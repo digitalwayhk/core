@@ -1,0 +1,26 @@
+.history
+.DS_Store
+*.log
+functions/*
+.temp/**
+*.csv
+*.toml
+# screenshot
+screenshot
+.firebase
+.eslintcache
+*.iml
+*.xml
+*.crt
+*.key
+build
+*.db
+db/*
+*.sqllite
+*.bolt
+*.json
+cmd/*
+.secret
+main/*
+*.ldb
+.idea/
