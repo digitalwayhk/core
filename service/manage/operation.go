@@ -1,7 +1,7 @@
 package manage
 
 import (
-	"github.com/digitalwayhk/core/internal/models"
+	"github.com/digitalwayhk/core/models"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 
 	st "github.com/digitalwayhk/core/pkg/server/types"

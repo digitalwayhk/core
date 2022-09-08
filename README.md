@@ -1,4 +1,4 @@
-# Crypto Project
+# digitalway.hk Core 
 
 [简体中文] 
 

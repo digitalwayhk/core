@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/digitalwayhk/core/internal/manage/view"
-	"github.com/digitalwayhk/core/internal/models"
+	"github.com/digitalwayhk/core/models"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/digitalwayhk/core/service/manage/view"
 )
 
 type Search[T pt.IModel] struct {

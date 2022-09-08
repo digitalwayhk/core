@@ -1,8 +1,8 @@
 package manage
 
 import (
-	"github.com/digitalwayhk/core/internal/manage"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	"github.com/digitalwayhk/core/service/manage"
 )
 
 type DBData struct {

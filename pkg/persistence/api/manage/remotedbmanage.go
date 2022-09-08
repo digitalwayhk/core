@@ -1,11 +1,11 @@
 package manage
 
 import (
-	"github.com/digitalwayhk/core/internal/manage"
-	"github.com/digitalwayhk/core/internal/manage/view"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/service/manage"
+	"github.com/digitalwayhk/core/service/manage/view"
 )
 
 type RemoteDBManage struct {

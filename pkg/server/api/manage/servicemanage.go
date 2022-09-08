@@ -3,13 +3,13 @@ package manage
 import (
 	"errors"
 
-	"github.com/digitalwayhk/core/internal/manage"
-	"github.com/digitalwayhk/core/internal/manage/view"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/service/manage"
+	"github.com/digitalwayhk/core/service/manage/view"
 )
 
 type ServiceInfo struct {
