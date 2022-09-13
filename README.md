@@ -25,8 +25,14 @@
    * 编码规范[uber-go](https://github.com/xxjwxc/uber_go_guide_cn#uber-goguide-%E7%9A%84%E4%B8%AD%E6%96%87%E7%BF%BB%E8%AF%91)
    * 项目规范[golang-standards](https://github.com/golang-standards/project-layout/blob/master/README_zh.md)
    * go版本要求 > 1.18
+## 安装引用
+    go get github.com/digitalwayhk/core@latest
 ## 快速开始
-    在examples下创建一个demo项目，创建简单的订单功能api，供前端调用  
+    演示如何创建简单的订单功能api，供前端调用  
+    在任意位置创建新目录demo，在demo目录下，初始化go项目, 终端中运行 go mod init demo
+    在demo目录下，创建api、main、models目录,api目录下创建private和public目录
+![效果](/docs/readmeimg/dic.jpg)  
+    在目录中创建以下文件，并copy代码，完成后,终端中运行 go mod tidy 获取引用
 
 ### 1、创建demo/models 文件夹下创建order.go文件,并在order.go文件中定义OrderModel,如下代码所示
             
