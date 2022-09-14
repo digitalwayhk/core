@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"strconv"
 	"sync"
 
@@ -82,6 +83,14 @@ func localdbGetConfig(name string, connecttype types.DBConnectType) (*RemoteDbCo
 }
 
 func dbconToIdb(rdc *RemoteDbConfig) (types.IDataBase, error) {
+	if rdc.DataBaseType == "mongo" {
+		mongo := nosql.NewMongo(rdc.Host, rdc.User, rdc.Pass, rdc.Port)
+		if mongo.Host == "" || mongo.User == "" || mongo.Pass == "" || mongo.Port == 0 {
+			return nil, errors.New(rdc.Name + " MongoDB not set remotedb config")
+		}
+		mongo.Name = rdc.Name
+		return mongo, nil
+	}
 	mysql := oltp.NewMysql(rdc.Host, rdc.User, rdc.Pass, rdc.Port)
 	if mysql.Host == "" || mysql.User == "" || mysql.Pass == "" || mysql.Port == 0 {
 		return nil, errors.New(rdc.Name + " database not set romotedb config")
