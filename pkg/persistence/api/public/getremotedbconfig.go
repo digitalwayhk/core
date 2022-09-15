@@ -23,7 +23,7 @@ func (own *GetRemoteDBConfig) Do(req types.IRequest) (interface{}, error) {
 	if own.Name != "" {
 		return list.SearchName(own.Name)
 	}
-	res, _, err := list.SerachAll(1, 10)
+	res, _, err := list.SearchAll(1, 10)
 	return res, err
 }
 
