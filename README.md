@@ -320,6 +320,71 @@ websocket 订阅getorder,获取order信息
 
 ![效果](/docs/readmeimg/view.jpg)
 
+### 管理模块功能演示,为订单增加token属性，token应该由管理员维护，对用户只读，下边例子完成该功能
+
+   打开models/order.go文件，在ordermodel中增加token属性
+
+    type OrderModel struct {
+	*entity.Model                 //从基础Model继承，默认添加ID,创建时间和状态字段
+	UserID        uint            //用户ID
+	Price         decimal.Decimal //价格
+	Amount        decimal.Decimal //数量
+	Token         uint            //币种
+}
+   在models目录，新增token.go文件，copy以下代码到token.go文件
+    
+    package models
+
+    import "github.com/digitalwayhk/core/pkg/persistence/entity"
+
+    type TokenModel struct {
+        *entity.Model
+        Name string
+    }
+
+    //NewTokenModel 新建币种模型
+    func NewTokenModel() *TokenModel {
+        return &TokenModel{
+            Model: entity.NewModel(),
+        }
+    }
+
+    //NewTokenModel 新建币种模型，用于ModelList的NewItem方法
+    func (own *TokenModel) NewModel() {
+        if own.Model == nil {
+            own.Model = entity.NewModel()
+        }
+    }
+  在api目录，新增加manage目录,在manage目录中创建tokenmanage.go文件，copy以下代码到tokenmanage.go文件中
+    
+    package manage
+
+    import (
+        "demo/models"
+
+        "github.com/digitalwayhk/core/service/manage"
+    )
+
+    type TokenManage struct {
+        *manage.ManageService[models.TokenModel]
+    }
+
+    func NewTokenManage() *TokenManage {
+        own := &TokenManage{}
+        own.ManageService = manage.NewManageService[models.TokenModel](own)
+        return own
+    }
+  在main.go文件中的OrderService中的Routers方法中，添加TokenManage路由
+
+    routers = append(routers, manage.NewTokenManage().Routers()...)
+![效果](/docs/readmeimg/addmanagerouter.jpg)
+
+    再次编译运行服务，运行后，打开开发视图http://localhost，左侧菜单增加orders主菜单，orders下增加了TokenManage菜单，如下图
+![效果](/docs/readmeimg/addmanagerun.jpg)
+    
+    TokenModel已经可以增删改查，可以直接使用
+
+![效果](/docs/readmeimg/addmanageedit.jpg)
 
 
 

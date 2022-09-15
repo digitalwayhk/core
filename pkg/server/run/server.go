@@ -48,7 +48,7 @@ func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 					return
 				}
 			}
-			fmt.Println("全部服务启动成功，开始合并服务。。。")
+			fmt.Println("全部服务启动成功，开始连接依赖服务。。。")
 			for _, ctx := range router.GetContexts() {
 				for _, cfg := range ctx.Config.AttachServices {
 					if cfg.Address != "" && cfg.Port != 0 {
@@ -57,14 +57,14 @@ func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 						time.Sleep(200 * time.Millisecond)
 						err := ctx.RegisterObserve(&public.Observe{})
 						if err != nil {
-							msg := ctx.Service.Name + "服务中合并服务" + cfg.Name + ",地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "异常，异常信息：" + err.Error()
+							msg := ctx.Service.Name + "服务中连接" + cfg.Name + "服务,地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "异常，异常信息：" + err.Error()
 							fmt.Println(msg)
 						} else {
-							msg := ctx.Service.Name + "服务中合并服务" + cfg.Name + ",地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "成功"
+							msg := ctx.Service.Name + "服务中连接" + cfg.Name + "服务,地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "成功"
 							fmt.Println(msg)
 						}
 					} else {
-						msg := cfg.Name + "服务待合并,但未设置地址和端口，请设置地址的端口号"
+						msg := cfg.Name + "服务待连接,但未设置地址和端口，请设置地址的端口号"
 						fmt.Println(msg)
 					}
 				}
@@ -114,7 +114,7 @@ func (own *WebServer) initServer() {
 			panic(msg)
 		}
 		own.newWebServer(ctx)
-		own.NewInternalServer(ctx)
+		own.newInternalServer(ctx)
 		own.htmls.AddServiceRouter(ctx.Router)
 	}
 }
@@ -133,7 +133,7 @@ func (own *WebServer) newWebServer(ctx *router.ServiceContext) {
 	rs := rest.NewServer(ctx)
 	ctx.SetHttpServer(rs)
 }
-func (own *WebServer) NewInternalServer(ctx *router.ServiceContext) {
+func (own *WebServer) newInternalServer(ctx *router.ServiceContext) {
 	if own.socketport > 0 {
 		ss := socket.NewServer(ctx)
 		ctx.SetSocketServer(ss)
