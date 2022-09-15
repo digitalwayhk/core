@@ -330,7 +330,8 @@ websocket 订阅getorder,获取order信息
 	Price         decimal.Decimal //价格
 	Amount        decimal.Decimal //数量
 	Token         uint            //币种
-}
+    }
+
    在models目录，新增token.go文件，copy以下代码到token.go文件
     
     package models
@@ -356,7 +357,9 @@ websocket 订阅getorder,获取order信息
         }
     }
   在api目录，新增加manage目录,在manage目录中创建tokenmanage.go文件，copy以下代码到tokenmanage.go文件中
-    
+
+  ![效果](/docs/readmeimg/managedic.jpg)
+
     package manage
 
     import (
