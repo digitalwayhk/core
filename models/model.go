@@ -25,6 +25,12 @@ func (own *Model) NewModel() {
 	}
 }
 
+func NewMongoModelList[T types.IModel]() *ModelList[T] {
+	return &ModelList[T]{
+		entity.NewModelList[T](adapter.NewNosqlAdapter()),
+	}
+}
+
 func NewManageModelList[T types.IModel]() *ModelList[T] {
 	ada := adapter.NewDefaultAdapter()
 	ada.SetSaveType(types.OnlyLocal)
