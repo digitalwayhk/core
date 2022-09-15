@@ -354,7 +354,7 @@ func (own *ModelList[T]) SearchTraceId(traceid string, fn ...func(item *types.Se
 	}
 	return nil, nil
 }
-func (own *ModelList[T]) SerachAll(page, size int, fn ...func(item *types.SearchItem)) ([]*T, int64, error) {
+func (own *ModelList[T]) SearchAll(page, size int, fn ...func(item *types.SearchItem)) ([]*T, int64, error) {
 	item := own.GetSearchItem()
 	if page > 0 {
 		item.Page = page
