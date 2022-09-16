@@ -121,3 +121,45 @@ func NewRemoteDbConfigList() *entity.ModelList[RemoteDbConfig] {
 	// }
 	return entity.NewModelList[RemoteDbConfig](nil)
 }
+
+func GetRemoteCacheConfig(name string) (types.ICache, error) {
+	if list == nil {
+		list = NewRemoteDbConfigList()
+	}
+	if GetRemoteDBHandler != nil {
+		rdc := &RemoteDbConfig{
+			Name:        name,
+			ConnectType: 0,
+		}
+		GetRemoteDBHandler(rdc)
+		if rdc.DataBaseType == "redis" {
+			redis := nosql.NewRedis(rdc.Host, rdc.Pass, rdc.Port)
+			if redis.Host == "" || redis.Port == 0 {
+				return nil, errors.New("redis not set remote config")
+			}
+			redis.Name = rdc.Name
+			return redis, nil
+		}
+	}
+	dbconfig, err := list.SearchName(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbconfig) == 0 {
+		addconfig(name)
+		return nil, errors.New(name + " database not set romotedb config")
+	}
+	rdc, err := localdbGetConfig(name, 0)
+	if err != nil {
+		return nil, errors.New(name + " cacheDB not set")
+	}
+	if rdc.DataBaseType == "redis" {
+		redis := nosql.NewRedis(rdc.Host, rdc.Pass, rdc.Port)
+		if redis.Host == "" || redis.Port == 0 {
+			return nil, errors.New("redis not set remote config")
+		}
+		redis.Name = rdc.Name
+		return redis, nil
+	}
+	return nil, errors.New("cacheDB not found")
+}
