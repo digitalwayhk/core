@@ -86,8 +86,10 @@ type IScopesTableName interface {
 }
 type ICache interface {
 	Get(key string) (interface{}, error)
-	Set(key string, value interface{}) error
+	Set(key string, value interface{}, seconds int) error
 	Del(key string) error
+	Scan() ([]string, error)
+	Search(prefix string) ([]string, error)
 }
 
 type IBaseModel interface {

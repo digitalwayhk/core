@@ -18,11 +18,13 @@ require (
 
 require (
 	github.com/cockroachdb/pebble v0.0.0-20220723153705-3fc374e4dc66
+	github.com/go-redis/redis/v8 v8.11.4
 	go.mongodb.org/mongo-driver v1.10.2
 )
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.1.2 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/getsentry/sentry-go v0.13.0 // indirect
 	github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect
