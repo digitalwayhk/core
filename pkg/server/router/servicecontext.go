@@ -209,52 +209,83 @@ func (own *ServiceContext) GetServerConfig(address string, port int) *config.Ser
 	res.GetData(csc)
 	return csc
 }
+func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types.TargetInfo) error {
+	as := own.Service.AttachService[oa.ServiceName]
+	if as != nil {
+		if _, ok := as.ObserverRouters[oa.Topic]; !ok {
+			ok, err := own.observeCall(oa, info)
+			if err != nil {
+				return err
+			}
+			as.IsAttach = ok
+			oa.IsOk = ok
+			as.ObserverRouters[oa.Topic] = oa
+		}
+	}
+	return nil
+}
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 	info := observe.RouterInfo()
-	con := own.Config
 	for _, as := range own.Service.AttachService {
 		if as.Address == "" || as.Port == 0 {
 			continue
 		}
 		for _, oa := range as.ObserverRouters {
-			oa.OwnAddress = con.RunIp
-			oa.OwnProt = con.Port
-			oa.OwnSocketProt = con.SocketPort
-			oa.ReceiveService = own.Service.Name
-			// oa.ServiceName = as.ServiceName // 这里不能设置，因为初始化时已经设置
-			// oa.Topic = oa.Router.RouterInfo().Path() // 这里不能设置，因为初始化时已经设置
-			payload := &types.PayLoad{
-				TraceID:          "",
-				SourceAddress:    oa.OwnAddress,
-				SourceService:    oa.ReceiveService,
-				TargetAddress:    as.Address,
-				TargetService:    as.ServiceName,
-				TargetPort:       as.Port,
-				TargetSocketPort: as.SocketPort,
-				SourcePath:       "",
-				TargetPath:       info.Path,
-				UserId:           0,
-				ClientIP:         oa.OwnAddress,
-				Auth:             false,
-				Instance:         oa,
-			}
-			values, err := own.Service.CallService(payload)
+			ti := &types.TargetInfo{}
+			ti.TargetAddress = as.Address
+			ti.TargetPort = as.Port
+			ti.TargetService = as.ServiceName
+			ti.TargetPath = info.Path
+			ti.TargetSocketPort = as.SocketPort
+			ok, err := own.observeCall(oa, ti)
 			if err != nil {
-				oa.Error = err
 				return err
 			}
-			res := &Response{}
-			json.Unmarshal(values, res)
-			if res.Success {
-				oa.IsOk = true
-				as.IsAttach = true
-			} else {
-				oa.Error = errors.New(res.ErrorMessage)
-				return oa.Error
-			}
+			oa.IsOk = ok
+			as.IsAttach = ok
 		}
 	}
 	return nil
+}
+
+func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
+	if oa.ServiceName == "" || oa.Topic == "" {
+		return false, errors.New("observeCall ServiceName or Topic is empty")
+	}
+	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
+		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
+	}
+	oa.OwnAddress = own.Config.RunIp
+	oa.OwnProt = own.Config.Port
+	oa.OwnSocketProt = own.Config.SocketPort
+	oa.ReceiveService = own.Service.Name
+	payload := &types.PayLoad{
+		TraceID:          "",
+		SourceAddress:    oa.OwnAddress,
+		SourceService:    oa.ReceiveService,
+		TargetAddress:    info.TargetAddress,
+		TargetService:    info.TargetService,
+		TargetPort:       info.TargetPort,
+		TargetSocketPort: info.TargetSocketPort,
+		SourcePath:       "",
+		TargetPath:       info.TargetPath,
+		UserId:           0,
+		ClientIP:         oa.OwnAddress,
+		Auth:             false,
+		Instance:         oa,
+	}
+	values, err := own.Service.CallService(payload)
+	if err != nil {
+		oa.Error = err
+		return false, err
+	}
+	res := &Response{}
+	json.Unmarshal(values, res)
+	if !res.Success {
+		oa.Error = errors.New(res.ErrorMessage)
+		return false, oa.Error
+	}
+	return true, nil
 }
 func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	ctx := GetContext(args.SendService)
