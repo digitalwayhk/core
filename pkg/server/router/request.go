@@ -183,11 +183,23 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		return rest, nil
 	}
 	if info != nil {
+		if info.TargetAddress == "" || info.TargetPort == 0 {
+			return nil, errors.New("目标地址或端口错误")
+		}
 		payload.TargetAddress = info.TargetAddress
 		payload.TargetPort = info.TargetPort
-		payload.TargetService = info.TargetService
-		payload.TargetPath = info.TargetPath
-		payload.TargetSocketPort = info.TargetSocketPort
+		if info.TargetService != "" {
+			payload.TargetService = info.TargetService
+		}
+		if info.TargetPath != "" {
+			payload.TargetPath = info.TargetPath
+		}
+		if info.TargetSocketPort == 0 {
+			con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
+			payload.TargetSocketPort = con.SocketPort
+		} else {
+			payload.TargetSocketPort = info.TargetSocketPort
+		}
 	}
 	return own.service.CallService(payload, callback...)
 }
