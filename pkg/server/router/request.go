@@ -164,9 +164,10 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 	return nil
 }
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
-	sinfo := own.servicerouter.GetRouter(own.apiPath)
-	tinfo := router.RouterInfo()
-	err := callrouterpermissions(sinfo, tinfo)
+	return own.CallTargetService(router, nil, callback...)
+}
+func (own *Request) CallTargetService(router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	payload, err := own.callPayload(router)
 	if err != nil {
 		return nil, err
 	}
@@ -181,10 +182,24 @@ func (own *Request) CallService(router types.IRouter, callback ...func(res types
 		}
 		return rest, nil
 	}
-	payload := ToPayLoad(own, router)
+	if info != nil {
+		payload.TargetAddress = info.TargetAddress
+		payload.TargetPort = info.TargetPort
+		payload.TargetService = info.TargetService
+		payload.TargetPath = info.TargetPath
+		payload.TargetSocketPort = info.TargetSocketPort
+	}
 	return own.service.CallService(payload, callback...)
 }
-
+func (own *Request) callPayload(router types.IRouter) (*types.PayLoad, error) {
+	sinfo := own.servicerouter.GetRouter(own.apiPath)
+	tinfo := router.RouterInfo()
+	err := callrouterpermissions(sinfo, tinfo)
+	if err != nil {
+		return nil, err
+	}
+	return ToPayLoad(own, router), nil
+}
 func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, router types.IRouter) *types.PayLoad {
 	info := router.RouterInfo()
 	return &types.PayLoad{

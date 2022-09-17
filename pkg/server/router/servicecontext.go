@@ -349,3 +349,33 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	}
 	return res, nil
 }
+func GetResponseData[T any](response interface{}) *T {
+	res := &Response{}
+	bytes, err := json.Marshal(response)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	err = json.Unmarshal(bytes, res)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	data := new(T)
+	res.GetData(data)
+	return data
+}
+func GetInstance[T any](instance interface{}) *T {
+	bytes, err := json.Marshal(instance)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	data := new(T)
+	err = json.Unmarshal(bytes, data)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	return data
+}

@@ -328,3 +328,4 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 		}
 	}
 }
+
