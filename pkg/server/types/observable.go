@@ -25,6 +25,7 @@ type ObserveArgs struct {
 	Router         IRouter                      `json:"-"` //订阅路由
 	IsOk           bool                         //是否注册成功
 	Error          error                        `json:"-"` //注册错误信息
+	IsUnSub        bool                         `json:"-"` //是否取消订阅
 }
 type TargetInfo struct {
 	TargetAddress    string

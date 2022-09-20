@@ -20,8 +20,8 @@ type ServiceContext struct {
 	Router    *ServiceRouter
 	isStart   bool
 	Pid       int
-	RunNotify func(sc *ServiceContext) `json:"-"`
-	Hub       interface{}              `json:"-"`
+	Hub       interface{} `json:"-"`
+	StateChan chan bool   `json:"-"`
 }
 
 const DEFAULTPORT = 8080
@@ -39,6 +39,7 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		return sc
 	}
 	sc := &ServiceContext{}
+	sc.StateChan = make(chan bool, 1)
 	sc.Service = initService(service, sc)
 	con := config.ReadConfig(name)
 	if con == nil {
@@ -137,19 +138,7 @@ func (own *ServiceContext) SetPid(pid int) {
 }
 func (own *ServiceContext) SetRunState(state bool) {
 	own.isStart = state
-	if state && own.Service != nil && own.Service.Instance != nil {
-		if start, ok := own.Service.Instance.(types.IStartService); ok {
-			start.Start()
-		}
-	}
-	if !state && own.Service != nil && own.Service.Instance != nil {
-		if stop, ok := own.Service.Instance.(types.IStopService); ok {
-			stop.Stop()
-		}
-	}
-	if own.RunNotify != nil {
-		own.RunNotify(own)
-	}
+	own.StateChan <- state
 }
 func (own *ServiceContext) IsRun() bool {
 	return own.isStart
@@ -178,6 +167,7 @@ func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 					cas.SocketPort = csc.SocketPort
 					cas.Address = csc.RunIp
 					as.Address = csc.RunIp
+					own.Config.Save()
 				}
 			}
 			as.SocketPort = cas.SocketPort
@@ -210,18 +200,18 @@ func (own *ServiceContext) GetServerConfig(address string, port int) *config.Ser
 	return csc
 }
 func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types.TargetInfo) error {
-	as := own.Service.AttachService[oa.ServiceName]
-	if as != nil {
-		if _, ok := as.ObserverRouters[oa.Topic]; !ok {
-			ok, err := own.observeCall(oa, info)
-			if err != nil {
-				return err
-			}
-			as.IsAttach = ok
-			oa.IsOk = ok
-			as.ObserverRouters[oa.Topic] = oa
-		}
+	//as := own.Service.AttachService[oa.ServiceName]
+	//if as == nil {
+	//if _, ok := as.ObserverRouters[oa.Topic]; !ok {
+	ok, err := own.observeCall(oa, info)
+	if err != nil {
+		return err
 	}
+	//as.IsAttach = ok
+	oa.IsOk = ok
+	//as.ObserverRouters[oa.Topic] = oa
+	//}
+	//}
 	return nil
 }
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
@@ -260,7 +250,7 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 	oa.OwnSocketProt = own.Config.SocketPort
 	oa.ReceiveService = own.Service.Name
 	payload := &types.PayLoad{
-		TraceID:          "",
+		TraceID:          "1",
 		SourceAddress:    oa.OwnAddress,
 		SourceService:    oa.ReceiveService,
 		TargetAddress:    info.TargetAddress,
@@ -274,6 +264,9 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 		Auth:             false,
 		Instance:         oa,
 	}
+	// if info.Router != nil {
+	// 	payload.Instance = info.Router
+	// }
 	values, err := own.Service.CallService(payload)
 	if err != nil {
 		oa.Error = err
