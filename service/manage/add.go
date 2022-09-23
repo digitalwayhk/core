@@ -22,6 +22,9 @@ func (own *Add[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *Add[T]) Validation(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	err, stop := own.Operation.ValidationBefore(own, req)
 	if err != nil {
 		return err
@@ -33,6 +36,9 @@ func (own *Add[T]) Validation(req types.IRequest) error {
 	return err
 }
 func (own *Add[T]) Do(req types.IRequest) (interface{}, error) {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	if add, ok := own.instance.(IManageService); ok {
 		data, err, stop := add.DoBefore(own, req)
 		if stop {

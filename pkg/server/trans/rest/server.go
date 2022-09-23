@@ -39,17 +39,15 @@ func (own *Server) Start() {
 	}
 	go checkRun(own.context)
 	fmt.Printf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
-
 	own.Server.Start()
 }
 func checkRun(context *router.ServiceContext) {
 	for {
 		time.Sleep(time.Millisecond * 10)
 		pid := utils.ScanPort("tcp", context.Config.Host, context.Config.Port)
-		//fmt.Println(fmt.Sprintf("checkRun:%s port:%d ", context.Service.Name, context.Config.Port))
 		if pid {
 			//context.SetPid(pid)
-			context.SetRunState(true)
+			go context.SetRunState(true)
 			return
 		}
 	}

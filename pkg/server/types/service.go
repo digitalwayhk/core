@@ -17,6 +17,7 @@ type Service struct {
 }
 
 func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
+
 	if payload.TargetService == "" {
 		return nil, errors.New("target service is empty")
 	}

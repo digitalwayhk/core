@@ -12,6 +12,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/gofrs/uuid"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest/httpx"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -61,7 +62,7 @@ func getRequestInfo(r *http.Request, req *Request) {
 	req.traceID = tid
 }
 
-//NewRequest 路由接收到请求
+// NewRequest 路由接收到请求
 func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 	req := &Request{
 		servicerouter: routers,
@@ -133,6 +134,9 @@ const maxBodyLen int64 = 8388608
 
 func (own *Request) Bind(v interface{}) error {
 	r := own.http
+	if r.Body == http.NoBody {
+		return nil
+	}
 	reader := io.LimitReader(r.Body, maxBodyLen)
 	var buf strings.Builder
 	teeReader := io.TeeReader(reader, &buf)
@@ -164,9 +168,10 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 	return nil
 }
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
-	sinfo := own.servicerouter.GetRouter(own.apiPath)
-	tinfo := router.RouterInfo()
-	err := callrouterpermissions(sinfo, tinfo)
+	return own.CallTargetService(router, nil, callback...)
+}
+func (own *Request) CallTargetService(router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	payload, err := own.callPayload(router)
 	if err != nil {
 		return nil, err
 	}
@@ -181,10 +186,36 @@ func (own *Request) CallService(router types.IRouter, callback ...func(res types
 		}
 		return rest, nil
 	}
-	payload := ToPayLoad(own, router)
+	if info != nil {
+		if info.TargetAddress == "" || info.TargetPort == 0 {
+			return nil, errors.New("目标地址或端口错误")
+		}
+		payload.TargetAddress = info.TargetAddress
+		payload.TargetPort = info.TargetPort
+		if payload.TargetService == "" && info.TargetService != "" {
+			payload.TargetService = info.TargetService
+		}
+		if payload.TargetPath == "" && info.TargetPath != "" {
+			payload.TargetPath = info.TargetPath
+		}
+		if info.TargetSocketPort == 0 {
+			con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
+			payload.TargetSocketPort = con.SocketPort
+		} else {
+			payload.TargetSocketPort = info.TargetSocketPort
+		}
+	}
 	return own.service.CallService(payload, callback...)
 }
-
+func (own *Request) callPayload(router types.IRouter) (*types.PayLoad, error) {
+	sinfo := own.servicerouter.GetRouter(own.apiPath)
+	tinfo := router.RouterInfo()
+	err := callrouterpermissions(sinfo, tinfo)
+	if err != nil {
+		return nil, err
+	}
+	return ToPayLoad(own, router), nil
+}
 func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, router types.IRouter) *types.PayLoad {
 	info := router.RouterInfo()
 	return &types.PayLoad{
@@ -229,6 +260,10 @@ func ToRequest(own *types.PayLoad) types.IRequest {
 		auth:      own.Auth,
 	}
 	req.service = GetContext(own.TargetService)
+	if req.service == nil {
+		logx.Error("服务不存在", own.TargetService)
+		return nil
+	}
 	req.servicerouter = req.service.Router
 	info := req.servicerouter.GetRouter(req.apiPath)
 	req.auth = info.Auth

@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -20,8 +21,8 @@ type ServiceContext struct {
 	Router    *ServiceRouter
 	isStart   bool
 	Pid       int
-	RunNotify func(sc *ServiceContext) `json:"-"`
-	Hub       interface{}              `json:"-"`
+	Hub       interface{} `json:"-"`
+	StateChan chan bool   `json:"-"`
 }
 
 const DEFAULTPORT = 8080
@@ -39,6 +40,7 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		return sc
 	}
 	sc := &ServiceContext{}
+	sc.StateChan = make(chan bool, 1)
 	sc.Service = initService(service, sc)
 	con := config.ReadConfig(name)
 	if con == nil {
@@ -79,13 +81,7 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 		Instance:         iser,
 	}
 	for _, sr := range service.SubscribeRouters {
-		if _, ok := service.AttachService[sr.ServiceName]; !ok {
-			service.AttachService[sr.ServiceName] = &types.ServiceAttach{
-				ServiceName:     sr.ServiceName,
-				ObserverRouters: make(map[string]*types.ObserveArgs),
-			}
-		}
-		as := service.AttachService[sr.ServiceName]
+		as := addAttachService(service, sr.ServiceName)
 		as.ObserverRouters[sr.Topic] = sr
 	}
 	req := &InitRequest{}
@@ -96,13 +92,7 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 		for path, cr := range req.CallRouters {
 			cinfo := cr.RouterInfo()
 			sname := cinfo.ServiceName
-			if _, ok := service.AttachService[sname]; !ok {
-				service.AttachService[sname] = &types.ServiceAttach{
-					ServiceName: sname,
-					CallRouters: make(map[string]types.IRouter),
-				}
-			}
-			as := service.AttachService[sname]
+			as := addAttachService(service, sname)
 			if as.CallRouters == nil {
 				as.CallRouters = make(map[string]types.IRouter)
 			}
@@ -111,14 +101,31 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	}
 	return service
 }
+func addAttachService(service *types.Service, tragetServiceName string) *types.ServiceAttach {
+	if _, ok := service.AttachService[tragetServiceName]; !ok {
+		service.AttachService[tragetServiceName] = &types.ServiceAttach{
+			ServiceName:     tragetServiceName,
+			ObserverRouters: make(map[string]*types.ObserveArgs),
+		}
+	}
+	return service.AttachService[tragetServiceName]
+}
 func safedo(cs types.IRouter, req types.IRequest) {
 	defer func() {
-		if recover() != nil {
-			// 一个函数的返回结果可以在defer调用中修改。
+		if err := recover(); err != nil {
+			//logx.Error(err)
+			// info := cs.RouterInfo()
+			// fmt.Println(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
 		}
 	}()
-	cs.Validation(req)
-	cs.Do(req)
+	err := cs.Validation(req)
+	if err != nil {
+		logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
+	}
+	_, err = cs.Do(req)
+	if err != nil {
+		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
+	}
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
@@ -137,19 +144,7 @@ func (own *ServiceContext) SetPid(pid int) {
 }
 func (own *ServiceContext) SetRunState(state bool) {
 	own.isStart = state
-	if state && own.Service != nil && own.Service.Instance != nil {
-		if start, ok := own.Service.Instance.(types.IStartService); ok {
-			start.Start()
-		}
-	}
-	if !state && own.Service != nil && own.Service.Instance != nil {
-		if stop, ok := own.Service.Instance.(types.IStopService); ok {
-			stop.Stop()
-		}
-	}
-	if own.RunNotify != nil {
-		own.RunNotify(own)
-	}
+	own.StateChan <- state
 }
 func (own *ServiceContext) IsRun() bool {
 	return own.isStart
@@ -178,6 +173,7 @@ func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 					cas.SocketPort = csc.SocketPort
 					cas.Address = csc.RunIp
 					as.Address = csc.RunIp
+					own.Config.Save()
 				}
 			}
 			as.SocketPort = cas.SocketPort
@@ -209,52 +205,86 @@ func (own *ServiceContext) GetServerConfig(address string, port int) *config.Ser
 	res.GetData(csc)
 	return csc
 }
+func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types.TargetInfo) error {
+	as := addAttachService(own.Service, oa.ServiceName)
+	if _, ok := as.ObserverRouters[oa.Topic]; !ok {
+		ok, err := own.observeCall(oa, info)
+		if err != nil {
+			return err
+		}
+		as.IsAttach = ok
+		oa.IsOk = ok
+		as.ObserverRouters[oa.Topic] = oa
+	}
+	return nil
+}
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 	info := observe.RouterInfo()
-	con := own.Config
 	for _, as := range own.Service.AttachService {
 		if as.Address == "" || as.Port == 0 {
 			continue
 		}
 		for _, oa := range as.ObserverRouters {
-			oa.OwnAddress = con.RunIp
-			oa.OwnProt = con.Port
-			oa.OwnSocketProt = con.SocketPort
-			oa.ReceiveService = own.Service.Name
-			// oa.ServiceName = as.ServiceName // 这里不能设置，因为初始化时已经设置
-			// oa.Topic = oa.Router.RouterInfo().Path() // 这里不能设置，因为初始化时已经设置
-			payload := &types.PayLoad{
-				TraceID:          "",
-				SourceAddress:    oa.OwnAddress,
-				SourceService:    oa.ReceiveService,
-				TargetAddress:    as.Address,
-				TargetService:    as.ServiceName,
-				TargetPort:       as.Port,
-				TargetSocketPort: as.SocketPort,
-				SourcePath:       "",
-				TargetPath:       info.Path,
-				UserId:           0,
-				ClientIP:         oa.OwnAddress,
-				Auth:             false,
-				Instance:         oa,
-			}
-			values, err := own.Service.CallService(payload)
+			ti := &types.TargetInfo{}
+			ti.TargetAddress = as.Address
+			ti.TargetPort = as.Port
+			ti.TargetService = as.ServiceName
+			ti.TargetPath = info.Path
+			ti.TargetSocketPort = as.SocketPort
+			ok, err := own.observeCall(oa, ti)
 			if err != nil {
-				oa.Error = err
 				return err
 			}
-			res := &Response{}
-			json.Unmarshal(values, res)
-			if res.Success {
-				oa.IsOk = true
-				as.IsAttach = true
-			} else {
-				oa.Error = errors.New(res.ErrorMessage)
-				return oa.Error
-			}
+			oa.IsOk = ok
+			as.IsAttach = ok
 		}
 	}
 	return nil
+}
+
+func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
+	if oa.ServiceName == "" || oa.Topic == "" {
+		logx.Error(utils.PrintObj(info))
+		return false, errors.New("observeCall ServiceName or Topic is empty")
+	}
+	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
+		logx.Error(utils.PrintObj(info))
+		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
+	}
+	oa.OwnAddress = own.Config.RunIp
+	oa.OwnProt = own.Config.Port
+	oa.OwnSocketProt = own.Config.SocketPort
+	oa.ReceiveService = own.Service.Name
+	payload := &types.PayLoad{
+		TraceID:          "1",
+		SourceAddress:    oa.OwnAddress,
+		SourceService:    oa.ReceiveService,
+		TargetAddress:    info.TargetAddress,
+		TargetService:    info.TargetService,
+		TargetPort:       info.TargetPort,
+		TargetSocketPort: info.TargetSocketPort,
+		SourcePath:       "",
+		TargetPath:       info.TargetPath,
+		UserId:           0,
+		ClientIP:         oa.OwnAddress,
+		Auth:             false,
+		Instance:         oa,
+	}
+	// if info.Router != nil {
+	// 	payload.Instance = info.Router
+	// }
+	values, err := own.Service.CallService(payload)
+	if err != nil {
+		oa.Error = err
+		return false, err
+	}
+	res := &Response{}
+	json.Unmarshal(values, res)
+	if !res.Success {
+		oa.Error = errors.New(res.ErrorMessage)
+		return false, oa.Error
+	}
+	return true, nil
 }
 func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	ctx := GetContext(args.SendService)
@@ -317,4 +347,34 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		json.Unmarshal(values, res)
 	}
 	return res, nil
+}
+func GetResponseData[T any](response interface{}) *T {
+	res := &Response{}
+	bytes, err := json.Marshal(response)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	err = json.Unmarshal(bytes, res)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	data := new(T)
+	res.GetData(data)
+	return data
+}
+func GetInstance[T any](instance interface{}) *T {
+	bytes, err := json.Marshal(instance)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	data := new(T)
+	err = json.Unmarshal(bytes, data)
+	if err != nil {
+		logx.Error(err)
+		return nil
+	}
+	return data
 }

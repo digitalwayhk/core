@@ -96,7 +96,7 @@ func (own *Server) tcpLisen() error {
 	for {
 		if own.listen != nil {
 			conn, err := own.listen.Accept()
-			logx.Info(fmt.Sprintf("accept conn from %s:%d", conn.RemoteAddr().String(), own.Port))
+			//logx.Info(fmt.Sprintf("accept conn from %s:%d", conn.RemoteAddr().String(), own.Port))
 			if err != nil {
 				logx.Error("accept failed, err:%v\n", err)
 				continue
@@ -139,13 +139,13 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 
 }
 func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
-	defer own.Unlock()
+	//defer own.Unlock()
 	values, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	if payload.TargetSocketPort > 0 {
-		own.Lock()
+		//own.Lock()
 		if _, ok := own.clients[payload.TargetService]; !ok {
 			cs := &Client{
 				Server: Server{

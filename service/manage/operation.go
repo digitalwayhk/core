@@ -32,6 +32,9 @@ func (own *Operation[T]) New(instance interface{}) st.IRouter {
 	return own
 }
 func (own *Operation[T]) Parse(req st.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	if ms, ok := own.instance.(IManageService); ok {
 		err := ms.ParseBefore(own, req)
 		if err != nil {
@@ -56,6 +59,9 @@ func (own *Operation[T]) Parse(req st.IRequest) error {
 	return nil
 }
 func (own *Operation[T]) Validation(req st.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	return nil
 }
 func (own *Operation[T]) ValidationBefore(sender interface{}, req st.IRequest) (error, bool) {
@@ -78,6 +84,9 @@ func (own *Operation[T]) ValidationAfter(sender interface{}, req st.IRequest) er
 	return nil
 }
 func (own *Operation[T]) Do(req st.IRequest) (interface{}, error) {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	return own.Model, nil
 }
 func (own *Operation[T]) RouterInfo() *st.RouterInfo {

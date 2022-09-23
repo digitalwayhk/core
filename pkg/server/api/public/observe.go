@@ -36,12 +36,16 @@ func (own *Observe) Do(req types.IRequest) (interface{}, error) {
 	if info == nil {
 		return nil, errors.New("没有找到该topic的路由信息!" + own.Topic)
 	}
+	if own.IsUnSub {
+		return nil, info.UnSubscribe(own.ObserveArgs)
+	}
+	own.ObserveArgs.IsOk = true
+	err := info.Subscribe(own.ObserveArgs)
 	own.CallBack = func(args *types.NotifyArgs) error {
 		notify := &Notify{}
 		return router.SendNotify(notify, args)
 	}
-	own.ObserveArgs.IsOk = true
-	err := info.Subscribe(own.ObserveArgs)
+
 	return info, err
 }
 

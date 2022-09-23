@@ -23,6 +23,9 @@ func (own *Release[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *Release[T]) Validation(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	err, stop := own.Operation.ValidationBefore(own, req)
 	if err != nil {
 		return err
@@ -34,6 +37,9 @@ func (own *Release[T]) Validation(req types.IRequest) error {
 	return err
 }
 func (own *Release[T]) Do(req types.IRequest) (interface{}, error) {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	id := (*own.Model).GetID()
 	if id == 0 {
 		return nil, errors.New("id is 0")

@@ -180,7 +180,10 @@ func (own *RouterInfo) requestNotify(api IRouter, traceid string) {
 		item.ServiceName = own.ServiceName
 		na := item.NewNotifyArgs(api, nil)
 		na.TraceID = traceid
-		item.Notify(na)
+		err := item.Notify(na)
+		if err != nil {
+			logx.Error(err)
+		}
 	}
 }
 func (own *RouterInfo) responseNotify(api IRouter, traceid string, resp IResponse) {
@@ -189,7 +192,10 @@ func (own *RouterInfo) responseNotify(api IRouter, traceid string, resp IRespons
 		item.ServiceName = own.ServiceName
 		na := item.NewNotifyArgs(api, resp)
 		na.TraceID = traceid
-		item.Notify(na)
+		err := item.Notify(na)
+		if err != nil {
+			logx.Error(err)
+		}
 	}
 }
 func (own *RouterInfo) errorNotify(api IRouter, traceid string, resp IResponse) {
@@ -198,7 +204,10 @@ func (own *RouterInfo) errorNotify(api IRouter, traceid string, resp IResponse) 
 		item.ServiceName = own.ServiceName
 		na := item.NewNotifyArgs(api, resp)
 		na.TraceID = traceid
-		item.Notify(na)
+		err := item.Notify(na)
+		if err != nil {
+			logx.Error(err)
+		}
 	}
 }
 func (own *RouterInfo) getCache(api IRouter) interface{} {
@@ -231,7 +240,7 @@ func getApiHash(api IRouter) int {
 	return utils.HashCode(key)
 }
 
-//注册websocket的订阅，并返回订阅的event号
+// 注册websocket的订阅，并返回订阅的event号
 func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) string {
 	if router == nil || client == nil || req == nil {
 		return ""
@@ -256,9 +265,9 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 		own.rWebSocketClient[hash] = make(map[IWebSocket]IRequest, 0)
 	}
 	own.rWebSocketClient[hash][client] = req
-	if !own.webSocketHandler {
-		go own.webSocketHandlerRun()
-	}
+	// if !own.webSocketHandler {
+	// 	go own.webSocketHandlerRun()
+	// }
 	client.Send("sub", own.Path, strconv.Itoa(hash))
 	return strconv.Itoa(hash)
 }
@@ -312,9 +321,11 @@ func (own *RouterInfo) webSocketHandlerRun() {
 }
 func (own *RouterInfo) NoticeWebSocketClient(router IRouter, message interface{}) {
 	own.webSocketHandler = false //关闭websocket代理处理
-	own.noticeClient(router, message)
+	go own.noticeClient(router, message)
 }
 func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
+	defer own.Unlock()
+	own.Lock()
 	hash := getApiHash(router)
 	if wsreq, ok := own.rWebSocketClient[hash]; ok {
 		for ws := range wsreq {

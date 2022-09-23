@@ -25,6 +25,14 @@ type ObserveArgs struct {
 	Router         IRouter                      `json:"-"` //订阅路由
 	IsOk           bool                         //是否注册成功
 	Error          error                        `json:"-"` //注册错误信息
+	IsUnSub        bool                         `json:"-"` //是否取消订阅
+}
+type TargetInfo struct {
+	TargetAddress    string
+	TargetService    string
+	TargetPort       int
+	TargetSocketPort int
+	TargetPath       string
 }
 
 //NewObserveArgs 创建对路由的订阅,router为订阅路由,state为订阅的触发时机，callback为回调函数
