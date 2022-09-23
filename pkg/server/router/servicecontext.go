@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -80,13 +81,7 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 		Instance:         iser,
 	}
 	for _, sr := range service.SubscribeRouters {
-		if _, ok := service.AttachService[sr.ServiceName]; !ok {
-			service.AttachService[sr.ServiceName] = &types.ServiceAttach{
-				ServiceName:     sr.ServiceName,
-				ObserverRouters: make(map[string]*types.ObserveArgs),
-			}
-		}
-		as := service.AttachService[sr.ServiceName]
+		as := addAttachService(service, sr.ServiceName)
 		as.ObserverRouters[sr.Topic] = sr
 	}
 	req := &InitRequest{}
@@ -97,13 +92,7 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 		for path, cr := range req.CallRouters {
 			cinfo := cr.RouterInfo()
 			sname := cinfo.ServiceName
-			if _, ok := service.AttachService[sname]; !ok {
-				service.AttachService[sname] = &types.ServiceAttach{
-					ServiceName: sname,
-					CallRouters: make(map[string]types.IRouter),
-				}
-			}
-			as := service.AttachService[sname]
+			as := addAttachService(service, sname)
 			if as.CallRouters == nil {
 				as.CallRouters = make(map[string]types.IRouter)
 			}
@@ -112,14 +101,31 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	}
 	return service
 }
+func addAttachService(service *types.Service, tragetServiceName string) *types.ServiceAttach {
+	if _, ok := service.AttachService[tragetServiceName]; !ok {
+		service.AttachService[tragetServiceName] = &types.ServiceAttach{
+			ServiceName:     tragetServiceName,
+			ObserverRouters: make(map[string]*types.ObserveArgs),
+		}
+	}
+	return service.AttachService[tragetServiceName]
+}
 func safedo(cs types.IRouter, req types.IRequest) {
 	defer func() {
-		if recover() != nil {
-			// 一个函数的返回结果可以在defer调用中修改。
+		if err := recover(); err != nil {
+			//logx.Error(err)
+			// info := cs.RouterInfo()
+			// fmt.Println(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
 		}
 	}()
-	cs.Validation(req)
-	cs.Do(req)
+	err := cs.Validation(req)
+	if err != nil {
+		logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
+	}
+	_, err = cs.Do(req)
+	if err != nil {
+		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
+	}
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
@@ -200,18 +206,16 @@ func (own *ServiceContext) GetServerConfig(address string, port int) *config.Ser
 	return csc
 }
 func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types.TargetInfo) error {
-	//as := own.Service.AttachService[oa.ServiceName]
-	//if as == nil {
-	//if _, ok := as.ObserverRouters[oa.Topic]; !ok {
-	ok, err := own.observeCall(oa, info)
-	if err != nil {
-		return err
+	as := addAttachService(own.Service, oa.ServiceName)
+	if _, ok := as.ObserverRouters[oa.Topic]; !ok {
+		ok, err := own.observeCall(oa, info)
+		if err != nil {
+			return err
+		}
+		as.IsAttach = ok
+		oa.IsOk = ok
+		as.ObserverRouters[oa.Topic] = oa
 	}
-	//as.IsAttach = ok
-	oa.IsOk = ok
-	//as.ObserverRouters[oa.Topic] = oa
-	//}
-	//}
 	return nil
 }
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
@@ -240,9 +244,11 @@ func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 
 func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
 	if oa.ServiceName == "" || oa.Topic == "" {
+		logx.Error(utils.PrintObj(info))
 		return false, errors.New("observeCall ServiceName or Topic is empty")
 	}
 	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
+		logx.Error(utils.PrintObj(info))
 		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
 	}
 	oa.OwnAddress = own.Config.RunIp

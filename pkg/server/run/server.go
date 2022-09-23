@@ -50,17 +50,16 @@ func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 		return
 	}
 	<-nsc.StateChan
-	if nsc.IsRun() {
-		for _, ctx := range own.serviceContexts {
-			if !ctx.IsRun() {
-				return
-			}
+	defer own.Unlock()
+	own.Lock()
+	for _, ctx := range own.serviceContexts {
+		if !ctx.IsRun() {
+			return
 		}
-		own.isRun = true
-		own.serviceStart()
-		own.linkService()
 	}
-
+	own.isRun = true
+	own.linkService()
+	own.serviceStart()
 }
 
 func (own *WebServer) serviceStart() {
@@ -81,6 +80,15 @@ func (own *WebServer) linkService() {
 	fmt.Println("全部服务启动成功，开始连接依赖服务。。。")
 	for _, ctx := range own.serviceContexts {
 		for _, cfg := range ctx.Config.AttachServices {
+			if cfg.Address == "" && cfg.Port == 0 {
+				context := own.serviceContexts[cfg.Name]
+				if context != nil {
+					cfg.Address = context.Config.RunIp
+					cfg.Port = context.Config.Port
+					cfg.SocketPort = context.Config.SocketPort
+				}
+				ctx.Config.Save()
+			}
 			if cfg.Address != "" && cfg.Port != 0 {
 				ctx.SetAttachServiceAddress(cfg.Name)
 				err := ctx.RegisterObserve(&public.Observe{})

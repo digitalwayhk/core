@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -63,6 +64,9 @@ func (own *Response) GetSuccess() bool {
 	return own.Success
 }
 func (own *Response) GetError() error {
+	if own.err == nil {
+		return errors.New(own.ErrorMessage)
+	}
 	if te, ok := own.err.(*types.TypeError); ok {
 		own.ErrorCode = te.Code
 		own.ErrorMessage = te.Message + te.Suggest

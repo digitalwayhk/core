@@ -40,6 +40,9 @@ func (own *Search[T]) GetModelList() *models.ModelList[T] {
 	return own.list
 }
 func (own *Search[T]) Parse(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	own.SearchItem = &view.SearchItem{}
 	err := req.Bind(own.SearchItem)
 	if err != nil {
@@ -62,9 +65,15 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 	return nil
 }
 func (own *Search[T]) Validation(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	return nil
 }
 func (own *Search[T]) Do(req types.IRequest) (interface{}, error) {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	var view IManageView = own.instance.(IManageView)
 	if view != nil {
 		own.View = view.GetView()

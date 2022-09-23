@@ -36,6 +36,9 @@ func (own *View[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *View[T]) Parse(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	if ms, ok := own.instance.(IManageService); ok {
 		err := ms.ParseBefore(own, req)
 		if err != nil {
@@ -45,6 +48,9 @@ func (own *View[T]) Parse(req types.IRequest) error {
 	return nil
 }
 func (own *View[T]) Validation(req types.IRequest) error {
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
 	if _, ok := own.instance.(IManageService); !ok {
 		return errors.New("instance is not IManageService")
 	}
@@ -54,13 +60,15 @@ func (own *View[T]) Validation(req types.IRequest) error {
 var viewModelMap = make(map[string]view.ViewModel)
 
 func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
-	defer func() {
-		if err := recover(); err != nil {
-			logx.Error(err)
-		}
-	}()
-
-	mv, vm := own.getmv(req, own.instance)
+	if ms, ok := own.instance.(IRequestSet); ok {
+		ms.SetReq(req)
+	}
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		logx.Error(err)
+	// 	}
+	// }()
+	mv, vm := own.getmv(req)
 	list := models.NewManageModelList[T]()
 	model := list.NewItem()
 	vm.Fields = modelToFiled(model, mv)
@@ -71,13 +79,13 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 	own.Model = vm
 	return own.Model, nil
 }
-func (own *View[T]) getmv(req types.IRequest, instance interface{}) (IManageView, *view.ViewModel) {
+func (own *View[T]) getmv(req types.IRequest) (IManageView, *view.ViewModel) {
 	vm := &view.ViewModel{}
-	if instance != nil {
-		if mv, ok := instance.(IManageView); ok {
-			if ms, ok := instance.(IManageService); ok {
+	if own.instance != nil {
+		if mv, ok := own.instance.(IManageView); ok {
+			if ms, ok := own.instance.(IManageService); ok {
 				ms.DoBefore(own, req)
-				vm.Name = utils.GetTypeName(instance)
+				vm.Name = utils.GetTypeName(own.instance)
 				vm.Title = vm.Name
 				vm.Commands = make([]*view.CommandModel, 0)
 				vm.Fields = make([]*view.FieldModel, 0)
@@ -95,12 +103,12 @@ func (own *View[T]) getmv(req types.IRequest, instance interface{}) (IManageView
 				}
 				return mv, vm
 			} else {
-				msg := utils.GetTypeName(instance) + " instance is not IManageService"
+				msg := utils.GetTypeName(own.instance) + " instance is not IManageService"
 				logx.Error(msg)
 				return nil, nil
 			}
 		} else {
-			msg := utils.GetTypeName(instance) + " instance is not IManageView"
+			msg := utils.GetTypeName(own.instance) + " instance is not IManageView"
 			logx.Error(msg)
 			return nil, nil
 		}

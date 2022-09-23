@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -140,6 +142,7 @@ func (c *Client) readPump() {
 				c.send <- []byte("退订错误:" + err.Error())
 				continue // 如果出错,则直接返回
 			}
+			api.Validation(c.res)
 			info.UnRegisterWebSocketClient(api, c)
 		}
 		//message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
@@ -153,6 +156,7 @@ func parse(info *types.RouterInfo, data interface{}) (types.IRouter, error) {
 		api = info.New()
 	} else {
 		api, err = info.ParseNew(data)
+		fmt.Println(utils.PrintObj(api))
 	}
 	if err != nil {
 		return nil, errors.New("数据格式不正确,无法转换为Request类型:" + err.Error())

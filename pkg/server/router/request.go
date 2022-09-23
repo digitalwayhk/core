@@ -12,6 +12,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/gofrs/uuid"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest/httpx"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -61,7 +62,7 @@ func getRequestInfo(r *http.Request, req *Request) {
 	req.traceID = tid
 }
 
-//NewRequest 路由接收到请求
+// NewRequest 路由接收到请求
 func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 	req := &Request{
 		servicerouter: routers,
@@ -133,6 +134,9 @@ const maxBodyLen int64 = 8388608
 
 func (own *Request) Bind(v interface{}) error {
 	r := own.http
+	if r.Body == http.NoBody {
+		return nil
+	}
 	reader := io.LimitReader(r.Body, maxBodyLen)
 	var buf strings.Builder
 	teeReader := io.TeeReader(reader, &buf)
@@ -188,10 +192,10 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		}
 		payload.TargetAddress = info.TargetAddress
 		payload.TargetPort = info.TargetPort
-		if info.TargetService != "" {
+		if payload.TargetService == "" && info.TargetService != "" {
 			payload.TargetService = info.TargetService
 		}
-		if info.TargetPath != "" {
+		if payload.TargetPath == "" && info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
 		if info.TargetSocketPort == 0 {
@@ -256,6 +260,10 @@ func ToRequest(own *types.PayLoad) types.IRequest {
 		auth:      own.Auth,
 	}
 	req.service = GetContext(own.TargetService)
+	if req.service == nil {
+		logx.Error("服务不存在", own.TargetService)
+		return nil
+	}
 	req.servicerouter = req.service.Router
 	info := req.servicerouter.GetRouter(req.apiPath)
 	req.auth = info.Auth
