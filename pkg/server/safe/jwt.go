@@ -1,15 +1,21 @@
 package safe
 
 import (
-	"time"
-
 	"github.com/golang-jwt/jwt/v4"
+	"time"
 )
 
 type Claims struct {
 	Uid   uint                   `json:"userid"`
 	Uname string                 `json:"username"`
 	Args  map[string]interface{} `json:"args"`
+}
+
+func NewClaims(userId uint, username string) *Claims {
+	return &Claims{
+		Uid:   userId,
+		Uname: username,
+	}
 }
 
 func GetToken(uid uint, secret string, expire int64) (string, error) {
@@ -35,7 +41,7 @@ func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 			claims[k] = v
 		}
 	}
-	token := jwt.New(jwt.SigningMethodES512)
+	token := jwt.New(jwt.SigningMethodHS256)
 	token.Claims = claims
 	return token.SignedString([]byte(secret))
 }

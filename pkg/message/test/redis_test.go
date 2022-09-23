@@ -3,23 +3,22 @@ package test
 import (
 	"fmt"
 	"github.com/digitalwayhk/core/pkg/persistence/adapter"
-	pkg "github.com/digitalwayhk/core/pkg/persistence/models"
 	"strconv"
 	"testing"
 )
 
 func init() {
 
-	pkg.GetRemoteDBHandler = func(dbconfig *pkg.RemoteDbConfig) {
-		if dbconfig.Host == "" {
-			dbconfig.Host = "127.0.0.1"
-			dbconfig.Port = 6379
-			dbconfig.Pass = ""
-			dbconfig.Name = "mains"
-			dbconfig.ConnectType = 0
-			dbconfig.DataBaseType = "redis"
-		}
-	}
+	//pkg.GetRemoteDBHandler = func(dbconfig *pkg.RemoteDbConfig) {
+	//	if dbconfig.Host == "" {
+	//		dbconfig.Host = "127.0.0.1"
+	//		dbconfig.Port = 6379
+	//		dbconfig.Pass = ""
+	//		dbconfig.Name = "mains"
+	//		dbconfig.ConnectType = 0
+	//		dbconfig.DataBaseType = "redis"
+	//	}
+	//}
 }
 
 func Test_SetRedis(t *testing.T) {
