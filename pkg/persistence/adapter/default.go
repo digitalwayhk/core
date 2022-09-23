@@ -35,6 +35,19 @@ func NewDefaultAdapter() *DefaultAdapter {
 	}
 	return defaultAda
 }
+
+func NewCustomAdapter(saveType int) *DefaultAdapter {
+	return &DefaultAdapter{
+		isTansaction:  false,
+		localdbs:      make(map[string]types.IDataBase),
+		readDBs:       make(map[string]types.IDataBase),
+		writeDB:       make(map[string]types.IDataBase),
+		manageDB:      make(map[string]types.IDataBase),
+		IsCreateTable: true,
+		saveType:      types.SaveType(saveType),
+	}
+}
+
 func getIDBName(item interface{}) (types.IDBName, error) {
 	if idb, ok := item.(types.IDBName); ok {
 		return idb, nil

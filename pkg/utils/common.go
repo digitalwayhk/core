@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math/rand"
+	"net/mail"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 func PrintObj(o interface{}) string {
@@ -119,3 +121,31 @@ func FirstLower(s string) string {
 // type mh struct {
 // 	hf func(unsafe.Pointer, uintptr) uintptr
 // }
+
+func IsEmail(device string) bool {
+	if _, err := mail.ParseAddress(device); err == nil {
+		return true
+	}
+	return false
+}
+
+func IsMobile(device string) bool {
+	if !strings.Contains(device, " ") {
+		return false
+	}
+	phone := strings.Split(device, " ")
+	areaCode, phoneNo := phone[0], phone[1]
+	if strings.HasPrefix(areaCode, "+") {
+		areaCode = TrimFirstRune(areaCode)
+	}
+	phoneNo = areaCode + phoneNo
+	if _, err := strconv.Atoi(phoneNo); err == nil {
+		return true
+	}
+	return false
+}
+
+func TrimFirstRune(s string) string {
+	_, i := utf8.DecodeRuneInString(s)
+	return s[i:]
+}
