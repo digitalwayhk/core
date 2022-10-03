@@ -114,6 +114,14 @@ func (own *RouterInfo) limit(ip string, userid uint) error {
 	return nil
 }
 func (own *RouterInfo) Exec(req IRequest) IResponse {
+	defer func() {
+		if config.INITSERVER {
+			return
+		}
+		if err := recover(); err != nil {
+			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+		}
+	}()
 	uid, _ := req.GetUser()
 	err := own.limit(req.GetClientIP(), uid)
 	if err != nil {
@@ -130,6 +138,14 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 }
 
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
+	defer func() {
+		if config.INITSERVER {
+			return
+		}
+		if err := recover(); err != nil {
+			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+		}
+	}()
 	err := api.Validation(req)
 	if err != nil {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
@@ -241,9 +257,9 @@ func getApiHash(api IRouter) int {
 }
 
 // 注册websocket的订阅，并返回订阅的event号
-func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) string {
+func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) int {
 	if router == nil || client == nil || req == nil {
-		return ""
+		return 0
 	}
 	own.Lock()
 	defer own.Unlock()
@@ -269,15 +285,22 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	// 	go own.webSocketHandlerRun()
 	// }
 	client.Send("sub", own.Path, strconv.Itoa(hash))
-	return strconv.Itoa(hash)
+	return hash
 }
-func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) {
+func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) int {
 	if router == nil || client == nil {
+		return 0
+	}
+	hash := getApiHash(router)
+	own.UnRegisterWebSocketHash(hash, client)
+	return hash
+}
+func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
+	if hash == 0 || client == nil {
 		return
 	}
 	own.Lock()
 	defer own.Unlock()
-	hash := getApiHash(router)
 	if _, ok := own.rWebSocketClient[hash]; ok {
 		delete(own.rWebSocketClient[hash], client)
 	}

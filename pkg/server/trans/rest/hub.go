@@ -27,6 +27,8 @@ const (
 	UnSubscribe MessageEvent = "unsub"
 	//调用，调用后返回结果
 	Call MessageEvent = "call"
+	//获取订阅信息
+	Get MessageEvent = "get"
 )
 
 type Message struct {

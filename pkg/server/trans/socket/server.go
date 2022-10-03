@@ -39,14 +39,22 @@ func (own *Server) process(conn net.Conn) {
 		reader := bufio.NewReader(conn)
 		// 读取客户端发送的数据
 		recv, err := DecodeBytes(reader)
+		if err != nil {
+			logx.Error("process DecodeBytes from conn failed, err:%v\n", err)
+			continue
+		}
 		data := own.Receive(recv)
 		value, _ := json.Marshal(data)
 		// 将接受到的数据返回给客户端
 		wres, err := EncodeBytes(value)
+		if err != nil {
+			logx.Error("process EncodeBytes from conn failed, err:%v\n", err)
+			continue
+		}
 		_, err = conn.Write(wres)
 		if err != nil {
-			fmt.Printf("write from conn failed, err:%v\n", err)
-			break
+			logx.Error("process write from conn failed, err:%v\n", err)
+			continue
 		}
 	}
 }
@@ -113,9 +121,6 @@ func (own *Server) register() {
 			err := json.Unmarshal(data, payload)
 			req := router.ToRequest(payload)
 			if err != nil {
-				// res := req.NewResponse(err, nil)
-				// data, _ := json.Marshal(res)
-				// payload.Data = data
 				return req.NewResponse(err, nil)
 			}
 			rou := own.context.Router.GetRouter(payload.TargetPath)
@@ -124,12 +129,8 @@ func (own *Server) register() {
 				if err != nil {
 					return req.NewResponse(err, nil)
 				}
-				// data, err := json.Marshal()
-				// payload.Data = data
 				return rou.ExecDo(api, req)
 			}
-			// res := req.NewResponse(errors.New(payload.TargetPath+"未找到对应的接口！"), nil)
-			// payload.Data, _ = json.Marshal(res)
 			return req.NewResponse(errors.New(payload.TargetPath+"未找到对应的接口！"), nil)
 		}
 	}

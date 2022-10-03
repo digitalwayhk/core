@@ -3,6 +3,7 @@ package manage
 import (
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -28,7 +29,7 @@ func (own *RemoteDBManage) Routers() []types.IRouter {
 	return routers
 }
 
-//ViewFieldModel 该方法用于获取视图字段，用于生成视图中的界面元素，model为数据模型，包含主模型和子模型
+// ViewFieldModel 该方法用于获取视图字段，用于生成视图中的界面元素，model为数据模型，包含主模型和子模型
 func (own *RemoteDBManage) ViewFieldModel(model interface{}, field *view.FieldModel) {
 	if field.IsFieldOrTitle("ConnectType") {
 		field.ComBox("读写类型", "只读类型", "管理类型")
@@ -36,6 +37,17 @@ func (own *RemoteDBManage) ViewFieldModel(model interface{}, field *view.FieldMo
 
 	if field.IsFieldOrTitle("Pass") {
 		field.IsPassword = true
+	}
+	if field.IsFieldOrTitle("Service") {
+		items := router.GetContexts()
+		names := make([]string, 0)
+		for i, _ := range items {
+			if i == "server" {
+				continue
+			}
+			names = append(names, i)
+		}
+		field.ComBox(names...)
 	}
 }
 

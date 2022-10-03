@@ -19,15 +19,24 @@ import (
 
 type Server struct {
 	*rest.Server
-	context *router.ServiceContext
+	context     *router.ServiceContext
+	IsWebSocket bool
+	IsCors      bool
 }
 
-func NewServer(context *router.ServiceContext) *Server {
-	//webSocket 必须timeout=0
-	context.Config.Timeout = 0
+func NewServer(context *router.ServiceContext, isWebSocket, isCors bool) *Server {
 	ser := &Server{
 		context: context,
-		Server:  rest.MustNewServer(context.Config.RestConf),
+	}
+	ser.IsWebSocket = isWebSocket
+	if ser.IsWebSocket {
+		context.Config.Timeout = 0
+	}
+	ser.IsCors = isCors
+	if ser.IsCors {
+		ser.Server = rest.MustNewServer(context.Config.RestConf, rest.WithCors())
+	} else {
+		ser.Server = rest.MustNewServer(context.Config.RestConf)
 	}
 	ser.register()
 	return ser
@@ -38,7 +47,14 @@ func (own *Server) Start() {
 		panic(fmt.Sprintf("%s 服务的端口%d被占用,不能启动服务", own.context.Service.Name, own.context.Config.Port))
 	}
 	go checkRun(own.context)
-	fmt.Printf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
+	s1 := fmt.Sprintf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
+	if own.IsWebSocket {
+		s2 := fmt.Sprintf("Starting %s websocket at %s:%d success,path:%s:%d/ws \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
+		s3 := fmt.Sprintf("Starting %s websocket auth at %s:%d success,path:%s:%d/wsauth \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
+		fmt.Print(s1, s2, s3)
+	} else {
+		fmt.Print(s1)
+	}
 	own.Server.Start()
 }
 func checkRun(context *router.ServiceContext) {
@@ -57,8 +73,6 @@ func (own *Server) Stop() {
 	own.Server.Stop()
 }
 func (own *Server) register() {
-	own.websocket()
-	own.websocketauth()
 	routers := own.context.Router.GetRouters()
 	count := len(routers)
 	fmt.Println("===========================================================")
@@ -66,6 +80,10 @@ func (own *Server) register() {
 	fmt.Println("Routes Count : " + strconv.Itoa(count))
 	for _, api := range routers {
 		handers(own, api)
+	}
+	if own.IsWebSocket {
+		own.websocket()
+		own.websocketauth()
 	}
 	fmt.Printf("%s Register Service Routes End. \n", own.context.Config.Name)
 	fmt.Println("===========================================================")
@@ -135,6 +153,7 @@ func (own *Server) websocket() {
 		Path:    "/ws",
 		Handler: websocketHandler(own.context),
 	})
+	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/ws")
 }
 func (own *Server) websocketauth() {
 	opts := make([]rest.RouteOption, 0)
@@ -144,6 +163,7 @@ func (own *Server) websocketauth() {
 		Path:    "/wsauth",
 		Handler: websocketHandler(own.context),
 	}, opts...)
+	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/wsauth")
 }
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

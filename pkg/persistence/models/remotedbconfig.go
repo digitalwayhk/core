@@ -12,6 +12,7 @@ import (
 
 type RemoteDbConfig struct {
 	*entity.Model
+	Service      string              `json:"service"`
 	Name         string              `json:"name"`
 	Host         string              `json:"host"`
 	Port         uint                `json:"port"`

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -26,12 +25,15 @@ var swagger embed.FS
 type HTMLServer struct {
 	Port     int
 	services []*router.ServiceRouter
+	Isstart  chan bool
+	Parent   *WebServer
 }
 
 func NewHTMLServer(port int) *HTMLServer {
 	ser := &HTMLServer{
 		services: make([]*router.ServiceRouter, 0),
 		Port:     port,
+		Isstart:  make(chan bool, 1),
 	}
 	return ser
 }
@@ -45,11 +47,11 @@ func (own *HTMLServer) Start() {
 	if own.Port == 0 {
 		return
 	}
-	stime := int(time.Millisecond) * len(own.services)
-	time.Sleep(time.Duration(stime))
-	fsys, _ := fs.Sub(html, "dist")
+	run := <-own.Isstart
+	if !run {
+		return
+	}
 	sfsys, _ := fs.Sub(swagger, "swagger")
-	http.Handle("/", http.FileServer(http.FS(fsys)))
 	http.Handle("/swagger/", http.StripPrefix("/swagger/", http.FileServer(http.FS(sfsys))))
 
 	for _, service := range own.services {
@@ -72,7 +74,26 @@ func (own *HTMLServer) Start() {
 		pts = ":" + strconv.Itoa(own.Port)
 	}
 	fmt.Println("===========================================================")
-	fmt.Printf("开发视图服务已经启动,请访问 http://localhost" + pts + " 查看\n")
+	var isview = true
+	if own.Parent != nil {
+		ops := own.Parent.GetServerOptions()
+		for n, op := range ops {
+			if op != nil && op.Demo != nil {
+				if op.Demo.Pattern != "" {
+					http.Handle("/"+op.Demo.Pattern+"/", http.StripPrefix("/"+op.Demo.Pattern+"/", http.FileServer(http.FS(op.Demo.File))))
+				} else {
+					http.Handle("/", http.FileServer(http.FS(op.Demo.File)))
+					isview = false
+				}
+				fmt.Printf(n + "的Demo服务已经启动,请访问 http://localhost" + pts + "/" + op.Demo.Pattern + " 查看\n")
+			}
+		}
+	}
+	if isview {
+		fsys, _ := fs.Sub(html, "dist")
+		http.Handle("/", http.FileServer(http.FS(fsys)))
+		fmt.Printf("开发视图服务已经启动,请访问 http://localhost" + pts + " 查看\n")
+	}
 	fmt.Println("===========================================================")
 	http.ListenAndServe(":"+strconv.Itoa(own.Port), nil)
 }

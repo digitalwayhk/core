@@ -77,7 +77,7 @@ require (
 	go.opentelemetry.io/otel/exporters/zipkin v1.3.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.3.0 // indirect
 	go.uber.org/automaxprocs v1.4.0 // indirect
-	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e // indirect
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
 	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
 	google.golang.org/grpc v1.44.0 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect

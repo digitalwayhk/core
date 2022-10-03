@@ -7,20 +7,20 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-//BaseModel 基础模型
+// BaseModel 基础模型
 type BaseModel struct {
 	types.IBaseModel `json:"-" gorm:"-"`
 	*Model
-	Code            string                    `json:"code"`
-	Name            string                    `json:"name"`
-	State           int                       `json:"state"`
-	Describe        string                    `json:"describe"`
-	CreatedUser     uint                      `json:"-"`
-	UpdatedUser     uint                      `json:"-"`
-	CreatedUserName string                    `json:"createdusername"`
-	UpdatedUserName string                    `json:"updatedusername"`
-	TraceID         string                    `json:"-"`
-	ReleaseRecord   []*BaseModelReleaseRecord `gorm:"foreignkey:SourceID"`
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	State           int    `json:"state"`
+	Describe        string `json:"describe"`
+	CreatedUser     uint   `json:"-"`
+	UpdatedUser     uint   `json:"-"`
+	CreatedUserName string `json:"createdusername"`
+	UpdatedUserName string `json:"updatedusername"`
+	TraceID         string `json:"-"`
+	//ReleaseRecord   []*BaseModelReleaseRecord `gorm:"foreignkey:SourceID"`
 }
 
 func NewBaseModel() *BaseModel {

@@ -1,8 +1,10 @@
 package run
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"strconv"
 	"sync"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/digitalwayhk/core/pkg/server/trans/socket"
@@ -21,21 +24,42 @@ import (
 
 type WebServer struct {
 	serviceContexts map[string]*router.ServiceContext
+	serverOption    map[string]*ServerOption
 	childServer     map[int]*WebServer
 	htmls           *HTMLServer
-	viewport        int
+	ViewPort        int
 	serverip        string
-	port            int
-	socketport      int
+	Port            int
+	SocketPort      int
 	isRun           bool
 	sync.Mutex
 }
 
+type ServerOption struct {
+	IsWebSocket bool //是否启用websocket
+	IsCors      bool //是否开启跨域
+	Demo        *DemoOption
+}
+type DemoOption struct {
+	Pattern string //路由前缀
+	File    fs.FS  //静态文件目录
+}
+
+func (own *WebServer) GetServerOptions() map[string]*ServerOption {
+	return own.serverOption
+}
+func (own *WebServer) GetServerOption(name string) *ServerOption {
+	if _, ok := own.serverOption[name]; ok {
+		return own.serverOption[name]
+	}
+	return nil
+}
 func NewWebServer() *WebServer {
 	config.INITSERVER = true
 	ws := &WebServer{
 		childServer:     make(map[int]*WebServer),
 		serviceContexts: make(map[string]*router.ServiceContext),
+		serverOption:    make(map[string]*ServerOption),
 	}
 	ws.AddIService(&server.SystemManage{})
 	return ws
@@ -60,6 +84,11 @@ func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 	own.isRun = true
 	own.linkService()
 	own.serviceStart()
+	if own.htmls != nil && own.ViewPort > 0 {
+		own.htmls.Isstart <- true
+	} else {
+		own.htmls.Isstart <- false
+	}
 }
 
 func (own *WebServer) serviceStart() {
@@ -112,7 +141,9 @@ func (own *WebServer) AddIService(service types.IService) {
 	sc := router.NewServiceContext(service)
 	own.AddServiceContext(sc)
 }
-
+func (own *WebServer) SetOption(service types.IService, option *ServerOption) {
+	own.serverOption[service.ServiceName()] = option
+}
 func (own *WebServer) Start() {
 	config.INITSERVER = true
 	own.initServer()
@@ -138,16 +169,17 @@ func (own *WebServer) Start() {
 
 func (own *WebServer) initServer() {
 	own.serverArgs()
-	own.htmls = NewHTMLServer(own.viewport)
+	own.htmls = NewHTMLServer(own.ViewPort)
+	own.htmls.Parent = own
 	for _, ctx := range own.serviceContexts {
 		if ctx.Config.ParentServerIP != own.serverip {
 			ctx.Config.ParentServerIP = own.serverip
 		}
-		if ctx.Config.Port != own.port && own.port != router.DEFAULTPORT {
-			ctx.Config.Port = own.port + int(ctx.Config.DataCenterID) - 1
+		if ctx.Config.Port != own.Port && own.Port != router.DEFAULTPORT {
+			ctx.Config.Port = own.Port + int(ctx.Config.DataCenterID) - 1
 		}
-		if ctx.Config.SocketPort != own.socketport && own.socketport != router.DEFAULTSOCKETPORT {
-			ctx.Config.SocketPort = own.socketport + int(ctx.Config.DataCenterID) - 1
+		if ctx.Config.SocketPort != own.SocketPort && own.SocketPort != router.DEFAULTSOCKETPORT {
+			ctx.Config.SocketPort = own.SocketPort + int(ctx.Config.DataCenterID) - 1
 		}
 		err := ctx.Config.Save()
 		if err != nil {
@@ -165,18 +197,52 @@ func (own *WebServer) serverArgs() {
 	socket := flag.Int("socket", router.DEFAULTSOCKETPORT, "启用Socket服务并指定端口,为0时不启用Socket服务")
 	view := flag.Int("view", 80, "启用视图服务并指定端口,为0时不启用视图服务")
 	flag.Parse()
-	own.viewport = *view
+	if own.ViewPort == 0 {
+		own.ViewPort = *view
+	}
 	own.serverip = *parentServer
-	own.port = *port
-	own.socketport = *socket
+	if own.Port == 0 {
+		own.Port = *port
+	}
+	if own.SocketPort == 0 {
+		own.SocketPort = *socket
+	}
 }
 func (own *WebServer) newWebServer(ctx *router.ServiceContext) {
-	rs := rest.NewServer(ctx)
+	var rs *rest.Server
+	if opt, ok := own.serverOption[ctx.Service.Name]; ok {
+		rs = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors)
+	} else {
+		rs = rest.NewServer(ctx, false, false)
+	}
 	ctx.SetHttpServer(rs)
 }
 func (own *WebServer) newInternalServer(ctx *router.ServiceContext) {
-	if own.socketport > 0 {
+	if own.SocketPort > 0 {
 		ss := socket.NewServer(ctx)
 		ctx.SetSocketServer(ss)
 	}
+}
+
+var typemap map[string]map[string]interface{} = make(map[string]map[string]interface{})
+
+func SetInternalService[T any](key string, service *T) error {
+	if service == nil {
+		return errors.New("service is nil")
+	}
+	name := utils.GetTypeName(service)
+	if _, ok := typemap[name]; !ok {
+		typemap[name] = make(map[string]interface{})
+	}
+	typemap[name][key] = service
+	return nil
+}
+func GetInternalService[T any](key string) *T {
+	name := utils.GetTypeName(new(T))
+	if _, ok := typemap[name]; ok {
+		if v, ok := typemap[name][key]; ok {
+			return v.(*T)
+		}
+	}
+	return nil
 }
