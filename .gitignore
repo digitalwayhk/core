@@ -25,3 +25,6 @@ main/*
 *.ldb
 .idea/
 /cmd
+/main
+db
+etc
