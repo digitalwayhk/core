@@ -255,6 +255,13 @@ func getApiHash(api IRouter) int {
 	})
 	return utils.HashCode(key)
 }
+func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
+	items := make([]IRouter, 0)
+	for _, r := range own.rArgs {
+		items = append(items, r)
+	}
+	return items
+}
 
 // 注册websocket的订阅，并返回订阅的event号
 func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) int {

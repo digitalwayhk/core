@@ -7,14 +7,14 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// GetOrder 获取通过AddOrder API接口添加的订单
-type GetOrder struct {
+// GetToken 获取通过TokenManage界面添加的Token数据
+type GetToken struct {
 	Page int `json:"page"`
 	Size int `json:"size"`
 }
 
 // Parse 解析通过http传递的参数
-func (own *GetOrder) Parse(req types.IRequest) error {
+func (own *GetToken) Parse(req types.IRequest) error {
 	//req.GetValue("id") //获取参数 url?id=1
 	//req.GetClaims("userid") //获取jwt中的claims
 
@@ -23,7 +23,7 @@ func (own *GetOrder) Parse(req types.IRequest) error {
 }
 
 // Validation 验证方法,该方法返回nil，Do方法将被调用
-func (own *GetOrder) Validation(req types.IRequest) error {
+func (own *GetToken) Validation(req types.IRequest) error {
 	if own.Page == 0 {
 		own.Page = 1
 	}
@@ -34,17 +34,17 @@ func (own *GetOrder) Validation(req types.IRequest) error {
 }
 
 // Do 执行逻辑
-func (own *GetOrder) Do(req types.IRequest) (interface{}, error) {
+func (own *GetToken) Do(req types.IRequest) (interface{}, error) {
 	//创建list
-	list := entity.NewModelList[models.OrderModel](nil)
-	//查询order表中的数据，查询第Page页，每页Size条数据
+	list := entity.NewModelList[models.TokenModel](nil)
+	//查询Token表中的数据，查询第Page页，每页Size条数据
 	items, _, err := list.SearchAll(own.Page, own.Size)
 	//查询数据
 	return items, err
 }
 
 // RouterInfo路由注册信息
-func (own *GetOrder) RouterInfo() *types.RouterInfo {
+func (own *GetToken) RouterInfo() *types.RouterInfo {
 	//设置默认路由信息
 	return router.DefaultRouterInfo(own)
 }

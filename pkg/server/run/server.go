@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 
+	ptypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server"
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/api/release"
@@ -36,13 +37,27 @@ type WebServer struct {
 }
 
 type ServerOption struct {
-	IsWebSocket bool //是否启用websocket
-	IsCors      bool //是否开启跨域
-	Demo        *DemoOption
+	IsWebSocket bool           //是否启用websocket
+	IsCors      bool           //是否开启跨域
+	OriginCors  []string       //支持的跨域域名
+	Demo        *DemoOption    //静态前端演示包
+	Storage     *StorageOption //存储方案
+	Trans       *TransOption   //传输方案
 }
 type DemoOption struct {
 	Pattern string //路由前缀
 	File    fs.FS  //静态文件目录
+}
+type StorageOption struct {
+	LocalStorage  ptypes.IDataBase
+	RemoteStorage ptypes.IDataBase
+	Cache         ptypes.ICache
+	ListAdapter   ptypes.IListAdapter
+	DataAdapter   ptypes.IDataAdapter
+}
+type TransOption struct {
+	IsRest     bool //是否启用默认失败后的rest传输
+	RetryCount int  //重试次数
 }
 
 func (own *WebServer) GetServerOptions() map[string]*ServerOption {
@@ -105,6 +120,16 @@ func (own *WebServer) linkService() {
 	defer func() {
 		config.INITSERVER = false
 	}()
+	islink := false
+	for _, ctx := range own.serviceContexts {
+		if len(ctx.Config.AttachServices) > 0 {
+			islink = true
+			break
+		}
+	}
+	if !islink {
+		return
+	}
 	fmt.Println("===========================================================")
 	fmt.Println("全部服务启动成功，开始连接依赖服务。。。")
 	for _, ctx := range own.serviceContexts {
@@ -137,9 +162,12 @@ func (own *WebServer) linkService() {
 	fmt.Println("===========================================================")
 }
 
-func (own *WebServer) AddIService(service types.IService) {
+func (own *WebServer) AddIService(service types.IService, option ...*ServerOption) {
 	sc := router.NewServiceContext(service)
 	own.AddServiceContext(sc)
+	if len(option) > 0 {
+		own.serverOption[service.ServiceName()] = option[0]
+	}
 }
 func (own *WebServer) SetOption(service types.IService, option *ServerOption) {
 	own.serverOption[service.ServiceName()] = option

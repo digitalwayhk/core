@@ -50,5 +50,7 @@ func (own *TestToken) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *TestToken) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	info := api.ServerRouterInfo(own)
+	info.Method = "GET"
+	return info
 }

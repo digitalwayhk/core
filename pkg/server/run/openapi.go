@@ -23,23 +23,6 @@ func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
 	doc.Servers = make(openapi3.Servers, 0)
 	doc.Components = openapi3.NewComponents()
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
-	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
-	doc.Components.SecuritySchemes["Bearer"] = &openapi3.SecuritySchemeRef{
-		Value: &openapi3.SecurityScheme{
-			Type:         "http",
-			Scheme:       "bearer",
-			BearerFormat: "JWT",
-			Flows: &openapi3.OAuthFlows{
-				Implicit: &openapi3.OAuthFlow{
-					AuthorizationURL: "http://localhost:8080/api/servermanage/testtoken",
-					Scopes: map[string]string{
-						"read":  "read access",
-						"write": "write access",
-					},
-				},
-			},
-		},
-	}
 	for _, r := range srs {
 		if r.Service.Service.Name == "server" {
 			continue
@@ -50,6 +33,15 @@ func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
 		doc.Servers = append(doc.Servers, server)
 		eachrouters(r.GetTypeRouters(types.PublicType), doc, server)
 		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)
+	}
+	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
+	doc.Components.SecuritySchemes["Bearer"] = &openapi3.SecuritySchemeRef{
+		Value: &openapi3.SecurityScheme{
+			Type:         "http",
+			Scheme:       "bearer",
+			BearerFormat: "JWT",
+			Description:  "Get TestToken from http://server:port/api/servermanage/testtoken?userid=12345",
+		},
 	}
 	return doc
 }
@@ -79,7 +71,7 @@ func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server)
 	if info.PathType == types.PrivateType {
 		oper.Security = openapi3.NewSecurityRequirements()
 		nsr := openapi3.NewSecurityRequirement()
-		nsr.Authenticate(server.URL+"/api/servermanage/testtoken ", "Bearer", "userid")
+		nsr.Authenticate("Bearer")
 		oper.Security.With(nsr)
 	}
 	return oper
