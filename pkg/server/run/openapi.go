@@ -40,7 +40,7 @@ func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
 			Type:         "http",
 			Scheme:       "bearer",
 			BearerFormat: "JWT",
-			Description:  "Get TestToken from http://server:port/api/servermanage/testtoken?userid=12345",
+			Description:  "Get TestToken from " + doc.Servers[0].URL + "api/servermanage/testtoken?userid=12345",
 		},
 	}
 	return doc
