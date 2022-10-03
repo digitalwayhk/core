@@ -44,7 +44,7 @@ func (own *DemoService) SubscribeRouters() []*types.ObserveArgs {
 			&private.AddOrder{},   //订阅的新增订单路由
 			types.ObserveResponse, //订阅的事件类型，ObserveResponse是指当AddOrder路由被调用并成功返回时，会触发该订阅通知下面的回调函数
 			func(args *types.NotifyArgs) error {
-				//TODO 这里是处理新增订单的消息，推动到通过websocket订阅的GetOrder的客户端
+				//TODO 这里是处理新增订单的消息，推送到通过websocket订阅的GetOrder的客户端
 				api := &public.GetOrder{}
 				info := api.RouterInfo()
 				//获取所有订阅的路由类型，当订阅路由的data中参数值不同时，会有多个订阅路由类型

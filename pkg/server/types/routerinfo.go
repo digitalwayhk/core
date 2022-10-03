@@ -93,7 +93,7 @@ func (own *RouterInfo) limit(ip string, userid uint) error {
 		own.iplasttime = make(map[string]time.Time)
 	}
 	if lasttiem, ok := own.iplasttime[ip]; ok {
-		if time.Now().Sub(lasttiem) < own.SpeedLimit {
+		if time.Since(lasttiem) < own.SpeedLimit {
 			return errors.New("ip too many request")
 		}
 	} else {
@@ -104,7 +104,7 @@ func (own *RouterInfo) limit(ip string, userid uint) error {
 			own.userlasttime = make(map[uint]time.Time)
 		}
 		if lasttiem, ok := own.userlasttime[userid]; ok {
-			if time.Now().Sub(lasttiem) < own.SpeedLimit {
+			if time.Since(lasttiem) < own.SpeedLimit {
 				return errors.New("user too many request")
 			}
 		} else {
@@ -185,9 +185,7 @@ func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
 	if own.Subscriber[ob.State] == nil {
 		return errors.New("subscriber not exists")
 	}
-	if _, ok := own.Subscriber[ob.State][ob.OwnAddress]; ok {
-		delete(own.Subscriber[ob.State], ob.OwnAddress)
-	}
+	delete(own.Subscriber[ob.State], ob.OwnAddress)
 	return nil
 }
 func (own *RouterInfo) requestNotify(api IRouter, traceid string) {

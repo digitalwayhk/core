@@ -60,10 +60,9 @@ func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server)
 		OperationID: info.Path,
 	}
 	api := info.New()
-
 	oper.RequestBody = getRequestBody(api, doc)
 	req := &router.InitRequest{}
-	data, _ := safedo(api, req)
+	data := router.TestResult[info.Path]
 	ress := getResponse(data, req, doc)
 	for k, v := range ress {
 		oper.AddResponse(k, v)
@@ -121,20 +120,4 @@ func getResponse(data interface{}, req types.IRequest, doc *openapi3.T) map[int]
 	}
 	item[800] = &openapi3.Response{Description: &errres800.ErrorMessage}
 	return item
-}
-func safedo(cs types.IRouter, req types.IRequest) (interface{}, error) {
-	defer func() {
-		if err := recover(); err != nil {
-			//fmt.Println("捕获异常:", err)
-		}
-	}()
-	// load := &types.PayLoad{
-	// 	TraceID:       "123456",
-	// 	UserId:        123456,
-	// 	UserName:      "123456",
-	// 	TargetService: info.ServiceName,
-	// 	TargetPath:    info.Path,
-	// }
-	// req := router.ToRequest(load)
-	return cs.Do(req)
 }

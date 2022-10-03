@@ -29,9 +29,11 @@ const DEFAULTPORT = 8080
 const DEFAULTSOCKETPORT = 7070
 
 var scontext map[string]*ServiceContext
+var TestResult map[string]interface{}
 
 func init() {
 	scontext = make(map[string]*ServiceContext)
+	TestResult = make(map[string]interface{})
 }
 
 func NewServiceContext(service types.IService) *ServiceContext {
@@ -122,7 +124,9 @@ func safedo(cs types.IRouter, req types.IRequest) {
 	if err != nil {
 		logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
 	}
-	_, err = cs.Do(req)
+	data, err := cs.Do(req)
+	info := cs.RouterInfo()
+	TestResult[info.Path] = data
 	if err != nil {
 		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
 	}

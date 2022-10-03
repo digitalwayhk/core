@@ -9,7 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-//Response 接口响应
+// Response 接口响应
 type Response struct {
 	err          error
 	TraceID      string        `json:"traceid"`      //追踪ID
@@ -22,22 +22,24 @@ type Response struct {
 	ShowType     int           `json:"showType"`     //展示类型
 }
 
-//NewResponse 一次请求的响应
+// NewResponse 一次请求的响应
 func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 	suc := true
-	msg := ""
+	res := &Response{
+		err:       err,
+		TraceID:   own.GetTraceId(),
+		ErrorCode: 200,
+		Data:      data,
+		Success:   suc,
+		Duration:  time.Since(own.startTime),
+	}
 	if err != nil {
 		suc = false
-		msg = err.Error()
-	}
-	res := &Response{
-		err:          err,
-		TraceID:      own.GetTraceId(),
-		ErrorCode:    200,
-		ErrorMessage: msg,
-		Data:         data,
-		Success:      suc,
-		Duration:     time.Since(own.startTime),
+		terr := err.(*types.TypeError)
+		if terr != nil {
+			res.ErrorCode = terr.Code
+		}
+		res.ErrorMessage = err.Error()
 	}
 	if own.service != nil {
 		res.Host = own.service.Config.RunIp
