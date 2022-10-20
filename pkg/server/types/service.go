@@ -60,7 +60,7 @@ func (own *Service) GetInternalServers() []IRunServer {
 	return own.internalServer
 }
 
-//ServiceAttach 附加引用的服务(通过订阅或CallService加载)
+// ServiceAttach 附加引用的服务(通过订阅或CallService加载)
 type ServiceAttach struct {
 	service         *Service
 	ServiceName     string

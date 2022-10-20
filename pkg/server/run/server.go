@@ -191,6 +191,10 @@ func (own *WebServer) Start() {
 			}
 		}
 	}
+	//todo:test quic server
+	// for _, ctx := range own.serviceContexts {
+	// 	group.Add(quic.NewServer(ctx))
+	// }
 	group.Add(own.htmls)
 	group.Start()
 }

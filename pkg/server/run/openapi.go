@@ -1,16 +1,32 @@
 package run
 
 import (
+	"embed"
+	"io/fs"
+	"net/http"
 	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/rest/httpx"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3gen"
 )
 
+//go:embed swagger
+var swagger embed.FS
+
+func SwaggerHandler() (string, http.FileSystem) {
+	sfsys, _ := fs.Sub(swagger, "swagger")
+	return "/swagger/", http.FS(sfsys)
+}
+func OpenAPIHandler(service ...*router.ServiceRouter) (string, http.Handler) {
+	return "/api/openapi", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpx.OkJson(w, GetOpenApi(service...))
+	})
+}
 func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
 	doc := &openapi3.T{}
 	doc.OpenAPI = "3.0.1"

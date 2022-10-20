@@ -19,8 +19,7 @@ import (
 //go:embed dist
 var html embed.FS
 
-//go:embed swagger
-var swagger embed.FS
+
 
 type HTMLServer struct {
 	Port     int

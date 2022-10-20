@@ -14,7 +14,7 @@
    * 引用的框架和技术组件，增加引用的请在本处更新指引
    * 数据库操作[Gorm](https://github.com/go-gorm/gorm)[说明文档](https://gorm.io/zh_CN/docs/constraints.html)
    * 缓存操作[BoltDB](https://github.com/boltdb/bolt)
-   * Http服务[Go-Zero](https://github.com/zeromicro/go-zero)[说明文档](https://go-zero.dev/cn/) 
+   * Http服务[Go-Zero](https://github.com/zeromicro/go-zero)[说明文档](https://go-zero.dev/cn/) [fiber](https://github.com/gofiber/fiber)
    * WebSocket服务[Socket.io](https://github.com/googollee/go-socket.io) 
    * 网络框架[EVIO](https://github.com/tidwall/evio)
    * 网络框架[gnet](https://github.com/panjf2000/gnet)

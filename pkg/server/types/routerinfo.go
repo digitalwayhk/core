@@ -45,14 +45,23 @@ type RouterInfo struct {
 	rWebSocketClient  map[int]map[IWebSocket]IRequest          //websocket客户端
 	webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
+	pool sync.Pool
 }
 
+func (own *RouterInfo) getNew() IRouter {
+	own.pool = sync.Pool{
+		New: func() interface{} {
+			return utils.NewInterface(own.instance)
+		},
+	}
+	return own.pool.Get().(IRouter)
+}
 func (own *RouterInfo) New() IRouter {
-	item := utils.NewInterface(own.instance)
+	item := own.getNew()
 	if factory, ok := item.(IRouterFactory); ok {
 		return factory.New(own.instance)
 	}
-	return item.(IRouter)
+	return item
 }
 func (own *RouterInfo) ParseNew(instance interface{}) (IRouter, error) {
 	item := own.New()
@@ -114,20 +123,21 @@ func (own *RouterInfo) limit(ip string, userid uint) error {
 	return nil
 }
 func (own *RouterInfo) Exec(req IRequest) IResponse {
-	defer func() {
-		if config.INITSERVER {
-			return
-		}
-		if err := recover(); err != nil {
-			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
-		}
-	}()
 	uid, _ := req.GetUser()
 	err := own.limit(req.GetClientIP(), uid)
 	if err != nil {
 		return req.NewResponse(nil, err)
 	}
 	api := own.New()
+	defer func() {
+		if config.INITSERVER {
+			return
+		}
+		own.pool.Put(api)
+		if err := recover(); err != nil {
+			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+		}
+	}()
 	err = api.Parse(req)
 	if err != nil {
 		msg := fmt.Sprintf("参数解析异常:%s", err)
@@ -139,6 +149,7 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	defer func() {
+		own.pool.Put(api)
 		if config.INITSERVER {
 			return
 		}
