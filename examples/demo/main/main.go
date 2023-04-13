@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/digitalwayhk/core/examples/demo"
 	"github.com/digitalwayhk/core/pkg/server/run"
+	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
 func main() {
@@ -11,7 +12,7 @@ func main() {
 	//创建WebServer实例
 	server := run.NewWebServer()
 	//添加DemoService业务服务
-	server.AddIService(&demo.DemoService{}, &run.ServerOption{
+	server.AddIService(&demo.DemoService{}, &types.ServerOption{
 		//开启跨域，如果不开启，不同ip或端口上运行的前端无法访问api
 		IsCors: true,
 		//开启websocket,所有public和private的api都可以被websocke订阅，消息格式如下
