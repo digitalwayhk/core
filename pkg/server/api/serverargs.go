@@ -27,7 +27,7 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 		context := router.GetContext(req.ServiceName())
 		if context != nil {
 			opt := context.GetServerOption()
-			if opt.RemoteAccessManageAPI {
+			if opt != nil && opt.RemoteAccessManageAPI {
 				return nil
 			}
 		}
