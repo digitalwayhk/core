@@ -1,9 +1,9 @@
 window.onload = function() {
   //<editor-fold desc="Changeable Configuration Block">
-
+  var host="http://"+window.location.host+'/api/openapi';
   // the following lines will be replaced by docker/configurator, when it runs in a docker-container
   window.ui = SwaggerUIBundle({
-    url: "http://localhost/api/openapi",//https://petstore.swagger.io/v2/swagger.json
+    url: host,//https://petstore.swagger.io/v2/swagger.json
     dom_id: '#swagger-ui',
     deepLinking: true,
     presets: [

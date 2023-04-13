@@ -24,12 +24,13 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 		ip = ip[:index]
 	}
 	if !req.Authorized() {
+		opt := router.GetContext(own.ServiceName).GetServerOption()
+		if opt.RemoteAccessManageAPI {
+			return nil
+		}
 		if !utils.HasLocalIPAddr(ip) {
 			return errors.New("服务管理接口只能在本地机访问！")
 		}
-		// if ip != "127.0.0.1" && ip != "localhost" {
-
-		// }
 	}
 	return nil
 }

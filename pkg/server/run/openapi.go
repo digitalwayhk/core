@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -24,10 +25,10 @@ func SwaggerHandler() (string, http.FileSystem) {
 }
 func OpenAPIHandler(service ...*router.ServiceRouter) (string, http.Handler) {
 	return "/api/openapi", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		httpx.OkJson(w, GetOpenApi(service...))
+		httpx.OkJson(w, GetOpenApi(r, service...))
 	})
 }
-func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
+func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 	doc := &openapi3.T{}
 	doc.OpenAPI = "3.0.1"
 	doc.Info = &openapi3.Info{
@@ -39,13 +40,18 @@ func GetOpenApi(srs ...*router.ServiceRouter) interface{} {
 	doc.Servers = make(openapi3.Servers, 0)
 	doc.Components = openapi3.NewComponents()
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
+	host := req.Host
+	if strings.Index(host, ":") > 0 {
+		host = host[:strings.Index(host, ":")]
+	}
 	for _, r := range srs {
 		if r.Service.Service.Name == "server" {
 			continue
 		}
 		doc.Tags = append(doc.Tags, &openapi3.Tag{Name: r.Service.Service.Name})
 		con := r.Service.Config
-		server := &openapi3.Server{URL: "http://" + con.RunIp + ":" + strconv.Itoa(con.Port) + "/"}
+
+		server := &openapi3.Server{URL: "http://" + host + ":" + strconv.Itoa(con.Port) + "/"}
 		doc.Servers = append(doc.Servers, server)
 		eachrouters(r.GetTypeRouters(types.PublicType), doc, server)
 		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)

@@ -92,6 +92,12 @@ func (own *RouterInfo) GetInstance() interface{} {
 func (own *RouterInfo) SetInstance(instance IRouter) {
 	own.instance = instance
 }
+func (own *RouterInfo) GetPath() string {
+	return own.Path
+}
+func (own *RouterInfo) GetServiceName() string {
+	return own.ServiceName
+}
 func (own *RouterInfo) limit(ip string, userid uint) error {
 	if config.INITSERVER {
 		return nil

@@ -4,11 +4,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"strconv"
 	"sync"
 
-	ptypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server"
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/api/release"
@@ -25,7 +23,7 @@ import (
 
 type WebServer struct {
 	serviceContexts map[string]*router.ServiceContext
-	serverOption    map[string]*ServerOption
+	serverOption    map[string]*types.ServerOption
 	childServer     map[int]*WebServer
 	htmls           *HTMLServer
 	ViewPort        int
@@ -36,34 +34,10 @@ type WebServer struct {
 	sync.Mutex
 }
 
-type ServerOption struct {
-	IsWebSocket bool           //是否启用websocket
-	IsCors      bool           //是否开启跨域
-	OriginCors  []string       //支持的跨域域名
-	Demo        *DemoOption    //静态前端演示包
-	Storage     *StorageOption //存储方案
-	Trans       *TransOption   //传输方案
-}
-type DemoOption struct {
-	Pattern string //路由前缀
-	File    fs.FS  //静态文件目录
-}
-type StorageOption struct {
-	LocalStorage  ptypes.IDataBase
-	RemoteStorage ptypes.IDataBase
-	Cache         ptypes.ICache
-	ListAdapter   ptypes.IListAdapter
-	DataAdapter   ptypes.IDataAdapter
-}
-type TransOption struct {
-	IsRest     bool //是否启用默认失败后的rest传输
-	RetryCount int  //重试次数
-}
-
-func (own *WebServer) GetServerOptions() map[string]*ServerOption {
+func (own *WebServer) GetServerOptions() map[string]*types.ServerOption {
 	return own.serverOption
 }
-func (own *WebServer) GetServerOption(name string) *ServerOption {
+func (own *WebServer) GetServerOption(name string) *types.ServerOption {
 	if _, ok := own.serverOption[name]; ok {
 		return own.serverOption[name]
 	}
@@ -74,7 +48,7 @@ func NewWebServer() *WebServer {
 	ws := &WebServer{
 		childServer:     make(map[int]*WebServer),
 		serviceContexts: make(map[string]*router.ServiceContext),
-		serverOption:    make(map[string]*ServerOption),
+		serverOption:    make(map[string]*types.ServerOption),
 	}
 	ws.AddIService(&server.SystemManage{})
 	return ws
@@ -162,15 +136,17 @@ func (own *WebServer) linkService() {
 	fmt.Println("===========================================================")
 }
 
-func (own *WebServer) AddIService(service types.IService, option ...*ServerOption) {
+func (own *WebServer) AddIService(service types.IService, option ...*types.ServerOption) {
 	sc := router.NewServiceContext(service)
 	own.AddServiceContext(sc)
 	if len(option) > 0 {
 		own.serverOption[service.ServiceName()] = option[0]
+		sc.SetServerOption(option[0])
 	}
 }
-func (own *WebServer) SetOption(service types.IService, option *ServerOption) {
+func (own *WebServer) SetOption(service types.IService, option *types.ServerOption) {
 	own.serverOption[service.ServiceName()] = option
+	own.serviceContexts[service.ServiceName()].SetServerOption(option)
 }
 func (own *WebServer) Start() {
 	config.INITSERVER = true

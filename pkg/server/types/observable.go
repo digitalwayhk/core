@@ -35,12 +35,12 @@ type TargetInfo struct {
 	TargetPath       string
 }
 
-//NewObserveArgs 创建对路由的订阅,router为订阅路由,state为订阅的触发时机，callback为回调函数
+// NewObserveArgs 创建对路由的订阅,router为订阅路由,state为订阅的触发时机，callback为回调函数
 func NewObserveArgs(router IRouter, state ObserveState, callBack func(args *NotifyArgs) error) *ObserveArgs {
 	info := router.RouterInfo()
 	return &ObserveArgs{
-		Topic:       info.Path,
-		ServiceName: info.ServiceName,
+		Topic:       info.GetPath(),
+		ServiceName: info.GetServiceName(),
 		Router:      router,
 		State:       state,
 		CallBack:    callBack,

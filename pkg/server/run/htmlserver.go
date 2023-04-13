@@ -19,8 +19,6 @@ import (
 //go:embed dist
 var html embed.FS
 
-
-
 type HTMLServer struct {
 	Port     int
 	services []*router.ServiceRouter
@@ -104,7 +102,7 @@ func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		url := strings.Trim(r.RequestURI, " ")
 		if url == "/api/openapi" {
-			httpx.OkJson(w, GetOpenApi(service...))
+			httpx.OkJson(w, GetOpenApi(r, service...))
 			return
 		}
 		if r.Method == "POST" {

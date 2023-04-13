@@ -8,7 +8,7 @@ import (
 
 	"github.com/digitalwayhk/core/models"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
-	"github.com/digitalwayhk/core/pkg/server/types"
+	types "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/digitalwayhk/core/service/manage/view"
 

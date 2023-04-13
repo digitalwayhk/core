@@ -15,14 +15,22 @@ import (
 )
 
 type ServiceContext struct {
-	Config    *config.ServerConfig
-	Service   *types.Service
-	snow      idgen.ISnowWorker
-	Router    *ServiceRouter
-	isStart   bool
-	Pid       int
-	Hub       interface{} `json:"-"`
-	StateChan chan bool   `json:"-"`
+	Config       *config.ServerConfig
+	Service      *types.Service
+	snow         idgen.ISnowWorker
+	Router       *ServiceRouter
+	isStart      bool
+	Pid          int
+	Hub          interface{} `json:"-"`
+	StateChan    chan bool   `json:"-"`
+	serverOption *types.ServerOption
+}
+
+func (own *ServiceContext) GetServerOption() *types.ServerOption {
+	return own.serverOption
+}
+func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
+	own.serverOption = so
 }
 
 const DEFAULTPORT = 8080
@@ -93,7 +101,7 @@ func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	if req.CallRouters != nil {
 		for path, cr := range req.CallRouters {
 			cinfo := cr.RouterInfo()
-			sname := cinfo.ServiceName
+			sname := cinfo.GetServiceName()
 			as := addAttachService(service, sname)
 			if as.CallRouters == nil {
 				as.CallRouters = make(map[string]types.IRouter)
@@ -126,7 +134,7 @@ func safedo(cs types.IRouter, req types.IRequest) {
 	}
 	data, err := cs.Do(req)
 	info := cs.RouterInfo()
-	TestResult[info.Path] = data
+	TestResult[info.GetPath()] = data
 	if err != nil {
 		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
 	}
@@ -233,7 +241,7 @@ func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 			ti.TargetAddress = as.Address
 			ti.TargetPort = as.Port
 			ti.TargetService = as.ServiceName
-			ti.TargetPath = info.Path
+			ti.TargetPath = info.GetPath()
 			ti.TargetSocketPort = as.SocketPort
 			ok, err := own.observeCall(oa, ti)
 			if err != nil {
@@ -305,7 +313,7 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 		TargetPort:       args.ReceiveProt,
 		TargetSocketPort: args.ReceiveSocketProt,
 		SourcePath:       args.Topic,
-		TargetPath:       info.Path,
+		TargetPath:       info.GetPath(),
 		ClientIP:         ctx.Config.RunIp,
 		Auth:             false,
 		Instance:         args,

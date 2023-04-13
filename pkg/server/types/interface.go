@@ -1,28 +1,6 @@
 package types
 
-//IServer
-type IServer interface {
-	NewID() uint
-	SendNotify(args *NotifyArgs) error
-}
-type IService interface {
-	ServiceName() string              //服务名称
-	Routers() []IRouter               //服务中的业务路由，用于发布api服务
-	SubscribeRouters() []*ObserveArgs //服务中订阅的路由，用于订阅其他服务的api服务
-}
-
-//关闭服务中的servermanage路由
-type ICloseServerManage interface {
-	IsCloseServerManage() bool
-}
-type IStartService interface {
-	Start() //启动服务完成时调用
-}
-type IStopService interface {
-	Stop() //停止服务完成时调用
-}
-
-//IRequest
+// IRequest
 type IRequest interface {
 	GetTraceId() string
 	GetUser() (uint, string)                                                        //获取用户ID和name，获取设置在token中的userid和name，name可能为空
@@ -44,7 +22,7 @@ type IRequestClear interface {
 	SetPath(path string)
 }
 
-//IResponse
+// IResponse
 type IResponse interface {
 	GetSuccess() bool                                //是否成功
 	GetMessage() string                              //获取消息
@@ -52,25 +30,7 @@ type IResponse interface {
 	GetError() error                                 //获取错误
 }
 
-//IRouter 标准业务路由接口，所有业务功能应通过该接口提供对外调用服务
-type IRouter interface {
-	Parse(req IRequest) error             //解析业务参数
-	Validation(req IRequest) error        //验证业务允许调用,该方法返回nil，Do方法将被调用
-	Do(req IRequest) (interface{}, error) //执行业务逻辑
-	RouterInfo() *RouterInfo              //路由注册信息
-}
-
-//IRouterFactory 业务路由工厂接口，用于创建业务路由实例
-type IRouterFactory interface {
-	New(instance interface{}) IRouter //创建业务路由实例
-}
-
-//IPackRouterHook 包装路由获取实例接口
-type IPackRouterHook interface {
-	GetInstance() interface{}
-}
-
-//IWebSocket 客户端WebSocket接口
+// IWebSocket 客户端WebSocket接口
 type IWebSocket interface {
 	Send(event, channel string, data interface{})
 	IsClosed() bool
