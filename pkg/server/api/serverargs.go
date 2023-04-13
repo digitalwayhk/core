@@ -24,9 +24,12 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 		ip = ip[:index]
 	}
 	if !req.Authorized() {
-		opt := router.GetContext(own.ServiceName).GetServerOption()
-		if opt.RemoteAccessManageAPI {
-			return nil
+		context := router.GetContext(own.ServiceName)
+		if context != nil {
+			opt := context.GetServerOption()
+			if opt.RemoteAccessManageAPI {
+				return nil
+			}
 		}
 		if !utils.HasLocalIPAddr(ip) {
 			return errors.New("服务管理接口只能在本地机访问！")

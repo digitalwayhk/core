@@ -47,36 +47,32 @@ func NewServiceRouter(service *ServiceContext, tis types.IService) *ServiceRoute
 func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
-		serviceName := info.GetServiceName()
-		path := info.GetPath()
-		if serviceName != own.Service.Service.Name {
-			tsn := strings.ToLower(serviceName)
+		if info.ServiceName != own.Service.Service.Name {
+			tsn := strings.ToLower(info.ServiceName)
 			ssn := strings.ToLower(own.Service.Service.Name)
-			path = strings.Replace(path, tsn, ssn, -1)
-			serviceName = own.Service.Service.Name
-			info.ServiceName = serviceName
+			info.Path = strings.Replace(info.Path, tsn, ssn, -1)
+			info.ServiceName = own.Service.Service.Name
 		}
-		pathType := info.PathType
-		if pathType == types.PublicType {
+		if info.PathType == types.PublicType {
 			own.publicAPI[info.Path] = info
 		}
-		if pathType == types.PrivateType {
+		if info.PathType == types.PrivateType {
 			own.privateAPI[info.Path] = info
 		}
-		if pathType == types.ManageType {
+		if info.PathType == types.ManageType {
 			own.manageAPI[info.Path] = info
 		}
 		if _, ok := own.allAPI[info.Path]; !ok {
 			own.allAPI[info.Path] = info
 		} else {
-			panic(fmt.Sprintf("service :%s router already exists. path:%s", serviceName, path))
+			panic(fmt.Sprintf("service :%s router already exists. path:%s", info.ServiceName, info.Path))
 		}
 	}
 }
 func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
-		own.serverManagerAPI[info.GetPath()] = info
+		own.serverManagerAPI[info.Path] = info
 	}
 }
 func (own *ServiceRouter) GetRouters() []*types.RouterInfo {
