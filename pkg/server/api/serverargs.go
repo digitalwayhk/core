@@ -24,7 +24,7 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 		ip = ip[:index]
 	}
 	if !req.Authorized() {
-		context := router.GetContext(own.ServiceName)
+		context := router.GetContext(req.ServiceName())
 		if context != nil {
 			opt := context.GetServerOption()
 			if opt.RemoteAccessManageAPI {
