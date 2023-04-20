@@ -113,7 +113,15 @@ func (own *Request) Authorized() bool {
 func (own *Request) GetValue(key string) string {
 	val := own.http.FormValue(key)
 	if val == "" {
-		val = own.http.URL.Query().Get(key)
+		query := own.http.URL.Query()
+		val = query.Get(key)
+		if val == "" {
+			for k, v := range query {
+				if strings.EqualFold(k, key) {
+					val = v[0]
+				}
+			}
+		}
 	}
 	return val
 }

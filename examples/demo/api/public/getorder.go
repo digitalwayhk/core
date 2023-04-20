@@ -1,6 +1,8 @@
 package public
 
 import (
+	"strconv"
+
 	"github.com/digitalwayhk/core/examples/demo/models"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -17,9 +19,13 @@ type GetOrder struct {
 func (own *GetOrder) Parse(req types.IRequest) error {
 	//req.GetValue("id") //获取参数 url?id=1
 	//req.GetClaims("userid") //获取jwt中的claims
-
+	p := req.GetValue("page")
+	s := req.GetValue("size")
+	var err error
+	own.Page, err = strconv.Atoi(p)
+	own.Size, err = strconv.Atoi(s)
 	//绑定json参数到结构体 {page:1,size:10}
-	return req.Bind(own)
+	return err
 }
 
 // Validation 验证方法,该方法返回nil，Do方法将被调用
@@ -46,5 +52,7 @@ func (own *GetOrder) Do(req types.IRequest) (interface{}, error) {
 // RouterInfo路由注册信息
 func (own *GetOrder) RouterInfo() *types.RouterInfo {
 	//设置默认路由信息
-	return router.DefaultRouterInfo(own)
+	info := router.DefaultRouterInfo(own)
+	info.Method = "GET" //设置请求方法
+	return info
 }

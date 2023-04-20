@@ -71,13 +71,51 @@ func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.
 	for _, r := range routers {
 		oper := getrouter(r, doc, server)
 		oper.Servers = &openapi3.Servers{server}
-		doc.AddOperation(r.Path, r.Method, oper)
+		doc.AddOperation(getOperation(r, doc))
 	}
+}
+func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method string, operation *openapi3.Operation) {
+	path = info.Path
+	method = info.Method
+	operation = &openapi3.Operation{
+		Tags: []string{info.ServiceName},
+		//Description: strings.ToUpper(info.StructName),
+		Responses:   make(openapi3.Responses, 0),
+		OperationID: info.Path,
+	}
+	api := info.New()
+	if method == "GET" {
+		operation.Parameters = make(openapi3.Parameters, 0)
+		utils.ForEach(api, func(name string, value interface{}) {
+			operation.Parameters = append(operation.Parameters, &openapi3.ParameterRef{
+				Value: &openapi3.Parameter{
+					Name:   name,
+					In:     "query",
+					Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: utils.GetTypeName(value)}},
+				},
+			})
+		})
+	} else {
+		operation.RequestBody = getRequestBody(api, doc)
+	}
+	req := &router.InitRequest{}
+	data := router.TestResult[info.Path]
+	ress := getResponse(data, req, doc)
+	for k, v := range ress {
+		operation.AddResponse(k, v)
+	}
+	if info.PathType == types.PrivateType {
+		operation.Security = openapi3.NewSecurityRequirements()
+		nsr := openapi3.NewSecurityRequirement()
+		nsr.Authenticate("Bearer")
+		operation.Security.With(nsr)
+	}
+	return
 }
 func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server) *openapi3.Operation {
 	oper := &openapi3.Operation{
 		Tags:        []string{info.ServiceName},
-		Description: info.StructName,
+		Description: strings.ToUpper(info.StructName),
 		Responses:   make(openapi3.Responses, 0),
 		OperationID: info.Path,
 	}
@@ -103,8 +141,9 @@ func getRequestBody(api interface{}, doc *openapi3.T) *openapi3.RequestBodyRef {
 	if len(schema.Value.Properties) == 0 {
 		return nil
 	}
-	doc.Components.Schemas[utils.GetTypeName(api)] = schema
+	//doc.Components.Schemas[utils.GetTypeName(api)] = schema
 	body := openapi3.NewRequestBody()
+
 	body.WithDescription("request body")
 	body.WithJSONSchema(schema.Value)
 	body.WithRequired(true)
@@ -119,11 +158,13 @@ func getResponse(data interface{}, req types.IRequest, doc *openapi3.T) map[int]
 	schema.Value.Example = res
 	content := openapi3.NewContentWithJSONSchema(schema.Value)
 	msg := "Successful operation"
-	item[200] = &openapi3.Response{Content: content, Description: &msg}
-	if data != nil {
-		doc.Components.Schemas[utils.GetTypeName(data)] = schema
-	}
-	doc.Components.Schemas[utils.GetTypeName(res)] = schema
+	opi3res := &openapi3.Response{Content: content, Description: &msg}
+	//opi3res.WithJSONSchema(schema.Value)
+	item[200] = opi3res
+	// if data != nil {
+	// 	doc.Components.Schemas[utils.GetTypeName(data)] = schema
+	// }
+	// doc.Components.Schemas[utils.GetTypeName(res)] = schema
 	errres := &router.Response{
 		ErrorCode:    600,
 		ErrorMessage: "参数解析异常----Parse return error",
