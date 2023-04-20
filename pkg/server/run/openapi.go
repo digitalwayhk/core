@@ -112,6 +112,8 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	}
 	return
 }
+
+// todo:不再使用
 func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server) *openapi3.Operation {
 	oper := &openapi3.Operation{
 		Tags:        []string{info.ServiceName},
