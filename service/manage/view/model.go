@@ -17,7 +17,7 @@ type ViewModel struct {
 	Disabled      bool              `json:"disabled"`
 	Visible       bool              `json:"visible"`
 	ViewType      string            `json:"viewtype"`
-	AutoLoad      bool              `json:"autoLoad"`
+	AutoLoad      bool              `json:"autoload"`
 	Fields        []*FieldModel     `json:"fields"`
 	Commands      []*CommandModel   `json:"commands"`
 	ChildModels   []*ViewChildModel `json:"childmodels"`
