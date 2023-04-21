@@ -148,6 +148,9 @@ func routerToCommand(info *types.RouterInfo) *view.CommandModel {
 	return cmd
 }
 func getfieldname(field *reflect.StructField) (string, string) {
+	if field == nil {
+		return "", ""
+	}
 	name := field.Name
 	jname := field.Tag.Get("json")
 	posttype := ""
@@ -179,7 +182,6 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 			name, fm := getForeignField(field, model)
 			foreignItems[name] = fm
 		}
-
 	})
 	count := len(fields)
 	for index, item := range fields {
@@ -309,8 +311,36 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "id", IsKey: true, Type: "string", IsSearch: false, Visible: false})
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "code", Title: "编码", Type: "string", IsSearch: true, Visible: true, Sorter: true})
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "name", Title: "名称", Type: "string", IsSearch: true, Visible: true, Sorter: true})
-	name, _ = getfieldname(utils.GetPropertyType(model, name))
+	ff := utils.GetPropertyType(model, name)
+	if ff == nil {
+		logx.Error(oof + "生成外键属性时异常:" + fm.ManyObjectName + "中未找到" + name + "字段,请确认references:中的字段是否正确,大小写必须一致！")
+	} else {
+		name, _ = getfieldname(ff)
+	}
 	return name, fm
+}
+func GetForeignModel(field *view.FieldModel, relevanceModel interface{}, manyFieldKey, display string) *view.ForeignModel {
+	fm := &view.ForeignModel{
+		IsFkey:             true,
+		OneObjectTypeName:  field.Type,
+		OneObjectField:     field.Field,
+		OneObjectName:      field.Type,
+		OneObjectFieldKey:  "id",
+		OneDisplayName:     display,
+		ManyObjectTypeName: utils.GetTypeName(relevanceModel),
+		ManyObjectName:     utils.GetTypeName(relevanceModel),
+		ManyObjectField:    field.Field,
+		ManyObjectFieldKey: manyFieldKey,
+	}
+	fm.FModel = &view.ViewModel{
+		Name:   fm.OneObjectTypeName,
+		Title:  fm.OneObjectTypeName,
+		Fields: make([]*view.FieldModel, 0),
+	}
+	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "id", IsKey: true, Type: "string", IsSearch: false, Visible: false})
+	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "code", Title: "编码", Type: "string", IsSearch: true, Visible: true, Sorter: true})
+	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "name", Title: "名称", Type: "string", IsSearch: true, Visible: true, Sorter: true})
+	return fm
 }
 func modelToChildModel(model interface{}, mv IManageView) []*view.ViewChildModel {
 	childItems := make([]*view.ViewChildModel, 0)
