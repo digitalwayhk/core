@@ -27,11 +27,11 @@ type IManageView interface {
 }
 type IManageSearch interface {
 	SearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool)
-	SearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error)
+	SearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error)
 	ForeignSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool)
-	ForeignSearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error)
+	ForeignSearchAfter(sender interface{}, result *view.ForeigData, req st.IRequest) (interface{}, error)
 	ChildSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool)
-	ChildSearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error)
+	ChildSearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error)
 	OnSearchData(list interface{}, total int64) *view.TableData
 }
 type IGetModelList[T pt.IModel] interface {
@@ -110,19 +110,19 @@ func (own *ManageService[T]) ViewChildModel(child *view.ViewChildModel) {}
 func (own *ManageService[T]) SearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
-func (own *ManageService[T]) SearchAfter(sender, result *view.TableData, req st.IRequest) (interface{}, error) {
+func (own *ManageService[T]) SearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error) {
 	return result, nil
 }
 func (own *ManageService[T]) ForeignSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
-func (own *ManageService[T]) ForeignSearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error) {
+func (own *ManageService[T]) ForeignSearchAfter(sender interface{}, result *view.ForeigData, req st.IRequest) (interface{}, error) {
 	return result, nil
 }
 func (own *ManageService[T]) ChildSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
-func (own *ManageService[T]) ChildSearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error) {
+func (own *ManageService[T]) ChildSearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error) {
 	return result, nil
 }
 func (own *ManageService[T]) OnSearchData(list interface{}, total int64) *view.TableData {

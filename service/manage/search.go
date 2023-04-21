@@ -211,7 +211,7 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 		err := action.Load(childitem, &result)
 		if ms, ok := own.instance.(IManageSearch); ok {
 			data := ms.OnSearchData(result, childitem.Total)
-			return ms.ForeignSearchAfter(own, data, req)
+			return ms.ChildSearchAfter(own, data, req)
 		}
 		return nil, err
 	}

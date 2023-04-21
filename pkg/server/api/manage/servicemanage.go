@@ -49,6 +49,9 @@ type ObserverRouterInfo struct {
 	IsOk         bool
 }
 
+func test(ms manage.IManageSearch) {
+
+}
 func (own *ServiceInfo) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
@@ -62,6 +65,7 @@ type ServiceManage struct {
 func NewServiceManage() *ServiceManage {
 	own := &ServiceManage{}
 	own.ManageService = manage.NewManageService[ServiceInfo](own)
+
 	return own
 }
 func (own *ServiceManage) Routers() []types.IRouter {
