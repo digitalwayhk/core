@@ -110,7 +110,7 @@ func (own *ManageService[T]) ViewChildModel(child *view.ViewChildModel) {}
 func (own *ManageService[T]) SearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
-func (own *ManageService[T]) SearchAfter(sender, result interface{}, req st.IRequest) (interface{}, error) {
+func (own *ManageService[T]) SearchAfter(sender, result *view.TableData, req st.IRequest) (interface{}, error) {
 	return result, nil
 }
 func (own *ManageService[T]) ForeignSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
