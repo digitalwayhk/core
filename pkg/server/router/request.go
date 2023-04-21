@@ -184,6 +184,18 @@ func (own *Request) GetServerInfo() *types.TargetInfo {
 		TargetSocketPort: cont.Config.SocketPort,
 	}
 }
+func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
+	cont := GetContext(serviceName)
+	if cont == nil {
+		return nil
+	}
+	return &types.TargetInfo{
+		TargetAddress:    cont.Config.Host,
+		TargetService:    serviceName,
+		TargetPort:       cont.Config.Port,
+		TargetSocketPort: cont.Config.SocketPort,
+	}
+}
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	return own.CallTargetService(router, nil, callback...)
 }
