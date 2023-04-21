@@ -175,6 +175,15 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 	}
 	return nil
 }
+func (own *Request) GetServerInfo() *types.TargetInfo {
+	cont := own.GetService()
+	return &types.TargetInfo{
+		TargetAddress:    cont.Config.Host,
+		TargetService:    own.ServiceName(),
+		TargetPort:       cont.Config.Port,
+		TargetSocketPort: cont.Config.SocketPort,
+	}
+}
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	return own.CallTargetService(router, nil, callback...)
 }
