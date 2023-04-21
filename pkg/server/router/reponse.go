@@ -34,7 +34,7 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 		Duration:  time.Since(own.startTime),
 	}
 	if err != nil {
-		suc = false
+		res.Success = false
 		terr := err.(*types.TypeError)
 		if terr != nil {
 			res.ErrorCode = terr.Code
