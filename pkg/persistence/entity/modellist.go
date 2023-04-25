@@ -309,7 +309,7 @@ func (own *ModelList[T]) SearchCode(code string, fn ...func(item *types.SearchIt
 	return nil, nil
 }
 
-//Contains 是否包含该数据，如果包含，返回true，并返回ID
+// Contains 是否包含该数据，如果包含，返回true，并返回ID
 func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
 	hash := getHash(item)
 	own.SearchWhere("Hashcode", hash)
@@ -368,8 +368,15 @@ func (own *ModelList[T]) SearchAll(page, size int, fn ...func(item *types.Search
 	err := own.LoadList(item)
 	return own.searchList, item.Total, err
 }
+func (own *ModelList[T]) SearchOne(fn ...func(item *types.SearchItem)) (*T, error) {
+	items, _, err := own.SearchAll(1, 1, fn...)
+	if len(items) == 0 {
+		return nil, err
+	}
+	return items[0], err
+}
 
-//统计查询，默认sum(field),当需要使用max,min,avg等统计时，需要在fn中修改item.Statistical=max
+// 统计查询，默认sum(field),当需要使用max,min,avg等统计时，需要在fn中修改item.Statistical=max
 func (own *ModelList[T]) SerachSum(field string, fn ...func(item *types.SearchItem)) (decimal.Decimal, error) {
 	item := own.GetSearchItem()
 	item.IsStatistical = true

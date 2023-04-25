@@ -26,6 +26,19 @@ type ServerConfig struct {
 	SocketPort       int
 	AttachServices   map[string]*AttachAddress
 	Debug            bool
+	IsWhiteList      bool
+	WhiteList        []string
+	CustomerDataList []*CustomerData
+	IsLoaclVisit     bool
+}
+
+func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
+	for _, v := range con.CustomerDataList {
+		if v.Key == key {
+			return v
+		}
+	}
+	return nil
 }
 
 type AuthSecret struct {
@@ -38,12 +51,16 @@ type AttachAddress struct {
 	Port       int
 	SocketPort int
 }
+type CustomerData struct {
+	Key   string
+	Value string
+}
 
 const CONFIGDIR = "/etc/"
 
 var CONFIGDIRPATH = utils.Getpath() + CONFIGDIR
 
-//初始化SERVER,true表示系统加载中，未运行，false表示系统已运行
+// 初始化SERVER,true表示系统加载中，未运行，false表示系统已运行
 var INITSERVER = false
 
 func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
@@ -63,7 +80,10 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.ManageAuth.AccessExpire = 86400
 	con.ServerManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ServerManageAuth.AccessExpire = 86400
-	con.Debug = true
+	con.Debug = false
+	con.IsWhiteList = false
+	con.WhiteList = make([]string, 0)
+	con.CustomerDataList = make([]*CustomerData, 0)
 	return &con
 }
 func ReadConfig(servicename string) *ServerConfig {
@@ -83,6 +103,12 @@ func (own *ServerConfig) Save() error {
 			panic(err)
 		}
 	}
+	if own.CustomerDataList == nil {
+		own.CustomerDataList = make([]*CustomerData, 0)
+	}
+	if own.WhiteList == nil {
+		own.WhiteList = make([]string, 0)
+	}
 	data, err := json.Marshal(own)
 	if err != nil {
 		return err
@@ -99,6 +125,7 @@ func (own *ServerConfig) Save() error {
 	// if own.AttachServices == nil || len(own.AttachServices) == 0 {
 	// 	str = strings.Replace(str, "\"AttachServices\":null", "\"AttachServices\":[]", -1)
 	// }
+
 	err = ioutil.WriteFile(file, utils.String2Bytes(str), 0777)
 	if err != nil {
 		return err

@@ -35,9 +35,10 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 	}
 	if err != nil {
 		res.Success = false
-		terr := err.(*types.TypeError)
-		if terr != nil {
-			res.ErrorCode = terr.Code
+		if terr, ok := err.(*types.TypeError); ok {
+			if terr != nil {
+				res.ErrorCode = terr.Code
+			}
 		}
 		res.ErrorMessage = err.Error()
 	}

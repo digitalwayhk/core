@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -117,6 +118,12 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 func routeHandler(rou *router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
+		ip := utils.ClientPublicIP(r)
+		err := trans.VerifyIPWhiteList(rou.Service.Config, ip)
+		if err != nil {
+			httpx.OkJson(w, req.NewResponse(nil, err))
+			return
+		}
 		info := rou.GetRouter(req.GetPath())
 		if info != nil {
 			res := info.Exec(req)
@@ -167,6 +174,12 @@ func (own *Server) websocketauth() {
 }
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := utils.ClientPublicIP(r)
+		err := trans.VerifyIPWhiteList(sc.Config, ip)
+		if err != nil {
+			httpx.OkJson(w, err)
+			return
+		}
 		ServeWs(sc.Hub.(*Hub), w, r)
 	}
 }

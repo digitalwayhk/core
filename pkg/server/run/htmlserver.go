@@ -11,7 +11,9 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
@@ -115,12 +117,18 @@ func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 			path := url[:last]
 			ss := getService(servicename, service)
 			req := router.NewRequest(ss, r)
+			ip := utils.ClientPublicIP(r)
+			err := trans.VerifyIPWhiteList(ss.Service.Config, ip)
+			if err != nil {
+				httpx.OkJson(w, req.NewResponse(nil, err))
+				return
+			}
 			req.SetPath(path)
 			if item := ss.GetRouter(path); item != nil {
 				res := item.Exec(req)
 				httpx.OkJson(w, res)
 			} else {
-				httpx.OkJson(w, req.NewResponse(errors.New(req.GetPath()+"未找到对应的接口！"), nil))
+				httpx.OkJson(w, req.NewResponse(nil, errors.New(req.GetPath()+"未找到对应的接口！")))
 			}
 		}
 	}
