@@ -288,7 +288,7 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 		foreignkey = strings.ToLower(foreignkey)
 	}
 	if name == "" {
-		name = field.Type.Name() + "ID"
+		name = field.Name + "ID"
 	}
 	oof, _ := getfieldname(&field)
 	fm := &view.ForeignModel{
