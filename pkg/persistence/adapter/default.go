@@ -251,3 +251,7 @@ func (own *DefaultAdapter) Commit() error {
 func (own *DefaultAdapter) SetSaveType(saveType types.SaveType) {
 	own.saveType = saveType
 }
+
+func (own *DefaultAdapter) GetRunDB() interface{} {
+	return own.currentDB
+}

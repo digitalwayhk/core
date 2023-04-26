@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/digitalwayhk/core/pkg/persistence/types"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/persistence/types"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // ReadType 動態轉化 Symbol 為 bson 所需字段
@@ -123,6 +124,9 @@ func NewMongo(host, user, pass string, port uint) *Mongo {
 		Pass:    pass,
 		TimeOut: 10,
 	}
+}
+func (own *Mongo) GetRunDB() interface{} {
+	return own.db
 }
 func (own *Mongo) GetMongo() (*mongo.Database, error) {
 	if own.db == nil {

@@ -219,3 +219,6 @@ func (own *Sqlite) Commit() error {
 	}
 	return nil
 }
+func (own *Sqlite) GetRunDB() interface{} {
+	return own.db
+}

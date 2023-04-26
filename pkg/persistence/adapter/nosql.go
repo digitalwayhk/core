@@ -1,9 +1,10 @@
 package adapter
 
 import (
+	"log"
+
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
-	"log"
 )
 
 type NosqlAdapter struct {
@@ -108,6 +109,9 @@ func (own *NosqlAdapter) getNosqlDB(model interface{}) (types.IDataBase, error) 
 		return nil, err
 	}
 	return idb, nil
+}
+func (own *NosqlAdapter) GetRunDB() interface{} {
+	return nil
 }
 
 //func loadMongo(db *mongo.Database, item *types.SearchItem, result interface{}) error {

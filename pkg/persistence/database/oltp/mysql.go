@@ -230,3 +230,6 @@ func (own *Mysql) Commit() error {
 	}
 	return nil
 }
+func (own *Mysql) GetRunDB() interface{} {
+	return own.db
+}

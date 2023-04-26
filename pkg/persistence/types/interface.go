@@ -48,6 +48,7 @@ type IDataAction interface {
 	Update(data interface{}) error
 	Delete(data interface{}) error
 	Commit() error
+	GetRunDB() interface{}
 }
 type IDataAdapter interface {
 	SetSaveType(saveType SaveType)
