@@ -12,13 +12,13 @@ type Model struct {
 	ID         uint      `gorm:"primarykey" json:"id,string"`
 	CreatedAt  time.Time `json:"createdat"`
 	UpdatedAt  time.Time `json:"updatedat"`
-	modelState int       `json:"-"`
+	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
 	Hashcode   string    `json:"-"`
 }
 
 func NewModel() *Model {
 	model := &Model{
-		modelState: 0,
+		ModelState: 0,
 	}
 	return model
 }
@@ -45,10 +45,10 @@ func (own *Model) GetID() uint {
 	return own.ID
 }
 func (own *Model) GetModelState() int {
-	return own.modelState
+	return own.ModelState
 }
 func (own *Model) SetModelState(state int) {
-	own.modelState = state
+	own.ModelState = state
 }
 func (own *Model) GetHash() string {
 	return utils.HashCodes(strconv.Itoa(int(own.ID)))
@@ -74,12 +74,12 @@ func (own *Model) GetRemoteDBName() string {
 	return "models"
 }
 
-//弃用，无法通过own获取子struct
+// 弃用，无法通过own获取子struct
 func (own *Model) GetField(field string) interface{} {
 	return utils.GetPropertyValue(own, field)
 }
 
-//弃用，无法通过own获取子struct
+// 弃用，无法通过own获取子struct
 func (own *Model) SetField(field string, value interface{}) error {
 	if field == "Hashcode" {
 		own.Hashcode = value.(string)
