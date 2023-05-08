@@ -439,6 +439,9 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 		}
 		item.WhereList = ws
 	}
+	if len(item.SortList) == 0 {
+		item.AddSort(&types.SortItem{Column: "ID", IsDesc: true})
+	}
 	ada := own.GetDBAdapter()
 	err := ada.Load(item, &own.searchList)
 	return err

@@ -169,7 +169,7 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 	foreignItems := make(map[string]*view.ForeignModel)
 
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
-		if field.Name == "Valid" || field.Name == "Hashcode" || field.Name == "CreatedUser" || field.Name == "UpdatedUser" {
+		if field.Name == "Valid" || field.Name == "Hashcode" || field.Name == "CreatedUser" || field.Name == "UpdatedUser" || field.Name == "ModelState" {
 			return
 		}
 		typeName := field.Type.Name()
