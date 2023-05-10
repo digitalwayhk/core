@@ -358,6 +358,7 @@ func modelToChildModel(model interface{}, mv IManageView) []*view.ViewChildModel
 }
 func getChildModel(field reflect.StructField, model interface{}, mv IManageView) *view.ViewChildModel {
 	foreignkey := gormfield(FOREIGNKEY, field)
+
 	vt := field.Type.Elem()
 	if vt.Kind() == reflect.Ptr {
 		vt = vt.Elem()
@@ -370,6 +371,7 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 		IsSelect:   false,
 		IsCheck:    true,
 		ForeignKey: foreignkey,
+		References: gormfield(REFERENCES, field),
 	}
 	vm.ViewModel = *getviewModel(obj, mv)
 	for _, f := range vm.ViewModel.Fields {

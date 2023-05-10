@@ -45,6 +45,7 @@ type ViewChildModel struct {
 	IsCheck    bool   `json:"ischeck"`
 	ForeignKey string `json:"foreignKey"`
 	Sortindex  int    `json:"sortindex"`
+	References string `json:"references"`
 }
 
 type CommandModel struct {
