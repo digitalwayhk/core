@@ -194,7 +194,7 @@ func paginate(page, size int) func(db *gorm.DB) *gorm.DB {
 		return db.Offset(offset).Limit(size)
 	}
 }
-func dropTable(db *gorm.DB, dst interface{}) error {
+func DropTable(db *gorm.DB, dst interface{}) error {
 	err := db.Migrator().DropTable(dst)
 	if err != nil {
 		return err
