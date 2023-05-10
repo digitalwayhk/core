@@ -54,6 +54,9 @@ func (own *Sqlite) init(data interface{}) error {
 	}
 	return own.HasTable(data)
 }
+func (own *Sqlite) Init(data interface{}) error {
+	return own.init(data)
+}
 func (own *Sqlite) GetDBName(data interface{}) error {
 	if idb, ok := data.(types.IDBName); ok {
 		own.Name = idb.GetRemoteDBName()
