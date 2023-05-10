@@ -54,9 +54,7 @@ func (own *Sqlite) init(data interface{}) error {
 	}
 	return own.HasTable(data)
 }
-func (own *Sqlite) Init(data interface{}) error {
-	return own.init(data)
-}
+
 func (own *Sqlite) GetDBName(data interface{}) error {
 	if idb, ok := data.(types.IDBName); ok {
 		own.Name = idb.GetRemoteDBName()
@@ -110,13 +108,13 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		}
 		own.db = db
 	}
-	name := utils.GetTypeName(model)
-	if itb, ok := model.(types.IScopesTableName); ok {
-		name = itb.TableName()
-	}
-	if _, ok := own.tables[name]; ok {
-		return nil
-	}
+	// name := utils.GetTypeName(model)
+	// if itb, ok := model.(types.IScopesTableName); ok {
+	// 	name = itb.TableName()
+	// }
+	// if _, ok := own.tables[name]; ok {
+	// 	return nil
+	// }
 	// tnacopes := model.(types.IScopesTableName)
 	// if tnacopes == nil {
 	// 	own.db.Scopes(func(d *gorm.DB) *gorm.DB {
@@ -133,10 +131,10 @@ func (own *Sqlite) HasTable(model interface{}) error {
 	if err != nil {
 		return err
 	}
-	own.tables[name] = NewTableMaster(own.db)
-	if err != nil {
-		return err
-	}
+	// own.tables[name] = NewTableMaster(own.db)
+	// if err != nil {
+	// 	return err
+	// }
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
 		if kind == utils.Array {
 			obj := reflect.New(field.Type.Elem().Elem()).Interface()
