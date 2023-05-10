@@ -197,7 +197,7 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 	if own.SearchItem.ChildModel.References == "" {
 		childitem.AddWhereN(own.SearchItem.ChildModel.ForeignKey, im.GetID())
 	} else {
-		childitem.AddWhereN(own.SearchItem.ChildModel.References, utils.GetPropertyValue(parent, own.SearchItem.ChildModel.References))
+		childitem.AddWhereN(own.SearchItem.ChildModel.ForeignKey, utils.GetPropertyValue(parent, own.SearchItem.ChildModel.References))
 	}
 	sf := utils.GetPropertyType(parent, own.SearchItem.ChildModel.Name)
 	if sf != nil {
