@@ -405,6 +405,15 @@ func (own *ModelList[T]) ReLoadList() error {
 func (own *ModelList[T]) ToArray() []*T {
 	return own.searchList
 }
+func (own *ModelList[T]) AddArray() []*T {
+	return own.addList
+}
+func (own *ModelList[T]) UpdateArray() []*T {
+	return own.updateList
+}
+func (own *ModelList[T]) RemoveArray() []*T {
+	return own.deleteList
+}
 func (own *ModelList[T]) Count() int {
 	count := len(own.searchList)
 	return count
@@ -446,22 +455,31 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 	err := ada.Load(item, &own.searchList)
 	return err
 }
+func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
+	return ada.Insert(item)
+}
+func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
+	return ada.Update(item)
+}
+func (own *ModelList[T]) OnDelete(ada types.IDataAction, item *T) error {
+	return ada.Delete(item)
+}
 func (own *ModelList[T]) Save() error {
 	ada := own.GetDBAdapter()
 	for _, item := range own.addList {
-		err := ada.Insert(item)
+		err := own.OnInsert(ada, item)
 		if err != nil {
 			return err
 		}
 	}
 	for _, item := range own.updateList {
-		err := ada.Update(item)
+		err := own.OnUpdate(ada, item)
 		if err != nil {
 			return err
 		}
 	}
 	for _, item := range own.deleteList {
-		err := ada.Delete(item)
+		err := own.OnDelete(ada, item)
 		if err != nil {
 			return err
 		}
