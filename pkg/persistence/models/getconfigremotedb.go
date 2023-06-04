@@ -120,7 +120,12 @@ func NewRemoteDbConfigList() *entity.ModelList[RemoteDbConfig] {
 	// 		list = entity.NewModelList[RemoteDbConfig](nil)
 	// 	})
 	// }
-	return entity.NewModelList[RemoteDbConfig](nil)
+	rdb := &RemoteDbConfig{}
+	ada := oltp.NewSqlite()
+	ada.Name = rdb.GetLocalDBName()
+	ada.IsLog = true
+	return entity.NewModelList[RemoteDbConfig](ada)
+
 }
 
 func GetRemoteCacheConfig(name string) (types.ICache, error) {
