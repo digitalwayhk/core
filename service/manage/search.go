@@ -59,9 +59,13 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 		return err
 	}
 
-	if gml, ok := own.instance.(IGetModelList[T]); ok {
-		own.list = gml.GetList()
+	if gml, ok := own.instance.(IGetModelList); ok {
+		list := gml.GetList()
+		if list != nil {
+			own.list = list.(*models.ModelList[T])
+		}
 	}
+
 	return nil
 }
 func (own *Search[T]) Validation(req types.IRequest) error {

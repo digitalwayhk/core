@@ -34,8 +34,8 @@ type IManageSearch interface {
 	ChildSearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error)
 	OnSearchData(list interface{}, total int64) *view.TableData
 }
-type IGetModelList[T pt.IModel] interface {
-	GetList() *models.ModelList[T]
+type IGetModelList interface {
+	GetList() interface{}
 }
 type IRequestSet interface {
 	SetReq(req st.IRequest)

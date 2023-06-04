@@ -427,6 +427,9 @@ func (own *ModelList[T]) Clear() {
 	own.updateList = make([]*T, 0, 1000)
 	own.deleteList = make([]*T, 0, 1000)
 }
+func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) error {
+	return ada.Load(item, &own.searchList)
+}
 func (own *ModelList[T]) load(item *types.SearchItem) error {
 	defer func() {
 		if err := recover(); err != nil {
@@ -452,8 +455,7 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 		item.AddSort(&types.SortItem{Column: "ID", IsDesc: true})
 	}
 	ada := own.GetDBAdapter()
-	err := ada.Load(item, &own.searchList)
-	return err
+	return own.OnLoad(ada, item)
 }
 func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
 	return ada.Insert(item)

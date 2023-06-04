@@ -53,8 +53,9 @@ func (own *Operation[T]) Parse(req st.IRequest) error {
 			return err
 		}
 	}
-	if gml, ok := own.instance.(IGetModelList[T]); ok {
-		own.list = gml.GetList()
+	if gml, ok := own.instance.(IGetModelList); ok {
+		list := gml.GetList()
+		own.list = list.(*models.ModelList[T])
 	}
 	return nil
 }
