@@ -2,13 +2,14 @@ package manage
 
 import (
 	"github.com/digitalwayhk/core/models"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 
 	st "github.com/digitalwayhk/core/pkg/server/types"
 )
 
 type Operation[T pt.IModel] struct {
-	list     *models.ModelList[T]
+	list     *entity.ModelList[T]
 	instance interface{}
 	Model    *T `json:"model"`
 }
@@ -27,7 +28,7 @@ func (own *Operation[T]) New(instance interface{}) st.IRouter {
 		}
 	}
 	if own.list == nil {
-		own.list = models.NewManageModelList[T]()
+		own.list = models.NewManageModelList[T]().ModelList
 	}
 	return own
 }
@@ -55,7 +56,7 @@ func (own *Operation[T]) Parse(req st.IRequest) error {
 	}
 	if gml, ok := own.instance.(IGetModelList); ok {
 		list := gml.GetList()
-		own.list = list.(*models.ModelList[T])
+		own.list = list.(*entity.ModelList[T])
 	}
 	return nil
 }

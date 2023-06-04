@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	"github.com/digitalwayhk/core/models"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -13,7 +14,7 @@ import (
 
 type Search[T pt.IModel] struct {
 	instance   interface{}
-	list       *models.ModelList[T]
+	list       *entity.ModelList[T]
 	SearchItem *view.SearchItem
 	View       *view.ViewModel
 }
@@ -32,13 +33,11 @@ func (own *Search[T]) New(instance interface{}) types.IRouter {
 		}
 	}
 	if own.list == nil {
-		own.list = models.NewManageModelList[T]()
+		own.list = models.NewManageModelList[T]().ModelList
 	}
 	return own
 }
-func (own *Search[T]) GetModelList() *models.ModelList[T] {
-	return own.list
-}
+
 func (own *Search[T]) Parse(req types.IRequest) error {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
@@ -62,7 +61,7 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 	if gml, ok := own.instance.(IGetModelList); ok {
 		list := gml.GetList()
 		if list != nil {
-			own.list = list.(*models.ModelList[T])
+			own.list = list.(*entity.ModelList[T])
 		}
 	}
 
