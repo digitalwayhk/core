@@ -32,7 +32,7 @@ func NewDefaultAdapter() *DefaultAdapter {
 			writeDB:      make(map[string]types.IDataBase),
 			manageDB:     make(map[string]types.IDataBase),
 			saveType:     0,
-			IsLog:        true,
+			IsLog:        false,
 		}
 	}
 	return defaultAda
