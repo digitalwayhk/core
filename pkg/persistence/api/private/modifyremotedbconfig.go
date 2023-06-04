@@ -14,7 +14,7 @@ type ModifyRemoteDBConfig struct {
 }
 
 func (own *ModifyRemoteDBConfig) Parse(req st.IRequest) error {
-	list := models.NewRemoteDbConfigList()
+	list := models.NewRemoteDbConfigList(false)
 	own.RemoteDbConfig = list.NewItem()
 	err := req.Bind(own.RemoteDbConfig)
 	return err
@@ -42,7 +42,7 @@ func (own *ModifyRemoteDBConfig) Validation(req st.IRequest) error {
 }
 
 func (own *ModifyRemoteDBConfig) Do(req st.IRequest) (interface{}, error) {
-	list := models.NewRemoteDbConfigList()
+	list := models.NewRemoteDbConfigList(false)
 	list.Clear()
 	list.SearchName(own.Name)
 	if list.Count() == 1 {

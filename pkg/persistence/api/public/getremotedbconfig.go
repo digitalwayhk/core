@@ -19,7 +19,7 @@ func (own *GetRemoteDBConfig) Validation(req types.IRequest) error {
 }
 
 func (own *GetRemoteDBConfig) Do(req types.IRequest) (interface{}, error) {
-	list := models.NewRemoteDbConfigList()
+	list := models.NewRemoteDbConfigList(false)
 	if own.Name != "" {
 		return list.SearchName(own.Name)
 	}
