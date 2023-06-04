@@ -25,15 +25,14 @@ func init() {
 
 var GetRemoteDBHandler func(dbconfig *RemoteDbConfig)
 
-func GetConfigRemoteDB(name string, connecttype types.DBConnectType) (types.IDataBase, error) {
+func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog bool) (types.IDataBase, error) {
 	if len(TempRemoteDB) > 0 {
 		if db, ok := TempRemoteDB[name]; ok {
 			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, false), nil
 		}
 	}
-	if list == nil {
-		list = NewRemoteDbConfigList()
-	}
+	list = NewRemoteDbConfigList(islog)
+
 	if GetRemoteDBHandler != nil {
 		rdc := &RemoteDbConfig{
 			Name:        name,
@@ -114,7 +113,7 @@ func dbconToIdb(rdc *RemoteDbConfig) (types.IDataBase, error) {
 	}
 	return mysql, nil
 }
-func NewRemoteDbConfigList() *entity.ModelList[RemoteDbConfig] {
+func NewRemoteDbConfigList(islog bool) *entity.ModelList[RemoteDbConfig] {
 	// if list == nil {
 	// 	once.Do(func() {
 	// 		list = entity.NewModelList[RemoteDbConfig](nil)
@@ -123,14 +122,14 @@ func NewRemoteDbConfigList() *entity.ModelList[RemoteDbConfig] {
 	rdb := &RemoteDbConfig{}
 	ada := oltp.NewSqlite()
 	ada.Name = rdb.GetLocalDBName()
-	ada.IsLog = true
+	ada.IsLog = islog
 	return entity.NewModelList[RemoteDbConfig](ada)
 
 }
 
 func GetRemoteCacheConfig(name string) (types.ICache, error) {
 	if list == nil {
-		list = NewRemoteDbConfigList()
+		list = NewRemoteDbConfigList(false)
 	}
 	if GetRemoteDBHandler != nil {
 		rdc := &RemoteDbConfig{
