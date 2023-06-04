@@ -32,6 +32,7 @@ type Mysql struct {
 	WriteTimeOut uint
 	isTansaction bool
 	tables       map[string]*TableMaster
+	IsLog        bool
 }
 
 func (own *Mysql) init(data interface{}) error {
@@ -54,7 +55,7 @@ func (own *Mysql) init(data interface{}) error {
 	}
 	return own.HasTable(data)
 }
-func NewMysql(host, user, pass string, port uint) *Mysql {
+func NewMysql(host, user, pass string, port uint, islog bool) *Mysql {
 	return &Mysql{
 		Host:         host,
 		Port:         port,
@@ -65,6 +66,7 @@ func NewMysql(host, user, pass string, port uint) *Mysql {
 		TimeOut:      10,
 		ReadTimeOut:  30,
 		WriteTimeOut: 60,
+		IsLog:        islog,
 	}
 }
 func (own *Mysql) GetDBName(data interface{}) error {
@@ -90,7 +92,11 @@ func (own *Mysql) GetDB() (*gorm.DB, error) {
 		if config.INITSERVER {
 			db.DryRun = true
 		} else {
-			db.Logger = logger.Default.LogMode(logger.Error)
+			if own.IsLog {
+				db.Logger = logger.Default.LogMode(logger.Info)
+			} else {
+				db.Logger = logger.Default.LogMode(logger.Error)
+			}
 			db.DryRun = false
 		}
 		if err != nil {

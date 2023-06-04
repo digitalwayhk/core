@@ -26,6 +26,7 @@ type Sqlite struct {
 	tx           *gorm.DB
 	isTansaction bool
 	tables       map[string]*TableMaster
+	IsLog        bool
 }
 
 func NewSqlite() *Sqlite {
@@ -87,7 +88,11 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 	if config.INITSERVER {
 		db.DryRun = true
 	} else {
-		db.Logger = logger.Default.LogMode(logger.Error)
+		if own.IsLog {
+			db.Logger = logger.Default.LogMode(logger.Info)
+		} else {
+			db.Logger = logger.Default.LogMode(logger.Error)
+		}
 		db.DryRun = false
 	}
 	if err != nil {

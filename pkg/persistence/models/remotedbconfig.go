@@ -25,6 +25,7 @@ type RemoteDbConfig struct {
 	WriteTimeOut uint                `json:"writetimeout"`
 	ConnectType  types.DBConnectType `json:"connecttype,int"` //连接类型
 	DataBaseType string              `json:"databasetype"`
+	IsLog        bool                `json:"islog"`
 }
 
 func (own *RemoteDbConfig) GetHash() string {

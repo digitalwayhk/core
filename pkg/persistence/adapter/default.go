@@ -18,6 +18,7 @@ type DefaultAdapter struct {
 	saveType      types.SaveType             //保存类型
 	IsCreateTable bool                       //是否创建表,该参数只能远程库有效，当为true时，表不存在,会获取ManageType连接，创建表或者修改表结构增加列
 	currentDB     []types.IDataBase          //当前操作的数据库
+	IsLog         bool                       //是否打印日志
 }
 
 var defaultAda *DefaultAdapter
@@ -31,6 +32,7 @@ func NewDefaultAdapter() *DefaultAdapter {
 			writeDB:      make(map[string]types.IDataBase),
 			manageDB:     make(map[string]types.IDataBase),
 			saveType:     0,
+			IsLog:        true,
 		}
 	}
 	return defaultAda
@@ -58,6 +60,7 @@ func GetDefalueLocalDB(name string) types.IDataBase {
 	db := defaultAda.localdbs[name]
 	if db == nil {
 		sl := oltp.NewSqlite()
+		sl.IsLog = defaultAda.IsLog
 		sl.Name = name
 		defaultAda.localdbs[name] = sl
 	}
@@ -71,6 +74,7 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	name := idb.GetLocalDBName()
 	if _, ok := own.localdbs[name]; !ok {
 		ndb := oltp.NewSqlite()
+		ndb.IsLog = own.IsLog
 		ndb.Name = name
 		if !config.INITSERVER {
 			own.localdbs[name] = ndb

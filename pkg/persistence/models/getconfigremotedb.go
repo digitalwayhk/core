@@ -2,9 +2,10 @@ package models
 
 import (
 	"errors"
-	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"strconv"
 	"sync"
+
+	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
@@ -15,7 +16,7 @@ var once sync.Once
 
 var list *entity.ModelList[RemoteDbConfig]
 
-//临时远程库配置，修改配置文件中的Debug为false,会失效这里的任何设置
+// 临时远程库配置，修改配置文件中的Debug为false,会失效这里的任何设置
 var TempRemoteDB map[string]*RemoteDbConfig
 
 func init() {
@@ -27,7 +28,7 @@ var GetRemoteDBHandler func(dbconfig *RemoteDbConfig)
 func GetConfigRemoteDB(name string, connecttype types.DBConnectType) (types.IDataBase, error) {
 	if len(TempRemoteDB) > 0 {
 		if db, ok := TempRemoteDB[name]; ok {
-			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port), nil
+			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, false), nil
 		}
 	}
 	if list == nil {
@@ -91,7 +92,7 @@ func dbconToIdb(rdc *RemoteDbConfig) (types.IDataBase, error) {
 		mongo.Name = rdc.Name
 		return mongo, nil
 	}
-	mysql := oltp.NewMysql(rdc.Host, rdc.User, rdc.Pass, rdc.Port)
+	mysql := oltp.NewMysql(rdc.Host, rdc.User, rdc.Pass, rdc.Port, rdc.IsLog)
 	if mysql.Host == "" || mysql.User == "" || mysql.Pass == "" || mysql.Port == 0 {
 		return nil, errors.New(rdc.Name + " database not set romotedb config")
 	}
