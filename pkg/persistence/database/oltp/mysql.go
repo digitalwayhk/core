@@ -3,6 +3,7 @@ package oltp
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
@@ -159,6 +160,15 @@ func (own *Mysql) HasTable(model interface{}) error {
 	if err != nil {
 		return err
 	}
+	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
+		if kind == utils.Array {
+			obj := reflect.New(field.Type.Elem().Elem()).Interface()
+			err = own.HasTable(obj)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+	})
 	// own.tables[name] = NewTableMaster(own.db)
 	// if err != nil {
 	// 	return err
