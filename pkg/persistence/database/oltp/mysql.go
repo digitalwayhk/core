@@ -124,45 +124,45 @@ func (own *Mysql) HasTable(model interface{}) error {
 		}
 		own.db = db
 	}
-	if own.tables == nil {
-		own.tables = make(map[string]*TableMaster)
-		var results []map[string]interface{}
-		tx := own.db.Raw("select * from information_schema.tables where table_schema='" + own.Name + "'").Find(&results)
-		if tx.Error != nil {
-			return tx.Error
-		}
-		if len(results) > 0 {
-			for _, v := range results {
-				name := strings.ToLower(v["TABLE_NAME"].(string))
-				count, _ := v["TABLE_ROWS"].(int)
-				avg, _ := v["AVG_ROW_LENGTH"].(int)
-				dl, _ := v["DATA_LENGTH"].(int)
-				il, _ := v["INDEX_LENGTH"].(int)
-				own.tables[name] = &TableMaster{
-					Rows:         count,
-					AvgRowLength: avg,
-					DataLength:   dl,
-					IndexLength:  il,
-				}
-			}
-		}
-	}
+	// if own.tables == nil {
+	// 	own.tables = make(map[string]*TableMaster)
+	// 	var results []map[string]interface{}
+	// 	tx := own.db.Raw("select * from information_schema.tables where table_schema='" + own.Name + "'").Find(&results)
+	// 	if tx.Error != nil {
+	// 		return tx.Error
+	// 	}
+	// 	if len(results) > 0 {
+	// 		for _, v := range results {
+	// 			name := strings.ToLower(v["TABLE_NAME"].(string))
+	// 			count, _ := v["TABLE_ROWS"].(int)
+	// 			avg, _ := v["AVG_ROW_LENGTH"].(int)
+	// 			dl, _ := v["DATA_LENGTH"].(int)
+	// 			il, _ := v["INDEX_LENGTH"].(int)
+	// 			own.tables[name] = &TableMaster{
+	// 				Rows:         count,
+	// 				AvgRowLength: avg,
+	// 				DataLength:   dl,
+	// 				IndexLength:  il,
+	// 			}
+	// 		}
+	// 	}
+	// }
 	name := utils.GetTypeName(model)
 	if itb, ok := model.(types.IScopesTableName); ok {
 		name = itb.TableName()
 	}
 	name = strings.ToLower(name)
-	if _, ok := own.tables[name]; ok {
-		return nil
-	}
+	// if _, ok := own.tables[name]; ok {
+	// 	return nil
+	// }
 	err := own.db.AutoMigrate(model)
 	if err != nil {
 		return err
 	}
-	own.tables[name] = NewTableMaster(own.db)
-	if err != nil {
-		return err
-	}
+	// own.tables[name] = NewTableMaster(own.db)
+	// if err != nil {
+	// 	return err
+	// }
 	return nil
 }
 func (own *Mysql) Load(item *types.SearchItem, result interface{}) error {
