@@ -66,7 +66,14 @@ func (own *Mongo) Load(item *types.SearchItem, result interface{}) error {
 	}
 	return loadMongo(own.db, item, result)
 }
-
+func (own *Mongo) Raw(sql string, data interface{}) error {
+	// err := own.init(data)
+	// if err != nil {
+	// 	return err
+	// }
+	// own.db.Raw(sql).Scan(data)
+	return nil
+}
 func (own *Mongo) Insert(data interface{}) error {
 	//TODO implement me
 	err := own.init(data)

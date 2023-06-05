@@ -46,7 +46,10 @@ func (own NosqlAdapter) Load(item *types.SearchItem, result interface{}) error {
 	}
 	return nil
 }
+func (own *NosqlAdapter) Raw(sql string, data interface{}) error {
 
+	return nil
+}
 func (own NosqlAdapter) Insert(data interface{}) error {
 	//TODO implement me
 	db, err := own.getNosqlDB(data)

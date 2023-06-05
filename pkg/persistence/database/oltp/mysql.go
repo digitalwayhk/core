@@ -188,6 +188,14 @@ func (own *Mysql) Load(item *types.SearchItem, result interface{}) error {
 	}
 	return load(own.db, item, result)
 }
+func (own *Mysql) Raw(sql string, data interface{}) error {
+	err := own.init(data)
+	if err != nil {
+		return err
+	}
+	own.db.Raw(sql).Scan(data)
+	return own.db.Error
+}
 func (own *Mysql) Transaction() {
 	own.isTansaction = true
 }

@@ -163,6 +163,20 @@ func (own *DefaultAdapter) Load(item *types.SearchItem, result interface{}) erro
 	}
 	return nil
 }
+func (own *DefaultAdapter) Raw(sql string, data interface{}) error {
+	var err error
+	own.currentDB, err = own.getdb(data)
+	if err != nil {
+		return err
+	}
+	for _, db := range own.currentDB {
+		err = db.Raw(sql, data)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (own *DefaultAdapter) Transaction() {
 	own.isTansaction = true
 }

@@ -47,6 +47,7 @@ type IDataAction interface {
 	Insert(data interface{}) error
 	Update(data interface{}) error
 	Delete(data interface{}) error
+	Raw(sql string, data interface{}) error
 	Commit() error
 	GetRunDB() interface{}
 }
