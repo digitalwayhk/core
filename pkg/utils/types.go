@@ -223,7 +223,7 @@ func ArrayEach(items interface{}, f func(item interface{})) {
 	}
 }
 func IsArray(items interface{}) bool {
-	stype := reflect.TypeOf(items)
+	stype := reflect.TypeOf(items).Elem()
 	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
 }
 
