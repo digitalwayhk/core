@@ -227,9 +227,16 @@ func IsArray(items interface{}) bool {
 	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
 }
 func NewArrayItem(items interface{}) interface{} {
-	stype := reflect.TypeOf(items).Elem()
+	stype := reflect.TypeOf(items)
+	if stype.Kind() == reflect.Ptr {
+		stype = stype.Elem()
+	}
 	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
-		return reflect.New(stype.Elem()).Interface()
+		t1 := stype.Elem()
+		if t1.Kind() == reflect.Ptr {
+			t1 = t1.Elem()
+		}
+		return reflect.New(t1).Interface()
 	}
 	return nil
 }
