@@ -80,7 +80,7 @@ func GetTypeKind(typ reflect.Type) TypeKind {
 func GetTypeAndValue(target interface{}) (reflect.Type, reflect.Value) {
 	stype := reflect.TypeOf(target)
 	sv := reflect.ValueOf(target)
-	if stype.Kind() == reflect.Ptr {
+	if stype.Kind() == reflect.Ptr || stype.Kind() == reflect.Array {
 		stype = stype.Elem()
 		sv = sv.Elem()
 	}

@@ -165,7 +165,8 @@ func (own *Sqlite) Load(item *types.SearchItem, result interface{}) error {
 	return load(own.db, item, result)
 }
 func (own *Sqlite) Raw(sql string, data interface{}) error {
-	err := own.init(data)
+	obj := utils.NewInterface(data)
+	err := own.init(obj)
 	if err != nil {
 		return err
 	}
