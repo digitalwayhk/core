@@ -80,7 +80,7 @@ func GetTypeKind(typ reflect.Type) TypeKind {
 func GetTypeAndValue(target interface{}) (reflect.Type, reflect.Value) {
 	stype := reflect.TypeOf(target)
 	sv := reflect.ValueOf(target)
-	if stype.Kind() == reflect.Ptr || stype.Kind() == reflect.Array {
+	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()
 		sv = sv.Elem()
 	}
@@ -225,6 +225,13 @@ func ArrayEach(items interface{}, f func(item interface{})) {
 func IsArray(items interface{}) bool {
 	stype := reflect.TypeOf(items).Elem()
 	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
+}
+func NewArrayItem(items interface{}) interface{} {
+	stype := reflect.TypeOf(items).Elem()
+	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
+		return reflect.New(stype.Elem()).Interface()
+	}
+	return nil
 }
 
 // AutoMapConvertList 映射转换集合,targetType为转换后的目标类型

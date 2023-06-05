@@ -189,7 +189,7 @@ func (own *Mysql) Load(item *types.SearchItem, result interface{}) error {
 	return load(own.db, item, result)
 }
 func (own *Mysql) Raw(sql string, data interface{}) error {
-	obj := utils.NewInterface(data)
+	obj := utils.NewArrayItem(data)
 	err := own.init(obj)
 	if err != nil {
 		return err

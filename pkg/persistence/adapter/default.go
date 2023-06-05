@@ -69,7 +69,7 @@ func GetDefalueLocalDB(name string) types.IDataBase {
 }
 func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error) {
 	if utils.IsArray(model) {
-		model = utils.NewInterface(model)
+		model = utils.NewArrayItem(model)
 	}
 	idb, err := getIDBName(model)
 	if err != nil {
@@ -113,7 +113,7 @@ func (own *DefaultAdapter) getMapDB(name string, conncettype types.DBConnectType
 
 func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBConnectType) (types.IDataBase, error) {
 	if utils.IsArray(model) {
-		model = utils.NewInterface(model)
+		model = utils.NewArrayItem(model)
 	}
 	idbn, err := getIDBName(model)
 	if err != nil {
