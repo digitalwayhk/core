@@ -7,6 +7,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/utils"
 )
 
 type DefaultAdapter struct {
@@ -67,6 +68,9 @@ func GetDefalueLocalDB(name string) types.IDataBase {
 	return defaultAda.localdbs[name]
 }
 func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error) {
+	if utils.IsArray(model) {
+		model = utils.NewInterface(model)
+	}
 	idb, err := getIDBName(model)
 	if err != nil {
 		return nil, err
@@ -108,6 +112,9 @@ func (own *DefaultAdapter) getMapDB(name string, conncettype types.DBConnectType
 }
 
 func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBConnectType) (types.IDataBase, error) {
+	if utils.IsArray(model) {
+		model = utils.NewInterface(model)
+	}
 	idbn, err := getIDBName(model)
 	if err != nil {
 		return nil, err

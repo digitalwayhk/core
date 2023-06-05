@@ -222,6 +222,10 @@ func ArrayEach(items interface{}, f func(item interface{})) {
 		}
 	}
 }
+func IsArray(items interface{}) bool {
+	stype := reflect.TypeOf(items)
+	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
+}
 
 // AutoMapConvertList 映射转换集合,targetType为转换后的目标类型
 func autoMapConvertList(source, target interface{}, getmap func(arge *AutoMapArge) *AutoMapHander) []interface{} {
