@@ -40,6 +40,7 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 	doc.Servers = make(openapi3.Servers, 0)
 	doc.Components = openapi3.NewComponents()
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
+
 	host := req.Host
 	if strings.Index(host, ":") > 0 {
 		host = host[:strings.Index(host, ":")]
@@ -50,8 +51,12 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 		}
 		doc.Tags = append(doc.Tags, &openapi3.Tag{Name: r.Service.Service.Name})
 		con := r.Service.Config
-
-		server := &openapi3.Server{URL: "http://" + host + ":" + strconv.Itoa(con.Port) + "/"}
+		var server *openapi3.Server
+		if req.TLS != nil {
+			server = &openapi3.Server{URL: "https://" + host + ":" + strconv.Itoa(con.Port) + "/"}
+		} else {
+			server = &openapi3.Server{URL: "http://" + host + ":" + strconv.Itoa(con.Port) + "/"}
+		}
 		doc.Servers = append(doc.Servers, server)
 		eachrouters(r.GetTypeRouters(types.PublicType), doc, server)
 		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)
