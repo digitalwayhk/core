@@ -155,7 +155,10 @@ func (own *SearchItem) OrWhereN(name string, value interface{}) *SearchItem {
 		Value:    value,
 		Relation: rel,
 	}
-	own.AddWhere(w)
+	if w.Column != "" {
+		own.WhereList = append(own.WhereList, w)
+	}
+	//own.AddWhere(w)
 	return own
 }
 func (own *SearchItem) AddWhere(w ...*WhereItem) *SearchItem {
