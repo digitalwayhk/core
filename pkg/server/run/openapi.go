@@ -52,13 +52,24 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 
 		con := r.Service.Config
 		var server *openapi3.Server
+		tagdesc := ""
 		if req.Header.Get("X-Forwarded-Proto") == "https" {
 			server = &openapi3.Server{URL: "https://" + host + "/"}
 		} else {
 			server = &openapi3.Server{URL: "http://" + host + ":" + strconv.Itoa(con.Port) + "/"}
+			tagdesc = server.URL
 		}
-		doc.Tags = append(doc.Tags, &openapi3.Tag{Name: r.Service.Service.Name, Description: server.URL})
-		doc.Servers = append(doc.Servers, server)
+		doc.Tags = append(doc.Tags, &openapi3.Tag{Name: r.Service.Service.Name, Description: tagdesc})
+		isaddServer := true
+		for _, s := range doc.Servers {
+			if s.URL == server.URL {
+				isaddServer = false
+				break
+			}
+		}
+		if isaddServer {
+			doc.Servers = append(doc.Servers, server)
+		}
 		eachrouters(r.GetTypeRouters(types.PublicType), doc, server)
 		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)
 	}
