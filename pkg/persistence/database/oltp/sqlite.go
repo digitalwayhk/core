@@ -173,6 +173,12 @@ func (own *Sqlite) Raw(sql string, data interface{}) error {
 	own.db.Raw(sql).Scan(data)
 	return own.db.Error
 }
+func (own *Sqlite) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
+	if own.isTansaction {
+		return own.tx.Raw(sql, values)
+	}
+	return own.db.Raw(sql, values)
+}
 func (own *Sqlite) Transaction() {
 	own.isTansaction = true
 }

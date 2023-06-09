@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"gorm.io/gorm"
 )
 
 // ReadType 動態轉化 Symbol 為 bson 所需字段
@@ -72,6 +73,9 @@ func (own *Mongo) Raw(sql string, data interface{}) error {
 	// 	return err
 	// }
 	// own.db.Raw(sql).Scan(data)
+	return nil
+}
+func (own *Mongo) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
 	return nil
 }
 func (own *Mongo) Insert(data interface{}) error {
