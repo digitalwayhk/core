@@ -66,6 +66,10 @@ func (own *Sqlite) GetDBName(data interface{}) error {
 	}
 	return errors.New("db name is empty")
 }
+func (own *Sqlite) GetModelDB(model interface{}) (interface{}, error) {
+	err := own.init(model)
+	return own.db, err
+}
 func (own *Sqlite) GetDB() (*gorm.DB, error) {
 	key := own.Name
 	if key == "" {
@@ -173,12 +177,7 @@ func (own *Sqlite) Raw(sql string, data interface{}) error {
 	own.db.Raw(sql).Scan(data)
 	return own.db.Error
 }
-func (own *Sqlite) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
-	if own.isTansaction {
-		return own.tx.Raw(sql, values)
-	}
-	return own.db.Raw(sql, values)
-}
+
 func (own *Sqlite) Transaction() {
 	own.isTansaction = true
 }

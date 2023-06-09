@@ -48,7 +48,7 @@ type IDataAction interface {
 	Update(data interface{}) error
 	Delete(data interface{}) error
 	Raw(sql string, data interface{}) error
-	DBRaw(sql string, values ...interface{}) (tx *gorm.DB)
+	GetModelDB(model interface{}) (interface{}, error)
 	Commit() error
 	GetRunDB() interface{}
 }

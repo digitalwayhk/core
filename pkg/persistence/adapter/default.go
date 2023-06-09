@@ -8,7 +8,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/utils"
-	"gorm.io/gorm"
 )
 
 type DefaultAdapter struct {
@@ -185,12 +184,8 @@ func (own *DefaultAdapter) Raw(sql string, data interface{}) error {
 	}
 	return nil
 }
-func (own *DefaultAdapter) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
-	own.currentDB, _ = own.getdb(values[0])
-	for _, db := range own.currentDB {
-		return db.DBRaw(sql, values[0])
-	}
-	return nil
+func (own *DefaultAdapter) GetModelDB(model interface{}) (interface{}, error) {
+	return own.getdb(model)
 }
 func (own *DefaultAdapter) Transaction() {
 	own.isTansaction = true

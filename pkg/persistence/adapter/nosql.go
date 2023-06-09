@@ -5,7 +5,6 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
-	"gorm.io/gorm"
 )
 
 type NosqlAdapter struct {
@@ -17,9 +16,8 @@ func NewNosqlAdapter() *NosqlAdapter {
 		isTransaction: false,
 	}
 }
-func (own *NosqlAdapter) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
-
-	return nil
+func (own *NosqlAdapter) GetModelDB(model interface{}) (interface{}, error) {
+	return own.getNosqlDB(model)
 }
 
 //// ReadType 動態轉化 Symbol 為 bson 所需字段

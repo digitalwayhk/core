@@ -80,6 +80,10 @@ func (own *Mysql) GetDBName(data interface{}) error {
 	}
 	return errors.New("db name is empty")
 }
+func (own *Mysql) GetModelDB(model interface{}) (interface{}, error) {
+	err := own.init(model)
+	return own.db, err
+}
 func (own *Mysql) GetDB() (*gorm.DB, error) {
 	if own.db == nil {
 		dsn := fmt.Sprintf(mysqldsn, own.User, own.Pass, own.Host, own.Port, own.Name, own.TimeOut, own.ReadTimeOut, own.WriteTimeOut)
@@ -197,12 +201,7 @@ func (own *Mysql) Raw(sql string, data interface{}) error {
 	own.db.Raw(sql).Scan(data)
 	return own.db.Error
 }
-func (own *Mysql) DBRaw(sql string, values ...interface{}) (tx *gorm.DB) {
-	if own.isTansaction {
-		return own.tx.Raw(sql, values)
-	}
-	return own.db.Raw(sql, values)
-}
+
 func (own *Mysql) Transaction() {
 	own.isTansaction = true
 }
