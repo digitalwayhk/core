@@ -16,7 +16,7 @@ type OrderModel struct {
 }
 
 // NewOrderModel 新建订单模型
-func NewChainModel() *OrderModel {
+func NewOrderModel() *OrderModel {
 	return &OrderModel{
 		Model: entity.NewModel(),
 	}

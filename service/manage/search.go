@@ -47,6 +47,12 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 	if err != nil {
 		return err
 	}
+	if gml, ok := own.instance.(IGetModelList); ok {
+		list := gml.GetList()
+		if list != nil {
+			own.list = list.(*entity.ModelList[T])
+		}
+	}
 	if own.SearchItem.Parent != nil {
 		item := own.list.NewItem()
 		values, err := json.Marshal(own.SearchItem.Parent)
@@ -57,19 +63,17 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 		own.SearchItem.Parent = item
 		return err
 	}
-
-	if gml, ok := own.instance.(IGetModelList); ok {
-		list := gml.GetList()
-		if list != nil {
-			own.list = list.(*entity.ModelList[T])
-		}
-	}
-
 	return nil
 }
 func (own *Search[T]) Validation(req types.IRequest) error {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
+	}
+	if own.SearchItem.Page == 0 {
+		own.SearchItem.Page = 1
+	}
+	if own.SearchItem.Size == 0 {
+		own.SearchItem.Size = 10
 	}
 	return nil
 }

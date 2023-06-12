@@ -461,7 +461,21 @@ func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
 	return ada.Insert(item)
 }
 func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
+	// utils.ForEach(item, func(name string, value interface{}) {
+	// 	if utils.IsArray(value) {
+	// 		utils.ArrayEach(value, func(v interface{}) {
+	// 			ms := utils.GetPropertyValue(v, "ModelState")
+	// 			if ms == 1 {
+	// 				utils.SetPropertyValue(v, "ID", 0)
+	// 			}
+	// 			if ms == 3 {
+	// 				ada.Delete(v)
+	// 			}
+	// 		})
+	// 	}
+	// })
 	return ada.Update(item)
+
 }
 func (own *ModelList[T]) OnDelete(ada types.IDataAction, item *T) error {
 	return ada.Delete(item)

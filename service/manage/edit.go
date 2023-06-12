@@ -82,6 +82,17 @@ func (own *Edit[T]) Do(req types.IRequest) (interface{}, error) {
 		if key != "TraceID" && key != "Hashcode" {
 			utils.SetPropertyValue(own.OldItem, key, value)
 		}
+		// if utils.IsArray(value) {
+		// 	utils.ArrayEach(value, func(v interface{}) {
+		// 		ms := utils.GetPropertyValue(v, "ModelState")
+		// 		if ms == 1 {
+		// 			utils.SetPropertyValue(v, "ID", 0)
+		// 		}
+		// 		// if ms == 3 {
+
+		// 		// }
+		// 	})
+		// }
 	})
 
 	err := own.list.Update(own.OldItem)
