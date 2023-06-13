@@ -105,9 +105,9 @@ func (own *DataTimeTypeModel) SetDate(is bool) {
 	if own.IsDate {
 		own.DateFormat = "YYYY-MM-DD"
 	}
-	if own.IsTime {
-		own.DateFormat = "YYYY-MM-DD HH:mm:ss"
-	}
+	// if own.IsTime {
+	// 	own.DateFormat = "YYYY-MM-DD HH:mm:ss"
+	// }
 }
 func (own *DataTimeTypeModel) SetTime(is bool) {
 	own.IsTime = is
@@ -115,9 +115,9 @@ func (own *DataTimeTypeModel) SetTime(is bool) {
 	if own.IsTime {
 		own.TimeFormat = "HH:mm:ss"
 	}
-	if own.IsDate {
-		own.DateFormat = "YYYY-MM-DD HH:mm:ss"
-	}
+	// if own.IsDate {
+	// 	own.DateFormat = "YYYY-MM-DD HH:mm:ss"
+	// }
 }
 func (own *FieldModel) ComBox(values ...string) {
 	for i, v := range values {
