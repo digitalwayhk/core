@@ -97,6 +97,7 @@ type DataTimeTypeModel struct {
 	IsTime     bool   `json:"istime"`
 	DateFormat string `json:"dateformat"` // YYYY-MM-dd HH:mm:ss
 	TimeFormat string `json:"timeformat"` // HH:mm:ss
+	IsUTC      bool   `json:"isutc"`
 }
 
 func (own *DataTimeTypeModel) SetDate(is bool) {

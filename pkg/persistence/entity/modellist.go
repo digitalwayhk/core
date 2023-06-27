@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"gorm.io/gorm"
 
 	"github.com/shopspring/decimal"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -510,4 +511,23 @@ func (own *ModelList[T]) GetDBAdapter() types.IDataAction {
 }
 func (own *ModelList[T]) SetDBAdapter(ada types.IDataAction) {
 	own.ada = ada
+}
+
+func (own *ModelList[T]) GetDB() (*gorm.DB, error) {
+	_adadb, err := own.GetDBAdapter().GetModelDB(own.hideEntity)
+	if err != nil {
+		return nil, err
+	}
+	if db, ok := _adadb.(*gorm.DB); ok {
+		return db, nil
+	}
+	if items, ok := _adadb.([]types.IDataBase); ok {
+		if len(items) > 0 {
+			db, _ := items[0].GetModelDB(own.hideEntity)
+			if db1, ok := db.(*gorm.DB); ok {
+				return db1, nil
+			}
+		}
+	}
+	return nil, nil
 }

@@ -163,7 +163,7 @@ func getRequestBody(api interface{}, doc *openapi3.T) *openapi3.RequestBodyRef {
 	//doc.Components.Schemas[utils.GetTypeName(api)] = schema
 	body := openapi3.NewRequestBody()
 
-	body.WithDescription("request body")
+	//body.WithDescription("request body")
 	body.WithJSONSchema(schema.Value)
 	body.WithRequired(true)
 	ref.Value = body
@@ -184,22 +184,23 @@ func getResponse(data interface{}, req types.IRequest, doc *openapi3.T) map[int]
 	// 	doc.Components.Schemas[utils.GetTypeName(data)] = schema
 	// }
 	// doc.Components.Schemas[utils.GetTypeName(res)] = schema
-	errres := &router.Response{
-		ErrorCode:    600,
-		ErrorMessage: "参数解析异常----Parse return error",
-	}
-	err600, _ := openapi3gen.NewSchemaRefForValue(errres, nil, openapi3gen.UseAllExportedFields())
-	err600.Value.Example = errres
-	item[600] = &openapi3.Response{Content: openapi3.NewContentWithJSONSchema(err600.Value), Description: &errres.ErrorMessage}
-	errres700 := &router.Response{
-		ErrorCode:    700,
-		ErrorMessage: "业务验证异常----Validation return error",
-	}
-	item[700] = &openapi3.Response{Description: &errres700.ErrorMessage}
-	errres800 := &router.Response{
-		ErrorCode:    800,
-		ErrorMessage: "调用执行异常----Do return error",
-	}
-	item[800] = &openapi3.Response{Description: &errres800.ErrorMessage}
+
+	// errres := &router.Response{
+	// 	ErrorCode:    600,
+	// 	ErrorMessage: "参数解析异常----Parse return error",
+	// }
+	// err600, _ := openapi3gen.NewSchemaRefForValue(errres, nil, openapi3gen.UseAllExportedFields())
+	// err600.Value.Example = errres
+	// item[600] = &openapi3.Response{Content: openapi3.NewContentWithJSONSchema(err600.Value), Description: &errres.ErrorMessage}
+	// errres700 := &router.Response{
+	// 	ErrorCode:    700,
+	// 	ErrorMessage: "业务验证异常----Validation return error",
+	// }
+	// item[700] = &openapi3.Response{Description: &errres700.ErrorMessage}
+	// errres800 := &router.Response{
+	// 	ErrorCode:    800,
+	// 	ErrorMessage: "调用执行异常----Do return error",
+	// }
+	// item[800] = &openapi3.Response{Description: &errres800.ErrorMessage}
 	return item
 }
