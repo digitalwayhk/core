@@ -25,10 +25,10 @@ func init() {
 
 var GetRemoteDBHandler func(dbconfig *RemoteDbConfig)
 
-func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog bool) (types.IDataBase, error) {
+func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog, autotable bool) (types.IDataBase, error) {
 	if len(TempRemoteDB) > 0 {
 		if db, ok := TempRemoteDB[name]; ok {
-			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, false), nil
+			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, islog, autotable), nil
 		}
 	}
 	list = NewRemoteDbConfigList(islog)
@@ -91,7 +91,7 @@ func dbconToIdb(rdc *RemoteDbConfig) (types.IDataBase, error) {
 		mongo.Name = rdc.Name
 		return mongo, nil
 	}
-	mysql := oltp.NewMysql(rdc.Host, rdc.User, rdc.Pass, rdc.Port, rdc.IsLog)
+	mysql := oltp.NewMysql(rdc.Host, rdc.User, rdc.Pass, rdc.Port, rdc.IsLog, rdc.AutoTable)
 	if mysql.Host == "" || mysql.User == "" || mysql.Pass == "" || mysql.Port == 0 {
 		return nil, errors.New(rdc.Name + " database not set romotedb config")
 	}

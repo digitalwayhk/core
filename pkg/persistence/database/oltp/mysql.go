@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -34,6 +35,7 @@ type Mysql struct {
 	isTansaction bool
 	tables       map[string]*TableMaster
 	IsLog        bool
+	AutoTable    bool
 }
 
 func (own *Mysql) init(data interface{}) error {
@@ -54,9 +56,13 @@ func (own *Mysql) init(data interface{}) error {
 			own.tx = own.db.Begin()
 		}
 	}
-	return own.HasTable(data)
+	err := own.HasTable(data)
+	if err != nil {
+		logx.Error(fmt.Sprintf("init table error:%s", err.Error()))
+	}
+	return nil
 }
-func NewMysql(host, user, pass string, port uint, islog bool) *Mysql {
+func NewMysql(host, user, pass string, port uint, islog bool, autotable bool) *Mysql {
 	return &Mysql{
 		Host:         host,
 		Port:         port,
@@ -68,6 +74,7 @@ func NewMysql(host, user, pass string, port uint, islog bool) *Mysql {
 		ReadTimeOut:  30,
 		WriteTimeOut: 60,
 		IsLog:        islog,
+		AutoTable:    autotable,
 	}
 }
 func (own *Mysql) GetDBName(data interface{}) error {
@@ -119,6 +126,9 @@ func (own *Mysql) GetDB() (*gorm.DB, error) {
 }
 
 func (own *Mysql) HasTable(model interface{}) error {
+	if !own.AutoTable {
+		return nil
+	}
 	if config.INITSERVER {
 		return nil
 	}
@@ -173,10 +183,6 @@ func (own *Mysql) HasTable(model interface{}) error {
 			}
 		}
 	})
-	// own.tables[name] = NewTableMaster(own.db)
-	// if err != nil {
-	// 	return err
-	// }
 	return nil
 }
 func (own *Mysql) Load(item *types.SearchItem, result interface{}) error {

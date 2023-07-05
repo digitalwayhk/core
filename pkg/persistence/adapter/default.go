@@ -127,14 +127,14 @@ func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBCo
 	if db != nil {
 		return db, nil
 	}
-	idb, err := models.GetConfigRemoteDB(name, connecttype, own.IsLog)
+	idb, err := models.GetConfigRemoteDB(name, connecttype, own.IsLog, true)
 	if err != nil {
 		return nil, err
 	}
 	if idb == nil && own.IsCreateTable {
 		err = idb.HasTable(model)
 		if err != nil {
-			midb, err := models.GetConfigRemoteDB(name, types.ManageType, own.IsLog)
+			midb, err := models.GetConfigRemoteDB(name, types.ManageType, own.IsLog, true)
 			if err != nil {
 				err = midb.HasTable(model)
 				return nil, err

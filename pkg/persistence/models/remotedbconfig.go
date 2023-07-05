@@ -26,6 +26,7 @@ type RemoteDbConfig struct {
 	ConnectType  types.DBConnectType `json:"connecttype,int"` //连接类型
 	DataBaseType string              `json:"databasetype"`
 	IsLog        bool                `json:"islog"`
+	AutoTable    bool                `json:"autotable"`
 }
 
 func (own *RemoteDbConfig) GetHash() string {

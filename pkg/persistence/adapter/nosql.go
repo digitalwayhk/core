@@ -111,7 +111,7 @@ func (own *NosqlAdapter) getNosqlDB(model interface{}) (types.IDataBase, error) 
 		return nil, err
 	}
 	name := idbn.GetRemoteDBName()
-	idb, err := models.GetConfigRemoteDB(name, 0, false)
+	idb, err := models.GetConfigRemoteDB(name, 0, false, true)
 	if err != nil {
 		return nil, err
 	}
