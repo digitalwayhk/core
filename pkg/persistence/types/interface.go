@@ -15,6 +15,9 @@ var (
 	ManageType DBConnectType = 2
 )
 
+type IDBSQL interface {
+	SearchSQL() string
+}
 type IDBName interface {
 	GetLocalDBName() string  //获取本地数据库的名称
 	GetRemoteDBName() string //获取远程数据库的名称

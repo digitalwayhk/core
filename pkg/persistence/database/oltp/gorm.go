@@ -101,7 +101,32 @@ func deleteData(db *gorm.DB, data interface{}) error {
 	}
 	return nil
 }
+func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result interface{}) error {
+	sql := dbsql.SearchSQL()
+	if sql == "" {
+		return errors.New("sql is empty")
+	}
+	query, args := item.Where(db)
+	tx := db.Raw(sql).Where(query, args...).Count(&item.Total)
+	if tx.Error != nil {
+		return tx.Error
+	}
+	if item.Total > 0 {
+		tx = db.Raw(sql)
+		if item.Total > int64(item.Size) {
+			tx = db.Scopes(paginate(item.Page, item.Size)).Raw(sql)
+		}
+		tx = tx.Where(query, args...).Order(item.Order()).Find(result)
+		if tx.Error != nil {
+			return tx.Error
+		}
+	}
+	return nil
+}
 func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
+	if dbsql, ok := item.Model.(types.IDBSQL); ok {
+		return sqlload(dbsql, db, item, result)
+	}
 	if ist, ok := item.Model.(types.IScopes); ok {
 		tx := db.Scopes(func(d *gorm.DB) *gorm.DB {
 			sh := ist.ScopesHandler()
