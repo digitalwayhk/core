@@ -194,6 +194,14 @@ func (own *SearchItem) AddSort(s ...*SortItem) *SearchItem {
 	}
 	return own
 }
+func (own *SearchItem) AddSortN(name string, isDesc bool) *SearchItem {
+	s := &SortItem{
+		Column: name,
+		IsDesc: isDesc,
+	}
+	own.AddSort(s)
+	return own
+}
 
 type WhereItem struct {
 	Column   string
