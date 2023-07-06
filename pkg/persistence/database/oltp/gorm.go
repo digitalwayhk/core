@@ -107,7 +107,7 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		return errors.New("sql is empty")
 	}
 	query, args := item.Where(db)
-	tx := db.Raw(sql).Where(query, args...).Count(&item.Total)
+	tx := db.Raw("select count(*) from ("+sql+") a").Where(query, args...).Count(&item.Total)
 	if tx.Error != nil {
 		return tx.Error
 	}
