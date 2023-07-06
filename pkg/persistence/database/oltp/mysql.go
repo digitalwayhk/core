@@ -126,7 +126,7 @@ func (own *Mysql) GetDB() (*gorm.DB, error) {
 }
 
 func (own *Mysql) HasTable(model interface{}) error {
-	if !own.AutoTable {
+	if !own.AutoTable && !utils.IsTest() {
 		return nil
 	}
 	if config.INITSERVER {
