@@ -165,13 +165,13 @@ func (own *SearchItem) AddWhere(w ...*WhereItem) *SearchItem {
 	if own.WhereList == nil {
 		own.WhereList = make([]*WhereItem, 0)
 	}
-	for _, item := range w {
-		for _, v := range own.WhereList {
-			if strings.EqualFold(item.Column, v.Column) {
-				return own
-			}
-		}
-	}
+	// for _, item := range w {
+	// 	for _, v := range own.WhereList {
+	// 		if strings.EqualFold(item.Column, v.Column) {
+	// 			return own
+	// 		}
+	// 	}
+	// }
 	own.WhereList = append(own.WhereList, w...)
 	return own
 }

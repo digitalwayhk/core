@@ -13,9 +13,9 @@ import (
 
 // AddOrder 新增订单
 type AddOrder struct {
-	Price   string `json:"price"`   //价格
-	Amount  string `json:"amount"`  //数量
-	TokenID uint   `json:"tokenid"` //币种ID
+	Price   string `json:"price" desc:"价格"`     //价格
+	Amount  string `json:"amount" desc:"数量"`    //数量
+	TokenID uint   `json:"tokenid" desc:"币种ID"` //币种ID
 }
 
 // 解析Order参数

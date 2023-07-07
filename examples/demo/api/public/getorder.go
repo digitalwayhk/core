@@ -11,8 +11,8 @@ import (
 
 // GetOrder 获取通过AddOrder API接口添加的订单
 type GetOrder struct {
-	Page int `json:"page" api:"获取第几页的数据"`
-	Size int `json:"size" api:"每页显示多少条数据"`
+	Page int `json:"page" desc:"获取第几页的数据"`
+	Size int `json:"size" desc:"每页显示多少条数据"`
 }
 
 // Parse 解析通过http传递的参数

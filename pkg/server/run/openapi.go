@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -106,9 +107,10 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 		utils.ForEach(api, func(name string, value interface{}) {
 			operation.Parameters = append(operation.Parameters, &openapi3.ParameterRef{
 				Value: &openapi3.Parameter{
-					Name:   name,
-					In:     "query",
-					Schema: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: utils.GetTypeName(value)}},
+					Name:        name,
+					In:          "query",
+					Schema:      &openapi3.SchemaRef{Value: &openapi3.Schema{Type: utils.GetTypeName(value)}},
+					Description: getNameTag(api, name),
 				},
 			})
 		})
@@ -163,13 +165,55 @@ func getRequestBody(api interface{}, doc *openapi3.T) *openapi3.RequestBodyRef {
 	//doc.Components.Schemas[utils.GetTypeName(api)] = schema
 	body := openapi3.NewRequestBody()
 
-	//body.WithDescription("request body")
+	body.WithDescription(getTag(api))
 	body.WithJSONSchema(schema.Value)
 	body.WithRequired(true)
 	ref.Value = body
 	return ref
 }
+func getTag(api interface{}) string {
+	desc := ""
+	t := reflect.TypeOf(api)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
 
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("desc")
+		if tag == "" {
+			tag, _ = field.Tag.Lookup("desc")
+		}
+		name := field.Tag.Get("json")
+		if name == "" {
+			name = field.Name
+		}
+		if desc == "" {
+			desc = name + ":" + tag
+		} else {
+			desc = desc + "</br>" + name + ":" + tag
+		}
+	}
+	return desc
+}
+func getNameTag(api interface{}, name string) string {
+	t := reflect.TypeOf(api)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if field, ok := t.FieldByName(name); ok {
+		tag := field.Tag.Get("desc")
+		if tag == "" {
+			tag, _ = field.Tag.Lookup("desc")
+		}
+		name := field.Tag.Get("json")
+		if name == "" {
+			name = field.Name
+		}
+		return name + ":" + tag
+	}
+	return ""
+}
 func getResponse(data interface{}, req types.IRequest, doc *openapi3.T) map[int]*openapi3.Response {
 	item := make(map[int]*openapi3.Response)
 	res := req.NewResponse(data, nil)
