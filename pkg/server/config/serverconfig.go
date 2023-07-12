@@ -72,7 +72,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	ip := utils.GetLocalIP()
 	con.Log.ServiceName = servicename + "-" + ip
 	con.Log.KeepDays = 10
-	con.Log.Mode = "file"
+	//con.Log.Mode = "file"
 	//con.Log.Path = "logs/" + servicename
 	con.RunIp = ip
 	con.Auth.AccessSecret = uuid.Must(uuid.NewV4()).String()
