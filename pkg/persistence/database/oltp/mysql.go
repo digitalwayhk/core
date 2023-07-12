@@ -176,7 +176,11 @@ func (own *Mysql) HasTable(model interface{}) error {
 	}
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
 		if kind == utils.Array {
-			obj := reflect.New(field.Type.Elem().Elem()).Interface()
+			objtype := field.Type.Elem().Elem()
+			if objtype == parent.Type || objtype == parent.Type.Elem() {
+				return
+			}
+			obj := reflect.New(objtype).Interface()
 			err = own.HasTable(obj)
 			if err != nil {
 				fmt.Println(err)
