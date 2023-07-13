@@ -3,10 +3,12 @@ package view
 import (
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type ViewModel struct {
@@ -206,6 +208,26 @@ func (own *SearchItem) ToSearchItem() *types.SearchItem {
 			field := own.View.ViewField(w.Column)
 			if field != nil {
 				if field.Type != utils.GetTypeName(w.Value) {
+					if field.Type == "datetime" {
+						layout := ""
+						if field.DataTimeType.IsDate {
+							layout = "2006-01-02"
+						}
+						if field.DataTimeType.IsTime {
+							if layout == "" {
+								layout = " 15:04:05"
+							} else {
+								layout += " 15:04:05"
+							}
+
+						}
+						val, err := time.Parse(layout, strings.Trim(reflect.ValueOf(w.Value).String(), " "))
+						if err != nil {
+							logx.Error(err)
+						}
+						w.Value = val
+						continue
+					}
 					w.Value, _ = utils.AnyToTypeData(w.Value, field.FieldType)
 				}
 			}
