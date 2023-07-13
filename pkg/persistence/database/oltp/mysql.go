@@ -3,7 +3,6 @@ package oltp
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
@@ -129,6 +128,11 @@ func (own *Mysql) HasTable(model interface{}) error {
 	if !own.AutoTable && !utils.IsTest() {
 		return nil
 	}
+	if vm, ok := model.(types.IViewModel); ok {
+		if vm.IsView() {
+			return nil
+		}
+	}
 	if config.INITSERVER {
 		return nil
 	}
@@ -174,19 +178,15 @@ func (own *Mysql) HasTable(model interface{}) error {
 	if err != nil {
 		return err
 	}
-	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
-		if kind == utils.Array {
-			objtype := field.Type.Elem().Elem()
-			if objtype == parent.Type || objtype == parent.Type.Elem() {
-				return
-			}
-			obj := reflect.New(objtype).Interface()
-			err = own.HasTable(obj)
-			if err != nil {
-				fmt.Println(err)
-			}
-		}
-	})
+	// utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
+	// 	if kind == utils.Array {
+	// 		obj := reflect.New(field.Type.Elem().Elem()).Interface()
+	// 		err = own.HasTable(obj)
+	// 		if err != nil {
+	// 			fmt.Println(err)
+	// 		}
+	// 	}
+	// })
 	return nil
 }
 func (own *Mysql) Load(item *types.SearchItem, result interface{}) error {

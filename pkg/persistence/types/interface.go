@@ -114,3 +114,6 @@ type IOrderModel interface {
 	UpdateValid(old interface{}) error
 	GetHash() string
 }
+type IViewModel interface {
+	IsView() bool
+}
