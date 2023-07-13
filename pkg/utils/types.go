@@ -187,13 +187,13 @@ func deepFor(stype reflect.Type, parent reflect.StructField, forfunc func(field,
 					forfunc(field, parent, ftype)
 				} else {
 					if IsTypeKind(field.Type, Array) {
-						if field.Type.Elem() != stype {
-							deepFor(field.Type.Elem(), field, forfunc)
-						}
+						//if field.Type.Elem() != stype {
+						deepFor(field.Type.Elem(), field, forfunc)
+						//}
 					} else {
-						if field.Type.Elem() != stype {
-							deepFor(field.Type, field, forfunc)
-						}
+						//if field.Type.Elem() != stype {
+						deepFor(field.Type, field, forfunc)
+						//}
 					}
 				}
 			}
