@@ -37,6 +37,7 @@ func (own *BaseModel) NewModel() {
 func (own *BaseModel) GetHash() string {
 	return utils.HashCodes(own.Code)
 }
+
 func (own *BaseModel) AddValid() error {
 	if own.ID == 0 {
 		return errors.New("id不能为空")
@@ -60,4 +61,27 @@ func (own *BaseModel) RemoveValid() error {
 }
 func (own *BaseModel) IsBaseModel() bool {
 	return true
+}
+func (own *BaseModel) SetCode(code string) {
+	own.Code = code
+}
+func (own *BaseModel) GetCode() string {
+	return own.Code
+}
+func (own *BaseModel) Equals(o interface{}) bool {
+	if own.Model != nil && own.Model.ID != 0 {
+		return own.Model.Equals(o)
+	}
+	if ao, ok := o.(types.IBaseModel); ok {
+		if own.Code != "" && ao.GetCode() != "" {
+			return own.Code == ao.GetCode()
+		}
+	}
+	return false
+}
+func (own *BaseModel) GetID() uint {
+	if own.Model == nil {
+		own.Model = NewModel()
+	}
+	return own.Model.ID
 }

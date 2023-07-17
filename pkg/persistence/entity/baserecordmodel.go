@@ -37,3 +37,15 @@ func (own *BaseRecordModel) RemoveValid() error {
 func (own *BaseRecordModel) GetHash() string {
 	return utils.HashCodes(own.TraceID)
 }
+
+func (own *BaseRecordModel) Equals(o interface{}) bool {
+	if own.Model != nil && own.Model.ID != 0 {
+		return own.Model.Equals(o)
+	}
+	if ao, ok := o.(types.IRecordModel); ok {
+		if own.Hashcode != "" && ao.GetHash() != "" {
+			return own.Hashcode == ao.GetHash()
+		}
+	}
+	return false
+}

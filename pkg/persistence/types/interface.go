@@ -73,8 +73,7 @@ type IModelSearchHook interface {
 type IModel interface {
 	Equals(o interface{}) bool
 	GetID() uint
-	// GetField(field string) interface{}
-	// SetField(field string, value interface{}) error
+	SetID(id uint)
 }
 type IRowCode interface {
 	GetHash() string
@@ -101,6 +100,8 @@ type ICache interface {
 type IBaseModel interface {
 	GetHash() string
 	IsBaseModel() bool
+	SetCode(code string)
+	GetCode() string
 }
 type IRecordModel interface {
 	AddValid() error

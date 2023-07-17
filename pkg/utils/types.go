@@ -105,6 +105,14 @@ func IsPtr(instance interface{}) bool {
 func IsTypeKind(typ reflect.Type, kind TypeKind) bool {
 	return GetTypeKind(typ) == kind
 }
+func HasProperty(target interface{}, name string) bool {
+	stype := reflect.TypeOf(target)
+	if stype.Kind() == reflect.Ptr { // 如果是指针类型，则获取指针指向的类型
+		stype = stype.Elem()
+	}
+	_, ok := stype.FieldByName(name)
+	return ok
+}
 func GetPropertyType(target interface{}, name string) *reflect.StructField {
 	stype := reflect.TypeOf(target)
 	if stype.Kind() == reflect.Ptr { // 如果是指针类型，则获取指针指向的类型

@@ -44,6 +44,9 @@ func (own *Model) Equals(o interface{}) bool {
 func (own *Model) GetID() uint {
 	return own.ID
 }
+func (own *Model) SetID(id uint) {
+	own.ID = id
+}
 func (own *Model) GetModelState() int {
 	return own.ModelState
 }
