@@ -312,9 +312,18 @@ func (own *ModelList[T]) SearchCode(code string, fn ...func(item *types.SearchIt
 
 // Contains 是否包含该数据，如果包含，返回true，并返回ID
 func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
+	id := getId(item)
+	if id > 0 {
+		obj, _ := own.SearchId(id)
+		if obj != nil {
+			return true, id
+		} else {
+			return false, 0
+		}
+	}
 	hash := getHash(item)
-	own.SearchWhere("Hashcode", hash)
-	if len(own.searchList) > 0 {
+	objs, _ := own.SearchWhere("Hashcode", hash)
+	if len(objs) > 0 {
 		return true, getId(own.searchList[0])
 	}
 	return false, 0
