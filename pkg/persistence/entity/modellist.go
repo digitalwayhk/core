@@ -309,6 +309,16 @@ func (own *ModelList[T]) SearchCode(code string, fn ...func(item *types.SearchIt
 	}
 	return nil, nil
 }
+func (own *ModelList[T]) SearchHash(hash string, fn ...func(item *types.SearchItem)) (*T, error) {
+	list, err := own.SearchWhere("Hashcode", hash, fn...)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) > 0 {
+		return list[0], nil
+	}
+	return nil, nil
+}
 
 // Contains 是否包含该数据，如果包含，返回true，并返回ID
 func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
