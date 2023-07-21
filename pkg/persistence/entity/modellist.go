@@ -453,7 +453,7 @@ func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) e
 func (own *ModelList[T]) load(item *types.SearchItem) error {
 	defer func() {
 		if err := recover(); err != nil {
-			msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法  error:" + fmt.Sprint(err))
+			msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法 或 error:" + fmt.Sprint(err) + "/r/n 查询信息:" + utils.PrintObj(item))
 			logx.Error(msg)
 		}
 	}()
