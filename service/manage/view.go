@@ -373,7 +373,7 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 		ForeignKey: foreignkey,
 		References: gormfield(REFERENCES, field),
 	}
-	vm.ViewModel = *getviewModel(obj, mv)
+	vm.ViewModel = *getviewModel(obj, mv, field.Name)
 	for _, f := range vm.ViewModel.Fields {
 		if f.IsFieldOrTitle(foreignkey) {
 			f.Visible = false
@@ -397,10 +397,10 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 	mv.ViewChildModel(vm)
 	return vm
 }
-func getviewModel(instance interface{}, mv IManageView) *view.ViewModel {
+func getviewModel(instance interface{}, mv IManageView, name string) *view.ViewModel {
 	vm := &view.ViewModel{}
 	vm.Name = utils.GetTypeName(instance)
-	vm.Title = vm.Name
+	vm.Title = name
 	vm.Commands = make([]*view.CommandModel, 0)
 	vm.Fields = modelToFiled(instance, mv)
 	return vm
