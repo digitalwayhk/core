@@ -54,7 +54,7 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 		}
 	}
 	if gml, ok := own.instance.(IGetModelListWhere); ok {
-		list := gml.GetList(own.SearchItem)
+		list := gml.GetItemList(own.SearchItem)
 		if list != nil {
 			own.list = list.(*entity.ModelList[T])
 		}
