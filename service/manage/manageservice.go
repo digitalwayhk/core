@@ -37,6 +37,9 @@ type IManageSearch interface {
 type IGetModelList interface {
 	GetList() interface{}
 }
+type IGetModelListWhere interface {
+	GetList(item *view.SearchItem) interface{}
+}
 type IRequestSet interface {
 	SetReq(req st.IRequest)
 }

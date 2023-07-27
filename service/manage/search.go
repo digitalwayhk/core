@@ -53,6 +53,12 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 			own.list = list.(*entity.ModelList[T])
 		}
 	}
+	if gml, ok := own.instance.(IGetModelListWhere); ok {
+		list := gml.GetList(own.SearchItem)
+		if list != nil {
+			own.list = list.(*entity.ModelList[T])
+		}
+	}
 	if own.SearchItem.Parent != nil {
 		item := own.list.NewItem()
 		values, err := json.Marshal(own.SearchItem.Parent)
