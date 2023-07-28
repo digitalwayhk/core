@@ -36,3 +36,7 @@ func Test_Order(t *testing.T) {
 	}
 	t.Log(utils.PrintObj(row))
 }
+func Test_Order_tttt(t *testing.T) {
+	list := entity.NewModelList[models.OrderModel](nil)
+	list.SearchAll(1, 1)
+}

@@ -13,6 +13,8 @@ type OrderModel struct {
 	Price         decimal.Decimal //价格
 	Amount        decimal.Decimal //数量
 	TokenID       uint            //币种ID
+	ParnetID      uint            //父订单ID
+	ChildDetail   []*OrderModel   `gorm:"foreignkey:ParnetID"` //子订单
 }
 
 // NewOrderModel 新建订单模型

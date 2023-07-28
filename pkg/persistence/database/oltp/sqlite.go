@@ -144,9 +144,27 @@ func (own *Sqlite) HasTable(model interface{}) error {
 	// if err != nil {
 	// 	return err
 	// }
+	// utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
+	// 	if kind == utils.Array {
+	// 		obj := reflect.New(field.Type.Elem().Elem()).Interface()
+	// 		err = own.HasTable(obj)
+	// 		if err != nil {
+	// 			fmt.Println(err)
+	// 		}
+	// 	}
+	// })
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
 		if kind == utils.Array {
-			obj := reflect.New(field.Type.Elem().Elem()).Interface()
+			t := field.Type.Elem()
+			if t.Kind() == reflect.Ptr {
+				t = t.Elem()
+			}
+			name1 := t.Name()
+			pname := utils.GetTypeName(model)
+			if name1 == pname {
+				return
+			}
+			obj := reflect.New(t).Interface()
 			err = own.HasTable(obj)
 			if err != nil {
 				fmt.Println(err)
