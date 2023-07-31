@@ -81,6 +81,7 @@ func (own *SearchItem) Where(db *gorm.DB) (string, []interface{}) {
 	}
 	return w, values
 }
+
 func getw(w, col string, item *WhereItem, wh bool) string {
 	if w == "" {
 		w = item.Prefix + col + item.Symbol
@@ -107,9 +108,7 @@ func (own *SearchItem) Order() string {
 		}
 	}
 	if order == "" {
-		if _, ok := own.Model.(IBaseModel); ok {
-			order = "id desc"
-		}
+		order = "id desc"
 	}
 	return order
 }
@@ -175,6 +174,7 @@ func (own *SearchItem) AddWhere(w ...*WhereItem) *SearchItem {
 	own.WhereList = append(own.WhereList, w...)
 	return own
 }
+
 func (own *SearchItem) AddSort(s ...*SortItem) *SearchItem {
 	if own.SortList == nil {
 		own.SortList = make([]*SortItem, 0)

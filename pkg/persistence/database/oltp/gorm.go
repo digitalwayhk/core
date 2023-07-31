@@ -107,16 +107,35 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		return errors.New("sql is empty")
 	}
 	query, args := item.Where(db)
-	tx := db.Raw("select count(*) from ("+sql+") a").Where(query, args...).Count(&item.Total)
+	name := ""
+	swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		tx = tx.Model(item.Model)
+		tx = tx.Where(query, args...)
+		tx = tx.Find(result)
+		name = tx.Statement.Schema.Table
+		return tx
+	})
+	if name != "" {
+		name = "`" + name + "`"
+	}
+	sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
+	tx := db.Raw("select count(*) from (" + sqlwhere + ") a").Count(&item.Total)
 	if tx.Error != nil {
 		return tx.Error
 	}
 	if item.Total > 0 {
-		tx = db.Raw(sql)
-		if item.Total > int64(item.Size) {
-			tx = db.Scopes(paginate(item.Page, item.Size)).Raw(sql)
-		}
-		tx = tx.Where(query, args...).Order(item.Order()).Find(result)
+		swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+			tx = tx.Model(item.Model)
+			tx = tx.Where(query, args...)
+			tx = tx.Order(item.Order())
+			if item.Total > int64(item.Size) {
+				tx = tx.Scopes(paginate(item.Page, item.Size))
+			}
+			tx = tx.Find(result)
+			return tx
+		})
+		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
+		tx = db.Raw(sqlwhere).Find(result)
 		if tx.Error != nil {
 			return tx.Error
 		}
