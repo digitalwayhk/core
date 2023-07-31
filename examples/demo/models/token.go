@@ -1,12 +1,17 @@
 package models
 
-import "github.com/digitalwayhk/core/pkg/persistence/entity"
+import (
+	"time"
+
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
+)
 
 // TokenModel 币种模型
 type TokenModel struct {
 	*entity.Model
-	Name   string
-	Orders []*OrderModel `gorm:"foreignkey:TokenID"`
+	Name    string
+	Orders  []*OrderModel `gorm:"foreignkey:TokenID"`
+	StartAt *time.Time
 }
 
 // NewTokenModel 新建币种模型

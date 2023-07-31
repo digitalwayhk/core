@@ -173,8 +173,10 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 			return
 		}
 		typeName := field.Type.Name()
-
-		if kind == utils.Base || (kind == utils.Struct && (typeName == "Time" || typeName == "Decimal")) {
+		if field.Type.Kind() == reflect.Ptr {
+			typeName = field.Type.Elem().Name()
+		}
+		if kind == utils.Base || ((kind == utils.Struct || kind == utils.Ptr) && (typeName == "Time" || typeName == "Decimal")) {
 			vfm := getField(field, typeName)
 			fields = append(fields, vfm)
 		}
