@@ -129,11 +129,11 @@ func (own *RouterInfo) limit(ip string, userid uint) error {
 	return nil
 }
 func (own *RouterInfo) Exec(req IRequest) IResponse {
-	uid, _ := req.GetUser()
-	err := own.limit(req.GetClientIP(), uid)
-	if err != nil {
-		return req.NewResponse(nil, err)
-	}
+	//uid, _ := req.GetUser()
+	// err := own.limit(req.GetClientIP(), uid)
+	// if err != nil {
+	// 	return req.NewResponse(nil, err)
+	// }
 	api := own.New()
 	defer func() {
 		if config.INITSERVER {
@@ -144,7 +144,7 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
 	}()
-	err = api.Parse(req)
+	err := api.Parse(req)
 	if err != nil {
 		msg := fmt.Sprintf("参数解析异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "parse", msg, 600)
