@@ -16,20 +16,21 @@ import (
 
 type ServerConfig struct {
 	rest.RestConf
-	DataCenterID     uint
-	MachineID        uint
-	Auth             AuthSecret
-	ManageAuth       AuthSecret
-	ServerManageAuth AuthSecret
-	RunIp            string
-	ParentServerIP   string
-	SocketPort       int
-	AttachServices   map[string]*AttachAddress
-	Debug            bool
-	IsWhiteList      bool
-	WhiteList        []string
-	CustomerDataList []*CustomerData
-	IsLoaclVisit     bool
+	DataCenterID          uint
+	MachineID             uint
+	Auth                  AuthSecret
+	ManageAuth            AuthSecret
+	ServerManageAuth      AuthSecret
+	RunIp                 string
+	ParentServerIP        string
+	SocketPort            int
+	AttachServices        map[string]*AttachAddress
+	Debug                 bool
+	IsWhiteList           bool
+	WhiteList             []string
+	CustomerDataList      []*CustomerData
+	IsLoaclVisit          bool
+	RemoteAccessManageAPI bool
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {

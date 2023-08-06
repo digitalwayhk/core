@@ -27,6 +27,9 @@ type ServiceContext struct {
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
+	if own != nil && own.serverOption != nil && own.Config != nil {
+		own.serverOption.RemoteAccessManageAPI = own.Config.RemoteAccessManageAPI
+	}
 	return own.serverOption
 }
 func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
