@@ -73,11 +73,8 @@ func (own *Sqlite) GetModelDB(model interface{}) (interface{}, error) {
 }
 
 var syncMap sync.Map
-var _lock sync.Mutex
 
 func (own *Sqlite) GetDB() (*gorm.DB, error) {
-	_lock.Lock()
-	defer _lock.Unlock()
 	key := own.Name
 	if key == "" {
 		key = "models"

@@ -51,15 +51,6 @@ func createInBatches(db *gorm.DB, data interface{}) error {
 	return nil
 }
 func createData(db *gorm.DB, data interface{}) error {
-	// t, v := utils.GetTypeAndValue(data)
-	// if t.Kind() == reflect.Array || t.Kind() == reflect.Slice {
-	// 	size := v.Len()
-	// 	var err error
-	// 	if size > 0 {
-	// 		err = createInBatches(db, data)
-	// 	}
-	// 	return err
-	// }
 	if ist, ok := data.(types.IScopes); ok {
 		tx := db.Scopes(ist.ScopesHandler()).Create(data)
 		if tx.Error != nil {
