@@ -53,7 +53,6 @@ func Test_AddOrders(t *testing.T) {
 func Benchmark_AddOrders(b *testing.B) {
 	list := entity.NewModelList[models.OrderModel](nil)
 	for i := 0; i < b.N; i++ {
-
 		row := list.NewItem()
 		row.ID = uint(b.N + 1*i)
 		err := list.Add(row)

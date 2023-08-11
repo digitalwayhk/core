@@ -73,8 +73,11 @@ func (own *Sqlite) GetModelDB(model interface{}) (interface{}, error) {
 }
 
 var syncMap sync.Map
+var _lock sync.Mutex
 
 func (own *Sqlite) GetDB() (*gorm.DB, error) {
+	_lock.Lock()
+	defer _lock.Unlock()
 	key := own.Name
 	if key == "" {
 		key = "models"
@@ -110,7 +113,9 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		logx.Error(errors.New("数据库连接失败,path:"+dns), err)
 	}
 	own.db = db
-	syncMap.Store(dns, db)
+	if !db.DryRun {
+		syncMap.Store(dns, db)
+	}
 	return db, err
 }
 
