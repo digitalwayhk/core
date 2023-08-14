@@ -1,6 +1,12 @@
 package types
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/digitalwayhk/core/pkg/utils"
+)
 
 type ObserveState int
 
@@ -60,6 +66,28 @@ type NotifyArgs struct {
 	State             ObserveState //触发时机，0：接收到请求时，1：请求完成时，2：异常发生时
 }
 
+func (own *NotifyArgs) GetInstance(instance interface{}) error {
+	if utils.IsPtr(instance) {
+		items, err := json.Marshal(own.Instance)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(items, instance)
+		return err
+	}
+	return errors.New("instance must be ptr")
+}
+func (own *NotifyArgs) GetResponse(resp IResponse) error {
+	if utils.IsPtr(resp) {
+		items, err := json.Marshal(own.Response)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(items, resp)
+		return err
+	}
+	return errors.New("response must be ptr")
+}
 func (own *ObserveArgs) Notify(args *NotifyArgs) error {
 	if own.CallBack != nil {
 		return own.CallBack(args)

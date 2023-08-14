@@ -37,7 +37,7 @@ func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
 }
 
 const DEFAULTPORT = 8080
-const DEFAULTSOCKETPORT = 7070
+const DEFAULTSOCKETPORT = 0
 
 var scontext map[string]*ServiceContext
 var TestResult map[string]interface{}
