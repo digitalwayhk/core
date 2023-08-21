@@ -30,6 +30,7 @@ func (own *OrderModel) NewModel() {
 		own.Model = entity.NewModel()
 	}
 }
-func (own *OrderModel) SearchSQL() string {
-	return "select * from OrderModel"
-}
+
+// func (own *OrderModel) SearchSQL() string {
+// 	return "select * from OrderModel"
+// }

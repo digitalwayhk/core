@@ -65,3 +65,17 @@ func Benchmark_AddOrders(b *testing.B) {
 		}
 	}
 }
+
+func Test_searchOrders2(t *testing.T) {
+	list := entity.NewModelList[models.OrderModel](nil)
+	rows, err := list.SearchWhere("ParnetID", uint(1), func(item *types.SearchItem) {
+		item.AddWhere(&types.WhereItem{
+			Column: "Amount",
+			Symbol: "isnotnull",
+		})
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(rows)
+}

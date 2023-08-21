@@ -49,7 +49,7 @@ func (own *SearchItem) getcol(col string) string {
 func (own *SearchItem) Where(db *gorm.DB) (string, []interface{}) {
 	w := ""
 	own.db = db
-	values := make([]interface{}, len(own.WhereList))
+	values := make([]interface{}, 0)
 	for i, item := range own.WhereList {
 		col := own.getcol(item.Column)
 		if item.Symbol == "" {
@@ -72,11 +72,11 @@ func (own *SearchItem) Where(db *gorm.DB) (string, []interface{}) {
 				vs := fmt.Sprintf(v, item.Value.(string))
 				item.Value = strings.Replace(vs, "$", "%", -1)
 				w = getw(w, col, item, true)
-				values[i] = item.Value
+				values = append(values, item.Value)
 			}
 		} else {
 			w = getw(w, col, item, true)
-			values[i] = item.Value
+			values = append(values, item.Value)
 		}
 	}
 	return w, values
