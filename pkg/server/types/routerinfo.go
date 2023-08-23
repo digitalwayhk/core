@@ -213,7 +213,7 @@ func (own *RouterInfo) requestNotify(api IRouter, traceid string) {
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {
-			logx.Error(err)
+			logx.Error(err, item)
 		}
 	}
 }
@@ -225,7 +225,7 @@ func (own *RouterInfo) responseNotify(api IRouter, traceid string, resp IRespons
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {
-			logx.Error(err)
+			logx.Error(err, item)
 		}
 	}
 }
@@ -237,7 +237,7 @@ func (own *RouterInfo) errorNotify(api IRouter, traceid string, resp IResponse) 
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {
-			logx.Error(err)
+			logx.Error(err, item)
 		}
 	}
 }
