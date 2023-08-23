@@ -11,6 +11,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -140,6 +141,7 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 
 }
 func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
+	logx.Info("socket Send :" + utils.PrintObj(payload))
 	//defer own.Unlock()
 	values, err := json.Marshal(payload)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
@@ -138,11 +139,13 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	if payload.TargetAddress == "" {
 		return nil, errors.New("TargetAddress is nil")
 	}
+	logx.Info("http Send :" + utils.PrintObj(payload))
 	values, err := json.Marshal(payload.Instance)
 	if err != nil {
 		return nil, err
 	}
 	path := payload.TargetAddress + ":" + fmt.Sprintf("%d", payload.TargetPort) + payload.TargetPath
+	logx.Info(path)
 	values, err = PostJson(path, values)
 	if err != nil {
 		return nil, err

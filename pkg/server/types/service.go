@@ -17,7 +17,6 @@ type Service struct {
 }
 
 func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
-
 	if payload.TargetService == "" {
 		return nil, errors.New("target service is empty")
 	}
@@ -25,7 +24,8 @@ func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
 		if as, ok := own.AttachService[payload.TargetService]; ok {
 			payload.TargetAddress = as.Address
 			payload.TargetPort = as.Port
-			payload.TargetSocketPort = as.SocketPort
+			payload.TargetSocketPort = 0
+			//as.SocketPort
 		}
 	}
 	if payload.TargetAddress == "" {
