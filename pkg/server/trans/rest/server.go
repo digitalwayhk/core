@@ -25,7 +25,7 @@ type Server struct {
 	IsCors      bool
 }
 
-func NewServer(context *router.ServiceContext, isWebSocket, isCors bool) *Server {
+func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) *Server {
 	ser := &Server{
 		context: context,
 	}

@@ -219,7 +219,7 @@ func (own *WebServer) serverArgs() {
 func (own *WebServer) newWebServer(ctx *router.ServiceContext) {
 	var rs *rest.Server
 	if opt, ok := own.serverOption[ctx.Service.Name]; ok {
-		rs = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors)
+		rs = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors, opt.OriginCors...)
 	} else {
 		rs = rest.NewServer(ctx, false, false)
 	}
