@@ -49,6 +49,11 @@ type RouterInfo struct {
 }
 
 func (own *RouterInfo) getNew() IRouter {
+	defer func() {
+		if err := recover(); err != nil {
+			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+		}
+	}()
 	own.pool = sync.Pool{
 		New: func() interface{} {
 			return utils.NewInterface(own.instance)

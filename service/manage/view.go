@@ -194,9 +194,9 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 			item.Precision = 4
 			item.Min = 0
 		}
-		if item.Type == "bool" {
-			item.Index = count + index
-		}
+		// if item.Type == "bool" {
+		// 	item.Index = count + index
+		// }
 		if item.IsFieldOrTitle("CreatedAt") || item.IsFieldOrTitle("UpdatedAt") {
 			item.Index = count + index + count
 		}
@@ -227,6 +227,7 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 			mv.ViewFieldModel(model, item)
 		}
 	}
+
 	return fields
 }
 func getField(field reflect.StructField, typeName string) *view.FieldModel {
