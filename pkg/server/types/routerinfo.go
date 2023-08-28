@@ -46,6 +46,7 @@ type RouterInfo struct {
 	webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
 	pool sync.Pool
+	once sync.Once
 }
 
 func (own *RouterInfo) getNew() IRouter {
@@ -54,11 +55,13 @@ func (own *RouterInfo) getNew() IRouter {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
 	}()
-	own.pool = sync.Pool{
-		New: func() interface{} {
-			return utils.NewInterface(own.instance)
-		},
-	}
+	own.once.Do(func() {
+		own.pool = sync.Pool{
+			New: func() interface{} {
+				return utils.NewInterface(own.instance)
+			},
+		}
+	})
 	return own.pool.Get().(IRouter)
 }
 func (own *RouterInfo) New() IRouter {
