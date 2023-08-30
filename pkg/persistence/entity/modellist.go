@@ -352,6 +352,9 @@ func (own *ModelList[T]) SearchWhere(name string, value interface{}, fn ...func(
 	for _, f := range fn {
 		f(item)
 	}
+	if item.Size <= 10 {
+		item.Size = 500
+	}
 	var err error
 	if item.IsPreload {
 		err = own.PreLoadList(item)
@@ -360,6 +363,9 @@ func (own *ModelList[T]) SearchWhere(name string, value interface{}, fn ...func(
 	}
 	if err != nil {
 		return nil, err
+	}
+	if item.Total > 0 && item.Total > 500 {
+		logx.Error(fmt.Sprintf("%s类型的SearchWhere条件查询数据超过500条,可能会影响性能,建议使用SearchAll方法指定分页查询:%s", utils.GetTypeName(own.hideEntity), utils.PrintObj(item)))
 	}
 	return own.searchList, nil
 

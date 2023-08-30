@@ -130,42 +130,14 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		}
 		own.db = db
 	}
-	// name := utils.GetTypeName(model)
-	// if itb, ok := model.(types.IScopesTableName); ok {
-	// 	name = itb.TableName()
-	// }
-	// if _, ok := own.tables[name]; ok {
-	// 	return nil
-	// }
-	// tnacopes := model.(types.IScopesTableName)
-	// if tnacopes == nil {
-	// 	own.db.Scopes(func(d *gorm.DB) *gorm.DB {
-	// 		return d.Table(tnacopes.TableName())
-	// 	})
-	// } else {
-	// 	scopes := model.(types.IScopes)
-	// 	if scopes == nil {
-	// 		own.db.Scopes(scopes.ScopesHandler())
-	// 	}
-	// }
-	// name:=own.db.Statement.Table
+	if _, ok := model.(types.IDBSQL); ok {
+		return nil
+	}
 	err := own.db.AutoMigrate(model)
 	if err != nil {
 		return err
 	}
-	// own.tables[name] = NewTableMaster(own.db)
-	// if err != nil {
-	// 	return err
-	// }
-	// utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
-	// 	if kind == utils.Array {
-	// 		obj := reflect.New(field.Type.Elem().Elem()).Interface()
-	// 		err = own.HasTable(obj)
-	// 		if err != nil {
-	// 			fmt.Println(err)
-	// 		}
-	// 	}
-	// })
+
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
 		if kind == utils.Array {
 			t := field.Type.Elem()
