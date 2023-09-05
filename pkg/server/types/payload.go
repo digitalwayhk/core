@@ -28,6 +28,7 @@ type PayLoad struct {
 	Auth             bool
 	Instance         interface{}
 	Data             []byte
+	HttpMethod       string
 }
 
 func (own *PayLoad) InstanceRouter(api IRouter) error {

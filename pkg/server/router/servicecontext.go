@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -331,6 +332,23 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 		return res.GetError()
 	}
 	return nil
+}
+func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse, error) {
+	info := api.RouterInfo()
+	pl := &types.PayLoad{
+		TraceID:       strconv.Itoa(int(own.NewID())),
+		SourceService: own.Service.Name,
+		SourcePath:    "",
+		TargetService: info.ServiceName,
+		TargetPath:    info.Path,
+		UserId:        0,
+		UserName:      "",
+		ClientIP:      utils.GetLocalIP(),
+		Auth:          false,
+		Instance:      api,
+		HttpMethod:    info.Method,
+	}
+	return own.CallService(pl)
 }
 func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	res := &Response{}

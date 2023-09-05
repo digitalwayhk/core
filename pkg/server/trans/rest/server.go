@@ -146,9 +146,27 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	}
 	path := payload.TargetAddress + ":" + fmt.Sprintf("%d", payload.TargetPort) + payload.TargetPath
 	logx.Info(path)
-	values, err = PostJson(path, values)
-	if err != nil {
-		return nil, err
+	if payload.HttpMethod == http.MethodGet {
+		args := ""
+		utils.ForEach(payload.Instance, func(key string, value interface{}) {
+			v := fmt.Sprintf("%v", value)
+			if v != "" {
+				args += "&" + key + "=" + v
+			}
+		})
+		if args != "" {
+			path = path + "?" + args[1:]
+		}
+		values, err = HttpGet(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if payload.HttpMethod == http.MethodPost || payload.HttpMethod == "" {
+		values, err = PostJson(path, values)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return values, nil
 }

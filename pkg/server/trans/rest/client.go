@@ -2,7 +2,7 @@ package rest
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,7 +17,7 @@ func Post(path string, data url.Values) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	return body, err
 }
 
@@ -30,5 +30,16 @@ func PostJson(path string, data []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return ioutil.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
+}
+func HttpGet(path string) ([]byte, error) {
+	if !strings.HasPrefix(path, "http://") {
+		path = "http://" + strings.TrimSpace(path)
+	}
+	resp, err := http.Get(path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }

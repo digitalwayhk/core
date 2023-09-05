@@ -260,6 +260,7 @@ func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, rout
 		Instance:      router,
 	}
 }
+
 func ToPayLoad(req *Request, router types.IRouter) *types.PayLoad {
 	uid, uname := req.GetUser()
 	info := router.RouterInfo()
@@ -274,6 +275,7 @@ func ToPayLoad(req *Request, router types.IRouter) *types.PayLoad {
 		ClientIP:      req.GetClientIP(),
 		Auth:          req.Authorized(),
 		Instance:      router,
+		HttpMethod:    req.http.Method,
 	}
 }
 
