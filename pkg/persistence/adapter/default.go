@@ -240,12 +240,14 @@ func (own *DefaultAdapter) Commit() error {
 				if err != nil {
 					return err
 				}
+				continue
 			}
 			if index > 0 {
 				own.asyncDoRemoteAction()
 				own.remoteActionChan <- func() error {
 					return db.Commit()
 				}
+				continue
 			}
 		}
 	}
@@ -315,7 +317,7 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 
 func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataBase) {
 	typeName := utils.GetTypeName(data)
-	//已经初始化
+	//已经同步
 	if isSync, ok := own.isSyncMap.Load(typeName); ok {
 		if isSync.(bool) {
 			return
