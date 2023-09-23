@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
+	"reflect"
 	"sync"
 )
 
@@ -33,13 +34,14 @@ var defaultAda *DefaultAdapter
 func NewDefaultAdapter() *DefaultAdapter {
 	if defaultAda == nil {
 		defaultAda = &DefaultAdapter{
-			isTansaction: false,
-			localdbs:     make(map[string]types.IDataBase),
-			readDBs:      make(map[string]types.IDataBase),
-			writeDB:      make(map[string]types.IDataBase),
-			manageDB:     make(map[string]types.IDataBase),
-			saveType:     0,
-			IsLog:        false,
+			isTansaction:     false,
+			localdbs:         make(map[string]types.IDataBase),
+			readDBs:          make(map[string]types.IDataBase),
+			writeDB:          make(map[string]types.IDataBase),
+			manageDB:         make(map[string]types.IDataBase),
+			saveType:         0,
+			IsLog:            false,
+			remoteActionChan: make(chan func() error),
 		}
 	}
 	return defaultAda
@@ -277,7 +279,7 @@ func (own *DefaultAdapter) doAction(data interface{}, action func(db types.IData
 	return nil
 }
 
-func (own *DefaultAdapter) SyncRemoteData(data interface{}, db types.IDataBase) {
+func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataBase) {
 	if own.isSync {
 		return
 	}
@@ -289,34 +291,54 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, db types.IDataBase) 
 		return
 	}
 
-	sql := db.GetRunDB().(*gorm.DB)
+	sql := localDb.GetRunDB().(*gorm.DB)
 	var count int64
 	sql.Model(data).Count(&count)
 	if count == 0 {
-		own.sysRemoteDataToLocal(data, sql)
+		own.sysRemoteDataToLocal(data, localDb)
 	}
 
 	own.isSync = true
 }
 
-func (own *DefaultAdapter) sysRemoteDataToLocal(data interface{}, db *gorm.DB) {
+func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types.IDataBase) {
+	rDatabase, _ := own.getRemoteDB(model, 0)
+	modelDb, _ := rDatabase.GetModelDB(model)
 	var maxId int
-	db.Model(data).Select("max(id)").Scan(&maxId)
+	sql := modelDb.(*gorm.DB)
+	sql.Model(model).Select("max(id)").Scan(&maxId)
 	if maxId == 0 {
 		return
 	}
 
 	numIntervals := 100
-	rDatabase, _ := own.getRemoteDB(data, 0)
-	rdb := rDatabase.GetRunDB().(*gorm.DB)
+
 	intervals := calculateIntervals(maxId, numIntervals)
 	c := utils.ConcurrencyTasks[interval]{Params: intervals, Concurrency: 16, Func: func(param interval) (interface{}, error) {
-		var resultList []interface{}
-		db.Model(data).Where("id >= ? and id < ?", param.start, param.end).Find(&resultList)
-		for _, result := range resultList {
-			rdb.Model(data).Save(result)
+		modelType := reflect.TypeOf(model)
+		modellistType := reflect.SliceOf(modelType)
+		resultList := reflect.MakeSlice(modellistType, 0, 0).Interface()
+		searchItem := &types.SearchItem{
+			WhereList: []*types.WhereItem{},
+			Model:     model,
 		}
-		return nil, nil
+		searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
+			Column: "id",
+			Value:  param.start,
+			Symbol: ">=",
+		})
+		searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
+			Column: "id",
+			Value:  param.end,
+			Symbol: "<",
+		})
+		err := rDatabase.Load(searchItem, &resultList)
+		modelistValue := reflect.ValueOf(resultList)
+		for i := 0; i < modelistValue.Len(); i++ {
+			itemValue := modelistValue.Index(i).Interface()
+			err = localDb.Insert(itemValue)
+		}
+		return err, nil
 	}}
 	c.Run()
 }
