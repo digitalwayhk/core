@@ -256,7 +256,7 @@ func (e client) GetEventChan(eventCode string) chan *publish.Event {
 }
 
 func (e client) initEventChanConsumer(eventCode string, eventChan chan *publish.Event) {
-	//缓存存在
+	//已经初始化
 	if init, ok := e.eventConsumerMap.Load(eventCode); ok {
 		if init.(bool) {
 			return
