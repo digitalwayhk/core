@@ -16,7 +16,7 @@ type Subscribe struct {
 	//依赖
 	Dependence []string `json:"dependence"`
 	//最大重试次数，默认0，使用默认重试次数，-1表示不重试
-	MaxRetryTimes int `json:"max_retry_times"`
+	MaxRetryTimes int `json:"max_retry_times"` //TODO  add retry
 }
 
 func NewConfig(name string, subscribe []Subscribe) *Config {
