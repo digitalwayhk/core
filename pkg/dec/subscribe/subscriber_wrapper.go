@@ -12,8 +12,6 @@ import (
 
 var noSubscriberMsg = "no subscriber"
 var processedResult = innerResult(true, "processed")
-var noRetryResult = innerResult(false, "no retry")
-var exceedTimesResult = innerResult(false, "exceed times")
 var blockSubscriberResult = innerResult(false, "block")
 
 var subscribeExecutor = 1
@@ -84,16 +82,6 @@ func (s *SubscriberWrapper) Execute(ctx context.Context, requestWrapper RequestW
 	//首次执行
 	if requestWrapper.retryTimes == 0 {
 		s.wrapperExecute(ctx, requestWrapper, index, config.GetName())
-		return
-	}
-	//不重试
-	if subscribe.MaxRetryTimes < 0 {
-		subscribeResult[index] = *noRetryResult
-		return
-	}
-	//超过最大重试次数
-	if subscribe.MaxRetryTimes > 0 && int(requestWrapper.retryTimes) > subscribe.MaxRetryTimes {
-		subscribeResult[index] = *exceedTimesResult
 		return
 	}
 	//重试执行
