@@ -2,24 +2,30 @@ package adapter
 
 import (
 	"errors"
-
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
+	"gorm.io/gorm"
+	"sync"
 )
 
 type DefaultAdapter struct {
-	isTansaction  bool                       //是否开启事务
-	localdbs      map[string]types.IDataBase //当前操作的数据库集合
-	readDBs       map[string]types.IDataBase //读数据库
-	writeDB       map[string]types.IDataBase //写数据库
-	manageDB      map[string]types.IDataBase //管理数据库
-	saveType      types.SaveType             //保存类型
-	IsCreateTable bool                       //是否创建表,该参数只能远程库有效，当为true时，表不存在,会获取ManageType连接，创建表或者修改表结构增加列
-	currentDB     []types.IDataBase          //当前操作的数据库
-	IsLog         bool                       //是否打印日志
+	isTansaction     bool                       //是否开启事务
+	localdbs         map[string]types.IDataBase //当前操作的数据库集合
+	readDBs          map[string]types.IDataBase //读数据库
+	writeDB          map[string]types.IDataBase //写数据库
+	manageDB         map[string]types.IDataBase //管理数据库
+	saveType         types.SaveType             //保存类型
+	IsCreateTable    bool                       //是否创建表,该参数只能远程库有效，当为true时，表不存在,会获取ManageType连接，创建表或者修改表结构增加列
+	currentDB        []types.IDataBase          //当前操作的数据库
+	IsLog            bool                       //是否打印日志
+	remoteActionChan chan func() error
+	once             sync.Once
+	syncLock         sync.Mutex
+	isSync           bool
 }
 
 var defaultAda *DefaultAdapter
@@ -90,6 +96,7 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	if !config.INITSERVER {
 		err = idatabase.HasTable(model)
 	}
+	own.SyncRemoteData(model, idatabase)
 	return idatabase, err
 }
 func (own *DefaultAdapter) getMapDB(name string, conncettype types.DBConnectType) (types.IDataBase, error) {
@@ -157,32 +164,14 @@ func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBCo
 }
 
 func (own *DefaultAdapter) Load(item *types.SearchItem, result interface{}) error {
-	var err error
-	own.currentDB, err = own.getdb(item.Model)
-	if err != nil {
-		return err
-	}
-	for _, db := range own.currentDB {
-		err = db.Load(item, result)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return own.doAction(item.Model, func(db types.IDataBase) error {
+		return db.Load(item, result)
+	})
 }
 func (own *DefaultAdapter) Raw(sql string, data interface{}) error {
-	var err error
-	own.currentDB, err = own.getdb(data)
-	if err != nil {
-		return err
-	}
-	for _, db := range own.currentDB {
-		err = db.Raw(sql, data)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return own.doAction(data, func(db types.IDataBase) error {
+		return db.Raw(sql, data)
+	})
 }
 func (own *DefaultAdapter) GetModelDB(model interface{}) (interface{}, error) {
 	return own.getdb(model)
@@ -192,46 +181,19 @@ func (own *DefaultAdapter) Transaction() {
 }
 
 func (own *DefaultAdapter) Insert(data interface{}) error {
-	var err error
-	own.currentDB, err = own.getdb(data)
-	if err != nil {
-		return err
-	}
-	for _, db := range own.currentDB {
-		err = db.Insert(data)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return own.doAction(data, func(db types.IDataBase) error {
+		return db.Insert(data)
+	})
 }
 func (own *DefaultAdapter) Update(data interface{}) error {
-	var err error
-	own.currentDB, err = own.getdb(data)
-	if err != nil {
-		return err
-	}
-	for _, db := range own.currentDB {
-		err = db.Update(data)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return own.doAction(data, func(db types.IDataBase) error {
+		return db.Update(data)
+	})
 }
 func (own *DefaultAdapter) Delete(data interface{}) error {
-	var err error
-	own.currentDB, err = own.getdb(data)
-	if err != nil {
-		return err
-	}
-	for _, db := range own.currentDB {
-		err = db.Delete(data)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return own.doAction(data, func(db types.IDataBase) error {
+		return db.Delete(data)
+	})
 }
 func (own *DefaultAdapter) getdb(data interface{}) ([]types.IDataBase, error) {
 	dbs := make([]types.IDataBase, 0)
@@ -266,10 +228,18 @@ func (own *DefaultAdapter) getdb(data interface{}) ([]types.IDataBase, error) {
 func (own *DefaultAdapter) Commit() error {
 	if own.isTansaction {
 		own.isTansaction = false
-		for _, db := range own.currentDB {
-			err := db.Commit()
-			if err != nil {
-				return err
+		for index, db := range own.currentDB {
+			if index == 0 {
+				err := db.Commit()
+				if err != nil {
+					return err
+				}
+			}
+			if index > 0 {
+				own.asyncDoRemoteAction()
+				own.remoteActionChan <- func() error {
+					return db.Commit()
+				}
 			}
 		}
 	}
@@ -282,4 +252,113 @@ func (own *DefaultAdapter) SetSaveType(saveType types.SaveType) {
 
 func (own *DefaultAdapter) GetRunDB() interface{} {
 	return own.currentDB
+}
+
+func (own *DefaultAdapter) doAction(data interface{}, action func(db types.IDataBase) error) error {
+	var err error
+	own.currentDB, err = own.getdb(data)
+	if err != nil {
+		return err
+	}
+	for index, db := range own.currentDB {
+		if index == 0 {
+			err = action(db)
+			if err != nil {
+				return err
+			}
+		}
+		if index > 0 {
+			own.asyncDoRemoteAction()
+			own.remoteActionChan <- func() error {
+				return action(db)
+			}
+		}
+	}
+	return nil
+}
+
+func (own *DefaultAdapter) SyncRemoteData(data interface{}, db types.IDataBase) {
+	if own.isSync {
+		return
+	}
+	own.syncLock.Lock()
+	defer own.syncLock.Unlock()
+
+	//二次确认
+	if own.isSync {
+		return
+	}
+
+	sql := db.GetRunDB().(*gorm.DB)
+	var count int64
+	sql.Model(data).Count(&count)
+	if count == 0 {
+		own.sysRemoteDataToLocal(data, sql)
+	}
+
+	own.isSync = true
+}
+
+func (own *DefaultAdapter) sysRemoteDataToLocal(data interface{}, db *gorm.DB) {
+	var maxId int
+	db.Model(data).Select("max(id)").Scan(&maxId)
+	if maxId == 0 {
+		return
+	}
+
+	numIntervals := 100
+	rDatabase, _ := own.getRemoteDB(data, 0)
+	rdb := rDatabase.GetRunDB().(*gorm.DB)
+	intervals := calculateIntervals(maxId, numIntervals)
+	c := utils.ConcurrencyTasks[interval]{Params: intervals, Concurrency: 16, Func: func(param interval) (interface{}, error) {
+		var resultList []interface{}
+		db.Model(data).Where("id >= ? and id < ?", param.start, param.end).Find(&resultList)
+		for _, result := range resultList {
+			rdb.Model(data).Save(result)
+		}
+		return nil, nil
+	}}
+	c.Run()
+}
+
+type interval struct {
+	start int
+	end   int
+}
+
+func calculateIntervals(n, numIntervals int) []interval {
+	if n < 1 || numIntervals < 1 {
+		return nil
+	}
+
+	intervalSize := n / numIntervals
+	remainder := n % numIntervals
+
+	intervals := make([]interval, numIntervals)
+	start := 1
+	for i := 0; i < numIntervals; i++ {
+		end := start + intervalSize - 1
+		if remainder > 0 {
+			end++
+			remainder--
+		}
+		intervals[i] = interval{start, end}
+		start = end + 1
+	}
+
+	return intervals
+}
+
+func (own *DefaultAdapter) asyncDoRemoteAction() {
+	own.once.Do(func() {
+		go func() {
+			for {
+				select {
+				case action := <-own.remoteActionChan:
+					err := action()
+					logx.Errorf("asyncDoRemoteAction err:%v", err)
+				}
+			}
+		}()
+	})
 }

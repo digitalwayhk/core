@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"context"
 	"github.com/zeromicro/go-zero/core/logx"
 	"sync"
 )
@@ -11,7 +10,6 @@ const (
 )
 
 type ConcurrencyTasks[T interface{}] struct {
-	Ctx         context.Context
 	Params      []T
 	Results     []interface{}
 	Func        func(param T) (interface{}, error)
