@@ -249,9 +249,8 @@ func (e client) GetEventChan(eventCode string) chan *publish.Event {
 	if value, ok := e.eventChMap.Load(eventCode); ok {
 		return value.(chan *publish.Event)
 	}
-	//查询
 	eventChan := make(chan *publish.Event)
-	//保存缓存
+	//保存
 	e.eventChMap.Store(eventCode, eventChan)
 	return eventChan
 }
@@ -271,6 +270,7 @@ func (e client) initEventChanConsumer(eventCode string, eventChan chan *publish.
 			return
 		}
 	}
+	//开启协程监听event
 	go func() {
 		for {
 			select {
@@ -284,6 +284,6 @@ func (e client) initEventChanConsumer(eventCode string, eventChan chan *publish.
 			}
 		}
 	}()
-	//保存缓存
+	//保存
 	e.eventConsumerMap.Store(eventCode, true)
 }
