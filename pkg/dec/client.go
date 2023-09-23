@@ -7,6 +7,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/dec/subscribe"
 	"github.com/digitalwayhk/core/pkg/dec/util"
 	"github.com/zeromicro/go-zero/core/logx"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -41,6 +42,9 @@ var Client = newClient()
 var ClientConfig = newClientConfig()
 
 type client struct {
+	eventChMap       sync.Map
+	eventConsumerMap sync.Map
+	mu               sync.Mutex
 }
 
 func newClient() *client {
@@ -135,6 +139,16 @@ func (c client) PublishEvent(ctx context.Context) {
 	}
 }
 
+// PublishOrderedEvent 发布有序事件,通过chan消费
+func (c client) PublishOrderedEvent(ctx context.Context) error {
+	err := c.publishToChan(ctx)
+	//错误报警
+	if err != nil {
+		logx.Errorf("Client_PublishOrderedEvent error,err:%v", err)
+	}
+	return err
+}
+
 // SyncPublishEvent 同步发布事件
 func (c client) SyncPublishEvent(ctx context.Context) error {
 	err := c.publish(ctx)
@@ -160,6 +174,26 @@ func (c client) publish(ctx context.Context) error {
 	event := wrapper.event
 	result := publish.Publisher.PublishEvent(ctx, *event)
 	logx.Infof("SyncPublishEvent result:%v", util.JsonUtil.ToString(result))
+	wrapper.state = published
+	return nil
+}
+
+func (c client) publishToChan(ctx context.Context) error {
+	wrapper := getEventWrapper(ctx)
+	if wrapper == nil {
+		logx.Errorf("publishToChan event context is not exist")
+		return ContextNotExistError
+	}
+	//状态校验
+	if wrapper.state == published {
+		logx.Errorf("publishToChan state is published,event:%v", wrapper)
+		return IllegalStateError
+	}
+	//发布事件
+	event := wrapper.event
+	eventChan := c.GetEventChan(event.GetEventCode())
+	c.initEventChanConsumer(event.GetEventCode(), eventChan)
+	eventChan <- event
 	wrapper.state = published
 	return nil
 }
@@ -202,4 +236,54 @@ func getEventWrapper(ctx context.Context) *eventWrapper {
 		return wrapper
 	}
 	return nil
+}
+
+func (e client) GetEventChan(eventCode string) chan *publish.Event {
+	//缓存存在
+	if value, ok := e.eventChMap.Load(eventCode); ok {
+		return value.(chan *publish.Event)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	//二次确认
+	if value, ok := e.eventChMap.Load(eventCode); ok {
+		return value.(chan *publish.Event)
+	}
+	//查询
+	eventChan := make(chan *publish.Event)
+	//保存缓存
+	e.eventChMap.Store(eventCode, eventChan)
+	return eventChan
+}
+
+func (e client) initEventChanConsumer(eventCode string, eventChan chan *publish.Event) {
+	//缓存存在
+	if init, ok := e.eventConsumerMap.Load(eventCode); ok {
+		if init.(bool) {
+			return
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	//二次确认
+	if init, ok := e.eventConsumerMap.Load(eventCode); ok {
+		if init.(bool) {
+			return
+		}
+	}
+	go func() {
+		for {
+			select {
+			case event := <-eventChan:
+				if event == nil {
+					continue
+				}
+				logx.Infof("new event, eventCode:%s EventContent: %s", event.GetEventCode(), util.JsonUtil.ToString(event.GetEventContent()))
+				result := publish.Publisher.PublishEvent(context.Background(), *event)
+				logx.Infof("SyncPublishEvent result:%v", util.JsonUtil.ToString(result))
+			}
+		}
+	}()
+	//保存缓存
+	e.eventConsumerMap.Store(eventCode, true)
 }
