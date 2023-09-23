@@ -40,3 +40,19 @@ func TestRegisterSubscriber2(t *testing.T) {
 	}
 	fmt.Printf("TestRegisterSubscriber2 finish,err:%v\n", err)
 }
+
+func TestRegisterSubscriber3(t *testing.T) {
+	eventList := []string{"TestRegisterSubscriber2"}
+	size := 3
+	subscribers := make([]subscribe.Subscriber, size)
+	currentIndex := getCurrentIndex()
+	subscribers[0] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 2), true)
+	subscribers[1] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 3), true)
+	subscribers[2] = newSayHello(eventList, 0, nil, true)
+	err := dec.Client.RegisterSubscriber(subscribers)
+	if err != nil {
+		t.Fail()
+		return
+	}
+	fmt.Printf("TestRegisterSubscriber2 finish,err:%v\n", err)
+}
