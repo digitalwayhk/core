@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-const (
-	oneMinute = 60
-)
-
-var retryIntervalTime = []int{oneMinute, 5 * oneMinute, 30 * oneMinute, 4 * 60 * oneMinute, 24 * 60 * oneMinute}
-
 var Publisher = newPublisher()
 
 type publisher struct {
