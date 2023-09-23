@@ -311,36 +311,40 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 		return
 	}
 
-	numIntervals := 100
-
+	numIntervals := 200
 	intervals := calculateIntervals(maxId, numIntervals)
-	c := utils.ConcurrencyTasks[interval]{Params: intervals, Concurrency: 16, Func: func(param interval) (interface{}, error) {
-		modelType := reflect.TypeOf(model)
-		modellistType := reflect.SliceOf(modelType)
-		resultList := reflect.MakeSlice(modellistType, 0, 0).Interface()
-		searchItem := &types.SearchItem{
-			WhereList: []*types.WhereItem{},
-			Model:     model,
-		}
-		searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
-			Column: "id",
-			Value:  param.start,
-			Symbol: ">=",
-		})
-		searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
-			Column: "id",
-			Value:  param.end,
-			Symbol: "<",
-		})
-		err := rDatabase.Load(searchItem, &resultList)
-		modelistValue := reflect.ValueOf(resultList)
-		for i := 0; i < modelistValue.Len(); i++ {
-			itemValue := modelistValue.Index(i).Interface()
-			err = localDb.Insert(itemValue)
-		}
-		return err, nil
-	}}
-	c.Run()
+	task := utils.ConcurrencyTasks[interval]{
+		Params: intervals,
+		Func: func(param interval) (interface{}, error) {
+			modelType := reflect.TypeOf(model)
+			modellistType := reflect.SliceOf(modelType)
+			resultList := reflect.MakeSlice(modellistType, 0, 0).Interface()
+			searchItem := &types.SearchItem{
+				WhereList: []*types.WhereItem{},
+				Model:     model,
+				Page:      1,
+				Size:      numIntervals,
+			}
+			searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
+				Column: "id",
+				Value:  param.start,
+				Symbol: ">=",
+			})
+			searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
+				Column: "id",
+				Value:  param.end,
+				Symbol: "<",
+			})
+			err := rDatabase.Load(searchItem, &resultList)
+			err = localDb.Insert(resultList)
+			if err != nil {
+				logx.Errorf("sysRemoteDataToLocal err:%v", err)
+			}
+			return err, nil
+		},
+		Concurrency: 8,
+	}
+	task.Run()
 }
 
 type interval struct {
