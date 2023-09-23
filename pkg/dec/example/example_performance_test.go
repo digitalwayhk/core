@@ -41,7 +41,7 @@ func TestBatchPublish(t *testing.T) {
 }
 
 func TestPublishWithDependence(t *testing.T) {
-	event1 := "TestPublishWithTransaction2"
+	event1 := "TestPublishWithDependence"
 	eventList := []string{event1}
 	size := 5
 	subscribers := make([]subscribe.Subscriber, size)
@@ -63,6 +63,37 @@ func TestPublishWithDependence(t *testing.T) {
 
 	//发布事件
 	err = dec.Client.SyncPublishEvent(ctx)
+	if err != nil {
+		fmt.Println("PublishEvent err:", err)
+		t.Fail()
+		return
+	}
+}
+
+func TestPublishOrdered(t *testing.T) {
+	event1 := "TestPublishOrdered"
+	eventList := []string{event1}
+	size := 5
+	subscribers := make([]subscribe.Subscriber, size)
+	currentIndex := getCurrentIndex()
+	subscribers[0] = newSayHello(eventList, 0, nil, true)
+	subscribers[1] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 0), true)
+	subscribers[2] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 1), false)
+	subscribers[3] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 2), true)
+	subscribers[4] = newSayHello(eventList, 0, newSayHelloDependence(currentIndex, 1), true)
+	err := dec.Client.RegisterSubscriber(subscribers)
+	if err != nil {
+		fmt.Println(err)
+		t.Fail()
+		return
+	}
+	//创建事件
+	key := getKey()
+	ctx := dec.Client.CreateEventContext(ctx, domain, key, event1, eventContent)
+
+	//发布事件
+	err = dec.Client.PublishOrderedEvent(ctx)
+	time.Sleep(time.Minute * 10)
 	if err != nil {
 		fmt.Println("PublishEvent err:", err)
 		t.Fail()
