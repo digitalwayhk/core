@@ -10,6 +10,7 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -166,12 +167,14 @@ func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBCo
 }
 
 func (own *DefaultAdapter) Load(item *types.SearchItem, result interface{}) error {
-	return own.doAction(item.Model, func(db types.IDataBase) error {
+	return own.doAction(item.Model, true, func(db types.IDataBase) error {
 		return db.Load(item, result)
 	})
 }
 func (own *DefaultAdapter) Raw(sql string, data interface{}) error {
-	return own.doAction(data, func(db types.IDataBase) error {
+	upperSQL := strings.ToUpper(sql)
+	isQuery := strings.Contains(upperSQL, "SELECT")
+	return own.doAction(data, isQuery, func(db types.IDataBase) error {
 		return db.Raw(sql, data)
 	})
 }
@@ -183,17 +186,17 @@ func (own *DefaultAdapter) Transaction() {
 }
 
 func (own *DefaultAdapter) Insert(data interface{}) error {
-	return own.doAction(data, func(db types.IDataBase) error {
+	return own.doAction(data, false, func(db types.IDataBase) error {
 		return db.Insert(data)
 	})
 }
 func (own *DefaultAdapter) Update(data interface{}) error {
-	return own.doAction(data, func(db types.IDataBase) error {
+	return own.doAction(data, false, func(db types.IDataBase) error {
 		return db.Update(data)
 	})
 }
 func (own *DefaultAdapter) Delete(data interface{}) error {
-	return own.doAction(data, func(db types.IDataBase) error {
+	return own.doDeleteAction(data, func(db types.IDataBase) error {
 		return db.Delete(data)
 	})
 }
@@ -256,7 +259,30 @@ func (own *DefaultAdapter) GetRunDB() interface{} {
 	return own.currentDB
 }
 
-func (own *DefaultAdapter) doAction(data interface{}, action func(db types.IDataBase) error) error {
+func (own *DefaultAdapter) doAction(data interface{}, isQuery bool, action func(db types.IDataBase) error) error {
+	var err error
+	own.currentDB, err = own.getdb(data)
+	if err != nil {
+		return err
+	}
+	for index, db := range own.currentDB {
+		if index == 0 {
+			err = action(db)
+			if err != nil {
+				return err
+			}
+		}
+		if index > 0 && !isQuery {
+			own.asyncDoRemoteAction()
+			own.remoteActionChan <- func() error {
+				return action(db)
+			}
+		}
+	}
+	return nil
+}
+
+func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types.IDataBase) error) error {
 	var err error
 	own.currentDB, err = own.getdb(data)
 	if err != nil {
@@ -272,7 +298,8 @@ func (own *DefaultAdapter) doAction(data interface{}, action func(db types.IData
 		if index > 0 {
 			own.asyncDoRemoteAction()
 			own.remoteActionChan <- func() error {
-				return action(db)
+				utils.SetPropertyValue(data, "is_delete", true)
+				return db.Update(data)
 			}
 		}
 	}
