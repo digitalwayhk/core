@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"errors"
+	"github.com/digitalwayhk/core/pkg/dec/util"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
@@ -316,6 +317,13 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 }
 
 func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataBase) {
+	// 从panic中恢复
+	defer func() {
+		if e := recover(); e != nil {
+			logx.Errorf("[PANIC]SyncRemoteData err,%v\n%s\n", e, util.RuntimeUtil.GetStack())
+		}
+	}()
+
 	typeName := utils.GetTypeName(data)
 	//已经同步
 	if isSync, ok := own.isSyncMap.Load(typeName); ok {
@@ -416,6 +424,13 @@ func (own *DefaultAdapter) asyncDoRemoteAction() {
 			for {
 				select {
 				case action := <-own.remoteActionChan:
+					// 从panic中恢复
+					defer func() {
+						if e := recover(); e != nil {
+							logx.Errorf("[PANIC]DoRemoteAction err,%v\n%s\n", e, util.RuntimeUtil.GetStack())
+						}
+					}()
+
 					err := action()
 					logx.Errorf("asyncDoRemoteAction err:%v", err)
 				}
