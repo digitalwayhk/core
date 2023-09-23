@@ -272,12 +272,14 @@ func (own *DefaultAdapter) doAction(data interface{}, isQuery bool, action func(
 			if err != nil {
 				return err
 			}
+			continue
 		}
 		if index > 0 && !isQuery {
 			own.asyncDoRemoteAction()
 			own.remoteActionChan <- func() error {
 				return action(db)
 			}
+			continue
 		}
 	}
 	return nil
@@ -295,7 +297,7 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 			if err != nil {
 				return err
 			}
-			return nil
+			continue
 		}
 		if index > 0 {
 			own.asyncDoRemoteAction()
@@ -303,18 +305,13 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 				utils.SetPropertyValue(data, "is_delete", true)
 				return db.Update(data)
 			}
-			return nil
+			continue
 		}
 	}
 	return nil
 }
 
 func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataBase) {
-	if own.ForceSyncRemoteData {
-		own.sysRemoteDataToLocal(data, localDb)
-		return
-	}
-
 	typeName := utils.GetTypeName(data)
 	//已经初始化
 	if isSync, ok := own.isSyncMap.Load(typeName); ok {
@@ -336,7 +333,7 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataB
 	sql := localDb.GetRunDB().(*gorm.DB)
 	var count int64
 	sql.Model(data).Count(&count)
-	if count == 0 {
+	if count == 0 || own.ForceSyncRemoteData {
 		own.sysRemoteDataToLocal(data, localDb)
 	}
 
