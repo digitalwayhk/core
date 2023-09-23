@@ -15,19 +15,20 @@ import (
 )
 
 type DefaultAdapter struct {
-	isTansaction     bool                       //是否开启事务
-	localdbs         map[string]types.IDataBase //当前操作的数据库集合
-	readDBs          map[string]types.IDataBase //读数据库
-	writeDB          map[string]types.IDataBase //写数据库
-	manageDB         map[string]types.IDataBase //管理数据库
-	saveType         types.SaveType             //保存类型
-	IsCreateTable    bool                       //是否创建表,该参数只能远程库有效，当为true时，表不存在,会获取ManageType连接，创建表或者修改表结构增加列
-	currentDB        []types.IDataBase          //当前操作的数据库
-	IsLog            bool                       //是否打印日志
-	remoteActionChan chan func() error
-	once             sync.Once
-	syncLock         sync.Mutex
-	isSync           bool
+	isTansaction        bool                       //是否开启事务
+	localdbs            map[string]types.IDataBase //当前操作的数据库集合
+	readDBs             map[string]types.IDataBase //读数据库
+	writeDB             map[string]types.IDataBase //写数据库
+	manageDB            map[string]types.IDataBase //管理数据库
+	saveType            types.SaveType             //保存类型
+	IsCreateTable       bool                       //是否创建表,该参数只能远程库有效，当为true时，表不存在,会获取ManageType连接，创建表或者修改表结构增加列
+	currentDB           []types.IDataBase          //当前操作的数据库
+	IsLog               bool                       //是否打印日志
+	remoteActionChan    chan func() error
+	once                sync.Once
+	syncLock            sync.Mutex
+	isSyncMap           sync.Map
+	ForceSyncRemoteData bool //是否强制同步远程数据到本地
 }
 
 var defaultAda *DefaultAdapter
@@ -141,7 +142,7 @@ func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBCo
 	if err != nil {
 		return nil, err
 	}
-	if idb == nil && own.IsCreateTable {
+	if idb != nil && own.IsCreateTable {
 		err = idb.HasTable(model)
 		if err != nil {
 			midb, err := models.GetConfigRemoteDB(name, types.ManageType, own.IsLog, true)
@@ -294,6 +295,7 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 			if err != nil {
 				return err
 			}
+			return nil
 		}
 		if index > 0 {
 			own.asyncDoRemoteAction()
@@ -301,21 +303,34 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 				utils.SetPropertyValue(data, "is_delete", true)
 				return db.Update(data)
 			}
+			return nil
 		}
 	}
 	return nil
 }
 
 func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataBase) {
-	if own.isSync {
+	if own.ForceSyncRemoteData {
+		own.sysRemoteDataToLocal(data, localDb)
 		return
 	}
+
+	typeName := utils.GetTypeName(data)
+	//已经初始化
+	if isSync, ok := own.isSyncMap.Load(typeName); ok {
+		if isSync.(bool) {
+			return
+		}
+	}
+
 	own.syncLock.Lock()
 	defer own.syncLock.Unlock()
 
 	//二次确认
-	if own.isSync {
-		return
+	if isSync, ok := own.isSyncMap.Load(typeName); ok {
+		if isSync.(bool) {
+			return
+		}
 	}
 
 	sql := localDb.GetRunDB().(*gorm.DB)
@@ -325,7 +340,7 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataB
 		own.sysRemoteDataToLocal(data, localDb)
 	}
 
-	own.isSync = true
+	own.isSyncMap.Store(typeName, true)
 }
 
 func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types.IDataBase) {
@@ -339,7 +354,7 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 	}
 
 	numIntervals := 200
-	intervals := calculateIntervals(maxId, numIntervals)
+	intervals := splitRange(maxId, numIntervals)
 	task := utils.ConcurrencyTasks[interval]{
 		Params: intervals,
 		Func: func(param interval) (interface{}, error) {
@@ -352,18 +367,20 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 				Page:      1,
 				Size:      numIntervals,
 			}
-			searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
-				Column: "id",
-				Value:  param.start,
-				Symbol: ">=",
-			})
-			searchItem.WhereList = append(searchItem.WhereList, &types.WhereItem{
-				Column: "id",
-				Value:  param.end,
-				Symbol: "<",
-			})
+			searchItem.AddWhere(
+				&types.WhereItem{
+					Column: "id",
+					Value:  param.start,
+					Symbol: ">=",
+				},
+				&types.WhereItem{
+					Column: "id",
+					Value:  param.end,
+					Symbol: "<=",
+				},
+			)
 			err := rDatabase.Load(searchItem, &resultList)
-			err = localDb.Insert(resultList)
+			err = localDb.Update(resultList)
 			if err != nil {
 				logx.Errorf("sysRemoteDataToLocal err:%v", err)
 			}
@@ -379,26 +396,16 @@ type interval struct {
 	end   int
 }
 
-func calculateIntervals(n, numIntervals int) []interval {
-	if n < 1 || numIntervals < 1 {
-		return nil
-	}
-
-	intervalSize := n / numIntervals
-	remainder := n % numIntervals
-
-	intervals := make([]interval, numIntervals)
-	start := 1
-	for i := 0; i < numIntervals; i++ {
-		end := start + intervalSize - 1
-		if remainder > 0 {
-			end++
-			remainder--
+func splitRange(n int, count int) []interval {
+	var intervals []interval
+	for start := 1; start <= n; start += count {
+		end := start + 1000
+		if end > n {
+			end = n
 		}
-		intervals[i] = interval{start, end}
-		start = end + 1
+		info := interval{start: start, end: end}
+		intervals = append(intervals, info)
 	}
-
 	return intervals
 }
 
