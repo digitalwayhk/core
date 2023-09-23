@@ -302,8 +302,10 @@ func (own *DefaultAdapter) doDeleteAction(data interface{}, action func(db types
 		if index > 0 {
 			own.asyncDoRemoteAction()
 			own.remoteActionChan <- func() error {
-				utils.SetPropertyValue(data, "is_delete", true)
-				return db.Update(data)
+				//软删除
+				//utils.SetPropertyValue(data, "is_delete", true)
+				//return db.Update(data)
+				return nil
 			}
 			continue
 		}
