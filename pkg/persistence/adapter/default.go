@@ -361,15 +361,14 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 	if maxId == 0 {
 		return
 	}
-
+	modelType := reflect.TypeOf(model)
+	modelListType := reflect.SliceOf(modelType)
 	numIntervals := 200
 	intervals := splitRange(maxId, numIntervals)
 	task := utils.ConcurrencyTasks[interval]{
 		Params: intervals,
 		Func: func(param interval) (interface{}, error) {
-			modelType := reflect.TypeOf(model)
-			modellistType := reflect.SliceOf(modelType)
-			resultList := reflect.MakeSlice(modellistType, 0, 0).Interface()
+			resultList := reflect.MakeSlice(modelListType, 0, 0).Interface()
 			searchItem := &types.SearchItem{
 				WhereList: []*types.WhereItem{},
 				Model:     model,
@@ -408,7 +407,7 @@ type interval struct {
 func splitRange(n int, count int) []interval {
 	var intervals []interval
 	for start := 1; start <= n; start += count {
-		end := start + 1000
+		end := start + count
 		if end > n {
 			end = n
 		}
