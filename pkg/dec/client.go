@@ -179,6 +179,13 @@ func (c client) publish(ctx context.Context) error {
 }
 
 func (c client) publishToChan(ctx context.Context) error {
+	// 从panic中恢复
+	defer func() {
+		if e := recover(); e != nil {
+			logx.Errorf("[PANIC]publishToChan err,%v\n%s\n", e, util.RuntimeUtil.GetStack())
+		}
+	}()
+
 	wrapper := getEventWrapper(ctx)
 	if wrapper == nil {
 		logx.Errorf("publishToChan event context is not exist")
@@ -275,6 +282,13 @@ func (e client) initEventChanConsumer(eventCode string, eventChan chan *publish.
 		for {
 			select {
 			case event := <-eventChan:
+				// 从panic中恢复
+				defer func() {
+					if e := recover(); e != nil {
+						logx.Errorf("[PANIC]tEventChanConsumer err,%v\n%s\n", e, util.RuntimeUtil.GetStack())
+					}
+				}()
+
 				if event == nil {
 					continue
 				}
