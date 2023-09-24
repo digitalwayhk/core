@@ -346,13 +346,13 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataB
 	var count int64
 	sql.Model(data).Count(&count)
 	if count == 0 || own.ForceSyncRemoteData {
-		own.sysRemoteDataToLocal(data, localDb)
+		own.syncRemoteDataToLocal(data, localDb)
 	}
 
 	own.isSyncMap.Store(typeName, true)
 }
 
-func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types.IDataBase) {
+func (own *DefaultAdapter) syncRemoteDataToLocal(model interface{}, localDb types.IDataBase) {
 	rDatabase, _ := own.getRemoteDB(model, 0)
 	modelDb, _ := rDatabase.GetModelDB(model)
 	var maxId int
@@ -390,7 +390,7 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 			err := rDatabase.Load(searchItem, &resultList)
 			err = localDb.Update(resultList)
 			if err != nil {
-				logx.Errorf("sysRemoteDataToLocal err:%v", err)
+				logx.Errorf("syncRemoteDataToLocal err:%v", err)
 			}
 			return err, nil
 		},
