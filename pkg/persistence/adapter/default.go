@@ -384,7 +384,7 @@ func (own *DefaultAdapter) sysRemoteDataToLocal(model interface{}, localDb types
 				&types.WhereItem{
 					Column: "id",
 					Value:  param.end,
-					Symbol: "<=",
+					Symbol: "<",
 				},
 			)
 			err := rDatabase.Load(searchItem, &resultList)
@@ -408,9 +408,6 @@ func splitRange(n int, count int) []interval {
 	var intervals []interval
 	for start := 1; start <= n; start += count {
 		end := start + count
-		if end > n {
-			end = n
-		}
 		info := interval{start: start, end: end}
 		intervals = append(intervals, info)
 	}
