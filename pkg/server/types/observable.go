@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/utils"
 )
@@ -33,6 +34,11 @@ type ObserveArgs struct {
 	Error          error                        `json:"-"` //注册错误信息
 	IsUnSub        bool                         `json:"-"` //是否取消订阅
 }
+
+func (own *ObserveArgs) GetHash() string {
+	return utils.HashCodes(own.Topic, own.ServiceName, strconv.Itoa((int(own.State))))
+}
+
 type TargetInfo struct {
 	TargetAddress    string
 	TargetService    string

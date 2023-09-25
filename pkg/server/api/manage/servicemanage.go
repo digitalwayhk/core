@@ -47,6 +47,7 @@ type ObserverRouterInfo struct {
 	RouterPath   string
 	ObserverType int
 	IsOk         bool
+	IsUnSub      bool
 }
 
 func test(ms manage.IManageSearch) {
@@ -163,6 +164,10 @@ func viewfieldObserverRouteInfo(field *view.FieldModel) {
 	}
 	if field.IsFieldOrTitle("IsOk") {
 		field.Title = "是否可用"
+	}
+	if field.IsFieldOrTitle("IsUnSub") {
+		field.Disabled = false
+		field.Title = "取消订阅"
 	}
 }
 func (own *ServiceManage) ViewChildModel(child *view.ViewChildModel) {
@@ -324,6 +329,13 @@ func (own *ServiceManage) DoBefore(sender interface{}, req types.IRequest) (inte
 			err = ctext.SetAttachServiceAddress(item.AttachServiceName)
 			if err != nil {
 				return nil, err, true
+			}
+			if as, ok := ctext.Service.AttachService[item.AttachServiceName]; ok {
+				for _, row := range edit.Model.ObserverRouters {
+					if or, ok := as.ObserverRouters[row.RouterPath]; ok {
+						or.IsUnSub = row.IsUnSub
+					}
+				}
 			}
 			err = ctext.RegisterObserve(&public.Observe{})
 			if err != nil {

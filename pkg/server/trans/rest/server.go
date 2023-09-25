@@ -139,7 +139,7 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	if payload.TargetAddress == "" {
 		return nil, errors.New("TargetAddress is nil")
 	}
-	logx.Info("http Send :" + utils.PrintObj(payload))
+	//logx.Info("http Send :" + utils.PrintObj(payload))
 	values, err := json.Marshal(payload.Instance)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	if payload.HttpMethod == http.MethodGet {
 		args := ""
 		utils.ForEach(payload.Instance, func(key string, value interface{}) {
-			v := fmt.Sprintf("%v", value)
+			v := utils.ConvertToString(value)
 			if v != "" {
 				args += "&" + key + "=" + v
 			}

@@ -311,9 +311,6 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 		own.rWebSocketClient[hash] = make(map[IWebSocket]IRequest, 0)
 	}
 	own.rWebSocketClient[hash][client] = req
-	// if !own.webSocketHandler {
-	// 	go own.webSocketHandlerRun()
-	// }
 	client.Send("sub", own.Path, strconv.Itoa(hash))
 	return hash
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -258,6 +260,52 @@ func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 	return nil
 }
 
+var observeMap map[string]*types.PayLoad = make(map[string]*types.PayLoad)
+var obseLock sync.RWMutex
+
+func addObserveMap(own *ServiceContext, payload *types.PayLoad) {
+	obseLock.Lock()
+	defer obseLock.Unlock()
+	observeMap[own.Service.Name] = payload
+}
+func removeObserveMap(own *ServiceContext, payload *types.PayLoad) {
+	obseLock.Lock()
+	defer obseLock.Unlock()
+	for k, v := range observeMap {
+		sv := v.Instance.(*types.ObserveArgs)
+		tv := payload.Instance.(*types.ObserveArgs)
+		if own.Service.Name == k && sv.Topic == tv.Topic {
+			delete(observeMap, k)
+		}
+	}
+}
+
+var runobserve sync.Once
+
+func runobservemap() {
+	for {
+		time.Sleep(time.Second * 60)
+		obseLock.Lock()
+		for k, v := range observeMap {
+			own := GetContext(k)
+			if own == nil {
+				continue
+			}
+			values, err := own.Service.CallService(v)
+			if err != nil {
+				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), err.Error())
+			}
+			res := &Response{}
+			json.Unmarshal(values, res)
+			if !res.Success {
+				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), res.ErrorMessage)
+			} else {
+				logx.Infof("%s Observe TargetAddress:%s, TargetService:%s, TargetPath:%s Success", own.Service.Name, v.TargetAddress, v.TargetService, v.TargetPath)
+			}
+		}
+		obseLock.Unlock()
+	}
+}
 func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
 	if oa.ServiceName == "" || oa.Topic == "" {
 		logx.Error(utils.PrintObj(info))
@@ -286,9 +334,6 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 		Auth:             false,
 		Instance:         oa,
 	}
-	// if info.Router != nil {
-	// 	payload.Instance = info.Router
-	// }
 	values, err := own.Service.CallService(payload)
 	if err != nil {
 		oa.Error = err
@@ -299,9 +344,19 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 	if !res.Success {
 		oa.Error = errors.New(res.ErrorMessage)
 		return false, oa.Error
+	} else {
+		runobserve.Do(func() {
+			go runobservemap()
+		})
+		if oa.IsUnSub {
+			removeObserveMap(own, payload)
+		} else {
+			addObserveMap(own, payload)
+		}
 	}
 	return true, nil
 }
+
 func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	ctx := GetContext(args.SendService)
 	if ctx == nil {
