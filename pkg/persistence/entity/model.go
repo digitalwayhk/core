@@ -14,6 +14,7 @@ type Model struct {
 	UpdatedAt  time.Time `json:"updatedat"`
 	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
 	Hashcode   string    `json:"-"`
+	DeletedAt  time.Time `json:"-"`
 }
 
 func NewModel() *Model {
