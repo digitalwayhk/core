@@ -92,7 +92,7 @@ func TestPublishOrdered(t *testing.T) {
 	ctx := dec.Client.CreateEventContext(ctx, domain, key, event1, eventContent)
 
 	//发布事件
-	err = dec.Client.PublishOrderedEvent(ctx)
+	dec.Client.PublishOrderedEvent(ctx)
 	time.Sleep(time.Minute * 10)
 	if err != nil {
 		fmt.Println("PublishEvent err:", err)

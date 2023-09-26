@@ -140,13 +140,12 @@ func (c client) PublishEvent(ctx context.Context) {
 }
 
 // PublishOrderedEvent 发布有序事件,通过chan消费
-func (c client) PublishOrderedEvent(ctx context.Context) error {
+func (c client) PublishOrderedEvent(ctx context.Context) {
 	err := c.publishToChan(ctx)
 	//错误报警
 	if err != nil {
 		logx.Errorf("Client_PublishOrderedEvent error,err:%v", err)
 	}
-	return err
 }
 
 // SyncPublishEvent 同步发布事件
