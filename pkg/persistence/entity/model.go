@@ -6,15 +6,16 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"gorm.io/plugin/soft_delete"
 )
 
 type Model struct {
-	ID         uint      `gorm:"primarykey" json:"id,string"`
-	CreatedAt  time.Time `json:"createdat"`
-	UpdatedAt  time.Time `json:"updatedat"`
-	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
-	Hashcode   string    `json:"-"`
-	DeletedAt  time.Time `json:"-"`
+	ID         uint                  `gorm:"primarykey" json:"id,string"`
+	CreatedAt  time.Time             `json:"createdat"`
+	UpdatedAt  time.Time             `json:"updatedat"`
+	ModelState int                   `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
+	Hashcode   string                `json:"-"`
+	DeletedAt  soft_delete.DeletedAt `json:"-"`
 }
 
 func NewModel() *Model {
