@@ -101,7 +101,9 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	if !config.INITSERVER {
 		err = idatabase.HasTable(model)
 	}
-	own.SyncRemoteData(model, idatabase)
+	if own.saveType == types.LocalAndRemote {
+		own.SyncRemoteData(model, idatabase)
+	}
 	return idatabase, err
 }
 func (own *DefaultAdapter) getMapDB(name string, conncettype types.DBConnectType) (types.IDataBase, error) {
@@ -342,7 +344,7 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataB
 		}
 	}
 
-	sql := localDb.GetRunDB().(*gorm.DB)
+	sql := getOrmDb(localDb, data)
 	var count int64
 	sql.Model(data).Count(&count)
 	if count == 0 || own.ForceSyncRemoteData {
@@ -354,9 +356,8 @@ func (own *DefaultAdapter) SyncRemoteData(data interface{}, localDb types.IDataB
 
 func (own *DefaultAdapter) syncRemoteDataToLocal(model interface{}, localDb types.IDataBase) {
 	rDatabase, _ := own.getRemoteDB(model, 0)
-	modelDb, _ := rDatabase.GetModelDB(model)
+	sql := getOrmDb(rDatabase, model)
 	var maxId int
-	sql := modelDb.(*gorm.DB)
 	sql.Model(model).Select("max(id)").Scan(&maxId)
 	if maxId == 0 {
 		return
@@ -402,6 +403,11 @@ func (own *DefaultAdapter) syncRemoteDataToLocal(model interface{}, localDb type
 type interval struct {
 	start int
 	end   int
+}
+
+func getOrmDb(db types.IDataBase, model interface{}) *gorm.DB {
+	modelDb, _ := db.GetModelDB(model)
+	return modelDb.(*gorm.DB)
 }
 
 func splitRange(n int, count int) []interval {
