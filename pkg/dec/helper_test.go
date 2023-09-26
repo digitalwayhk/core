@@ -44,7 +44,7 @@ type demoSubscriber struct {
 }
 
 func (s demoSubscriber) GetConfig() subscribe.Config {
-	return *subscribe.NewDomainConfig("panicSubscriber", "demo", "demo")
+	return *subscribe.NewDomainConfig("demoSubscriber", "demo", "demo")
 }
 
 func (s demoSubscriber) Execute(ctx context.Context, req subscribe.Request) subscribe.Result {
