@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"gorm.io/gorm"
 	"strconv"
 	"time"
 
@@ -9,11 +10,12 @@ import (
 )
 
 type Model struct {
-	ID         uint      `gorm:"primarykey" json:"id,string"`
-	CreatedAt  time.Time `json:"createdat"`
-	UpdatedAt  time.Time `json:"updatedat"`
-	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
-	Hashcode   string    `json:"-"`
+	ID         uint           `gorm:"primarykey" json:"id,string"`
+	CreatedAt  time.Time      `json:"createdat"`
+	UpdatedAt  time.Time      `json:"updatedat"`
+	ModelState int            `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
+	Hashcode   string         `json:"-"`
+	DeletedAt  gorm.DeletedAt `json:"-"` // gorm soft delete
 }
 
 func NewModel() *Model {
