@@ -485,7 +485,7 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 
 		// 批量保存
 		if len(onlyInRemote) > 0 {
-			localDB.Create(onlyInRemote)
+			localDB.Save(onlyInRemote)
 		}
 		return nil
 	}
