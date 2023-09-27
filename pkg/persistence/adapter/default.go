@@ -473,7 +473,7 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 		localDB.Where("id IN (?)", getIDs(remoteData)).Find(&localResult)
 		localDataMap := toModelMap(localResult)
 
-		// 执行批量创建和批量更新
+		// 执行批量
 		onlyInRemote := []entity.Model{}
 		for _, remote := range remoteData {
 			_, exist := localDataMap[remote.ID]
@@ -483,9 +483,9 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 			}
 		}
 
-		// 批量保存（包括创建和更新）
+		// 批量保存
 		if len(onlyInRemote) > 0 {
-			localDB.Save(onlyInRemote)
+			localDB.Create(onlyInRemote)
 		}
 		return nil
 	}
