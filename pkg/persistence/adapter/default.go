@@ -411,18 +411,18 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 
 		// 执行批量创建和批量更新
 		localToSave := []entity.Model{}
-		remoteSave := []entity.Model{}
+		remoteToSave := []entity.Model{}
 		for _, local := range localData {
 			remote, exist := remoteDataMap[local.ID]
 
 			if !exist {
 				// 远程数据库中不存在该数据，则创建到远程数据库
-				remoteSave = append(remoteSave, local)
+				remoteToSave = append(remoteToSave, local)
 			} else {
 				// 比较更新时间
 				if local.UpdatedAt.After(remote.UpdatedAt) {
 					// 本地数据更新时间较新，则更新到远程数据库
-					remoteSave = append(remoteSave, local)
+					remoteToSave = append(remoteToSave, local)
 				} else if local.UpdatedAt.Before(remote.UpdatedAt) {
 					// 远程数据更新时间较新，则更新到本地数据库
 					localToSave = append(localToSave, remote)
@@ -435,8 +435,8 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 			localDB.Save(localToSave)
 		}
 
-		if len(remoteSave) > 0 {
-			remoteDB.Save(remoteSave)
+		if len(remoteToSave) > 0 {
+			remoteDB.Save(remoteToSave)
 		}
 		return nil
 	}
