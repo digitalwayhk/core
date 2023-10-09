@@ -95,6 +95,14 @@ func (own *Model) SetHashcode(code string) {
 	own.Hashcode = code
 }
 
+func (own *Model) GetUpdatedAt() time.Time {
+	return own.UpdatedAt
+}
+
+func (own *Model) setUpdatedAt(UpdatedAt time.Time) {
+	own.UpdatedAt = UpdatedAt
+}
+
 // func (own *Model) MarshalJSON() ([]byte, error) {
 // 	type Alias Model
 // 	return json.Marshal(&struct {

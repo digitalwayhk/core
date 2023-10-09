@@ -4,7 +4,6 @@ import (
 	"errors"
 	"github.com/digitalwayhk/core/pkg/dec/util"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -410,20 +409,20 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 		remoteDataMap := toModelMap(remoteResult)
 
 		// 执行批量创建和批量更新
-		localToSave := []entity.Model{}
-		remoteToSave := []entity.Model{}
+		localToSave := []types.IModel{}
+		remoteToSave := []types.IModel{}
 		for _, local := range localData {
-			remote, exist := remoteDataMap[local.ID]
+			remote, exist := remoteDataMap[local.GetID()]
 
 			if !exist {
 				// 远程数据库中不存在该数据，则创建到远程数据库
 				remoteToSave = append(remoteToSave, local)
 			} else {
 				// 比较更新时间
-				if local.UpdatedAt.After(remote.UpdatedAt) {
+				if local.GetUpdatedAt().After(remote.GetUpdatedAt()) {
 					// 本地数据更新时间较新，则更新到远程数据库
 					remoteToSave = append(remoteToSave, local)
-				} else if local.UpdatedAt.Before(remote.UpdatedAt) {
+				} else if local.GetUpdatedAt().Before(remote.GetUpdatedAt()) {
 					// 远程数据更新时间较新，则更新到本地数据库
 					localToSave = append(localToSave, remote)
 				}
@@ -432,11 +431,11 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 
 		// 批量保存（包括创建和更新）
 		if len(localToSave) > 0 {
-			localDB.Save(localToSave)
+			localDB.Model(model).Save(localToSave)
 		}
 
 		if len(remoteToSave) > 0 {
-			remoteDB.Save(remoteToSave)
+			remoteDB.Model(model).Save(remoteToSave)
 		}
 		return nil
 	}
@@ -474,9 +473,9 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 		localDataMap := toModelMap(localResult)
 
 		// 执行批量
-		onlyInRemote := []entity.Model{}
+		onlyInRemote := []interface{}{}
 		for _, remote := range remoteData {
-			_, exist := localDataMap[remote.ID]
+			_, exist := localDataMap[remote.GetID()]
 			if !exist {
 				// 远程数据库中不存在该数据，则创建到远程数据库
 				onlyInRemote = append(onlyInRemote, remote)
@@ -485,7 +484,11 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 
 		// 批量保存
 		if len(onlyInRemote) > 0 {
-			localDB.Save(onlyInRemote)
+			localDB.Model(model).Save(&onlyInRemote)
+			err := localDB.Error
+			if err != nil {
+				logx.Errorf("syncOnlyInRemoteDataToLocal err:%v", err)
+			}
 		}
 		return nil
 	}
@@ -506,35 +509,35 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 	task.Run()
 }
 
-func toModelList(value interface{}) []entity.Model {
-	modelList := make([]entity.Model, 0)
+func toModelList(value interface{}) []types.IModel {
+	modelList := make([]types.IModel, 0)
 	reflectValue := reflect.Indirect(reflect.ValueOf(value))
 	switch reflectValue.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < reflectValue.Len(); i++ {
 			modelValue := reflectValue.Index(i).Interface()
-			model, ok := modelValue.(entity.Model)
+			model, ok := modelValue.(types.IModel)
 			if ok {
 				modelList = append(modelList, model)
 			}
 		}
 	}
-	return []entity.Model{}
+	return modelList
 }
 
-func toModelMap(value interface{}) map[uint]entity.Model {
+func toModelMap(value interface{}) map[uint]types.IModel {
 	modelList := toModelList(value)
-	modelMap := make(map[uint]entity.Model)
+	modelMap := make(map[uint]types.IModel)
 	for _, model := range modelList {
-		modelMap[model.ID] = model
+		modelMap[model.GetID()] = model
 	}
 	return modelMap
 }
 
-func getIDs(data []entity.Model) []uint {
+func getIDs(data []types.IModel) []uint {
 	var ids []uint
 	for _, d := range data {
-		ids = append(ids, d.ID)
+		ids = append(ids, d.GetID())
 	}
 	return ids
 }

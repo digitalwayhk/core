@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"fmt"
 	"github.com/zeromicro/go-zero/core/logx"
+	"runtime"
 	"sync"
 )
 
@@ -62,8 +64,10 @@ func (t *ConcurrencyTasks[T]) doFun(i int) {
 	defer func() {
 		// 从panic中恢复
 		if e := recover(); e != nil {
-			err := e.(error)
-			logx.Infof("[PANIC]param=%s,err=%v\n", param, err)
+			buf := make([]byte, 16*1024*1024)
+			buf = buf[:runtime.Stack(buf, false)]
+			fmt.Printf("[PANIC]%v\n%s\n", e, buf)
+			logx.Errorf("[PANIC]%v\n%s\n", e, buf)
 		}
 	}()
 	defer t.wg.Done()

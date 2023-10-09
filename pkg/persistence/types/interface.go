@@ -2,6 +2,7 @@ package types
 
 import (
 	"gorm.io/gorm"
+	"time"
 )
 
 type DBConnectType int
@@ -74,6 +75,7 @@ type IModel interface {
 	Equals(o interface{}) bool
 	GetID() uint
 	SetID(id uint)
+	GetUpdatedAt() time.Time
 }
 type IRowCode interface {
 	GetHash() string
