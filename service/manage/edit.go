@@ -79,7 +79,7 @@ func (own *Edit[T]) Do(req types.IRequest) (interface{}, error) {
 		utils.SetPropertyValue(own.Model, "UpdatedUserName", uname)
 	}
 	utils.ForEach(own.Model, func(key string, value interface{}) {
-		if key != "TraceID" && key != "Hashcode" {
+		if key != "TraceID" && key != "Hashcode" && key != "DeletedAt" {
 			utils.SetPropertyValue(own.OldItem, key, value)
 		}
 		// if utils.IsArray(value) {

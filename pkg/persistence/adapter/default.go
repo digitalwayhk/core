@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"errors"
+	"fmt"
 	"github.com/digitalwayhk/core/pkg/dec/util"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/models"
@@ -404,9 +405,11 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 
 		localDB.Order("id").Offset(offset).Limit(pageSize).Find(&localResult)
 		localData := toModelList(localResult)
+		localModelTypeValueMap := toModelTypeValueMap(localResult)
 
 		remoteDB.Where("id IN (?)", getIDs(localData)).Find(&remoteResult)
 		remoteDataMap := toModelMap(remoteResult)
+		remoteModelTypeValueMap := toModelTypeValueMap(remoteResult)
 
 		// 执行批量创建和批量更新
 		localToSave := []types.IModel{}
@@ -431,11 +434,20 @@ func (own *DefaultAdapter) syncLocalDataToRemote(model interface{}, localDB, rem
 
 		// 批量保存（包括创建和更新）
 		if len(localToSave) > 0 {
-			localDB.Model(model).Save(localToSave)
+			localDB.Model(model).Save(getModelList(remoteModelTypeValueMap, localToSave, modelListType))
+			err := localDB.Error
+			if err != nil {
+				fmt.Println("syncLocalDataToRemote localDB save err :", err)
+			}
+
 		}
 
 		if len(remoteToSave) > 0 {
-			remoteDB.Model(model).Save(remoteToSave)
+			remoteDB.Model(model).Save(getModelList(localModelTypeValueMap, remoteToSave, modelListType))
+			err := remoteDB.Error
+			if err != nil {
+				fmt.Println("syncLocalDataToRemote remoteDB save err :", err)
+			}
 		}
 		return nil
 	}
@@ -468,12 +480,13 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 
 		remoteDB.Order("id").Offset(offset).Limit(pageSize).Find(&remoteResult)
 		remoteData := toModelList(remoteResult)
+		remoteModelTypeValueMap := toModelTypeValueMap(remoteData)
 
 		localDB.Where("id IN (?)", getIDs(remoteData)).Find(&localResult)
 		localDataMap := toModelMap(localResult)
 
 		// 执行批量
-		onlyInRemote := []interface{}{}
+		onlyInRemote := []types.IModel{}
 		for _, remote := range remoteData {
 			_, exist := localDataMap[remote.GetID()]
 			if !exist {
@@ -484,10 +497,11 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 
 		// 批量保存
 		if len(onlyInRemote) > 0 {
-			localDB.Model(model).Save(&onlyInRemote)
+			localDB.Model(model).Save(getModelList(remoteModelTypeValueMap, onlyInRemote, modelListType))
 			err := localDB.Error
 			if err != nil {
 				logx.Errorf("syncOnlyInRemoteDataToLocal err:%v", err)
+				fmt.Println("syncOnlyInRemoteDataToLocal localDB save err :", err)
 			}
 		}
 		return nil
@@ -509,6 +523,22 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 	task.Run()
 }
 
+func getModelList(modelTypeValueMap map[uint]interface{}, models []types.IModel, modelListType reflect.Type) interface{} {
+	resultValue := reflect.MakeSlice(modelListType, 0, 0)
+	reflectionValue := reflect.New(resultValue.Type())
+	reflectionValue.Elem().Set(resultValue)
+
+	slicePtr := reflect.ValueOf(reflectionValue.Interface())
+
+	sliceValuePtr := slicePtr.Elem()
+	for _, model := range models {
+		modeTypeValue := modelTypeValueMap[model.GetID()]
+		sliceValuePtr.Set(reflect.Append(sliceValuePtr, reflect.ValueOf(modeTypeValue)))
+	}
+	value := sliceValuePtr.Interface()
+	return value
+}
+
 func toModelList(value interface{}) []types.IModel {
 	modelList := make([]types.IModel, 0)
 	reflectValue := reflect.Indirect(reflect.ValueOf(value))
@@ -523,6 +553,38 @@ func toModelList(value interface{}) []types.IModel {
 		}
 	}
 	return modelList
+}
+
+func getModelTypeList(value interface{}) interface{} {
+	modelMap := make(map[uint]interface{})
+	reflectValue := reflect.Indirect(reflect.ValueOf(value))
+	switch reflectValue.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < reflectValue.Len(); i++ {
+			modelValue := reflectValue.Index(i).Interface()
+			model, ok := modelValue.(types.IModel)
+			if ok {
+				modelMap[model.GetID()] = modelValue
+			}
+		}
+	}
+	return modelMap
+}
+
+func toModelTypeValueMap(value interface{}) map[uint]interface{} {
+	modelMap := make(map[uint]interface{})
+	reflectValue := reflect.Indirect(reflect.ValueOf(value))
+	switch reflectValue.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < reflectValue.Len(); i++ {
+			modelValue := reflectValue.Index(i).Interface()
+			model, ok := modelValue.(types.IModel)
+			if ok {
+				modelMap[model.GetID()] = modelValue
+			}
+		}
+	}
+	return modelMap
 }
 
 func toModelMap(value interface{}) map[uint]types.IModel {
