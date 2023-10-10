@@ -555,22 +555,6 @@ func toModelList(value interface{}) []types.IModel {
 	return modelList
 }
 
-func getModelTypeList(value interface{}) interface{} {
-	modelMap := make(map[uint]interface{})
-	reflectValue := reflect.Indirect(reflect.ValueOf(value))
-	switch reflectValue.Kind() {
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < reflectValue.Len(); i++ {
-			modelValue := reflectValue.Index(i).Interface()
-			model, ok := modelValue.(types.IModel)
-			if ok {
-				modelMap[model.GetID()] = modelValue
-			}
-		}
-	}
-	return modelMap
-}
-
 func toModelTypeValueMap(value interface{}) map[uint]interface{} {
 	modelMap := make(map[uint]interface{})
 	reflectValue := reflect.Indirect(reflect.ValueOf(value))
