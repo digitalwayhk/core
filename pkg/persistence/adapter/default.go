@@ -524,12 +524,19 @@ func (own *DefaultAdapter) syncOnlyInRemoteDataToLocal(model interface{}, localD
 }
 
 func getModelList(modelTypeValueMap map[uint]interface{}, models []types.IModel, modelListType reflect.Type) interface{} {
-	resultList := make([]interface{}, 0)
+	resultValue := reflect.MakeSlice(modelListType, 0, 0)
+	reflectionValue := reflect.New(resultValue.Type())
+	reflectionValue.Elem().Set(resultValue)
+
+	slicePtr := reflect.ValueOf(reflectionValue.Interface())
+
+	sliceValuePtr := slicePtr.Elem()
 	for _, model := range models {
 		modeTypeValue := modelTypeValueMap[model.GetID()]
-		resultList = append(resultList, modeTypeValue)
+		sliceValuePtr.Set(reflect.Append(sliceValuePtr, reflect.ValueOf(modeTypeValue)))
 	}
-	return resultList
+	value := sliceValuePtr.Interface()
+	return value
 }
 
 func toModelList(value interface{}) []types.IModel {
@@ -546,6 +553,22 @@ func toModelList(value interface{}) []types.IModel {
 		}
 	}
 	return modelList
+}
+
+func getModelTypeList(value interface{}) interface{} {
+	modelMap := make(map[uint]interface{})
+	reflectValue := reflect.Indirect(reflect.ValueOf(value))
+	switch reflectValue.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < reflectValue.Len(); i++ {
+			modelValue := reflectValue.Index(i).Interface()
+			model, ok := modelValue.(types.IModel)
+			if ok {
+				modelMap[model.GetID()] = modelValue
+			}
+		}
+	}
+	return modelMap
 }
 
 func toModelTypeValueMap(value interface{}) map[uint]interface{} {
