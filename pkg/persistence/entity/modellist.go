@@ -83,6 +83,18 @@ func newlist[T types.IModel](t reflect.Type, v reflect.Value, model *T, action t
 		ada: action,
 	}
 }
+func (own *ModelList[T]) SetOnLoad(fn func(item *types.SearchItem, own interface{}) error) {
+	own.onLoad = fn
+}
+func (own *ModelList[T]) SetOnInsert(fn func(item *T) error) {
+	own.onInsert = fn
+}
+func (own *ModelList[T]) SetOnUpdate(fn func(item *T) error) {
+	own.onUpdate = fn
+}
+func (own *ModelList[T]) SetOnDelete(fn func(item *T) error) {
+	own.onDelete = fn
+}
 func (own *ModelList[T]) GetSearchItem() *types.SearchItem {
 	if own.searchItem == nil {
 		own.searchItem = &types.SearchItem{
