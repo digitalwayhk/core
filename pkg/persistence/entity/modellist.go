@@ -504,10 +504,14 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 	return own.OnLoad(ada, item)
 }
 func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
-	err := ada.Insert(item)
-	if err == nil && own.onInsert != nil {
+	var err error
+	if own.onInsert != nil {
 		err = own.onInsert(item)
+		if err != nil {
+			return err
+		}
 	}
+	err = ada.Insert(item)
 	return err
 }
 func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
@@ -524,10 +528,14 @@ func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
 	// 		})
 	// 	}
 	// })
-	err := ada.Update(item)
+	var err error
 	if err == nil && own.onUpdate != nil {
 		err = own.onUpdate(item)
+		if err != nil {
+			return err
+		}
 	}
+	err = ada.Update(item)
 	return err
 
 }
