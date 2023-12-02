@@ -25,6 +25,10 @@ type ModelList[T types.IModel] struct {
 	searchList  []*T
 	searchItem  *types.SearchItem
 	ada         types.IDataAction
+	onLoad      func(item *types.SearchItem, own interface{}) error
+	onInsert    func(item *T) error
+	onUpdate    func(item *T) error
+	onDelete    func(item *T) error
 }
 
 func NewModelList[T types.IModel](action types.IDataAction) *ModelList[T] {
@@ -454,7 +458,11 @@ func (own *ModelList[T]) Clear() {
 	own.deleteList = make([]*T, 0, 1000)
 }
 func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) error {
-	return ada.Load(item, &own.searchList)
+	err := ada.Load(item, &own.searchList)
+	if err == nil && own.onLoad != nil {
+		err = own.onLoad(item, own)
+	}
+	return err
 }
 func (own *ModelList[T]) load(item *types.SearchItem) error {
 	defer func() {
@@ -484,7 +492,11 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 	return own.OnLoad(ada, item)
 }
 func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
-	return ada.Insert(item)
+	err := ada.Insert(item)
+	if err == nil && own.onInsert != nil {
+		err = own.onInsert(item)
+	}
+	return err
 }
 func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
 	// utils.ForEach(item, func(name string, value interface{}) {
@@ -500,7 +512,11 @@ func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
 	// 		})
 	// 	}
 	// })
-	return ada.Update(item)
+	err := ada.Update(item)
+	if err == nil && own.onUpdate != nil {
+		err = own.onUpdate(item)
+	}
+	return err
 
 }
 func (own *ModelList[T]) OnDelete(ada types.IDataAction, item *T) error {
