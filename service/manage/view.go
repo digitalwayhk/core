@@ -63,11 +63,15 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
 	}
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		logx.Error(err)
-	// 	}
-	// }()
+	if view, ok := own.instance.(IManageService); ok {
+		data, err, stop := view.DoBefore(own, req)
+		if stop {
+			return data, err
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	mv, vm := own.getmv(req)
 	list := models.NewManageModelList[T]()
 	model := list.NewItem()
@@ -77,6 +81,10 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 		mv.ViewModel(vm)
 	}
 	own.Model = vm
+	if view, ok := own.instance.(IManageService); ok {
+		view.DoAfter(own, req)
+		//return data, err
+	}
 	return own.Model, nil
 }
 func (own *View[T]) getmv(req types.IRequest) (IManageView, *view.ViewModel) {
