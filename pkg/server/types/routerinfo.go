@@ -147,7 +147,7 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 		if config.INITSERVER {
 			return
 		}
-		own.pool.Put(api)
+		own.pool.Put(utils.NewInterface(api))
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
