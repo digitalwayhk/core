@@ -55,14 +55,16 @@ func (own *RouterInfo) getNew() IRouter {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
 	}()
-	own.once.Do(func() {
-		own.pool = sync.Pool{
-			New: func() interface{} {
-				return utils.NewInterface(own.instance)
-			},
-		}
-	})
-	return own.pool.Get().(IRouter)
+	return utils.NewInterface(own.instance).(IRouter)
+	//有问题，值无法初始化
+	// own.once.Do(func() {
+	// 	own.pool = sync.Pool{
+	// 		New: func() interface{} {
+	// 			return utils.NewInterface(own.instance)
+	// 		},
+	// 	}
+	// })
+	// return own.pool.Get().(IRouter)
 }
 func (own *RouterInfo) New() IRouter {
 	item := own.getNew()
@@ -147,7 +149,7 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 		if config.INITSERVER {
 			return
 		}
-		own.pool.Put(utils.NewInterface(api))
+		//own.pool.Put(utils.NewInterface(api))
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
@@ -163,7 +165,7 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	defer func() {
-		own.pool.Put(api)
+		//own.pool.Put(api)
 		if config.INITSERVER {
 			return
 		}
