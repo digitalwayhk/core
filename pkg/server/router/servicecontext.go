@@ -184,16 +184,16 @@ func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 		if as, ok := own.Service.AttachService[name]; ok {
 			as.Address = cas.Address
 			as.Port = cas.Port
-			if cas.SocketPort == 0 {
-				csc := own.GetServerConfig(as.Address, as.Port)
-				if csc != nil {
-					as.SocketPort = csc.SocketPort
-					cas.SocketPort = csc.SocketPort
-					cas.Address = csc.RunIp
-					as.Address = csc.RunIp
-					own.Config.Save()
-				}
-			}
+			// if cas.SocketPort == 0 {
+			// 	csc := own.GetServerConfig(as.Address, as.Port)
+			// 	if csc != nil {
+			// 		as.SocketPort = csc.SocketPort
+			// 		cas.SocketPort = csc.SocketPort
+			// 		cas.Address = csc.RunIp
+			// 		as.Address = csc.RunIp
+			// 		own.Config.Save()
+			// 	}
+			// }
 			as.SocketPort = cas.SocketPort
 			as.IsAttach = false
 			for _, sr := range as.ObserverRouters {

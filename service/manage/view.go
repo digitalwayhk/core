@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/models"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	types "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -59,13 +60,28 @@ func (own *View[T]) Validation(req types.IRequest) error {
 
 var viewModelMap = make(map[string]view.ViewModel)
 
+func getViewModel(item interface{}) *view.ViewModel {
+	if utils.IsPtr(item) {
+		return item.(*view.ViewModel)
+	}
+	logx.Error("getViewModel item is not ptr")
+	return nil
+}
+func getModelT(item interface{}) *entity.Model {
+	return item.(*entity.Model)
+}
 func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
 	}
+	list := models.NewManageModelList[T]()
+	model := list.NewItem()
 	if view, ok := own.instance.(IManageService); ok {
 		data, err, stop := view.DoBefore(own, req)
 		if stop {
+			//vm := getViewModel(data)
+			//own.instance.(IManageView).ViewModel(vm)
+			own.Model = getViewModel(data)
 			return data, err
 		}
 		if err != nil {
@@ -73,8 +89,6 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 		}
 	}
 	mv, vm := own.getmv(req)
-	list := models.NewManageModelList[T]()
-	model := list.NewItem()
 	vm.Fields = modelToFiled(model, mv)
 	if mv != nil {
 		vm.ChildModels = modelToChildModel(model, mv)
