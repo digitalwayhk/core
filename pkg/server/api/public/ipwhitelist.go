@@ -1,7 +1,6 @@
 package public
 
 import (
-	"errors"
 	"strconv"
 	"time"
 
@@ -46,19 +45,23 @@ func (own *IpWhiteList) Validation(req types.IRequest) error {
 	// 		return errors.New("服务管理接口只能在本地机访问！")
 	// 	}
 	// }
-	if own.Ip == "" {
-		return errors.New("ip不能为空!/r/n")
-	}
+	// if own.Ip == "" {
+	// 	return errors.New("ip不能为空!/r/n")
+	// }
 
 	return nil
 }
 func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
+	list := entity.NewModelList[smodels.IPWhiteModel](nil)
+	if own.Ip == "" {
+		rows, _, err := list.SearchAll(1, 1000)
+		return rows, err
+	}
 	if own.Timeout <= 0 {
 		own.Timeout = int64(time.Hour)
 	} else {
 		own.Timeout = own.Timeout * int64(time.Minute)
 	}
-	list := entity.NewModelList[smodels.IPWhiteModel](nil)
 	row := list.NewItem()
 	row.Name = own.Ip
 	row.Timeout = own.Timeout
@@ -66,7 +69,12 @@ func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, list.Save()
+	err = list.Save()
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := list.SearchAll(1, 1000)
+	return rows, err
 }
 
 func (own *IpWhiteList) RouterInfo() *types.RouterInfo {
