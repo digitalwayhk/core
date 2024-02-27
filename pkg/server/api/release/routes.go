@@ -16,6 +16,7 @@ func Routers() []types.IRouter {
 		&public.Observe{},
 		&public.Notify{},
 		&public.Attach{},
+		&public.IpWhiteList{},
 		&private.ModifyConfig{},
 		&private.SetServiceAddress{},
 		&ppv.ModifyRemoteDBConfig{},
