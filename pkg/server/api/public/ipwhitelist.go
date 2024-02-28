@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -63,12 +64,27 @@ func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 	} else {
 		own.Timeout = own.Timeout * int64(time.Minute)
 	}
-	row := list.NewItem()
-	row.Name = own.Ip
-	row.Timeout = own.Timeout
-	err := list.Add(row)
+	row, err := list.SearchOne(func(item *pt.SearchItem) {
+		item.AddWhereN("name", own.Ip)
+	})
 	if err != nil {
 		return nil, err
+	}
+	if row == nil {
+		row := list.NewItem()
+		row.Name = own.Ip
+		row.Timeout = own.Timeout
+		err := list.Add(row)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		row.Timeout = own.Timeout
+		row.CreatedAt = time.Now()
+		err := list.Update(row)
+		if err != nil {
+			return nil, err
+		}
 	}
 	err = list.Save()
 	if err != nil {
