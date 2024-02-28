@@ -1,6 +1,7 @@
 package public
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
@@ -78,5 +79,7 @@ func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *IpWhiteList) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	info := api.ServerRouterInfo(own)
+	info.Method = http.MethodGet
+	return info
 }
