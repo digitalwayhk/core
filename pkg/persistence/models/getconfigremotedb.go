@@ -26,13 +26,14 @@ func init() {
 var GetRemoteDBHandler func(dbconfig *RemoteDbConfig)
 
 func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog, autotable bool) (types.IDataBase, error) {
+	if list == nil {
+		list = NewRemoteDbConfigList(islog)
+	}
 	if len(TempRemoteDB) > 0 {
 		if db, ok := TempRemoteDB[name]; ok {
 			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, islog, autotable), nil
 		}
 	}
-	list = NewRemoteDbConfigList(islog)
-
 	if GetRemoteDBHandler != nil {
 		rdc := &RemoteDbConfig{
 			Name:        name,
