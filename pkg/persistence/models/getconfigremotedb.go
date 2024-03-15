@@ -14,8 +14,6 @@ import (
 
 var once sync.Once
 
-var list *entity.ModelList[RemoteDbConfig]
-
 // 临时远程库配置，修改配置文件中的Debug为false,会失效这里的任何设置
 var TempRemoteDB map[string]*RemoteDbConfig
 
@@ -26,14 +24,12 @@ func init() {
 var GetRemoteDBHandler func(dbconfig *RemoteDbConfig)
 
 func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog, autotable bool) (types.IDataBase, error) {
-	if list == nil {
-		list = NewRemoteDbConfigList(islog)
-	}
 	if len(TempRemoteDB) > 0 {
 		if db, ok := TempRemoteDB[name]; ok {
 			return oltp.NewMysql(db.Host, db.User, db.Pass, db.Port, islog, autotable), nil
 		}
 	}
+	list := NewRemoteDbConfigList(islog)
 	if GetRemoteDBHandler != nil {
 		rdc := &RemoteDbConfig{
 			Name:        name,
@@ -47,16 +43,16 @@ func GetConfigRemoteDB(name string, connecttype types.DBConnectType, islog, auto
 		return nil, err
 	}
 	if len(dbconfig) == 0 {
-		addconfig(name)
+		addconfig(name, list)
 		return nil, errors.New(name + " database not set romotedb config")
 	}
-	rdc, err := localdbGetConfig(name, connecttype)
+	rdc, err := localdbGetConfig(name, connecttype, list)
 	if err != nil {
 		return nil, errors.New(name + " database not set romotedb config type:" + strconv.Itoa(int(connecttype)))
 	}
 	return dbconToIdb(rdc)
 }
-func addconfig(name string) error {
+func addconfig(name string, list *entity.ModelList[RemoteDbConfig]) error {
 	item := list.NewItem()
 	item.Name = name
 	item.ConnectType = 0
@@ -64,7 +60,7 @@ func addconfig(name string) error {
 	list.Add(item)
 	return list.Save()
 }
-func localdbGetConfig(name string, connecttype types.DBConnectType) (*RemoteDbConfig, error) {
+func localdbGetConfig(name string, connecttype types.DBConnectType, list *entity.ModelList[RemoteDbConfig]) (*RemoteDbConfig, error) {
 	_, rdc := list.FindOne(func(o *RemoteDbConfig) bool {
 		if connecttype == types.ReadAndWriteType {
 			return o.ConnectType == types.ReadAndWriteType
@@ -129,9 +125,7 @@ func NewRemoteDbConfigList(islog bool) *entity.ModelList[RemoteDbConfig] {
 }
 
 func GetRemoteCacheConfig(name string) (types.ICache, error) {
-	if list == nil {
-		list = NewRemoteDbConfigList(false)
-	}
+	list := NewRemoteDbConfigList(false)
 	if GetRemoteDBHandler != nil {
 		rdc := &RemoteDbConfig{
 			Name:        name,
@@ -152,10 +146,10 @@ func GetRemoteCacheConfig(name string) (types.ICache, error) {
 		return nil, err
 	}
 	if len(dbconfig) == 0 {
-		addconfig(name)
+		addconfig(name, list)
 		return nil, errors.New(name + " database not set romotedb config")
 	}
-	rdc, err := localdbGetConfig(name, 0)
+	rdc, err := localdbGetConfig(name, 0, list)
 	if err != nil {
 		return nil, errors.New(name + " cacheDB not set")
 	}
