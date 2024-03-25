@@ -58,6 +58,9 @@ func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 	own.serviceContexts[sc.Service.Name] = sc
 	go own.stateCallback(sc)
 }
+
+var once sync.Once
+
 func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 	if own.isRun {
 		return
@@ -71,13 +74,15 @@ func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 		}
 	}
 	own.isRun = true
-	own.linkService()
-	own.serviceStart()
-	if own.htmls != nil && own.ViewPort > 0 {
-		own.htmls.Isstart <- true
-	} else {
-		own.htmls.Isstart <- false
-	}
+	once.Do(func() {
+		if own.htmls != nil && own.ViewPort > 0 {
+			own.htmls.Isstart <- true
+		} else {
+			own.htmls.Isstart <- false
+		}
+		own.linkService()
+		own.serviceStart()
+	})
 }
 
 func (own *WebServer) serviceStart() {
@@ -85,7 +90,7 @@ func (own *WebServer) serviceStart() {
 		if start, ok := ctx.Service.Instance.(types.IStartService); ok {
 			fmt.Println("===========================================================")
 			fmt.Println("服务" + ctx.Service.Name + "的IStartService接口开始执行")
-			start.Start()
+			go start.Start()
 			fmt.Println("===========================================================")
 		}
 	}
