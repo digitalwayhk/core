@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -120,6 +121,7 @@ func (own *Mysql) GetDB() (*gorm.DB, error) {
 		}
 		mysqldb.SetMaxOpenConns(int(own.ConMax))
 		mysqldb.SetMaxIdleConns(int(own.ConPool))
+		mysqldb.SetConnMaxLifetime(time.Minute)
 		own.db = db
 	}
 	return own.db, nil
