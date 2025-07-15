@@ -108,7 +108,7 @@ func handers(own *Server, api *types.RouterInfo) {
 			Handler: routeHandler(own.context.Router),
 		},
 	}, opts...)
-	fmt.Printf("register route: %s \n", path)
+	fmt.Printf("register auth: %t ,method: %s ,route: %s \n", api.Auth, api.Method, path)
 }
 func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 	for _, rou := range routers {
@@ -157,13 +157,13 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 		if args != "" {
 			path = path + "?" + args[1:]
 		}
-		values, err = HttpGet(path)
+		values, err = HttpGet(path, payload)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if payload.HttpMethod == http.MethodPost || payload.HttpMethod == "" {
-		values, err = PostJson(path, values)
+		values, err = PostJson(path, values, payload)
 		if err != nil {
 			return nil, err
 		}

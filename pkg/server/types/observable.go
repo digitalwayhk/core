@@ -45,6 +45,7 @@ type TargetInfo struct {
 	TargetPort       int
 	TargetSocketPort int
 	TargetPath       string
+	TargetToken      string //目标服务的token
 }
 
 // NewObserveArgs 创建对路由的订阅,router为订阅路由,state为订阅的触发时机，callback为回调函数

@@ -30,6 +30,9 @@ func (own *ViewModel) ViewField(name string) *FieldModel {
 		if strings.EqualFold(f.Field, name) {
 			return f
 		}
+		if strings.EqualFold(f.PropField, name) {
+			return f
+		}
 	}
 	return nil
 }
@@ -71,7 +74,8 @@ type CommandModel struct {
 type FieldModel struct {
 	*entity.Model `json:"-"`
 	IsKey         bool              `json:"iskey"`
-	Field         string            `json:"field"`
+	Field         string            `json:"field"`     // 字段名称，有可能是json中的属性名称，当为json时，可能与数据库字段名称不同
+	PropField     string            `json:"porpfield"` // 属性字段名称，当field和本字段不同时，使用此字段作为属性名称
 	Title         string            `json:"title"`
 	Index         int               `json:"index"`
 	Disabled      bool              `json:"disabled"`
@@ -143,6 +147,9 @@ func (own *FieldModel) IsFieldOrTitle(name ...string) bool {
 	}
 	for _, n := range name {
 		if strings.EqualFold(own.Field, n) {
+			return true
+		}
+		if strings.EqualFold(own.PropField, n) {
 			return true
 		}
 	}

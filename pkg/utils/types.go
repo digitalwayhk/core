@@ -174,7 +174,14 @@ func GetParentType(target interface{}) interface{} {
 }
 
 func DeepForItem(item interface{}, forfunc func(field, parent reflect.StructField, kind TypeKind)) {
+	if item == nil {
+		return
+	}
 	t := reflect.TypeOf(item)
+	// 如果是指针，获取指向的类型
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
 	DeepFor(t, forfunc)
 }
 func DeepFor(stype reflect.Type, forfunc func(field, parent reflect.StructField, kind TypeKind)) {
@@ -209,7 +216,19 @@ func deepFor(stype reflect.Type, parent reflect.StructField, forfunc func(field,
 	}
 }
 func ForItem(item interface{}, value func(name string) interface{}) {
-	sv := reflect.ValueOf(item).Elem()
+	if item == nil {
+		return
+	}
+	sv := reflect.ValueOf(item)
+	if sv.Kind() == reflect.Ptr {
+		if sv.IsNil() {
+			return
+		}
+		sv = sv.Elem()
+	}
+	if !sv.IsValid() {
+		return
+	}
 	DeepForItem(item, func(field, parent reflect.StructField, kind TypeKind) {
 		vv := sv.FieldByName(field.Name)
 		v := value(field.Name)
@@ -219,7 +238,19 @@ func ForItem(item interface{}, value func(name string) interface{}) {
 	})
 }
 func ForEach(item interface{}, fn func(name string, value interface{})) {
-	sv := reflect.ValueOf(item).Elem()
+	if item == nil {
+		return
+	}
+	sv := reflect.ValueOf(item)
+	if sv.Kind() == reflect.Ptr {
+		if sv.IsNil() {
+			return
+		}
+		sv = sv.Elem()
+	}
+	if !sv.IsValid() {
+		return
+	}
 	DeepForItem(item, func(field, parent reflect.StructField, kind TypeKind) {
 		fn(field.Name, sv.FieldByName(field.Name).Interface())
 	})
@@ -235,7 +266,13 @@ func ArrayEach(items interface{}, f func(item interface{})) {
 	}
 }
 func IsArray(items interface{}) bool {
-	stype := reflect.TypeOf(items).Elem()
+	if items == nil {
+		return false
+	}
+	stype := reflect.TypeOf(items)
+	if stype.Kind() == reflect.Ptr {
+		stype = stype.Elem()
+	}
 	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
 }
 func NewArrayItem(items interface{}) interface{} {

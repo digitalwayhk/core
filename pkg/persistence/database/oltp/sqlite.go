@@ -37,12 +37,12 @@ func NewSqlite() *Sqlite {
 	return sql
 }
 func (own *Sqlite) init(data interface{}) error {
-	if own.Name == "" {
-		err := own.GetDBName(data)
-		if err != nil {
-			return err
-		}
+	//if own.Name == "" {
+	err := own.GetDBName(data)
+	if err != nil {
+		return err
 	}
+	//}
 	if own.db == nil {
 		_, err := own.GetDB()
 		if err != nil {
@@ -59,7 +59,7 @@ func (own *Sqlite) init(data interface{}) error {
 
 func (own *Sqlite) GetDBName(data interface{}) error {
 	if idb, ok := data.(types.IDBName); ok {
-		own.Name = idb.GetRemoteDBName()
+		own.Name = idb.GetLocalDBName()
 		if own.Name == "" {
 			return errors.New("db name is empty")
 		}

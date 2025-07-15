@@ -24,6 +24,11 @@ type Response struct {
 
 // NewResponse 一次请求的响应
 func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
+	if own.service != nil {
+		if newres, ok := own.service.Service.Instance.(types.INewResponse); ok {
+			return newres.NewResponse(data, err)
+		}
+	}
 	suc := true
 	res := &Response{
 		err:       err,

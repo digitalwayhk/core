@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -54,12 +55,8 @@ func getRequestInfo(r *http.Request, req *Request) {
 	}
 	req.userID = uint(uid)
 	req.userName = uname
-	spanCtx := trace.SpanContextFromContext(ctext)
-	tid := ""
-	if spanCtx.HasTraceID() {
-		tid = spanCtx.TraceID().String()
-	}
-	req.traceID = tid
+	req.traceID = getTraceID(ctext, r)
+	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
 }
 
 // NewRequest 路由接收到请求
@@ -83,12 +80,24 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 	}
 	return req
 }
+func getTraceID(ctx context.Context, r *http.Request) string {
+	if r != nil {
+		if traceID := r.Header.Get("X-Trace-Id"); traceID != "" {
+			//logx.Infof("api: %s, 获取到X-Trace-Id-internal: %s", r.RequestURI, traceID)
+			return traceID
+		}
+	}
+	// 1. 优先从OpenTelemetry获取
+	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.HasTraceID() {
+		return spanCtx.TraceID().String()
+	}
+
+	// 4. 生成新的traceID
+	uid, _ := uuid.NewV4()
+	return uid.String()
+}
 
 func (own *Request) GetTraceId() string {
-	if own.traceID == "" {
-		uid, _ := uuid.NewV4()
-		own.traceID = uid.String()
-	}
 	return own.traceID
 }
 func (own *Request) ClearTraceId() {
@@ -111,6 +120,14 @@ func (own *Request) Authorized() bool {
 	return own.auth
 }
 func (own *Request) GetValue(key string) string {
+	val := own.getValue(key)
+	if val == "" {
+		key = strings.Replace(key, "-", "", -1)
+		val = own.getValue(key)
+	}
+	return val
+}
+func (own *Request) getValue(key string) string {
 	val := own.http.FormValue(key)
 	if val == "" {
 		query := own.http.URL.Query()
@@ -178,7 +195,7 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 func (own *Request) GetServerInfo() *types.TargetInfo {
 	cont := own.GetService()
 	return &types.TargetInfo{
-		TargetAddress:    cont.Config.Host,
+		TargetAddress:    cont.Config.RunIp,
 		TargetService:    own.ServiceName(),
 		TargetPort:       cont.Config.Port,
 		TargetSocketPort: cont.Config.SocketPort,
@@ -221,10 +238,10 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		}
 		payload.TargetAddress = info.TargetAddress
 		payload.TargetPort = info.TargetPort
-		if payload.TargetService == "" && info.TargetService != "" {
+		if info.TargetService != "" {
 			payload.TargetService = info.TargetService
 		}
-		if payload.TargetPath == "" && info.TargetPath != "" {
+		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
 		if info.TargetSocketPort == 0 {
@@ -232,6 +249,9 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 			payload.TargetSocketPort = con.SocketPort
 		} else {
 			payload.TargetSocketPort = info.TargetSocketPort
+		}
+		if info.TargetToken != "" {
+			payload.Token = info.TargetToken
 		}
 	}
 	return own.service.CallService(payload, callback...)
@@ -243,7 +263,7 @@ func (own *Request) callPayload(router types.IRouter) (*types.PayLoad, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ToPayLoad(own, router), nil
+	return ToPayLoad(own, router, tinfo), nil
 }
 func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, router types.IRouter) *types.PayLoad {
 	info := router.RouterInfo()
@@ -258,10 +278,11 @@ func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, rout
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,
 		Instance:      router,
+		HttpMethod:    info.Method,
 	}
 }
 
-func ToPayLoad(req *Request, router types.IRouter) *types.PayLoad {
+func ToPayLoad(req *Request, router types.IRouter, tinfo *types.RouterInfo) *types.PayLoad {
 	uid, uname := req.GetUser()
 	info := router.RouterInfo()
 	return &types.PayLoad{
@@ -275,7 +296,7 @@ func ToPayLoad(req *Request, router types.IRouter) *types.PayLoad {
 		ClientIP:      req.GetClientIP(),
 		Auth:          req.Authorized(),
 		Instance:      router,
-		HttpMethod:    req.http.Method,
+		HttpMethod:    tinfo.Method,
 	}
 }
 

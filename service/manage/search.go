@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/digitalwayhk/core/models"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -32,8 +31,9 @@ func (own *Search[T]) New(instance interface{}) types.IRouter {
 			own.instance = instance
 		}
 	}
-	if own.list == nil {
-		own.list = models.NewManageModelList[T]().ModelList
+	if gml, ok := own.instance.(IGetModelList); ok {
+		list := gml.GetList()
+		own.list = list.(*entity.ModelList[T])
 	}
 	return own
 }
@@ -46,18 +46,6 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 	err := req.Bind(own.SearchItem)
 	if err != nil {
 		return err
-	}
-	if gml, ok := own.instance.(IGetModelList); ok {
-		list := gml.GetList()
-		if list != nil {
-			own.list = list.(*entity.ModelList[T])
-		}
-	}
-	if gml, ok := own.instance.(IGetModelListWhere); ok {
-		list := gml.GetItemList(own.SearchItem)
-		if list != nil {
-			own.list = list.(*entity.ModelList[T])
-		}
 	}
 	if own.SearchItem.Parent != nil {
 		item := own.list.NewItem()
@@ -110,8 +98,8 @@ func (own *Search[T]) Do(req types.IRequest) (interface{}, error) {
 	list := own.list
 	item := own.SearchItem.ToSearchItem()
 	item.Model = list.NewItem()
-	if bm, ok := item.Model.(pt.IBaseModel); ok {
-		item.IsPreload = bm.IsBaseModel()
+	if bm, ok := item.Model.(pt.IIsPreload); ok {
+		item.IsPreload = bm.IsPreload()
 	}
 	err := list.LoadList(item)
 	if err != nil {

@@ -388,6 +388,31 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	}
 	return nil
 }
+func (own *ServiceContext) CallTargetService(traceid string, router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	payload := GetPayLoad(traceid, own.Service.Name, "", "", 0, router)
+	if info != nil {
+		if info.TargetAddress == "" || info.TargetPort == 0 {
+			return nil, errors.New("目标地址或端口错误")
+		}
+		payload.TargetAddress = info.TargetAddress
+		payload.TargetPort = info.TargetPort
+		if info.TargetService != "" {
+			payload.TargetService = info.TargetService
+		}
+		if info.TargetPath != "" {
+			payload.TargetPath = info.TargetPath
+		}
+		if info.TargetSocketPort == 0 {
+			payload.TargetSocketPort = own.Config.SocketPort
+		} else {
+			payload.TargetSocketPort = info.TargetSocketPort
+		}
+		if info.TargetToken != "" {
+			payload.Token = info.TargetToken
+		}
+	}
+	return own.CallService(payload, callback...)
+}
 func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse, error) {
 	info := api.RouterInfo()
 	pl := &types.PayLoad{

@@ -19,5 +19,6 @@ func RouterInfo(own interface{}) *st.RouterInfo {
 	ioh := own.(st.IPackRouterHook)
 	info.Path = "/api/manage/" + info.ServiceName + "/" + strings.ToLower(utils.GetTypeName(ioh.GetInstance())) + "/" + name
 	info.Auth = true
+	info.PathType = st.ManageType
 	return info
 }

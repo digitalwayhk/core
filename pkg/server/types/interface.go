@@ -24,6 +24,10 @@ type IRequestClear interface {
 	SetPath(path string)
 }
 
+type INewResponse interface {
+	NewResponse(data interface{}, err error) IResponse //创建一个响应
+}
+
 // IResponse
 type IResponse interface {
 	GetSuccess() bool                                //是否成功
@@ -41,4 +45,12 @@ type IWebSocket interface {
 type ITypeInfo interface {
 	//返回类型的code和name
 	GetInfo() (string, string)
+}
+
+type ITitle interface {
+	GetTitle() string //获取标题
+}
+
+type IDescription interface {
+	GetDescription() string //获取描述
 }

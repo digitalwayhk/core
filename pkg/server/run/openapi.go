@@ -2,15 +2,18 @@ package run
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest/httpx"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -102,6 +105,14 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 		OperationID: info.Path,
 	}
 	api := info.New()
+	defer func() {
+		if err := recover(); err != nil {
+			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
+			// 获取调用栈字符串并打印
+			stack := debug.Stack()
+			fmt.Printf("\nStack trace:\n%s\n", stack)
+		}
+	}()
 	if method == "GET" {
 		operation.Parameters = make(openapi3.Parameters, 0)
 		utils.ForEach(api, func(name string, value interface{}) {

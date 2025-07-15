@@ -80,8 +80,8 @@ func (own *ManageService[T]) Routers() []st.IRouter {
 func (own *ManageService[T]) GetView() *view.ViewModel {
 	return own.View.Model
 }
-func (own *ManageService[T]) GetList() *models.ModelList[T] {
-	return models.NewManageModelList[T]()
+func (own *ManageService[T]) GetList() interface{} {
+	return models.NewManageModelList[T]().ModelList
 }
 func (own *ManageService[T]) ParseBefore(sender interface{}, req st.IRequest) error {
 	return nil

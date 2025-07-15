@@ -118,3 +118,7 @@ type IOrderModel interface {
 type IViewModel interface {
 	IsView() bool
 }
+
+type IIsPreload interface {
+	IsPreload() bool //是否预加载
+}

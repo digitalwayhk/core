@@ -17,6 +17,7 @@ type QueryService struct {
 type ServiceData struct {
 	*types.Service
 	ViewManage string `json:"viewmanage"`
+	Title      string `json:"title"` //服务标题
 }
 
 func (own *QueryService) Parse(req types.IRequest) error {
@@ -46,8 +47,13 @@ func (own *QueryService) RouterInfo() *types.RouterInfo {
 	return api.ServerRouterInfo(own)
 }
 func toData(sr *router.ServiceContext, path string) *ServiceData {
+	title := ""
+	if ititle, ok := sr.Service.Instance.(types.ITitle); ok {
+		title = ititle.GetTitle()
+	}
 	return &ServiceData{
 		Service:    sr.Service,
 		ViewManage: fmt.Sprintf(path, sr.Service.Name),
+		Title:      title,
 	}
 }

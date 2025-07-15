@@ -20,6 +20,9 @@ func (own *SystemManage) Routers() []types.IRouter {
 	//演示发布其他服务中的路由在本服务提供
 	dbc := pm.NewRemoteDBManage()
 	items = append(items, dbc.Routers()...)
+
+	items = append(items, manage.NewDirectoryManage().Routers()...)
+	items = append(items, manage.NewMenuManage().Routers()...)
 	return items
 }
 func (own *SystemManage) SubscribeRouters() []*types.ObserveArgs {

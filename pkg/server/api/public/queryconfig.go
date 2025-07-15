@@ -37,7 +37,7 @@ func (own *QueryConfig) RouterInfo() *types.RouterInfo {
 
 func (own *QueryConfig) GetConfigPath(address string, port int) (*config.ServerConfig, error) {
 	path := address + ":" + strconv.Itoa(port) + own.RouterInfo().Path
-	values, err := rest.PostJson(path, nil)
+	values, err := rest.PostJson(path, nil, nil)
 	if err != nil {
 		return nil, err
 	}

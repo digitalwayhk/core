@@ -169,22 +169,25 @@ func routerToCommand(info *types.RouterInfo) *view.CommandModel {
 	// }
 	return cmd
 }
-func getfieldname(field *reflect.StructField) (string, string) {
+
+// getfieldname returns the field name, json name, and post type from a struct field.
+func getfieldname(field *reflect.StructField) (string, string, string) {
 	if field == nil {
-		return "", ""
+		return "", "", ""
 	}
 	name := field.Name
 	jname := field.Tag.Get("json")
+	name1 := ""
 	posttype := ""
 	if jname != "" {
 		if index := strings.Index(jname, ","); index > 0 {
-			name = jname[0:index]
+			name1 = jname[0:index]
 			posttype = jname[index+1:]
 		} else {
-			name = jname
+			name1 = jname
 		}
 	}
-	return name, posttype
+	return name1, name, posttype
 }
 func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 	fields := make([]*view.FieldModel, 0)
@@ -254,7 +257,7 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 }
 func getField(field reflect.StructField, typeName string) *view.FieldModel {
 	vfm := &view.FieldModel{}
-	vfm.Field, vfm.PostType = getfieldname(&field)
+	vfm.Field, vfm.PropField, vfm.PostType = getfieldname(&field)
 	vfm.Title = field.Name
 	vfm.IsSearch = true
 	vfm.IsEdit = true
@@ -315,7 +318,7 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 	if name == "" {
 		name = field.Name + "ID"
 	}
-	oof, _ := getfieldname(&field)
+	oof, _, _ := getfieldname(&field)
 	fm := &view.ForeignModel{
 		IsFkey:             true,
 		OneObjectTypeName:  field.Type.Name(),
@@ -334,13 +337,14 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 		Fields: make([]*view.FieldModel, 0),
 	}
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "id", IsKey: true, Type: "string", IsSearch: false, Visible: false})
-	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "code", Title: "编码", Type: "string", IsSearch: true, Visible: true, Sorter: true})
+	// fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "code", Title: "编码", Type: "string", IsSearch: true, Visible: true, Sorter: true})
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "name", Title: "名称", Type: "string", IsSearch: true, Visible: true, Sorter: true})
+
 	ff := utils.GetPropertyType(model, name)
 	if ff == nil {
 		logx.Error(oof + "生成外键属性时异常:" + fm.ManyObjectName + "中未找到" + name + "字段,请确认references:中的字段是否正确,大小写必须一致！")
 	} else {
-		name, _ = getfieldname(ff)
+		name, _, _ = getfieldname(ff)
 	}
 	return name, fm
 }

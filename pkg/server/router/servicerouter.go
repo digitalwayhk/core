@@ -11,6 +11,10 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
+type GetRouterPath interface {
+	GetRouterPathPrefixes() string
+}
+
 type ServiceRouter struct {
 	Service              *ServiceContext
 	publicAPI            map[string]*types.RouterInfo
@@ -147,17 +151,13 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 	index = strings.LastIndex(servicepack, "/")
 	servername := strings.ToLower(servicepack[index+1:])
 	auth := false
-	limit := 50
-	limittype := 0
 	if Pathtype == types.PrivateType {
 		auth = true
-		limittype = 1
-	}
-	if Pathtype == types.ManageType {
-		limit = 10
-		limittype = 1
 	}
 	Path := "/api/" + strings.ToLower(servername) + "/" + strings.ToLower(name)
+	if item, ok := item.(GetRouterPath); ok {
+		Path = item.GetRouterPathPrefixes() + "/" + strings.ToLower(name)
+	}
 	if !config.INITSERVER {
 		sc := GetContext(servername)
 		if sc != nil {
@@ -172,8 +172,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 		ID:                utils.HashCode(Path),
 		Path:              Path,
 		Auth:              auth,
-		SpeedLimit:        time.Duration(time.Second / time.Duration(limit)),
-		LimitType:         limittype,
+		PackPath:          pack,
 		Method:            http.MethodPost,
 		ServiceName:       servername,
 		PathType:          Pathtype,

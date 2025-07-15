@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -29,18 +30,16 @@ type RouterInfo struct {
 	Auth              bool
 	Method            string
 	ServiceName       string
-	SpeedLimit        time.Duration //接口限速
-	LimitType         int           //限速类型 0：IP,1:USERID
-	IsTwoSteps        bool          //是否是二步验证访问
+	PackPath          string //包路径
 	PathType          ApiType
 	StructName        string
 	InstanceName      string
 	instance          IRouter
 	WebSocketWaitTime time.Duration                            //websocket默认通知的循环等待时间 默认:10秒
-	iplasttime        map[string]time.Time                     //ip最后访问时间
-	userlasttime      map[uint]time.Time                       //userid最后访问时间
 	Subscriber        map[ObserveState]map[string]*ObserveArgs //订阅者
 	rCache            sync.Map                                 //路由结果缓存,key:api hash,value:result
+	useCache          bool                                     //是否使用缓存
+	cacheTime         time.Duration                            //缓存时间
 	rArgs             map[int]IRouter                          //路由参数
 	rWebSocketClient  map[int]map[IWebSocket]IRequest          //websocket客户端
 	webSocketHandler  bool                                     //websocket代理处理是否运行
@@ -108,36 +107,37 @@ func (own *RouterInfo) GetPath() string {
 func (own *RouterInfo) GetServiceName() string {
 	return own.ServiceName
 }
-func (own *RouterInfo) limit(ip string, userid uint) error {
-	if config.INITSERVER {
-		return nil
-	}
-	own.Lock()
-	defer own.Unlock()
-	if own.iplasttime == nil {
-		own.iplasttime = make(map[string]time.Time)
-	}
-	if lasttiem, ok := own.iplasttime[ip]; ok {
-		if time.Since(lasttiem) < own.SpeedLimit {
-			return errors.New("ip too many request")
-		}
-	} else {
-		own.iplasttime[ip] = time.Now()
-	}
-	if own.LimitType == 1 {
-		if own.userlasttime == nil {
-			own.userlasttime = make(map[uint]time.Time)
-		}
-		if lasttiem, ok := own.userlasttime[userid]; ok {
-			if time.Since(lasttiem) < own.SpeedLimit {
-				return errors.New("user too many request")
-			}
-		} else {
-			own.userlasttime[userid] = time.Now()
-		}
-	}
-	return nil
-}
+
+//	func (own *RouterInfo) limit(ip string, userid uint) error {
+//		if config.INITSERVER {
+//			return nil
+//		}
+//		own.Lock()
+//		defer own.Unlock()
+//		if own.iplasttime == nil {
+//			own.iplasttime = make(map[string]time.Time)
+//		}
+//		if lasttiem, ok := own.iplasttime[ip]; ok {
+//			if time.Since(lasttiem) < own.SpeedLimit {
+//				return errors.New("ip too many request")
+//			}
+//		} else {
+//			own.iplasttime[ip] = time.Now()
+//		}
+//		if own.LimitType == 1 {
+//			if own.userlasttime == nil {
+//				own.userlasttime = make(map[uint]time.Time)
+//			}
+//			if lasttiem, ok := own.userlasttime[userid]; ok {
+//				if time.Since(lasttiem) < own.SpeedLimit {
+//					return errors.New("user too many request")
+//				}
+//			} else {
+//				own.userlasttime[userid] = time.Now()
+//			}
+//		}
+//		return nil
+//	}
 func (own *RouterInfo) Exec(req IRequest) IResponse {
 	//uid, _ := req.GetUser()
 	// err := own.limit(req.GetClientIP(), uid)
@@ -171,19 +171,35 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		}
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+			// 获取调用栈字符串并打印
+			stack := debug.Stack()
+			fmt.Printf("\nStack trace:\n%s\n", stack)
 		}
 	}()
 	err := api.Validation(req)
 	if err != nil {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "validation", msg, 700)
+		logx.Error(err)
 		return req.NewResponse(nil, err)
+	}
+	if own.useCache {
+		if cache := own.getCache(api); cache != nil {
+			resp := req.NewResponse(cache.data, nil)
+			go own.responseNotify(api, req.GetTraceId(), resp)
+			return resp
+		}
 	}
 	go own.requestNotify(api, req.GetTraceId())
 	data, err := api.Do(req)
 	if err != nil {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "do", msg, 800)
+		logx.Error(err)
+	} else {
+		if own.useCache && data != nil {
+			own.setCache(api, data)
+		}
 	}
 	resp := req.NewResponse(data, err)
 	if err != nil {
@@ -251,16 +267,46 @@ func (own *RouterInfo) errorNotify(api IRouter, traceid string, resp IResponse) 
 		}
 	}
 }
-func (own *RouterInfo) getCache(api IRouter) interface{} {
+
+type cacheObject struct {
+	updateCacheTime time.Time   //更新缓存时间
+	data            interface{} //缓存数据
+}
+
+func (own *RouterInfo) UseCache(cacheTime time.Duration) {
+	own.useCache = true
+	own.cacheTime = cacheTime
+	if cacheTime <= 0 {
+		own.cacheTime = time.Second * 10 //默认缓存10秒
+	}
+	own.rCache = sync.Map{}
+}
+func (own *RouterInfo) getCache(api IRouter) *cacheObject {
 	key := getApiHash(api)
 	if value, ok := own.rCache.Load(key); ok {
-		return value
+		obj := value.(*cacheObject)
+		if obj.updateCacheTime.Add(own.cacheTime).After(time.Now()) {
+			return obj
+		}
+		//缓存过期
+		own.rCache.Delete(key)
+		return nil
 	}
 	return nil
 }
 func (own *RouterInfo) setCache(api IRouter, value interface{}) {
 	key := getApiHash(api)
-	own.rCache.Store(key, value)
+	obj := own.getCache(api)
+	if obj == nil {
+		obj = &cacheObject{
+			updateCacheTime: time.Now(),
+			data:            value,
+		}
+	} else {
+		obj.updateCacheTime = time.Now()
+		obj.data = value
+	}
+	own.rCache.Store(key, obj)
 }
 func (own *RouterInfo) FailureCache(api IRouter) {
 	if api == nil {
