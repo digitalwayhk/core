@@ -132,15 +132,15 @@ func (c *Client) readPump() {
 			c.SendError(msg.Channel, "Event数据不正确,只支持 sub,unsub,call")
 			continue // 如果出错,则直接返回
 		}
+		if cr, ok := c.res.(types.IRequestClear); ok {
+			cr.ClearTraceId()
+			cr.SetPath(msg.Channel)
+		}
 		if msg.Event == string(Call) {
 			nr, err := parse(info, msg.Data)
 			if err != nil {
 				c.SendError(msg.Channel, "数据格式不正确,无法转换为Request类型:"+err.Error())
 				continue // 如果出错,则直接返回
-			}
-			if cr, ok := c.res.(types.IRequestClear); ok {
-				cr.ClearTraceId()
-				cr.SetPath(msg.Channel)
 			}
 			res := info.ExecDo(nr, c.res)
 			c.Send(msg.Event, msg.Channel, res)
