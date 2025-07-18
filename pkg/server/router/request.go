@@ -244,12 +244,12 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
-		if info.TargetSocketPort == 0 {
-			con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
-			payload.TargetSocketPort = con.SocketPort
-		} else {
-			payload.TargetSocketPort = info.TargetSocketPort
-		}
+		// if info.TargetSocketPort == 0 {
+		// 	con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
+		// 	payload.TargetSocketPort = con.SocketPort
+		// } else {
+		// 	payload.TargetSocketPort = info.TargetSocketPort
+		// }
 		if info.TargetToken != "" {
 			payload.Token = info.TargetToken
 		}
