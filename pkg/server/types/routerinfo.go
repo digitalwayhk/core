@@ -44,8 +44,9 @@ type RouterInfo struct {
 	rWebSocketClient  map[int]map[IWebSocket]IRequest          //websocket客户端
 	webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
-	pool sync.Pool
-	once sync.Once
+	pool      sync.Pool
+	once      sync.Once
+	TempStore sync.Map
 }
 
 func (own *RouterInfo) getNew() IRouter {
@@ -357,9 +358,13 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	}
 	if _, ok := own.rWebSocketClient[hash]; !ok {
 		own.rWebSocketClient[hash] = make(map[IWebSocket]IRequest, 0)
+		if iwsr, ok := router.(IWebSocketRouter); ok {
+			iwsr.RegisterWebSocket(client, req)
+		}
 	}
 	own.rWebSocketClient[hash][client] = req
-	client.Send("sub", own.Path, strconv.Itoa(hash))
+	//client.Send("sub", own.Path, strconv.Itoa(hash))
+
 	return hash
 }
 func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) int {
@@ -376,10 +381,15 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 	}
 	own.Lock()
 	defer own.Unlock()
+	req := own.rWebSocketClient[hash][client]
 	if _, ok := own.rWebSocketClient[hash]; ok {
 		delete(own.rWebSocketClient[hash], client)
 	}
 	if len(own.rWebSocketClient[hash]) == 0 {
+		api := own.rArgs[hash]
+		if iwsr, ok := api.(IWebSocketRouter); ok {
+			iwsr.UnRegisterWebSocket(client, req)
+		}
 		delete(own.rWebSocketClient, hash)
 		delete(own.rArgs, hash)
 	}
@@ -388,52 +398,96 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 	}
 	client.Send("unsub", own.Path, strconv.Itoa(hash))
 }
-func (own *RouterInfo) webSocketHandlerRun() {
-	if own.PathType != PublicType || own.webSocketHandler {
-		return
-	}
-	own.webSocketHandler = true
-	for {
-		if !own.webSocketHandler {
-			return
+
+// NoticeWebSocket 通知所有订阅的websocket客户端
+// 这里假设 IWebSocketRouter 有一个 FiltersRouter 方法来过滤消息
+// 该方法会遍历所有注册的路由，检查是否满足条件，并发送
+// 注意：此方法会在锁内收集需要发送的客户端，避免在锁内直接发送消息，这样可以减少锁的持有时间，避免阻塞其他操作
+func (own *RouterInfo) NoticeWebSocket(message interface{}) {
+	napi := own.New()
+	if iwsr, ok := napi.(IWebSocketRouter); ok {
+		// 先收集需要发送的客户端
+		var clientsToNotify []struct {
+			ws   IWebSocket
+			hash string
+			data interface{}
 		}
-		time.Sleep(own.WebSocketWaitTime)
+
+		own.RLock()
 		for hash, api := range own.rArgs {
-			if wsreq, ok := own.rWebSocketClient[hash]; ok {
-				var res IResponse = nil
-				for ws, req := range wsreq {
-					if res == nil {
-						if cr, ok := req.(IRequestClear); ok {
-							cr.ClearTraceId()
-							cr.SetPath(own.Path)
+			if iwsr.FiltersRouter(message, api) {
+				if wsreq, ok := own.rWebSocketClient[hash]; ok {
+					for ws := range wsreq {
+						if !ws.IsClosed() {
+							var data interface{}
+							if res, ok := message.(IResponse); ok {
+								data = res.GetData()
+							} else {
+								data = message
+							}
+							clientsToNotify = append(clientsToNotify, struct {
+								ws   IWebSocket
+								hash string
+								data interface{}
+							}{ws, strconv.Itoa(hash), data})
 						}
-						res = own.ExecDo(api, req)
-					}
-					if !ws.IsClosed() {
-						ws.Send(strconv.Itoa(hash), own.Path, res.GetData())
 					}
 				}
 			}
 		}
+		own.RUnlock()
+
+		// 异步发送消息，避免阻塞
+		go func() {
+			for _, client := range clientsToNotify {
+				// 添加错误恢复
+				func() {
+					defer func() {
+						if err := recover(); err != nil {
+							logx.Error(fmt.Sprintf("WebSocket发送失败: %v", err))
+						}
+					}()
+					client.ws.Send(client.hash, own.Path, client.data)
+				}()
+			}
+		}()
 	}
 }
 func (own *RouterInfo) NoticeWebSocketClient(router IRouter, message interface{}) {
 	own.webSocketHandler = false //关闭websocket代理处理
+
 	go own.noticeClient(router, message)
 }
 func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
-	defer own.Unlock()
+	// 先收集需要发送的客户端
+	var clientsToNotify []struct {
+		ws   IWebSocket
+		data interface{}
+	}
+
 	own.Lock()
 	hash := getApiHash(router)
 	if wsreq, ok := own.rWebSocketClient[hash]; ok {
 		for ws := range wsreq {
 			if !ws.IsClosed() {
+				var data interface{}
 				if res, ok := message.(IResponse); ok {
-					ws.Send(strconv.Itoa(hash), own.Path, res.GetData())
+					data = res.GetData()
 				} else {
-					ws.Send(strconv.Itoa(hash), own.Path, message)
+					data = message
 				}
+				clientsToNotify = append(clientsToNotify, struct {
+					ws   IWebSocket
+					data interface{}
+				}{ws, data})
 			}
 		}
+	}
+	own.Unlock() // 只在这里解锁一次
+
+	// 在锁外发送消息
+	hashStr := strconv.Itoa(hash)
+	for _, client := range clientsToNotify {
+		client.ws.Send(hashStr, own.Path, client.data)
 	}
 }

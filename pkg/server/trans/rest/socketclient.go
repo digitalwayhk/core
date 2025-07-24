@@ -161,6 +161,7 @@ func (c *Client) readPump() {
 				c.subchannel[msg.Channel] = make(map[int]types.IRouter)
 			}
 			c.subchannel[msg.Channel][hash] = api
+			c.Send(msg.Event, msg.Channel, c.subchannel)
 		}
 		if msg.Event == string(UnSubscribe) {
 			hash, ok := msg.Data.(float64)

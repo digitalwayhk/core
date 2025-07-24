@@ -30,3 +30,9 @@ type IRouterFactory interface {
 type IPackRouterHook interface {
 	GetInstance() interface{}
 }
+
+type IWebSocketRouter interface {
+	RegisterWebSocket(client IWebSocket, req IRequest)
+	UnRegisterWebSocket(client IWebSocket, req IRequest)
+	FiltersRouter(message interface{}, api IRouter) bool
+}
