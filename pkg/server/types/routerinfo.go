@@ -491,3 +491,19 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 		client.ws.Send(hashStr, own.Path, client.data)
 	}
 }
+
+// GetActiveClientCount 返回当前活跃的websocket客户端数量
+func (own *RouterInfo) GetActiveClientCount() int {
+	own.RLock()
+	defer own.RUnlock()
+
+	count := 0
+	for _, clients := range own.rWebSocketClient {
+		for ws := range clients {
+			if !ws.IsClosed() {
+				count++
+			}
+		}
+	}
+	return count
+}
