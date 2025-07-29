@@ -3,12 +3,16 @@ package utils
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unsafe"
 
 	"github.com/shopspring/decimal"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type Decimal decimal.Decimal
@@ -86,9 +90,80 @@ func GetTypeAndValue(target interface{}) (reflect.Type, reflect.Value) {
 	}
 	return stype, sv
 }
+
+var (
+	reflectObjectPool = sync.Map{} // key: reflect.Type, value: *sync.Pool
+	poolMutex         = sync.RWMutex{}
+)
+
+func getObjectPool(t reflect.Type) *sync.Pool {
+	if pool, ok := reflectObjectPool.Load(t); ok {
+		return pool.(*sync.Pool)
+	}
+
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+
+	// 双重检查
+	if pool, ok := reflectObjectPool.Load(t); ok {
+		return pool.(*sync.Pool)
+	}
+
+	newPool := &sync.Pool{
+		New: func() interface{} {
+			return reflect.New(t).Interface()
+		},
+	}
+	reflectObjectPool.Store(t, newPool)
+	return newPool
+}
+
+// 修复 NewInterface 函数，使用对象池
 func NewInterface(obj interface{}) interface{} {
 	tye, _ := GetTypeAndValue(obj)
-	return reflect.New(tye).Interface()
+
+	// 使用对象池获取对象，避免频繁 reflect.New
+	pool := getObjectPool(tye)
+	newObj := pool.Get()
+
+	// 重置对象状态
+	resetObject(newObj)
+
+	return newObj
+}
+
+// 添加对象重置函数
+func resetObject(obj interface{}) {
+	if obj == nil {
+		return
+	}
+
+	v := reflect.ValueOf(obj)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() == reflect.Struct {
+		// 重置所有字段为零值
+		v.Set(reflect.Zero(v.Type()))
+	}
+}
+
+// 添加对象回收函数
+func RecycleObject(obj interface{}) {
+	if obj == nil {
+		return
+	}
+
+	tye := reflect.TypeOf(obj)
+	if tye.Kind() == reflect.Ptr {
+		tye = tye.Elem()
+	}
+
+	if pool, ok := reflectObjectPool.Load(tye); ok {
+		resetObject(obj)
+		pool.(*sync.Pool).Put(obj)
+	}
 }
 func getType(typ reflect.Type) reflect.Type {
 	if IsTypeKind(typ, Ptr) {
@@ -310,65 +385,99 @@ func autoMapConvertList(source, target interface{}, getmap func(arge *AutoMapArg
 	return items
 }
 
-// AutoMapConvert 映射转换
+var (
+	fieldMappingCache = sync.Map{} // key: string (sourceType+targetType), value: []fieldMapping
+	mappingCacheMutex = sync.RWMutex{}
+)
+
+type fieldMapping struct {
+	SourceField string
+	TargetField string
+	SourceIndex int
+	TargetIndex int
+}
+
+func getCacheKey(sourceType, targetType reflect.Type) string {
+	return sourceType.String() + "->" + targetType.String()
+}
+
+// 优化 AutoMapConvert，使用缓存减少反射
 func AutoMapConvert(source, target interface{}, getmap func(arge *AutoMapArge) *AutoMapHander) interface{} {
 	stype, sv := GetTypeAndValue(source)
 	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
 		return autoMapConvertList(source, target, getmap)
 	}
+
 	_, tv := GetTypeAndValue(target)
-	sk := stype.Kind()
-	if sk == reflect.Struct {
-		count := stype.NumField()
-		for i := 0; i < count; i++ {
-			sfv := sv.Field(i)
-			val := convertString(sfv)
-			field := stype.Field(i)
-			name := field.Name
-			var amh *AutoMapHander = nil
-			if getmap != nil {
-				arge := &AutoMapArge{
-					Field:       name,
-					FieldType:   field,
-					SourceName:  stype.Name(),
-					SourceType:  stype,
-					TargetName:  tv.Type().Name(),
-					TargetType:  tv.Type(),
-					Value:       val,
-					FieldValue:  sfv.Interface(),
-					SourceValue: source,
-					TargetValue: target,
-				}
-				amh = getmap(arge)
-				if amh == nil {
-					continue
-				}
-				if amh != nil && amh.TargetField != "" {
-					name = amh.TargetField
-				}
+	targetType := tv.Type()
+
+	// 使用缓存的字段映射
+	cacheKey := getCacheKey(stype, targetType)
+	var mappings []fieldMapping
+
+	if cached, ok := fieldMappingCache.Load(cacheKey); ok {
+		mappings = cached.([]fieldMapping)
+	} else {
+		mappings = buildFieldMappings(stype, targetType)
+		fieldMappingCache.Store(cacheKey, mappings)
+	}
+
+	// 使用缓存的映射进行快速复制
+	for _, mapping := range mappings {
+		sourceField := sv.Field(mapping.SourceIndex)
+		targetField := tv.Field(mapping.TargetIndex)
+
+		if targetField.CanSet() && sourceField.IsValid() {
+			// 直接赋值，避免字符串转换
+			if sourceField.Type() == targetField.Type() {
+				targetField.Set(sourceField)
+			} else {
+				// 只在类型不匹配时才进行转换
+				convertAndSet(sourceField, targetField)
 			}
-			vv := tv.FieldByName(name)
-			if vv.CanSet() && amh != nil {
-				if amh.TargetValue != nil {
-					pl := reflect.ValueOf(amh.TargetValue)
-					vv.Set(pl)
-				} else {
-					// vv.Set(convertOp(val, vv.Type()))
-					vv.Set(sfv)
-				}
-				if amh.TargetItems != nil && len(amh.TargetItems) > 0 {
-					for n := range amh.TargetItems {
-						vv = tv.FieldByName(n)
-						if vv.CanSet() {
-							pl := reflect.ValueOf(amh.TargetItems[n])
-							vv.Set(pl)
-						}
-					}
+		}
+	}
+
+	return target
+}
+
+func buildFieldMappings(sourceType, targetType reflect.Type) []fieldMapping {
+	mappings := make([]fieldMapping, 0, sourceType.NumField())
+
+	for i := 0; i < sourceType.NumField(); i++ {
+		sourceField := sourceType.Field(i)
+
+		if targetField, ok := targetType.FieldByName(sourceField.Name); ok {
+			// 找到对应的目标字段索引
+			for j := 0; j < targetType.NumField(); j++ {
+				if targetType.Field(j).Name == targetField.Name {
+					mappings = append(mappings, fieldMapping{
+						SourceField: sourceField.Name,
+						TargetField: targetField.Name,
+						SourceIndex: i,
+						TargetIndex: j,
+					})
+					break
 				}
 			}
 		}
 	}
-	return target
+
+	return mappings
+}
+
+func convertAndSet(source, target reflect.Value) {
+	// 避免通过字符串转换，直接类型转换
+	if source.Type().ConvertibleTo(target.Type()) {
+		target.Set(source.Convert(target.Type()))
+		return
+	}
+
+	// 只在必要时使用字符串转换
+	str := convertString(source)
+	if convertedValue, err := convertOp1(str, target.Type()); err == nil {
+		target.Set(convertedValue)
+	}
 }
 func AnyToTypeData(value interface{}, src reflect.Type) (interface{}, error) {
 	if value == nil {
@@ -532,4 +641,73 @@ func String2Bytes(s string) []byte {
 
 func Bytes2String(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
+}
+
+// 添加内存监控
+func init() {
+	startReflectionMemoryMonitor()
+}
+
+func startReflectionMemoryMonitor() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			// 如果内存使用超过阈值，清理缓存
+			if m.Alloc > 200*1024*1024 { // 200MB
+				cleanReflectionCaches()
+			}
+
+			// 记录统计
+			logReflectionStats(&m)
+		}
+	}()
+}
+
+func cleanReflectionCaches() {
+	// 清理对象池（保留常用类型）
+	count := 0
+	reflectObjectPool.Range(func(key, value interface{}) bool {
+		count++
+		if count > 50 { // 只保留前50个常用类型
+			reflectObjectPool.Delete(key)
+		}
+		return true
+	})
+
+	// 清理字段映射缓存
+	mappingCount := 0
+	fieldMappingCache.Range(func(key, value interface{}) bool {
+		mappingCount++
+		if mappingCount > 100 { // 只保留前100个映射
+			fieldMappingCache.Delete(key)
+		}
+		return true
+	})
+
+	// 强制GC
+	runtime.GC()
+
+	logx.Infof("清理反射缓存 - 对象池: %d, 映射缓存: %d", count, mappingCount)
+}
+
+func logReflectionStats(m *runtime.MemStats) {
+	poolCount := 0
+	reflectObjectPool.Range(func(key, value interface{}) bool {
+		poolCount++
+		return true
+	})
+
+	mappingCount := 0
+	fieldMappingCache.Range(func(key, value interface{}) bool {
+		mappingCount++
+		return true
+	})
+
+	logx.Infof("反射统计 - 内存: %dMB, 对象池: %d, 映射缓存: %d",
+		m.Alloc/1024/1024, poolCount, mappingCount)
 }
