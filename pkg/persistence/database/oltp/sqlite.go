@@ -35,7 +35,6 @@ func NewSqlite() *Sqlite {
 	sql := &Sqlite{
 		tables: make(map[string]*TableMaster),
 	}
-	sql.cleanup() // 启动清理协程
 	return sql
 }
 
