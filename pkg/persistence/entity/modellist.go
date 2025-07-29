@@ -67,15 +67,21 @@ func getdbname(model interface{}) string {
 	}
 	return ""
 }
+
+const (
+	searchCap    = 20 // 搜索结果通常较多
+	operationCap = 5  // 增删改操作通常较少
+)
+
 func newlist[T types.IModel](t reflect.Type, v reflect.Value, model *T, action types.IDataAction) *ModelList[T] {
 	return &ModelList[T]{
 		entityType:  t,
 		entityValue: v,
 		hideEntity:  model,
-		addList:     make([]*T, 0, 1000),
-		updateList:  make([]*T, 0, 1000),
-		deleteList:  make([]*T, 0, 1000),
-		searchList:  make([]*T, 0, 1000),
+		addList:     make([]*T, 0, operationCap),
+		updateList:  make([]*T, 0, operationCap),
+		deleteList:  make([]*T, 0, operationCap),
+		searchList:  make([]*T, 0, searchCap),
 		searchItem: &types.SearchItem{
 			Page: 1,
 			Size: 10,
@@ -464,10 +470,10 @@ func (own *ModelList[T]) AddCount() int {
 	return len(own.addList)
 }
 func (own *ModelList[T]) Clear() {
-	own.searchList = make([]*T, 0, 1000)
-	own.addList = make([]*T, 0, 1000)
-	own.updateList = make([]*T, 0, 1000)
-	own.deleteList = make([]*T, 0, 1000)
+	own.searchList = make([]*T, 0, searchCap)
+	own.addList = make([]*T, 0, operationCap)
+	own.updateList = make([]*T, 0, operationCap)
+	own.deleteList = make([]*T, 0, operationCap)
 }
 func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) error {
 	err := ada.Load(item, &own.searchList)
@@ -483,7 +489,22 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 			logx.Error(msg)
 		}
 	}()
-	own.searchList = make([]*T, 0)
+
+	// 根据预期大小智能分配容量
+	expectedSize := item.Size
+	if expectedSize <= 0 {
+		expectedSize = 10
+	}
+
+	capacity := getOptimalCapacity(expectedSize)
+
+	// 重用现有切片的底层数组（如果容量足够）
+	if cap(own.searchList) >= capacity {
+		own.searchList = own.searchList[:0] // 重置长度但保持容量
+	} else {
+		own.searchList = make([]*T, 0, capacity)
+	}
+
 	if item.Model == nil {
 		item.Model = own.hideEntity
 	}
@@ -562,9 +583,9 @@ func (own *ModelList[T]) Save() error {
 			return err
 		}
 	}
-	own.addList = make([]*T, 0, 1000)
-	own.updateList = make([]*T, 0, 1000)
-	own.deleteList = make([]*T, 0, 1000)
+	own.addList = make([]*T, 0, operationCap)
+	own.updateList = make([]*T, 0, operationCap)
+	own.deleteList = make([]*T, 0, operationCap)
 	return nil
 }
 func (own *ModelList[T]) GetDBAdapter() types.IDataAction {
@@ -591,4 +612,37 @@ func (own *ModelList[T]) GetDB() (*gorm.DB, error) {
 		}
 	}
 	return nil, nil
+}
+
+func getOptimalCapacity(expectedSize int) int {
+	if expectedSize <= 0 {
+		return 5
+	}
+	if expectedSize <= 10 {
+		return 10
+	}
+	if expectedSize <= 50 {
+		return 50
+	}
+	if expectedSize <= 100 {
+		return 100
+	}
+	// 最大预分配500，而不是1000
+	if expectedSize <= 500 {
+		return expectedSize
+	}
+	return 500
+}
+
+func (own *ModelList[T]) GetMemoryStats() map[string]int {
+	return map[string]int{
+		"searchList_cap": cap(own.searchList),
+		"searchList_len": len(own.searchList),
+		"addList_cap":    cap(own.addList),
+		"addList_len":    len(own.addList),
+		"updateList_cap": cap(own.updateList),
+		"updateList_len": len(own.updateList),
+		"deleteList_cap": cap(own.deleteList),
+		"deleteList_len": len(own.deleteList),
+	}
 }

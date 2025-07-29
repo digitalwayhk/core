@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/local"
@@ -341,18 +340,4 @@ func (own *Sqlite) Commit() error {
 }
 func (own *Sqlite) GetRunDB() interface{} {
 	return own.db
-}
-
-// 添加清理方法
-func (own *Sqlite) cleanup() {
-	// 定期清理缓存
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			runtime.GC()
-			runtime.GC() // 双重GC
-		}
-	}()
 }

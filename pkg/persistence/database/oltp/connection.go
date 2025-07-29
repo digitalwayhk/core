@@ -63,23 +63,42 @@ func init() {
 
 func startGlobalCleanup() {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// 清理所有连接的缓存
+			// 清理连接缓存
 			cleanConnections()
 
-			// 执行垃圾回收
-			runtime.GC()
-			runtime.GC()
+			// 智能GC：基于内存增长率决定是否GC
+			performSmartGC()
 
-			// 记录清理统计
+			// 记录统计
 			logCleanupStats()
 		}
 	}()
 }
 
+var lastMemStats runtime.MemStats
+
+func performSmartGC() {
+	var current runtime.MemStats
+	runtime.ReadMemStats(&current)
+
+	// 计算内存增长率
+	if lastMemStats.Alloc > 0 {
+		growthRate := float64(current.Alloc) / float64(lastMemStats.Alloc)
+
+		// 只有在内存快速增长时才强制GC
+		if growthRate > 1.5 || current.Alloc > 200*1024*1024 {
+			logx.Infof("执行智能GC - 增长率: %.2f, 当前内存: %dMB",
+				growthRate, current.Alloc/1024/1024)
+			runtime.GC()
+		}
+	}
+
+	lastMemStats = current
+}
 func cleanConnections() {
 	connManager.mutex.Lock()
 	defer connManager.mutex.Unlock()
