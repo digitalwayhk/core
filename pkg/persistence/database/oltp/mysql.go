@@ -95,6 +95,10 @@ func (own *Mysql) GetModelDB(model interface{}) (interface{}, error) {
 func (own *Mysql) GetDB() (*gorm.DB, error) {
 	if own.db == nil {
 		dsn := fmt.Sprintf(mysqldsn, own.User, own.Pass, own.Host, own.Port, own.Name, own.TimeOut, own.ReadTimeOut, own.WriteTimeOut)
+		if db, ok := connManager.GetConnection(dsn); ok {
+			own.db = db
+			return db, nil
+		}
 		dia := mysql.Open(dsn)
 		db, err := gorm.Open(dia, &gorm.Config{
 			NamingStrategy: schema.NamingStrategy{
@@ -123,6 +127,9 @@ func (own *Mysql) GetDB() (*gorm.DB, error) {
 		mysqldb.SetMaxIdleConns(int(own.ConPool))
 		mysqldb.SetConnMaxLifetime(time.Minute)
 		own.db = db
+		if !db.DryRun {
+			connManager.SetConnection(dsn, db)
+		}
 	}
 	return own.db, nil
 }
