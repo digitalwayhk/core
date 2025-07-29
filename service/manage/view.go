@@ -392,7 +392,7 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 	if vt.Kind() == reflect.Ptr {
 		vt = vt.Elem()
 	}
-	obj := reflect.New(vt).Interface()
+	obj := utils.NewInterface(vt)
 	vm := &view.ViewChildModel{
 		IsAdd:      true,
 		IsEdit:     true,

@@ -360,7 +360,7 @@ func NewArrayItem(items interface{}) interface{} {
 		if t1.Kind() == reflect.Ptr {
 			t1 = t1.Elem()
 		}
-		return reflect.New(t1).Interface()
+		return NewInterface(t1)
 	}
 	return nil
 }
@@ -377,7 +377,7 @@ func autoMapConvertList(source, target interface{}, getmap func(arge *AutoMapArg
 		s := reflect.ValueOf(source)
 		for i := 0; i < s.Len(); i++ {
 			oo := s.Index(i).Interface()
-			t := reflect.New(targetType).Interface()
+			t := NewInterface(targetType)
 			AutoMapConvert(oo, t, getmap)
 			items = append(items, t)
 		}

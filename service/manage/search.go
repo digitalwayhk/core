@@ -139,7 +139,7 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 		if vf.Kind() == reflect.Ptr {
 			vf = vf.Elem()
 		}
-		ps.Model = reflect.New(vf).Interface()
+		ps.Model = utils.NewInterface(vf)
 		if imn, ok := ps.Model.(pt.IModelNewHook); ok {
 			imn.NewModel()
 		}
@@ -206,7 +206,7 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 		if vf.Kind() == reflect.Ptr {
 			vf = vf.Elem()
 		}
-		childitem.Model = reflect.New(vf).Interface()
+		childitem.Model = utils.NewInterface(vf)
 		if imn, ok := childitem.Model.(pt.IModelNewHook); ok {
 			imn.NewModel()
 		}
