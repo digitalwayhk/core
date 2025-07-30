@@ -31,9 +31,9 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 		context: context,
 	}
 	ser.IsWebSocket = isWebSocket
-	if ser.IsWebSocket {
-		context.Config.Timeout = 0
-	}
+	// if ser.IsWebSocket {
+	// 	context.Config.Timeout = 0
+	// }
 	ser.IsCors = isCors
 	if ser.IsCors {
 		ser.Server = rest.MustNewServer(context.Config.RestConf, rest.WithCors())
