@@ -309,6 +309,9 @@ var REFERENCES = "references:"
 
 func getForeignField(field reflect.StructField, model interface{}) (string, *view.ForeignModel) {
 	name := gormfield(REFERENCES, field)
+	if name == "-" {
+		return "", nil
+	}
 	foreignkey := gormfield(FOREIGNKEY, field)
 	if foreignkey == "" {
 		foreignkey = "id"
@@ -319,6 +322,9 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 		name = field.Name + "ID"
 	}
 	oof, _, _ := getfieldname(&field)
+	if oof == "-" {
+		return "", nil
+	}
 	fm := &view.ForeignModel{
 		IsFkey:             true,
 		OneObjectTypeName:  field.Type.Name(),
@@ -389,10 +395,7 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 	foreignkey := gormfield(FOREIGNKEY, field)
 
 	vt := field.Type.Elem()
-	if vt.Kind() == reflect.Ptr {
-		vt = vt.Elem()
-	}
-	obj := utils.NewInterface(vt)
+	obj := utils.NewInterfaceByType(vt)
 	vm := &view.ViewChildModel{
 		IsAdd:      true,
 		IsEdit:     true,

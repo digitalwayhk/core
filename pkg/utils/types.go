@@ -122,8 +122,13 @@ func getObjectPool(t reflect.Type) *sync.Pool {
 func NewInterface(obj interface{}) interface{} {
 	tye, _ := GetTypeAndValue(obj)
 
-	// 使用对象池获取对象，避免频繁 reflect.New
-	pool := getObjectPool(tye)
+	return NewInterfaceByType(tye)
+}
+func NewInterfaceByType(typ reflect.Type) interface{} {
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	pool := getObjectPool(typ)
 	newObj := pool.Get()
 
 	// 重置对象状态
@@ -357,10 +362,7 @@ func NewArrayItem(items interface{}) interface{} {
 	}
 	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
 		t1 := stype.Elem()
-		if t1.Kind() == reflect.Ptr {
-			t1 = t1.Elem()
-		}
-		return NewInterface(t1)
+		return NewInterfaceByType(t1)
 	}
 	return nil
 }

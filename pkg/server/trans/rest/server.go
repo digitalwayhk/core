@@ -31,9 +31,9 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 		context: context,
 	}
 	ser.IsWebSocket = isWebSocket
-	// if ser.IsWebSocket {
-	// 	context.Config.Timeout = 0
-	// }
+	if ser.IsWebSocket {
+		context.Config.Timeout = 0
+	}
 	ser.IsCors = isCors
 	if ser.IsCors {
 		ser.Server = rest.MustNewServer(context.Config.RestConf, rest.WithCors())
@@ -186,6 +186,7 @@ func (own *Server) websocket() {
 func (own *Server) websocketauth() {
 	opts := make([]rest.RouteOption, 0)
 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
+	//opts = append(opts, rest.WithTimeout(0))
 	own.Server.AddRoute(rest.Route{
 		Method:  http.MethodGet,
 		Path:    "/wsauth",

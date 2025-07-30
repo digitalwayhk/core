@@ -136,10 +136,10 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 	sf := utils.GetPropertyType(ps.Model, own.SearchItem.Foreign.OneObjectField)
 	if sf != nil {
 		vf := sf.Type.Elem()
-		if vf.Kind() == reflect.Ptr {
-			vf = vf.Elem()
-		}
-		ps.Model = utils.NewInterface(vf)
+		// if vf.Kind() == reflect.Ptr {
+		// 	vf = vf.Elem()
+		// }
+		ps.Model = utils.NewInterfaceByType(vf)
 		if imn, ok := ps.Model.(pt.IModelNewHook); ok {
 			imn.NewModel()
 		}
@@ -203,10 +203,7 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 	sf := utils.GetPropertyType(parent, own.SearchItem.ChildModel.Name)
 	if sf != nil {
 		vf := sf.Type.Elem()
-		if vf.Kind() == reflect.Ptr {
-			vf = vf.Elem()
-		}
-		childitem.Model = utils.NewInterface(vf)
+		childitem.Model = utils.NewInterfaceByType(vf)
 		if imn, ok := childitem.Model.(pt.IModelNewHook); ok {
 			imn.NewModel()
 		}
