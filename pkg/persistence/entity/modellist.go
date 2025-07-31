@@ -35,13 +35,7 @@ func NewModelList[T types.IModel](action types.IDataAction) *ModelList[T] {
 	model := new(T)
 	newmodel(model)
 	t, v := utils.GetTypeAndValue(*model)
-	if action == nil {
-		if name := getdbname(model); name != "" {
-			sl := oltp.NewSqlite()
-			sl.Name = name
-			action = sl
-		}
-	}
+
 	list := newlist(t, v, model, action)
 	list.searchItem = &types.SearchItem{
 		Page:  1,
@@ -521,7 +515,7 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 	if len(item.SortList) == 0 {
 		item.AddSort(&types.SortItem{Column: "ID", IsDesc: true})
 	}
-	ada := own.GetDBAdapter()
+	ada := own.GetDBAdapter(item)
 	return own.OnLoad(ada, item)
 }
 func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
@@ -564,20 +558,26 @@ func (own *ModelList[T]) OnDelete(ada types.IDataAction, item *T) error {
 	return ada.Delete(item)
 }
 func (own *ModelList[T]) Save() error {
-	ada := own.GetDBAdapter()
+	searchItem := own.GetSearchItem()
 	for _, item := range own.addList {
+		searchItem.Model = item
+		ada := own.GetDBAdapter(searchItem)
 		err := own.OnInsert(ada, item)
 		if err != nil {
 			return err
 		}
 	}
 	for _, item := range own.updateList {
+		searchItem.Model = item
+		ada := own.GetDBAdapter(searchItem)
 		err := own.OnUpdate(ada, item)
 		if err != nil {
 			return err
 		}
 	}
 	for _, item := range own.deleteList {
+		searchItem.Model = item
+		ada := own.GetDBAdapter(searchItem)
 		err := own.OnDelete(ada, item)
 		if err != nil {
 			return err
@@ -588,7 +588,14 @@ func (own *ModelList[T]) Save() error {
 	own.deleteList = make([]*T, 0, operationCap)
 	return nil
 }
-func (own *ModelList[T]) GetDBAdapter() types.IDataAction {
+func (own *ModelList[T]) GetDBAdapter(item *types.SearchItem) types.IDataAction {
+	if own.ada == nil && item != nil && item.Model != nil {
+		if name := getdbname(item.Model); name != "" {
+			sl := oltp.NewSqlite()
+			sl.Name = name
+			own.ada = sl
+		}
+	}
 	return own.ada
 }
 func (own *ModelList[T]) SetDBAdapter(ada types.IDataAction) {
@@ -596,7 +603,11 @@ func (own *ModelList[T]) SetDBAdapter(ada types.IDataAction) {
 }
 
 func (own *ModelList[T]) GetDB() (*gorm.DB, error) {
-	_adadb, err := own.GetDBAdapter().GetModelDB(own.hideEntity)
+	item := own.GetSearchItem()
+	if item.Model == nil {
+		item.Model = own.hideEntity
+	}
+	_adadb, err := own.GetDBAdapter(item).GetModelDB(own.hideEntity)
 	if err != nil {
 		return nil, err
 	}

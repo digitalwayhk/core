@@ -130,7 +130,7 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
-	var action pt.IDataAction = own.list.GetDBAdapter()
+
 	ps := own.SearchItem.ToSearchItem()
 	ps.Model = own.list.NewItem()
 	sf := utils.GetPropertyType(ps.Model, own.SearchItem.Foreign.OneObjectField)
@@ -145,6 +145,7 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 		}
 		sliceType := reflect.SliceOf(sf.Type)
 		result := reflect.MakeSlice(sliceType, 0, ps.Size).Interface()
+		var action pt.IDataAction = own.list.GetDBAdapter(ps)
 		err := action.Load(ps, &result)
 		if err != nil {
 			return nil, err
@@ -182,7 +183,6 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
-	var action pt.IDataAction = own.list.GetDBAdapter()
 
 	childitem := own.SearchItem.ToSearchItem()
 	parent := own.list.NewItem()
@@ -210,6 +210,7 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 		sliceType := reflect.SliceOf(vf)
 		result := reflect.MakeSlice(sliceType, 0, childitem.Size).Interface()
 		childitem.IsPreload = true
+		var action pt.IDataAction = own.list.GetDBAdapter(childitem)
 		err := action.Load(childitem, &result)
 		if ms, ok := own.instance.(IManageSearch); ok {
 			data := ms.OnSearchData(result, childitem.Total)
