@@ -95,9 +95,10 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 
 	if db, ok := connManager.GetConnection(dns); ok {
 		own.db = db
+		logx.Infof("🔄 复用现有数据库连接: %s", dns)
 		return db, nil
 	}
-
+	logx.Infof("🆕 创建新的数据库连接: %s", dns)
 	dia := sqlite.Open(dns)
 	db, err := gorm.Open(dia, &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,

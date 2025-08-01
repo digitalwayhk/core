@@ -6,9 +6,10 @@ import (
 	"sync"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
+
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 )
 

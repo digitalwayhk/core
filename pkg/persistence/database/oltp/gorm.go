@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
-
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
