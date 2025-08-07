@@ -1,0 +1,52 @@
+package melody
+
+import (
+	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/olahol/melody"
+	"github.com/zeromicro/go-zero/core/logx"
+)
+
+// MelodyClient 适配器，实现原有的Client接口
+type MelodyClient struct {
+	session *melody.Session
+	manager *MelodyManager
+}
+
+func (mc *MelodyClient) Send(hash, path string, message interface{}) {
+	// 🔧 添加：检查连接状态
+	if mc.session.IsClosed() {
+		logx.Errorf("尝试向已关闭的WebSocket连接发送消息: path=%s", path)
+		return
+	}
+
+	mc.manager.sendToSession(mc.session, hash, path, message)
+}
+
+func (mc *MelodyClient) SendError(path string, err string) {
+	// 🔧 添加：检查连接状态
+	if mc.session.IsClosed() {
+		logx.Errorf("尝试向已关闭的WebSocket连接发送错误: path=%s", path)
+		return
+	}
+	mc.manager.sendError(mc.session, path, err)
+}
+
+func (mc *MelodyClient) IsClosed() bool {
+	return mc.session.IsClosed()
+}
+
+func (mc *MelodyClient) GetSubscriptions() map[string]map[int]types.IRouter {
+	return mc.manager.GetSessionSubscriptions(mc.session)
+}
+
+func (mc *MelodyClient) AddSubscription(channel string, hash int, router types.IRouter) {
+	mc.manager.AddSessionSubscription(mc.session, channel, hash, router)
+}
+
+func (mc *MelodyClient) RemoveSubscription(channel string, hash int) {
+	mc.manager.RemoveSessionSubscription(mc.session, channel, hash)
+}
+
+func (mc *MelodyClient) GetChannelArgs(channel string) map[int]types.IRouter {
+	return mc.manager.GetChannelSubscriptions(mc.session, channel)
+}

@@ -7,7 +7,7 @@ require (
 	github.com/getkin/kin-openapi v0.94.0
 	github.com/gofrs/uuid v4.2.0+incompatible
 	github.com/golang-jwt/jwt/v4 v4.2.0
-	github.com/gorilla/websocket v1.4.1
+	github.com/gorilla/websocket v1.5.0
 	github.com/shopspring/decimal v1.3.1
 	github.com/zeromicro/go-zero v1.3.1
 	go.opentelemetry.io/otel/trace v1.3.0
@@ -22,9 +22,10 @@ require (
 	github.com/gofiber/adaptor/v2 v2.1.27
 	github.com/gofiber/fiber/v2 v2.38.1
 	github.com/lucas-clemente/quic-go v0.29.1
+	github.com/olahol/melody v1.3.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.16.0
-	github.com/stretchr/testify v1.7.1
+	github.com/stretchr/testify v1.8.0
 	go.mongodb.org/mongo-driver v1.10.2
 )
 
