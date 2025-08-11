@@ -376,7 +376,7 @@ func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSock
 	return hash
 }
 func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
-	if hash == 0 || client == nil {
+	if client == nil {
 		return
 	}
 	own.Lock()
