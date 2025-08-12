@@ -149,10 +149,10 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 		session: s,
 		manager: mm,
 	}
-	s.Set("client", client)
 	// 初始化订阅映射
 	mm.subscriptionsMu.Lock()
-	mm.subscriptions[s] = NewSessionSubscriptions(mm)
+	sr := mm.serviceContext.Router
+	mm.subscriptions[s] = NewSessionSubscriptions(mm, client, sr)
 	mm.subscriptionsMu.Unlock()
 
 	// 🔧 修复：在锁内读取和更新统计
@@ -169,7 +169,6 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	mm.cleanupSession(s)
 	s.UnSet("request") // 清理请求对象
-	s.UnSet("client")  // 清理客户端适配器
 	mm.subscriptionsMu.Lock()
 	delete(mm.subscriptions, s) // 删除订阅映射
 	mm.subscriptionsMu.Unlock()

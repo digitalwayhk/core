@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/local"
@@ -285,7 +286,28 @@ func (own *Sqlite) Insert(data interface{}) error {
 		}
 		return nil
 	}
-	return createData(own.db, data)
+	err = createData(own.db, data)
+	if err != nil {
+		err = own.errorHandler(err, data, createData)
+	}
+	return err
+}
+func (own *Sqlite) errorHandler(err error, data interface{}, fn func(db *gorm.DB, data interface{}) error) error {
+	if err == nil {
+		return nil
+	}
+	// 检查是否是列不存在的错误
+	if strings.Contains(err.Error(), "no such column") ||
+		strings.Contains(err.Error(), "has no column named") ||
+		strings.Contains(err.Error(), "ambiguous column name") ||
+		strings.Contains(err.Error(), "no such table") ||
+		strings.Contains(err.Error(), "datatype mismatch") {
+		err := own.db.AutoMigrate(data)
+		if err == nil {
+			return fn(own.db, data)
+		}
+	}
+	return err
 }
 func (own *Sqlite) Update(data interface{}) error {
 	err := own.init(data)
@@ -306,7 +328,11 @@ func (own *Sqlite) Update(data interface{}) error {
 		}
 		return nil
 	}
-	return updateData(own.db, data)
+	err = updateData(own.db, data)
+	if err != nil {
+		err = own.errorHandler(err, data, updateData)
+	}
+	return err
 }
 func (own *Sqlite) Delete(data interface{}) error {
 	err := own.init(data)
@@ -327,7 +353,11 @@ func (own *Sqlite) Delete(data interface{}) error {
 		}
 		return nil
 	}
-	return deleteData(own.db, data)
+	err = deleteData(own.db, data)
+	if err != nil {
+		err = own.errorHandler(err, data, deleteData)
+	}
+	return err
 }
 func (own *Sqlite) Commit() error {
 	own.isTansaction = false
