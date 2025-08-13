@@ -241,31 +241,24 @@ func (own *Server) websocketauth() {
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 添加：详细的错误日志
-		logx.Infof("WebSocket连接请求: %s from %s", r.URL.Path, r.RemoteAddr)
-
+		// 🔧 添加：连接频率限制
 		ip := utils.ClientPublicIP(r)
-		err := trans.VerifyIPWhiteList(sc.Config, ip)
-		if err != nil {
-			logx.Errorf("WebSocket IP白名单验证失败: %v, IP: %s", err, ip)
-			httpx.OkJson(w, err)
+		melodyManager := sc.Hub.(*melody.MelodyManager)
+		if melodyManager == nil {
+			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
-
-		// 添加：检查Hub是否正确初始化
-		if sc.Hub == nil {
-			logx.Error("WebSocket Hub未初始化")
-			http.Error(w, "WebSocket service not initialized", http.StatusInternalServerError)
+		limit := melodyManager.GetConnectionLimiter()
+		if !limit.Allow(ip) {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
-
-		// 使用MelodyManager替换原有的ServeWs
-		if melodyManager, ok := sc.Hub.(*melody.MelodyManager); ok {
-			logx.Infof("使用MelodyManager处理WebSocket连接: %s", r.RemoteAddr)
-			melodyManager.ServeWS(w, r)
-		} else {
-			logx.Errorf("Hub类型转换失败, 实际类型: %T", sc.Hub)
-			http.Error(w, "WebSocket service not available", http.StatusInternalServerError)
+		// 快速IP验证
+		if err := trans.VerifyIPWhiteList(sc.Config, ip); err != nil {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
 		}
+		// 处理WebSocket连接
+		melodyManager.ServeWS(w, r)
 	}
 }

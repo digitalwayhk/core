@@ -27,6 +27,7 @@ require (
 	github.com/onsi/gomega v1.16.0
 	github.com/stretchr/testify v1.8.0
 	go.mongodb.org/mongo-driver v1.10.2
+	golang.org/x/time v0.0.0-20211116232009-f0f3c7e86c11
 )
 
 require (

@@ -45,6 +45,7 @@ type MelodyManager struct {
 	// 客户端订阅管理
 	subscriptions   map[*melody.Session]*SessionSubscriptions
 	subscriptionsMu sync.RWMutex
+	connectionLimit *ConnectionRateLimiter
 
 	// 统计信息
 	stats struct {
@@ -61,18 +62,19 @@ func NewMelodyManager(serviceContext *router.ServiceContext) *MelodyManager {
 
 	// 配置Melody参数
 	m.Config.MaxMessageSize = 512
-	m.Config.MessageBufferSize = 256
+	m.Config.MessageBufferSize = 1024
 	m.Config.PongWait = 60 * time.Second
 	m.Config.PingPeriod = 54 * time.Second
 	m.Config.WriteWait = 10 * time.Second
-	// m.Config.ReadBufferSize = 1024
+
 	// m.Config.WriteBufferSize = 1024
 
 	manager := &MelodyManager{
-		melody:         m,
-		serviceContext: serviceContext,
-		subscriptions:  make(map[*melody.Session]*SessionSubscriptions),
-		closeChan:      make(chan struct{}), // 🔧 添加关闭通道
+		melody:          m,
+		serviceContext:  serviceContext,
+		subscriptions:   make(map[*melody.Session]*SessionSubscriptions),
+		closeChan:       make(chan struct{}), // 🔧 添加关闭通道
+		connectionLimit: NewConnectionRateLimiter(),
 	}
 
 	manager.setupHandlers()
@@ -99,6 +101,9 @@ func (mm *MelodyManager) startStatsMonitor() {
 			return
 		}
 	}
+}
+func (mm *MelodyManager) GetConnectionLimiter() *ConnectionRateLimiter {
+	return mm.connectionLimit
 }
 
 // 🔧 修复：优雅关闭
@@ -134,7 +139,31 @@ func (mm *MelodyManager) setupHandlers() {
 
 	// 错误处理事件
 	mm.melody.HandleError(func(s *melody.Session, err error) {
-		logx.Errorf("WebSocket错误: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
+		errMsg := err.Error()
+
+		// 检查是否是正常的客户端断开
+		if strings.Contains(errMsg, "close 1001") ||
+			strings.Contains(errMsg, "going away") {
+			// 客户端正常离开，使用Info级别
+			logx.Infof("WebSocket客户端正常断开: %s", s.Request.RemoteAddr)
+			return
+		}
+
+		// 检查是否是其他正常的关闭码
+		if strings.Contains(errMsg, "close 1000") { // 正常关闭
+			logx.Infof("WebSocket连接正常关闭: %s", s.Request.RemoteAddr)
+			return
+		}
+
+		// 检查缓冲区满的问题
+		if strings.Contains(errMsg, "message buffer is full") {
+			logx.Errorf("WebSocket缓冲区满，强制断开连接: %s", s.Request.RemoteAddr)
+			//mm.handleBufferFullError(s)
+			return
+		}
+
+		// 其他错误使用Error级别
+		logx.Errorf("WebSocket异常错误: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
 	})
 
 	// 定期统计
@@ -176,7 +205,7 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	delete(mm.subscriptions, s) // 删除订阅映射
 	mm.subscriptionsMu.Unlock()
 
-	// 🔧 修复：同样在锁内操作
+	// 同样在锁内操作
 	mm.stats.mu.Lock()
 	mm.stats.activeConnections--
 	activeCount := mm.stats.activeConnections
@@ -186,7 +215,6 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 		s.Request.RemoteAddr, activeCount)
 }
 func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
-	// 🔧 添加：恐慌恢复
 	defer func() {
 		if err := recover(); err != nil {
 			logx.Errorf("WebSocket消息处理发生恐慌: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)

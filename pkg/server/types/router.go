@@ -34,5 +34,8 @@ type IPackRouterHook interface {
 type IWebSocketRouter interface {
 	RegisterWebSocket(client IWebSocket, req IRequest)
 	UnRegisterWebSocket(client IWebSocket, req IRequest)
-	FiltersRouter(message interface{}, api IRouter) bool
+}
+
+type IWebSocketRouterNotice interface {
+	NoticeFiltersRouter(message interface{}, api IRouter) (bool, interface{})
 }

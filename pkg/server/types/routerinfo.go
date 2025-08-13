@@ -44,9 +44,10 @@ type RouterInfo struct {
 	rWebSocketClient  map[int]map[IWebSocket]IRequest          //websocket客户端
 	webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
-	pool      sync.Pool
-	once      sync.Once
-	TempStore sync.Map
+	pool          sync.Pool
+	once          sync.Once
+	TempStore     sync.Map
+	websocketlock sync.RWMutex
 }
 
 func (own *RouterInfo) getNew() IRouter {
@@ -340,8 +341,8 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	if router == nil || client == nil || req == nil {
 		return 0
 	}
-	own.Lock()
-	defer own.Unlock()
+	own.websocketlock.Lock()
+	defer own.websocketlock.Unlock()
 	if own.rArgs == nil {
 		own.rArgs = make(map[int]IRouter, 0)
 	}
@@ -379,8 +380,8 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 	if client == nil {
 		return
 	}
-	own.Lock()
-	defer own.Unlock()
+	own.websocketlock.Lock()
+	defer own.websocketlock.Unlock()
 	req := own.rWebSocketClient[hash][client]
 	if _, ok := own.rWebSocketClient[hash]; ok {
 		delete(own.rWebSocketClient[hash], client)
@@ -400,11 +401,10 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 
 // NoticeWebSocket 通知所有订阅的websocket客户端
 // 这里假设 IWebSocketRouter 有一个 FiltersRouter 方法来过滤消息
-// 该方法会遍历所有注册的路由，检查是否满足条件，并发送
+// 该方法会遍历所有注册的路由，检查是否满足条件，并发送在NoticeFiltersRouter接口中返回的数据
 // 注意：此方法会在锁内收集需要发送的客户端，避免在锁内直接发送消息，这样可以减少锁的持有时间，避免阻塞其他操作
 func (own *RouterInfo) NoticeWebSocket(message interface{}) {
-	napi := own.New()
-	if iwsr, ok := napi.(IWebSocketRouter); ok {
+	if iwsr, ok := own.instance.(IWebSocketRouterNotice); ok {
 		// 先收集需要发送的客户端
 		var clientsToNotify []struct {
 			ws   IWebSocket
@@ -412,9 +412,9 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 			data interface{}
 		}
 
-		own.RLock()
+		own.websocketlock.RLock()
 		for hash, api := range own.rArgs {
-			if iwsr.FiltersRouter(message, api) {
+			if ok, ndata := iwsr.NoticeFiltersRouter(message, api); ok {
 				if wsreq, ok := own.rWebSocketClient[hash]; ok {
 					for ws := range wsreq {
 						if !ws.IsClosed() {
@@ -422,7 +422,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 							if res, ok := message.(IResponse); ok {
 								data = res.GetData()
 							} else {
-								data = message
+								data = ndata
 							}
 							clientsToNotify = append(clientsToNotify, struct {
 								ws   IWebSocket
@@ -434,7 +434,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 				}
 			}
 		}
-		own.RUnlock()
+		own.websocketlock.RUnlock()
 
 		// 异步发送消息，避免阻塞
 		go func() {
@@ -464,7 +464,7 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 		data interface{}
 	}
 
-	own.Lock()
+	own.websocketlock.Lock()
 	hash := getApiHash(router)
 	if wsreq, ok := own.rWebSocketClient[hash]; ok {
 		for ws := range wsreq {
@@ -482,7 +482,7 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 			}
 		}
 	}
-	own.Unlock() // 只在这里解锁一次
+	own.websocketlock.Unlock() // 只在这里解锁一次
 
 	// 在锁外发送消息
 	hashStr := strconv.Itoa(hash)
