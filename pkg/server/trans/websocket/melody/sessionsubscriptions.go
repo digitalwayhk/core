@@ -1,6 +1,7 @@
 package melody
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,21 +36,30 @@ func (s *SessionSubscriptions) GetClient() types.IWebSocket {
 	defer s.mu.RUnlock()
 	return s.client
 }
-func (s *SessionSubscriptions) Subscribe(channel string, hash int, api types.IRouter) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.subscriptions[channel]; !exists {
-		s.subscriptions[channel] = make(map[int]types.IRouter)
-	}
-	if _, exists := s.subscriptions[channel][hash]; !exists {
-		s.subscriptions[channel][hash] = api
-		info := api.RouterInfo()
-		res := router.NewRequest(s.sr, s.client.session.Request)
-		info.RegisterWebSocketClient(api, s.client, res)
-	}
-	s.lastActivity = time.Now() // 更新最后活动时间
+func (s *SessionSubscriptions) getIRequest(channel string) types.IRequest {
+	req := router.NewRequest(s.sr, s.client.session.Request)
+	clearRequest(req, channel)
+	return req
 }
-func (s *SessionSubscriptions) handleSubscribe(msg *Message) {
+func clearRequest(req interface{}, channel string) {
+	if cr, ok := req.(types.IRequestClear); ok {
+		cr.ClearTraceId()
+		cr.SetPath(channel)
+	}
+}
+func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, data interface{}) (types.IRouter, types.IRequest, error) {
+	req := s.getIRequest(channel)
+	api, err := s.manage.parseRequest(info, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = api.Validation(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	return api, req, nil
+}
+func (s *SessionSubscriptions) HandleSubscribe(msg *Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	channel := strings.TrimSpace(msg.Channel)
@@ -61,39 +71,67 @@ func (s *SessionSubscriptions) handleSubscribe(msg *Message) {
 	if _, exists := s.subscriptions[channel]; !exists {
 		s.subscriptions[channel] = make(map[int]types.IRouter)
 	}
-	res := router.NewRequest(s.sr, s.client.session.Request)
-	api, err := info.ParseNew(msg.Data)
+	api, req, err := s.getApi(info, channel, msg.Data)
 	if err != nil {
 		s.client.SendError(channel, "订阅错误: "+err.Error())
 		return
 	}
-	hash := info.RegisterWebSocketClient(api, s.client, res)
+	hash := info.RegisterWebSocketClient(api, s.client, req)
 	s.subscriptions[channel][hash] = api
+	s.client.Send("sub", channel, s.subscriptions[channel])
+	s.lastActivity = time.Now() // 更新最后活动时间
 }
-func (s *SessionSubscriptions) handleUnsubscribe(msg *Message) {
+
+func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	channel := strings.TrimSpace(msg.Channel)
-	hash := msg.Data.(int)
+	info := s.sr.GetRouter(channel)
+	if info == nil {
+		s.client.SendError(channel, "当前服务中未找到对应的路由")
+		return
+	}
+	hash, ok := msg.Data.(int)
+	if !ok {
+		api, _, err := s.getApi(info, channel, msg.Data)
+		if err != nil {
+			s.client.SendError(channel, "退订错误: "+err.Error())
+			return
+		}
+		hash = info.UnRegisterWebSocketClient(api, s.client)
+	} else {
+		info.UnRegisterWebSocketHash(hash, s.client)
+	}
 	if _, exists := s.subscriptions[channel]; exists {
 		delete(s.subscriptions[channel], hash)
 		if len(s.subscriptions[channel]) == 0 {
 			delete(s.subscriptions, channel)
 		}
 	}
+	s.client.Send("unsub", channel, strconv.Itoa(hash))
+	s.lastActivity = time.Now() // 更新最后活动时间
 }
 
-func (s *SessionSubscriptions) Unsubscribe(channel string, hash int) {
+func (s *SessionSubscriptions) UnsubscribeAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if _, exists := s.subscriptions[channel]; exists {
-		delete(s.subscriptions[channel], hash)
+	for channel, subs := range s.subscriptions {
+		info := s.sr.GetRouter(channel)
+		if info == nil {
+			continue
+		}
+		for hash := range subs {
+			info.UnRegisterWebSocketHash(hash, s.client)
+			delete(s.subscriptions[channel], hash)
+		}
 		if len(s.subscriptions[channel]) == 0 {
 			delete(s.subscriptions, channel)
 		}
 	}
 	s.lastActivity = time.Now() // 更新最后活动时间
+}
+func (s *SessionSubscriptions) setServiceRouter(sr *router.ServiceRouter) {
+	s.sr = sr
 }
 func (s *SessionSubscriptions) GetAllSubscriptions() map[string]map[int]types.IRouter {
 	s.mu.RLock()

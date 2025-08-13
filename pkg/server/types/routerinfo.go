@@ -356,7 +356,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	if _, ok := own.rArgs[hash]; !ok {
 		own.rArgs[hash] = router
 	}
-	if _, ok := own.rWebSocketClient[hash]; !ok {
+	if _, ok := own.rWebSocketClient[hash]; !ok || hash == 0 {
 		own.rWebSocketClient[hash] = make(map[IWebSocket]IRequest, 0)
 		if iwsr, ok := router.(IWebSocketRouter); ok {
 			iwsr.RegisterWebSocket(client, req)
@@ -396,7 +396,6 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 	if len(own.rArgs) == 0 {
 		own.webSocketHandler = false
 	}
-	client.Send("unsub", own.Path, strconv.Itoa(hash))
 }
 
 // NoticeWebSocket 通知所有订阅的websocket客户端

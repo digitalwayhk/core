@@ -143,8 +143,8 @@ func (mm *MelodyManager) setupHandlers() {
 
 func (mm *MelodyManager) onConnect(s *melody.Session) {
 	// 创建请求对象
-	req := router.NewRequest(mm.serviceContext.Router, s.Request)
-	s.Set("request", req)
+	// req := router.NewRequest(mm.serviceContext.Router, s.Request)
+	// s.Set("request", req)
 	client := &MelodyClient{
 		session: s,
 		manager: mm,
@@ -170,6 +170,9 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	mm.cleanupSession(s)
 	s.UnSet("request") // 清理请求对象
 	mm.subscriptionsMu.Lock()
+	if ss, exists := mm.subscriptions[s]; exists {
+		ss.UnsubscribeAll()
+	}
 	delete(mm.subscriptions, s) // 删除订阅映射
 	mm.subscriptionsMu.Unlock()
 
@@ -227,31 +230,20 @@ func (mm *MelodyManager) handleGet(s *melody.Session, msg *Message) {
 }
 
 func (mm *MelodyManager) handleCall(s *melody.Session, msg *Message) {
-	msg.Channel = strings.TrimSpace(msg.Channel)
-	info := mm.serviceContext.Router.GetRouter(msg.Channel)
+	mm.subscriptionsMu.RLock()
+	subscriptions := mm.subscriptions[s]
+	mm.subscriptionsMu.RUnlock()
+	channel := strings.TrimSpace(msg.Channel)
+	req := subscriptions.getIRequest(channel)
+	info := mm.serviceContext.Router.GetRouter(channel)
 	if info == nil {
-		mm.sendError(s, msg.Channel, "当前服务中未找到对应的路由")
+		mm.sendError(s, channel, "当前服务中未找到对应的路由")
 		return
 	}
-
-	// 获取请求对象
-	reqInterface, exists := s.Get("request")
-	if !exists {
-		mm.sendError(s, msg.Channel, "内部错误：无法获取请求对象")
-		return
-	}
-	req := reqInterface.(types.IRequest)
-
-	// 清理请求状态
-	if cr, ok := req.(types.IRequestClear); ok {
-		cr.ClearTraceId()
-		cr.SetPath(msg.Channel)
-	}
-
 	// 解析请求数据
 	api, err := mm.parseRequest(info, msg.Data)
 	if err != nil {
-		mm.sendError(s, msg.Channel, "数据格式不正确: "+err.Error())
+		mm.sendError(s, channel, "数据格式不正确: "+err.Error())
 		return
 	}
 
@@ -261,104 +253,21 @@ func (mm *MelodyManager) handleCall(s *melody.Session, msg *Message) {
 }
 
 func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
-	msg.Channel = strings.TrimSpace(msg.Channel)
-	info := mm.serviceContext.Router.GetRouter(msg.Channel)
-	if info == nil {
-		mm.sendError(s, msg.Channel, "当前服务中未找到对应的路由")
-		return
-	}
-
-	// 获取请求对象
-	reqInterface, exists := s.Get("request")
-	if !exists {
-		mm.sendError(s, msg.Channel, "内部错误：无法获取请求对象")
-		return
-	}
-	req := reqInterface.(types.IRequest)
-
-	// 解析订阅数据
-	api, err := mm.parseRequest(info, msg.Data)
-	if err != nil {
-		mm.sendError(s, msg.Channel, "订阅错误: "+err.Error())
-		return
-	}
-
-	// 验证订阅请求
-	err = api.Validation(req)
-	if err != nil {
-		mm.sendError(s, msg.Channel, "订阅错误: "+err.Error())
-		return
-	}
-
-	// 创建Melody客户端适配器
-	var melodyClient *MelodyClient
-	if client, exists := s.Get("client"); exists {
-		melodyClient = client.(*MelodyClient)
-	} else {
-		melodyClient = &MelodyClient{session: s, manager: mm}
-	}
-	// 注册订阅
-	hash := info.RegisterWebSocketClient(api, melodyClient, req)
-	//	melodyClient.SubChannel(msg.Channel, hash, api)
-	// // 保存订阅信息
-	// mm.subscriptionsMu.Lock()
-	// if _, ok := mm.subscriptions[s][msg.Channel]; !ok {
-	// 	mm.subscriptions[s][msg.Channel] = make(map[int]types.IRouter)
-	// }
-	// mm.subscriptions[s][msg.Channel][hash] = api
-	// subscriptions := mm.subscriptions[s]
-	// mm.subscriptionsMu.Unlock()
-
-	// 更新统计
-	mm.stats.mu.Lock()
-	mm.stats.totalSubscriptions++
-	mm.stats.mu.Unlock()
-
-	mm.sendToSession(s, msg.Event, msg.Channel, melodyClient.GetChannelArgs(msg.Channel))
-	logx.Infof("客户端订阅成功: %s, 频道: %s, Hash: %d", s.Request.RemoteAddr, msg.Channel, hash)
+	mm.subscriptionsMu.RLock()
+	subscriptions := mm.subscriptions[s]
+	subscriptions.setServiceRouter(mm.serviceContext.Router)
+	mm.subscriptionsMu.RUnlock()
+	subscriptions.HandleSubscribe(msg)
+	logx.Infof("客户端订阅成功: %s, 频道: %s, Data: %s", s.Request.RemoteAddr, msg.Channel, msg.Data)
 }
 
 func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
-	var melodyClient *MelodyClient
-	if client, exists := s.Get("client"); exists {
-		melodyClient = client.(*MelodyClient)
-	}
-	if melodyClient == nil {
-		mm.sendError(s, msg.Channel, "内部错误：无法获取客户端对象")
-		return
-	}
-	msg.Channel = strings.TrimSpace(msg.Channel)
-	info := mm.serviceContext.Router.GetRouter(msg.Channel)
-	if info == nil {
-		mm.sendError(s, msg.Channel, "当前服务中未找到对应的路由")
-		return
-	}
-	// 普通退订
-
-	var hash int
-	if hs, ok := msg.Data.(int); ok && hs > 0 {
-		hash = int(hs)
-		info.UnRegisterWebSocketHash(hash, melodyClient)
-	} else {
-		reqInterface, exists := s.Get("request")
-		if !exists {
-			mm.sendError(s, msg.Channel, "内部错误：无法获取请求对象")
-			return
-		}
-		req := reqInterface.(types.IRequest)
-		api, err := mm.parseRequest(info, msg.Data)
-		if err != nil {
-			mm.sendError(s, msg.Channel, "退订错误: "+err.Error())
-			return
-		}
-		err = api.Validation(req)
-		if err != nil {
-			mm.sendError(s, msg.Channel, "退订错误: "+err.Error())
-			return
-		}
-		hash = info.UnRegisterWebSocketClient(api, melodyClient)
-	}
-	//melodyClient.UnsubChannel(msg.Channel, hash)
+	mm.subscriptionsMu.RLock()
+	subscriptions := mm.subscriptions[s]
+	subscriptions.setServiceRouter(mm.serviceContext.Router)
+	mm.subscriptionsMu.RUnlock()
+	subscriptions.HandleUnsubscribe(msg)
+	logx.Infof("客户端退订成功: %s, 频道: %s, Data: %s", s.Request.RemoteAddr, msg.Channel, msg.Data)
 }
 
 func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (types.IRouter, error) {
