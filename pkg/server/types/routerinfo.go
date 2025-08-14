@@ -322,6 +322,9 @@ func (own *RouterInfo) FailureCache(api IRouter) {
 	own.rCache.Delete(key)
 }
 func getApiHash(api IRouter) int {
+	if hk, ok := api.(IRouterHashKey); ok {
+		return hk.GetHashKey()
+	}
 	key := ""
 	utils.ForEach(api, func(name string, value interface{}) {
 		key += utils.ConvertToString(value)

@@ -39,3 +39,7 @@ type IWebSocketRouter interface {
 type IWebSocketRouterNotice interface {
 	NoticeFiltersRouter(message interface{}, api IRouter) (bool, interface{})
 }
+
+type IRouterHashKey interface {
+	GetHashKey() int
+}
