@@ -176,7 +176,7 @@ func (mm *MelodyManager) setupHandlers() {
 		// 检查缓冲区满的问题
 		if strings.Contains(errMsg, "message buffer is full") {
 			logx.Errorf("WebSocket缓冲区满，强制断开连接: %s", s.Request.RemoteAddr)
-			//mm.handleBufferFullError(s)
+			mm.handleBufferFullError(s)
 			return
 		}
 
@@ -188,6 +188,33 @@ func (mm *MelodyManager) setupHandlers() {
 	go mm.startStatsMonitor()
 }
 
+// 🔧 新增：处理缓冲区满的错误
+func (mm *MelodyManager) handleBufferFullError(s *melody.Session) {
+	// 防止重复处理
+	if s.IsClosed() {
+		return
+	}
+
+	// 标记为问题连接
+	s.Set("buffer_full", true)
+
+	// 先清理订阅状态
+	//mm.cleanupSession(s)
+
+	// 强制关闭连接
+	go func() {
+		// 给一点时间让清理完成
+		time.Sleep(50 * time.Millisecond)
+
+		// 真正关闭WebSocket连接
+		err := s.Close()
+		if err != nil {
+			logx.Errorf("强制关闭WebSocket连接失败: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
+		} else {
+			logx.Infof("WebSocket连接已强制关闭: %s", s.Request.RemoteAddr)
+		}
+	}()
+}
 func (mm *MelodyManager) onConnect(s *melody.Session) {
 	currentCount := mm.connCounter.Increment()
 	if currentCount > mm.maxConnections {
@@ -219,15 +246,7 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 
 func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	currentCount := mm.connCounter.Decrement()
-
 	mm.cleanupSession(s)
-	s.UnSet("request") // 清理请求对象
-	mm.subscriptionsMu.Lock()
-	if ss, exists := mm.subscriptions[s]; exists {
-		ss.UnsubscribeAll()
-	}
-	delete(mm.subscriptions, s) // 删除订阅映射
-	mm.subscriptionsMu.Unlock()
 
 	// 同样在锁内操作
 	mm.stats.mu.Lock()
@@ -343,26 +362,18 @@ func (mm *MelodyManager) cleanupSession(s *melody.Session) {
 	mm.subscriptionsMu.Lock()
 	defer mm.subscriptionsMu.Unlock()
 
-	// subscriptions, exists := mm.subscriptions[s]
-	// if !exists {
-	// 	return
-	// }
-	// 清理所有订阅
-	//melodyClient := &MelodyClient{session: s, manager: mm}
-	// for channel, items := range subscriptions {
-	// 	info := mm.serviceContext.Router.GetRouter(channel)
-	// 	if info != nil {
-	// 		for hash := range items {
-	// 			info.UnRegisterWebSocketHash(hash, melodyClient)
-	// 		}
-	// 	}
-	// }
+	if ss, exists := mm.subscriptions[s]; exists {
+		ss.UnsubscribeAll()
+	}
+	delete(mm.subscriptions, s) // 删除订阅映射
 
-	delete(mm.subscriptions, s)
-	//logx.Infof("清理客户端订阅: %s, 清理频道数: %d", s.Request.RemoteAddr, len(subscriptions))
 }
 
 func (mm *MelodyManager) sendToSession(s *melody.Session, event, channel string, data interface{}) {
+	if s.IsClosed() {
+		logx.Errorf("尝试向已关闭的WebSocket连接发送消息: %s", s.Request.RemoteAddr)
+		return
+	}
 	msg := &Message{
 		Event:   event,
 		Channel: channel,
@@ -392,6 +403,10 @@ func (mm *MelodyManager) sendToSession(s *melody.Session, event, channel string,
 }
 
 func (mm *MelodyManager) sendError(s *melody.Session, channel, errMsg string) {
+	if s.IsClosed() {
+		logx.Errorf("尝试向已关闭的WebSocket连接发送消息: %s", s.Request.RemoteAddr)
+		return
+	}
 	// 🔧 修复：使用更安全的错误发送
 	errorMsg := &Message{
 		Event:   "error",
@@ -440,128 +455,10 @@ func (mm *MelodyManager) BroadcastFilter(data []byte, filter func(*melody.Sessio
 }
 
 func (mm *MelodyManager) GetSessionSubscriptions(s *melody.Session) map[string]map[int]types.IRouter {
-	// mm.sessionMu.RLock()
-	// defer mm.sessionMu.RUnlock()
-
-	// if sessionSub, exists := mm.sessionSubscriptions[s]; exists {
-	// 	sessionSub.mu.RLock()
-	// 	defer sessionSub.mu.RUnlock()
-
-	// 	// 返回副本，避免并发修改
-	// 	result := make(map[string]map[int]types.IRouter)
-	// 	for channel, hashMap := range sessionSub.subscriptions {
-	// 		result[channel] = make(map[int]types.IRouter)
-	// 		for hash, router := range hashMap {
-	// 			result[channel][hash] = router
-	// 		}
-	// 	}
-	// 	return result
-	// }
-
 	return make(map[string]map[int]types.IRouter)
 }
 
 // 🔧 获取特定频道的订阅
 func (mm *MelodyManager) GetChannelSubscriptions(s *melody.Session, channel string) map[int]types.IRouter {
-	// mm.sessionMu.RLock()
-	// defer mm.sessionMu.RUnlock()
-
-	// if sessionSub, exists := mm.sessionSubscriptions[s]; exists {
-	// 	sessionSub.mu.RLock()
-	// 	defer sessionSub.mu.RUnlock()
-
-	// 	if channelSubs, exists := sessionSub.subscriptions[channel]; exists {
-	// 		// 返回副本
-	// 		result := make(map[int]types.IRouter)
-	// 		for hash, router := range channelSubs {
-	// 			result[hash] = router
-	// 		}
-	// 		return result
-	// 	}
-	// }
-
 	return make(map[int]types.IRouter)
-}
-
-// 🔧 添加订阅
-func (mm *MelodyManager) AddSessionSubscription(s *melody.Session, channel string, hash int, router types.IRouter) {
-	// mm.sessionMu.Lock()
-	// defer mm.sessionMu.Unlock()
-
-	// // 确保SessionSubscriptions存在
-	// if _, exists := mm.sessionSubscriptions[s]; !exists {
-	// 	mm.sessionSubscriptions[s] = &SessionSubscriptions{
-	// 		subscriptions: make(map[string]map[int]types.IRouter),
-	// 		metadata:      make(map[string]interface{}),
-	// 		createdAt:     time.Now(),
-	// 		lastActivity:  time.Now(),
-	// 	}
-	// }
-
-	// sessionSub := mm.sessionSubscriptions[s]
-	// sessionSub.mu.Lock()
-	// defer sessionSub.mu.Unlock()
-
-	// // 确保频道存在
-	// if _, exists := sessionSub.subscriptions[channel]; !exists {
-	// 	sessionSub.subscriptions[channel] = make(map[int]types.IRouter)
-	// }
-
-	// sessionSub.subscriptions[channel][hash] = router
-	// sessionSub.lastActivity = time.Now()
-
-	logx.Infof("添加订阅: Session=%p, Channel=%s, Hash=%d", s, channel, hash)
-}
-
-// 🔧 移除订阅
-func (mm *MelodyManager) RemoveSessionSubscription(s *melody.Session, channel string, hash int) bool {
-	mm.subscriptionsMu.Lock()
-	subscript := mm.subscriptions[s]
-	mm.subscriptionsMu.Unlock()
-	if subscript == nil {
-		logx.Errorf("尝试移除订阅时，未找到对应的Session: %p", s)
-		return false
-	}
-	subscript.GetSubscriptions(channel)
-
-	subscript.mu.Lock()
-	defer subscript.mu.Unlock()
-
-	// channelSubs, exists := sessionSub.subscriptions[channel]
-	// if !exists {
-	// 	return false
-	// }
-
-	// if _, exists := channelSubs[hash]; !exists {
-	// 	return false
-	// }
-
-	// delete(channelSubs, hash)
-	// sessionSub.lastActivity = time.Now()
-
-	// // 如果频道没有订阅了，删除频道
-	// if len(channelSubs) == 0 {
-	// 	delete(sessionSub.subscriptions, channel)
-	// }
-
-	logx.Infof("移除订阅: Session=%p, Channel=%s, Hash=%d", s, channel, hash)
-	return true
-}
-
-// 🔧 检查是否有订阅
-func (mm *MelodyManager) HasSubscription(s *melody.Session, channel string, hash int) bool {
-	// mm.sessionMu.RLock()
-	// defer mm.sessionMu.RUnlock()
-
-	// if sessionSub, exists := mm.sessionSubscriptions[s]; exists {
-	// 	sessionSub.mu.RLock()
-	// 	defer sessionSub.mu.RUnlock()
-
-	// 	if channelSubs, exists := sessionSub.subscriptions[channel]; exists {
-	// 		_, exists := channelSubs[hash]
-	// 		return exists
-	// 	}
-	// }
-
-	return false
 }

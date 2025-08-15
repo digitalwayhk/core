@@ -39,14 +39,6 @@ func (mc *MelodyClient) GetSubscriptions() map[string]map[int]types.IRouter {
 	return mc.manager.GetSessionSubscriptions(mc.session)
 }
 
-func (mc *MelodyClient) AddSubscription(channel string, hash int, router types.IRouter) {
-	mc.manager.AddSessionSubscription(mc.session, channel, hash, router)
-}
-
-func (mc *MelodyClient) RemoveSubscription(channel string, hash int) {
-	mc.manager.RemoveSessionSubscription(mc.session, channel, hash)
-}
-
 func (mc *MelodyClient) GetChannelArgs(channel string) map[int]types.IRouter {
 	return mc.manager.GetChannelSubscriptions(mc.session, channel)
 }
