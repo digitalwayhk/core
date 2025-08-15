@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/olahol/melody"
@@ -47,6 +48,9 @@ type MelodyManager struct {
 	subscriptionsMu sync.RWMutex
 	connectionLimit *ConnectionRateLimiter
 
+	connCounter    *ConnectionCounter //
+	maxConnections int64              // 最大连接数限制
+
 	// 统计信息
 	stats struct {
 		totalConnections   int64
@@ -57,15 +61,18 @@ type MelodyManager struct {
 	}
 }
 
-func NewMelodyManager(serviceContext *router.ServiceContext) *MelodyManager {
+func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.MelodyConfigOption) *MelodyManager {
 	m := melody.New()
-
+	config := config.GetMelodyConfig()
+	for _, option := range options {
+		option(config)
+	}
 	// 配置Melody参数
-	m.Config.MaxMessageSize = 512
-	m.Config.MessageBufferSize = 1024
-	m.Config.PongWait = 60 * time.Second
-	m.Config.PingPeriod = 54 * time.Second
-	m.Config.WriteWait = 10 * time.Second
+	m.Config.MaxMessageSize = config.MaxMessageSize
+	m.Config.MessageBufferSize = config.MessageBufferSize
+	m.Config.PongWait = config.PongWait
+	m.Config.PingPeriod = config.PingPeriod
+	m.Config.WriteWait = config.WriteWait
 
 	// m.Config.WriteBufferSize = 1024
 
@@ -75,10 +82,21 @@ func NewMelodyManager(serviceContext *router.ServiceContext) *MelodyManager {
 		subscriptions:   make(map[*melody.Session]*SessionSubscriptions),
 		closeChan:       make(chan struct{}), // 🔧 添加关闭通道
 		connectionLimit: NewConnectionRateLimiter(),
+		connCounter:     &ConnectionCounter{},
+		maxConnections:  config.MaxConnections, // 默认最大连接数
 	}
 
 	manager.setupHandlers()
 	return manager
+}
+func (mm *MelodyManager) GetMelody() *melody.Melody {
+	return mm.melody
+}
+func (mm *MelodyManager) GetConnectionCounter() *ConnectionCounter {
+	return mm.connCounter
+}
+func (mm *MelodyManager) GetMaxConnections() int64 {
+	return mm.maxConnections
 }
 
 // 🔧 修复：安全的统计监控
@@ -171,9 +189,13 @@ func (mm *MelodyManager) setupHandlers() {
 }
 
 func (mm *MelodyManager) onConnect(s *melody.Session) {
-	// 创建请求对象
-	// req := router.NewRequest(mm.serviceContext.Router, s.Request)
-	// s.Set("request", req)
+	currentCount := mm.connCounter.Increment()
+	if currentCount > mm.maxConnections {
+		logx.Errorf("超过最大连接数限制 %d，拒绝连接: %s", mm.maxConnections, s.Request.RemoteAddr)
+		mm.connCounter.Decrement()
+		s.Close()
+		return
+	}
 	client := &MelodyClient{
 		session: s,
 		manager: mm,
@@ -196,6 +218,8 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 }
 
 func (mm *MelodyManager) onDisconnect(s *melody.Session) {
+	currentCount := mm.connCounter.Decrement()
+
 	mm.cleanupSession(s)
 	s.UnSet("request") // 清理请求对象
 	mm.subscriptionsMu.Lock()
@@ -211,8 +235,8 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	activeCount := mm.stats.activeConnections
 	mm.stats.mu.Unlock()
 
-	logx.Infof("WebSocket客户端断开: %s, 当前活跃连接: %d",
-		s.Request.RemoteAddr, activeCount)
+	logx.Infof("WebSocket客户端断开: %s, 当前活跃连接: %d, 当前连接数: %d",
+		s.Request.RemoteAddr, activeCount, currentCount)
 }
 func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 	defer func() {

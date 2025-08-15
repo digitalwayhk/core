@@ -241,24 +241,55 @@ func (own *Server) websocketauth() {
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 🔧 添加：连接频率限制
+		startTime := time.Now()
+
 		ip := utils.ClientPublicIP(r)
 		melodyManager := sc.Hub.(*melody.MelodyManager)
 		if melodyManager == nil {
 			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
+
+		// 检查当前连接数
+		currentConn := melodyManager.GetConnectionCounter().Get()
+		if currentConn >= melodyManager.GetMaxConnections() {
+			logx.Errorf("连接数已达上限，拒绝新连接: %s, 当前连接: %d", ip, currentConn)
+			http.Error(w, "Service Busy", http.StatusServiceUnavailable)
+			return
+		}
+
+		// 连接频率限制
 		limit := melodyManager.GetConnectionLimiter()
 		if !limit.Allow(ip) {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
-		// 快速IP验证
+
+		// IP验证
 		if err := trans.VerifyIPWhiteList(sc.Config, ip); err != nil {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		// 处理WebSocket连接
-		melodyManager.ServeWS(w, r)
+
+		// 🔧 添加：握手超时检测
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			melodyManager.ServeWS(w, r)
+		}()
+
+		// 🔧 可选：监控握手时间
+		go func() {
+			select {
+			case <-done:
+				duration := time.Since(startTime)
+				if duration > 5*time.Second {
+					logx.Errorf("WebSocket握手耗时过长: %v, IP: %s", duration, ip)
+				}
+			case <-time.After(30 * time.Second): // 30秒握手超时
+				logx.Errorf("WebSocket握手超时: IP: %s", ip)
+				// 这里不能强制关闭，因为可能已经升级成功
+			}
+		}()
 	}
 }

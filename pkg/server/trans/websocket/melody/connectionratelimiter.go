@@ -56,3 +56,28 @@ func (crl *ConnectionRateLimiter) cleanup() {
 		crl.clients = make(map[string]*rate.Limiter)
 	}
 }
+
+type ConnectionCounter struct {
+	count int64
+	mu    sync.RWMutex
+}
+
+func (cc *ConnectionCounter) Increment() int64 {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	cc.count++
+	return cc.count
+}
+
+func (cc *ConnectionCounter) Decrement() int64 {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	cc.count--
+	return cc.count
+}
+
+func (cc *ConnectionCounter) Get() int64 {
+	cc.mu.RLock()
+	defer cc.mu.RUnlock()
+	return cc.count
+}
