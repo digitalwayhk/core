@@ -241,7 +241,7 @@ func (own *Server) websocketauth() {
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
+		//startTime := time.Now()
 
 		ip := utils.ClientPublicIP(r)
 		melodyManager := sc.Hub.(*melody.MelodyManager)
@@ -270,26 +270,26 @@ func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-
+		melodyManager.ServeWS(w, r)
 		// 🔧 添加：握手超时检测
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			melodyManager.ServeWS(w, r)
-		}()
+		// done := make(chan struct{})
+		// go func() {
+		// 	defer close(done)
+		// 	melodyManager.ServeWS(w, r)
+		// }()
 
-		// 🔧 可选：监控握手时间
-		go func() {
-			select {
-			case <-done:
-				duration := time.Since(startTime)
-				if duration > 5*time.Second {
-					logx.Errorf("WebSocket握手耗时过长: %v, IP: %s", duration, ip)
-				}
-			case <-time.After(30 * time.Second): // 30秒握手超时
-				logx.Errorf("WebSocket握手超时: IP: %s", ip)
-				// 这里不能强制关闭，因为可能已经升级成功
-			}
-		}()
+		// // 🔧 可选：监控握手时间
+		// go func() {
+		// 	select {
+		// 	case <-done:
+		// 		duration := time.Since(startTime)
+		// 		if duration > 5*time.Second {
+		// 			logx.Errorf("WebSocket握手耗时过长: %v, IP: %s", duration, ip)
+		// 		}
+		// 	case <-time.After(30 * time.Second): // 30秒握手超时
+		// 		logx.Errorf("WebSocket握手超时: IP: %s", ip)
+		// 		// 这里不能强制关闭，因为可能已经升级成功
+		// 	}
+		// }()
 	}
 }

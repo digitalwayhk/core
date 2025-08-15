@@ -31,7 +31,6 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfig          *MelodyConfig //websocket配置
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
@@ -87,7 +86,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
-	con.MelodyConfig = NewMelodyConfig()
+	//con.MelodyConfig = NewMelodyConfig()
 	return &con
 }
 func ReadConfig(servicename string) *ServerConfig {
