@@ -75,6 +75,7 @@ func NewModelList[T types.IModel](action types.IDataAction) *ModelList[T] {
 	}
 	return list
 }
+
 func newmodel(model interface{}) {
 	defer func() {
 		if err := recover(); err != nil {

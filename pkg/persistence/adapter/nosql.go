@@ -53,6 +53,10 @@ func (own *NosqlAdapter) Raw(sql string, data interface{}) error {
 
 	return nil
 }
+func (own *NosqlAdapter) Exec(sql string, data interface{}) error {
+
+	return nil
+}
 
 func (own NosqlAdapter) Insert(data interface{}) error {
 	//TODO implement me

@@ -220,6 +220,20 @@ func (own *DefaultAdapter) Raw(sql string, data interface{}) error {
 	}
 	return nil
 }
+func (own *DefaultAdapter) Exec(sql string, data interface{}) error {
+	var err error
+	own.currentDB, err = own.getdb(data)
+	if err != nil {
+		return err
+	}
+	for _, db := range own.currentDB {
+		err = db.Exec(sql, data)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (own *DefaultAdapter) GetModelDB(model interface{}) (interface{}, error) {
 	return own.getdb(model)
 }

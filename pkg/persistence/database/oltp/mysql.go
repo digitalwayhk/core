@@ -210,6 +210,14 @@ func (own *Mysql) Raw(sql string, data interface{}) error {
 	own.db.Raw(sql).Scan(data)
 	return own.db.Error
 }
+func (own *Mysql) Exec(sql string, data interface{}) error {
+	err := own.init(data)
+	if err != nil {
+		return err
+	}
+	own.db.Exec(sql, data)
+	return own.db.Error
+}
 
 func (own *Mysql) Transaction() {
 	own.isTansaction = true

@@ -44,6 +44,19 @@ func (own *Sqlite) init(data interface{}) error {
 		return err
 	}
 
+	// 🔧 修复：检查数据库文件是否存在
+	dns, err := own.getPath()
+	if err != nil {
+		return err
+	}
+
+	// 如果数据库文件不存在，清除连接缓存
+	if !utils.IsFile(dns) {
+		connManager.SetConnection(dns, nil)
+		own.db = nil
+		own.tx = nil
+	}
+
 	if own.db == nil {
 		_, err := own.GetDB()
 		if err != nil {
@@ -57,7 +70,6 @@ func (own *Sqlite) init(data interface{}) error {
 		}
 	}
 
-	// 不在 init 中检查表，延迟到真正需要时
 	return nil
 }
 
@@ -79,8 +91,81 @@ func (own *Sqlite) GetModelDB(model interface{}) (interface{}, error) {
 	err := own.init(model)
 	return own.db, err
 }
+func (own *Sqlite) DeleteDB() error {
+	dns, err := own.getPath()
+	if err != nil {
+		return err
+	}
 
-func (own *Sqlite) GetDB() (*gorm.DB, error) {
+	// 🔧 修复：在删除文件前先关闭所有数据库连接
+	if err := own.closeAllConnections(); err != nil {
+		logx.Errorf("关闭数据库连接失败: %v", err)
+		// 继续执行，不要因为关闭连接失败而阻止删除文件
+	}
+
+	// 🔧 修复：清除连接缓存（在删除文件前）
+	connManager.SetConnection(dns, nil)
+
+	// 🔧 修复：重置当前实例的连接
+	own.db = nil
+	own.tx = nil
+	own.isTansaction = false
+
+	// 删除数据库文件
+	err = utils.DeleteFile(dns)
+	if err != nil {
+		logx.Errorf("删除数据库文件失败: %s, 错误: %v", dns, err)
+		return err
+	}
+
+	// 🔧 修复：清除表缓存
+	own.clearTableCache()
+
+	logx.Infof("✅ 成功删除数据库文件: %s", dns)
+	return nil
+}
+
+// 🔧 新增：关闭所有数据库连接
+func (own *Sqlite) closeAllConnections() error {
+	var lastError error
+
+	// 关闭事务连接
+	if own.tx != nil {
+		if tx := own.tx.Rollback(); tx != nil {
+			logx.Errorf("回滚事务失败: %v", tx.Error)
+			lastError = tx.Error
+		}
+		own.tx = nil
+		own.isTansaction = false
+	}
+
+	// 关闭主数据库连接
+	if own.db != nil {
+		if sqlDB, err := own.db.DB(); err == nil {
+			if err := sqlDB.Close(); err != nil {
+				logx.Errorf("关闭数据库连接失败: %v", err)
+				lastError = err
+			}
+		}
+		own.db = nil
+	}
+
+	return lastError
+}
+
+// 🔧 新增：清除表缓存
+func (own *Sqlite) clearTableCache() {
+	// 清除与此数据库相关的表缓存
+	tableCache.Range(func(key, value interface{}) bool {
+		if cacheKey, ok := key.(TableCacheKey); ok {
+			if cacheKey.DBPath == own.Path {
+				tableCache.Delete(key)
+			}
+		}
+		return true
+	})
+}
+func (own *Sqlite) getPath() (string, error) {
 	key := own.Name
 	if key == "" {
 		key = "models"
@@ -88,19 +173,16 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 
 	path, err := local.GetDbPath(key)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	dns := path + ".ldb"
 	own.Path = dns
-
-	if db, ok := connManager.GetConnection(dns); ok {
-		own.db = db
-		logx.Infof("🔄 复用现有数据库连接: %s", dns)
-		return db, nil
-	}
-	logx.Infof("🆕 创建新的数据库连接: %s", dns)
-	dia := sqlite.Open(dns)
+	return dns, nil
+}
+func (own *Sqlite) newDB() (*gorm.DB, error) {
+	logx.Infof("🆕 创建新的数据库连接: %s", own.Path)
+	dia := sqlite.Open(own.Path)
 	db, err := gorm.Open(dia, &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy: schema.NamingStrategy{
@@ -127,13 +209,45 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 	sqlDB.SetMaxIdleConns(1)                   // 最小空闲连接
 	sqlDB.SetMaxOpenConns(2)                   // 最小打开连接
 	sqlDB.SetConnMaxLifetime(10 * time.Minute) // 短生存时间
+	return db, nil
+}
 
-	own.db = db
-	if !config.INITSERVER {
-		connManager.SetConnection(dns, db)
+// 🔧 修复：GetDB 方法添加文件存在性检查
+func (own *Sqlite) GetDB() (*gorm.DB, error) {
+	dns, err := own.getPath()
+	if err != nil {
+		return nil, err
 	}
 
-	return db, nil
+	// 🔧 修复：检查文件是否存在，如果不存在则清除缓存
+	if !utils.IsFile(dns) {
+		connManager.SetConnection(dns, nil)
+		own.db = nil
+	}
+
+	if db, ok := connManager.GetConnection(dns); ok {
+		if db != nil && db.Error == nil {
+			// 🔧 修复：验证连接是否仍然有效
+			if err := db.Exec("SELECT 1").Error; err == nil {
+				own.db = db
+				logx.Infof("🔄 复用现有数据库连接: %s", dns)
+				return db, nil
+			} else {
+				// 连接无效，清除缓存
+				connManager.SetConnection(dns, nil)
+			}
+		}
+	}
+
+	own.db, err = own.newDB()
+	if err != nil {
+		return nil, err
+	}
+
+	if !config.INITSERVER {
+		connManager.SetConnection(dns, own.db)
+	}
+	return own.db, nil
 }
 
 func (own *Sqlite) HasTable(model interface{}) error {
@@ -261,6 +375,14 @@ func (own *Sqlite) Raw(sql string, data interface{}) error {
 		return err
 	}
 	own.db.Raw(sql).Scan(data)
+	return own.db.Error
+}
+func (own *Sqlite) Exec(sql string, data interface{}) error {
+	err := own.init(data)
+	if err != nil {
+		return err
+	}
+	own.db.Exec(sql, data)
 	return own.db.Error
 }
 

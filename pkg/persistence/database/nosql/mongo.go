@@ -74,6 +74,14 @@ func (own *Mongo) Raw(sql string, data interface{}) error {
 	// own.db.Raw(sql).Scan(data)
 	return nil
 }
+func (own *Mongo) Exec(sql string, data interface{}) error {
+	// err := own.init(data)
+	// if err != nil {
+	// 	return err
+	// }
+	// own.db.Raw(sql).Scan(data)
+	return nil
+}
 func (own *Mongo) GetModelDB(model interface{}) (interface{}, error) {
 	err := own.init(model)
 	return own.db, err
