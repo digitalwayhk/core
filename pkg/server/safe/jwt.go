@@ -26,7 +26,7 @@ func GetToken(uid uint, secret string, expire int64) (string, error) {
 	claims := make(jwt.MapClaims)
 	claims["exp"] = iat + expire
 	claims["iat"] = iat
-	claims["uid"] = uid
+	claims["uid"] = fmt.Sprintf("%d", uid) // 🔧 转为字符串存储
 	token := jwt.New(jwt.SigningMethodHS256)
 	token.Claims = claims
 	return token.SignedString([]byte(secret))
@@ -37,7 +37,7 @@ func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 	claims := make(jwt.MapClaims)
 	claims["exp"] = iat + expire
 	claims["iat"] = iat
-	claims["uid"] = own.Uid
+	claims["uid"] = fmt.Sprintf("%d", own.Uid) // 🔧 转为字符串存储
 	claims["uname"] = own.Uname
 	if own.Args != nil {
 		for k, v := range own.Args {
@@ -60,10 +60,9 @@ func ValidateJWTToken(tokenString, secret string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		if userID, exists := claims["uid"]; exists {
-			return fmt.Sprintf("%v", userID), nil
+		if uidStr, ok := claims["uid"].(string); ok {
+			return uidStr, nil
 		}
 		// if sub, exists := claims["sub"]; exists {
 		// 	return fmt.Sprintf("%v", sub), nil

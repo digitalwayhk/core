@@ -3,6 +3,7 @@ package melody
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,10 +73,10 @@ func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, da
 		}
 		id, err := strconv.Atoi(s.req.userID)
 		if err != nil {
-			return nil, nil, errors.New("invalid user ID in session request")
+			return nil, nil, fmt.Errorf("invalid user ID in session request: %w", err)
 		}
 		if id <= 0 {
-			return nil, nil, errors.New("invalid user ID in session request")
+			return nil, nil, fmt.Errorf("invalid user ID in session request: %d", id)
 		}
 		if iuid, ok := api.(IUserID); ok {
 			iuid.SetUserID(uint(id))
