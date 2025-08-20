@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,18 +43,22 @@ func getRequestInfo(r *http.Request, req *Request) {
 	req.apiPath = path
 	req.http = r
 	req.clientIP = utils.ClientPublicIP(r)
-	var uid int64
+	var uid uint
 	var uname string
 	ctext := r.Context()
 	obj := ctext.Value("uid")
 	if obj != nil {
-		uid, _ = obj.(json.Number).Int64()
+		suid := obj.(string)
+		if suid != "" {
+			id, _ := strconv.Atoi(suid)
+			uid = uint(id)
+		}
 	}
 	nobj := ctext.Value("uname")
 	if nobj != nil {
 		uname = ctext.Value("uname").(string)
 	}
-	req.userID = uint(uid)
+	req.userID = uid
 	req.userName = uname
 	req.traceID = getTraceID(ctext, r)
 	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
