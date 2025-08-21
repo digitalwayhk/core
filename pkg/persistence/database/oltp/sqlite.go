@@ -180,61 +180,38 @@ func (own *Sqlite) getPath() (string, error) {
 	own.Path = dns
 	return dns, nil
 }
-func (own *Sqlite) newDB() (*gorm.DB, error) {
-	logx.Infof("🆕 创建新的数据库连接: %s", own.Path)
-	dia := sqlite.Open(own.Path)
-	db, err := gorm.Open(dia, &gorm.Config{
-		DisableForeignKeyConstraintWhenMigrating: true,
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-			NoLowerCase:   true,
-		},
-		PrepareStmt:              false, // 暂时禁用预编译语句减少内存
-		DisableAutomaticPing:     true,
-		DisableNestedTransaction: true,
-		SkipDefaultTransaction:   true,                                  // 跳过默认事务
-		Logger:                   logger.Default.LogMode(logger.Silent), // 静默模式
-	})
 
-	if err != nil {
-		return nil, err
-	}
-
-	// 最小连接池配置
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, err
-	}
-
-	sqlDB.SetMaxIdleConns(1)                   // 最小空闲连接
-	sqlDB.SetMaxOpenConns(2)                   // 最小打开连接
-	sqlDB.SetConnMaxLifetime(10 * time.Minute) // 短生存时间
-	return db, nil
-}
-
-// 🔧 修复：GetDB 方法添加文件存在性检查
+// sqlite.go - 修复连接管理
 func (own *Sqlite) GetDB() (*gorm.DB, error) {
 	dns, err := own.getPath()
 	if err != nil {
 		return nil, err
 	}
 
-	// 🔧 修复：检查文件是否存在，如果不存在则清除缓存
+	// 🔧 修复：检查文件是否存在
 	if !utils.IsFile(dns) {
+		// 先关闭现有连接再清除缓存
+		if db, ok := connManager.GetConnection(dns); ok && db != nil {
+			if sqlDB, err := db.DB(); err == nil {
+				sqlDB.Close()
+			}
+		}
 		connManager.SetConnection(dns, nil)
 		own.db = nil
 	}
 
 	if db, ok := connManager.GetConnection(dns); ok {
-		if db != nil && db.Error == nil {
-			// 🔧 修复：验证连接是否仍然有效
-			if err := db.Exec("SELECT 1").Error; err == nil {
-				own.db = db
-				logx.Infof("🔄 复用现有数据库连接: %s", dns)
-				return db, nil
-			} else {
-				// 连接无效，清除缓存
-				connManager.SetConnection(dns, nil)
+		if db != nil {
+			// 🔧 修复：检查连接健康状态
+			if sqlDB, err := db.DB(); err == nil {
+				if err := sqlDB.Ping(); err == nil {
+					own.db = db
+					return db, nil
+				} else {
+					// 连接不健康，关闭并清理
+					sqlDB.Close()
+					connManager.SetConnection(dns, nil)
+				}
 			}
 		}
 	}
@@ -248,6 +225,41 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		connManager.SetConnection(dns, own.db)
 	}
 	return own.db, nil
+}
+
+// 🔧 修复：改进newDB配置
+func (own *Sqlite) newDB() (*gorm.DB, error) {
+	logx.Infof("🆕 创建新的数据库连接: %s", own.Path)
+	dia := sqlite.Open(own.Path)
+	db, err := gorm.Open(dia, &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schema.NamingStrategy{
+			SingularTable: true,
+			NoLowerCase:   true,
+		},
+		PrepareStmt:              false,
+		DisableAutomaticPing:     false, // 🔧 启用ping检测
+		DisableNestedTransaction: true,
+		SkipDefaultTransaction:   true,
+		Logger:                   logger.Default.LogMode(logger.Silent),
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 🔧 修复：更严格的连接池配置
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB.SetMaxIdleConns(1)                  // 最小空闲连接
+	sqlDB.SetMaxOpenConns(3)                  // 稍微增加但保持较小
+	sqlDB.SetConnMaxLifetime(5 * time.Minute) // 缩短生存时间
+	sqlDB.SetConnMaxIdleTime(2 * time.Minute) // 🔧 新增：空闲超时
+
+	return db, nil
 }
 
 func (own *Sqlite) HasTable(model interface{}) error {

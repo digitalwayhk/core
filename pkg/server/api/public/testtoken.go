@@ -39,12 +39,13 @@ func (own *TestToken) Parse(req types.IRequest) error {
 func (own *TestToken) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
 	con := sc.Config
-	token, err := safe.GetToken(own.UserID, con.Auth.AccessSecret, con.Auth.AccessExpire)
+	jwt := safe.NewClaims(own.UserID, "")
+	token, err := jwt.GetToken(con.Auth.AccessSecret, con.Auth.AccessExpire)
 	if own.TokenType == 1 {
-		token, err = safe.GetToken(own.UserID, con.ManageAuth.AccessSecret, con.ManageAuth.AccessExpire)
+		token, err = jwt.GetToken(con.ManageAuth.AccessSecret, con.ManageAuth.AccessExpire)
 	}
 	if own.TokenType == 2 {
-		token, err = safe.GetToken(own.UserID, con.ServerManageAuth.AccessSecret, con.ServerManageAuth.AccessExpire)
+		token, err = jwt.GetToken(con.ServerManageAuth.AccessSecret, con.ServerManageAuth.AccessExpire)
 	}
 	return token, err
 }
