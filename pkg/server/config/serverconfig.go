@@ -73,6 +73,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	ip := utils.GetLocalIP()
 	con.Log.ServiceName = servicename + "-" + ip
 	con.Log.KeepDays = 10
+	con.Log.Level = "error"
 	//con.Log.Mode = "file"
 	//con.Log.Path = "logs/" + servicename
 	con.RunIp = ip
@@ -124,8 +125,17 @@ func (own *ServerConfig) Save() error {
 		expity = int(own.Signature.Expiry / time.Hour)
 	}
 	//,\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}
-	str = strings.Replace(str, "\"WrapUpTime\":\"1s\"", "\"WrapUpTime\":1100000000", -1)
-	str = strings.Replace(str, "\"WaitTime\":\"5.5s\"", "\"WaitTime\":5500000000", -1)
+	// UploadRate is the duration for which profiling data is uploaded.
+	//UploadRate time.Duration `json:",default=15s"`
+	// CheckInterval is the interval to check if profiling should start.
+	//CheckInterval time.Duration `json:",default=10s"`
+	// ProfilingDuration is the duration for which profiling data is collected.
+	//ProfilingDuration time.Duration `json:",default=2m"`
+	str = strings.Replace(str, "\"UploadRate\":"+strconv.Itoa(int(own.Profiling.UploadRate)), "\"UploadRate\":\"15s\"", -1)
+	str = strings.Replace(str, "\"CheckInterval\":"+strconv.Itoa(int(own.Profiling.CheckInterval)), "\"CheckInterval\":\"10s\"", -1)
+	str = strings.Replace(str, "\"ProfilingDuration\":"+strconv.Itoa(int(own.Profiling.ProfilingDuration)), "\"ProfilingDuration\":\"2m\"", -1)
+	str = strings.Replace(str, "\"WrapUpTime\":"+strconv.Itoa(int(own.Shutdown.WrapUpTime)), "\"WrapUpTime\":\"1s\"", -1)
+	str = strings.Replace(str, "\"WaitTime\":"+strconv.Itoa(int(own.Shutdown.WaitTime)), "\"WaitTime\":\"5.5s\"", -1)
 	str = strings.Replace(str, "\"Expiry\":"+strconv.Itoa(int(own.Signature.Expiry)), "\"Expiry\":\""+strconv.Itoa(int(expity))+"h\"", -1)
 	if own.Signature.PrivateKeys == nil {
 		str = strings.Replace(str, "\"PrivateKeys\":null", "\"PrivateKeys\":[]", -1)
