@@ -86,6 +86,8 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
+	con.Shutdown.WaitTime = time.Duration(5.5 * float64(time.Second))
+	con.Shutdown.WrapUpTime = time.Duration(1 * float64(time.Second))
 	//con.MelodyConfig = NewMelodyConfig()
 	return &con
 }

@@ -10,21 +10,23 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 
+	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type Claims struct {
-	Uid        uint                   `json:"userid"`
-	Uname      string                 `json:"username"`
-	Args       map[string]interface{} `json:"args"`
-	EncryptKey string                 `json:"-"`
+	Uid        uint              `json:"userid"`
+	Uname      string            `json:"username"`
+	Args       map[string]string `json:"args"`
+	EncryptKey string            `json:"-"`
 }
 
 func NewClaims(userId uint, username string) *Claims {
 	return &Claims{
 		Uid:   userId,
 		Uname: username,
-		Args:  make(map[string]interface{}),
+		Args:  make(map[string]string),
 		//生成个随机安全值
 		EncryptKey: "k3y-dfs932l2343202324",
 	}
@@ -33,11 +35,36 @@ func (own *Claims) SetEncryptKey(key string) *Claims {
 	own.EncryptKey = key
 	return own
 }
-func (own *Claims) AddData(key string, value interface{}) {
+func (own *Claims) AddData(key string, value string) {
 	if own.Args == nil {
-		own.Args = make(map[string]interface{})
+		own.Args = make(map[string]string)
 	}
-	own.Args[key] = value
+	nv := value
+	if isSensitiveKey(key) {
+		var err error
+		nv, err = utils.EncryptAES(nv, own.EncryptKey)
+		if err != nil {
+			logx.Errorf("加密失败: %v", err)
+		}
+	}
+	own.Args[key] = nv
+}
+func (own *Claims) GetData(key string) (string, error) {
+	if own.Args == nil {
+		return "", errors.New("无数据")
+	}
+	if value, exists := own.Args[key]; exists {
+		if isSensitiveKey(key) {
+			var err error
+			value, err = utils.DecryptAES(value, own.EncryptKey)
+			if err != nil {
+				logx.Errorf("解密失败: %v", err)
+				return "", err
+			}
+		}
+		return value, nil
+	}
+	return "", errors.New("未找到数据")
 }
 
 func (own *Claims) GetToken(secret string, expire int64) (string, error) {
