@@ -67,7 +67,7 @@ var INITSERVER = false
 func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	var con ServerConfig
 	con.Name = servicename
-	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\",\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}}"
+	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\"}"
 	conf.LoadConfigFromJsonBytes([]byte(str), &con)
 	con.Telemetry.Batcher = "jaeger"
 	ip := utils.GetLocalIP()
@@ -123,6 +123,9 @@ func (own *ServerConfig) Save() error {
 	if own.Signature.Expiry > 0 {
 		expity = int(own.Signature.Expiry / time.Hour)
 	}
+	//,\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}
+	str = strings.Replace(str, "\"WrapUpTime\":\"1s\"", "\"WrapUpTime\":1100000000", -1)
+	str = strings.Replace(str, "\"WaitTime\":\"5.5s\"", "\"WaitTime\":5500000000", -1)
 	str = strings.Replace(str, "\"Expiry\":"+strconv.Itoa(int(own.Signature.Expiry)), "\"Expiry\":\""+strconv.Itoa(int(expity))+"h\"", -1)
 	if own.Signature.PrivateKeys == nil {
 		str = strings.Replace(str, "\"PrivateKeys\":null", "\"PrivateKeys\":[]", -1)
