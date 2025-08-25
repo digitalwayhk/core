@@ -67,7 +67,7 @@ var INITSERVER = false
 func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	var con ServerConfig
 	con.Name = servicename
-	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\"}"
+	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\",\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}}"
 	conf.LoadConfigFromJsonBytes([]byte(str), &con)
 	con.Telemetry.Batcher = "jaeger"
 	ip := utils.GetLocalIP()
