@@ -38,7 +38,7 @@ func GetGlobalSqliteInstance(name string) *oltp.Sqlite {
 	}
 
 	// 创建新实例
-	logx.Infof("🆕 创建全局Sqlite实例: %s", name)
+	//logx.Infof("🆕 创建全局Sqlite实例: %s", name)
 	instance := oltp.NewSqlite()
 	instance.Name = name
 	globalSqliteInstances[name] = instance
@@ -370,21 +370,23 @@ func (own *ModelList[T]) SearchHash(hash string, fn ...func(item *types.SearchIt
 
 // Contains 是否包含该数据，如果包含，返回true，并返回ID
 func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
+	searchItem := own.GetSearchItem()
+	searchItem.Model = item
 	id := getId(item)
 	if id > 0 {
-		obj, _ := own.SearchId(id)
-		if obj != nil {
-			return true, id
-		} else {
-			return false, 0
-		}
+		searchItem.AddWhereN("Id", id)
 	}
-	hash := getHash(item)
-	objs, _ := own.SearchWhere("Hashcode", hash)
-	if len(objs) > 0 {
-		return true, getId(own.searchList[0])
+	err := own.LoadList(searchItem)
+	if err != nil {
+		return false, 0
 	}
-	return false, 0
+	resBool := len(own.searchList) > 0
+	if resBool {
+		id = getId(own.searchList[0])
+	} else {
+		id = 0
+	}
+	return resBool, id
 }
 
 func (own *ModelList[T]) SearchName(name string, fn ...func(item *types.SearchItem)) ([]*T, error) {

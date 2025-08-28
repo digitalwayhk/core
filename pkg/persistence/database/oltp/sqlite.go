@@ -121,7 +121,7 @@ func (own *Sqlite) DeleteDB() error {
 	// 🔧 修复：清除表缓存
 	own.clearTableCache()
 
-	logx.Infof("✅ 成功删除数据库文件: %s", dns)
+	//logx.Infof("✅ 成功删除数据库文件: %s", dns)
 	return nil
 }
 
@@ -229,7 +229,7 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 
 // 🔧 修复：改进newDB配置
 func (own *Sqlite) newDB() (*gorm.DB, error) {
-	logx.Infof("🆕 创建新的数据库连接: %s", own.Path)
+	//logx.Infof("🆕 创建新的数据库连接: %s", own.Path)
 	dia := sqlite.Open(own.Path)
 	db, err := gorm.Open(dia, &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
@@ -300,7 +300,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
-	logx.Infof("检查表: %s", tableName)
+	//logx.Infof("检查表: %s", tableName)
 
 	// 快速检查表是否存在，避免调用复杂的 Migrator
 	var count int64
@@ -310,7 +310,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil // 表已存在
 	}
 
-	logx.Infof("开始创建表: %s", tableName)
+	//logx.Infof("开始创建表: %s", tableName)
 
 	// 只在表不存在时才执行迁移
 	err = own.db.AutoMigrate(model)
@@ -321,7 +321,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 
 	// 缓存结果
 	tableCache.Store(cacheKey, true)
-	logx.Infof("表创建完成: %s", tableName)
+	//logx.Infof("表创建完成: %s", tableName)
 
 	// 处理嵌套表，但限制深度
 	return own.processNestedTablesOptimized(model, make(map[string]bool), 0, 2)
