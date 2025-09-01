@@ -453,7 +453,7 @@ func (own *ModelList[T]) SearchOne(fn ...func(item *types.SearchItem)) (*T, erro
 }
 
 // 统计查询，默认sum(field),当需要使用max,min,avg等统计时，需要在fn中修改item.Statistical=max
-func (own *ModelList[T]) SerachSum(field string, fn ...func(item *types.SearchItem)) (decimal.Decimal, error) {
+func (own *ModelList[T]) SearchSum(field string, fn ...func(item *types.SearchItem)) (decimal.Decimal, error) {
 	item := own.GetSearchItem()
 	item.IsStatistical = true
 	item.StatField = field
@@ -463,7 +463,11 @@ func (own *ModelList[T]) SerachSum(field string, fn ...func(item *types.SearchIt
 		}
 	}
 	data := decimal.Zero
-	err := own.ada.Load(item, &data)
+	if err := own.searchHook(item); err != nil {
+		return data, err
+	}
+	ada := own.GetDBAdapter(item)
+	err := ada.Load(item, &data)
 	return data, err
 }
 func (own *ModelList[T]) LoadList(item *types.SearchItem) error {
@@ -517,7 +521,16 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 			logx.Error(msg)
 		}
 	}()
-
+	if err := own.searchHook(item); err != nil {
+		return err
+	}
+	if len(item.SortList) == 0 {
+		item.AddSort(&types.SortItem{Column: "ID", IsDesc: true})
+	}
+	ada := own.GetDBAdapter(item)
+	return own.OnLoad(ada, item)
+}
+func (own *ModelList[T]) searchHook(item *types.SearchItem) error {
 	// 根据预期大小智能分配容量
 	expectedSize := item.Size
 	if expectedSize <= 0 {
@@ -546,11 +559,7 @@ func (own *ModelList[T]) load(item *types.SearchItem) error {
 		}
 		item.WhereList = ws
 	}
-	if len(item.SortList) == 0 {
-		item.AddSort(&types.SortItem{Column: "ID", IsDesc: true})
-	}
-	ada := own.GetDBAdapter(item)
-	return own.OnLoad(ada, item)
+	return nil
 }
 func (own *ModelList[T]) OnInsert(ada types.IDataAction, item *T) error {
 	var err error
