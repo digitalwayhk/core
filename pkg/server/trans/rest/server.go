@@ -86,7 +86,7 @@ func (own *Server) register() {
 	}
 	if own.IsWebSocket {
 		own.websocket()
-		own.websocketauth()
+		//own.websocketauth()
 	}
 	fmt.Printf("%s Register Service Routes End. \n", own.context.Config.Name)
 	fmt.Println("===========================================================")
@@ -227,17 +227,17 @@ func (own *Server) websocket() {
 	}, opts...)
 }
 
-func (own *Server) websocketauth() {
-	opts := make([]rest.RouteOption, 0)
-	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-	opts = append(opts, rest.WithTimeout(0)) // 添加：为认证WebSocket路由也禁用超时
+// func (own *Server) websocketauth() {
+// 	opts := make([]rest.RouteOption, 0)
+// 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
+// 	opts = append(opts, rest.WithTimeout(0)) // 添加：为认证WebSocket路由也禁用超时
 
-	own.Server.AddRoute(rest.Route{
-		Method:  http.MethodGet,
-		Path:    "/wsauth",
-		Handler: websocketHandler(own.context),
-	}, opts...)
-}
+// 	own.Server.AddRoute(rest.Route{
+// 		Method:  http.MethodGet,
+// 		Path:    "/wsauth",
+// 		Handler: websocketHandler(own.context),
+// 	}, opts...)
+// }
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
