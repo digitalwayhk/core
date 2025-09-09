@@ -366,7 +366,6 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 		}
 		if own.rWebSocketClient == nil {
 			own.rWebSocketClient = make(map[int]map[IWebSocket]IRequest)
-			// 🔧 注意：StartPeriodicCleanup 可能需要在外部调用，避免在锁内启动goroutine
 		}
 
 		// 🔧 处理私有类型
@@ -376,10 +375,10 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 		}
 
 		hash = getApiHash(router)
-		if hash == 0 {
-			logx.Errorf("WebSocket注册失败: hash为0")
-			return
-		}
+		// if hash == 0 {
+		// 	logx.Errorf("WebSocket注册失败: hash为0")
+		// 	return
+		// }
 
 		// 🔧 安全地注册路由
 		if _, ok := own.rArgs[hash]; !ok {
