@@ -338,11 +338,6 @@ func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
 	}
 	return items
 }
-func (own *RouterInfo) ensureWebSocketInit() {
-	own.once.Do(func() {
-		own.StartPeriodicCleanup()
-	})
-}
 
 // 注册websocket的订阅，并返回订阅的event号
 func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) int {
@@ -697,14 +692,73 @@ func (own *RouterInfo) CleanupDeadConnections() {
 	logx.Infof("清理了 %d 个空的WebSocket hash", len(hashesToClean))
 }
 
-// 🔧 新增：定期清理任务
-func (own *RouterInfo) StartPeriodicCleanup() {
+// 🔧 新增：RouterInfo销毁时的清理
+func (own *RouterInfo) Destroy() {
+	// 清理WebSocket连接
+	own.CleanupDeadConnections()
+
+	// 从全局清理map中移除
+	key := own.Path
+	if keyhash, ok := own.instance.(IRouterHashKey); ok {
+		key = key + ":" + strconv.Itoa(keyhash.GetHashKey())
+	}
+	clearMap.Delete(key)
+
+	logx.Infof("RouterInfo已销毁: %s", key)
+}
+
+var websocketcleanupOnce sync.Once
+var clearMap sync.Map
+
+func (own *RouterInfo) ensureWebSocketInit() {
+	// 🔧 确保全局清理任务启动
+	websocketcleanupOnce.Do(func() {
+		logx.Info("🚀 启动全局WebSocket清理任务")
+		StartPeriodicCleanup()
+	})
+
+	// 🔧 生成唯一的key
+	key := own.ServiceName + ":" + own.Path
+	if keyhash, ok := own.instance.(IRouterHashKey); ok {
+		key = key + ":" + strconv.Itoa(keyhash.GetHashKey())
+	}
+
+	// 🔧 注册到全局清理map
+	if _, loaded := clearMap.LoadOrStore(key, own); !loaded {
+		logx.Infof("📝 注册WebSocket路由: %s", key)
+	}
+}
+
+func StartPeriodicCleanup() {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second) // 每30秒清理一次
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			own.CleanupDeadConnections()
+			totalCleaned := 0
+			totalRouters := 0
+			totalClients := 0
+
+			clearMap.Range(func(key, value interface{}) bool {
+				if rou, ok := value.(*RouterInfo); ok {
+					totalRouters++
+
+					// 🔧 统计清理前的客户端数量
+					beforeCount := rou.GetActiveClientCount()
+					rou.CleanupDeadConnections()
+					afterCount := rou.GetActiveClientCount()
+
+					cleaned := beforeCount - afterCount
+					totalCleaned += cleaned
+					totalClients += afterCount
+				}
+				return true
+			})
+
+			if totalCleaned > 0 || totalRouters > 0 {
+				logx.Infof("🧹 WebSocket清理完成 - 路由数: %d, 活跃客户端: %d, 清理连接: %d",
+					totalRouters, totalClients, totalCleaned)
+			}
 		}
 	}()
 }
