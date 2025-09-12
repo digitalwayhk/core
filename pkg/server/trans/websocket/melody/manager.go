@@ -223,21 +223,25 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 		s.Close()
 		return
 	}
+
+	// 🔧 在锁外创建所有对象
 	client := &MelodyClient{
 		session: s,
 		manager: mm,
 	}
-	// 初始化订阅映射
-	mm.subscriptionsMu.Lock()
 	sr := mm.serviceContext.Router
-	mm.subscriptions[s] = NewSessionSubscriptions(mm, client, sr)
+	newSubscriptions := NewSessionSubscriptions(mm, client, sr)
+
+	// 🔧 最小化锁持有时间 - 只保护map操作
+	mm.subscriptionsMu.Lock()
+	mm.subscriptions[s] = newSubscriptions
 	mm.subscriptionsMu.Unlock()
 
-	// 🔧 修复：在锁内读取和更新统计
+	// 🔧 统计更新
 	mm.stats.mu.Lock()
 	mm.stats.totalConnections++
 	mm.stats.activeConnections++
-	activeCount := mm.stats.activeConnections // 在锁内读取
+	activeCount := mm.stats.activeConnections
 	mm.stats.mu.Unlock()
 
 	logx.Infof("WebSocket客户端连接: %s, 当前活跃连接: %d",
@@ -324,21 +328,37 @@ func (mm *MelodyManager) handleCall(s *melody.Session, msg *Message) {
 }
 
 func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
+	// 🔧 使用读锁并快速获取引用
 	mm.subscriptionsMu.RLock()
 	subscriptions := mm.subscriptions[s]
-	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	mm.subscriptionsMu.RUnlock()
+
+	if subscriptions == nil {
+		mm.sendError(s, msg.Channel, "会话未初始化")
+		return
+	}
+
+	// 🔧 在锁外设置router
+	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	subscriptions.HandleSubscribe(msg)
-	logx.Infof("客户端订阅成功: %s, 频道: %s, Data: %s", s.Request.RemoteAddr, msg.Channel, msg.Data)
+
+	logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
 }
 
 func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
 	mm.subscriptionsMu.RLock()
 	subscriptions := mm.subscriptions[s]
-	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	mm.subscriptionsMu.RUnlock()
+
+	if subscriptions == nil {
+		mm.sendError(s, msg.Channel, "会话未初始化")
+		return
+	}
+
+	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	subscriptions.HandleUnsubscribe(msg)
-	logx.Infof("客户端退订成功: %s, 频道: %s, Data: %s", s.Request.RemoteAddr, msg.Channel, msg.Data)
+
+	logx.Infof("客户端退订成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
 }
 
 func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (types.IRouter, error) {
@@ -359,19 +379,36 @@ func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) 
 }
 
 func (mm *MelodyManager) cleanupSession(s *melody.Session) {
-	mm.subscriptionsMu.Lock()
-	defer mm.subscriptionsMu.Unlock()
+	// 🔧 先在锁外检查
+	mm.subscriptionsMu.RLock()
+	ss, exists := mm.subscriptions[s]
+	mm.subscriptionsMu.RUnlock()
 
-	if ss, exists := mm.subscriptions[s]; exists {
-		ss.UnsubscribeAll()
+	if !exists {
+		return // 快速返回，无需清理
 	}
-	delete(mm.subscriptions, s) // 删除订阅映射
 
+	// 🔧 在锁外执行耗时的清理操作
+	if ss != nil {
+		// 这里可能是耗时操作，在锁外执行
+		go func() {
+			defer func() {
+				if err := recover(); err != nil {
+					logx.Errorf("清理会话时发生错误: %v", err)
+				}
+			}()
+			ss.UnsubscribeAll()
+		}()
+	}
+
+	// 🔧 最后才在锁内删除映射
+	mm.subscriptionsMu.Lock()
+	delete(mm.subscriptions, s)
+	mm.subscriptionsMu.Unlock()
 }
-
 func (mm *MelodyManager) sendToSession(s *melody.Session, event, channel string, data interface{}) {
-	if s.IsClosed() {
-		logx.Errorf("尝试向已关闭的WebSocket连接发送消息: %s", s.Request.RemoteAddr)
+	if s == nil || s.IsClosed() {
+		logx.Errorf("跳过向已关闭连接发送消息: event=%s, channel=%s", event, channel)
 		return
 	}
 	msg := &Message{
