@@ -1,6 +1,8 @@
 package oltp
 
 import (
+	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -58,6 +60,14 @@ func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 	}
 
 	if db != nil {
+		// 🔧 优化数据库连接池配置
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.SetMaxOpenConns(10)                  // 最大打开连接数
+			sqlDB.SetMaxIdleConns(5)                   // 最大空闲连接数
+			sqlDB.SetConnMaxLifetime(30 * time.Minute) // 连接最大生命周期
+			sqlDB.SetConnMaxIdleTime(10 * time.Minute) // 空闲连接最大存活时间
+		}
+
 		cm.connections[key] = &ConnectionInfo{
 			DB:        db,
 			CreatedAt: time.Now(),
@@ -106,26 +116,101 @@ func init() {
 // connection.go - 改进清理策略
 func startGlobalCleanup() {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute) // 🔧 更频繁的清理
+		defer func() {
+			if err := recover(); err != nil {
+				logx.Errorf("全局清理goroutine panic: %v", err)
+				// 重启清理任务
+				time.Sleep(5 * time.Second)
+				startGlobalCleanup()
+			}
+		}()
+
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// 🔧 1. 清理过期连接
-			connManager.CleanupExpired()
+			// 🔧 为整个清理过程设置超时
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
-			// 🔧 2. 清理过期表缓存
-			cleanExpiredTableCache()
+			cleanupTasks := []struct {
+				name string
+				fn   func(context.Context)
+			}{
+				{"清理过期连接", func(ctx context.Context) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						connManager.CleanupExpired()
+					}
+				}},
+				{"清理表缓存", func(ctx context.Context) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						cleanExpiredTableCache()
+					}
+				}},
+				{"检查连接健康", func(ctx context.Context) { checkConnectionHealthWithContext(ctx) }},
+				{"智能GC", func(ctx context.Context) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						performSmartGC()
+					}
+				}},
+				{"记录统计", func(ctx context.Context) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						logCleanupStats()
+					}
+				}},
+			}
 
-			// 🔧 3. 检查连接健康状态
-			checkConnectionHealth()
+			// 🔧 串行执行清理任务，每个都有超时保护
+			for _, task := range cleanupTasks {
+				select {
+				case <-ctx.Done():
+					logx.Alert("清理任务超时，跳过后续任务")
+					break
+				default:
+					func() {
+						defer func() {
+							if err := recover(); err != nil {
+								logx.Errorf("清理任务 %s panic: %v", task.name, err)
+							}
+						}()
 
-			// 🔧 4. 智能GC
-			performSmartGC()
+						taskCtx, taskCancel := context.WithTimeout(ctx, 20*time.Second)
+						task.fn(taskCtx)
+						taskCancel()
+					}()
+				}
+			}
 
-			// 🔧 5. 记录统计
-			logCleanupStats()
+			cancel()
 		}
 	}()
+}
+
+// 🔧 新增：带上下文的连接健康检查
+func checkConnectionHealthWithContext(ctx context.Context) {
+	done := make(chan struct{}, 1)
+	go func() {
+		checkConnectionHealth()
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+		// 检查完成
+	case <-ctx.Done():
+		logx.Alert("连接健康检查被上下文取消")
+	}
 }
 
 var lastMemStats runtime.MemStats
@@ -152,71 +237,126 @@ func cleanExpiredTableCache() {
 	}
 }
 
-// 🔧 新增：检查连接健康状态
+// 🔧 修复：带超时的连接健康检查
 func checkConnectionHealth() {
+	// 🔧 使用带超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	connManager.mutex.RLock()
 	keys := make([]string, 0, len(connManager.connections))
-	for key := range connManager.connections {
+	infos := make([]*ConnectionInfo, 0, len(connManager.connections))
+	for key, info := range connManager.connections {
 		keys = append(keys, key)
+		infos = append(infos, info)
 	}
 	connManager.mutex.RUnlock()
 
-	for _, key := range keys {
-		if db, ok := connManager.GetConnection(key); ok {
-			if sqlDB, err := db.DB(); err == nil {
-				if err := sqlDB.Ping(); err != nil {
-					logx.Errorf("数据库连接不健康，移除: %s, 错误: %v", key, err)
-					sqlDB.Close()
-					connManager.SetConnection(key, nil)
-				}
-			}
+	// 🔧 并发检查连接健康状态，但限制并发数
+	semaphore := make(chan struct{}, 5) // 最多5个并发检查
+	var wg sync.WaitGroup
+
+	for i, key := range keys {
+		if ctx.Err() != nil {
+			break // 如果上下文已取消，停止检查
 		}
+
+		wg.Add(1)
+		go func(k string, info *ConnectionInfo) {
+			defer wg.Done()
+
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+
+				// 🔧 带超时的ping检查
+				done := make(chan error, 1)
+				go func() {
+					if sqlDB, err := info.DB.DB(); err == nil {
+						done <- sqlDB.PingContext(ctx)
+					} else {
+						done <- err
+					}
+				}()
+
+				select {
+				case err := <-done:
+					if err != nil {
+						logx.Errorf("数据库连接不健康，移除: %s, 错误: %v", k, err)
+						if sqlDB, dbErr := info.DB.DB(); dbErr == nil {
+							sqlDB.Close()
+						}
+						connManager.SetConnection(k, nil)
+					}
+				case <-ctx.Done():
+					logx.Alert(fmt.Sprintf("数据库连接健康检查超时: %s", k))
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}(key, infos[i])
+	}
+
+	// 🔧 等待所有检查完成，但有超时
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+		// 所有检查完成
+	case <-ctx.Done():
+		logx.Alert("连接健康检查整体超时")
 	}
 }
 func performSmartGC() {
-	var current runtime.MemStats
-	runtime.ReadMemStats(&current)
+	// 🔧 使用超时防止阻塞
+	done := make(chan struct{}, 1)
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				logx.Errorf("智能GC执行时panic: %v", err)
+			}
+			done <- struct{}{}
+		}()
 
-	// 检查goroutine数量
-	goroutineCount := runtime.NumGoroutine()
+		var current runtime.MemStats
+		runtime.ReadMemStats(&current)
 
-	// 🔧 基于多个指标决定是否GC
-	shouldGC := false
+		goroutineCount := runtime.NumGoroutine()
+		shouldGC := false
 
-	if lastMemStats.Alloc > 0 {
-		growthRate := float64(current.Alloc) / float64(lastMemStats.Alloc)
-		if growthRate > 1.3 || current.Alloc > 150*1024*1024 {
+		if lastMemStats.Alloc > 0 {
+			growthRate := float64(current.Alloc) / float64(lastMemStats.Alloc)
+			if growthRate > 1.3 || current.Alloc > 150*1024*1024 {
+				shouldGC = true
+			}
+		}
+
+		if goroutineCount > 1000 {
 			shouldGC = true
 		}
-	}
 
-	// 🔧 如果goroutine过多也执行GC
-	if goroutineCount > 1000 {
-		shouldGC = true
-	}
-
-	if shouldGC {
-		logx.Infof("执行智能GC - 内存增长率: %.2f, 当前内存: %dMB, Goroutines: %d",
-			float64(current.Alloc)/float64(lastMemStats.Alloc),
-			current.Alloc/1024/1024,
-			goroutineCount)
-		runtime.GC()
-		time.Sleep(100 * time.Millisecond) // 给GC一些时间
-	}
-
-	lastMemStats = current
-}
-func cleanConnections() {
-	connManager.mutex.Lock()
-	defer connManager.mutex.Unlock()
-
-	for _, info := range connManager.connections {
-		if sqlDB, err := info.DB.DB(); err == nil {
-			// 重置连接池
-			sqlDB.SetMaxIdleConns(0)
-			time.Sleep(10 * time.Millisecond)
-			sqlDB.SetMaxIdleConns(1)
+		if shouldGC {
+			logx.Infof("执行智能GC - 内存增长率: %.2f, 当前内存: %dMB, Goroutines: %d",
+				float64(current.Alloc)/float64(lastMemStats.Alloc),
+				current.Alloc/1024/1024,
+				goroutineCount)
+			runtime.GC()
 		}
+
+		lastMemStats = current
+	}()
+
+	// 🔧 如果GC执行超时，直接返回
+	select {
+	case <-done:
+		// GC完成
+	case <-time.After(10 * time.Second):
+		logx.Alert("智能GC执行超时")
 	}
 }
 

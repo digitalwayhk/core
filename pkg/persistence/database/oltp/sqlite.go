@@ -307,10 +307,8 @@ func (own *Sqlite) HasTable(model interface{}) error {
 	err := own.db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&count).Error
 	if err == nil && count > 0 {
 		tableCache.Store(cacheKey, true)
-		return nil // 表已存在
+		return nil
 	}
-
-	//logx.Infof("开始创建表: %s", tableName)
 
 	// 只在表不存在时才执行迁移
 	err = own.db.AutoMigrate(model)
@@ -351,11 +349,13 @@ func (own *Sqlite) processNestedTablesOptimized(model interface{}, processed map
 			if name1 == pname {
 				return // 避免自引用
 			}
-
 			obj := reflect.New(t).Interface()
-			if err := own.processNestedTablesOptimized(obj, processed, depth+1, maxDepth); err != nil {
-				logx.Error("处理嵌套表失败:", err)
+			err := own.db.AutoMigrate(obj)
+			if err != nil {
+				logx.Errorf("处理嵌套表失败: %s -> %s, 错误: %v", pname, name1, err)
 			}
+			// 递归处理嵌套表
+			own.processNestedTablesOptimized(obj, processed, depth+1, maxDepth)
 		}
 	})
 
