@@ -57,11 +57,9 @@ func (own *Sqlite) init(data interface{}) error {
 		own.tx = nil
 	}
 
-	if own.db == nil {
-		_, err := own.GetDB()
-		if err != nil {
-			return err
-		}
+	// 🔧 修复：使用新的连接检查方法
+	if err := own.ensureValidConnection(); err != nil {
+		return err
 	}
 
 	if own.isTansaction {
@@ -71,6 +69,57 @@ func (own *Sqlite) init(data interface{}) error {
 	}
 
 	return nil
+}
+func (own *Sqlite) ensureValidConnection() error {
+	if own.db == nil {
+		_, err := own.GetDB()
+		return err
+	}
+
+	// 🔧 检查连接是否有效
+	sqlDB, err := own.db.DB()
+	if err != nil {
+		logx.Errorf("获取底层数据库连接失败: %v", err)
+		return own.recreateConnection()
+	}
+
+	// 🔧 测试连接
+	if err := sqlDB.Ping(); err != nil {
+		logx.Errorf("数据库连接ping失败: %v", err)
+		return own.recreateConnection()
+	}
+
+	return nil
+}
+
+// 🔧 新增：重建连接的方法
+func (own *Sqlite) recreateConnection() error {
+	// 清理当前连接
+	own.cleanupCurrentConnection()
+
+	// 重新获取连接
+	newDB, err := own.GetDB()
+	if err != nil {
+		return fmt.Errorf("重建数据库连接失败: %v", err)
+	}
+
+	own.db = newDB
+	logx.Infof("数据库连接已重建: %s", own.Path)
+	return nil
+}
+
+// 🔧 新增：清理当前连接
+func (own *Sqlite) cleanupCurrentConnection() {
+	if own.db != nil {
+		if sqlDB, err := own.db.DB(); err == nil {
+			sqlDB.Close()
+		}
+		own.db = nil
+	}
+
+	// 从连接池中移除
+	dns, _ := own.getPath()
+	connManager.SetConnection(dns, nil)
 }
 
 // 新增：延迟表检查方法
