@@ -3,16 +3,11 @@ package manage
 import (
 	"strings"
 
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
 )
-
-type IGetDefaultItems[T pt.IModel] interface {
-	GetDefaultItems() []*T
-}
 
 // DmpBase 是目录、菜单、权限等管理的基础结构体
 type DmpBase[T pt.IModel] struct {
@@ -84,24 +79,4 @@ func (own *DmpBase[T]) OnViewFieldModel(model interface{}, field *view.FieldMode
 	if field.IsFieldOrTitle("url") {
 		field.Title = "链接"
 	}
-}
-
-func (own *DmpBase[T]) SearchAfter(sender interface{}, result *view.TableData, req types.IRequest) (interface{}, error) {
-	if result.Total == 0 {
-		if idg, ok := own.instance.(IGetDefaultItems[T]); ok {
-			if items := idg.GetDefaultItems(); len(items) > 0 {
-				if list := own.GetList().(*entity.ModelList[T]); list != nil {
-					if err := list.Add(items...); err != nil {
-						return nil, err
-					}
-					if err := list.Save(); err != nil {
-						return nil, err
-					}
-					result.Rows = items
-					result.Total = int64(len(items))
-				}
-			}
-		}
-	}
-	return result, nil
 }

@@ -2,6 +2,7 @@ package manage
 
 import (
 	"github.com/digitalwayhk/core/models"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	st "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -42,6 +43,9 @@ type IGetModelListWhere interface {
 }
 type IRequestSet interface {
 	SetReq(req st.IRequest)
+}
+type IGetDefaultItems[T pt.IModel] interface {
+	GetDefaultItems() []*T
 }
 
 type ManageService[T pt.IModel] struct {
@@ -113,9 +117,27 @@ func (own *ManageService[T]) ViewChildModel(child *view.ViewChildModel) {}
 func (own *ManageService[T]) SearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
+
 func (own *ManageService[T]) SearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error) {
+	if result.Total == 0 {
+		if idg, ok := own.Search.GetInstance().(IGetDefaultItems[T]); ok {
+			if items := idg.GetDefaultItems(); len(items) > 0 {
+				if list := own.GetList().(*entity.ModelList[T]); list != nil {
+					if err := list.Add(items...); err != nil {
+						return nil, err
+					}
+					if err := list.Save(); err != nil {
+						return nil, err
+					}
+					result.Rows = items
+					result.Total = int64(len(items))
+				}
+			}
+		}
+	}
 	return result, nil
 }
+
 func (own *ManageService[T]) ForeignSearchBefore(sender interface{}, req st.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
