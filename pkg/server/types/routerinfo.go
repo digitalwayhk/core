@@ -501,6 +501,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 				go func() {
 					defer func() {
 						if err := recover(); err != nil {
+							logx.Errorf("%s \nnoticeFiltersRouter timeout for hash:%d,\nAPI json:%s,\nMessage json:%s", own.Path, hash, utils.PrintObj(own.instance), utils.PrintObj(message))
 							logx.Error("NoticeFiltersRouter panic:", err)
 						}
 						done <- true
@@ -514,7 +515,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 						own.collectClients(hash, message, ndata, &clientsToNotify)
 					}
 				case <-time.After(100 * time.Millisecond): // 超时保护
-					logx.Errorf("NoticeFiltersRouter timeout for hash:", hash)
+					logx.Errorf("%s \nnoticeFiltersRouter timeout for hash:%d,\nAPI json:%s,\nMessage json:%s", own.Path, hash, utils.PrintObj(own.instance), utils.PrintObj(message))
 					continue
 				}
 			}

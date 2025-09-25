@@ -131,7 +131,7 @@ func (own *SearchItem) AddGroup(name ...string) *SearchItem {
 	own.groupFields = append(own.groupFields, name...)
 	return own
 }
-func (own *SearchItem) AddWhereN(name string, value interface{}) *SearchItem {
+func (own *SearchItem) AddWhereN(name string, value interface{}) *WhereItem {
 	rel := ""
 	if len(own.WhereList) > 0 {
 		rel = "AND"
@@ -142,9 +142,23 @@ func (own *SearchItem) AddWhereN(name string, value interface{}) *SearchItem {
 		Relation: rel,
 	}
 	own.AddWhere(w)
-	return own
+	return w
 }
-func (own *SearchItem) OrWhereN(name string, value interface{}) *SearchItem {
+func (own *SearchItem) AddWhereNS(name string, symbol string, value interface{}) *WhereItem {
+	rel := ""
+	if len(own.WhereList) > 0 {
+		rel = "AND"
+	}
+	w := &WhereItem{
+		Column:   name,
+		Value:    value,
+		Symbol:   symbol,
+		Relation: rel,
+	}
+	own.AddWhere(w)
+	return w
+}
+func (own *SearchItem) OrWhereN(name string, value interface{}) *WhereItem {
 	rel := ""
 	if len(own.WhereList) > 0 {
 		rel = "Or"
@@ -158,7 +172,7 @@ func (own *SearchItem) OrWhereN(name string, value interface{}) *SearchItem {
 		own.WhereList = append(own.WhereList, w)
 	}
 	//own.AddWhere(w)
-	return own
+	return w
 }
 func (own *SearchItem) AddWhere(w ...*WhereItem) *SearchItem {
 	if own.WhereList == nil {
@@ -210,6 +224,52 @@ type WhereItem struct {
 	Relation string
 	Prefix   string
 	Suffix   string
+}
+
+func (own *WhereItem) Start() *WhereItem {
+	own.Prefix = "("
+	return own
+}
+func (own *WhereItem) And() *WhereItem {
+	own.Relation = "AND"
+	return own
+}
+func (own *WhereItem) Or() *WhereItem {
+	own.Relation = "OR"
+	return own
+}
+func (own *WhereItem) End() *WhereItem {
+	own.Suffix = ")"
+	return own
+}
+func (own *WhereItem) Like() *WhereItem {
+	own.Symbol = "like"
+	return own
+}
+func (own *WhereItem) Not() *WhereItem {
+	own.Symbol = "!="
+	return own
+}
+func (own *WhereItem) IsNull() *WhereItem {
+	own.Symbol = "isnull"
+	return own
+}
+func (own *WhereItem) IsNotNull() *WhereItem {
+	own.Symbol = "isnotnull"
+	return own
+}
+func (own *WhereItem) SetColumn(name string) *WhereItem {
+	own.Column = name
+	return own
+}
+func (own *WhereItem) SetValue(value interface{}) *WhereItem {
+	own.Value = value
+	return own
+}
+
+func (own *WhereItem) SetSymbol(symbol string) *WhereItem {
+	own.Symbol = symbol
+	return own
 }
 
 type SortItem struct {
