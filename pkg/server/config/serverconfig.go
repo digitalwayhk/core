@@ -31,6 +31,7 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
+	Logto                 LogtoConfig
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
@@ -55,6 +56,11 @@ type AttachAddress struct {
 type CustomerData struct {
 	Key   string
 	Value string
+}
+type LogtoConfig struct {
+	ExpectedAudience string
+	Issuer           string
+	Enable           bool
 }
 
 const CONFIGDIR = "/etc/"
@@ -87,6 +93,10 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
+	con.Logto = LogtoConfig{
+		ExpectedAudience: "http://localhost/api",
+		Issuer:           "https://srph37.logto.app",
+	}
 	// con.Shutdown.WaitTime = time.Duration(5.5 * float64(time.Second))
 	// con.Shutdown.WrapUpTime = time.Duration(1 * float64(time.Second))
 	//con.MelodyConfig = NewMelodyConfig()

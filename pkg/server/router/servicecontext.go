@@ -162,7 +162,14 @@ func (own *ServiceContext) SetPid(pid int) {
 }
 func (own *ServiceContext) SetRunState(state bool) {
 	own.isStart = state
-	own.StateChan <- state
+	// 🔧 非阻塞发送，避免死锁
+	select {
+	case own.StateChan <- state:
+		// 发送成功
+	default:
+		// 通道满了，在当前架构下这不是问题
+		logx.Debugf("StateChan已满，跳过状态通知: %s", own.Service.Name)
+	}
 }
 func (own *ServiceContext) IsRun() bool {
 	return own.isStart

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/safe/logto"
 	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/websocket/melody"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -95,18 +96,23 @@ func (own *Server) register() {
 func handers(own *Server, api *types.RouterInfo) {
 	opts := make([]rest.RouteOption, 0)
 	path := api.Path
-	if api.Auth {
-		if own.context.Router.HasRouter(path, types.ManageType) {
-			opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
-		} else {
-			opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
+	handler := routeHandler(own.context.Router)
+	if own.context.Config.Logto.Enable {
+		handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Logto.Issuer, own.context.Config.Logto.ExpectedAudience).ServeHTTP
+	} else {
+		if api.Auth {
+			if own.context.Router.HasRouter(path, types.ManageType) {
+				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
+			} else {
+				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
+			}
 		}
 	}
 	own.Server.AddRoutes([]rest.Route{
 		{
 			Method:  api.Method,
 			Path:    path,
-			Handler: routeHandler(own.context.Router),
+			Handler: handler,
 		},
 	}, opts...)
 	fmt.Printf("register auth: %t ,method: %s ,route: %s \n", api.Auth, api.Method, path)

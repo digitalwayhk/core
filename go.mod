@@ -17,10 +17,12 @@ require (
 )
 
 require (
+	github.com/MicahParks/keyfunc/v2 v2.1.0
 	github.com/cockroachdb/pebble v0.0.0-20220723153705-3fc374e4dc66
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gofiber/adaptor/v2 v2.1.27
 	github.com/gofiber/fiber/v2 v2.38.1
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/lucas-clemente/quic-go v0.29.1
 	github.com/olahol/melody v1.3.0
 	github.com/onsi/ginkgo v1.16.5
