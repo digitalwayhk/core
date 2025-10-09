@@ -74,6 +74,7 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		if err != nil {
 			panic(err)
 		}
+
 	} else {
 		for _, as := range sc.Service.AttachService {
 			if cas, ok := con.AttachServices[as.ServiceName]; ok {

@@ -23,5 +23,6 @@ func Routers() []types.IRouter {
 		&ppu.GetRemoteDBConfig{},
 		&public.QueryService{},
 		&public.GetMenu{},
+		&public.Health{},
 	}
 }

@@ -262,12 +262,12 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 		s.Request.RemoteAddr, activeCount, currentCount)
 }
 func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
-	defer func() {
-		if err := recover(); err != nil {
-			logx.Errorf("WebSocket消息处理发生恐慌: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
-			mm.sendError(s, "", "服务器内部错误")
-		}
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		logx.Errorf("WebSocket消息处理发生恐慌: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
+	// 		mm.sendError(s, "", "服务器内部错误")
+	// 	}
+	// }()
 
 	mm.stats.mu.Lock()
 	mm.stats.totalMessages++

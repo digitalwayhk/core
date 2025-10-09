@@ -46,7 +46,7 @@ func GetRandNum(n int) int {
 	return rand.Intn(n)
 }
 
-//字符时间戳转时间
+// 字符时间戳转时间
 func ToTime(s string) time.Time {
 	t, _ := strconv.ParseInt(s, 10, 64)
 	tme := time.Unix(t/1000, 0)
@@ -92,7 +92,7 @@ func HashCodes(strings ...string) string {
 }
 
 func IsTest() bool {
-	return flag.Lookup("test.v") != nil
+	return flag.Lookup("test.v") != nil || flag.Lookup("testify.m") != nil
 }
 
 // FirstUpper 字符串首字母大写

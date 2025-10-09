@@ -54,8 +54,8 @@ func (own *Server) Start() {
 	s1 := fmt.Sprintf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
 	if own.IsWebSocket {
 		s2 := fmt.Sprintf("Starting %s websocket at %s:%d success,path:%s:%d/ws \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		s3 := fmt.Sprintf("Starting %s websocket auth at %s:%d success,path:%s:%d/wsauth \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		fmt.Print(s1, s2, s3)
+		//s3 := fmt.Sprintf("Starting %s websocket auth at %s:%d success,path:%s:%d/wsauth \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
+		fmt.Print(s1, s2)
 	} else {
 		fmt.Print(s1)
 	}
@@ -97,10 +97,10 @@ func handers(own *Server, api *types.RouterInfo) {
 	opts := make([]rest.RouteOption, 0)
 	path := api.Path
 	handler := routeHandler(own.context.Router)
-	if own.context.Config.Logto.Enable {
-		handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Logto.Issuer, own.context.Config.Logto.ExpectedAudience).ServeHTTP
-	} else {
-		if api.Auth {
+	if api.Auth {
+		if own.context.Config.Logto.Enable {
+			handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Logto.Issuer, own.context.Config.Logto.ExpectedAudience).ServeHTTP
+		} else {
 			if own.context.Router.HasRouter(path, types.ManageType) {
 				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
 			} else {
@@ -108,6 +108,7 @@ func handers(own *Server, api *types.RouterInfo) {
 			}
 		}
 	}
+
 	own.Server.AddRoutes([]rest.Route{
 		{
 			Method:  api.Method,

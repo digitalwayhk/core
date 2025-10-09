@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -469,97 +470,153 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 	}
 }
 
-// NoticeWebSocket 通知所有订阅的websocket客户端
-// 这里假设 IWebSocketRouter 有一个 FiltersRouter 方法来过滤消息
-// 该方法会遍历所有注册的路由，检查是否满足条件，并发送在NoticeFiltersRouter接口中返回的数据
-// 注意：此方法会在锁内收集需要发送的客户端，避免在锁内直接发送消息，这样可以减少锁的持有时间，避免阻塞其他操作
+// 🔧 添加工作池
+type noticeJob struct {
+	hash    int
+	api     IRouter
+	message interface{}
+	iwsr    IWebSocketRouterNotice
+	router  *RouterInfo
+}
+
+var (
+	noticeJobChan = make(chan *noticeJob, 1000) // 缓冲通道
+	workerOnce    sync.Once
+)
+
 func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	if iwsr, ok := own.instance.(IWebSocketRouterNotice); ok {
-		// 🔧 修复：先快速收集数据，减少锁持有时间
-		var clientsToNotify []struct {
-			ws   IWebSocket
-			hash string
-			data interface{}
-		}
+		// 🔧 确保工作池启动
+		workerOnce.Do(func() {
+			own.startNoticeWorkers()
+		})
 
-		// 🔧 使用defer确保锁被释放
-		func() {
-			own.websocketlock.RLock()
-			defer own.websocketlock.RUnlock()
-
-			// 🔧 添加快速路径检查
-			if len(own.rArgs) == 0 {
-				return
+		// 🔧 快速收集并提交任务
+		hashApis := own.collectHashApis()
+		for hash, api := range hashApis {
+			job := &noticeJob{
+				hash:    hash,
+				api:     api,
+				message: message,
+				iwsr:    iwsr,
+				router:  own,
 			}
 
-			for hash, api := range own.rArgs {
-				// 🔧 添加超时保护
-				done := make(chan bool, 1)
-				var ok bool
-				var ndata interface{}
-
-				go func() {
-					defer func() {
-						if err := recover(); err != nil {
-							logx.Errorf("%s \nnoticeFiltersRouter timeout for hash:%d,\nAPI json:%s,\nMessage json:%s", own.Path, hash, utils.PrintObj(own.instance), utils.PrintObj(message))
-							logx.Error("NoticeFiltersRouter panic:", err)
-						}
-						done <- true
-					}()
-					ok, ndata = iwsr.NoticeFiltersRouter(message, api)
-				}()
-
-				select {
-				case <-done:
-					if ok {
-						own.collectClients(hash, message, ndata, &clientsToNotify)
-					}
-				case <-time.After(100 * time.Millisecond): // 超时保护
-					logx.Errorf("%s \nnoticeFiltersRouter timeout for hash:%d,\nAPI json:%s,\nMessage json:%s", own.Path, hash, utils.PrintObj(own.instance), utils.PrintObj(message))
-					continue
-				}
+			// 🔧 非阻塞提交，如果队列满了就丢弃
+			select {
+			case noticeJobChan <- job:
+			default:
+				logx.Errorf("Notice job queue full, dropping job for hash:%d", hash)
 			}
-		}()
-
-		// 🔧 异步发送，避免阻塞
-		if len(clientsToNotify) > 0 {
-			go own.sendToClients(clientsToNotify)
 		}
 	}
 }
 
-// 🔧 新增：提取客户端收集逻辑
-func (own *RouterInfo) collectClients(hash int, message, ndata interface{}, clientsToNotify *[]struct {
+// 🔧 启动工作协程池
+func (own *RouterInfo) startNoticeWorkers() {
+	const workerCount = 10 // 可配置
+
+	for i := 0; i < workerCount; i++ {
+		go own.noticeWorker(i)
+	}
+	logx.Infof("Started %d notice workers", workerCount)
+}
+
+// 🔧 工作协程
+func (own *RouterInfo) noticeWorker(workerID int) {
+	for job := range noticeJobChan {
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					logx.Errorf("Worker %d panic processing job for hash:%d, error:%v",
+						workerID, job.hash, err)
+				}
+			}()
+
+			// 🔧 带超时的处理
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			done := make(chan bool, 1)
+			var ok bool
+			var ndata interface{}
+
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						logx.Errorf("NoticeFiltersRouter panic in worker %d: %v", workerID, err)
+					}
+					done <- true
+				}()
+				ok, ndata = job.iwsr.NoticeFiltersRouter(job.message, job.api)
+			}()
+
+			select {
+			case <-done:
+				if ok {
+					job.router.sendToHashClients(job.hash, job.message, ndata)
+				}
+			case <-ctx.Done():
+				logx.Errorf("Worker %d: NoticeFiltersRouter timeout for hash:%d", workerID, job.hash)
+			}
+		}()
+	}
+}
+
+// 🔧 快速收集hash和api映射
+func (own *RouterInfo) collectHashApis() map[int]IRouter {
+	own.websocketlock.RLock()
+	defer own.websocketlock.RUnlock()
+
+	if len(own.rArgs) == 0 {
+		return nil
+	}
+
+	// 复制映射，避免在异步处理中出现并发问题
+	hashApis := make(map[int]IRouter, len(own.rArgs))
+	for hash, api := range own.rArgs {
+		hashApis[hash] = api
+	}
+	return hashApis
+}
+
+// 🔧 发送消息到特定hash的客户端
+func (own *RouterInfo) sendToHashClients(hash int, message, ndata interface{}) {
+	// 快速收集客户端
+	var clients []clientToNotify
+
+	func() {
+		own.websocketlock.RLock()
+		defer own.websocketlock.RUnlock()
+
+		if wsreq, ok := own.rWebSocketClient[hash]; ok {
+			clients = make([]clientToNotify, 0, len(wsreq))
+			for ws := range wsreq {
+				if ws != nil && !ws.IsClosed() {
+					clients = append(clients, clientToNotify{
+						ws:   ws,
+						hash: strconv.Itoa(hash),
+						data: ndata,
+					})
+				}
+			}
+		}
+	}()
+
+	// 异步发送
+	if len(clients) > 0 {
+		go own.sendToClients(clients)
+	}
+}
+
+type clientToNotify struct {
 	ws   IWebSocket
 	hash string
 	data interface{}
-}) {
-	if wsreq, ok := own.rWebSocketClient[hash]; ok {
-		hashStr := strconv.Itoa(hash)
-		for ws := range wsreq {
-			if ws != nil && !ws.IsClosed() {
-				var data interface{}
-				if res, ok := message.(IResponse); ok {
-					data = res.GetData()
-				} else {
-					data = ndata
-				}
-				*clientsToNotify = append(*clientsToNotify, struct {
-					ws   IWebSocket
-					hash string
-					data interface{}
-				}{ws, hashStr, data})
-			}
-		}
-	}
 }
 
 // 🔧 新增：批量发送消息
-func (own *RouterInfo) sendToClients(clientsToNotify []struct {
-	ws   IWebSocket
-	hash string
-	data interface{}
-}) {
+func (own *RouterInfo) sendToClients(clientsToNotify []clientToNotify) {
 	// 🔧 分批发送，避免过多的并发
 	const batchSize = 100
 	for i := 0; i < len(clientsToNotify); i += batchSize {
@@ -569,11 +626,7 @@ func (own *RouterInfo) sendToClients(clientsToNotify []struct {
 		}
 
 		batch := clientsToNotify[i:end]
-		go func(clients []struct {
-			ws   IWebSocket
-			hash string
-			data interface{}
-		}) {
+		go func(clients []clientToNotify) {
 			for _, client := range clients {
 				// 🔧 每个发送都有独立的错误恢复
 				func() {

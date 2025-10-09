@@ -112,6 +112,9 @@ func ReadConfig(servicename string) *ServerConfig {
 	return con
 }
 func (own *ServerConfig) Save() error {
+	if utils.IsTest() {
+		return nil
+	}
 	file := CONFIGDIRPATH + own.Name + ".json"
 	if !utils.IsExista(file) {
 		_, err := utils.CreateDir("etc")
