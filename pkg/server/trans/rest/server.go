@@ -98,11 +98,15 @@ func handers(own *Server, api *types.RouterInfo) {
 	path := api.Path
 	handler := routeHandler(own.context.Router)
 	if api.Auth {
-		if own.context.Config.Logto.Enable {
-			handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Logto.Issuer, own.context.Config.Logto.ExpectedAudience).ServeHTTP
-		} else {
-			if own.context.Router.HasRouter(path, types.ManageType) {
+		if own.context.Router.HasRouter(path, types.ManageType) {
+			if own.context.Config.ManageAuth.Logto.Enable {
+				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
+			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
+			}
+		} else {
+			if own.context.Config.Auth.Logto.Enable {
+				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
 			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
 			}

@@ -31,7 +31,6 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	Logto                 LogtoConfig
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
@@ -46,6 +45,7 @@ func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
 type AuthSecret struct {
 	AccessSecret string
 	AccessExpire int64
+	Logto        LogtoConfig
 }
 type AttachAddress struct {
 	Name       string
@@ -85,18 +85,27 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.RunIp = ip
 	con.Auth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.Auth.AccessExpire = 86400
+	con.Auth.Logto = LogtoConfig{
+		ExpectedAudience: "",
+		Issuer:           "",
+	}
 	con.ManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ManageAuth.AccessExpire = 86400
+	con.ManageAuth.Logto = LogtoConfig{
+		ExpectedAudience: "",
+		Issuer:           "",
+	}
 	con.ServerManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ServerManageAuth.AccessExpire = 86400
+	con.ServerManageAuth.Logto = LogtoConfig{
+		ExpectedAudience: "",
+		Issuer:           "",
+	}
+	con.SocketPort = port + 10000
 	con.Debug = false
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
-	con.Logto = LogtoConfig{
-		ExpectedAudience: "http://localhost/api",
-		Issuer:           "https://srph37.logto.app",
-	}
 	// con.Shutdown.WaitTime = time.Duration(5.5 * float64(time.Second))
 	// con.Shutdown.WrapUpTime = time.Duration(1 * float64(time.Second))
 	//con.MelodyConfig = NewMelodyConfig()
