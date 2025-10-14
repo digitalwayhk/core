@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	// 从 Logto 控制台 -> API 资源 -> Identifier
-	expectedAudience = "http://localhost/api"
+	// 从 Logto 控制台 -> API 资源 -> Identifier=appid
+	expectedAudience = "<appid>"
 
 	// Logto 租户域名 (替换成你自己的域名，比如 https://your-tenant.logto.app)
 	issuer = "https://srph37.logto.app"

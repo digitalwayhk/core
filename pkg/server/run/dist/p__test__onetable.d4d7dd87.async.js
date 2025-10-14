@@ -1,0 +1,1 @@
+(self["webpackChunkant_design_pro"]=self["webpackChunkant_design_pro"]||[]).push([[332],{39785:function(n,e,t){"use strict";t.r(e);var r=t(66721),s=t(85893);e["default"]=function(){return(0,s.jsx)(r.Z,{controller:"onetable"})}}}]);
