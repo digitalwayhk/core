@@ -3,6 +3,7 @@ package server
 import (
 	pm "github.com/digitalwayhk/core/pkg/persistence/api/manage"
 	"github.com/digitalwayhk/core/pkg/server/api/manage"
+	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -23,6 +24,8 @@ func (own *SystemManage) Routers() []types.IRouter {
 
 	items = append(items, manage.NewDirectoryManage().Routers()...)
 	items = append(items, manage.NewMenuManage().Routers()...)
+
+	items = append(items, &public.GetMenu{})
 	return items
 }
 func (own *SystemManage) SubscribeRouters() []*types.ObserveArgs {
