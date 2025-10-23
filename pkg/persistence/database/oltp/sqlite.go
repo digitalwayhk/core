@@ -555,3 +555,65 @@ func (own *Sqlite) Commit() error {
 func (own *Sqlite) GetRunDB() interface{} {
 	return own.db
 }
+
+// 在您的sqlite.go中添加跨库事务支持
+func (own *Sqlite) AttachDatabase(aliasName, dbPath string) error {
+	if own.db == nil {
+		if _, err := own.GetDB(); err != nil {
+			return err
+		}
+	}
+
+	sql := fmt.Sprintf("ATTACH DATABASE '%s' AS %s", dbPath, aliasName)
+	return own.db.Exec(sql).Error
+}
+
+func (own *Sqlite) DetachDatabase(aliasName string) error {
+	if own.db == nil {
+		return errors.New("database connection not initialized")
+	}
+
+	sql := fmt.Sprintf("DETACH DATABASE %s", aliasName)
+	return own.db.Exec(sql).Error
+}
+
+// 在您的sqlite.go基础上进行WAL模式优化
+func (own *Sqlite) newDBWithWAL() (*gorm.DB, error) {
+	dia := sqlite.Open(own.Path + "?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=1000&_temp_store=memory")
+	db, err := gorm.Open(dia, &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schema.NamingStrategy{
+			SingularTable: true,
+			NoLowerCase:   true,
+		},
+		PrepareStmt:              true, // 启用预编译语句
+		DisableAutomaticPing:     false,
+		DisableNestedTransaction: false, // 支持嵌套事务
+		SkipDefaultTransaction:   false, // 保持事务安全
+		Logger:                   logger.Default.LogMode(logger.Silent),
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	// 优化的连接池配置
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+
+	// WAL模式配置
+	sqlDB.Exec("PRAGMA journal_mode=WAL;")
+	sqlDB.Exec("PRAGMA synchronous=NORMAL;")
+	sqlDB.Exec("PRAGMA cache_size=1000;")
+	sqlDB.Exec("PRAGMA temp_store=memory;")
+	sqlDB.Exec("PRAGMA mmap_size=268435456;") // 256MB mmap
+
+	return db, nil
+}

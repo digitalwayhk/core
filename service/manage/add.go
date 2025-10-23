@@ -66,7 +66,9 @@ func (own *Add[T]) Do(req types.IRequest) (interface{}, error) {
 	}
 	if add, ok := own.instance.(IManageService); ok {
 		data, err := add.DoAfter(own, req)
-		return data, err
+		if data != nil {
+			return data, err
+		}
 	}
 	return own.Model, err
 }
