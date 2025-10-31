@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
+	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -45,6 +46,7 @@ func createInBatches(db *gorm.DB, data interface{}) error {
 	}
 	tx := db.CreateInBatches(data, size)
 	if tx.Error != nil {
+		logx.Errorf("create in batches error: %v", tx.Error)
 		return tx.Error
 	}
 	return nil
@@ -59,6 +61,7 @@ func createData(db *gorm.DB, data interface{}) error {
 	}
 	tx := db.Create(data)
 	if tx.Error != nil {
+		logx.Errorf("create data error: %v", tx.Error)
 		return tx.Error
 	}
 	return nil
@@ -73,6 +76,7 @@ func updateData(db *gorm.DB, data interface{}) error {
 	}
 	tx := db.Save(data)
 	if tx.Error != nil {
+		logx.Errorf("update data error: %v", tx.Error)
 		return tx.Error
 	}
 	return nil
@@ -87,6 +91,7 @@ func deleteData(db *gorm.DB, data interface{}) error {
 	}
 	tx := db.Delete(data)
 	if tx.Error != nil {
+		logx.Errorf("delete data error: %v", tx.Error)
 		return tx.Error
 	}
 	return nil
@@ -109,15 +114,18 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		name = "`" + name + "`"
 	}
 	sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
-	tx := db.Raw("select count(*) from (" + sqlwhere + ") a").Count(&item.Total)
+	runsql := "select count(*) from (" + sqlwhere + ") a"
+	tx := db.Raw(runsql).Count(&item.Total)
 	if tx.Error != nil {
+		runsql = strings.ReplaceAll(runsql, "\n", " ")
+		logx.Errorf("sqlload count error: %v,sql:%s", tx.Error, runsql)
 		return tx.Error
 	}
 	if item.Total > 0 {
 		swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
 			tx = tx.Model(item.Model)
 			tx = tx.Where(query, args...)
-			tx = tx.Order(item.Order())
+			//tx = tx.Order(item.Order())
 			if item.Total > int64(item.Size) {
 				tx = tx.Scopes(paginate(item.Page, item.Size))
 			}
@@ -127,6 +135,8 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
 		tx = db.Raw(sqlwhere).Find(result)
 		if tx.Error != nil {
+			sqlwhere = strings.ReplaceAll(sqlwhere, "\n", " ")
+			logx.Errorf("sqlload find error: %v,sql:%s", tx.Error, sqlwhere)
 			return tx.Error
 		}
 	}
@@ -144,6 +154,7 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 			return sdb.Where(query, args...)
 		}).Model(item.Model).Count(&item.Total)
 		if tx.Error != nil {
+			logx.Errorf("load count error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
 			return tx.Error
 		}
 		if item.Total > 0 {
@@ -156,6 +167,7 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 				return sdb.Where(query, args...)
 			}).Model(item.Model).Order(item.Order()).Find(result)
 			if tx.Error != nil {
+				logx.Errorf("load find error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
 				return tx.Error
 			}
 		}
@@ -179,6 +191,7 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 		}
 		tx = db.Find(result)
 		if tx.Error != nil {
+			logx.Errorf("load find error: %v", tx.Error)
 			return tx.Error
 		}
 	}

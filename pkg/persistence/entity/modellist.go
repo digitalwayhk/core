@@ -376,7 +376,11 @@ func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
 	if id > 0 {
 		searchItem.AddWhereN("Id", id)
 	}
-	err := own.LoadList(searchItem)
+	hash := getHash(item)
+	if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
+		searchItem.AddWhereN("Hashcode", hash)
+	}
+	err := own.load(searchItem)
 	if err != nil {
 		return false, 0
 	}
