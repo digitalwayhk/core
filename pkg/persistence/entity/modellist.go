@@ -155,23 +155,29 @@ func modelNewHook(item interface{}) {
 }
 func modelAddValid[T types.IModel](list *ModelList[T], item interface{}) error {
 	if im, ok := item.(types.IModel); ok {
-		id := im.GetID()
+		searchItem := list.GetSearchItem()
+		searchItem.Model = im
+		id := getId(item)
 		hash := getHash(item)
-		if id == 0 {
-			if hash == "" || utils.HashCodes("0") == hash {
-				return nil
+		if id > 0 {
+			searchItem.AddWhereN("Id", id)
+		} else {
+			if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
+				searchItem.AddWhereN("Hashcode", hash)
+				setHash(item, hash)
 			}
 		}
-		list.searchItem.Model = item
-		old, err := list.searchIdAndHash(id, hash)
-		list.searchItem.Model = nil
+		err := list.load(searchItem)
 		if err != nil {
 			return err
+		}
+		var old *T
+		if len(list.searchList) > 0 {
+			old = list.searchList[0]
 		}
 		if old != nil {
 			return errors.New("id or hash already exists id:" + strconv.Itoa(int(id)) + " hash:" + hash)
 		}
-		setHash(item, hash)
 		if imv, ok := item.(types.IModelValidHook); ok {
 			return imv.AddValid()
 		}
@@ -375,10 +381,11 @@ func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
 	id := getId(item)
 	if id > 0 {
 		searchItem.AddWhereN("Id", id)
-	}
-	hash := getHash(item)
-	if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
-		searchItem.AddWhereN("Hashcode", hash)
+	} else {
+		hash := getHash(item)
+		if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
+			searchItem.AddWhereN("Hashcode", hash)
+		}
 	}
 	err := own.load(searchItem)
 	if err != nil {
