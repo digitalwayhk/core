@@ -26,7 +26,17 @@ type Response struct {
 func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 	if own.service != nil {
 		if newres, ok := own.service.Service.Instance.(types.INewResponse); ok {
-			return newres.NewResponse(data, err)
+			res := newres.NewResponse(data, err)
+			if utils.HasProperty(res, "TraceID") {
+				utils.SetPropertyValue(res, "TraceID", own.GetTraceId())
+			}
+			if utils.HasProperty(res, "Duration") {
+				utils.SetPropertyValue(res, "Duration", time.Since(own.startTime))
+			}
+			if utils.HasProperty(res, "Host") {
+				utils.SetPropertyValue(res, "Host", own.service.Config.RunIp)
+			}
+			return res
 		}
 	}
 	suc := true
