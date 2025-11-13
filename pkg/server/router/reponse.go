@@ -27,14 +27,10 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 	if own.service != nil {
 		if newres, ok := own.service.Service.Instance.(types.INewResponse); ok {
 			res := newres.NewResponse(data, err)
-			if utils.HasProperty(res, "TraceID") {
-				utils.SetPropertyValue(res, "TraceID", own.GetTraceId())
-			}
-			if utils.HasProperty(res, "Duration") {
-				utils.SetPropertyValue(res, "Duration", time.Since(own.startTime))
-			}
-			if utils.HasProperty(res, "Host") {
-				utils.SetPropertyValue(res, "Host", own.service.Config.RunIp)
+			if setres, ok := res.(types.ISetResponseData); ok {
+				setres.SetTraceId(own.GetTraceId())
+				setres.SetDuration(time.Since(own.startTime))
+				setres.SetHost(own.service.Config.RunIp)
 			}
 			return res
 		}
@@ -90,4 +86,16 @@ func (own *Response) GetError() error {
 		own.ErrorMessage = te.Message + te.Suggest
 	}
 	return own.err
+}
+func (own *Response) SetCode(code int) {
+	own.ErrorCode = code
+}
+func (own *Response) SetTraceId(traceId string) {
+	own.TraceID = traceId
+}
+func (own *Response) SetDuration(duration time.Duration) {
+	own.Duration = duration
+}
+func (own *Response) SetHost(host string) {
+	own.Host = host
 }

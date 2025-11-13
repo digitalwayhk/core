@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 // IRequest
 type IRequest interface {
 	GetTraceId() string
@@ -34,6 +36,12 @@ type IResponse interface {
 	GetMessage() string                              //获取消息
 	GetData(instanceType ...interface{}) interface{} //获取数据,参数为实例类型，如果为空，则返回map[string]interface{}
 	GetError() error                                 //获取错误
+}
+type ISetResponseData interface {
+	SetCode(code int)                   //设置状态码
+	SetTraceId(traceId string)          //设置追踪ID
+	SetDuration(duration time.Duration) //设置持续时间
+	SetHost(host string)                //设置主机
 }
 
 // IWebSocket 客户端WebSocket接口
