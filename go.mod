@@ -18,6 +18,7 @@ require (
 
 require (
 	github.com/MicahParks/keyfunc/v2 v2.1.0
+	github.com/casdoor/casdoor-go-sdk v1.31.0
 	github.com/cockroachdb/pebble v0.0.0-20220723153705-3fc374e4dc66
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gofiber/adaptor/v2 v2.1.27
@@ -77,6 +78,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
+	golang.org/x/oauth2 v0.24.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
@@ -93,7 +95,7 @@ require (
 	github.com/cockroachdb/errors v1.9.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
-	github.com/ghodss/yaml v1.0.0 // indirect
+	github.com/ghodss/yaml v1.0.0
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect

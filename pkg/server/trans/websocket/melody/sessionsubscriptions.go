@@ -15,8 +15,8 @@ import (
 )
 
 type SessionSubscriptions struct {
-	subscriptions map[string]map[int]types.IRouter // channel -> hash -> router
-	metadata      map[string]interface{}           // 客户端元数据
+	subscriptions map[string]map[uint64]types.IRouter // channel -> hash -> router
+	metadata      map[string]interface{}              // 客户端元数据
 	createdAt     time.Time
 	lastActivity  time.Time
 	mu            sync.RWMutex
@@ -28,7 +28,7 @@ type SessionSubscriptions struct {
 
 func NewSessionSubscriptions(manage *MelodyManager, client *MelodyClient, sr *router.ServiceRouter) *SessionSubscriptions {
 	return &SessionSubscriptions{
-		subscriptions: make(map[string]map[int]types.IRouter),
+		subscriptions: make(map[string]map[uint64]types.IRouter),
 		client:        client,
 		manage:        manage,
 		metadata:      make(map[string]interface{}),
@@ -54,8 +54,8 @@ func clearRequest(req interface{}, channel string) {
 }
 
 type IUserID interface {
-	GetUserID() uint
-	SetUserID(userID uint)
+	GetUserID() string
+	SetUserID(userID, userName string)
 }
 
 func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, data interface{}) (types.IRouter, types.IRequest, error) {
@@ -71,15 +71,11 @@ func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, da
 		if err := s.req.Validate(); err != nil {
 			return nil, nil, err
 		}
-		id, err := strconv.Atoi(s.req.userID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid user ID in session request: %w", err)
-		}
-		if id <= 0 {
-			return nil, nil, fmt.Errorf("invalid user ID in session request: %d", id)
+		if s.req.userID == "" {
+			return nil, nil, fmt.Errorf("invalid user ID in session request: %s", s.req.userID)
 		}
 		if iuid, ok := api.(IUserID); ok {
-			iuid.SetUserID(uint(id))
+			iuid.SetUserID(s.req.userID, s.req.userName)
 		}
 	}
 	err = api.Validation(req)
@@ -144,7 +140,7 @@ func (s *SessionSubscriptions) HandleSubscribe(msg *Message) {
 		}
 	}
 	if _, exists := s.subscriptions[channel]; !exists {
-		s.subscriptions[channel] = make(map[int]types.IRouter)
+		s.subscriptions[channel] = make(map[uint64]types.IRouter)
 	}
 	api, req, err := s.getApi(info, channel, msg.Data)
 	if err != nil {
@@ -167,14 +163,19 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 		s.client.SendError(channel, "当前服务中未找到对应的路由")
 		return
 	}
-	hash, ok := msg.Data.(int)
+	hash, ok := msg.Data.(uint64)
 	if !ok {
-		api, _, err := s.getApi(info, channel, msg.Data)
+		hashStr := msg.Data.(string)
+		var err error
+		hash, err = strconv.ParseUint(hashStr, 10, 64)
 		if err != nil {
-			s.client.SendError(channel, "退订错误: "+err.Error())
-			return
+			api, _, err := s.getApi(info, channel, msg.Data)
+			if err != nil {
+				s.client.SendError(channel, "退订错误: "+err.Error())
+				return
+			}
+			hash = info.UnRegisterWebSocketClient(api, s.client)
 		}
-		hash = info.UnRegisterWebSocketClient(api, s.client)
 	} else {
 		info.UnRegisterWebSocketHash(hash, s.client)
 	}
@@ -184,7 +185,8 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 			delete(s.subscriptions, channel)
 		}
 	}
-	s.client.Send("unsub", channel, strconv.Itoa(hash))
+	hashStr := strconv.FormatUint(hash, 10)
+	s.client.Send("unsub", channel, hashStr)
 	s.lastActivity = time.Now() // 更新最后活动时间
 }
 
@@ -233,16 +235,17 @@ func (s *SessionSubscriptions) Logon(req *SessionRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	secret := s.manage.serviceContext.Config.Auth.AccessSecret
 	var sid string
+	var sname string
 	var err error
-	if sid, err = safe.ValidateJWTToken(req.Token, secret); err != nil {
+	if sid, sname, err = safe.ValidateJWTToken(req.Token, s.manage.serviceContext.Config.Auth); err != nil {
 		return err
 	}
 	if sid == "" {
 		return errors.New("invalid session request")
 	}
 	req.userID = sid
+	req.userName = sname
 	s.req = req
 
 	return nil
@@ -260,12 +263,12 @@ func (s *SessionSubscriptions) Logout() *SessionResponse {
 		ReturnRateLimits: false,
 	}
 }
-func (s *SessionSubscriptions) GetAllSubscriptions() map[string]map[int]types.IRouter {
+func (s *SessionSubscriptions) GetAllSubscriptions() map[string]map[uint64]types.IRouter {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.subscriptions
 }
-func (s *SessionSubscriptions) GetSubscriptions(channel string) map[int]types.IRouter {
+func (s *SessionSubscriptions) GetSubscriptions(channel string) map[uint64]types.IRouter {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -286,42 +289,4 @@ func (s *SessionSubscriptions) SetMetadata(key string, value interface{}) {
 
 	s.metadata[key] = value
 	s.lastActivity = time.Now() // 更新最后活动时间
-}
-
-type SessionRequest struct {
-	ApiKey    string `json:"apiKey"`
-	Signature string `json:"signature"`
-	Timestamp int64  `json:"timestamp"`
-	Token     string `json:"token"`
-	userID    string `json:"userId"`
-}
-
-func (own *SessionRequest) Response() *SessionResponse {
-	key := own.ApiKey
-	if key == "" {
-		key = own.Token
-	}
-	return &SessionResponse{
-		ApiKey:           key,
-		AuthorizedSince:  time.Now().Unix(),
-		ConnectedSince:   time.Now().Unix(),
-		ReturnRateLimits: false,
-	}
-}
-func (own *SessionRequest) Validate() error {
-	if own == nil {
-		return errors.New("invalid session request")
-	}
-	if own.Token == "" && (own.ApiKey == "" || own.Signature == "" || own.Timestamp == 0) {
-		return errors.New("invalid session request")
-	}
-	return nil
-}
-
-type SessionResponse struct {
-	ApiKey           string `json:"apiKey"`
-	AuthorizedSince  int64  `json:"authorizedSince"`
-	ConnectedSince   int64  `json:"connectedSince"`
-	ReturnRateLimits bool   `json:"returnRateLimits"`
-	ServerTime       int64  `json:"serverTime"`
 }

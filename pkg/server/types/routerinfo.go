@@ -26,7 +26,7 @@ var (
 )
 
 type RouterInfo struct {
-	ID                int
+	ID                uint64
 	Path              string
 	Auth              bool
 	Method            string
@@ -41,8 +41,8 @@ type RouterInfo struct {
 	rCache            sync.Map                                 //路由结果缓存,key:api hash,value:result
 	useCache          bool                                     //是否使用缓存
 	cacheTime         time.Duration                            //缓存时间
-	rArgs             map[int]IRouter                          //路由参数
-	rWebSocketClient  map[int]map[IWebSocket]IRequest          //websocket客户端
+	rArgs             map[uint64]IRouter                       //路由参数
+	rWebSocketClient  map[uint64]map[IWebSocket]IRequest       //websocket客户端
 	webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
 	pool          sync.Pool
@@ -322,7 +322,7 @@ func (own *RouterInfo) FailureCache(api IRouter) {
 	key := getApiHash(api)
 	own.rCache.Delete(key)
 }
-func getApiHash(api IRouter) int {
+func getApiHash(api IRouter) uint64 {
 	if hk, ok := api.(IRouterHashKey); ok {
 		return hk.GetHashKey()
 	}
@@ -330,7 +330,7 @@ func getApiHash(api IRouter) int {
 	utils.ForEach(api, func(name string, value interface{}) {
 		key += utils.ConvertToString(value)
 	})
-	return utils.HashCode(key)
+	return utils.HashCode64(key)
 }
 func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
 	items := make([]IRouter, 0)
@@ -341,7 +341,7 @@ func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
 }
 
 // 注册websocket的订阅，并返回订阅的event号
-func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) int {
+func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) uint64 {
 	if router == nil || client == nil || req == nil {
 		return 0
 	}
@@ -349,7 +349,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 
 	// 🔧 在锁外声明需要的变量
 	var needRegister bool
-	var hash int
+	var hash uint64
 
 	// 🔧 在锁内只做数据操作
 	func() {
@@ -358,10 +358,10 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 
 		// 🔧 初始化检查
 		if own.rArgs == nil {
-			own.rArgs = make(map[int]IRouter)
+			own.rArgs = make(map[uint64]IRouter)
 		}
 		if own.rWebSocketClient == nil {
-			own.rWebSocketClient = make(map[int]map[IWebSocket]IRequest)
+			own.rWebSocketClient = make(map[uint64]map[IWebSocket]IRequest)
 		}
 
 		// 🔧 处理私有类型
@@ -405,7 +405,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 
 	return hash
 }
-func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) int {
+func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) uint64 {
 	if router == nil || client == nil {
 		return 0
 	}
@@ -413,7 +413,7 @@ func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSock
 	own.UnRegisterWebSocketHash(hash, client)
 	return hash
 }
-func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
+func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	if client == nil {
 		return
 	}
@@ -472,7 +472,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash int, client IWebSocket) {
 
 // 🔧 添加工作池
 type noticeJob struct {
-	hash    int
+	hash    uint64
 	api     IRouter
 	message interface{}
 	iwsr    IWebSocketRouterNotice
@@ -564,7 +564,7 @@ func (own *RouterInfo) noticeWorker(workerID int) {
 }
 
 // 🔧 快速收集hash和api映射
-func (own *RouterInfo) collectHashApis() map[int]IRouter {
+func (own *RouterInfo) collectHashApis() map[uint64]IRouter {
 	own.websocketlock.RLock()
 	defer own.websocketlock.RUnlock()
 
@@ -573,7 +573,7 @@ func (own *RouterInfo) collectHashApis() map[int]IRouter {
 	}
 
 	// 复制映射，避免在异步处理中出现并发问题
-	hashApis := make(map[int]IRouter, len(own.rArgs))
+	hashApis := make(map[uint64]IRouter, len(own.rArgs))
 	for hash, api := range own.rArgs {
 		hashApis[hash] = api
 	}
@@ -581,7 +581,7 @@ func (own *RouterInfo) collectHashApis() map[int]IRouter {
 }
 
 // 🔧 发送消息到特定hash的客户端
-func (own *RouterInfo) sendToHashClients(hash int, message, ndata interface{}) {
+func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}) {
 	// 快速收集客户端
 	var clients []clientToNotify
 
@@ -593,9 +593,10 @@ func (own *RouterInfo) sendToHashClients(hash int, message, ndata interface{}) {
 			clients = make([]clientToNotify, 0, len(wsreq))
 			for ws := range wsreq {
 				if ws != nil && !ws.IsClosed() {
+					hashStr := strconv.FormatUint(hash, 10)
 					clients = append(clients, clientToNotify{
 						ws:   ws,
-						hash: strconv.Itoa(hash),
+						hash: hashStr,
 						data: ndata,
 					})
 				}
@@ -697,7 +698,7 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 	own.websocketlock.Unlock() // 只在这里解锁一次
 
 	// 在锁外发送消息
-	hashStr := strconv.Itoa(hash)
+	hashStr := strconv.FormatUint(hash, 10)
 	for _, client := range clientsToNotify {
 		client.ws.Send(hashStr, own.Path, client.data)
 	}
@@ -712,7 +713,7 @@ func (own *RouterInfo) CleanupDeadConnections() {
 		return
 	}
 
-	var hashesToClean []int
+	var hashesToClean []uint64
 	for hash, clients := range own.rWebSocketClient {
 		var deadClients []IWebSocket
 
@@ -754,7 +755,8 @@ func (own *RouterInfo) Destroy() {
 	// 从全局清理map中移除
 	key := own.Path
 	if keyhash, ok := own.instance.(IRouterHashKey); ok {
-		key = key + ":" + strconv.Itoa(keyhash.GetHashKey())
+		hashStr := strconv.FormatUint(keyhash.GetHashKey(), 10)
+		key = key + ":" + hashStr
 	}
 	clearMap.Delete(key)
 
@@ -774,7 +776,8 @@ func (own *RouterInfo) ensureWebSocketInit() {
 	// 🔧 生成唯一的key
 	key := own.ServiceName + ":" + own.Path
 	if keyhash, ok := own.instance.(IRouterHashKey); ok {
-		key = key + ":" + strconv.Itoa(keyhash.GetHashKey())
+		hashStr := strconv.FormatUint(keyhash.GetHashKey(), 10)
+		key = key + ":" + hashStr
 	}
 
 	// 🔧 注册到全局清理map

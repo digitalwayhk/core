@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +21,7 @@ import (
 type Request struct {
 	traceID       string
 	host          string
-	userID        uint
+	userID        string
 	userName      string
 	clientIP      string
 	apiPath       string
@@ -43,23 +42,17 @@ func getRequestInfo(r *http.Request, req *Request) {
 	req.apiPath = path
 	req.http = r
 	req.clientIP = utils.ClientPublicIP(r)
-	var uid uint
-	var uname string
 	ctext := r.Context()
 	obj := ctext.Value("uid")
 	if obj != nil {
 		suid := obj.(string)
-		if suid != "" {
-			id, _ := strconv.Atoi(suid)
-			uid = uint(id)
-		}
+		req.userID = suid
 	}
 	nobj := ctext.Value("uname")
 	if nobj != nil {
-		uname = ctext.Value("uname").(string)
+		uname := ctext.Value("uname").(string)
+		req.userName = uname
 	}
-	req.userID = uid
-	req.userName = uname
 	req.traceID = getTraceID(ctext, r)
 	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
 }
@@ -81,6 +74,13 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 		if info != nil {
 			req.auth = info.Auth
 			req.routerinfo = info
+			if req.auth {
+				if req.userID == "" && req.userName == "" {
+					logx.Errorf("Auth required but no user info found for api: %s", req.apiPath)
+					return nil
+				}
+				logx.Infof("Auth required for api: %s", req.apiPath)
+			}
 		}
 	}
 	return req
@@ -112,7 +112,7 @@ func (own *Request) ClearTraceId() {
 func (own *Request) GetPath() string {
 	return own.apiPath
 }
-func (own *Request) GetUser() (uint, string) {
+func (own *Request) GetUser() (string, string) {
 	return own.userID, own.userName
 }
 func (own *Request) GetClientIP() string {
@@ -270,7 +270,7 @@ func (own *Request) callPayload(router types.IRouter) (*types.PayLoad, error) {
 	}
 	return ToPayLoad(own, router, tinfo), nil
 }
-func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid uint, router types.IRouter) *types.PayLoad {
+func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid string, router types.IRouter) *types.PayLoad {
 	info := router.RouterInfo()
 	return &types.PayLoad{
 		TraceID:       traceid,

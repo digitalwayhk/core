@@ -2,7 +2,7 @@ package config
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +46,7 @@ type AuthSecret struct {
 	AccessSecret string
 	AccessExpire int64
 	Logto        LogtoConfig
+	CasDoor      CasDoorConfig
 }
 type AttachAddress struct {
 	Name       string
@@ -89,17 +90,29 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
+	con.Auth.CasDoor = CasDoorConfig{
+		Enable:       false,
+		YamlFilePath: "",
+	}
 	con.ManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ManageAuth.AccessExpire = 86400
 	con.ManageAuth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
+	con.Auth.CasDoor = CasDoorConfig{
+		Enable:       false,
+		YamlFilePath: "",
+	}
 	con.ServerManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ServerManageAuth.AccessExpire = 86400
 	con.ServerManageAuth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
+	}
+	con.Auth.CasDoor = CasDoorConfig{
+		Enable:       false,
+		YamlFilePath: "",
 	}
 	con.SocketPort = port + 10000
 	con.Debug = false
@@ -118,6 +131,24 @@ func ReadConfig(servicename string) *ServerConfig {
 	}
 	con := &ServerConfig{}
 	conf.MustLoad(file, con)
+	if con.Auth.CasDoor.Enable {
+		err := con.Auth.CasDoor.ReloadConfig()
+		if err != nil {
+			panic(err)
+		}
+	}
+	if con.ManageAuth.CasDoor.Enable {
+		err := con.ManageAuth.CasDoor.ReloadConfig()
+		if err != nil {
+			panic(err)
+		}
+	}
+	if con.ServerManageAuth.CasDoor.Enable {
+		err := con.ServerManageAuth.CasDoor.ReloadConfig()
+		if err != nil {
+			panic(err)
+		}
+	}
 	return con
 }
 func (own *ServerConfig) Save() error {
@@ -166,7 +197,7 @@ func (own *ServerConfig) Save() error {
 	// 	str = strings.Replace(str, "\"AttachServices\":null", "\"AttachServices\":[]", -1)
 	// }
 
-	err = ioutil.WriteFile(file, utils.String2Bytes(str), 0777)
+	err = os.WriteFile(file, utils.String2Bytes(str), 0777)
 	if err != nil {
 		return err
 	}

@@ -10,25 +10,29 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type Claims struct {
-	Uid        uint              `json:"userid"`
+	Uid        string            `json:"userid"`
 	Uname      string            `json:"username"`
 	Args       map[string]string `json:"args"`
 	EncryptKey string            `json:"-"`
 }
 
-func NewClaims(userId uint, username string) *Claims {
+func NewClaims(userId string, username string) *Claims {
+	uuid := uuid.New().String()
 	return &Claims{
 		Uid:   userId,
 		Uname: username,
 		Args:  make(map[string]string),
 		//生成个随机安全值
-		EncryptKey: "k3y-dfs932l2343202324",
+		EncryptKey: uuid,
 	}
 }
 func (own *Claims) SetEncryptKey(key string) *Claims {
@@ -72,7 +76,7 @@ func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 	claims := make(jwt.MapClaims)
 	claims["exp"] = iat + expire
 	claims["iat"] = iat
-	claims["uid"] = fmt.Sprintf("%d", own.Uid) // 🔧 转为字符串存储
+	claims["uid"] = own.Uid // 🔧 转为字符串存储
 	claims["uname"] = own.Uname
 	if own.Args != nil {
 		for k, v := range own.Args {
@@ -94,7 +98,18 @@ func isSensitiveKey(key string) bool {
 	}
 	return false
 }
-func ValidateJWTToken(tokenString, secret string) (string, error) {
+func ValidateJWTToken(tokenString string, auth config.AuthSecret) (string, string, error) {
+	if auth.CasDoor.Enable {
+		user, err := casdoor.TokenParse(tokenString)
+		if err != nil {
+			return "", "", err
+		}
+		return user.Id, user.Email, nil
+	}
+	return defaultToken(tokenString, auth.AccessSecret)
+}
+
+func defaultToken(tokenString, secret string) (string, string, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -103,19 +118,22 @@ func ValidateJWTToken(tokenString, secret string) (string, error) {
 	})
 
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		if uidStr, ok := claims["uid"].(string); ok {
-			return uidStr, nil
+		uidStr, unameStr := "", ""
+		if uname, ok := claims["uname"].(string); ok {
+			unameStr = uname
 		}
-		// if sub, exists := claims["sub"]; exists {
-		// 	return fmt.Sprintf("%v", sub), nil
-		// }
-		return "", errors.New("token中未找到用户ID")
+		if uid, ok := claims["uid"].(string); ok {
+			uidStr = uid
+		}
+		if uidStr != "" {
+			return uidStr, unameStr, nil
+		}
+		return "", "", errors.New("userid is empty")
 	}
-
-	return "", errors.New("invalid token")
+	return "", "", errors.New("invalid token")
 }
 
 func GetJWTExpiry(tokenString string) int64 {

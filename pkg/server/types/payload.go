@@ -22,7 +22,7 @@ type PayLoad struct {
 	TargetService    string
 	SourcePath       string
 	TargetPath       string
-	UserId           uint
+	UserId           string
 	UserName         string
 	ClientIP         string
 	Auth             bool

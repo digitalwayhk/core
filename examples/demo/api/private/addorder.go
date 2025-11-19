@@ -46,7 +46,7 @@ func (own *AddOrder) Validation(req types.IRequest) error {
 	if amount.LessThan(decimal.NewFromFloat(0)) {
 		return errors.New("amount is less than zero")
 	}
-	if u, _ := req.GetUser(); u == 0 {
+	if u, _ := req.GetUser(); u == "" {
 		return errors.New("userid is empty")
 	}
 	if own.TokenID == 0 {

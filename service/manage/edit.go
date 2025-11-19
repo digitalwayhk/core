@@ -72,7 +72,7 @@ func (own *Edit[T]) Do(req types.IRequest) (interface{}, error) {
 		}
 	}
 	uid, uname := req.GetUser()
-	if uid > 0 {
+	if uid != "" {
 		utils.SetPropertyValue(own.Model, "UpdatedUser", uid)
 	}
 	if uname != "" {

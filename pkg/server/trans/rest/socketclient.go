@@ -52,7 +52,7 @@ type Client struct {
 	conn *websocket.Conn
 	// Buffered channel of outbound messages.
 	send       chan []byte
-	subchannel map[string]map[int]types.IRouter
+	subchannel map[string]map[uint64]types.IRouter
 	isClose    bool
 }
 
@@ -158,7 +158,7 @@ func (c *Client) readPump() {
 			}
 			hash := info.RegisterWebSocketClient(api, c, c.res)
 			if _, ok := c.subchannel[msg.Channel]; !ok {
-				c.subchannel[msg.Channel] = make(map[int]types.IRouter)
+				c.subchannel[msg.Channel] = make(map[uint64]types.IRouter)
 			}
 			c.subchannel[msg.Channel][hash] = api
 			c.Send(msg.Event, msg.Channel, c.subchannel)
@@ -166,7 +166,7 @@ func (c *Client) readPump() {
 		if msg.Event == string(UnSubscribe) {
 			hash, ok := msg.Data.(float64)
 			if ok && hash > 0 {
-				hint := int(hash)
+				hint := uint64(hash)
 				if hs, ok := c.subchannel[msg.Channel]; ok {
 					if _, ok := hs[hint]; ok {
 						info.UnRegisterWebSocketHash(hint, c)
@@ -174,7 +174,8 @@ func (c *Client) readPump() {
 						continue
 					}
 				}
-				c.SendError(msg.Channel, "退订错误:"+msg.Channel+"未找到订阅"+strconv.Itoa(hint))
+				hashStr := strconv.FormatUint(hint, 10)
+				c.SendError(msg.Channel, "退订错误:"+msg.Channel+"未找到订阅"+hashStr)
 				continue
 			}
 			api, err := parse(info, msg.Data)
@@ -272,7 +273,7 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		res:        router.NewRequest(hub.serviceContext.Router, r),
 		conn:       conn,
 		send:       make(chan []byte, bufSize),
-		subchannel: make(map[string]map[int]types.IRouter),
+		subchannel: make(map[string]map[uint64]types.IRouter),
 	}
 	client.hub.register <- client
 

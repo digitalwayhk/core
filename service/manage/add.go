@@ -50,7 +50,7 @@ func (own *Add[T]) Do(req types.IRequest) (interface{}, error) {
 	}
 	utils.SetPropertyValue(own.Model, "ID", req.NewID())
 	uid, uname := req.GetUser()
-	if uid > 0 {
+	if uid != "" {
 		utils.SetPropertyValue(own.Model, "CreatedUser", uid)
 	}
 	if uname != "" {

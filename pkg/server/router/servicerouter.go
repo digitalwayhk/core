@@ -169,7 +169,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 	}
 	sname := utils.GetTypeName(item)
 	info := &types.RouterInfo{
-		ID:                utils.HashCode(Path),
+		ID:                utils.HashCode64(Path),
 		Path:              Path,
 		Auth:              auth,
 		PackPath:          pack,

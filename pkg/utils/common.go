@@ -8,10 +8,12 @@ package utils
 import (
 	"bytes"
 	"crypto/md5"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"hash/crc32"
 	"math/rand"
 	"net/mail"
 	"reflect"
@@ -19,6 +21,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 func PrintObj(o interface{}) string {
@@ -64,21 +68,47 @@ func Md5(strs ...string) string {
 	return md5str
 }
 
-// String hashes a string to a unique HashCode.
-// https://github.com/hashicorp/terraform/blob/master/helper/hashcode/hashcode.go
-// crc32 returns a uint32, but for our use we need
-// and non negative integer. Here we cast to an integer
-// and invert it if the result is negative.
-func HashCode(s string) int {
-	v := int(crc32.ChecksumIEEE([]byte(s)))
-	if v >= 0 {
-		return v
-	}
-	if -v >= 0 {
-		return -v
-	}
-	// v == MinInt
-	return 0
+// UserIDHash - 用户ID哈希（32字符，推荐用于用户标识）
+func UserIDHash(externalID string) string {
+	hash := sha256.Sum256([]byte(externalID))
+	return hex.EncodeToString(hash[:16]) // 32字符，2^128种可能
+}
+
+// UserIDUUID - UUID格式用户ID（36字符，标准格式）
+func UserIDUUID(externalID string) string {
+	namespace := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	return uuid.NewSHA1(namespace, []byte(externalID)).String()
+}
+
+// ===== 通用哈希函数 =====
+
+// ShortHash - 短哈希（16字符）
+func ShortHash(s string) string {
+	hash := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(hash[:8])
+}
+
+// MediumHash - 中等哈希（32字符）
+func MediumHash(s string) string {
+	hash := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(hash[:16])
+}
+
+// SecureHash - 完整哈希（64字符）
+func SecureHash(s string) string {
+	hash := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(hash[:])
+}
+
+// 保持向后兼容
+func HashCodeHex(s string) string {
+	return SecureHash(s)
+}
+
+// HashCode64 - 返回64位整数
+func HashCode64(s string) uint64 {
+	hash := sha256.Sum256([]byte(s))
+	return binary.BigEndian.Uint64(hash[:8])
 }
 
 func HashCodes(strings ...string) string {
@@ -87,8 +117,7 @@ func HashCodes(strings ...string) string {
 	for _, s := range strings {
 		buf.WriteString(fmt.Sprintf("%s-", s))
 	}
-
-	return fmt.Sprintf("%d", HashCode(buf.String()))
+	return MediumHash(buf.String())
 }
 
 func IsTest() bool {

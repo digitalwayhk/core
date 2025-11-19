@@ -12,7 +12,7 @@ import (
 
 type TestToken struct {
 	api.ServerArgs
-	UserID    uint
+	UserID    string
 	TokenType int //0:普通用户token,1:管理员token,2:管理服务token
 }
 
@@ -21,11 +21,7 @@ func (own *TestToken) Parse(req types.IRequest) error {
 	if id == "" {
 		return errors.New("userid is empty")
 	}
-	userid, err := strconv.Atoi(id)
-	if err != nil {
-		return err
-	}
-	own.UserID = uint(userid)
+	own.UserID = id
 	t := req.GetValue("type")
 	if t != "" {
 		ti, err := strconv.Atoi(t)

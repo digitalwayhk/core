@@ -41,5 +41,5 @@ type IWebSocketRouterNotice interface {
 }
 
 type IRouterHashKey interface {
-	GetHashKey() int
+	GetHashKey() uint64
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/safe/logto"
 	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/websocket/melody"
@@ -101,12 +102,17 @@ func handers(own *Server, api *types.RouterInfo) {
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			if own.context.Config.ManageAuth.Logto.Enable {
 				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
+			} else if own.context.Config.ManageAuth.CasDoor.Enable {
+				handler = casdoor.AuthHandler(routeHandler(own.context.Router)).ServeHTTP
 			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
 			}
+
 		} else {
 			if own.context.Config.Auth.Logto.Enable {
 				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
+			} else if own.context.Config.Auth.CasDoor.Enable {
+				handler = casdoor.AuthHandler(routeHandler(own.context.Router)).ServeHTTP
 			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
 			}

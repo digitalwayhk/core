@@ -337,7 +337,7 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 		TargetSocketPort: info.TargetSocketPort,
 		SourcePath:       "",
 		TargetPath:       info.TargetPath,
-		UserId:           0,
+		UserId:           "",
 		ClientIP:         oa.OwnAddress,
 		Auth:             false,
 		Instance:         oa,
@@ -397,7 +397,7 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	return nil
 }
 func (own *ServiceContext) CallTargetService(traceid string, router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
-	payload := GetPayLoad(traceid, own.Service.Name, "", "", 0, router)
+	payload := GetPayLoad(traceid, own.Service.Name, "", "", "", router)
 	if info != nil {
 		if info.TargetAddress == "" || info.TargetPort == 0 {
 			return nil, errors.New("目标地址或端口错误")
@@ -429,7 +429,7 @@ func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse
 		SourcePath:    "",
 		TargetService: info.ServiceName,
 		TargetPath:    info.Path,
-		UserId:        0,
+		UserId:        "",
 		UserName:      "",
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,

@@ -9,7 +9,7 @@ import (
 // OrderModel 订单模型
 type OrderModel struct {
 	*entity.Model                 //从基础Model继承，默认添加ID,创建时间和状态字段
-	UserID        uint            //用户ID
+	UserID        string          //用户ID
 	Price         decimal.Decimal //价格
 	Amount        decimal.Decimal //数量
 	TokenID       uint            //币种ID

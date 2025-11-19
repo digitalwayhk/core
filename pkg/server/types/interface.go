@@ -5,7 +5,7 @@ import "time"
 // IRequest
 type IRequest interface {
 	GetTraceId() string
-	GetUser() (uint, string)                                                        //获取用户ID和name，获取设置在token中的userid和name，name可能为空
+	GetUser() (string, string)                                                      //获取用户ID和name，获取设置在token中的userid和name，name可能为空
 	GetClientIP() string                                                            //获取客户端IP
 	NewID() uint                                                                    //生成新的ID
 	Authorized() bool                                                               //该请求是否授权路由
