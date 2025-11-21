@@ -45,6 +45,6 @@ func (own *Callback) Do(req types.IRequest) (interface{}, error) {
 func (own *Callback) RouterInfo() *types.RouterInfo {
 	info := router.DefaultRouterInfo(own)
 	info.Method = http.MethodGet
-	info.Path = "/api/auth/callback"
+	info.Path = "/api/callback"
 	return info
 }

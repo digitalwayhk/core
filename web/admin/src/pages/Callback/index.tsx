@@ -89,7 +89,7 @@ const Callback: React.FC = () => {
         setDebugInfo({ logs: [...logs] });
 
         const backendBaseUrl = window.location.origin; // 自动获取当前运行的地址
-        const backendCallbackUrl = `${backendBaseUrl}/api/auth/callback?code=${code}&state=${state}`;
+        const backendCallbackUrl = `${backendBaseUrl}/api/callback?code=${code}&state=${state}`;
 
         console.log('后端地址:', backendBaseUrl);
         console.log('回调URL:', backendCallbackUrl);
