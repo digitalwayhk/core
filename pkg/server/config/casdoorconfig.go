@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
-	"github.com/ghodss/yaml"
+	"gopkg.in/yaml.v3"
 )
 
 type CasDoorServer struct {

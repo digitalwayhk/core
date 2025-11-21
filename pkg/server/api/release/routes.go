@@ -24,5 +24,6 @@ func Routers() []types.IRouter {
 		&public.QueryService{},
 		&public.GetMenu{},
 		&public.Health{},
+		&public.Callback{},
 	}
 }
