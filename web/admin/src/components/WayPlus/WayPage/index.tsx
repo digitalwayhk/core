@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Col, message, Row } from 'antd';
-import { connect } from 'react-redux';
 import WayToolbar from '../WayToolbar';
 import WayTable from '../WayTable';
 import type { FormPlus } from '../WayForm';
@@ -22,7 +21,7 @@ interface WayPageProps {
   namespace?: string;
   controller: string;
   title?: string;
-  service?: string;
+  service: string;
   onCommandClick?: (command: string) => void;
   onExpandedRowTabPane?: (childmodel: ChildModelAttribute, record: any) => React.ReactElement;
   // Redux 注入的方法
@@ -47,7 +46,6 @@ const WayPage: React.FC<WayPageProps> = (props) => {
   });
   const [current, setCurrent] = useState(1);
   const [initError, setInitError] = useState<string | null>(null);
-
   useEffect(() => {
     console.log('🔄 WayPage useEffect 触发', { controller: props.controller, namespace: props.namespace, service: props.service });
     setModel(undefined);
@@ -437,13 +435,13 @@ const WayPage: React.FC<WayPageProps> = (props) => {
             attr={model}
             onAdd={props.execute}
             form={form || undefined}
-          onShowChange={(show) => {
-            setImportShow(show);
-            if (!show) {
-              searchDataThan(searchItem, (data) => setData(data));
-            }
-          }}
-          onSearchData={searchDataThan}
+            onShowChange={(show) => {
+              setImportShow(show);
+              if (!show) {
+                searchDataThan(searchItem, (data) => setData(data));
+              }
+            }}
+            onSearchData={searchDataThan}
           />
         )}
       </PageContainer>
@@ -464,57 +462,4 @@ const WayPage: React.FC<WayPageProps> = (props) => {
   return render();
 };
 
-function mapDispatchToProps(dispatch: any, ownProps: WayPageProps) {
-  let typens = ownProps.controller;
-  if (ownProps.namespace != undefined) typens = ownProps.namespace;
-
-  console.log('🔗 mapDispatchToProps 配置:', {
-    namespace: ownProps.namespace,
-    service: ownProps.service,
-    controller: ownProps.controller,
-    typens: typens,
-    dispatchType: typens + '/init'
-  });
-
-  const init = (args: any) => {
-    return {
-      type: typens + '/init',
-      payload: args,
-    };
-  };
-  const search = (args: any) => {
-    return {
-      type: typens + '/search',
-      payload: args,
-    };
-  };
-  const execute = (args: any) => {
-    return {
-      type: typens + '/execute',
-      payload: args,
-    };
-  };
-  return {
-    dispatch,
-    init() {
-      const payload = {
-        c: ownProps.namespace + '/' + ownProps.service + '/' + ownProps.controller,
-        s: ownProps.service,
-      };
-      console.log('📤 Dispatching init action:', {
-        type: typens + '/init',
-        payload: payload
-      });
-      return dispatch(init(payload));
-    },
-    search(searchItem: SearchItem) {
-      const c = ownProps.namespace + '/' + ownProps.service + '/' + ownProps.controller;
-      return dispatch(search({ c: c, item: searchItem, s: ownProps.service }));
-    },
-    execute(command: string, item: any) {
-      const c = ownProps.namespace + '/' + ownProps.service + '/' + ownProps.controller;
-      return dispatch(execute({ c: c, command: command, item: item, s: ownProps.service }));
-    },
-  };
-}
-export default connect(() => { }, mapDispatchToProps)(WayPage);
+export default WayPage;

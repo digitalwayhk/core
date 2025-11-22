@@ -15,7 +15,16 @@ export function DefaultRowToDisplay(value: any, item: WayFieldAttribute, row: an
   let data = AnyToTypeData(item, value)
   if (item.comvtp?.isvtp && item.type != 'string') {
     //if (item.type != 'strin
-    const mmap: Map<number, string> = new Map(item.comvtp.items);
+    let mmap: Map<number, string>;
+    if (item.comvtp.items instanceof Map) {
+      mmap = item.comvtp.items;
+    } else if (Array.isArray(item.comvtp.items)) {
+      mmap = new Map(item.comvtp.items);
+    } else if (item.comvtp.items && typeof item.comvtp.items === 'object') {
+      mmap = new Map(Object.entries(item.comvtp.items).map(([k, v]) => [Number(k), v as string]));
+    } else {
+      mmap = new Map();
+    }
     data = mmap.get(data);
     //}
   }

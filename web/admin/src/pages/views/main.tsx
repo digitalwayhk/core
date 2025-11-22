@@ -1,35 +1,24 @@
 import { useEffect } from 'react';
-import { useParams, useLocation } from '@umijs/max';
+import { useParams, useLocation, useModel } from '@umijs/max';
 import WayPage from '@/components/WayPlus/WayPage/index';
+import { init, search, execute } from '@/components/WayPlus/request';
+import { ErrorBoundary } from '@ant-design/pro-components';
+
 
 export default () => {
   const params = useParams<{ s: string; c: string }>();
   const location = useLocation();
-
-  console.log('===== Main.tsx 组件渲染 =====');
-  console.log('🔍 URL:', window.location.href);
-  console.log('🔍 pathname:', location.pathname);
-  console.log('🔍 useParams 结果:', params);
-  console.log('🔍 s (service):', params.s);
-  console.log('🔍 c (controller):', params.c);
-  console.log('================================');
+  const model = useModel('useRouteParams'); // 使用全局 model
 
   useEffect(() => {
-    console.log('===== Main.tsx useEffect 触发 =====');
-    console.log('组件已挂载');
-    console.log('当前参数:', params);
-
+    // 同步路由参数到全局 model
+    model.setRouteParams?.({ s: params.s, c: params.c });
     return () => {
-      console.log('===== Main.tsx 组件卸载 =====');
+      console.log('🧹 Main 组件卸载:', { pathname: location.pathname, params: params });
     };
   }, [params]);
-
   // 检查参数是否存在
   if (!params.s || !params.c) {
-    console.error('❌ 错误：缺少路由参数');
-    console.error('URL:', window.location.href);
-    console.error('params:', params);
-
     return (
       <div style={{ padding: 24, backgroundColor: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4 }}>
         <h2 style={{ color: '#ff4d4f' }}>⚠️ 路由参数错误</h2>
@@ -49,47 +38,29 @@ export default () => {
   }
 
   const { s, c } = params;
-
-  console.log('✅ 准备渲染 WayPage 组件');
-  console.log('传入参数:', {
-    controller: c,
-    service: s,
-    namespace: 'manage'
-  });
-
-  try {
-    return (
-      <div style={{ height: '100%' }}>
-        <div style={{
-          padding: '8px 16px',
-          backgroundColor: '#e6f7ff',
-          borderBottom: '1px solid #91d5ff',
-          fontSize: 12,
-          color: '#0050b3'
-        }}>
-          🔍 调试信息: Service={s}, Controller={c}, Namespace=manage
-        </div>
-        <WayPage
-          controller={c}
-          service={s}
-          namespace={'manage'}
-        />
-      </div>
-    );
-  } catch (error: any) {
-    console.error('===== Main.tsx 渲染错误 =====');
-    console.error('错误信息:', error.message);
-    console.error('错误堆栈:', error.stack);
-    console.error('================================');
-
-    return (
-      <div style={{ padding: 24, color: 'red' }}>
-        <h2>❌ 组件渲染错误</h2>
-        <p><strong>错误信息:</strong> {error.message}</p>
-        <pre style={{ backgroundColor: '#fff2f0', padding: 12, borderRadius: 4 }}>
-          {error.stack}
-        </pre>
-      </div>
-    );
-  }
+  return (
+    <ErrorBoundary key={`manage-${params.s}-${params.c}`}>
+      <WayPage
+        key={`manage-${params.s}-${params.c}`} // 强制基于路由参数重挂载
+        controller={c}
+        service={s}
+        namespace={'manage'}
+        init={() => {
+          const payload = {
+            c: 'manage/' + params.s + '/' + params.c,
+            s: s,
+          };
+          return init(payload);
+        }}
+        search={(item: any) => {
+          const url = 'manage/' + params.s + '/' + params.c;
+          return search({ c: url, s: s, item: item });
+        }}
+        execute={(method: string, item: any) => {
+          const url = 'manage/' + params.s + '/' + params.c;
+          return execute({ c: url, m: method, s: s, item: item });
+        }}
+      />
+    </ErrorBoundary>
+  );
 };

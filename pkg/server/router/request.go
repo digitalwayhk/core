@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -56,6 +57,34 @@ func getRequestInfo(r *http.Request, req *Request) {
 	req.traceID = getTraceID(ctext, r)
 	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
 }
+func getUserIDAndName(req *Request, r *http.Request) (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	ctext := r.Context()
+	uid := ""
+	uname := ""
+	obj := ctext.Value("uid")
+	if obj != nil {
+		uid = obj.(string)
+	}
+	nobj := ctext.Value("uname")
+	if nobj != nil {
+		uname = ctext.Value("uname").(string)
+	}
+	con := GetContext(req.ServiceName())
+	if con != nil && req.auth {
+		if con.Config.Auth.CasDoor.Enable || con.Config.ManageAuth.CasDoor.Enable {
+			if uu, ok := ctext.Value("user").(casdoorsdk.User); ok {
+				uid = uu.Id
+				uname = uu.Email
+			}
+		}
+	}
+	req.userID = uid
+	req.userName = uname
+	return uid, uname
+}
 
 // NewRequest 路由接收到请求
 func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
@@ -74,6 +103,7 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 		if info != nil {
 			req.auth = info.Auth
 			req.routerinfo = info
+			getUserIDAndName(req, r)
 			if req.auth {
 				if req.userID == "" && req.userName == "" {
 					logx.Errorf("Auth required but no user info found for api: %s", req.apiPath)

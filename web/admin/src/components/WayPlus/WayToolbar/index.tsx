@@ -235,7 +235,8 @@ const WayToolbar: React.FC<WayToolbarProps> = (props) => {
       prop.icon = <Icon component={PlusOutlined} />;
     }
     if (dangerKeys.includes(prop.name)) {
-      prop.type = 'danger';
+      prop.type = 'primary';
+      prop.danger = true;
       prop.icon = <DeleteOutlined />;
     }
     if (editKeys.includes(prop.name)) {

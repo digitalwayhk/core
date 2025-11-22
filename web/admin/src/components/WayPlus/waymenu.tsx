@@ -1,5 +1,6 @@
 import type { MenuDataItem } from '@ant-design/pro-layout';
 import { getMenu, getRouters, getService } from './request';
+import * as Icons from '@ant-design/icons';
 
 const queryRouters = async (name: string): Promise<MenuDataItem[]> => {
   const mdItem: MenuDataItem[] = [];
@@ -35,7 +36,34 @@ const queryRouters = async (name: string): Promise<MenuDataItem[]> => {
 
   return mdItem;
 };
+function getIcon(name?: string) {
+  // 常用图标列表
+  const iconList = [
+    'HomeOutlined',
+    'AppstoreOutlined',
+    'SettingOutlined',
+    'UserOutlined',
+    'FolderOpenOutlined',
+    'StarOutlined',
+    'SmileOutlined',
+    'CloudOutlined',
+    'DatabaseOutlined',
+    'RocketOutlined',
+  ];
+  // 随机选一个
+  function getRandomIcon() {
+    const idx = Math.floor(Math.random() * iconList.length);
+    const IconComponent = (Icons as any)[iconList[idx]];
+    return IconComponent ? <IconComponent /> : null;
+  }
 
+  if (!name || name.trim() === '') {
+    return getRandomIcon();
+  }
+  const iconName = name.charAt(0).toUpperCase() + name.slice(1) + 'Outlined';
+  const IconComponent = (Icons as any)[iconName];
+  return IconComponent ? <IconComponent /> : getRandomIcon();
+}
 export const GetMenuItem = async (): Promise<MenuDataItem[]> => {
   let mdItem: MenuDataItem[] = [];
   const menuData = await getDir('');
@@ -83,7 +111,7 @@ async function getDir(service: string): Promise<MenuDataItem[]> {
       mdItem.push({
         name: item.title ?? item.name,
         path: '/' + item.name,
-        icon: item.icon,
+        icon: getIcon(item.icon),
         routes: meuns,
       });
     });
