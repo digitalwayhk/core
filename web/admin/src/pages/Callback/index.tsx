@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { history, useModel } from '@umijs/max';
 import { Spin, Result, Button, Card, Descriptions, Alert } from 'antd';
 import { LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import { handleSigninCallback } from '@/config/casdoor';
+import { fetchCasdoorConfig, handleSigninCallback } from '@/config/casdoor';
 
 /**
  * 解析 JWT Token 获取用户信息
@@ -87,9 +87,11 @@ const Callback: React.FC = () => {
         // 2. 构建后端回调 URL
         logs.push({ step: '2. 构建后端URL', status: 'processing' });
         setDebugInfo({ logs: [...logs] });
-
+        const config=await fetchCasdoorConfig()
         const backendBaseUrl = window.location.origin; // 自动获取当前运行的地址
-        const backendCallbackUrl = `${backendBaseUrl}/api/callback?code=${code}&state=${state}`;
+        const typeUrl=config.ismanage?'&type=manage':''
+        const callbackUrl = `${config.BackgroundCallbackURL}?code=${code}&state=${state}${typeUrl}`;
+        const backendCallbackUrl = `${backendBaseUrl}${callbackUrl}`;
 
         console.log('后端地址:', backendBaseUrl);
         console.log('回调URL:', backendCallbackUrl);

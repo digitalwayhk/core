@@ -1,12 +1,16 @@
 // Casdoor 配置
-export const casdoorConfig = {
-  serverUrl: 'http://localhost:8000',
-  clientId: 'd55769f0148775246e05',
-  organizationName: 'futures',
-  appName: 'application_p93igp',
-  redirectPath: '/callback',
-};
+let casdoorConfig: any = null;
 
+export async function fetchCasdoorConfig() {
+  if (casdoorConfig) return casdoorConfig;
+  const resp = await fetch('/api/casdoor?type=manage');
+  if (!resp.ok) throw new Error('获取 Casdoor 配置失败');
+  const result = await resp.json();
+  if (!result.success || !result.data) throw new Error('Casdoor 配置无效');
+  casdoorConfig = result.data;
+  casdoorConfig.ismanage = true;
+  return casdoorConfig;
+}
 /**
  * 生成随机 state
  */
@@ -18,31 +22,33 @@ const generateState = () => {
 /**
  * 获取 Casdoor 登录 URL
  */
-export const getCasdoorSignInUrl = () => {
-  const redirectUri = `${window.location.origin}${casdoorConfig.redirectPath}`;
+export const getCasdoorSignInUrl = async () => {
+  const config = await fetchCasdoorConfig();
+  const redirectUri = `${window.location.origin}/callback`;
   const state = generateState();
-
   // 保存 state 用于后续验证
   sessionStorage.setItem('casdoor_state', state);
 
   const params = new URLSearchParams({
-    client_id: casdoorConfig.clientId,
+    client_id: config.ClientID,
     response_type: 'code',
     redirect_uri: redirectUri,
     scope: 'read',
     state: state,
+    organization: config.Organization,
+    application: config.Application,
   });
 
-  return `${casdoorConfig.serverUrl}/login/oauth/authorize?${params.toString()}`;
+  return `${config.Endpoint}/login/oauth/authorize?${params.toString()}`;
 };
 
 /**
  * 跳转到 Casdoor 登录页面
  */
-export const signinRedirect = () => {
-  const signInUrl = getCasdoorSignInUrl();
+export async function signinRedirect() {
+  const signInUrl = await getCasdoorSignInUrl();
   window.location.href = signInUrl;
-};
+}
 
 /**
  * 处理 Casdoor 回调
@@ -72,21 +78,19 @@ export const handleSigninCallback = () => {
 /**
  * 获取 Casdoor 登出 URL
  */
-export const getCasdoorSignOutUrl = () => {
+export async function getCasdoorSignOutUrl() {
+  const config = await fetchCasdoorConfig();
   const redirectUri = `${window.location.origin}/user/login`;
-  return `${casdoorConfig.serverUrl}/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  return `${config.Endpoint}/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
 };
 
 /**
  * 登出
  */
-export const signout = () => {
-  // 清除本地数据
+export async function signout() {
   localStorage.removeItem('casdoor_token');
   localStorage.removeItem('casdoor_user');
   sessionStorage.clear();
-
-  // 跳转到 Casdoor 登出页面
-  const signOutUrl = getCasdoorSignOutUrl();
+  const signOutUrl = await getCasdoorSignOutUrl();
   window.location.href = signOutUrl;
-};
+}
