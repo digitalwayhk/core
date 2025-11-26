@@ -1,6 +1,11 @@
 package config
 
-import "time"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"time"
+)
 
 type MelodyConfig struct {
 	WriteWait                 time.Duration // Duration until write times out.
@@ -26,9 +31,27 @@ func NewMelodyConfig() *MelodyConfig {
 	}
 }
 
+var defaultMelodyConfig = NewMelodyConfig()
+
 type MelodyConfigOption func(con *MelodyConfig)
 
 func GetMelodyConfig() *MelodyConfig {
-	config := NewMelodyConfig()
-	return config
+	return defaultMelodyConfig
+}
+
+func loadMelodyConfig(configPath string) error {
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(data, defaultMelodyConfig)
+	if err != nil {
+		return err
+	}
+	return nil
 }

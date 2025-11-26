@@ -31,7 +31,7 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string
+	MelodyConfigPath      string `json:",optional"`
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
@@ -120,6 +120,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
+	con.MelodyConfigPath = ""
 	// con.Shutdown.WaitTime = time.Duration(5.5 * float64(time.Second))
 	// con.Shutdown.WrapUpTime = time.Duration(1 * float64(time.Second))
 	//con.MelodyConfig = NewMelodyConfig()
@@ -146,6 +147,12 @@ func ReadConfig(servicename string) *ServerConfig {
 	}
 	if con.ServerManageAuth.CasDoor.Enable {
 		err := con.ServerManageAuth.CasDoor.ReloadConfig()
+		if err != nil {
+			panic(err)
+		}
+	}
+	if con.MelodyConfigPath != "" {
+		err := loadMelodyConfig(con.MelodyConfigPath)
 		if err != nil {
 			panic(err)
 		}
