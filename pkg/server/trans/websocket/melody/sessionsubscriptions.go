@@ -165,17 +165,12 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 	}
 	hash, ok := msg.Data.(uint64)
 	if !ok {
-		hashStr := msg.Data.(string)
-		var err error
-		hash, err = strconv.ParseUint(hashStr, 10, 64)
+		api, _, err := s.getApi(info, channel, msg.Data)
 		if err != nil {
-			api, _, err := s.getApi(info, channel, msg.Data)
-			if err != nil {
-				s.client.SendError(channel, "退订错误: "+err.Error())
-				return
-			}
-			hash = info.UnRegisterWebSocketClient(api, s.client)
+			s.client.SendError(channel, "退订错误: "+err.Error())
+			return
 		}
+		hash = info.UnRegisterWebSocketClient(api, s.client)
 	} else {
 		info.UnRegisterWebSocketHash(hash, s.client)
 	}

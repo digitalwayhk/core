@@ -31,6 +31,7 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
+	MelodyConfigPath      string
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
