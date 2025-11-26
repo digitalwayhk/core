@@ -15,9 +15,9 @@ const ProportionSales = ({
 }: {
   loading: boolean;
   dropdownGroup: React.ReactNode;
-  salesType: 'all' | 'online' | 'stores';
+  salesType: 'all' | 'online' | 'stores'| 'api';
   salesPieData: DataItem[];
-  handleChangeSalesType?: (value: 'all' | 'online' | 'stores') => void;
+  handleChangeSalesType?: (value: 'all' | 'online' | 'stores' | 'api') => void;
 }) => {
   const { styles } = useStyles();
   return (
@@ -25,7 +25,7 @@ const ProportionSales = ({
       loading={loading}
       className={styles.salesCard}
       variant="borderless"
-      title="销售额类别占比"
+      title="交易额类别占比"
       style={{
         height: '100%',
       }}
@@ -37,16 +37,17 @@ const ProportionSales = ({
             value={salesType}
             onChange={handleChangeSalesType}
             options={[
-              { label: '全部渠道', value: 'all' },
-              { label: '线上', value: 'online' },
-              { label: '门店', value: 'stores' },
+              { label: '全部', value: 'all' },
+              { label: 'WEB', value: 'online' },
+              { label: '手机', value: 'stores' },
+              { label: 'API', value: 'api' },
             ]}
             size="middle"
           />
         </div>
       }
     >
-      <Text>销售额</Text>
+      <Text>交易额</Text>
       <Pie
         height={340}
         radius={0.8}

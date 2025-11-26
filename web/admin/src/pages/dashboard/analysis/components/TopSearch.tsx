@@ -25,7 +25,7 @@ const TopSearch = ({
       key: 'index',
     },
     {
-      title: '搜索关键词',
+      title: '市场',
       dataIndex: 'keyword',
       key: 'keyword',
       render: (text: React.ReactNode) => <a href="/">{text}</a>,
@@ -77,7 +77,7 @@ const TopSearch = ({
     <Card
       loading={loading}
       bordered={false}
-      title="线上热门搜索"
+      title="热门市场"
       extra={dropdownGroup}
       style={{
         height: '100%',
@@ -94,7 +94,7 @@ const TopSearch = ({
           <NumberInfo
             subTitle={
               <span>
-                搜索用户数
+                用户数
                 <Tooltip title="指标说明">
                   <InfoCircleOutlined
                     style={{
@@ -133,7 +133,7 @@ const TopSearch = ({
           <NumberInfo
             subTitle={
               <span>
-                人均搜索次数
+                人均下单次数
                 <Tooltip title="指标说明">
                   <InfoCircleOutlined
                     style={{

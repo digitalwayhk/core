@@ -131,7 +131,9 @@ func getTraceID(ctx context.Context, r *http.Request) string {
 	uid, _ := uuid.NewV4()
 	return uid.String()
 }
-
+func (own *Request) GetHttpRequest() *http.Request {
+	return own.http
+}
 func (own *Request) GetTraceId() string {
 	return own.traceID
 }

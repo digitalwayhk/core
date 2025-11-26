@@ -1,8 +1,10 @@
 package melody
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -261,6 +263,7 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 	logx.Infof("WebSocket客户端断开: %s, 当前活跃连接: %d, 当前连接数: %d",
 		s.Request.RemoteAddr, activeCount, currentCount)
 }
+
 func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 	// defer func() {
 	// 	if err := recover(); err != nil {
@@ -268,26 +271,69 @@ func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 	// 		mm.sendError(s, "", "服务器内部错误")
 	// 	}
 	// }()
-
+	dataLen := len(data)
+	preview := string(data)
+	if dataLen > int(mm.melody.Config.MaxMessageSize) {
+		preview = preview[:int(mm.melody.Config.MaxMessageSize)] + "...(truncated)"
+	}
 	mm.stats.mu.Lock()
 	mm.stats.totalMessages++
 	mm.stats.mu.Unlock()
 
-	var msg Message
-	if err := json.Unmarshal(data, &msg); err != nil {
-		mm.sendError(s, "", "消息格式错误: "+err.Error())
-		return
+	msg := &Message{}
+
+	if err := json.Unmarshal(data, msg); err != nil {
+		// 解析失败时记录更多信息
+		logx.Errorf("JSON 解析失败: %v, len=%d, preview=%s, RemoteAddr=%s", err, dataLen, preview, s.Request.RemoteAddr)
+		// 1) 先去掉尾部空白
+		tryBuf := bytes.TrimSpace(data)
+
+		// 2) 容错：移除尾随的逗号（例如 "...} , "）再尝试解析
+		re := regexp.MustCompile(",\\s*([\\}\\]])")
+		fixed := re.ReplaceAllString(string(tryBuf), "$1")
+
+		if err2 := json.Unmarshal([]byte(fixed), msg); err2 == nil {
+			logx.Errorf("JSON 解析通过移除尾随逗号成功, 原len=%d, newlen=%d, RemoteAddr=%s", dataLen, len(fixed), s.Request.RemoteAddr)
+		} else {
+			// 3) 继续尝试剔除末尾反斜线并重试（最多5次）
+			parsed := false
+			tmp := []byte(fixed)
+			for i := 0; i < 5 && len(tmp) > 0; i++ {
+				last := tmp[len(tmp)-1]
+				if last == '\\' || last == ',' || last == '\n' || last == '\r' || last == '\t' || last == ' ' {
+					tmp = tmp[:len(tmp)-1]
+					if err3 := json.Unmarshal(tmp, msg); err3 == nil {
+						parsed = true
+						logx.Errorf("JSON 解析通过逐次修剪末尾字符成功, 原len=%d, newlen=%d, RemoteAddr=%s", dataLen, len(tmp), s.Request.RemoteAddr)
+						break
+					}
+					continue
+				}
+				break
+			}
+			if !parsed {
+				// 4) 最后一招：用 Decoder 读取第一个 JSON 对象（忽略尾部垃圾）
+				dec := json.NewDecoder(bytes.NewReader(data))
+				dec.UseNumber()
+				if err4 := dec.Decode(&msg); err4 == nil {
+					logx.Errorf("JSON 使用 Decoder 解析成功（忽略尾部）， RemoteAddr=%s", s.Request.RemoteAddr)
+				} else {
+					mm.sendError(s, "", "消息格式错误: "+err.Error())
+					return
+				}
+			}
+		}
 	}
 
 	switch MessageEvent(msg.Event) {
 	case Get:
-		mm.handleGet(s, &msg)
+		mm.handleGet(s, msg)
 	case Call:
-		mm.handleCall(s, &msg)
+		mm.handleCall(s, msg)
 	case Subscribe:
-		mm.handleSubscribe(s, &msg)
+		mm.handleSubscribe(s, msg)
 	case UnSubscribe:
-		mm.handleUnsubscribe(s, &msg)
+		mm.handleUnsubscribe(s, msg)
 	default:
 		mm.sendError(s, msg.Channel, "不支持的事件类型: "+msg.Event)
 	}

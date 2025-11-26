@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // IRequest
 type IRequest interface {
@@ -20,6 +23,9 @@ type IRequest interface {
 	ServiceName() string                                //获取服务名称
 	GetServerInfo() *TargetInfo                         //获取当前服务信息
 	GetTargetServerInfo(serviceName string) *TargetInfo //获取目标服务信息
+}
+type IRequestHttp interface {
+	GetHttpRequest() *http.Request //获取原生http请求
 }
 type IRequestClear interface {
 	ClearTraceId()

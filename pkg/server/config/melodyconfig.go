@@ -19,7 +19,7 @@ func NewMelodyConfig() *MelodyConfig {
 		PongWait:                  60 * time.Second, // 等待pong响应的时间
 		PingPeriod:                54 * time.Second, // 发送ping的间隔（应该 < PongWait）
 		ReadTimeout:               65 * time.Second, // 稍微大于PongWait
-		MaxMessageSize:            512,
+		MaxMessageSize:            1024 * 256,       // 最大消息大小2MB
 		MessageBufferSize:         256,
 		ConcurrentMessageHandling: true,
 		MaxConnections:            10000, // 默认最大连接数

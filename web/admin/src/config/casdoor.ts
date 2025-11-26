@@ -16,9 +16,14 @@ export async function fetchCasdoorConfig() {
  */
 const generateState = () => {
   return Math.random().toString(36).substring(2, 15) +
-         Math.random().toString(36).substring(2, 15);
+    Math.random().toString(36).substring(2, 15);
 };
-
+function withProtocol(endpoint: string): string {
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+  return `${window.location.protocol}//${endpoint}`;
+}
 /**
  * 获取 Casdoor 登录 URL
  */
@@ -38,8 +43,8 @@ export const getCasdoorSignInUrl = async () => {
     organization: config.Organization,
     application: config.Application,
   });
-
-  return `${config.Endpoint}/login/oauth/authorize?${params.toString()}`;
+  const endpoint = withProtocol(config.Endpoint);
+  return `${endpoint}/login/oauth/authorize?${params.toString()}`;
 };
 
 /**
@@ -81,7 +86,8 @@ export const handleSigninCallback = () => {
 export async function getCasdoorSignOutUrl() {
   const config = await fetchCasdoorConfig();
   const redirectUri = `${window.location.origin}/user/login`;
-  return `${config.Endpoint}/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const endpoint = withProtocol(config.Endpoint);
+  return `${endpoint}/logout?redirect_uri=${encodeURIComponent(redirectUri)}`;
 };
 
 /**

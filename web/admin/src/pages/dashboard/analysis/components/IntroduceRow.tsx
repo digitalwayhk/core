@@ -31,18 +31,18 @@ const IntroduceRow = ({
       <Col {...topColResponsiveProps}>
         <ChartCard
           bordered={false}
-          title="总销售额"
+          title="总交易额"
           action={
             <Tooltip title="指标说明">
               <InfoCircleOutlined />
             </Tooltip>
           }
           loading={loading}
-          total={() => <Yuan>126560</Yuan>}
+          total={() => <Yuan>9823928782.3</Yuan>}
           footer={
             <Field
-              label="日销售额"
-              value={`￥${numeral(12423).format('0,0')}`}
+              label="日交易额"
+              value={`$${numeral(12423).format('0,0')}`}
             />
           }
           contentHeight={46}
@@ -99,14 +99,14 @@ const IntroduceRow = ({
         <ChartCard
           bordered={false}
           loading={loading}
-          title="支付笔数"
+          title="未平仓总量"
           action={
             <Tooltip title="指标说明">
               <InfoCircleOutlined />
             </Tooltip>
           }
-          total={numeral(6560).format('0,0')}
-          footer={<Field label="转化率" value="60%" />}
+          total={numeral(8560).format('0,0')}
+          footer={<Field label="多空比" value="0.34%" />}
           contentHeight={46}
         >
           <Column
@@ -118,6 +118,19 @@ const IntroduceRow = ({
             data={visitData}
             scale={{ x: { paddingInner: 0.4 } }}
           />
+           <Trend
+            flag="up"
+            style={{
+              marginRight: 16,
+            }}
+          >
+            多仓
+            <span className={styles.trendText}>{numeral(2345).format('0,0')}(32%)</span>
+          </Trend>
+          <Trend flag="down">
+            空仓
+            <span className={styles.trendText}>{numeral(6538).format('0,0')}(68%)</span>
+          </Trend>
         </ChartCard>
       </Col>
       <Col {...topColResponsiveProps}>
