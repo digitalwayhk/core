@@ -161,11 +161,14 @@ func modelAddValid[T types.IModel](list *ModelList[T], item interface{}) error {
 		hash := getHash(item)
 		if id > 0 {
 			searchItem.AddWhereN("Id", id)
-		} else {
-			if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
+		}
+		if hash != "" && !(id == 0 && (hash == "" || utils.HashCodes("0") == hash)) {
+			if id == 0 {
 				searchItem.AddWhereN("Hashcode", hash)
-				setHash(item, hash)
+			} else {
+				searchItem.OrWhereN("Hashcode", hash)
 			}
+			setHash(item, hash)
 		}
 		err := list.load(searchItem)
 		if err != nil {
