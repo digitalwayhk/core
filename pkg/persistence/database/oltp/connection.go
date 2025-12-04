@@ -20,6 +20,11 @@ var (
 	}
 )
 
+func ClearTableCache() {
+	tableCache = sync.Map{}
+	connManager.CloseAll()
+}
+
 type TableCacheKey struct {
 	DBPath    string
 	TableName string
@@ -36,6 +41,20 @@ type ConnectionInfo struct {
 	LastUsed  time.Time
 }
 
+func GetConnectionManager() *ConnectionManager {
+	return connManager
+}
+func (cm *ConnectionManager) GetAllConnections() map[string]*ConnectionInfo {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+
+	// 返回连接的副本以避免并发修改
+	copy := make(map[string]*ConnectionInfo)
+	for k, v := range cm.connections {
+		copy[k] = v
+	}
+	return copy
+}
 func (cm *ConnectionManager) GetConnection(key string) (*gorm.DB, bool) {
 	cm.mutex.RLock()
 	defer cm.mutex.RUnlock()

@@ -7,6 +7,9 @@ type IRouter interface {
 	Do(req IRequest) (interface{}, error) //执行业务逻辑
 	RouterInfo() *RouterInfo              //路由注册信息
 }
+type IRouterResponse interface {
+	GetResponse() interface{}
+}
 
 // IRouterInfo 路由信息用于管理IRouter,IRouterInfo是IRouter的元数据
 type IRouterInfo interface {

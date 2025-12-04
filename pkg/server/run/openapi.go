@@ -130,6 +130,11 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	}
 	req := &router.InitRequest{}
 	data := router.TestResult[info.Path]
+	if data == nil {
+		if igp, ok := api.(types.IRouterResponse); ok {
+			data = igp.GetResponse()
+		}
+	}
 	ress := getResponse(data, req, doc)
 	for k, v := range ress {
 		operation.AddResponse(k, v)

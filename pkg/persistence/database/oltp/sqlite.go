@@ -173,6 +173,9 @@ func (own *Sqlite) DeleteDB() error {
 	//logx.Infof("✅ 成功删除数据库文件: %s", dns)
 	return nil
 }
+func (own *Sqlite) RecreateConnection() error {
+	return own.recreateConnection()
+}
 
 // 🔧 新增：关闭所有数据库连接
 func (own *Sqlite) closeAllConnections() error {

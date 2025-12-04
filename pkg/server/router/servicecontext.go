@@ -135,16 +135,18 @@ func safedo(cs types.IRouter, req types.IRequest) {
 			// fmt.Println(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
 		}
 	}()
+	serviceName := req.ServiceName()
+	path := req.GetPath()
 	err := cs.Validation(req)
 	if err != nil {
-		logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
+		logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", serviceName, path, err.Error()))
 	}
 	data, err := cs.Do(req)
+	if err != nil {
+		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", serviceName, path, err.Error()))
+	}
 	info := cs.RouterInfo()
 	TestResult[info.GetPath()] = data
-	if err != nil {
-		logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", req.ServiceName(), req.GetPath(), err.Error()))
-	}
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
