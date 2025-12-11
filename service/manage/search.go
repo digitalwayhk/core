@@ -163,16 +163,16 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 	return nil, nil
 }
 func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
-	var view IManageView = own.instance.(IManageView)
-	if view != nil {
-		vm := view.GetView()
-		for _, v := range vm.ChildModels {
-			if v.Name == own.SearchItem.ChildModel.Name {
-				own.View = &v.ViewModel
+	//var view IManageView = own.instance.(IManageView)
+	// if view != nil {
+	// 	vm := view.GetView()
+	// 	for _, v := range vm.ChildModels {
+	// 		if v.Name == own.SearchItem.ChildModel.Name {
+	// 			own.View = &v.ViewModel
 
-			}
-		}
-	}
+	// 		}
+	// 	}
+	// }
 	own.SearchItem.View = own.View
 	if ms, ok := own.instance.(IManageSearch); ok {
 		data, err, stop := ms.ChildSearchBefore(own, req)

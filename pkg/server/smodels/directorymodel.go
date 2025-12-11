@@ -1,6 +1,9 @@
 package smodels
 
-import "github.com/digitalwayhk/core/pkg/persistence/entity"
+import (
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	"github.com/digitalwayhk/core/pkg/utils"
+)
 
 type DirectoryModel struct {
 	*entity.Model
@@ -25,4 +28,8 @@ func (own *DirectoryModel) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
+}
+
+func (own *DirectoryModel) GetHash() string {
+	return utils.HashCodes(own.Name)
 }

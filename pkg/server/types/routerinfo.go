@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"runtime/debug"
 	"strconv"
 	"sync"
@@ -16,6 +17,15 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// IRouterResettable 可重置接口（对象池复用前重置状态）
+type IRouterResettable interface {
+	Reset()
+}
+
+// IRouterCleanable 可清理接口（对象池回收前清理敏感数据）
+type IRouterCleanable interface {
+	Clean()
+}
 type ApiType string
 
 var (
@@ -49,25 +59,11 @@ type RouterInfo struct {
 	once          sync.Once
 	TempStore     sync.Map
 	websocketlock sync.RWMutex
+	// 自定义响应处理函数
+	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
+	channelPool         *ChannelPool                                                `json:"-"`
 }
 
-func (own *RouterInfo) getNew() IRouter {
-	defer func() {
-		if err := recover(); err != nil {
-			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
-		}
-	}()
-	return utils.NewInterface(own.instance).(IRouter)
-	//有问题，值无法初始化
-	// own.once.Do(func() {
-	// 	own.pool = sync.Pool{
-	// 		New: func() interface{} {
-	// 			return utils.NewInterface(own.instance)
-	// 		},
-	// 	}
-	// })
-	// return own.pool.Get().(IRouter)
-}
 func (own *RouterInfo) New() IRouter {
 	item := own.getNew()
 	if factory, ok := item.(IRouterFactory); ok {
@@ -142,17 +138,16 @@ func (own *RouterInfo) GetServiceName() string {
 //		return nil
 //	}
 func (own *RouterInfo) Exec(req IRequest) IResponse {
-	//uid, _ := req.GetUser()
-	// err := own.limit(req.GetClientIP(), uid)
-	// if err != nil {
-	// 	return req.NewResponse(nil, err)
-	// }
 	api := own.New()
+	// 🔧 使用 defer 确保对象回收
 	defer func() {
 		if config.INITSERVER {
 			return
 		}
-		//own.pool.Put(utils.NewInterface(api))
+
+		// 🔧 回收对象到池
+		own.putRouter(api)
+
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 		}
@@ -168,7 +163,6 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	defer func() {
-		//own.pool.Put(api)
 		if config.INITSERVER {
 			return
 		}

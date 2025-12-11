@@ -72,7 +72,11 @@ func handler(services []*router.ServiceRouter) http.Handler {
 				req := router.NewRequest(service, r)
 				req.SetPath(path)
 				res := info.Exec(req)
-				httpx.OkJson(w, res)
+				if info.ResponseHandlerFunc == nil {
+					httpx.OkJson(w, res)
+				} else {
+					info.ResponseHandlerFunc(w, r, res)
+				}
 				return
 			}
 		}

@@ -1,18 +1,15 @@
 package quic
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/quic/testdata"
-	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
-	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
 type Server struct {
@@ -53,20 +50,5 @@ func setupHandler(context *router.ServiceContext) http.Handler {
 }
 
 func routeHandler(sr *router.ServiceRouter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		req := router.NewRequest(sr, r)
-		ip := utils.ClientPublicIP(r)
-		err := trans.VerifyIPWhiteList(sr.Service.Config, ip)
-		if err != nil {
-			httpx.OkJson(w, req.NewResponse(err, nil))
-			return
-		}
-		info := sr.GetRouter(req.GetPath())
-		if info != nil {
-			res := info.Exec(req)
-			httpx.OkJson(w, res)
-		} else {
-			httpx.OkJson(w, req.NewResponse(errors.New(req.GetPath()+"未找到对应的接口！"), nil))
-		}
-	}
+	return rest.RouteHandler(sr)
 }

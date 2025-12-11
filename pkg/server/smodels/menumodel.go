@@ -1,6 +1,9 @@
 package smodels
 
-import "github.com/digitalwayhk/core/pkg/persistence/entity"
+import (
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	"github.com/digitalwayhk/core/pkg/utils"
+)
 
 type MenuModel struct {
 	*entity.Model
@@ -24,6 +27,9 @@ func (own *MenuModel) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
+}
+func (own *MenuModel) GetHash() string {
+	return utils.HashCodes(own.Url)
 }
 func (own *MenuModel) IsPreload() bool {
 	return true

@@ -90,6 +90,12 @@ func (own *ServiceManage) ViewFieldModel(model interface{}, field *view.FieldMod
 	if _, ok := model.(*AttachInfo); ok {
 		viewfieldAttachInfo(field)
 	}
+	if _, ok := model.(*CallRouterInfo); ok {
+		viewfieldCallRouteInfo(field)
+	}
+	if _, ok := model.(*ObserverRouterInfo); ok {
+		viewfieldObserverRouteInfo(field)
+	}
 	if field.IsFieldOrTitle("CreatedAt") || field.IsFieldOrTitle("UpdatedAt") {
 		field.Visible = false
 	}

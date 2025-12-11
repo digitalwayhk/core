@@ -19,7 +19,6 @@ import (
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
-	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
 type Server struct {
@@ -97,22 +96,22 @@ func (own *Server) register() {
 func handers(own *Server, api *types.RouterInfo) {
 	opts := make([]rest.RouteOption, 0)
 	path := api.Path
-	handler := routeHandler(own.context.Router)
+	handler := RouteHandler(own.context.Router)
 	if api.Auth {
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			if own.context.Config.ManageAuth.Logto.Enable {
-				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
+				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
 			} else if own.context.Config.ManageAuth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(routeHandler(own.context.Router)).ServeHTTP
+				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
 			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
 			}
 
 		} else {
 			if own.context.Config.Auth.Logto.Enable {
-				handler = logto.AuthHandler(routeHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
+				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
 			} else if own.context.Config.Auth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(routeHandler(own.context.Router)).ServeHTTP
+				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
 			} else {
 				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
 			}
@@ -134,22 +133,35 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 	}
 }
 
-func routeHandler(rou *router.ServiceRouter) http.HandlerFunc {
+func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
 		ip := utils.ClientPublicIP(r)
+
+		// IP 白名单验证
 		err := trans.VerifyIPWhiteList(rou.Service.Config, ip)
 		if err != nil {
-			httpx.OkJson(w, req.NewResponse(nil, err))
+			writeErrorResponse(w, StatusForbidden, "IP not in whitelist", err)
 			return
 		}
+
 		info := rou.GetRouter(req.GetPath())
-		if info != nil {
-			res := info.Exec(req)
-			httpx.OkJson(w, res)
-		} else {
-			httpx.OkJson(w, req.NewResponse(errors.New(req.GetPath()+"未找到对应的接口！"), nil))
+		if info == nil {
+			writeErrorResponse(w, StatusNotFound, "Route not found: "+req.GetPath(), nil)
+			return
 		}
+
+		// 执行路由处理
+		res := info.Exec(req)
+
+		// 自定义响应处理
+		if info.ResponseHandlerFunc != nil {
+			info.ResponseHandlerFunc(w, r, res)
+			return
+		}
+
+		// 标准响应处理
+		HandleResponse(w, res)
 	}
 }
 
@@ -288,25 +300,6 @@ func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 			return
 		}
 		melodyManager.ServeWS(w, r)
-		// 🔧 添加：握手超时检测
-		// done := make(chan struct{})
-		// go func() {
-		// 	defer close(done)
-		// 	melodyManager.ServeWS(w, r)
-		// }()
 
-		// // 🔧 可选：监控握手时间
-		// go func() {
-		// 	select {
-		// 	case <-done:
-		// 		duration := time.Since(startTime)
-		// 		if duration > 5*time.Second {
-		// 			logx.Errorf("WebSocket握手耗时过长: %v, IP: %s", duration, ip)
-		// 		}
-		// 	case <-time.After(30 * time.Second): // 30秒握手超时
-		// 		logx.Errorf("WebSocket握手超时: IP: %s", ip)
-		// 		// 这里不能强制关闭，因为可能已经升级成功
-		// 	}
-		// }()
 	}
 }

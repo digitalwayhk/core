@@ -465,9 +465,14 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		values, err := own.Service.CallService(payload)
 		//TODO:网络错误，应该进入重试流程，未实现
 		if err != nil {
+			logx.Errorf("CallService 网络错误 Payload:%s ,Error:%s", utils.PrintObj(payload), err.Error())
 			return nil, err
 		}
-		json.Unmarshal(values, res)
+		err = json.Unmarshal(values, res)
+		if err != nil {
+			logx.Errorf("CallService 数据错误 Payload:%s, Values:%s ,Error:%s", utils.PrintObj(payload), string(values), err.Error())
+			return nil, err
+		}
 	}
 	return res, nil
 }

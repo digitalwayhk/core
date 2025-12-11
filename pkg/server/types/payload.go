@@ -29,7 +29,7 @@ type PayLoad struct {
 	Instance         interface{}
 	Data             []byte
 	HttpMethod       string
-	Token            string
+	Token            string `json:"-"`
 }
 
 func (own *PayLoad) InstanceRouter(api IRouter) error {

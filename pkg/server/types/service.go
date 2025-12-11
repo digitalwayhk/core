@@ -37,7 +37,7 @@ func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
 	var err error
 	var txt []byte
 	if payload.TraceID != "" {
-		if own.internalServer != nil && len(own.internalServer) > 0 {
+		if len(own.internalServer) > 0 {
 			for _, server := range own.internalServer {
 				txt, err = server.Send(payload)
 				if err != nil {

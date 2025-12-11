@@ -11,6 +11,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type MenuManage struct {
@@ -67,6 +68,7 @@ func (own *MenuManage) updateMenuModelAll() {
 			if len(old.Permissions) != len(item.Permissions) {
 				item.DirectoryModelID = old.DirectoryModelID
 				if err := list.Remove(old); err != nil {
+					logx.Errorf("Remove old menu item error: %v", err)
 					continue
 				}
 			} else {
@@ -74,9 +76,11 @@ func (own *MenuManage) updateMenuModelAll() {
 			}
 		}
 		if err := list.Add(item); err != nil {
+			logx.Errorf("Add menu item error: %v", err)
 			continue
 		}
 		if err := list.Save(); err != nil {
+			logx.Errorf("Save menu item error: %v", err)
 			continue
 		}
 	}
@@ -112,13 +116,16 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 				} else {
 					diritem := smodels.NewDirectoryModel()
 					diritem.Name = sc.Service.Name
+					diritem.ID = own.Req.NewID()
 					if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
 						diritem.Title = ititle.GetTitle()
 					}
 					if err := dirList.Add(diritem); err != nil {
+						logx.Errorf("Add directory model error: %v", err)
 						continue
 					}
 					if err := dirList.Save(); err != nil {
+						logx.Errorf("Save directory model error: %v", err)
 						continue
 					}
 					item.DirectoryModelID = diritem.ID

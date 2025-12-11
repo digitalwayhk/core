@@ -130,7 +130,11 @@ func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 			req.SetPath(path)
 			if item := ss.GetRouter(path); item != nil {
 				res := item.Exec(req)
-				httpx.OkJson(w, res)
+				if item.ResponseHandlerFunc == nil {
+					httpx.OkJson(w, res)
+				} else {
+					item.ResponseHandlerFunc(w, r, res)
+				}
 			} else {
 				httpx.OkJson(w, req.NewResponse(nil, errors.New(req.GetPath()+"未找到对应的接口！")))
 			}
