@@ -145,6 +145,11 @@ func GetRouterPackAndTypeName(item interface{}) (string, string) {
 	return pack, name
 }
 func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("创建路由发生异常，Pack:%s,Name:%s,Error:%v,Item:%s", pack, name, err, utils.PrintObj(item))
+		}
+	}()
 	index := strings.Index(pack, "api")
 	Pathtype := types.ApiType(pack[index+4:])
 	servicepack := pack[:index-1]

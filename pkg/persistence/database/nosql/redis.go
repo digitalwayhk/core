@@ -3,9 +3,10 @@ package nosql
 import (
 	"context"
 	"fmt"
-	"github.com/go-redis/redis/v8"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var redisUrl = "%s:%d"

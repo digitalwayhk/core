@@ -205,6 +205,7 @@ type SearchItem struct {
 	SortList   []*SearchSort   `json:"sortList"`
 	Value      string          `json:"value"`
 	View       *ViewModel      `json:"-"`
+	Tag        string          `json:"tag"` // 扩展字段,通过TableData传递到前端，前端不处理，在这里返回
 }
 
 func (own *SearchItem) ToSearchItem() *types.SearchItem {
@@ -246,6 +247,7 @@ func (own *SearchItem) ToSearchItem() *types.SearchItem {
 type TableData struct {
 	Rows  interface{} `json:"rows"`
 	Total int64       `json:"total"`
+	Tag   string      `json:"tag"` // 扩展字段,传递到前端，前端不处理，在SearchItem中返回
 }
 type ForeigData struct {
 	Rows  interface{} `json:"rows"`
