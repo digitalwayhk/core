@@ -322,6 +322,16 @@ func (b *BadgerDB[T]) BatchInsert(items []*T) error {
 
 	return lastErr
 }
+func (b *BadgerDB[T]) DeleteByItem(item *T) error {
+	if item == nil {
+		return fmt.Errorf("item 不能为空")
+	}
+	key := b.generateKey(item)
+	if key == "" {
+		return badger.ErrEmptyKey
+	}
+	return b.Delete(key)
+}
 
 // Delete 删除数据（支持软删除）
 func (b *BadgerDB[T]) Delete(key string) error {
