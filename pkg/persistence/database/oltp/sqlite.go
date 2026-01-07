@@ -466,8 +466,7 @@ func (own *Sqlite) Insert(data interface{}) error {
 	if own.isTansaction {
 		err := createData(own.tx, data)
 		if err != nil {
-			fmt.Println(own.Path)
-			own.tx.Rollback()
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil
@@ -508,8 +507,7 @@ func (own *Sqlite) Update(data interface{}) error {
 	if own.isTansaction {
 		err := updateData(own.tx, data)
 		if err != nil {
-			fmt.Println(own.Path)
-			own.tx.Rollback()
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil
@@ -533,8 +531,7 @@ func (own *Sqlite) Delete(data interface{}) error {
 	if own.isTansaction {
 		err := deleteData(own.tx, data)
 		if err != nil {
-			fmt.Println(own.Path)
-			own.tx.Rollback()
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil

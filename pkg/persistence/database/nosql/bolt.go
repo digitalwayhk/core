@@ -2,155 +2,109 @@ package nosql
 
 import (
 	"encoding/json"
-	"errors"
-	"strconv"
+	"fmt"
 	"time"
 
-	"github.com/digitalwayhk/core/pkg/persistence/local"
-	"github.com/digitalwayhk/core/pkg/utils"
-
-	"github.com/boltdb/bolt"
+	"go.etcd.io/bbolt"
 )
 
-type Bolt struct {
-	UserID  uint
-	MaxSize int    //库大小限制
-	Path    string //库文件路径
-	db      *bolt.DB
+type BoltDB struct {
+	db   *bbolt.DB
+	path string
 }
 
-func NewBolt(userid uint) (*Bolt, error) {
-	bolt := &Bolt{
-		UserID: userid,
-	}
-	_, err := bolt.getdb()
-	return bolt, err
-}
-func (own *Bolt) GetSize() int64 {
-	_, size := local.GetDbFileInfo(own.Path)
-	return size
-}
-func (own *Bolt) ModTime() time.Time {
-	t, _ := local.GetDbFileInfo(own.Path)
-	return t
-}
-func (own *Bolt) getdb() (*bolt.DB, error) {
-	if own.db == nil {
-		if own.Path == "" {
-			key := strconv.Itoa(int(own.UserID))
-			path, err := local.GetDbPath(key)
-			if err != nil {
-				return nil, err
-			}
-			own.Path = path + ".bolt"
-		}
-		db, err := bolt.Open(own.Path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-		if err != nil {
-			return nil, err
-		}
-		defer db.Close()
-		own.db = db
-	}
-	return own.db, nil
-}
-func (own *Bolt) open() error {
-	db, err := bolt.Open(own.Path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+func NewBoltDB(path string) (*BoltDB, error) {
+	db, err := bbolt.Open(path, 0600, &bbolt.Options{
+		Timeout:         1 * time.Second,
+		NoGrowSync:      false, // ✅ 每次扩容都 sync
+		NoFreelistSync:  false, // ✅ 每次都持久化空闲列表
+		FreelistType:    bbolt.FreelistArrayType,
+		ReadOnly:        false,
+		MmapFlags:       0,
+		InitialMmapSize: 10 << 20, // 10MB 初始映射
+		PageSize:        4096,     // 4KB 页
+		NoSync:          false,    // ✅ 强制 fsync
+		OpenFile:        nil,
+	})
+
 	if err != nil {
-		return err
+		return nil, err
 	}
-	own.db = db
-	return nil
+
+	return &BoltDB{db: db, path: path}, nil
 }
-func (own *Bolt) Get(id uint, value interface{}) error {
-	defer own.Close()
-	own.open()
-	return own.db.View(func(tx *bolt.Tx) error {
-		name := utils.GetTypeName(value)
-		b := tx.Bucket([]byte(name))
-		if b == nil {
-			return nil
+
+// 批量写入
+func (b *BoltDB) BatchWrite(bucket string, items map[string]interface{}) error {
+	return b.db.Update(func(tx *bbolt.Tx) error {
+		bkt, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
 		}
-		item := b.Get([]byte(strconv.Itoa(int(id))))
-		if item != nil && len(item) > 0 {
-			return json.Unmarshal(item, value)
+
+		for key, value := range items {
+			data, _ := json.Marshal(value)
+			if err := bkt.Put([]byte(key), data); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
 }
 
-func (own *Bolt) Set(value interface{}) error {
-	defer own.Close()
-	own.open()
-	return own.db.Update(func(tx *bolt.Tx) error {
-		name := utils.GetTypeName(value)
-		b, err := tx.CreateBucketIfNotExists([]byte(name))
-		if err != nil {
-			return errors.New("bolt set create bucket error:" + err.Error())
+// 读取
+func (b *BoltDB) Get(bucket, key string, result interface{}) error {
+	return b.db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket([]byte(bucket))
+		if bkt == nil {
+			return bbolt.ErrBucketNotFound
 		}
-		jbyte, err := json.Marshal(value)
-		if err != nil {
-			return errors.New(name + "bolt set marshal error:" + err.Error())
-		}
-		id := utils.GetPropertyValue(value, "ID")
-		key := strconv.Itoa(int(id.(uint)))
-		return b.Put([]byte(key), jbyte)
-	})
-}
-func (own *Bolt) Delete(value interface{}) error {
-	defer own.Close()
-	own.open()
-	return own.db.Update(func(tx *bolt.Tx) error {
-		name := utils.GetTypeName(value)
-		b := tx.Bucket([]byte(name))
-		if b == nil {
-			return nil
-		}
-		id := utils.GetPropertyValue(value, "ID")
-		return b.Delete([]byte(id.(string)))
-	})
-}
-func (own *Bolt) DeleteBucket(value interface{}) error {
-	defer own.Close()
-	own.open()
-	return own.db.Update(func(tx *bolt.Tx) error {
-		name := utils.GetTypeName(value)
-		return tx.DeleteBucket([]byte(name))
-	})
-}
-func (own *Bolt) AllForEach(fn func(name, key string, value interface{}) error) error {
-	defer own.Close()
-	own.open()
-	return own.db.View(func(tx *bolt.Tx) error {
-		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			return b.ForEach(func(k, v []byte) error {
-				var value interface{}
-				if err := json.Unmarshal(v, &value); err != nil {
-					return err
-				}
-				return fn(string(name), string(k), value)
-			})
-		})
-	})
-}
-func (own *Bolt) ForEach(model interface{}, fn func(key string, value interface{}) error) error {
-	defer own.Close()
-	own.open()
-	return own.db.View(func(tx *bolt.Tx) error {
-		name := utils.GetTypeName(model)
-		b := tx.Bucket([]byte(name))
-		if b == nil {
-			return nil
-		}
-		return b.ForEach(func(k, v []byte) error {
-			var value interface{}
-			if err := json.Unmarshal(v, &value); err != nil {
-				return err
-			}
-			return fn(string(k), value)
-		})
 
+		val := bkt.Get([]byte(key))
+		if val == nil {
+			return fmt.Errorf("key not found: %s", key)
+		}
+
+		return json.Unmarshal(val, result)
 	})
 }
-func (own *Bolt) Close() error {
-	return own.db.Close()
+
+// 范围查询
+func (b *BoltDB) Scan(bucket, prefix string, limit int) ([][]byte, error) {
+	var results [][]byte
+
+	err := b.db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket([]byte(bucket))
+		if bkt == nil {
+			return nil
+		}
+
+		c := bkt.Cursor()
+		count := 0
+
+		for k, v := c.Seek([]byte(prefix)); k != nil && count < limit; k, v = c.Next() {
+			if !hasPrefix(k, []byte(prefix)) {
+				break
+			}
+			dst := make([]byte, len(v))
+			copy(dst, v)
+			results = append(results, dst)
+			count++
+		}
+		return nil
+	})
+
+	return results, err
+}
+
+func hasPrefix(s, prefix []byte) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if s[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }

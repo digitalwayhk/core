@@ -385,9 +385,7 @@ func (own *Mysql) Insert(data interface{}) error {
 		err := createData(own.tx, data)
 		if err != nil {
 			// 🔧 事务中发生错误时自动回滚
-			own.tx.Rollback()
-			own.tx = nil
-			own.isTransaction = false
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil
@@ -413,9 +411,7 @@ func (own *Mysql) Update(data interface{}) error {
 	if own.isTransaction {
 		err := updateData(own.tx, data)
 		if err != nil {
-			own.tx.Rollback()
-			own.tx = nil
-			own.isTransaction = false
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil
@@ -441,9 +437,7 @@ func (own *Mysql) Delete(data interface{}) error {
 	if own.isTransaction {
 		err := deleteData(own.tx, data)
 		if err != nil {
-			own.tx.Rollback()
-			own.tx = nil
-			own.isTransaction = false
+			// 不在这里回滚，让调用者决定是否回滚
 			return err
 		}
 		return nil
