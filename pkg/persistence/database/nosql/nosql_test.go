@@ -867,4 +867,427 @@ func BenchmarkGeneric_BatchSync_1000(b *testing.B) {
 	}
 }
 
-// ...existing code...
+// ✅ 测试自动清理功能
+func TestGeneric_AutoCleanup(t *testing.T) {
+	// 创建带自动清理配置的 BadgerDB
+	config := DefaultProductionConfig(t.TempDir())
+	config.AutoCleanup = true
+	config.CleanupInterval = 500 * time.Millisecond
+	config.KeepDuration = 1 * time.Second
+
+	db, err := NewBadgerDBWithConfig[TestModel](config)
+	db.config.SizeThreshold = 0
+	require.NoError(t, err)
+	defer db.Close()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入并同步数据
+	model := NewTestModel(26001)
+	model.Name = "cleanup_test"
+	model.Value = 100
+	model.CreatedAt = time.Now()
+
+	err = db.Set(model, 0)
+	require.NoError(t, err)
+
+	// // 手动触发同步
+	// err = db.ManualSync()
+	// require.NoError(t, err)
+	row, err := db.Get(model.GetHash())
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	require.Equal(t, "cleanup_test", row.Name)
+	time.Sleep(600 * time.Millisecond)
+
+	// 验证数据已同步到 SQLite
+	result := make([]*TestModel, 0)
+	item := &types.SearchItem{}
+	item.Model = NewTestModel(0)
+	item.AddWhereN("id", uint(26001))
+	err = gormDB.Load(item, &result)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+
+	// 等待自动清理（CleanupKeepDuration + CleanupInterval）
+	// 等待数据超过保留期限 + 清理间隔触发
+	time.Sleep(2 * time.Second)
+
+	// 验证 BadgerDB 中的数据已被清理
+	row, err = db.Get(model.GetHash())
+	assert.Error(t, err, "Key not found")
+	assert.Nil(t, row, "BadgerDB 中的数据应该被清理")
+
+	// 验证 SQLite 中的数据仍然存在
+	result = make([]*TestModel, 0)
+	err = gormDB.Load(item, &result)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(result), "SQLite 中的数据应该保留")
+}
+
+// ✅ 测试手动清理功能
+func TestGeneric_ManualCleanup(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入多条数据
+	for i := 0; i < 10; i++ {
+		model := NewTestModel(uint(27000 + i))
+		model.Name = fmt.Sprintf("manual_cleanup_%d", i)
+		model.Value = i
+		model.CreatedAt = time.Now()
+
+		err := db.Set(model, 0)
+		require.NoError(t, err)
+	}
+
+	// 手动触发同步
+	err := db.ManualSync()
+	require.NoError(t, err)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// 验证数据已同步
+	results := make([]*TestModel, 0)
+	item := &types.SearchItem{}
+	item.Size = 10
+	item.Model = NewTestModel(0)
+	item.AddWhereNS("id", ">=", uint(27000))
+	item.AddWhereNS("id", "<", uint(27010))
+	err = gormDB.Load(item, &results)
+	require.NoError(t, err)
+	assert.Equal(t, 10, len(results))
+
+	// 手动触发清理（保留 0 秒，即立即清理所有已同步数据）
+	err = db.CleanupAfterSync(0)
+	require.NoError(t, err)
+
+	// 验证 BadgerDB 中的数据已被清理
+	allItems, err := db.GetAll()
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(allItems), "所有已同步数据应该被清理")
+
+	// 验证 SQLite 中的数据仍然存在
+	results = make([]*TestModel, 0)
+	err = gormDB.Load(item, &results)
+	require.NoError(t, err)
+	assert.Equal(t, 10, len(results), "SQLite 中的数据应该保留")
+}
+
+// ✅ 测试清理未同步的数据不会被删除
+func TestGeneric_CleanupPreservesUnsyncedData(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入已同步的数据
+	syncedModel := NewTestModel(28001)
+	syncedModel.Name = "synced_data"
+	syncedModel.Value = 100
+
+	err := db.Set(syncedModel, 0)
+	require.NoError(t, err)
+
+	// 同步第一条数据
+	err = db.ManualSync()
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// 插入未同步的数据
+	unsyncedModel := NewTestModel(28002)
+	unsyncedModel.Name = "unsynced_data"
+	unsyncedModel.Value = 200
+
+	err = db.Set(unsyncedModel, 0)
+	require.NoError(t, err)
+
+	// 触发清理
+	err = db.CleanupAfterSync(0)
+	require.NoError(t, err)
+
+	// 验证已同步的数据被清理
+	_, err = db.Get(syncedModel.GetHash())
+	assert.Error(t, err, "已同步的数据应该被清理")
+
+	// 验证未同步的数据仍然存在
+	result, err := db.Get(unsyncedModel.GetHash())
+	require.NoError(t, err)
+	assert.Equal(t, "unsynced_data", result.Name)
+}
+
+// ✅ 测试清理保留期限功能
+func TestGeneric_CleanupWithKeepDuration(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入旧数据
+	oldModel := NewTestModel(29001)
+	oldModel.Name = "old_data"
+	oldModel.Value = 100
+
+	err := db.Set(oldModel, 0)
+	require.NoError(t, err)
+
+	// 同步旧数据
+	err = db.ManualSync()
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// 等待一段时间
+	time.Sleep(1 * time.Second)
+
+	// 插入新数据
+	newModel := NewTestModel(29002)
+	newModel.Name = "new_data"
+	newModel.Value = 200
+
+	err = db.Set(newModel, 0)
+	require.NoError(t, err)
+
+	// 同步新数据
+	err = db.ManualSync()
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// 清理保留 500ms 的数据
+	err = db.CleanupAfterSync(500 * time.Millisecond)
+	require.NoError(t, err)
+
+	// 旧数据应该被清理
+	_, err = db.Get(oldModel.GetHash())
+	assert.Error(t, err, "旧数据应该被清理")
+
+	// 新数据应该保留
+	result, err := db.Get(newModel.GetHash())
+	require.NoError(t, err)
+	assert.Equal(t, "new_data", result.Name)
+}
+
+// ✅ 测试批量清理性能
+func TestGeneric_BatchCleanupPerformance(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 批量插入大量数据
+	const totalItems = 1000
+	items := make([]*TestModel, totalItems)
+	for i := 0; i < totalItems; i++ {
+		model := NewTestModel(uint(30000 + i))
+		model.Name = fmt.Sprintf("cleanup_perf_%d", i)
+		model.Value = i
+		items[i] = model
+	}
+
+	err := db.BatchInsert(items)
+	require.NoError(t, err)
+
+	// 批量同步
+	for retry := 0; retry < 3; retry++ {
+		err = db.ManualSync()
+		require.NoError(t, err)
+		time.Sleep(300 * time.Millisecond)
+
+		count, _ := db.GetPendingSyncCount()
+		if count == 0 {
+			break
+		}
+	}
+
+	// 测量清理时间
+	startTime := time.Now()
+	err = db.CleanupAfterSync(0)
+	require.NoError(t, err)
+	cleanupDuration := time.Since(startTime)
+
+	t.Logf("清理 %d 条数据耗时: %v", totalItems, cleanupDuration)
+
+	// 验证清理完成
+	allItems, err := db.GetAll()
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(allItems))
+
+	// 验证性能（应该在 1 秒内完成）
+	assert.Less(t, cleanupDuration, 1*time.Second, "清理时间过长")
+}
+
+// ✅ 测试并发清理
+func TestGeneric_ConcurrentCleanup(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入数据
+	for i := 0; i < 100; i++ {
+		model := NewTestModel(uint(31000 + i))
+		model.Name = fmt.Sprintf("concurrent_cleanup_%d", i)
+		model.Value = i
+
+		err := db.Set(model, 0)
+		require.NoError(t, err)
+	}
+
+	// 同步数据
+	err := db.ManualSync()
+	require.NoError(t, err)
+	time.Sleep(300 * time.Millisecond)
+
+	// 并发触发清理
+	const goroutines = 5
+	done := make(chan bool, goroutines)
+	errors := make(chan error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			err := db.CleanupAfterSync(0)
+			if err != nil {
+				errors <- err
+			}
+			done <- true
+		}()
+	}
+
+	// 等待所有清理完成
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	// 检查是否有错误
+	select {
+	case err := <-errors:
+		t.Fatalf("并发清理失败: %v", err)
+	default:
+	}
+
+	// 验证数据已清理
+	allItems, err := db.GetAll()
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(allItems))
+}
+
+// ✅ 测试清理删除标记的数据
+func TestGeneric_CleanupDeletedData(t *testing.T) {
+	db, cleanup := setupBadgerDBGeneric(t)
+	defer cleanup()
+
+	gormDB, cleanupSQL := setupSQLite(t)
+	defer cleanupSQL()
+
+	// 设置同步数据库
+	db.SetSyncDB(gormDB)
+
+	// 插入数据
+	model := NewTestModel(32001)
+	model.Name = "to_be_deleted_and_cleaned"
+	model.Value = 999
+
+	err := db.Set(model, 0)
+	require.NoError(t, err)
+
+	// 删除数据（软删除）
+	err = db.Delete(model.GetHash())
+	require.NoError(t, err)
+
+	// 同步删除操作
+	err = db.ManualSync()
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// 清理
+	err = db.CleanupAfterSync(0)
+	require.NoError(t, err)
+
+	// 验证已删除的数据也被清理
+	wrapper, err := db.getWrapper(model.GetHash())
+	assert.Error(t, err, "已删除并同步的数据应该被完全清理")
+	assert.Nil(t, wrapper)
+}
+
+// ✅ 基准测试 - 清理性能
+func BenchmarkGeneric_Cleanup_100(b *testing.B) {
+	db, _ := NewBadgerDBFast[TestModel](b.TempDir())
+	defer db.Close()
+
+	sql := oltp.NewSqlite()
+	gormDB, _ := sql.GetDB()
+	gormDB.AutoMigrate(&TestModel{})
+	db.SetSyncDB(sql)
+
+	// 准备数据
+	items := make([]*TestModel, 100)
+	for i := 0; i < 100; i++ {
+		model := NewTestModel(uint(40000 + i))
+		model.Name = fmt.Sprintf("bench_cleanup_%d", i)
+		model.Value = i
+		items[i] = model
+	}
+	db.BatchInsert(items)
+	db.ManualSync()
+	time.Sleep(200 * time.Millisecond)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.CleanupAfterSync(0)
+	}
+}
+
+func BenchmarkGeneric_Cleanup_1000(b *testing.B) {
+	db, _ := NewBadgerDBFast[TestModel](b.TempDir())
+	defer db.Close()
+
+	sql := oltp.NewSqlite()
+	gormDB, _ := sql.GetDB()
+	gormDB.AutoMigrate(&TestModel{})
+	db.SetSyncDB(sql)
+
+	// 准备数据
+	items := make([]*TestModel, 1000)
+	for i := 0; i < 1000; i++ {
+		model := NewTestModel(uint(50000 + i))
+		model.Name = fmt.Sprintf("bench_cleanup_%d", i)
+		model.Value = i
+		items[i] = model
+	}
+	db.BatchInsert(items)
+
+	for retry := 0; retry < 3; retry++ {
+		db.ManualSync()
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.CleanupAfterSync(0)
+	}
+}
