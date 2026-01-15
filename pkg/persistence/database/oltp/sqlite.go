@@ -331,8 +331,32 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
-	// 获取表名
-	tableName := own.db.NamingStrategy.TableName(reflect.TypeOf(model).Elem().Name())
+	// 🔧 修复：先检查并处理指针层级
+	modelType := reflect.TypeOf(model)
+	if modelType == nil {
+		return fmt.Errorf("model 不能为 nil")
+	}
+
+	// 🔧 统计指针层级并解引用到最终类型
+	pointerDepth := 0
+	finalType := modelType
+	for finalType.Kind() == reflect.Ptr {
+		finalType = finalType.Elem()
+		pointerDepth++
+	}
+
+	// 🔧 验证最终类型必须是结构体
+	if finalType.Kind() != reflect.Struct {
+		return fmt.Errorf("model 必须是结构体或结构体指针，当前类型: %v", modelType)
+	}
+
+	// 🔧 如果是双指针或更多层，记录警告
+	if pointerDepth > 1 {
+		logx.Errorf("HasTable 检测到 %d 层指针: %v -> %v", pointerDepth, modelType, finalType)
+	}
+
+	// 获取表名（使用解引用后的类型名）
+	tableName := own.db.NamingStrategy.TableName(finalType.Name())
 	cacheKey := TableCacheKey{
 		DBPath:    own.Path,
 		TableName: tableName,
@@ -340,7 +364,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 
 	// 检查缓存
 	if _, exists := tableCache.Load(cacheKey); exists {
-		return nil // 已处理过，直接返回
+		return nil
 	}
 
 	// 使用锁防止并发迁移
@@ -352,9 +376,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
-	//logx.Infof("检查表: %s", tableName)
-
-	// 快速检查表是否存在，避免调用复杂的 Migrator
+	// 快速检查表是否存在
 	var count int64
 	err := own.db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&count).Error
 	if err == nil && count > 0 {
@@ -362,19 +384,23 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
+	// 🔧 修复：创建标准的单层指针实例用于迁移
+	// reflect.New(finalType) 返回 *finalType
+	modelForMigration := reflect.New(finalType).Interface()
+
 	// 只在表不存在时才执行迁移
-	err = own.db.AutoMigrate(model)
+	err = own.db.AutoMigrate(modelForMigration)
 	if err != nil {
-		logx.Errorf("创建表失败: %s, 错误: %v", tableName, err)
+		logx.Errorf("创建表失败: %s, 错误: %v, 输入类型: %v, 迁移类型: %v",
+			tableName, err, modelType, reflect.TypeOf(modelForMigration))
 		return err
 	}
 
 	// 缓存结果
 	tableCache.Store(cacheKey, true)
-	//logx.Infof("表创建完成: %s", tableName)
 
-	// 处理嵌套表，但限制深度
-	return own.processNestedTablesOptimized(model, make(map[string]bool), 0, 2)
+	// 处理嵌套表（使用规范化后的实例）
+	return own.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
 }
 
 // 优化嵌套表处理，添加深度限制

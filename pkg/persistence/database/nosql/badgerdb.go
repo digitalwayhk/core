@@ -3,11 +3,17 @@ package nosql
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -38,7 +44,8 @@ type BadgerDB[T types.IModel] struct {
 	db             *badger.DB
 	path           string
 	config         BadgerDBConfig // 🆕 配置
-	syncDB         types.IDataAction
+	syncDB         bool
+	syncList       *entity.ModelList[T]
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
 	syncInProgress bool
@@ -47,6 +54,12 @@ type BadgerDB[T types.IModel] struct {
 	syncOnce       sync.Once
 	cleanupOnce    sync.Once // 🆕 清理启动控制
 	bufferPool     sync.Pool
+	isAutoClean    bool // 🆕 是否启用自动清理
+
+	// 🆕 待同步计数缓存
+	pendingCountCache int
+	pendingCountMutex sync.RWMutex
+	lastCountUpdate   time.Time
 }
 
 // NewBadgerDB 创建生产环境 BadgerDB（保持向后兼容）
@@ -62,11 +75,110 @@ func NewBadgerDBFast[T types.IModel](path string) (*BadgerDB[T], error) {
 	return NewBadgerDBWithConfig[T](config)
 }
 
+// 🆕 检查并诊断锁定错误
+func diagnoseLockError(dbPath string) string {
+	lockFile := filepath.Join(dbPath, "LOCK")
+
+	// 检查锁文件是否存在
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		return "锁文件不存在（可能是其他错误）"
+	}
+
+	// 尝试读取锁文件内容（BadgerDB 会写入进程信息）
+	content, err := ioutil.ReadFile(lockFile)
+	if err != nil {
+		return fmt.Sprintf("无法读取锁文件: %v", err)
+	}
+
+	// 解析锁文件内容
+	lines := strings.Split(string(content), "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+		if err == nil {
+			// 检查进程是否还在运行
+			process, err := os.FindProcess(pid)
+			if err != nil {
+				return fmt.Sprintf("锁定进程 PID=%d 已不存在（可能是僵尸锁）", pid)
+			}
+
+			// 尝试发送信号 0 检查进程是否存活
+			err = process.Signal(syscall.Signal(0))
+			if err != nil {
+				return fmt.Sprintf("锁定进程 PID=%d 已不存在（僵尸锁），建议手动删除锁文件", pid)
+			}
+
+			// 🔧 获取进程信息（macOS/Linux）
+			processInfo := getProcessInfo(pid)
+			return fmt.Sprintf("数据库被进程锁定 [PID=%d, %s]", pid, processInfo)
+		}
+	}
+
+	return fmt.Sprintf("锁文件存在但格式异常: %s", string(content))
+}
+
+// 🆕 获取进程信息
+func getProcessInfo(pid int) string {
+	// macOS: 使用 ps 命令
+	cmdPath := fmt.Sprintf("/proc/%d/cmdline", pid)
+	if content, err := os.ReadFile(cmdPath); err == nil {
+		cmd := strings.ReplaceAll(string(content), "\x00", " ")
+		return fmt.Sprintf("命令: %s", cmd)
+	}
+
+	// 备用方案：只返回 PID
+	return "进程正在运行"
+}
+
+// 🔧 改进的锁定错误检查
+func isLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	// BadgerDB 的典型锁定错误信息
+	lockKeywords := []string{
+		"Cannot acquire directory lock",
+		"resource temporarily unavailable",
+		"另一个进程正在使用",
+		"LOCK",
+	}
+
+	for _, keyword := range lockKeywords {
+		if strings.Contains(errStr, keyword) {
+			return true
+		}
+	}
+
+	// 系统级锁定错误
+	return os.IsExist(err) ||
+		syscall.EAGAIN.Error() == errStr ||
+		os.IsPermission(err)
+}
+
 // NewBadgerDBWithConfig 使用配置创建 BadgerDB
 func NewBadgerDBWithConfig[T types.IModel](config BadgerDBConfig) (*BadgerDB[T], error) {
 	// 验证配置
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("配置验证失败: %w", err)
+	}
+
+	// 🆕 尝试清理旧的锁文件（仅在开发/测试环境）
+	if config.Mode == "fast" || config.Mode == "test" {
+		lockFile := filepath.Join(config.Path, "LOCK")
+		if _, err := os.Stat(lockFile); err == nil {
+			// 🔧 先诊断锁定情况
+			diagnosis := diagnoseLockError(config.Path)
+			logx.Infof("发现锁文件: %s", diagnosis)
+
+			// 尝试删除锁文件（可能失败，这是正常的）
+			if err := os.Remove(lockFile); err != nil {
+				logx.Errorf("无法删除锁文件: %v", err)
+			} else {
+				logx.Info("已清理旧锁文件")
+			}
+		}
 	}
 
 	// 构建 BadgerDB 选项
@@ -89,9 +201,33 @@ func NewBadgerDBWithConfig[T types.IModel](config BadgerDBConfig) (*BadgerDB[T],
 		opts = opts.WithLogger(nil)
 	}
 
-	// 打开数据库
-	db, err := badger.Open(opts)
-	if err != nil {
+	// 🆕 添加重试逻辑
+	var db *badger.DB
+	var err error
+	maxRetries := 3
+
+	for i := 0; i < maxRetries; i++ {
+		db, err = badger.Open(opts)
+		if err == nil {
+			break
+		}
+
+		// 检查是否是锁定错误
+		if isLockError(err) {
+			// 🔧 详细诊断
+			diagnosis := diagnoseLockError(config.Path)
+
+			if i < maxRetries-1 {
+				logx.Errorf("数据库被锁定，等待重试... (%d/%d)\n详情: %s", i+1, maxRetries, diagnosis)
+				time.Sleep(time.Second * time.Duration(i+1))
+				continue
+			} else {
+				// 🔧 最后一次重试失败，返回详细错误
+				return nil, fmt.Errorf("打开 BadgerDB 失败（已重试 %d 次）: %s\n原始错误: %w",
+					maxRetries, diagnosis, err)
+			}
+		}
+
 		return nil, fmt.Errorf("打开 BadgerDB 失败: %w", err)
 	}
 
@@ -117,42 +253,97 @@ func NewBadgerDBWithConfig[T types.IModel](config BadgerDBConfig) (*BadgerDB[T],
 		go b.periodicSync()
 	}
 
+	if config.AutoCleanup {
+		b.SetAutoCleanup(true)
+	}
+
 	logx.Infof("BadgerDB 已启动 [mode=%s, path=%s, autoSync=%v, autoCleanup=%v]",
 		config.Mode, config.Path, config.AutoSync, config.AutoCleanup)
 
 	return b, nil
 }
 
-// SetSyncDB 设置同步数据库
-func (b *BadgerDB[T]) SetSyncDB(action types.IDataAction) {
-	b.syncLock.Lock()
-	defer b.syncLock.Unlock()
+// 🆕 添加手动检查锁定状态的方法
+func CheckDatabaseLock(dbPath string) error {
+	lockFile := filepath.Join(dbPath, "LOCK")
 
-	if b.syncDB != nil {
-		logx.Error("syncDB 已设置，跳过")
-		return
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		return nil // 无锁
 	}
 
-	b.syncDB = action
+	diagnosis := diagnoseLockError(dbPath)
+	return fmt.Errorf("数据库已被锁定: %s", diagnosis)
+}
 
-	if action != nil {
-		// 🔧 启动自动同步
-		if b.config.AutoSync {
-			b.syncOnce.Do(func() {
-				b.wg.Add(1)
-				go b.syncToOtherDB()
-				logx.Info("自动同步已启动")
-			})
+// 🆕 强制释放锁（危险操作，仅用于恢复）
+func ForceUnlock(dbPath string) error {
+	lockFile := filepath.Join(dbPath, "LOCK")
+
+	// 先诊断
+	diagnosis := diagnoseLockError(dbPath)
+	logx.Errorf("强制解锁前诊断: %s", diagnosis)
+
+	// 删除锁文件
+	if err := os.Remove(lockFile); err != nil {
+		return fmt.Errorf("删除锁文件失败: %w", err)
+	}
+
+	logx.Info("已强制删除锁文件")
+	return nil
+}
+func (b *BadgerDB[T]) getDataAction(item *T) types.IDataAction {
+	if b.syncList != nil {
+		model := item
+		if model == nil {
+			model = new(T)
+			if nm, ok := any(model).(types.IModelNewHook); ok {
+				nm.NewModel()
+			}
 		}
-
+		searchItem := b.syncList.GetSearchItem()
+		searchItem.Model = model
+		action := b.syncList.GetDBAdapter(searchItem)
+		return action
+	}
+	return nil
+}
+func (b *BadgerDB[T]) SetAutoCleanup(auto bool) {
+	b.isAutoClean = auto
+	if auto {
 		// 🔧 启动自动清理
-		if b.config.AutoCleanup {
-			b.cleanupOnce.Do(func() {
-				b.wg.Add(1)
-				go b.autoCleanup()
-				logx.Info("自动清理已启动")
-			})
+		b.cleanupOnce.Do(func() {
+			b.wg.Add(1)
+			go b.autoCleanup()
+			logx.Info("自动清理已启动")
+		})
+	}
+}
+
+// SetSyncDB 设置同步数据库
+func (b *BadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
+	b.syncLock.Lock()
+	defer b.syncLock.Unlock()
+	if list != nil {
+		if b.syncDB {
+			return
 		}
+		b.syncDB = true
+	} else {
+		if !b.syncDB {
+			return
+		}
+		b.syncDB = false
+	}
+
+	b.syncList = list
+
+	if list != nil && b.syncDB {
+		// 🔧 启动自动同步
+		b.syncOnce.Do(func() {
+			b.wg.Add(1)
+			go b.syncToOtherDB()
+			logx.Info("自动同步已启动")
+		})
 	}
 }
 
@@ -167,74 +358,113 @@ func (b *BadgerDB[T]) generateKey(item *T) string {
 	return ""
 }
 
-// Set 写入数据
-func (b *BadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper *SyncQueueItem[T])) error {
-	if item == nil {
-		return fmt.Errorf("item 不能为空")
+// 🆕 快速获取待同步数量（带缓存）
+func (b *BadgerDB[T]) GetPendingSyncCountFast() (int, error) {
+	b.pendingCountMutex.RLock()
+
+	// 缓存有效期 1 秒
+	if time.Since(b.lastCountUpdate) < time.Second {
+		count := b.pendingCountCache
+		b.pendingCountMutex.RUnlock()
+		return count, nil
 	}
 
+	b.pendingCountMutex.RUnlock()
+
+	// 重新计数
+	count, err := b.GetPendingSyncCount()
+	if err != nil {
+		return 0, err
+	}
+
+	b.pendingCountMutex.Lock()
+	b.pendingCountCache = count
+	b.lastCountUpdate = time.Now()
+	b.pendingCountMutex.Unlock()
+
+	return count, nil
+}
+
+// 🆕 更新待同步计数（在写入/删除时调用）
+func (b *BadgerDB[T]) incrementPendingCount(delta int) {
+	b.pendingCountMutex.Lock()
+	b.pendingCountCache += delta
+	b.pendingCountMutex.Unlock()
+}
+
+// Set 写入数据
+func (b *BadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper *SyncQueueItem[T])) error {
 	key := b.generateKey(item)
 	if key == "" {
 		return badger.ErrEmptyKey
 	}
 
 	b.syncLock.RLock()
-	needSync := b.syncDB != nil
+	needSync := b.syncDB
 	b.syncLock.RUnlock()
 
-	// 🔧 检查是插入还是更新
-	op := OpInsert
-	existingWrapper, err := b.getWrapper(key)
-	if err == nil && existingWrapper != nil && !existingWrapper.IsDeleted {
-		op = OpUpdate
-	}
-
-	// 🔧 创建包装对象
-	now := time.Now()
-	wrapper := &SyncQueueItem[T]{
-		Key:       key,
-		Item:      item,
-		Op:        op,
-		CreatedAt: now,
-		UpdatedAt: now,
-		IsSynced:  !needSync,
-		IsDeleted: false,
-	}
-
-	// 🔧 保留创建时间（如果是更新）
-	if op == OpUpdate && existingWrapper != nil {
-		wrapper.CreatedAt = existingWrapper.CreatedAt
-	}
-
-	// 序列化
-	data, err := json.Marshal(wrapper)
-	if err != nil {
-		return fmt.Errorf("序列化失败: %w", err)
-	}
-	if len(fn) > 0 {
-		fn[0](wrapper)
-	}
-	// 写入数据库
-	return b.db.Update(func(txn *badger.Txn) error {
+	data, err := b.setItem(key, needSync, item, fn...)
+	err = b.db.Update(func(txn *badger.Txn) error {
 		entry := badger.NewEntry([]byte(key), data)
 		if ttl > 0 {
 			entry = entry.WithTTL(ttl)
 		}
 		return txn.SetEntry(entry)
 	})
-}
 
-// BatchInsert 批量插入
-func (b *BadgerDB[T]) BatchInsert(items []*T) error {
+	// 🆕 更新待同步计数
+	if err == nil && needSync {
+		b.incrementPendingCount(1)
+	}
+	return err
+}
+func (b *BadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...func(wrapper *SyncQueueItem[T])) ([]byte, error) {
+	if item == nil {
+		return nil, fmt.Errorf("item 不能为空")
+	}
+	existingWrapper, err := b.getWrapper(key)
+	var wrapper *SyncQueueItem[T]
+
+	if err == nil && existingWrapper != nil {
+		if existingWrapper.IsDeleted {
+			return nil, fmt.Errorf("无法更新已删除的项，key=%s", key)
+		}
+		wrapper = existingWrapper
+		wrapper.Op = OpUpdate
+		wrapper.Item = item
+		wrapper.UpdatedAt = time.Now()
+		wrapper.IsSynced = !needSync
+	} else {
+		now := time.Now()
+		wrapper = &SyncQueueItem[T]{
+			Key:       key,
+			Item:      item,
+			Op:        OpInsert,
+			CreatedAt: now,
+			UpdatedAt: now,
+			IsSynced:  !needSync,
+			IsDeleted: false,
+		}
+	}
+
+	data, err := json.Marshal(wrapper)
+	if err != nil {
+		return nil, fmt.Errorf("序列化失败: %w", err)
+	}
+
+	if len(fn) > 0 {
+		fn[0](wrapper)
+	}
+	return data, nil
+}
+func (b *BadgerDB[T]) batchInsert(items []*T, fn ...func(wrapper *SyncQueueItem[T])) error {
 	if len(items) == 0 {
 		return nil
 	}
 
 	b.syncLock.RLock()
-	needSync := b.syncDB != nil
+	needSync := b.syncDB
 	b.syncLock.RUnlock()
-
-	now := time.Now()
 
 	type serializedItem struct {
 		key   string
@@ -247,28 +477,14 @@ func (b *BadgerDB[T]) BatchInsert(items []*T) error {
 		if item == nil {
 			continue
 		}
-
 		key := b.generateKey(item)
 		if key == "" {
 			return badger.ErrEmptyKey
 		}
-
-		// 🔧 创建包装对象
-		wrapper := &SyncQueueItem[T]{
-			Key:       key,
-			Item:      item,
-			Op:        OpInsert,
-			CreatedAt: now,
-			UpdatedAt: now,
-			IsSynced:  !needSync,
-			IsDeleted: false,
-		}
-
-		value, err := json.Marshal(wrapper)
+		value, err := b.setItem(key, needSync, item, fn...)
 		if err != nil {
 			return fmt.Errorf("序列化失败: %w", err)
 		}
-
 		serialized = append(serialized, serializedItem{
 			key:   key,
 			value: value,
@@ -313,6 +529,10 @@ func (b *BadgerDB[T]) BatchInsert(items []*T) error {
 				time.Sleep(time.Millisecond * 100 * time.Duration(retry+1))
 				continue
 			}
+			// 🆕 更新待同步计数
+			if needSync {
+				b.incrementPendingCount(1)
+			}
 			return nil
 		}
 
@@ -322,6 +542,16 @@ func (b *BadgerDB[T]) BatchInsert(items []*T) error {
 
 	return lastErr
 }
+
+// BatchInsert 批量插入
+func (b *BadgerDB[T]) BatchInsert(items []*T) error {
+	return b.batchInsert(items)
+}
+
+// BatchInsertWithBack 带回调的批量插入
+func (b *BadgerDB[T]) BatchInsertWithBack(items []*T, fn ...func(wrapper *SyncQueueItem[T])) error {
+	return b.batchInsert(items, fn...)
+}
 func (b *BadgerDB[T]) DeleteByItem(item *T) error {
 	if item == nil {
 		return fmt.Errorf("item 不能为空")
@@ -330,22 +560,39 @@ func (b *BadgerDB[T]) DeleteByItem(item *T) error {
 	if key == "" {
 		return badger.ErrEmptyKey
 	}
-	return b.Delete(key)
+	b.syncLock.RLock()
+	needSync := b.syncDB
+	b.syncLock.RUnlock()
+	return b.delete(key, needSync)
+}
+func (b *BadgerDB[T]) DeleteByItemWithSync(item *T, needSync bool) error {
+	if item == nil {
+		return fmt.Errorf("item 不能为空")
+	}
+	key := b.generateKey(item)
+	if key == "" {
+		return badger.ErrEmptyKey
+	}
+	return b.delete(key, needSync)
 }
 
 // Delete 删除数据（支持软删除）
 func (b *BadgerDB[T]) Delete(key string) error {
 	b.syncLock.RLock()
-	needSync := b.syncDB != nil
+	needSync := b.syncDB
 	b.syncLock.RUnlock()
-
+	return b.delete(key, needSync)
+}
+func (b *BadgerDB[T]) delete(key string, needSync bool) error {
 	if !needSync {
 		// 🔧 不需要同步，直接物理删除
 		return b.db.Update(func(txn *badger.Txn) error {
 			return txn.Delete([]byte(key))
 		})
 	}
-
+	if !b.syncDB {
+		return fmt.Errorf("未启用同步数据库功能，无法执行软删除")
+	}
 	// 🔧 需要同步，执行软删除
 	return b.db.Update(func(txn *badger.Txn) error {
 		// 读取现有数据
@@ -445,7 +692,8 @@ func (b *BadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
 
 		count := 0
 		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
-			if count >= limit {
+			// ✅ 修复：limit <= 0 表示不限制
+			if limit > 0 && count >= limit {
 				break
 			}
 
@@ -457,7 +705,7 @@ func (b *BadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
 					return err
 				}
 
-				// 🔧 过滤已删除的数据
+				// 过滤已删除的数据
 				if wrapper.IsDeleted {
 					return nil
 				}
@@ -481,6 +729,98 @@ func (b *BadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
 	})
 
 	return results, err
+}
+
+// ScanResult 分页扫描结果
+type ScanResult[T types.IModel] struct {
+	Items   []*T   `json:"items"`    // 数据列表
+	LastKey string `json:"last_key"` // 最后一个 key（用于下次分页）
+	HasMore bool   `json:"has_more"` // 是否还有更多数据
+}
+
+// ScanPage 分页扫描数据（基于游标）
+// prefix: key 前缀
+// limit: 每页数量
+// lastKey: 上一页的最后一个 key（首次传空字符串）
+func (b *BadgerDB[T]) ScanPage(prefix string, limit int, lastKey string) (*ScanResult[T], error) {
+	if limit <= 0 {
+		limit = 1000 // 默认每页 1000 条
+	}
+
+	result := &ScanResult[T]{
+		Items: make([]*T, 0, limit),
+	}
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchSize = 100
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		// 确定起始位置
+		var startKey []byte
+		if lastKey != "" {
+			startKey = []byte(lastKey)
+		} else {
+			startKey = []byte(prefix)
+		}
+
+		count := 0
+		firstItem := true
+
+		for it.Seek(startKey); it.ValidForPrefix([]byte(prefix)); it.Next() {
+			// 跳过上一页的最后一条（避免重复）
+			if lastKey != "" && firstItem {
+				currentKey := string(it.Item().Key())
+				if currentKey == lastKey {
+					firstItem = false
+					continue
+				}
+			}
+			firstItem = false
+
+			// 达到限制后再读一条，判断是否还有更多数据
+			if count >= limit {
+				result.HasMore = true
+				break
+			}
+
+			item := it.Item()
+			currentKey := string(item.Key())
+
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return err
+				}
+
+				// 过滤已删除的数据
+				if wrapper.IsDeleted {
+					return nil
+				}
+
+				if wrapper.Item != nil {
+					if hook, ok := any(wrapper.Item).(types.IModelNewHook); ok {
+						hook.NewModel()
+					}
+					result.Items = append(result.Items, wrapper.Item)
+					result.LastKey = currentKey
+					count++
+				}
+				return nil
+			})
+
+			if err != nil {
+				logx.Errorf("解析数据失败: %v", err)
+				continue
+			}
+		}
+
+		return nil
+	})
+
+	return result, err
 }
 
 // GetAll 获取所有数据（过滤已删除的数据）
@@ -577,18 +917,18 @@ func (b *BadgerDB[T]) processSyncQueue() error {
 
 	logx.Infof("开始同步 %d 条数据到其他DB", len(unsyncedItems))
 
-	successKeys, err := b.syncBatch(unsyncedItems)
+	_, err = b.syncBatch(unsyncedItems)
 	if err != nil {
 		logx.Errorf("批量同步失败: %v", err)
 	}
 
-	if len(successKeys) > 0 {
-		if err := b.handleSyncedItems(successKeys); err != nil {
-			logx.Errorf("处理已同步数据失败: %v", err)
-		} else {
-			logx.Infof("成功同步 %d 条数据", len(successKeys))
-		}
-	}
+	// if len(successKeys) > 0 {
+	// 	if err := b.handleSyncedItems(successKeys); err != nil {
+	// 		logx.Errorf("处理已同步数据失败: %v", err)
+	// 	} else {
+	// 		logx.Infof("成功同步 %d 条数据", len(successKeys))
+	// 	}
+	// }
 
 	return nil
 }
@@ -639,6 +979,11 @@ func (b *BadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], error) {
 
 	return items, err
 }
+func setHashCode(item interface{}) {
+	if code, ok := item.(types.IRowCode); ok {
+		code.SetHashcode(code.GetHash())
+	}
+}
 
 // syncBatch 批量同步数据
 func (b *BadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, error) {
@@ -647,11 +992,10 @@ func (b *BadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, error) {
 	b.syncLock.RLock()
 	defer b.syncLock.RUnlock()
 
-	if b.syncDB == nil {
-		return nil, fmt.Errorf("syncDB 未配置")
+	if !b.syncDB {
+		return nil, fmt.Errorf("未开启 syncDB ")
 	}
 
-	b.syncDB.Transaction()
 	defer func() {
 		if r := recover(); r != nil {
 			logx.Errorf("同步 panic: %v", r)
@@ -660,20 +1004,49 @@ func (b *BadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, error) {
 
 	for _, wrapper := range items {
 		var err error
-
+		syncAction := b.getDataAction(wrapper.Item)
+		if syncAction == nil {
+			logx.Errorf("未找到同步操作对象 [%s]", wrapper.Key)
+			continue
+		}
+		setHashCode(wrapper.Item)
 		switch wrapper.Op {
 		case OpInsert:
 			if wrapper.Item != nil {
-				err = b.syncDB.Insert(wrapper.Item)
+				err = syncAction.Insert(wrapper.Item)
+				logx.Infof("同步插入操作 [%s]", wrapper.Key)
+				if err != nil {
+					if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint failed") {
+						logx.Infof("数据已存在，尝试更新操作 [%s]", wrapper.Key)
+						err = nil
+					}
+				}
+				if err == nil {
+					if err1 := b.updateSyncedItem(wrapper); err1 != nil {
+						logx.Errorf("更新已同步数据失败 [%s]: %v", wrapper.Key, err1)
+					}
+				}
 			}
 		case OpUpdate:
 			if wrapper.Item != nil {
-				err = b.syncDB.Update(wrapper.Item)
+				err = syncAction.Update(wrapper.Item)
+				logx.Infof("同步更新操作 [%s]", wrapper.Key)
+				if err == nil {
+					if err1 := b.updateSyncedItem(wrapper); err1 != nil {
+						logx.Errorf("更新已同步数据失败 [%s]: %v", wrapper.Key, err1)
+					}
+				}
 			}
 		case OpDelete:
 			// 🔧 同步删除操作
 			if wrapper.Item != nil {
-				err = b.syncDB.Delete(wrapper.Item)
+				err = syncAction.Delete(wrapper.Item)
+				logx.Infof("同步删除操作 [%s]", wrapper.Key)
+				if err == nil {
+					if err1 := b.delete(wrapper.Key, false); err1 != nil {
+						logx.Errorf("物理删除失败 [%s]: %v", wrapper.Key, err1)
+					}
+				}
 			}
 		default:
 			logx.Errorf("未知操作类型: %s", wrapper.Op)
@@ -687,12 +1060,25 @@ func (b *BadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, error) {
 
 		successKeys = append(successKeys, wrapper.Key)
 	}
-
-	if err := b.syncDB.Commit(); err != nil {
-		return nil, fmt.Errorf("提交同步事务失败: %w", err)
-	}
-
 	return successKeys, nil
+}
+func (b *BadgerDB[T]) updateSyncedItem(wrapper *SyncQueueItem[T]) error {
+	return b.db.Update(func(txn *badger.Txn) error {
+		// 🔧 标记为已同步
+		wrapper.IsSynced = true
+		wrapper.SyncedAt = time.Now()
+		wrapper.Op = OpUpdate
+
+		data, err := json.Marshal(&wrapper)
+		if err != nil {
+			return err
+		}
+
+		if err := txn.Set([]byte(wrapper.Key), data); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // handleSyncedItems 处理已同步的数据
@@ -743,11 +1129,11 @@ func (b *BadgerDB[T]) handleSyncedItems(keys []string) error {
 // ManualSync 手动触发同步
 func (b *BadgerDB[T]) ManualSync() error {
 	b.syncLock.RLock()
-	hasDB := b.syncDB != nil
+	hasDB := b.syncList != nil
 	b.syncLock.RUnlock()
 
 	if !hasDB {
-		return fmt.Errorf("syncDB 未配置")
+		return fmt.Errorf("未开启 syncDB ")
 	}
 
 	return b.processSyncQueue()
@@ -756,10 +1142,12 @@ func (b *BadgerDB[T]) ManualSync() error {
 // CleanupAfterSync 清理已同步的数据
 func (b *BadgerDB[T]) CleanupAfterSync(keepDuration time.Duration) error {
 	count := 0
-	deletedCount := 0
 	cutoffTime := time.Now().Add(-keepDuration)
 
-	err := b.db.Update(func(txn *badger.Txn) error {
+	// 第一步：收集需要删除的 key
+	var keysToDelete []string
+
+	err := b.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = true
 		it := txn.NewIterator(opts)
@@ -767,7 +1155,7 @@ func (b *BadgerDB[T]) CleanupAfterSync(keepDuration time.Duration) error {
 
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			key := item.Key()
+			key := string(item.Key())
 
 			err := item.Value(func(val []byte) error {
 				var wrapper SyncQueueItem[T]
@@ -777,26 +1165,56 @@ func (b *BadgerDB[T]) CleanupAfterSync(keepDuration time.Duration) error {
 
 				count++
 
-				// 🔧 清理已同步且超过保留时间的数据
+				// 清理已同步且超过保留时间的数据
 				if wrapper.IsSynced && !wrapper.SyncedAt.IsZero() && wrapper.SyncedAt.Before(cutoffTime) {
-					if err := txn.Delete(key); err != nil {
-						return err
-					}
-					deletedCount++
+					keysToDelete = append(keysToDelete, key)
 				}
 
 				return nil
 			})
 
 			if err != nil {
-				logx.Errorf("清理数据失败: %v", err)
+				logx.Errorf("读取数据失败: %v", err)
 			}
 		}
 		return nil
 	})
 
 	if err != nil {
-		return fmt.Errorf("清理失败: %w", err)
+		return fmt.Errorf("收集待删除数据失败: %w", err)
+	}
+
+	if len(keysToDelete) == 0 {
+		logx.Infof("清理完成: 检查 %d 条，无需删除", count)
+		return nil
+	}
+
+	// 第二步：分批删除
+	const batchSize = 1000
+	deletedCount := 0
+
+	for i := 0; i < len(keysToDelete); i += batchSize {
+		end := i + batchSize
+		if end > len(keysToDelete) {
+			end = len(keysToDelete)
+		}
+
+		batch := keysToDelete[i:end]
+
+		err := b.db.Update(func(txn *badger.Txn) error {
+			for _, key := range batch {
+				if err := txn.Delete([]byte(key)); err != nil {
+					return err
+				}
+				deletedCount++
+			}
+			return nil
+		})
+
+		if err != nil {
+			logx.Errorf("批量删除失败 [batch %d-%d]: %v", i, end, err)
+			continue
+		}
 	}
 
 	logx.Infof("清理完成: 检查 %d 条，删除 %d 条，保留 %d 条", count, deletedCount, count-deletedCount)
@@ -877,11 +1295,10 @@ func (l *badgerLogger) Warningf(f string, v ...interface{}) { logx.Infof(f, v...
 func (l *badgerLogger) Infof(f string, v ...interface{})    { logx.Infof(f, v...) }
 func (l *badgerLogger) Debugf(f string, v ...interface{})   {}
 
-// syncToOtherDB 同步到其他数据库
+// syncToOtherDB 使用快速计数
 func (b *BadgerDB[T]) syncToOtherDB() {
 	defer b.wg.Done()
 
-	// 🔧 使用配置中的间隔参数
 	interval := b.config.SyncInterval
 	minInterval := b.config.SyncMinInterval
 	maxInterval := b.config.SyncMaxInterval
@@ -893,10 +1310,23 @@ func (b *BadgerDB[T]) syncToOtherDB() {
 		select {
 		case <-ticker.C:
 			b.syncLock.RLock()
-			hasDB := b.syncDB != nil
+			hasDB := b.syncDB
 			b.syncLock.RUnlock()
 
 			if !hasDB {
+				continue
+			}
+
+			// 🔧 使用快速缓存计数
+			pendingCount, err := b.GetPendingSyncCountFast()
+			if err != nil {
+				logx.Errorf("获取待同步数量失败: %v", err)
+				continue
+			}
+
+			if pendingCount == 0 {
+				interval = min(interval*2, maxInterval)
+				ticker.Reset(interval)
 				continue
 			}
 
@@ -923,7 +1353,12 @@ func (b *BadgerDB[T]) syncToOtherDB() {
 			b.syncInProgress = false
 			b.syncMutex.Unlock()
 
-			// 🔧 自适应调整间隔
+			// 🆕 同步后重置缓存
+			b.pendingCountMutex.Lock()
+			b.pendingCountCache = 0
+			b.lastCountUpdate = time.Time{}
+			b.pendingCountMutex.Unlock()
+
 			if duration < interval/2 {
 				interval = max(interval/2, minInterval)
 			} else if duration > interval {
@@ -931,7 +1366,8 @@ func (b *BadgerDB[T]) syncToOtherDB() {
 			}
 
 			ticker.Reset(interval)
-			logx.Infof("同步完成，耗时 %v，下次间隔 %v", duration, interval)
+			logx.Infof("同步完成 [处理: %d, 耗时: %v, 下次间隔: %v]",
+				pendingCount, duration, interval)
 
 		case <-b.closeCh:
 			b.syncMutex.Lock()
@@ -1185,4 +1621,179 @@ func (b *BadgerDB[T]) UpdateConfig(updateFn func(*BadgerDBConfig)) error {
 
 	logx.Infof("配置已更新: %+v", b.config)
 	return nil
+}
+
+// Count 获取数据库中的数据总数（不包括已删除的数据）
+func (b *BadgerDB[T]) Count() (int, error) {
+	count := 0
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return nil // 忽略解析错误
+				}
+
+				// 只统计未删除的数据
+				if !wrapper.IsDeleted {
+					count++
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+// CountAll 获取数据库中的所有数据总数（包括已删除的数据）
+func (b *BadgerDB[T]) CountAll() (int, error) {
+	count := 0
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false // 不需要读取值
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+// CountByPrefix 统计指定前缀的数据数量（不包括已删除）
+func (b *BadgerDB[T]) CountByPrefix(prefix string) (int, error) {
+	count := 0
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return nil
+				}
+
+				if !wrapper.IsDeleted {
+					count++
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	return count, err
+}
+
+// GetStatistics 获取数据库统计信息
+func (b *BadgerDB[T]) GetStatistics() (*DBStatistics, error) {
+	stats := &DBStatistics{}
+
+	err := b.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return nil
+				}
+
+				stats.TotalCount++
+
+				if wrapper.IsDeleted {
+					stats.DeletedCount++
+				} else {
+					stats.ActiveCount++
+				}
+
+				if !wrapper.IsSynced {
+					stats.UnsyncedCount++
+				} else {
+					stats.SyncedCount++
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 获取数据库大小
+	lsm, vlog, _ := b.GetDBSize()
+	stats.LSMSize = lsm
+	stats.VLogSize = vlog
+	stats.TotalSize = lsm + vlog
+
+	return stats, nil
+}
+
+// DBStatistics 数据库统计信息
+type DBStatistics struct {
+	TotalCount    int   `json:"total_count"`    // 总数据量
+	ActiveCount   int   `json:"active_count"`   // 活跃数据（未删除）
+	DeletedCount  int   `json:"deleted_count"`  // 已删除数据
+	SyncedCount   int   `json:"synced_count"`   // 已同步数据
+	UnsyncedCount int   `json:"unsynced_count"` // 未同步数据
+	LSMSize       int64 `json:"lsm_size"`       // LSM 大小（字节）
+	VLogSize      int64 `json:"vlog_size"`      // VLog 大小（字节）
+	TotalSize     int64 `json:"total_size"`     // 总大小（字节）
+}
+
+// String 格式化输出统计信息
+func (s *DBStatistics) String() string {
+	return fmt.Sprintf(
+		"总数: %d, 活跃: %d, 已删除: %d, 已同步: %d, 未同步: %d, LSM: %dMB, VLog: %dMB, 总大小: %dMB",
+		s.TotalCount,
+		s.ActiveCount,
+		s.DeletedCount,
+		s.SyncedCount,
+		s.UnsyncedCount,
+		s.LSMSize/(1024*1024),
+		s.VLogSize/(1024*1024),
+		s.TotalSize/(1024*1024),
+	)
 }
