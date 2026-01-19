@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -950,6 +951,12 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 		case OpInsert:
 			if wrapper.Item != nil {
 				err = syncAction.Insert(wrapper.Item)
+				if err != nil {
+					if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint failed") {
+						logx.Infof("数据已存在，尝试更新操作 [%s]", wrapper.Key)
+						err = nil
+					}
+				}
 				if err == nil {
 					p.updateSyncedItem(wrapper)
 				}
@@ -965,7 +972,9 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 			if wrapper.Item != nil {
 				err = syncAction.Delete(wrapper.Item)
 				if err == nil {
-					p.delete(wrapper.Key, false)
+					if err1 := p.delete(wrapper.Key, false); err1 != nil {
+						logx.Errorf("物理删除失败 [%s]: %v", wrapper.Key, err1)
+					}
 				}
 			}
 		}
