@@ -3,7 +3,6 @@ package nosql
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -85,7 +84,7 @@ func diagnoseLockError(dbPath string) string {
 	}
 
 	// 尝试读取锁文件内容（BadgerDB 会写入进程信息）
-	content, err := ioutil.ReadFile(lockFile)
+	content, err := os.ReadFile(lockFile)
 	if err != nil {
 		return fmt.Sprintf("无法读取锁文件: %v", err)
 	}
