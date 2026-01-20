@@ -88,6 +88,7 @@ func (own *RouterInfo) initStats() {
 
 // 🆕 更新QPS统计（每秒执行）
 func (own *RouterInfo) updateQPSStats() {
+	own.initStats()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -133,6 +134,7 @@ func (own *RouterInfo) recordRequestStart() func() {
 
 // 🆕 记录请求结束
 func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
+	own.initStats()
 	duration := time.Since(startTime)
 
 	own.stats.mu.Lock()
@@ -157,6 +159,7 @@ func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
 
 // 🆕 记录缓存命中
 func (own *RouterInfo) recordCacheHit() {
+	own.initStats()
 	own.stats.mu.Lock()
 	own.stats.cacheHits++
 	own.stats.mu.Unlock()
@@ -164,6 +167,7 @@ func (own *RouterInfo) recordCacheHit() {
 
 // 🆕 记录缓存未命中
 func (own *RouterInfo) recordCacheMiss() {
+	own.initStats()
 	own.stats.mu.Lock()
 	own.stats.cacheMisses++
 	own.stats.mu.Unlock()
@@ -171,6 +175,7 @@ func (own *RouterInfo) recordCacheMiss() {
 
 // 🆕 更新缓存大小
 func (own *RouterInfo) updateCacheSize() {
+	own.initStats()
 	count := int64(0)
 	own.rCache.Range(func(key, value interface{}) bool {
 		count++
@@ -184,6 +189,7 @@ func (own *RouterInfo) updateCacheSize() {
 
 // 🆕 每秒更新统计（合并 QPS 和 WebSocket MPS）
 func (own *RouterInfo) updateStatsPerSecond() {
+	own.initStats()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -225,6 +231,7 @@ func (own *RouterInfo) updateStatsPerSecond() {
 
 // 🆕 更新WebSocket实时统计
 func (own *RouterInfo) updateWebSocketCurrentStats() {
+	own.initStats()
 	own.websocketlock.RLock()
 	defer own.websocketlock.RUnlock()
 
@@ -249,6 +256,7 @@ func (own *RouterInfo) updateWebSocketCurrentStats() {
 
 // 🆕 记录 WebSocket 连接建立
 func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
@@ -262,6 +270,7 @@ func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
 
 // 🆕 记录 WebSocket 断开连接
 func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
@@ -273,6 +282,7 @@ func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
 
 // 🆕 记录 WebSocket 消息发送
 func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
@@ -287,6 +297,7 @@ func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
 
 // 🆕 记录 WebSocket 广播
 func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
@@ -297,6 +308,7 @@ func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
 
 // 🆕 记录 WebSocket 错误
 func (own *RouterInfo) recordWebSocketError() {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
@@ -305,6 +317,7 @@ func (own *RouterInfo) recordWebSocketError() {
 
 // 🆕 记录清理的死连接
 func (own *RouterInfo) recordDeadConnectionsCleaned(count int) {
+	own.initStats()
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
