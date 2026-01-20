@@ -400,6 +400,11 @@ func (own *ModelList[T]) Contains(item interface{}) (bool, uint) {
 	} else {
 		id = 0
 	}
+	if id > 0 {
+		if model, ok := item.(types.IModel); ok {
+			model.SetID(id)
+		}
+	}
 	return resBool, id
 }
 

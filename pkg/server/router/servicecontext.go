@@ -38,6 +38,91 @@ func (own *ServiceContext) GetServerOption() *types.ServerOption {
 func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
 	own.serverOption = so
 }
+func (own *ServiceContext) getStatsManager() *StatsManager {
+	return NewStatsManager(own.Service.Name, own.Router.GetRouters())
+}
+
+// 🆕 GetAllRouterStats 获取所有路由统计（支持过滤和排序）
+func (own *ServiceContext) GetAllRouterStats(
+	filterTypes []types.ApiType,
+	sortBy SortField,
+	order SortOrder,
+) *AggregatedStats {
+	manager := own.getStatsManager()
+	return manager.GetAllStats(filterTypes, sortBy, order)
+}
+
+// 🆕 GetPublicRouterStats 获取公共路由统计（排序）
+func (own *ServiceContext) GetPublicRouterStats(
+	sortBy SortField,
+	order SortOrder,
+) *AggregatedStats {
+	return own.GetAllRouterStats(
+		[]types.ApiType{types.PublicType},
+		sortBy,
+		order,
+	)
+}
+
+// 🆕 GetPrivateRouterStats 获取私有路由统计（排序）
+func (own *ServiceContext) GetPrivateRouterStats(
+	sortBy SortField,
+	order SortOrder,
+) *AggregatedStats {
+	return own.GetAllRouterStats(
+		[]types.ApiType{types.PrivateType},
+		sortBy,
+		order,
+	)
+}
+
+// 🆕 GetTopRouters 获取排名前N的路由
+func (own *ServiceContext) GetTopRouters(
+	n int,
+	filterTypes []types.ApiType,
+	sortBy SortField,
+) []*types.RouterStatsSnapshot {
+	manager := own.getStatsManager()
+	return manager.GetTopN(n, filterTypes, sortBy)
+}
+
+// 🆕 PrintRouterStats 打印路由统计
+func (own *ServiceContext) PrintRouterStats(
+	filterTypes []types.ApiType,
+	sortBy SortField,
+) {
+	manager := own.getStatsManager()
+	summary := manager.GetSummary(filterTypes)
+	logx.Info(summary)
+
+	// 打印 Top 10
+	manager.PrintTopStats(10, filterTypes, sortBy)
+}
+
+// 🆕 GetStatsJSON 获取JSON格式统计
+func (own *ServiceContext) GetStatsJSON(
+	filterTypes []types.ApiType,
+	sortBy SortField,
+	order SortOrder,
+) string {
+	manager := own.getStatsManager()
+	return manager.GetStatsJSON(filterTypes, sortBy, order)
+}
+
+// 获取响应最慢的10个路由
+func (own *ServiceContext) GetSlowestRoutersJSON(
+	sortBy SortField,
+) string {
+	manager := own.getStatsManager()
+	filterTypes := []types.ApiType{types.PrivateType, types.PublicType}
+	topRouters := manager.GetTopN(10, filterTypes, sortBy)
+	data, err := json.MarshalIndent(topRouters, "", "  ")
+	if err != nil {
+		logx.Error("Failed to marshal slowest routers JSON:", err)
+		return ""
+	}
+	return string(data)
+}
 
 const DEFAULTPORT = 8080
 const DEFAULTSOCKETPORT = 0

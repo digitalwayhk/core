@@ -61,7 +61,11 @@ type RouterInfo struct {
 	websocketlock sync.RWMutex
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
-	channelPool         *ChannelPool                                                `json:"-"`
+	channelPool         *ChannelPool
+
+	// 🆕 性能统计字段
+	stats     *RouterStats `json:"-"`
+	statsLock sync.RWMutex
 }
 
 func (own *RouterInfo) New() IRouter {
@@ -161,7 +165,12 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 	return own.ExecDo(api, req)
 }
 
+// 🔧 修改 ExecDo 方法，添加统计
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
+	// 🆕 记录请求开始
+	recordEnd := own.recordRequestStart()
+	startTime := time.Now()
+
 	defer func() {
 		if config.INITSERVER {
 			return
@@ -171,8 +180,15 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 			// 获取调用栈字符串并打印
 			stack := debug.Stack()
 			fmt.Printf("\nStack trace:\n%s\n", stack)
+
+			// 🆕 记录异常
+			own.recordRequestEnd(startTime, fmt.Errorf("%v", err))
+		} else {
+			// 🆕 正常结束
+			recordEnd()
 		}
 	}()
+
 	err := api.Validation(req)
 	if err != nil {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
@@ -180,13 +196,21 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		logx.Error(err)
 		return req.NewResponse(nil, err)
 	}
+
 	if own.useCache {
 		if cache := own.getCache(api); cache != nil {
+			// 🆕 记录缓存命中
+			own.recordCacheHit()
+
 			resp := req.NewResponse(cache.data, nil)
 			go own.responseNotify(api, req.GetTraceId(), resp)
 			return resp
+		} else {
+			// 🆕 记录缓存未命中
+			own.recordCacheMiss()
 		}
 	}
+
 	go own.requestNotify(api, req.GetTraceId())
 	data, err := api.Do(req)
 	if err != nil {
@@ -196,8 +220,11 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	} else {
 		if own.useCache && data != nil {
 			own.setCache(api, data)
+			// 🆕 更新缓存大小
+			go own.updateCacheSize()
 		}
 	}
+
 	resp := req.NewResponse(data, err)
 	if err != nil {
 		go own.errorNotify(api, req.GetTraceId(), resp)
@@ -365,10 +392,6 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 		}
 
 		hash = getApiHash(router)
-		// if hash == 0 {
-		// 	logx.Errorf("WebSocket注册失败: hash为0")
-		// 	return
-		// }
 
 		// 🔧 安全地注册路由
 		if _, ok := own.rArgs[hash]; !ok {
@@ -381,6 +404,8 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 			needRegister = true
 		}
 		own.rWebSocketClient[hash][client] = req
+		// 🆕 记录连接建立
+		own.recordWebSocketConnect(hash)
 	}()
 
 	// 🔧 在锁外调用外部方法
@@ -430,6 +455,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 		// 🔧 获取请求对象和API
 		if clients, ok := own.rWebSocketClient[hash]; ok {
 			req = clients[client]
+
 			delete(clients, client)
 
 			// 🔧 如果没有客户端了，准备清理资源
@@ -447,6 +473,8 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 		if len(own.rArgs) == 0 {
 			own.webSocketHandler = false
 		}
+
+		own.recordWebSocketDisconnect(hash)
 	}()
 
 	// 🔧 在锁外调用外部接口
@@ -610,10 +638,13 @@ type clientToNotify struct {
 	data interface{}
 }
 
-// 🔧 新增：批量发送消息
+// 🔧 修改 sendToClients，添加消息统计
 func (own *RouterInfo) sendToClients(clientsToNotify []clientToNotify) {
-	// 🔧 分批发送，避免过多的并发
 	const batchSize = 100
+
+	// 🆕 记录广播
+	own.recordWebSocketBroadcast(len(clientsToNotify))
+
 	for i := 0; i < len(clientsToNotify); i += batchSize {
 		end := i + batchSize
 		if end > len(clientsToNotify) {
@@ -623,24 +654,35 @@ func (own *RouterInfo) sendToClients(clientsToNotify []clientToNotify) {
 		batch := clientsToNotify[i:end]
 		go func(clients []clientToNotify) {
 			for _, client := range clients {
-				// 🔧 每个发送都有独立的错误恢复
 				func() {
 					defer func() {
 						if err := recover(); err != nil {
 							logx.Error("WebSocket发送失败:", err)
+							// 🆕 记录错误
+							own.recordWebSocketError()
 						}
 					}()
 
-					// 🔧 添加发送超时
 					done := make(chan bool, 1)
 					go func() {
 						defer func() {
 							if err := recover(); err != nil {
 								logx.Error("WebSocket Send panic:", err)
+								own.recordWebSocketError()
 							}
 							done <- true
 						}()
+
+						// 🆕 计算消息大小
+						var messageSize int
+						if data, err := json.Marshal(client.data); err == nil {
+							messageSize = len(data)
+						}
+
 						client.ws.Send(client.hash, own.Path, client.data)
+
+						// 🆕 记录成功发送的消息
+						own.recordWebSocketMessage(messageSize)
 					}()
 
 					select {
@@ -648,17 +690,18 @@ func (own *RouterInfo) sendToClients(clientsToNotify []clientToNotify) {
 						// 发送成功
 					case <-time.After(5 * time.Second):
 						logx.Errorf("WebSocket发送超时")
+						own.recordWebSocketError()
 					}
 				}()
 			}
 		}(batch)
 
-		// 🔧 批次间稍微延迟，避免瞬间压力
 		if i+batchSize < len(clientsToNotify) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
+
 func (own *RouterInfo) NoticeWebSocketClient(router IRouter, message interface{}) {
 	own.webSocketHandler = false //关闭websocket代理处理
 
@@ -698,7 +741,7 @@ func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
 	}
 }
 
-// 🔧 新增：WebSocket连接健康检查
+// 🔧 修改 CleanupDeadConnections，添加统计
 func (own *RouterInfo) CleanupDeadConnections() {
 	own.websocketlock.Lock()
 	defer own.websocketlock.Unlock()
@@ -708,6 +751,8 @@ func (own *RouterInfo) CleanupDeadConnections() {
 	}
 
 	var hashesToClean []uint64
+	deadCount := 0
+
 	for hash, clients := range own.rWebSocketClient {
 		var deadClients []IWebSocket
 
@@ -717,18 +762,17 @@ func (own *RouterInfo) CleanupDeadConnections() {
 			}
 		}
 
-		// 清理死连接
+		deadCount += len(deadClients)
+
 		for _, ws := range deadClients {
 			delete(clients, ws)
 		}
 
-		// 如果没有活跃连接了，标记hash待清理
 		if len(clients) == 0 {
 			hashesToClean = append(hashesToClean, hash)
 		}
 	}
 
-	// 清理空的hash
 	for _, hash := range hashesToClean {
 		delete(own.rWebSocketClient, hash)
 		delete(own.rArgs, hash)
@@ -738,7 +782,11 @@ func (own *RouterInfo) CleanupDeadConnections() {
 		own.webSocketHandler = false
 	}
 
-	logx.Infof("清理了 %d 个空的WebSocket hash", len(hashesToClean))
+	// 🆕 记录清理的死连接数
+	if deadCount > 0 {
+		own.recordDeadConnectionsCleaned(deadCount)
+		logx.Infof("清理了 %d 个死连接，%d 个空hash", deadCount, len(hashesToClean))
+	}
 }
 
 // 🔧 新增：RouterInfo销毁时的清理

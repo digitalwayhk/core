@@ -971,6 +971,12 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 		case OpDelete:
 			if wrapper.Item != nil {
 				err = syncAction.Delete(wrapper.Item)
+				if err != nil {
+					if strings.Contains(err.Error(), "record not found") || strings.Contains(err.Error(), "no such file or directory") {
+						logx.Infof("数据不存在，尝试物理删除 [%s]", wrapper.Key)
+						err = nil
+					}
+				}
 				if err == nil {
 					if err1 := p.delete(wrapper.Key, false); err1 != nil {
 						logx.Errorf("物理删除失败 [%s]: %v", wrapper.Key, err1)

@@ -89,10 +89,18 @@ func deleteData(db *gorm.DB, data interface{}) error {
 		}
 		return nil
 	}
-	tx := db.Delete(data)
-	if tx.Error != nil {
-		logx.Errorf("delete data error: %v", tx.Error)
-		return tx.Error
+	if model, ok := data.(types.IModel); ok {
+		tx := db.Delete(data, "id = ?", model.GetID())
+		if tx.Error != nil {
+			logx.Errorf("delete data error: %v", tx.Error)
+			return tx.Error
+		}
+	} else {
+		tx := db.Delete(data)
+		if tx.Error != nil {
+			logx.Errorf("delete data error: %v", tx.Error)
+			return tx.Error
+		}
 	}
 	return nil
 }
