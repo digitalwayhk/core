@@ -584,8 +584,7 @@ func (own *Sqlite) GetRunDB() interface{} {
 }
 func (own *Sqlite) Rollback() error {
 	if own.tx != nil {
-		own.tx.Rollback()
-		err := own.tx.Error
+		err := own.tx.Rollback().Error
 		own.tx = nil
 		own.isTansaction = false
 		return err
