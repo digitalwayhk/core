@@ -45,7 +45,7 @@ type IListAdapter interface {
 	Save() error
 }
 type IDataAction interface {
-	Transaction()
+	Transaction() error
 	Load(item *SearchItem, result interface{}) error
 	Insert(data interface{}) error
 	Update(data interface{}) error
@@ -55,6 +55,7 @@ type IDataAction interface {
 	GetModelDB(model interface{}) (interface{}, error)
 	Commit() error
 	GetRunDB() interface{}
+	Rollback() error
 }
 type IDataAdapter interface {
 	SetSaveType(saveType SaveType)

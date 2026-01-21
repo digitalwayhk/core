@@ -476,8 +476,9 @@ func (own *Sqlite) Exec(sql string, data interface{}) error {
 	return own.db.Error
 }
 
-func (own *Sqlite) Transaction() {
+func (own *Sqlite) Transaction() error {
 	own.isTansaction = true
+	return nil
 }
 func (own *Sqlite) Insert(data interface{}) error {
 	err := own.init(data)
@@ -580,6 +581,16 @@ func (own *Sqlite) Commit() error {
 }
 func (own *Sqlite) GetRunDB() interface{} {
 	return own.db
+}
+func (own *Sqlite) Rollback() error {
+	if own.tx != nil {
+		own.tx.Rollback()
+		err := own.tx.Error
+		own.tx = nil
+		own.isTansaction = false
+		return err
+	}
+	return nil
 }
 
 // 在您的sqlite.go中添加跨库事务支持

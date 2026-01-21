@@ -363,8 +363,9 @@ func (own *Mysql) Exec(sql string, data interface{}) error {
 	return own.db.Error
 }
 
-func (own *Mysql) Transaction() {
+func (own *Mysql) Transaction() error {
 	own.isTransaction = true
+	return nil
 }
 
 func (own *Mysql) Insert(data interface{}) error {

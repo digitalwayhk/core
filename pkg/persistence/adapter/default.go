@@ -237,8 +237,9 @@ func (own *DefaultAdapter) Exec(sql string, data interface{}) error {
 func (own *DefaultAdapter) GetModelDB(model interface{}) (interface{}, error) {
 	return own.getdb(model)
 }
-func (own *DefaultAdapter) Transaction() {
+func (own *DefaultAdapter) Transaction() error {
 	own.isTansaction = true
+	return nil
 }
 
 func (own *DefaultAdapter) Insert(data interface{}) error {
@@ -325,7 +326,18 @@ func (own *DefaultAdapter) Commit() error {
 	}
 	return nil
 }
-
+func (own *DefaultAdapter) Rollback() error {
+	if own.isTansaction {
+		own.isTansaction = false
+		for _, db := range own.currentDB {
+			err := db.Rollback()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 func (own *DefaultAdapter) SetSaveType(saveType types.SaveType) {
 	own.saveType = saveType
 }

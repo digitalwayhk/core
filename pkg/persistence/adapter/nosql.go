@@ -29,8 +29,9 @@ func (own *NosqlAdapter) GetModelDB(model interface{}) (interface{}, error) {
 //	"!=": "$ne",
 //}
 
-func (own NosqlAdapter) Transaction() {
+func (own NosqlAdapter) Transaction() error {
 	log.Println("implement Mongo Transaction")
+	return nil
 }
 
 func (own NosqlAdapter) SetSaveType(saveType types.SaveType) {
@@ -122,6 +123,10 @@ func (own *NosqlAdapter) getNosqlDB(model interface{}) (types.IDataBase, error) 
 	return idb, nil
 }
 func (own *NosqlAdapter) GetRunDB() interface{} {
+	return nil
+}
+func (own *NosqlAdapter) Rollback() error {
+	own.isTransaction = false
 	return nil
 }
 
