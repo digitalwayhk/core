@@ -572,8 +572,7 @@ func (own *Sqlite) Delete(data interface{}) error {
 func (own *Sqlite) Commit() error {
 	own.isTansaction = false
 	if own.tx != nil {
-		own.tx.Commit()
-		err := own.tx.Error
+		err := own.tx.Commit().Error
 		own.tx = nil
 		return err
 	}
