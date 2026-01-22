@@ -1271,12 +1271,31 @@ func (p *PrefixedBadgerDB[T]) CountByPrefix(subPrefix string) (int, error) {
 
 	err := p.manager.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
+		opts.PrefetchValues = true // 🔧 需要读取值来判断是否删除
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
 		for it.Seek([]byte(fullPrefix)); it.ValidForPrefix([]byte(fullPrefix)); it.Next() {
-			count++
+			item := it.Item()
+
+			// 🆕 解析数据，检查是否已删除
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return err
+				}
+
+				// 只统计未删除的数据
+				if !wrapper.IsDeleted {
+					count++
+				}
+				return nil
+			})
+
+			if err != nil {
+				logx.Errorf("解析数据失败: %v", err)
+				continue
+			}
 		}
 		return nil
 	})

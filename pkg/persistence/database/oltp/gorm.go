@@ -52,6 +52,9 @@ func createInBatches(db *gorm.DB, data interface{}) error {
 	return nil
 }
 func createData(db *gorm.DB, data interface{}) error {
+	if db == nil {
+		return errors.New("database connection is nil")
+	}
 	if ist, ok := data.(types.IScopes); ok {
 		tx := db.Scopes(ist.ScopesHandler()).Create(data)
 		if tx.Error != nil {
@@ -67,6 +70,9 @@ func createData(db *gorm.DB, data interface{}) error {
 	return nil
 }
 func updateData(db *gorm.DB, data interface{}) error {
+	if db == nil {
+		return errors.New("database connection is nil")
+	}
 	if ist, ok := data.(types.IScopes); ok {
 		tx := db.Scopes(ist.ScopesHandler()).Updates(data)
 		if tx.Error != nil {
@@ -82,6 +88,9 @@ func updateData(db *gorm.DB, data interface{}) error {
 	return nil
 }
 func deleteData(db *gorm.DB, data interface{}) error {
+	if db == nil {
+		return errors.New("database connection is nil")
+	}
 	if ist, ok := data.(types.IScopes); ok {
 		tx := db.Scopes(ist.ScopesHandler()).Delete(data)
 		if tx.Error != nil {
