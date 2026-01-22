@@ -8,122 +8,332 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-// 🆕 RouterStats 路由统计信息（扩展 WebSocket 统计）
+// 🆕 RouterStats 路由统计信息
 type RouterStats struct {
-	// 实时统计
-	currentSecond   int64 // 当前秒数（Unix时间戳）
-	currentReqCount int64 // 当前秒的请求数
-	maxReqPerSecond int64 // 每秒最大请求数
-	totalRequests   int64 // 总请求数
-	totalErrors     int64 // 总错误数
+	Path        string
+	ServiceName string
+	StartTime   time.Time
+	closeChan   chan struct{}
 
-	// 响应时间统计
-	minResponseTime   time.Duration // 最小响应时间
-	maxResponseTime   time.Duration // 最大响应时间
-	totalResponseTime time.Duration // 总响应时间（用于计算平均值）
+	// QPS 统计
+	Request *RequestStats
 
 	// 缓存统计
-	cacheHits   int64 // 缓存命中次数
-	cacheMisses int64 // 缓存未命中次数
-	cacheSize   int64 // 缓存项数量
+	Cache *CacheStats
 
-	// 每秒请求数历史（保留最近60秒）
-	qpsHistory      []int64 // QPS历史记录
-	qpsHistoryIndex int     // 当前索引位置
-
-	// 🆕 WebSocket 统计
-	wsCurrentConnections   int64 // 当前WebSocket连接数
-	wsMaxConnections       int64 // 历史最大连接数
-	wsTotalConnections     int64 // 总连接数（累计）
-	wsTotalDisconnections  int64 // 总断开数（累计）
-	wsTotalMessages        int64 // 总消息数（发送）
-	wsCurrentMessages      int64 // 当前秒的消息数
-	wsMaxMessagesPerSecond int64 // 每秒最大消息数
-	wsTotalBroadcasts      int64 // 总广播次数
-	wsTotalErrors          int64 // WebSocket错误数
-	wsMessageSizeTotal     int64 // 总消息大小（字节）
-	wsAvgMessageSize       int64 // 平均消息大小
-
-	// 🆕 WebSocket 连接质量统计
-	wsActiveHashes            int64           // 活跃的hash数量
-	wsDeadConnectionsCleaned  int64           // 清理的死连接数
-	wsConnectionDurations     []time.Duration // 连接持续时间样本（最近100个）
-	wsConnectionDurationIndex int             // 连接持续时间索引
-
-	// 🆕 WebSocket 消息历史（保留最近60秒）
-	wsMpsHistory      []int64 // MPS (Messages Per Second) 历史
-	wsMpsHistoryIndex int     // 当前索引位置
+	// WebSocket 统计
+	WebSocket *WebSocketStats
 
 	mu sync.RWMutex
-
-	// 开始统计时间
-	startTime time.Time
 }
 
-// 🆕 初始化统计（扩展 WebSocket 支持）
+// 🆕 RequestStats QPS统计
+type RequestStats struct {
+	CurrentSecond   int64            // 当前秒数（Unix时间戳）
+	CurrentReqCount int64            // 当前秒的请求数
+	MaxReqPerSecond int64            // 每秒最大请求数
+	TotalRequests   int64            // 总请求数
+	TotalErrors     int64            // 总错误数
+	History         []RequestHistory // 历史记录（最近60秒）
+	HistoryIndex    int              // 当前索引位置
+
+	// 响应时间统计
+	MinResponseTime   time.Duration // 最小响应时间
+	MaxResponseTime   time.Duration // 最大响应时间
+	TotalResponseTime time.Duration // 总响应时间
+}
+
+type RequestHistory struct {
+	Timestamp time.Time
+	Count     int64
+	AvgTime   time.Duration
+}
+
+// 🆕 CacheStats 缓存统计
+type CacheStats struct {
+	Hits   int64 // 缓存命中次数
+	Misses int64 // 缓存未命中次数
+	Size   int64 // 缓存项数量
+}
+
+// 🆕 WebSocketStats WebSocket统计
+type WebSocketStats struct {
+	// 连接统计
+	CurrentConnections  int64 `json:"current_connections"`
+	MaxConnections      int64 `json:"max_connections"`
+	TotalConnections    int64 `json:"total_connections"`
+	TotalDisconnections int64 `json:"total_disconnections"`
+	TotalRegistered     int64 `json:"total_registered"` // 总注册数（包括死连接）
+	// 消息统计
+	TotalMessages   int64 `json:"total_messages"`
+	CurrentMPS      int64 `json:"current_mps"` // 当前每秒消息数
+	MaxMPS          int64 `json:"max_mps"`
+	TotalBroadcasts int64 `json:"total_broadcasts"`
+
+	// 消息大小统计
+	TotalMessageSize int64 `json:"total_message_size_bytes"`
+	AvgMessageSize   int64 `json:"avg_message_size_bytes"`
+
+	// 错误统计
+	TotalErrors int64 `json:"total_errors"`
+
+	// 清理统计
+	DeadConnectionsCleaned int64 `json:"dead_connections_cleaned"`
+
+	// Hash统计
+	ConnectionsByHash map[uint64]int `json:"connections_by_hash"`
+
+	// MPS历史
+	MPSHistory      []int64 `json:"mps_history"`
+	MPSHistoryIndex int     `json:"-"`
+
+	mu sync.RWMutex
+}
+
+// 🆕 初始化统计
 func (own *RouterInfo) initStats() {
-	if own.stats != nil {
-		return
-	}
 	own.statsLock.Lock()
 	defer own.statsLock.Unlock()
+
+	// 🆕 防止重复初始化
 	if own.stats != nil {
 		return
 	}
+
 	own.stats = &RouterStats{
-		currentSecond:         time.Now().Unix(),
-		minResponseTime:       time.Hour * 24,             // 初始设置为一个大值
-		qpsHistory:            make([]int64, 60),          // 保留60秒历史
-		wsMpsHistory:          make([]int64, 60),          // 保留60秒消息历史
-		wsConnectionDurations: make([]time.Duration, 100), // 保留100个样本
-		startTime:             time.Now(),
+		Path:        own.Path,
+		ServiceName: own.ServiceName,
+		StartTime:   time.Now(),
+		closeChan:   make(chan struct{}),
+
+		Request: &RequestStats{
+			History:         make([]RequestHistory, 0, 60),
+			MinResponseTime: time.Hour * 24, // 初始化为一个大值
+		},
+
+		Cache: &CacheStats{},
+
+		WebSocket: &WebSocketStats{
+			ConnectionsByHash: make(map[uint64]int),
+			MPSHistory:        make([]int64, 60),
+		},
 	}
 
-	// 启动QPS和WebSocket统计协程
-	go own.updateStatsPerSecond()
-	// 启动QPS统计协程
-	go own.updateQPSStats()
+	// 🔧 确保分片已初始化
+	if own.rWebSocketShards[0] == nil {
+		own.initShards()
+	}
 
+	// 🔧 启动统计协程
+	go own.updateStatsPerSecond()
+
+	logx.Infof("📊 统计系统已启动: %s", own.Path)
 }
 
-// 🆕 更新QPS统计（每秒执行）
-func (own *RouterInfo) updateQPSStats() {
-	own.initStats()
-	ticker := time.NewTicker(time.Second)
+// 🆕 关闭统计系统
+func (own *RouterInfo) closeStats() {
+	own.statsLock.Lock()
+	defer own.statsLock.Unlock()
+
+	if own.stats == nil {
+		return
+	}
+
+	// 🔧 安全地关闭通道
+	select {
+	case <-own.stats.closeChan:
+		// 已经关闭
+	default:
+		close(own.stats.closeChan)
+	}
+
+	logx.Infof("📊 统计系统已关闭: %s", own.Path)
+}
+
+// 🆕 获取关闭通道（防止 panic）
+func (own *RouterInfo) getStatsCloseChan() chan struct{} {
+	own.statsLock.RLock()
+	defer own.statsLock.RUnlock()
+
+	if own.stats == nil {
+		// 返回一个永远阻塞的通道
+		ch := make(chan struct{})
+		return ch
+	}
+	return own.stats.closeChan
+}
+
+// 🆕 每秒更新统计
+func (own *RouterInfo) updateStatsPerSecond() {
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		own.stats.mu.Lock()
+	for {
+		select {
+		case <-ticker.C:
+			func() {
+				defer func() {
+					if err := recover(); err != nil {
+						logx.Errorf("更新统计时发生错误: %v", err)
+					}
+				}()
 
-		currentSec := time.Now().Unix()
-		if currentSec != own.stats.currentSecond {
-			// 保存当前秒的请求数到历史
-			own.stats.qpsHistory[own.stats.qpsHistoryIndex] = own.stats.currentReqCount
-			own.stats.qpsHistoryIndex = (own.stats.qpsHistoryIndex + 1) % 60
+				own.updateRequestStats()
+				own.updateCacheStats()
+				own.updateWebSocketStats()
+			}()
 
-			// 更新最大QPS
-			if own.stats.currentReqCount > own.stats.maxReqPerSecond {
-				own.stats.maxReqPerSecond = own.stats.currentReqCount
-			}
-
-			// 重置当前秒计数
-			own.stats.currentSecond = currentSec
-			own.stats.currentReqCount = 0
+		case <-own.getStatsCloseChan():
+			logx.Infof("统计协程退出: %s", own.Path)
+			return
 		}
-
-		own.stats.mu.Unlock()
 	}
 }
+
+// 🔧 更新请求统计
+func (own *RouterInfo) updateRequestStats() {
+	own.statsLock.RLock()
+	if own.stats == nil || own.stats.Request == nil {
+		own.statsLock.RUnlock()
+		return
+	}
+	own.statsLock.RUnlock()
+
+	own.stats.mu.Lock()
+	defer own.stats.mu.Unlock()
+
+	currentSec := time.Now().Unix()
+	if currentSec != own.stats.Request.CurrentSecond {
+		// 保存当前秒的统计到历史
+		if own.stats.Request.CurrentReqCount > 0 {
+			avgTime := time.Duration(0)
+			if own.stats.Request.TotalRequests > 0 {
+				avgTime = own.stats.Request.TotalResponseTime / time.Duration(own.stats.Request.TotalRequests)
+			}
+
+			history := RequestHistory{
+				Timestamp: time.Unix(own.stats.Request.CurrentSecond, 0),
+				Count:     own.stats.Request.CurrentReqCount,
+				AvgTime:   avgTime,
+			}
+
+			if len(own.stats.Request.History) < 60 {
+				own.stats.Request.History = append(own.stats.Request.History, history)
+			} else {
+				own.stats.Request.History[own.stats.Request.HistoryIndex] = history
+			}
+			own.stats.Request.HistoryIndex = (own.stats.Request.HistoryIndex + 1) % 60
+
+			// 更新最大QPS
+			if own.stats.Request.CurrentReqCount > own.stats.Request.MaxReqPerSecond {
+				own.stats.Request.MaxReqPerSecond = own.stats.Request.CurrentReqCount
+			}
+		}
+
+		// 重置当前秒计数
+		own.stats.Request.CurrentSecond = currentSec
+		own.stats.Request.CurrentReqCount = 0
+	}
+}
+
+// 🔧 更新缓存统计
+func (own *RouterInfo) updateCacheStats() {
+	own.statsLock.RLock()
+	if own.stats == nil || own.stats.Cache == nil {
+		own.statsLock.RUnlock()
+		return
+	}
+	own.statsLock.RUnlock()
+
+	count := int64(0)
+	own.rCache.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+
+	own.stats.mu.Lock()
+	own.stats.Cache.Size = count
+	own.stats.mu.Unlock()
+}
+
+// 🔧 更新WebSocket统计
+func (own *RouterInfo) updateWebSocketStats() {
+	own.statsLock.RLock()
+	if own.stats == nil || own.stats.WebSocket == nil {
+		own.statsLock.RUnlock()
+		return
+	}
+	own.statsLock.RUnlock()
+
+	// 🆕 防御性检查分片
+	if own.rWebSocketShards[0] == nil {
+		return
+	}
+
+	var totalClients int64
+	var activeClients int64
+
+	// 🔧 安全地统计所有分片
+	for i := 0; i < shardCount; i++ {
+		shard := own.rWebSocketShards[i]
+		if shard == nil {
+			continue
+		}
+
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					logx.Errorf("统计分片 %d 时发生错误: %v", i, err)
+				}
+			}()
+
+			shard.mu.RLock()
+			defer shard.mu.RUnlock()
+
+			for ws := range shard.clients {
+				totalClients++
+				if ws != nil && !ws.IsClosed() {
+					activeClients++
+				}
+			}
+		}()
+	}
+
+	// 🔧 更新统计
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.CurrentConnections = activeClients
+	own.stats.WebSocket.TotalRegistered = totalClients
+
+	// 更新最大连接数
+	if int64(activeClients) > own.stats.WebSocket.MaxConnections {
+		own.stats.WebSocket.MaxConnections = int64(activeClients)
+	}
+
+	// 更新 MPS 历史
+	if own.stats.WebSocket.CurrentMPS > own.stats.WebSocket.MaxMPS {
+		own.stats.WebSocket.MaxMPS = own.stats.WebSocket.CurrentMPS
+	}
+
+	own.stats.WebSocket.MPSHistory[own.stats.WebSocket.MPSHistoryIndex] = own.stats.WebSocket.CurrentMPS
+	own.stats.WebSocket.MPSHistoryIndex = (own.stats.WebSocket.MPSHistoryIndex + 1) % 60
+	own.stats.WebSocket.CurrentMPS = 0 // 重置当前秒的消息数
+}
+
+// ==================== 记录方法 ====================
 
 // 🆕 记录请求开始
 func (own *RouterInfo) recordRequestStart() func() {
-	own.initStats()
+	if own.stats == nil {
+		own.initStats()
+	}
 
 	startTime := time.Now()
 
 	own.stats.mu.Lock()
-	own.stats.currentReqCount++
-	own.stats.totalRequests++
+	own.stats.Request.CurrentReqCount++
+	own.stats.Request.TotalRequests++
 	own.stats.mu.Unlock()
 
 	// 返回记录结束的函数
@@ -134,202 +344,160 @@ func (own *RouterInfo) recordRequestStart() func() {
 
 // 🆕 记录请求结束
 func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
-	own.initStats()
+	if own.stats == nil {
+		return
+	}
+
 	duration := time.Since(startTime)
 
 	own.stats.mu.Lock()
 	defer own.stats.mu.Unlock()
 
 	// 更新响应时间统计
-	own.stats.totalResponseTime += duration
+	own.stats.Request.TotalResponseTime += duration
 
-	if duration < own.stats.minResponseTime {
-		own.stats.minResponseTime = duration
+	if duration < own.stats.Request.MinResponseTime {
+		own.stats.Request.MinResponseTime = duration
 	}
 
-	if duration > own.stats.maxResponseTime {
-		own.stats.maxResponseTime = duration
+	if duration > own.stats.Request.MaxResponseTime {
+		own.stats.Request.MaxResponseTime = duration
 	}
 
 	// 错误统计
 	if err != nil {
-		own.stats.totalErrors++
+		own.stats.Request.TotalErrors++
 	}
 }
 
 // 🆕 记录缓存命中
 func (own *RouterInfo) recordCacheHit() {
-	own.initStats()
+	if own.stats == nil {
+		own.initStats()
+	}
+
 	own.stats.mu.Lock()
-	own.stats.cacheHits++
+	own.stats.Cache.Hits++
 	own.stats.mu.Unlock()
 }
 
 // 🆕 记录缓存未命中
 func (own *RouterInfo) recordCacheMiss() {
-	own.initStats()
-	own.stats.mu.Lock()
-	own.stats.cacheMisses++
-	own.stats.mu.Unlock()
-}
-
-// 🆕 更新缓存大小
-func (own *RouterInfo) updateCacheSize() {
-	own.initStats()
-	count := int64(0)
-	own.rCache.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
+	if own.stats == nil {
+		own.initStats()
+	}
 
 	own.stats.mu.Lock()
-	own.stats.cacheSize = count
+	own.stats.Cache.Misses++
 	own.stats.mu.Unlock()
-}
-
-// 🆕 每秒更新统计（合并 QPS 和 WebSocket MPS）
-func (own *RouterInfo) updateStatsPerSecond() {
-	own.initStats()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		own.stats.mu.Lock()
-
-		currentSec := time.Now().Unix()
-		if currentSec != own.stats.currentSecond {
-			// 保存 QPS 历史
-			own.stats.qpsHistory[own.stats.qpsHistoryIndex] = own.stats.currentReqCount
-			own.stats.qpsHistoryIndex = (own.stats.qpsHistoryIndex + 1) % 60
-
-			// 更新最大QPS
-			if own.stats.currentReqCount > own.stats.maxReqPerSecond {
-				own.stats.maxReqPerSecond = own.stats.currentReqCount
-			}
-
-			// 保存 WebSocket MPS 历史
-			own.stats.wsMpsHistory[own.stats.wsMpsHistoryIndex] = own.stats.wsCurrentMessages
-			own.stats.wsMpsHistoryIndex = (own.stats.wsMpsHistoryIndex + 1) % 60
-
-			// 更新最大MPS
-			if own.stats.wsCurrentMessages > own.stats.wsMaxMessagesPerSecond {
-				own.stats.wsMaxMessagesPerSecond = own.stats.wsCurrentMessages
-			}
-
-			// 重置当前秒计数
-			own.stats.currentSecond = currentSec
-			own.stats.currentReqCount = 0
-			own.stats.wsCurrentMessages = 0
-		}
-
-		// 🆕 更新当前WebSocket连接数和活跃hash数
-		own.updateWebSocketCurrentStats()
-
-		own.stats.mu.Unlock()
-	}
-}
-
-// 🆕 更新WebSocket实时统计
-func (own *RouterInfo) updateWebSocketCurrentStats() {
-	own.initStats()
-	own.websocketlock.RLock()
-	defer own.websocketlock.RUnlock()
-
-	// 统计活跃连接数
-	activeCount := int64(0)
-	for _, clients := range own.rWebSocketClient {
-		for ws := range clients {
-			if !ws.IsClosed() {
-				activeCount++
-			}
-		}
-	}
-
-	own.stats.wsCurrentConnections = activeCount
-	own.stats.wsActiveHashes = int64(len(own.rArgs))
-
-	// 更新历史最大连接数
-	if activeCount > own.stats.wsMaxConnections {
-		own.stats.wsMaxConnections = activeCount
-	}
 }
 
 // 🆕 记录 WebSocket 连接建立
 func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
-
-	own.stats.wsTotalConnections++
-	own.stats.wsCurrentConnections++
-
-	if own.stats.wsCurrentConnections > own.stats.wsMaxConnections {
-		own.stats.wsMaxConnections = own.stats.wsCurrentConnections
+	if own.stats == nil {
+		own.initStats()
 	}
+
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.TotalConnections++
+	own.stats.WebSocket.CurrentConnections++
+
+	if int64(own.stats.WebSocket.CurrentConnections) > own.stats.WebSocket.MaxConnections {
+		own.stats.WebSocket.MaxConnections = int64(own.stats.WebSocket.CurrentConnections)
+	}
+
+	// 更新hash统计
+	own.stats.WebSocket.ConnectionsByHash[hash]++
 }
 
 // 🆕 记录 WebSocket 断开连接
 func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
+	if own.stats == nil {
+		return
+	}
 
-	own.stats.wsTotalDisconnections++
-	own.stats.wsCurrentConnections--
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.TotalDisconnections++
+	if own.stats.WebSocket.CurrentConnections > 0 {
+		own.stats.WebSocket.CurrentConnections--
+	}
+
+	// 更新hash统计
+	if count, ok := own.stats.WebSocket.ConnectionsByHash[hash]; ok && count > 0 {
+		own.stats.WebSocket.ConnectionsByHash[hash]--
+		if own.stats.WebSocket.ConnectionsByHash[hash] == 0 {
+			delete(own.stats.WebSocket.ConnectionsByHash, hash)
+		}
+	}
 }
-
-// 🆕 WebSocket 统计详情
 
 // 🆕 记录 WebSocket 消息发送
 func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
+	if own.stats == nil {
+		return
+	}
 
-	own.stats.wsTotalMessages++
-	own.stats.wsCurrentMessages++
-	own.stats.wsMessageSizeTotal += int64(messageSize)
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
 
-	if own.stats.wsTotalMessages > 0 {
-		own.stats.wsAvgMessageSize = own.stats.wsMessageSizeTotal / own.stats.wsTotalMessages
+	own.stats.WebSocket.TotalMessages++
+	own.stats.WebSocket.CurrentMPS++
+	own.stats.WebSocket.TotalMessageSize += int64(messageSize)
+
+	if own.stats.WebSocket.TotalMessages > 0 {
+		own.stats.WebSocket.AvgMessageSize = own.stats.WebSocket.TotalMessageSize / own.stats.WebSocket.TotalMessages
 	}
 }
 
 // 🆕 记录 WebSocket 广播
 func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
+	if own.stats == nil {
+		return
+	}
 
-	own.stats.wsTotalBroadcasts++
-	own.stats.wsTotalMessages += int64(recipientCount)
-	own.stats.wsCurrentMessages += int64(recipientCount)
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.TotalBroadcasts++
+	own.stats.WebSocket.TotalMessages += int64(recipientCount)
+	own.stats.WebSocket.CurrentMPS += int64(recipientCount)
 }
 
 // 🆕 记录 WebSocket 错误
 func (own *RouterInfo) recordWebSocketError() {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
+	if own.stats == nil {
+		return
+	}
 
-	own.stats.wsTotalErrors++
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.TotalErrors++
 }
 
 // 🆕 记录清理的死连接
 func (own *RouterInfo) recordDeadConnectionsCleaned(count int) {
-	own.initStats()
-	own.stats.mu.Lock()
-	defer own.stats.mu.Unlock()
+	if own.stats == nil {
+		return
+	}
 
-	own.stats.wsDeadConnectionsCleaned += int64(count)
+	own.stats.WebSocket.mu.Lock()
+	defer own.stats.WebSocket.mu.Unlock()
+
+	own.stats.WebSocket.DeadConnectionsCleaned += int64(count)
 }
 
-// 🆕 RouterStatsSnapshot 扩展 WebSocket 统计
+// ==================== 获取统计快照 ====================
+
+// 🆕 RouterStatsSnapshot 统计快照
 type RouterStatsSnapshot struct {
 	// 基本信息
 	ServiceName string `json:"service_name"`
 	Path        string `json:"path"`
-	Method      string `json:"method"`
 
 	// QPS统计
 	CurrentQPS int64   `json:"current_qps"`
@@ -352,48 +520,31 @@ type RouterStatsSnapshot struct {
 	CacheHitRate float64 `json:"cache_hit_rate"`
 	CacheSize    int64   `json:"cache_size"`
 
-	// QPS历史
-	QPSHistory []int64 `json:"qps_history"`
-
-	// 🆕 WebSocket 统计
-	WebSocket *WebSocketStats `json:"websocket,omitempty"`
+	// WebSocket 统计
+	WebSocket *WebSocketStatsSnapshot `json:"websocket,omitempty"`
 
 	// 运行时间
 	Uptime    string    `json:"uptime"`
 	StartTime time.Time `json:"start_time"`
 }
 
-type WebSocketStats struct {
-	// 连接统计
-	CurrentConnections  int64 `json:"current_connections"`  // 当前连接数
-	MaxConnections      int64 `json:"max_connections"`      // 历史最大连接数
-	TotalConnections    int64 `json:"total_connections"`    // 总连接数（累计）
-	TotalDisconnections int64 `json:"total_disconnections"` // 总断开数
-	ActiveHashes        int64 `json:"active_hashes"`        // 活跃的hash数
-
-	// 消息统计
-	TotalMessages   int64   `json:"total_messages"`   // 总消息数
-	CurrentMPS      int64   `json:"current_mps"`      // 当前每秒消息数
-	MaxMPS          int64   `json:"max_mps"`          // 最大每秒消息数
-	AvgMPS          float64 `json:"avg_mps"`          // 平均每秒消息数
-	TotalBroadcasts int64   `json:"total_broadcasts"` // 总广播次数
-
-	// 消息大小统计
-	TotalMessageSize int64 `json:"total_message_size_bytes"` // 总消息大小
-	AvgMessageSize   int64 `json:"avg_message_size_bytes"`   // 平均消息大小
-
-	// 错误统计
-	TotalErrors int64   `json:"total_errors"` // 总错误数
-	ErrorRate   float64 `json:"error_rate"`   // 错误率
-
-	// 清理统计
-	DeadConnectionsCleaned int64 `json:"dead_connections_cleaned"` // 清理的死连接数
-
-	// MPS历史
-	MPSHistory []int64 `json:"mps_history"` // 每秒消息数历史
+type WebSocketStatsSnapshot struct {
+	CurrentConnections     int64   `json:"current_connections"`
+	MaxConnections         int64   `json:"max_connections"`
+	TotalConnections       int64   `json:"total_connections"`
+	TotalDisconnections    int64   `json:"total_disconnections"`
+	TotalMessages          int64   `json:"total_messages"`
+	CurrentMPS             int64   `json:"current_mps"`
+	MaxMPS                 int64   `json:"max_mps"`
+	AvgMPS                 float64 `json:"avg_mps"`
+	TotalBroadcasts        int64   `json:"total_broadcasts"`
+	AvgMessageSize         int64   `json:"avg_message_size_bytes"`
+	TotalErrors            int64   `json:"total_errors"`
+	ErrorRate              float64 `json:"error_rate"`
+	DeadConnectionsCleaned int64   `json:"dead_connections_cleaned"`
 }
 
-// 🆕 GetStats 扩展 WebSocket 统计
+// 🆕 GetStats 获取统计快照
 func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
 	if own.stats == nil {
 		own.initStats()
@@ -403,98 +554,98 @@ func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
 	defer own.stats.mu.RUnlock()
 
 	snapshot := &RouterStatsSnapshot{
-		ServiceName:   own.ServiceName,
-		Path:          own.Path,
-		Method:        own.Method,
-		CurrentQPS:    own.stats.currentReqCount,
-		MaxQPS:        own.stats.maxReqPerSecond,
-		TotalRequests: own.stats.totalRequests,
-		TotalErrors:   own.stats.totalErrors,
-		CacheHits:     own.stats.cacheHits,
-		CacheMisses:   own.stats.cacheMisses,
-		CacheSize:     own.stats.cacheSize,
-		StartTime:     own.stats.startTime,
-		QPSHistory:    make([]int64, 60),
+		ServiceName: own.ServiceName,
+		Path:        own.Path,
+		StartTime:   own.stats.StartTime,
 	}
 
-	// 计算平均QPS
-	uptime := time.Since(own.stats.startTime).Seconds()
-	if uptime > 0 {
-		snapshot.AvgQPS = float64(own.stats.totalRequests) / uptime
-	}
+	// 请求统计
+	if own.stats.Request != nil {
+		snapshot.CurrentQPS = own.stats.Request.CurrentReqCount
+		snapshot.MaxQPS = own.stats.Request.MaxReqPerSecond
+		snapshot.TotalRequests = own.stats.Request.TotalRequests
+		snapshot.TotalErrors = own.stats.Request.TotalErrors
 
-	// 计算错误率
-	if snapshot.TotalRequests > 0 {
-		snapshot.ErrorRate = float64(snapshot.TotalErrors) / float64(snapshot.TotalRequests) * 100
-	}
-
-	// 计算缓存命中率
-	totalCacheAccess := snapshot.CacheHits + snapshot.CacheMisses
-	if totalCacheAccess > 0 {
-		snapshot.CacheHitRate = float64(snapshot.CacheHits) / float64(totalCacheAccess) * 100
-	}
-
-	// 响应时间统计
-	if own.stats.minResponseTime < time.Hour*24 {
-		snapshot.MinResponseTime = own.stats.minResponseTime.String()
-	} else {
-		snapshot.MinResponseTime = "N/A"
-	}
-
-	snapshot.MaxResponseTime = own.stats.maxResponseTime.String()
-
-	if own.stats.totalRequests > 0 {
-		avgDuration := own.stats.totalResponseTime / time.Duration(own.stats.totalRequests)
-		snapshot.AvgResponseTime = avgDuration.String()
-	} else {
-		snapshot.AvgResponseTime = "N/A"
-	}
-
-	// 复制QPS历史
-	copy(snapshot.QPSHistory, own.stats.qpsHistory)
-
-	// 🆕 WebSocket 统计
-	if own.stats.wsTotalConnections > 0 || own.stats.wsCurrentConnections > 0 {
-		wsStats := &WebSocketStats{
-			CurrentConnections:     own.stats.wsCurrentConnections,
-			MaxConnections:         own.stats.wsMaxConnections,
-			TotalConnections:       own.stats.wsTotalConnections,
-			TotalDisconnections:    own.stats.wsTotalDisconnections,
-			ActiveHashes:           own.stats.wsActiveHashes,
-			TotalMessages:          own.stats.wsTotalMessages,
-			CurrentMPS:             own.stats.wsCurrentMessages,
-			MaxMPS:                 own.stats.wsMaxMessagesPerSecond,
-			TotalBroadcasts:        own.stats.wsTotalBroadcasts,
-			TotalMessageSize:       own.stats.wsMessageSizeTotal,
-			AvgMessageSize:         own.stats.wsAvgMessageSize,
-			TotalErrors:            own.stats.wsTotalErrors,
-			DeadConnectionsCleaned: own.stats.wsDeadConnectionsCleaned,
-			MPSHistory:             make([]int64, 60),
-		}
-
-		// 计算平均MPS
+		// 计算平均QPS
+		uptime := time.Since(own.stats.StartTime).Seconds()
 		if uptime > 0 {
-			wsStats.AvgMPS = float64(own.stats.wsTotalMessages) / uptime
+			snapshot.AvgQPS = float64(own.stats.Request.TotalRequests) / uptime
 		}
 
 		// 计算错误率
-		if own.stats.wsTotalMessages > 0 {
-			wsStats.ErrorRate = float64(own.stats.wsTotalErrors) / float64(own.stats.wsTotalMessages) * 100
+		if snapshot.TotalRequests > 0 {
+			snapshot.ErrorRate = float64(snapshot.TotalErrors) / float64(snapshot.TotalRequests) * 100
 		}
 
-		// 复制MPS历史
-		copy(wsStats.MPSHistory, own.stats.wsMpsHistory)
+		// 响应时间统计
+		if own.stats.Request.MinResponseTime < time.Hour*24 {
+			snapshot.MinResponseTime = own.stats.Request.MinResponseTime.String()
+		} else {
+			snapshot.MinResponseTime = "N/A"
+		}
 
-		snapshot.WebSocket = wsStats
+		snapshot.MaxResponseTime = own.stats.Request.MaxResponseTime.String()
+
+		if own.stats.Request.TotalRequests > 0 {
+			avgDuration := own.stats.Request.TotalResponseTime / time.Duration(own.stats.Request.TotalRequests)
+			snapshot.AvgResponseTime = avgDuration.String()
+		} else {
+			snapshot.AvgResponseTime = "N/A"
+		}
+	}
+
+	// 缓存统计
+	if own.stats.Cache != nil {
+		snapshot.CacheHits = own.stats.Cache.Hits
+		snapshot.CacheMisses = own.stats.Cache.Misses
+		snapshot.CacheSize = own.stats.Cache.Size
+
+		totalCacheAccess := snapshot.CacheHits + snapshot.CacheMisses
+		if totalCacheAccess > 0 {
+			snapshot.CacheHitRate = float64(snapshot.CacheHits) / float64(totalCacheAccess) * 100
+		}
+	}
+
+	// WebSocket 统计
+	if own.stats.WebSocket != nil {
+		own.stats.WebSocket.mu.RLock()
+
+		wsSnapshot := &WebSocketStatsSnapshot{
+			CurrentConnections:     own.stats.WebSocket.CurrentConnections,
+			MaxConnections:         own.stats.WebSocket.MaxConnections,
+			TotalConnections:       own.stats.WebSocket.TotalConnections,
+			TotalDisconnections:    own.stats.WebSocket.TotalDisconnections,
+			TotalMessages:          own.stats.WebSocket.TotalMessages,
+			CurrentMPS:             own.stats.WebSocket.CurrentMPS,
+			MaxMPS:                 own.stats.WebSocket.MaxMPS,
+			TotalBroadcasts:        own.stats.WebSocket.TotalBroadcasts,
+			AvgMessageSize:         own.stats.WebSocket.AvgMessageSize,
+			TotalErrors:            own.stats.WebSocket.TotalErrors,
+			DeadConnectionsCleaned: own.stats.WebSocket.DeadConnectionsCleaned,
+		}
+
+		// 计算平均MPS
+		uptime := time.Since(own.stats.StartTime).Seconds()
+		if uptime > 0 {
+			wsSnapshot.AvgMPS = float64(own.stats.WebSocket.TotalMessages) / uptime
+		}
+
+		// 计算错误率
+		if own.stats.WebSocket.TotalMessages > 0 {
+			wsSnapshot.ErrorRate = float64(own.stats.WebSocket.TotalErrors) / float64(own.stats.WebSocket.TotalMessages) * 100
+		}
+
+		own.stats.WebSocket.mu.RUnlock()
+		snapshot.WebSocket = wsSnapshot
 	}
 
 	// 运行时长
-	snapshot.Uptime = time.Since(own.stats.startTime).Round(time.Second).String()
+	snapshot.Uptime = time.Since(own.stats.StartTime).Round(time.Second).String()
 
 	return snapshot
 }
 
-// 🆕 PrintStats 扩展 WebSocket 统计输出
+// 🆕 PrintStats 打印统计信息
 func (own *RouterInfo) PrintStats() {
 	snapshot := own.GetStats()
 
@@ -506,7 +657,6 @@ func (own *RouterInfo) PrintStats() {
 ║   当前连接:  %d
 ║   最大连接:  %d
 ║   总连接数:  %d
-║   活跃Hash:  %d
 ║   当前 MPS:  %d msg/s
 ║   最大 MPS:  %d msg/s
 ║   平均 MPS:  %.2f msg/s
@@ -519,7 +669,6 @@ func (own *RouterInfo) PrintStats() {
 			ws.CurrentConnections,
 			ws.MaxConnections,
 			ws.TotalConnections,
-			ws.ActiveHashes,
 			ws.CurrentMPS,
 			ws.MaxMPS,
 			ws.AvgMPS,

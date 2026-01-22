@@ -48,16 +48,23 @@ func (p *ChannelPool) Put(router IRouter) {
 
 // 🔧 在 RouterInfo 中使用 ChannelPool
 func (own *RouterInfo) initChannelPool() {
-	own.once.Do(func() {
-		own.channelPool = NewChannelPool(func() IRouter {
-			instance := utils.NewInterface(own.instance)
-			if instance == nil {
-				logx.Errorf("Failed to create new instance for %s", own.Path)
-				return nil
-			}
-			return instance.(IRouter)
-		}, 100) // 池大小为100
-	})
+	if own.channelPool != nil {
+		return
+	}
+	own.Lock()
+	defer own.Unlock()
+	if own.channelPool != nil {
+		return
+	}
+	own.channelPool = NewChannelPool(func() IRouter {
+		instance := utils.NewInterface(own.instance)
+		if instance == nil {
+			logx.Errorf("Failed to create new instance for %s", own.Path)
+			return nil
+		}
+		return instance.(IRouter)
+	}, 100) // 池大小为100
+
 }
 
 func (own *RouterInfo) getNew() IRouter {

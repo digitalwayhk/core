@@ -133,7 +133,7 @@ func (sm *StatsManager) GetAllStats(
 
 		// WebSocket 统计
 		if snapshot.WebSocket != nil {
-			stats.TotalWSConnections += snapshot.WebSocket.CurrentConnections
+			stats.TotalWSConnections += int64(snapshot.WebSocket.CurrentConnections)
 			stats.TotalWSMessages += snapshot.WebSocket.TotalMessages
 			stats.TotalWSErrors += snapshot.WebSocket.TotalErrors
 		}
