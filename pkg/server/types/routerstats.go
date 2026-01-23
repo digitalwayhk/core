@@ -8,6 +8,11 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+const (
+	// 🆕 统计开关（调试时可设为 false）
+	enableStats = false
+)
+
 // 🆕 RouterStats 路由统计信息
 type RouterStats struct {
 	Path        string
@@ -92,6 +97,9 @@ type WebSocketStats struct {
 
 // 🆕 初始化统计
 func (own *RouterInfo) initStats() {
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	own.statsLock.Lock()
 	defer own.statsLock.Unlock()
 
@@ -132,6 +140,9 @@ func (own *RouterInfo) initStats() {
 
 // 🆕 关闭统计系统
 func (own *RouterInfo) closeStats() {
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	own.statsLock.Lock()
 	defer own.statsLock.Unlock()
 
@@ -165,6 +176,9 @@ func (own *RouterInfo) getStatsCloseChan() chan struct{} {
 
 // 🆕 每秒更新统计
 func (own *RouterInfo) updateStatsPerSecond() {
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -325,10 +339,9 @@ func (own *RouterInfo) updateWebSocketStats() {
 
 // 🆕 记录请求开始
 func (own *RouterInfo) recordRequestStart() func() {
-	if own.stats == nil {
-		own.initStats()
+	if !enableStats || own.stats == nil {
+		return func() {}
 	}
-
 	startTime := time.Now()
 
 	own.stats.mu.Lock()
@@ -344,7 +357,7 @@ func (own *RouterInfo) recordRequestStart() func() {
 
 // 🆕 记录请求结束
 func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -372,10 +385,12 @@ func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
 
 // 🆕 记录缓存命中
 func (own *RouterInfo) recordCacheHit() {
-	if own.stats == nil {
-		own.initStats()
+	if !enableStats || own.stats == nil {
+		return
 	}
-
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	own.stats.mu.Lock()
 	own.stats.Cache.Hits++
 	own.stats.mu.Unlock()
@@ -383,10 +398,12 @@ func (own *RouterInfo) recordCacheHit() {
 
 // 🆕 记录缓存未命中
 func (own *RouterInfo) recordCacheMiss() {
-	if own.stats == nil {
-		own.initStats()
+	if !enableStats || own.stats == nil {
+		return
 	}
-
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	own.stats.mu.Lock()
 	own.stats.Cache.Misses++
 	own.stats.mu.Unlock()
@@ -394,10 +411,9 @@ func (own *RouterInfo) recordCacheMiss() {
 
 // 🆕 记录 WebSocket 连接建立
 func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
-	if own.stats == nil {
-		own.initStats()
+	if !enableStats || own.stats == nil {
+		return
 	}
-
 	own.stats.WebSocket.mu.Lock()
 	defer own.stats.WebSocket.mu.Unlock()
 
@@ -414,7 +430,7 @@ func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
 
 // 🆕 记录 WebSocket 断开连接
 func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -437,7 +453,7 @@ func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
 
 // 🆕 记录 WebSocket 消息发送
 func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -455,7 +471,7 @@ func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
 
 // 🆕 记录 WebSocket 广播
 func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -469,7 +485,7 @@ func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
 
 // 🆕 记录 WebSocket 错误
 func (own *RouterInfo) recordWebSocketError() {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -481,7 +497,7 @@ func (own *RouterInfo) recordWebSocketError() {
 
 // 🆕 记录清理的死连接
 func (own *RouterInfo) recordDeadConnectionsCleaned(count int) {
-	if own.stats == nil {
+	if !enableStats || own.stats == nil {
 		return
 	}
 
@@ -546,10 +562,9 @@ type WebSocketStatsSnapshot struct {
 
 // 🆕 GetStats 获取统计快照
 func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
-	if own.stats == nil {
-		own.initStats()
+	if own.stats == nil || !enableStats {
+		return nil
 	}
-
 	own.stats.mu.RLock()
 	defer own.stats.mu.RUnlock()
 
@@ -647,8 +662,10 @@ func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
 
 // 🆕 PrintStats 打印统计信息
 func (own *RouterInfo) PrintStats() {
+	if !enableStats {
+		return // 🔧 直接返回，不初始化
+	}
 	snapshot := own.GetStats()
-
 	wsInfo := ""
 	if snapshot.WebSocket != nil {
 		ws := snapshot.WebSocket
