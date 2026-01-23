@@ -1,12 +1,13 @@
 package nosql
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/json"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"

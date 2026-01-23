@@ -23,6 +23,7 @@ require (
 	github.com/gofiber/adaptor/v2 v2.1.27
 	github.com/gofiber/fiber/v2 v2.38.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/json-iterator/go v1.1.12
 	github.com/lucas-clemente/quic-go v0.29.1
 	github.com/olahol/melody v1.3.0
 	github.com/onsi/ginkgo v1.16.5
@@ -65,6 +66,8 @@ require (
 	github.com/marten-seemann/qtls-go1-19 v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect

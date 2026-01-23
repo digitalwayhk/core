@@ -125,10 +125,10 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	own.recordWebSocketDisconnect(hash)
 }
 
-// 🔧 优化广播（添加检查）
+// 🔧 优化广播（使用单例）
 func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	if own == nil {
-		logx.Error("NoticeWebSocket: RouterInfo is nil")
+		logx.Errorf("NoticeWebSocket: RouterInfo is nil")
 		return
 	}
 
@@ -137,14 +137,20 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		return
 	}
 
-	// 🔧 确保全局系统启动
-	globalNotificationSystem.Start()
+	// 🔧 获取并启动全局系统（单例）
+	notifySys := getGlobalNotificationSystem()
+	notifySys.Start()
+
+	// 🆕 健康检查
+	if !notifySys.IsHealthy() {
+		logx.Errorf("通知系统不健康，跳过广播")
+		return
+	}
 
 	// 🆕 确保分片已初始化
 	if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
 		own.ensureWebSocketInit()
 
-		// 再次检查
 		if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
 			logx.Errorf("NoticeWebSocket: 分片初始化失败 for %s", own.Path)
 			return
@@ -170,7 +176,6 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		dropped := 0
 
 		for _, hash := range hashes {
-			// 再次读取，确保安全
 			own.RLock()
 			api, exists := own.rArgs[hash]
 			own.RUnlock()
@@ -184,24 +189,24 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 				api:     api,
 				message: message,
 				iwsr:    iwsr,
-				router:  own, // 🆕 确保 router 不为 nil
+				router:  own,
 			}
 
-			// 🆕 验证 job 的完整性
 			if job.router == nil || job.iwsr == nil || job.api == nil {
-				logx.Errorf("NoticeWebSocket: 创建的 job 不完整 hash:%d", hash)
+				logx.Errorf("NoticeWebSocket: job 不完整 hash:%d", hash)
 				continue
 			}
 
-			if globalNotificationSystem.Submit(job) {
+			if notifySys.Submit(job) {
 				submitted++
 			} else {
 				dropped++
 			}
 		}
 
+		// 🆕 只在有丢弃时才打印
 		if dropped > 0 {
-			logx.Errorf("⚠️ %s 提交任务: 成功:%d, 丢弃:%d",
+			logx.Errorf("%s 提交任务: 成功:%d, 丢弃:%d",
 				own.Path, submitted, dropped)
 		}
 	}()

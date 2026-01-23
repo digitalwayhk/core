@@ -1,7 +1,6 @@
 package nosql
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/json"
 
 	"github.com/dgraph-io/badger/v3"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
