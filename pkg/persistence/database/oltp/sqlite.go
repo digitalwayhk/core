@@ -310,7 +310,10 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(3)                  // 稍微增加但保持较小
 	sqlDB.SetConnMaxLifetime(5 * time.Minute) // 缩短生存时间
 	sqlDB.SetConnMaxIdleTime(2 * time.Minute) // 🔧 新增：空闲超时
-
+	db.Exec("PRAGMA journal_mode=WAL;")
+	db.Exec("PRAGMA busy_timeout=5000;")  // 5秒超时
+	db.Exec("PRAGMA synchronous=NORMAL;") // 提升性能
+	db.Exec("PRAGMA cache_size=2000;")    // 增加缓存
 	return db, nil
 }
 
