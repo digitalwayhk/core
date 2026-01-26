@@ -13,6 +13,17 @@ import (
 type ISyncAfterDelete[T types.IModel] interface {
 	IsSyncAfterDelete() bool
 }
+type IAutoCleanup[T types.IModel] interface {
+	IsAutoCleanup(item *SyncQueueItem[T]) bool
+}
+
+// 🆕 IAutoLimit 自动限制数量接口
+type IAutoLimit[T types.IModel] interface {
+	// GetLimitConfig 获取限制配置
+	// 返回: (筛选前缀, 最大保留条数, 排序字段, 是否降序)
+	// 例如: ("user:active:", 1000, "created_at", true) 表示只保留最新的1000条活跃用户
+	GetLimitConfig() (filterPrefix string, maxCount int, sortField string, descending bool)
+}
 
 // SharedBadgerManager 共享的 BadgerDB 管理器
 type SharedBadgerManager struct {
@@ -90,6 +101,8 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 
 	// 构建 BadgerDB 选项（针对共享场景优化）
 	opts := badger.DefaultOptions(basePath).
+		WithLogger(nil).
+		WithLoggingLevel(badger.WARNING).
 		WithSyncWrites(cfg.SyncWrites).
 		WithDetectConflicts(cfg.DetectConflicts).
 		WithNumVersionsToKeep(1).
@@ -214,17 +227,35 @@ func (m *SharedBadgerManager) runGC() {
 	for {
 		select {
 		case <-ticker.C:
+			// 🆕 记录 GC 前的数据库大小
+			lsmBefore, vlogBefore := m.db.Size()
+
+			const maxGCRounds = 10
 			var reclaimed int
-			for {
+
+			for i := 0; i < maxGCRounds; i++ {
 				err := m.db.RunValueLogGC(m.config.GCDiscardRatio)
 				if err != nil {
+					if err == badger.ErrNoRewrite {
+						break
+					}
+					logx.Errorf("共享DB GC失败 (round %d): %v", i+1, err)
 					break
 				}
 				reclaimed++
 			}
+
+			// 🆕 记录 GC 后的数据库大小
+			lsmAfter, vlogAfter := m.db.Size()
+
 			if reclaimed > 0 {
-				logx.Infof("共享DB GC完成，回收 %d 个文件", reclaimed)
+				fmt.Printf("共享DB GC完成 [回收: %d轮, LSM: %dMB->%dMB, VLog: %dMB->%dMB]",
+					reclaimed,
+					lsmBefore/(1024*1024), lsmAfter/(1024*1024),
+					vlogBefore/(1024*1024), vlogAfter/(1024*1024),
+				)
 			}
+
 		case <-m.closeCh:
 			logx.Info("共享DB runGC 退出")
 			return

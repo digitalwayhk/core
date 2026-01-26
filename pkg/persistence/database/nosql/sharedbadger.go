@@ -343,8 +343,10 @@ func (p *PrefixedBadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
 	prefix = p.prefix + prefix
 	err := p.manager.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		opts.PrefetchSize = 100
+		opts.PrefetchSize = 1000 // 增加预取大小
 		opts.PrefetchValues = true
+		opts.Reverse = false
+		opts.AllVersions = false // 只读取最新版本
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
@@ -1312,5 +1314,185 @@ func (p *PrefixedBadgerDB[T]) Close() error {
 	p.manager.RemoveRef(p.prefix)
 
 	logx.Infof("共享BadgerDB实例已关闭 [prefix=%s]", p.prefix)
+	return nil
+}
+
+// 🆕 CheckAndEnforceLimit 检查并执行数量限制
+func (p *PrefixedBadgerDB[T]) CheckAndEnforceLimit(model *T) error {
+	// 检查模型是否实现了 IAutoLimit 接口
+
+	limitConfig, ok := any(model).(IAutoLimit[T])
+	if !ok {
+		return nil // 未实现接口,不执行限制
+	}
+
+	filterPrefix, maxCount, sortField, descending := limitConfig.GetLimitConfig()
+	if maxCount <= 0 {
+		return nil // 无限制
+	}
+
+	// 统计当前数量
+	currentCount, err := p.CountByPrefix(filterPrefix)
+	if err != nil {
+		return fmt.Errorf("统计数量失败: %w", err)
+	}
+
+	if currentCount <= maxCount {
+		return nil // 未超过限制
+	}
+
+	// 需要删除的数量
+	deleteCount := currentCount - maxCount
+	logx.Infof("数据超限 [prefix=%s, current=%d, max=%d, delete=%d]",
+		p.prefix+filterPrefix, currentCount, maxCount, deleteCount)
+
+	// 获取需要删除的旧数据
+	keysToDelete, err := p.getOldestKeys(filterPrefix, deleteCount, sortField, descending)
+	if err != nil {
+		return fmt.Errorf("获取旧数据失败: %w", err)
+	}
+
+	if len(keysToDelete) == 0 {
+		return nil
+	}
+
+	// 批量删除
+	if err := p.batchDelete(keysToDelete); err != nil {
+		return fmt.Errorf("批量删除失败: %w", err)
+	}
+
+	logx.Infof("自动清理完成 [prefix=%s, deleted=%d]", p.prefix+filterPrefix, len(keysToDelete))
+	return nil
+}
+
+// 🆕 获取最旧的数据key列表
+func (p *PrefixedBadgerDB[T]) getOldestKeys(filterPrefix string, count int, sortField string, descending bool) ([]string, error) {
+	type itemWithKey struct {
+		key       string
+		sortValue interface{}
+		timestamp time.Time
+	}
+
+	fullPrefix := p.prefix + filterPrefix
+	items := make([]itemWithKey, 0)
+
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek([]byte(fullPrefix)); it.ValidForPrefix([]byte(fullPrefix)); it.Next() {
+			item := it.Item()
+			key := string(item.Key())
+
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return err
+				}
+
+				// 跳过已删除的数据
+				if wrapper.IsDeleted {
+					return nil
+				}
+
+				// 提取排序字段值
+				var sortValue interface{}
+				var timestamp time.Time
+
+				if wrapper.Item != nil {
+					// 使用反射获取排序字段
+					v := reflect.ValueOf(wrapper.Item)
+					if v.Kind() == reflect.Ptr {
+						v = v.Elem()
+					}
+
+					if v.Kind() == reflect.Struct {
+						field := v.FieldByName(sortField)
+						if field.IsValid() {
+							sortValue = field.Interface()
+							// 如果是时间类型
+							if t, ok := sortValue.(time.Time); ok {
+								timestamp = t
+							}
+						}
+					}
+				}
+
+				// 如果没有找到排序字段,使用创建时间
+				if timestamp.IsZero() {
+					timestamp = wrapper.CreatedAt
+				}
+
+				items = append(items, itemWithKey{
+					key:       key,
+					sortValue: sortValue,
+					timestamp: timestamp,
+				})
+				return nil
+			})
+
+			if err != nil {
+				logx.Errorf("解析数据失败: %v", err)
+				continue
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 排序(根据时间戳)
+	if descending {
+		// 降序: 保留最新的,删除最旧的
+		for i := 0; i < len(items); i++ {
+			for j := i + 1; j < len(items); j++ {
+				if items[i].timestamp.Before(items[j].timestamp) {
+					items[i], items[j] = items[j], items[i]
+				}
+			}
+		}
+	} else {
+		// 升序: 保留最旧的,删除最新的
+		for i := 0; i < len(items); i++ {
+			for j := i + 1; j < len(items); j++ {
+				if items[i].timestamp.After(items[j].timestamp) {
+					items[i], items[j] = items[j], items[i]
+				}
+			}
+		}
+	}
+
+	// 取需要删除的key
+	deleteCount := count
+	if deleteCount > len(items) {
+		deleteCount = len(items)
+	}
+
+	keys := make([]string, deleteCount)
+	for i := 0; i < deleteCount; i++ {
+		keys[i] = items[len(items)-deleteCount+i].key
+	}
+
+	return keys, nil
+}
+
+// 🆕 在 Set 方法后自动检查限制
+func (p *PrefixedBadgerDB[T]) SetWithAutoLimit(item *T, ttl time.Duration, fn ...func(wrapper *SyncQueueItem[T])) error {
+	err := p.Set(item, ttl, fn...)
+	if err != nil {
+		return err
+	}
+
+	// 异步检查并执行限制
+	go func() {
+		if err := p.CheckAndEnforceLimit(item); err != nil {
+			logx.Errorf("自动限制检查失败: %v", err)
+		}
+	}()
+
 	return nil
 }

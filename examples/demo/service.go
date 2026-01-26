@@ -54,12 +54,12 @@ func (own *DemoService) SubscribeRouters() []*types.ObserveArgs {
 				info := api.RouterInfo()
 				order := router.GetResponseData[models.OrderModel](args.Response) //从推送过来的消息中获取订单数据
 				//获取所有订阅的路由类型，当订阅路由的data中参数值不同时，会有多个订阅路由类型
-				for _, r := range info.GetWebSocketIRouter() {
-					//推送刚创建的order到通过websocket订阅GetOrder路由的客户端
-					//这里推送到所有订阅（100个用户订阅一次推送），实际使用中，可以根据条件推送到指定的客户端
-					//例如：根据order的用户id，推送到指定的客户端 r.(*public.GetOrder).UserID == order.UserID
-					info.NoticeWebSocketClient(r, order)
-				}
+				//for _, r := range info.GetWebSocketIRouter() {
+				//推送刚创建的order到通过websocket订阅GetOrder路由的客户端
+				//这里推送到所有订阅（100个用户订阅一次推送），实际使用中，可以根据条件推送到指定的客户端
+				//例如：根据order的用户id，推送到指定的客户端 r.(*public.GetOrder).UserID == order.UserID
+				info.NoticeWebSocket(order)
+				//}
 				return nil
 			}),
 	}
