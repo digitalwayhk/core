@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/digitalwayhk/core/models"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	types "github.com/digitalwayhk/core/pkg/server/types"
@@ -74,8 +73,11 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
 	}
-	list := models.NewManageModelList[T]()
-	model := list.NewItem()
+	list := entity.NewModelList[T](nil)
+	if gl, ok := own.instance.(IGetModelList); ok {
+		l := gl.GetList()
+		list = l.(*entity.ModelList[T])
+	}
 	if view, ok := own.instance.(IManageService); ok {
 		data, err, stop := view.DoBefore(own, req)
 		if stop {
@@ -88,6 +90,7 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
+	model := list.NewItem()
 	mv, vm := own.getmv(req)
 	vm.Fields = modelToFiled(model, mv)
 	if mv != nil {

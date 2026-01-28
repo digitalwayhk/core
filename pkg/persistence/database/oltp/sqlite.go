@@ -281,19 +281,18 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 
 // 🔧 修复：改进newDB配置
 func (own *Sqlite) newDB() (*gorm.DB, error) {
-	//fmt.Println("🆕 创建新的数据库连接: %s", own.Path)
 	dia := sqlite.Open(own.Path)
 	db, err := gorm.Open(dia, &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
-			NoLowerCase:   true,
+			//NoLowerCase:   true,
 		},
 		PrepareStmt:              false,
 		DisableAutomaticPing:     false, // 🔧 启用ping检测
 		DisableNestedTransaction: true,
 		SkipDefaultTransaction:   true,
-		Logger:                   logger.Default.LogMode(logger.Silent),
+		Logger:                   logger.Default.LogMode(logger.Error),
 	})
 
 	if err != nil {

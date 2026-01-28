@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
@@ -51,9 +50,9 @@ func (own *CacheAdapter) Search(prefix string) ([]string, error) {
 }
 
 func (own *CacheAdapter) getCacheDB() (types.ICache, error) {
-	idb, err := models.GetRemoteCacheConfig(own.DbName)
-	if err != nil {
-		return nil, err
-	}
-	return idb, nil
+	// idb, err := models.GetRemoteCacheConfig(own.DbName)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	return nil, nil
 }

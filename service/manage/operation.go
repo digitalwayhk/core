@@ -1,7 +1,6 @@
 package manage
 
 import (
-	"github.com/digitalwayhk/core/models"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 
@@ -27,8 +26,9 @@ func (own *Operation[T]) New(instance interface{}) st.IRouter {
 			own.instance = instance
 		}
 	}
-	if own.list == nil {
-		own.list = models.NewManageModelList[T]().ModelList
+	if gl, ok := instance.(IGetModelList); ok {
+		l := gl.GetList()
+		own.list = l.(*entity.ModelList[T])
 	}
 	return own
 }

@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"github.com/digitalwayhk/core/pkg/persistence/api/manage"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -14,8 +13,8 @@ func (own *PersistenceService) ServiceName() string {
 
 func (own *PersistenceService) Routers() []types.IRouter {
 	items := make([]types.IRouter, 0)
-	dbc := manage.NewRemoteDBManage()
-	items = append(items, dbc.Routers()...)
+	// dbc := manage.NewRemoteDBManage()
+	// items = append(items, dbc.Routers()...)
 	return items
 }
 func (own *PersistenceService) SubscribeRouters() []*types.ObserveArgs {

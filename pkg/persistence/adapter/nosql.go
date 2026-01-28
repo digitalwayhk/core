@@ -1,134 +1,127 @@
 package adapter
 
-import (
-	"log"
+// type NosqlAdapter struct {
+// 	isTransaction bool //是否开启事务
+// }
 
-	"github.com/digitalwayhk/core/pkg/persistence/models"
-	"github.com/digitalwayhk/core/pkg/persistence/types"
-)
+// func NewNosqlAdapter() *NosqlAdapter {
+// 	return &NosqlAdapter{
+// 		isTransaction: false,
+// 	}
+// }
+// func (own *NosqlAdapter) GetModelDB(model interface{}) (interface{}, error) {
+// 	return own.getNosqlDB(model)
+// }
 
-type NosqlAdapter struct {
-	isTransaction bool //是否开启事务
-}
+// //// ReadType 動態轉化 Symbol 為 bson 所需字段
+// //var ReadType = map[string]string{
+// //	">":  "$gt",
+// //	"<":  "$lt",
+// //	">=": "$gte",
+// //	"=<": "$lte",
+// //	"!=": "$ne",
+// //}
 
-func NewNosqlAdapter() *NosqlAdapter {
-	return &NosqlAdapter{
-		isTransaction: false,
-	}
-}
-func (own *NosqlAdapter) GetModelDB(model interface{}) (interface{}, error) {
-	return own.getNosqlDB(model)
-}
+// func (own NosqlAdapter) Transaction() error {
+// 	log.Println("implement Mongo Transaction")
+// 	return nil
+// }
 
-//// ReadType 動態轉化 Symbol 為 bson 所需字段
-//var ReadType = map[string]string{
-//	">":  "$gt",
-//	"<":  "$lt",
-//	">=": "$gte",
-//	"=<": "$lte",
-//	"!=": "$ne",
-//}
+// func (own NosqlAdapter) SetSaveType(saveType types.SaveType) {
+// 	//TODO implement me
+// }
 
-func (own NosqlAdapter) Transaction() error {
-	log.Println("implement Mongo Transaction")
-	return nil
-}
+// func (own NosqlAdapter) Load(item *types.SearchItem, result interface{}) error {
+// 	//TODO implement me
+// 	db, err := own.getNosqlDB(item.Model)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	err = db.Load(item, result)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
+// func (own *NosqlAdapter) Raw(sql string, data interface{}) error {
 
-func (own NosqlAdapter) SetSaveType(saveType types.SaveType) {
-	//TODO implement me
-}
+// 	return nil
+// }
+// func (own *NosqlAdapter) Exec(sql string, data interface{}) error {
 
-func (own NosqlAdapter) Load(item *types.SearchItem, result interface{}) error {
-	//TODO implement me
-	db, err := own.getNosqlDB(item.Model)
-	if err != nil {
-		return err
-	}
-	err = db.Load(item, result)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-func (own *NosqlAdapter) Raw(sql string, data interface{}) error {
+// 	return nil
+// }
 
-	return nil
-}
-func (own *NosqlAdapter) Exec(sql string, data interface{}) error {
+// func (own NosqlAdapter) Insert(data interface{}) error {
+// 	//TODO implement me
+// 	db, err := own.getNosqlDB(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	err = db.Insert(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
-	return nil
-}
+// func (own NosqlAdapter) Update(data interface{}) error {
+// 	//TODO implement me
+// 	db, err := own.getNosqlDB(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	err = db.Update(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
-func (own NosqlAdapter) Insert(data interface{}) error {
-	//TODO implement me
-	db, err := own.getNosqlDB(data)
-	if err != nil {
-		return err
-	}
-	err = db.Insert(data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// func (own NosqlAdapter) Delete(data interface{}) error {
+// 	//TODO implement me
+// 	db, err := own.getNosqlDB(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	err = db.Delete(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
-func (own NosqlAdapter) Update(data interface{}) error {
-	//TODO implement me
-	db, err := own.getNosqlDB(data)
-	if err != nil {
-		return err
-	}
-	err = db.Update(data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// func (own NosqlAdapter) Commit() error {
+// 	//TODO implement me
+// 	log.Println("implement Mongo commit")
+// 	return nil
+// }
 
-func (own NosqlAdapter) Delete(data interface{}) error {
-	//TODO implement me
-	db, err := own.getNosqlDB(data)
-	if err != nil {
-		return err
-	}
-	err = db.Delete(data)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// func (own NosqlAdapter) Back() error {
+// 	//TODO implement me
+// 	log.Println("implement Mongo back")
+// 	return nil
+// }
 
-func (own NosqlAdapter) Commit() error {
-	//TODO implement me
-	log.Println("implement Mongo commit")
-	return nil
-}
-
-func (own NosqlAdapter) Back() error {
-	//TODO implement me
-	log.Println("implement Mongo back")
-	return nil
-}
-
-func (own *NosqlAdapter) getNosqlDB(model interface{}) (types.IDataBase, error) {
-	idbn, err := getIDBName(model)
-	if err != nil {
-		return nil, err
-	}
-	name := idbn.GetRemoteDBName()
-	idb, err := models.GetConfigRemoteDB(name, 0, false, true)
-	if err != nil {
-		return nil, err
-	}
-	return idb, nil
-}
-func (own *NosqlAdapter) GetRunDB() interface{} {
-	return nil
-}
-func (own *NosqlAdapter) Rollback() error {
-	own.isTransaction = false
-	return nil
-}
+// func (own *NosqlAdapter) getNosqlDB(model interface{}) (types.IDataBase, error) {
+// 	idbn, err := getIDBName(model)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	name := idbn.GetRemoteDBName()
+// 	idb, err := models.GetConfigRemoteDB(name, 0, false, true)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return idb, nil
+// }
+// func (own *NosqlAdapter) GetRunDB() interface{} {
+// 	return nil
+// }
+// func (own *NosqlAdapter) Rollback() error {
+// 	own.isTransaction = false
+// 	return nil
+// }
 
 //func loadMongo(db *mongo.Database, item *types.SearchItem, result interface{}) error {
 //

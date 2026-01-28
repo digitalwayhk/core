@@ -1,7 +1,6 @@
 package manage
 
 import (
-	"github.com/digitalwayhk/core/models"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	st "github.com/digitalwayhk/core/pkg/server/types"
@@ -85,7 +84,7 @@ func (own *ManageService[T]) GetView() *view.ViewModel {
 	return own.View.Model
 }
 func (own *ManageService[T]) GetList() interface{} {
-	return models.NewManageModelList[T]().ModelList
+	return entity.NewModelList[T](nil)
 }
 func (own *ManageService[T]) ParseBefore(sender interface{}, req st.IRequest) error {
 	return nil

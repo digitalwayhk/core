@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
-	"github.com/digitalwayhk/core/pkg/persistence/models"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -163,32 +162,32 @@ func (own *DefaultAdapter) getRemoteDB(model interface{}, connecttype types.DBCo
 	if db != nil {
 		return db, nil
 	}
-	idb, err := models.GetConfigRemoteDB(name, connecttype, own.IsLog, true)
-	if err != nil {
-		return nil, err
-	}
-	if idb == nil && own.IsCreateTable {
-		err = idb.HasTable(model)
-		if err != nil {
-			midb, err := models.GetConfigRemoteDB(name, types.ManageType, own.IsLog, true)
-			if err != nil {
-				err = midb.HasTable(model)
-				return nil, err
-			}
-		}
-	}
-	if connecttype == types.ReadAndWriteType {
-		own.writeDB[name] = idb
-		return idb, nil
-	}
-	if connecttype == types.OnlyReadType {
-		own.readDBs[name] = idb
-		return idb, nil
-	}
-	if connecttype == types.ManageType {
-		own.manageDB[name] = idb
-		return idb, nil
-	}
+	// idb, err := models.GetConfigRemoteDB(name, connecttype, own.IsLog, true)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if idb == nil && own.IsCreateTable {
+	// 	err = idb.HasTable(model)
+	// 	if err != nil {
+	// 		midb, err := models.GetConfigRemoteDB(name, types.ManageType, own.IsLog, true)
+	// 		if err != nil {
+	// 			err = midb.HasTable(model)
+	// 			return nil, err
+	// 		}
+	// 	}
+	// }
+	// if connecttype == types.ReadAndWriteType {
+	// 	own.writeDB[name] = idb
+	// 	return idb, nil
+	// }
+	// if connecttype == types.OnlyReadType {
+	// 	own.readDBs[name] = idb
+	// 	return idb, nil
+	// }
+	// if connecttype == types.ManageType {
+	// 	own.manageDB[name] = idb
+	// 	return idb, nil
+	// }
 	return db, nil
 }
 
