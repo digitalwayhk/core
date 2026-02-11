@@ -94,7 +94,8 @@ func cleanupTestDataSQLite(t *testing.T, sqlite *oltp.Sqlite) {
 		db.Exec("DROP TABLE IF EXISTS SQLiteTestOrder")
 		db.Exec("DROP TABLE IF EXISTS SQLiteTestUser")
 	}
-
+	err := sqlite.DeleteDB()
+	assert.NoError(t, err)
 	// 清除表缓存
 	oltp.ClearTableCache()
 }

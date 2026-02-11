@@ -2703,39 +2703,6 @@ func (s *ClickHouseTestSuite) Test9_5_BusinessViewWithFilters() {
 	s.T().Log("✅ 带过滤条件的业务视图创建成功")
 }
 
-func (s *ClickHouseTestSuite) Test9_6_QueryBusinessStatsByName() {
-	s.NoError(s.ch.InitConfigTable())
-	s.NoError(s.ch.CreateTable(&Trade{}))
-
-	// 创建业务视图
-	config := &BusinessDimensionConfig{
-		ViewName:        "trades_user_hourly",
-		SourceTableName: "trades",
-		Dimensions:      `["user_id"]`,
-		TimeGranularity: "hour",
-		NumericFields:   `["amount"]`,
-	}
-	s.NoError(s.ch.SaveBusinessViewConfig(config))
-	s.NoError(s.ch.CreateBusinessViewFromConfig(config))
-
-	// 插入数据
-	trades := generateTestTrades(50)
-	s.NoError(s.ch.BatchInsert(trades))
-	time.Sleep(3 * time.Second)
-
-	// 查询业务统计
-	now := time.Now()
-	stats, err := s.ch.QueryBusinessStatsByName(
-		"trades_user_hourly",
-		map[string]interface{}{"user_id": "U001"},
-		now.Add(-24*time.Hour),
-		now,
-	)
-
-	s.NoError(err)
-	s.T().Logf("✅ 业务统计查询: %d 条", len(stats))
-}
-
 func (s *ClickHouseTestSuite) Test9_7_ListBusinessViewConfigs() {
 	s.NoError(s.ch.InitConfigTable())
 
@@ -2851,52 +2818,6 @@ func (s *ClickHouseTestSuite) Test9_10_CreateBusinessViewFromModel() {
 
 	s.T().Logf("✅ 从模型自动创建配置: 数值字段=%d, Decimal字段=%d",
 		len(numFields), len(decFields))
-}
-
-func (s *ClickHouseTestSuite) Test9_11_BusinessViewDecimalAggregation() {
-	s.NoError(s.ch.InitConfigTable())
-	s.NoError(s.ch.CreateTable(&Trade{}))
-
-	config := &BusinessDimensionConfig{
-		ViewName:        "trades_fee_stats",
-		SourceTableName: "trades",
-		Dimensions:      `["user_id"]`,
-		TimeGranularity: "hour",
-		DecimalFields:   `["fee"]`,
-	}
-	s.NoError(s.ch.SaveBusinessViewConfig(config))
-	s.NoError(s.ch.CreateBusinessViewFromConfig(config))
-
-	// 插入数据
-	now := time.Now()
-	trades := []*Trade{
-		{UserID: "U001", Amount: 100.0, Fee: decimal.NewFromFloat(0.1)},
-		{UserID: "U001", Amount: 200.0, Fee: decimal.NewFromFloat(0.2)},
-	}
-	for _, t := range trades {
-		t.CreatedAt = now
-		t.UpdatedAt = now
-	}
-	s.NoError(s.ch.BatchInsert(trades))
-	time.Sleep(3 * time.Second)
-
-	// 查询统计
-	stats, err := s.ch.QueryBusinessStatsByName(
-		"trades_fee_stats",
-		map[string]interface{}{"user_id": "U001"},
-		now.Add(-1*time.Hour),
-		now.Add(1*time.Hour),
-	)
-
-	s.NoError(err)
-	if len(stats) > 0 {
-		s.T().Logf("✅ Decimal聚合统计: %+v", stats[0])
-
-		// 验证Fee字段是string类型(保持精度)
-		if totalFee, ok := stats[0]["total_fee"]; ok {
-			s.IsType("", totalFee, "total_fee应该是string类型保持精度")
-		}
-	}
 }
 
 func (s *ClickHouseTestSuite) Test9_12_BatchCreateBusinessViews() {

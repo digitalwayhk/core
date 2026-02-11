@@ -26,16 +26,18 @@ type ClickHouse struct {
 
 // ClickHouse 配置
 type Config struct {
-	Host         string
-	Port         int
-	Database     string
-	Username     string
-	Password     string
-	Debug        bool
-	MaxOpenConns int
-	MaxIdleConns int
-	AutoCreateDB bool // 自动创建数据库
-	Logger       logger.Interface
+	Host             string
+	Port             int
+	Database         string
+	Username         string
+	Password         string
+	Debug            bool
+	MaxOpenConns     int
+	MaxIdleConns     int
+	AutoCreateDB     bool // 自动创建数据库
+	Logger           logger.Interface
+	DialTimeout      int // 秒
+	MaxExecutionTime int // 秒
 }
 
 func (c *Config) Hash() string {
@@ -45,6 +47,94 @@ func (c *Config) Hash() string {
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf("%x", hash[:8])
 }
+func (c *Config) ClickHouseDSN() string {
+	if c.DialTimeout == 0 {
+		c.DialTimeout = 10
+	}
+	if c.MaxExecutionTime == 0 {
+		c.MaxExecutionTime = 60
+	}
+
+	// 🔧 添加异步插入参数
+	return fmt.Sprintf("clickhouse://%s:%s@%s:%d/%s?dial_timeout=%ds&max_execution_time=%d&async_insert=1&wait_for_async_insert=0&async_insert_max_data_size=10485760&async_insert_busy_timeout_ms=1000",
+		c.Username,
+		c.Password,
+		c.Host,
+		c.Port,
+		c.Database,
+		c.DialTimeout,
+		c.MaxExecutionTime,
+	)
+}
+func (c *Config) SetClickHouseDSN(dsn string) error {
+	// 例: clickhouse://user:pass@host:9000/dbname?dial_timeout=10s&max_execution_time=60
+	if !strings.HasPrefix(dsn, "clickhouse://") {
+		return fmt.Errorf("无效的 DSN 格式: 缺少 clickhouse:// 前缀")
+	}
+	// 去掉前缀
+	rest := strings.TrimPrefix(dsn, "clickhouse://")
+	// user:pass@host:port/dbname?params
+	upAndHost := strings.SplitN(rest, "@", 2)
+	if len(upAndHost) != 2 {
+		return fmt.Errorf("无效的 DSN 格式: 缺少 @")
+	}
+	userPass := upAndHost[0]
+	hostAndDb := upAndHost[1]
+
+	// 用户名和密码
+	userParts := strings.SplitN(userPass, ":", 2)
+	if len(userParts) != 2 {
+		return fmt.Errorf("无效的 DSN 格式: 用户名或密码缺失")
+	}
+	c.Username = userParts[0]
+	c.Password = userParts[1]
+
+	// host:port/dbname?params
+	hostDbParts := strings.SplitN(hostAndDb, "/", 2)
+	if len(hostDbParts) != 2 {
+		return fmt.Errorf("无效的 DSN 格式: 缺少数据库名")
+	}
+	hostPort := hostDbParts[0]
+	dbAndParams := hostDbParts[1]
+
+	// 主机和端口
+	hostPortParts := strings.SplitN(hostPort, ":", 2)
+	if len(hostPortParts) != 2 {
+		return fmt.Errorf("无效的 DSN 格式: 主机或端口缺失")
+	}
+	c.Host = hostPortParts[0]
+	fmt.Sscanf(hostPortParts[1], "%d", &c.Port)
+
+	// 数据库和参数
+	dbParts := strings.SplitN(dbAndParams, "?", 2)
+	c.Database = dbParts[0]
+	if c.Database == "" {
+		return fmt.Errorf("无效的 DSN: 数据库名为空")
+	}
+	// 解析参数
+	if len(dbParts) == 2 {
+		params := dbParts[1]
+		for _, kv := range strings.Split(params, "&") {
+			kvParts := strings.SplitN(kv, "=", 2)
+			if len(kvParts) != 2 {
+				continue
+			}
+			switch kvParts[0] {
+			case "dial_timeout":
+				fmt.Sscanf(kvParts[1], "%ds", &c.DialTimeout)
+			case "max_execution_time":
+				fmt.Sscanf(kvParts[1], "%d", &c.MaxExecutionTime)
+			}
+		}
+	}
+	if c.DialTimeout == 0 {
+		c.DialTimeout = 10
+	}
+	if c.MaxExecutionTime == 0 {
+		c.MaxExecutionTime = 60
+	}
+	return nil
+}
 
 // 表引擎配置
 type TableEngineConfig struct {
@@ -52,6 +142,8 @@ type TableEngineConfig struct {
 	PartitionBy      string        // 分区键，如 "toYYYYMM(created_at)"
 	OrderBy          []string      // 排序键
 	TTL              time.Duration // 数据保留时间
+	TTLMode          string        // 🆕 TTL 模式: "DELETE" | "TO VOLUME" | "TO DISK"
+	TTLVolume        string        // 🆕 冷存储卷名（当 TTLMode = "TO VOLUME" 时使用）
 	IndexGranularity int           // 索引粒度
 }
 
@@ -61,7 +153,8 @@ func DefaultTableEngineConfig() *TableEngineConfig {
 		Engine:           "MergeTree()",
 		PartitionBy:      "toYYYYMM(created_at)",
 		OrderBy:          []string{"created_at"},
-		TTL:              90 * 24 * time.Hour, // 90天
+		TTL:              365 * 24 * time.Hour, // 365天
+		TTLMode:          "DELETE",             // 🆕 默认删除模式
 		IndexGranularity: 8192,
 	}
 }
@@ -198,14 +291,7 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 	}
 
 	// 第二步:连接到目标数据库
-	dsn := fmt.Sprintf("clickhouse://%s:%s@%s:%d/%s?dial_timeout=10s&max_execution_time=60",
-		cfg.Username,
-		cfg.Password,
-		cfg.Host,
-		cfg.Port,
-		cfg.Database,
-	)
-
+	dsn := cfg.ClickHouseDSN()
 	db, err := gorm.Open(clickhouse.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
@@ -240,6 +326,9 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 
 	return instance, nil
 }
+func (ch *ClickHouse) GetDB() *gorm.DB {
+	return ch.db
+}
 
 // 创建业务表
 func (ch *ClickHouse) CreateTable(model interface{}, engineCfg ...*TableEngineConfig) error {
@@ -269,10 +358,10 @@ func (ch *ClickHouse) CreateTable(model interface{}, engineCfg ...*TableEngineCo
 	logx.Infof("✅ 创建业务表成功 [%s]", tableName)
 
 	// 自动创建时间维度统计视图
-	if err := ch.createTimeBasedViews(model, tableName); err != nil {
-		logx.Errorf("创建统计视图失败: %v", err)
-		return err
-	}
+	// if err := ch.createTimeBasedViews(model, tableName); err != nil {
+	// 	logx.Errorf("创建统计视图失败: %v", err)
+	// 	return err
+	// }
 
 	return nil
 }
@@ -287,7 +376,6 @@ func (ch *ClickHouse) generateCreateTableSQL(model interface{}, tableName string
 		modelType = modelType.Elem()
 	}
 
-	// 🔧 修复:递归解析嵌入的结构体字段
 	columns = ch.parseStructFields(modelType, "")
 
 	// 构建 SQL
@@ -309,10 +397,35 @@ func (ch *ClickHouse) generateCreateTableSQL(model interface{}, tableName string
 		sql.WriteString(fmt.Sprintf("\nORDER BY (%s)", strings.Join(cfg.OrderBy, ", ")))
 	}
 
-	// TTL
+	// 🔧 修复: TTL 策略（添加删除模式）
 	if cfg.TTL > 0 {
 		days := int(cfg.TTL.Hours() / 24)
-		sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY", days))
+
+		// 🆕 根据 TTLMode 生成不同的 TTL 子句
+		switch cfg.TTLMode {
+		case "DELETE", "": // 默认删除模式
+			sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY DELETE", days))
+
+		case "TO VOLUME": // 移动到冷存储
+			if cfg.TTLVolume != "" {
+				sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY TO VOLUME '%s'", days, cfg.TTLVolume))
+			} else {
+				logx.Errorf("TTLMode 设置为 TO VOLUME，但未指定 TTLVolume，使用 DELETE 模式")
+				sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY DELETE", days))
+			}
+
+		case "TO DISK": // 移动到指定磁盘
+			if cfg.TTLVolume != "" { // 复用 TTLVolume 字段存储磁盘名
+				sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY TO DISK '%s'", days, cfg.TTLVolume))
+			} else {
+				logx.Errorf("TTLMode 设置为 TO DISK，但未指定磁盘名，使用 DELETE 模式")
+				sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY DELETE", days))
+			}
+
+		default:
+			logx.Errorf("未知的 TTLMode: %s，使用 DELETE 模式", cfg.TTLMode)
+			sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY DELETE", days))
+		}
 	}
 
 	// SETTINGS
@@ -410,12 +523,29 @@ func (ch *ClickHouse) getAggregations(numericFields, decimalFields []string) []s
 	for _, field := range decimalFields {
 		aggregations = append(aggregations,
 			fmt.Sprintf("sum(%s) as total_%s", field, field),
-			fmt.Sprintf("avg(%s) as avg_%s", field, field),
+			// 🔧 修复: avg() 需要显式转换回 Decimal
+			fmt.Sprintf("CAST(avg(%s) AS Decimal(20, 8)) as avg_%s", field, field),
 			fmt.Sprintf("max(%s) as max_%s", field, field),
 			fmt.Sprintf("min(%s) as min_%s", field, field),
 		)
 	}
 	return aggregations
+}
+func (ch *ClickHouse) DeleteDB(databaseName ...string) error {
+	if len(databaseName) == 0 {
+		databaseName = []string{ch.config.Database}
+	}
+	for _, dbname := range databaseName {
+		if dbname == "" {
+			continue
+		}
+		sql := fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbname)
+		if err := ch.db.Exec(sql).Error; err != nil {
+			return fmt.Errorf("删除数据库 %s 失败: %w", dbname, err)
+		}
+		logx.Infof("🗑️ 删除数据库成功: %s", dbname)
+	}
+	return nil
 }
 
 // 🆕 创建分钟统计视图 (支持 Decimal)
@@ -900,4 +1030,42 @@ func CloseAllConnections() error {
 		return fmt.Errorf("关闭连接时发生 %d 个错误", len(errs))
 	}
 	return nil
+}
+
+// 查询月度统计时，自动添加数据状态
+func (ch *ClickHouse) QueryMonthlyStats(tableName string, startTime, endTime time.Time) ([]map[string]interface{}, error) {
+	viewName := fmt.Sprintf("%s_stats_monthly", tableName)
+
+	var results []map[string]interface{}
+	err := ch.db.Table(viewName).
+		Where("stat_month BETWEEN ? AND ?", startTime, endTime).
+		Order("stat_month DESC").
+		Find(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 🆕 添加数据状态标识
+	now := time.Now()
+	sourceTTLDays := 365 // 源表 TTL
+
+	for _, result := range results {
+		if statMonth, ok := result["stat_month"].(time.Time); ok {
+			daysOld := int(now.Sub(statMonth).Hours() / 24)
+
+			// 🔧 判断源数据是否还存在
+			if daysOld > sourceTTLDays {
+				result["data_status"] = "archived" // 已归档（源数据已删除）
+				result["has_detail"] = false       // 无法查看明细
+			} else {
+				result["data_status"] = "active" // 活跃（源数据存在）
+				result["has_detail"] = true      // 可以查看明细
+			}
+
+			result["days_old"] = daysOld
+		}
+	}
+
+	return results, nil
 }

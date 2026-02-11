@@ -13,6 +13,11 @@ import (
 type ISyncAfterDelete[T types.IModel] interface {
 	IsSyncAfterDelete() bool
 }
+type IOnSyncAfter[T types.IModel] interface {
+	OnSyncAfter(items []*SyncQueueItem[T]) error
+}
+
+// 🆕 IAutoCleanup 自动清理接口
 type IAutoCleanup[T types.IModel] interface {
 	IsAutoCleanup(item *SyncQueueItem[T]) bool
 }
@@ -60,8 +65,8 @@ func DefaultSharedConfig(path string) BadgerDBConfig {
 		PeriodicSync:         true,
 		PeriodicSyncInterval: 3 * time.Second,
 		AutoSync:             true,
-		SyncInterval:         10 * time.Second,
-		SyncMinInterval:      2 * time.Second,
+		SyncInterval:         2 * time.Second,
+		SyncMinInterval:      1 * time.Second,
 		SyncMaxInterval:      5 * time.Minute,
 		SyncBatchSize:        500,
 		AutoCleanup:          true,
@@ -85,6 +90,7 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 	var cfg BadgerDBConfig
 	if len(config) > 0 {
 		cfg = config[0]
+		cfg.Path = basePath
 	} else {
 		cfg = DefaultSharedConfig(basePath)
 	}

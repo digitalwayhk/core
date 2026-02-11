@@ -40,6 +40,77 @@ type Config struct {
 	IsLog        bool
 }
 
+func (c *Config) MysqlDSN() string {
+	if c.Charset == "" {
+		c.Charset = "utf8mb4"
+	}
+	if c.ParseTime == false {
+		c.ParseTime = true
+	}
+	if c.Loc == "" {
+		c.Loc = "Local"
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s",
+		c.Username, c.Password, c.Host, c.Port, c.Database, c.Charset, c.ParseTime, c.Loc)
+}
+func (c *Config) SetMysqlDSN(dsn string) error {
+	// 例: user:pass@tcp(host:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local
+	upAndRest := strings.SplitN(dsn, "@tcp(", 2)
+	if len(upAndRest) != 2 {
+		return errors.New("invalid DSN format")
+	}
+	userPass := upAndRest[0]
+	rest := upAndRest[1]
+
+	// 用户名和密码
+	userParts := strings.SplitN(userPass, ":", 2)
+	if len(userParts) != 2 {
+		return errors.New("invalid DSN user:pass format")
+	}
+	c.Username = userParts[0]
+	c.Password = userParts[1]
+
+	// host:port)/dbname?params
+	hostAndDb := strings.SplitN(rest, ")/", 2)
+	if len(hostAndDb) != 2 {
+		return errors.New("invalid DSN format")
+	}
+
+	hostPort := strings.TrimSuffix(hostAndDb[0], ")")
+	hostPortParts := strings.SplitN(hostPort, ":", 2)
+	if len(hostPortParts) != 2 {
+		return errors.New("invalid DSN host:port format")
+	}
+	c.Host = hostPortParts[0]
+	fmt.Sscanf(hostPortParts[1], "%d", &c.Port)
+
+	// dbname?params
+	dbAndParams := strings.SplitN(hostAndDb[1], "?", 2)
+	c.Database = dbAndParams[0]
+	// if c.Database == "" {
+	// 	return errors.New("invalid DSN: database name is empty")
+	// }
+	// 解析参数
+	if len(dbAndParams) == 2 {
+		params := dbAndParams[1]
+		for _, kv := range strings.Split(params, "&") {
+			kvParts := strings.SplitN(kv, "=", 2)
+			if len(kvParts) != 2 {
+				continue
+			}
+			switch kvParts[0] {
+			case "charset":
+				c.Charset = kvParts[1]
+			case "parseTime":
+				c.ParseTime = kvParts[1] == "true" || kvParts[1] == "True"
+			case "loc":
+				c.Loc = kvParts[1]
+			}
+		}
+	}
+	return nil
+}
+
 // 默认配置
 var DefaultConfig = &Config{
 	Host:         "localhost",
@@ -307,6 +378,15 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 
 // buildDSN 构建不带数据库名的 DSN（用于管理操作或创建数据库）
 func (m *MySQL) buildDSN() string {
+	if m.config.Charset == "" {
+		m.config.Charset = "utf8mb4"
+	}
+	if m.config.ParseTime == false {
+		m.config.ParseTime = true
+	}
+	if m.config.Loc == "" {
+		m.config.Loc = "Local"
+	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=%s&parseTime=true&loc=%s",
 		m.config.Username,
 		m.config.Password,
@@ -319,6 +399,15 @@ func (m *MySQL) buildDSN() string {
 
 // buildDSNWithDB 构建带数据库名的 DSN（直接连接到指定数据库）
 func (m *MySQL) buildDSNWithDB(dbName string) string {
+	if m.config.Charset == "" {
+		m.config.Charset = "utf8mb4"
+	}
+	if m.config.ParseTime == false {
+		m.config.ParseTime = true
+	}
+	if m.config.Loc == "" {
+		m.config.Loc = "Local"
+	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
 		m.config.Username,
 		m.config.Password,

@@ -14,7 +14,6 @@ type Model struct {
 	UpdatedAt  time.Time `json:"updatedat"`
 	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
 	Hashcode   string    `gorm:"column:hashcode;type:varchar(100);uniqueIndex" json:"hashcode"`
-	//DeletedAt  soft_delete.DeletedAt `json:"-"`
 }
 
 func NewModel() *Model {
@@ -55,9 +54,14 @@ func (own *Model) SetModelState(state int) {
 	own.ModelState = state
 }
 func (own *Model) GetHash() string {
+	if own.Hashcode != "" {
+		return own.Hashcode
+	}
 	return utils.HashCodes(strconv.Itoa(int(own.ID)))
 }
-
+func (own *Model) SetHashcode(code string) {
+	own.Hashcode = code
+}
 func (own *Model) SearchWhere(ws []*types.WhereItem) ([]*types.WhereItem, error) {
 	return ws, nil
 }
@@ -90,8 +94,18 @@ func (own *Model) SetField(field string, value interface{}) error {
 	}
 	return utils.SetPropertyValue(own, field, value)
 }
-func (own *Model) SetHashcode(code string) {
-	own.Hashcode = code
+
+func (own *Model) SetCreatedAt(t time.Time) {
+	own.CreatedAt = t
+}
+func (own *Model) GetCreatedAt() time.Time {
+	return own.CreatedAt
+}
+func (own *Model) GetUpdatedAt() time.Time {
+	return own.UpdatedAt
+}
+func (own *Model) SetUpdatedAt(t time.Time) {
+	own.UpdatedAt = t
 }
 
 // func (own *Model) MarshalJSON() ([]byte, error) {

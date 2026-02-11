@@ -1,6 +1,8 @@
 package types
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 )
 
@@ -80,6 +82,12 @@ type IModel interface {
 type IRowCode interface {
 	GetHash() string
 	SetHashcode(code string)
+}
+type IRowDate interface {
+	SetCreatedAt(t time.Time)
+	SetUpdatedAt(t time.Time)
+	GetCreatedAt() time.Time
+	GetUpdatedAt() time.Time
 }
 type IRowState interface {
 	GetModelState() int
