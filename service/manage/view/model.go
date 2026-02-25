@@ -23,6 +23,8 @@ type ViewModel struct {
 	Fields        []*FieldModel     `json:"fields"`
 	Commands      []*CommandModel   `json:"commands"`
 	ChildModels   []*ViewChildModel `json:"childmodels"`
+	ShowComvtp    bool              `json:"showComvtp"` //是否显示左边工具栏
+	AutoSearch    bool              `json:"autoSearch"` //左边工具栏是否自动搜索
 }
 
 func (own *ViewModel) ViewField(name string) *FieldModel {
@@ -97,6 +99,7 @@ type FieldModel struct {
 	Foreign       *ForeignModel     `json:"foreign"`
 	PostType      string            `json:"posttype"`
 	FieldType     reflect.Type      `json:"-"`
+	ShowInComvtp  bool              `json:"showInComvtp"`
 }
 type DataTimeTypeModel struct {
 	IsDate     bool   `json:"isdate"`

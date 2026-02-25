@@ -136,22 +136,24 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 	sf := utils.GetPropertyType(ps.Model, own.SearchItem.Foreign.OneObjectField)
 	if sf != nil {
 		vf := sf.Type.Elem()
-		// if vf.Kind() == reflect.Ptr {
-		// 	vf = vf.Elem()
-		// }
 		ps.Model = utils.NewInterfaceByType(vf)
 		if imn, ok := ps.Model.(pt.IModelNewHook); ok {
 			imn.NewModel()
 		}
 		sliceType := reflect.SliceOf(sf.Type)
-		result := reflect.MakeSlice(sliceType, 0, ps.Size).Interface()
+		// 修复：创建切片并获取其指针
+		resultSlice := reflect.MakeSlice(sliceType, 0, ps.Size)
+		resultPtr := reflect.New(sliceType)
+		resultPtr.Elem().Set(resultSlice)
+		result := resultPtr.Interface()
+
 		var action pt.IDataAction = own.list.GetDBAdapter(ps)
-		err := action.Load(ps, &result)
+		err := action.Load(ps, result)
 		if err != nil {
 			return nil, err
 		}
 		data := &view.ForeigData{
-			Rows:  result,
+			Rows:  resultPtr.Elem().Interface(), // 取实际的切片值
 			Total: ps.Total,
 			Model: own.SearchItem.Foreign.FModel,
 		}
@@ -162,17 +164,8 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 	}
 	return nil, nil
 }
-func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
-	//var view IManageView = own.instance.(IManageView)
-	// if view != nil {
-	// 	vm := view.GetView()
-	// 	for _, v := range vm.ChildModels {
-	// 		if v.Name == own.SearchItem.ChildModel.Name {
-	// 			own.View = &v.ViewModel
 
-	// 		}
-	// 	}
-	// }
+func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 	own.SearchItem.View = own.View
 	if ms, ok := own.instance.(IManageSearch); ok {
 		data, err, stop := ms.ChildSearchBefore(own, req)
@@ -208,12 +201,20 @@ func (own *Search[T]) childSearch(req types.IRequest) (interface{}, error) {
 			imn.NewModel()
 		}
 		sliceType := reflect.SliceOf(vf)
-		result := reflect.MakeSlice(sliceType, 0, childitem.Size).Interface()
+		// 修复：创建切片并获取其指针
+		resultSlice := reflect.MakeSlice(sliceType, 0, childitem.Size)
+		resultPtr := reflect.New(sliceType)
+		resultPtr.Elem().Set(resultSlice)
+		result := resultPtr.Interface()
+
 		childitem.IsPreload = true
 		var action pt.IDataAction = own.list.GetDBAdapter(childitem)
-		err := action.Load(childitem, &result)
+		err := action.Load(childitem, result)
+		if err != nil {
+			return nil, err
+		}
 		if ms, ok := own.instance.(IManageSearch); ok {
-			data := ms.OnSearchData(result, childitem.Total)
+			data := ms.OnSearchData(resultPtr.Elem().Interface(), childitem.Total)
 			return ms.ChildSearchAfter(own, data, req)
 		}
 		return nil, err

@@ -1,8 +1,6 @@
 module github.com/digitalwayhk/core
 
-go 1.24.0
-
-toolchain go1.24.12
+go 1.26.0
 
 require (
 	github.com/getkin/kin-openapi v0.94.0
@@ -37,7 +35,6 @@ require (
 	golang.org/x/time v0.10.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/clickhouse v0.7.0
-	gorm.io/driver/postgres v1.6.0
 )
 
 require (
@@ -69,10 +66,6 @@ require (
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/hashicorp/go-version v1.6.0 // indirect
-	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.4 // indirect
-	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/marten-seemann/qpack v0.2.1 // indirect
 	github.com/marten-seemann/qtls-go1-18 v0.1.2 // indirect
@@ -153,7 +146,7 @@ require (
 	go.opentelemetry.io/otel/exporters/zipkin v1.24.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.39.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
-	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	google.golang.org/grpc v1.65.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect

@@ -162,20 +162,32 @@ func (m *MySQL) GetConfig() *Config {
 // ==================== 核心方法（与 SQLite 保持一致）====================
 
 func (m *MySQL) ensureValidConnection() error {
+	// 🔧 检查连接是否为 nil
 	if m.db == nil {
-		_, err := m.GetDB()
-		return err
+		logx.Info("🔧 连接为 nil，尝试重新创建连接...")
+		return m.recreateConnection()
 	}
 
-	// 🔧 检查连接是否有效
+	// 🔧 测试连接
 	sqlDB, err := m.db.DB()
 	if err != nil {
 		logx.Errorf("获取底层数据库连接失败: %v", err)
 		return m.recreateConnection()
 	}
 
-	// 🔧 测试连接
+	// 🔧 检查连接是否已关闭
 	if err := sqlDB.Ping(); err != nil {
+		errStr := err.Error()
+
+		// 🔧 连接已关闭，需要重建
+		if strings.Contains(errStr, "database is closed") ||
+			strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "bad connection") {
+			logx.Infof("🔧 检测到连接已关闭，尝试重新连接: %v", err)
+			return m.recreateConnection()
+		}
+
+		// 其他网络错误也尝试重连
 		logx.Errorf("数据库连接ping失败: %v", err)
 		return m.recreateConnection()
 	}
@@ -183,34 +195,65 @@ func (m *MySQL) ensureValidConnection() error {
 	return nil
 }
 
-// 🔧 重建连接的方法
+// 🔧 重建连接的方法（增强版）
 func (m *MySQL) recreateConnection() error {
 	// 清理当前连接
 	m.cleanupCurrentConnection()
 
-	// 重新获取连接
-	newDB, err := m.GetDB()
-	if err != nil {
-		return fmt.Errorf("重建数据库连接失败: %v", err)
+	// 🔧 添加重试机制
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		// 延迟重试
+		if i > 0 {
+			waitTime := time.Duration(i) * time.Second
+			logx.Infof("⏳ 等待 %v 后重试连接...", waitTime)
+			time.Sleep(waitTime)
+		}
+
+		// 重新获取连接
+		db, err := m.GetDB()
+		if err != nil {
+			logx.Errorf("❌ 第 %d 次重建连接失败: %v", i+1, err)
+			if i == maxRetries-1 {
+				return fmt.Errorf("重建连接失败（已重试 %d 次）: %v", maxRetries, err)
+			}
+			continue
+		}
+
+		m.db = db
+		logx.Info("✅ 数据库连接重建成功")
+		return nil
 	}
 
-	m.db = newDB
-	logx.Infof("数据库连接已重建: %s", m.Name)
-	return nil
+	return fmt.Errorf("重建连接失败: 已达到最大重试次数")
 }
 
-// 🔧 清理当前连接
+// 🔧 清理当前连接（增强版）
 func (m *MySQL) cleanupCurrentConnection() {
-	if m.db != nil {
-		if sqlDB, err := m.db.DB(); err == nil {
-			sqlDB.Close()
-		}
-		m.db = nil
+	if m.db == nil {
+		return
 	}
 
+	// 关闭底层连接
+	if sqlDB, err := m.db.DB(); err == nil {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			logx.Errorf("关闭数据库连接失败: %v", closeErr)
+		} else {
+			logx.Info("🔧 已关闭旧的数据库连接")
+		}
+	}
+
+	// 清空当前连接
+	m.db = nil
+	m.tx = nil
+	m.isTansaction = false
+
 	// 从连接池中移除
-	connKey := m.getConnectionKey()
-	connManager.SetConnection(connKey, nil)
+	if m.Name != "" {
+		connKey := m.getConnectionKey()
+		connManager.Remove(connKey)
+		logx.Infof("🔧 已从连接池移除: %s", connKey)
+	}
 }
 
 // 延迟表检查方法
@@ -522,29 +565,24 @@ func (m *MySQL) getLogger() logger.Interface {
 	return logger.Default.LogMode(logger.Error)
 }
 
-// HasTable 检查并创建表（与 SQLite 逻辑完全一致）
+// HasTable 检查并创建表（增强版）
 func (m *MySQL) HasTable(model interface{}) error {
 	// 🔧 先获取数据库名
-	if err := m.GetDBName(model); err != nil {
+	err := m.GetDBName(model)
+	if err != nil {
 		return err
 	}
 
 	if m.db == nil {
-		db, err := m.GetDB()
+		_, err := m.GetDB()
 		if err != nil {
 			return err
 		}
-		m.db = db
 	}
 
-	if _, ok := model.(types.IDBSQL); ok {
-		return nil
-	}
-
-	// ...existing code... (后续逻辑保持不变)
 	modelType := reflect.TypeOf(model)
 	if modelType == nil {
-		return fmt.Errorf("model 不能为 nil")
+		return errors.New("模型为 nil")
 	}
 
 	pointerDepth := 0
@@ -555,11 +593,11 @@ func (m *MySQL) HasTable(model interface{}) error {
 	}
 
 	if finalType.Kind() != reflect.Struct {
-		return fmt.Errorf("model 必须是结构体或结构体指针，当前类型: %v", modelType)
+		return errors.New("模型必须是结构体类型")
 	}
 
 	if pointerDepth > 1 {
-		logx.Errorf("HasTable 检测到 %d 层指针: %v -> %v", pointerDepth, modelType, finalType)
+		return errors.New("模型不能是多级指针")
 	}
 
 	tableName := m.db.NamingStrategy.TableName(finalType.Name())
@@ -568,34 +606,72 @@ func (m *MySQL) HasTable(model interface{}) error {
 		TableName: tableName,
 	}
 
-	if _, exists := tableCache.Load(cacheKey); exists {
-		return nil
-	}
-
 	migrationLock.Lock()
 	defer migrationLock.Unlock()
 
-	if _, exists := tableCache.Load(cacheKey); exists {
-		return nil
-	}
-
+	// 🔧 强制检查数据库中的表是否真实存在（不信任缓存）
 	var count int64
-	err := m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+	err = m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
 		m.Name, tableName).Scan(&count).Error
-	if err == nil && count > 0 {
-		tableCache.Store(cacheKey, true)
-		return nil
-	}
 
-	modelForMigration := reflect.New(finalType).Interface()
-
-	err = m.db.AutoMigrate(modelForMigration)
 	if err != nil {
-		logx.Errorf("创建表失败: %s, 错误: %v, 输入类型: %v, 迁移类型: %v",
-			tableName, err, modelType, reflect.TypeOf(modelForMigration))
+		logx.Errorf("检查表是否存在失败: %s.%s, 错误: %v", m.Name, tableName, err)
+		// 🔧 清除缓存
+		tableCache.Delete(cacheKey)
 		return err
 	}
 
+	// 🔧 表已存在且缓存有效
+	if count > 0 {
+		// 表存在，但可能需要更新结构
+		modelForMigration := reflect.New(finalType).Interface()
+		if err := m.safeAutoMigrate(modelForMigration, tableName); err != nil {
+			logx.Errorf("更新表结构失败: %s, 错误: %v", tableName, err)
+			// 不返回错误，允许继续使用现有表
+		}
+
+		tableCache.Store(cacheKey, true)
+		return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
+	}
+
+	// 🔧 表不存在，创建表
+	logx.Infof("🔧 表不存在，开始创建: %s.%s", m.Name, tableName)
+
+	modelForMigration := reflect.New(finalType).Interface()
+
+	// 🔧 使用更安全的创建方式
+	migrator := m.db.Migrator()
+
+	// 方式1：先尝试 CreateTable
+	if err := migrator.CreateTable(modelForMigration); err != nil {
+		errStr := err.Error()
+
+		// 如果是"表已存在"错误，说明并发创建了
+		if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "Error 1050") {
+			logx.Infof("⚠️ 表已被其他进程创建: %s", tableName)
+			tableCache.Store(cacheKey, true)
+			return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
+		}
+
+		// 其他错误，尝试 AutoMigrate
+		logx.Errorf("CreateTable 失败，尝试 AutoMigrate: %s, 错误: %v", tableName, err)
+		if err := m.safeAutoMigrate(modelForMigration, tableName); err != nil {
+			logx.Errorf("AutoMigrate 也失败: %s, 错误: %v", tableName, err)
+			return err
+		}
+	}
+
+	// 🔧 再次验证表是否创建成功
+	var verifyCount int64
+	err = m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+		m.Name, tableName).Scan(&verifyCount).Error
+
+	if err != nil || verifyCount == 0 {
+		tableCache.Delete(cacheKey)
+		return fmt.Errorf("表创建失败或验证失败: %s.%s", m.Name, tableName)
+	}
+
+	logx.Infof("✅ 表创建成功: %s.%s", m.Name, tableName)
 	tableCache.Store(cacheKey, true)
 
 	return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
@@ -626,7 +702,6 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 				return
 			}
 
-			// 🔧 关键修复：先检查嵌套表是否已存在
 			nestedTableName := m.db.NamingStrategy.TableName(name1)
 			var tableExists int64
 			err := m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
@@ -637,28 +712,88 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 				return
 			}
 
-			// 🔧 只有在表不存在时才创建
-			if tableExists == 0 {
-				obj := reflect.New(t).Interface()
+			obj := reflect.New(t).Interface()
 
-				// 🔧 使用 Migrator.CreateTable 而不是 AutoMigrate
-				// CreateTable 只创建表结构，不会尝试同步外键约束
+			if tableExists == 0 {
+				// 🔧 表不存在，使用 CreateTable 创建
 				migrator := m.db.Migrator()
 				if err := migrator.CreateTable(obj); err != nil {
 					logx.Errorf("创建嵌套表失败: %s -> %s, 错误: %v", pname, name1, err)
 					return
 				}
 				logx.Infof("✅ 创建嵌套表成功: %s", nestedTableName)
-
-				// 递归处理更深层的嵌套（只在新创建的表上）
-				m.processNestedTablesOptimized(obj, processed, depth+1, maxDepth)
 			} else {
-				// 表已存在，跳过迁移和递归
-				logx.Infof("嵌套表已存在，跳过迁移: %s", nestedTableName)
+				// 🔧 表已存在，使用安全的迁移方式
+				if err := m.safeAutoMigrate(obj, nestedTableName); err != nil {
+					logx.Errorf("迁移嵌套表失败: %s, 错误: %v", nestedTableName, err)
+					return
+				}
 			}
+
+			// 递归处理更深层的嵌套
+			m.processNestedTablesOptimized(obj, processed, depth+1, maxDepth)
 		}
 	})
 
+	return nil
+}
+
+// safeAutoMigrate 安全的自动迁移方法（完全重写）
+func (m *MySQL) safeAutoMigrate(model interface{}, tableName string) error {
+	migrator := m.db.Migrator()
+
+	// 🔧 获取模型的 schema 信息
+	stmt := &gorm.Statement{DB: m.db}
+	if err := stmt.Parse(model); err != nil {
+		return err
+	}
+
+	// 🔧 手动添加缺失的列（不使用 AutoMigrate）
+	for _, field := range stmt.Schema.Fields {
+		if field.DBName == "" {
+			continue
+		}
+
+		// 检查列是否存在
+		hasColumn := migrator.HasColumn(model, field.DBName)
+		if !hasColumn {
+			// 只添加新列
+			if err := migrator.AddColumn(model, field.DBName); err != nil {
+				errStr := err.Error()
+				// 忽略列已存在的错误
+				if !strings.Contains(errStr, "Duplicate column") &&
+					!strings.Contains(errStr, "Error 1060") {
+					logx.Errorf("添加列失败: %s.%s - %v", tableName, field.DBName, err)
+				}
+			} else {
+				logx.Infof("✅ 添加新列: %s.%s", tableName, field.DBName)
+			}
+		}
+	}
+
+	// 🔧 手动创建索引（跳过已存在的）
+	for _, idx := range stmt.Schema.ParseIndexes() {
+		// 跳过有问题的索引名称
+		if strings.Contains(idx.Name, "hashcode") {
+			logx.Infof("⚠️ 跳过 hashcode 索引: %s.%s", tableName, idx.Name)
+			continue
+		}
+
+		if !migrator.HasIndex(model, idx.Name) {
+			if err := migrator.CreateIndex(model, idx.Name); err != nil {
+				errStr := err.Error()
+				if !strings.Contains(errStr, "Duplicate key") &&
+					!strings.Contains(errStr, "Error 1061") &&
+					!strings.Contains(errStr, "already exists") {
+					logx.Infof("⚠️ 创建索引失败（忽略）: %s.%s - %v", tableName, idx.Name, err)
+				}
+			} else {
+				logx.Infof("✅ 创建索引: %s.%s", tableName, idx.Name)
+			}
+		}
+	}
+
+	logx.Infof("✅ 表迁移完成: %s", tableName)
 	return nil
 }
 
@@ -711,24 +846,57 @@ func (m *MySQL) Transaction() error {
 	return nil
 }
 
-// errorHandler 错误处理（MySQL 版本）
+// errorHandler 错误处理（MySQL 版本 - 增强版）
 func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, data interface{}) error) error {
 	if err == nil {
-		return nil
+		return fn(m.db, data)
 	}
 
 	// MySQL 特定的错误检查
 	errStr := err.Error()
-	if strings.Contains(errStr, "Unknown column") ||
-		strings.Contains(errStr, "doesn't exist") ||
-		strings.Contains(errStr, "Table") && strings.Contains(errStr, "doesn't exist") ||
-		strings.Contains(errStr, "Column") && strings.Contains(errStr, "cannot be null") {
 
-		err := m.db.AutoMigrate(data)
-		if err == nil {
-			return fn(m.db, data)
+	// 🔧 表不存在错误
+	if strings.Contains(errStr, "doesn't exist") || strings.Contains(errStr, "Error 1146") {
+		logx.Infof("🔧 检测到表不存在错误，尝试创建表: %v", err)
+
+		// 清除表缓存
+		if m.Name != "" {
+			modelType := reflect.TypeOf(data)
+			if modelType.Kind() == reflect.Ptr {
+				modelType = modelType.Elem()
+			}
+			tableName := m.db.NamingStrategy.TableName(modelType.Name())
+			cacheKey := TableCacheKey{
+				DBPath:    m.Name,
+				TableName: tableName,
+			}
+			tableCache.Delete(cacheKey)
+			logx.Infof("🔧 清除表缓存: %s.%s", m.Name, tableName)
 		}
+
+		// 强制创建表
+		if err := m.HasTable(data); err != nil {
+			logx.Errorf("❌ 自动创建表失败: %v", err)
+			return err
+		}
+
+		// 重试操作
+		logx.Infof("🔄 表创建成功，重试操作...")
+		return fn(m.db, data)
 	}
+
+	// 🔧 字段不存在或其他结构问题
+	if strings.Contains(errStr, "Unknown column") ||
+		strings.Contains(errStr, "Column") && strings.Contains(errStr, "cannot be null") {
+		logx.Infof("🔧 检测到字段错误，尝试更新表结构: %v", err)
+
+		if err := m.HasTable(data); err != nil {
+			return err
+		}
+
+		return fn(m.db, data)
+	}
+
 	return err
 }
 

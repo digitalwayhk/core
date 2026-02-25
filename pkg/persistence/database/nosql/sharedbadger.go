@@ -16,6 +16,33 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// ScanResult 分页扫描结果
+type ScanResult[T types.IModel] struct {
+	Items   []*T   `json:"items"`    // 数据列表
+	LastKey string `json:"last_key"` // 最后一个 key（用于下次分页）
+	HasMore bool   `json:"has_more"` // 是否还有更多数据
+}
+type OpType string
+
+const (
+	OpInsert OpType = "insert"
+	OpUpdate OpType = "update"
+	OpDelete OpType = "delete" // 🔧 删除操作
+)
+
+// SyncQueueItem 同步队列项（包装数据）
+type SyncQueueItem[T types.IModel] struct {
+	Key       string    `json:"key"`
+	Item      *T        `json:"item,omitempty"`
+	Op        OpType    `json:"op"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	IsSynced  bool      `json:"is_synced"`
+	SyncedAt  time.Time `json:"synced_at,omitempty"`
+	IsDeleted bool      `json:"is_deleted"`
+	DeletedAt time.Time `json:"deleted_at,omitempty"`
+}
+
 // PrefixedBadgerDB 带前缀的共享 BadgerDB
 type PrefixedBadgerDB[T types.IModel] struct {
 	manager *SharedBadgerManager
@@ -35,6 +62,11 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	pendingCountCache int
 	pendingCountMutex sync.RWMutex
 	lastCountUpdate   time.Time
+
+	// ✅ 关闭状态控制
+	closeOnce sync.Once
+	closed    bool
+	closeMu   sync.RWMutex
 }
 
 // NewSharedBadgerDB 创建共享 BadgerDB 实例
@@ -98,6 +130,9 @@ func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
 
 // Set 写入数据
 func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper *SyncQueueItem[T])) error {
+	if p.IsClosed() {
+		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
 	key := p.generateKey(item)
 	if key == "" {
 		return badger.ErrEmptyKey
@@ -126,6 +161,9 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 	return err
 }
 func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
+	if p.IsClosed() {
+		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
 	if len(items) == 0 {
 		return nil
 	}
@@ -211,6 +249,9 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 
 // Get 获取数据
 func (p *PrefixedBadgerDB[T]) Get(key string) (*T, error) {
+	if p.IsClosed() {
+		return nil, fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
 	fullKey := p.prefix + key
 	wrapper, err := p.getWrapper(fullKey)
 	if err != nil {
@@ -254,6 +295,9 @@ func (p *PrefixedBadgerDB[T]) getWrapper(key string) (*SyncQueueItem[T], error) 
 
 // Delete 删除数据
 func (p *PrefixedBadgerDB[T]) Delete(key string) error {
+	if p.IsClosed() {
+		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
 	fullKey := p.prefix + key
 
 	p.syncLock.RLock()
@@ -347,6 +391,9 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 
 // Scan 扫描数据（仅扫描当前前缀）
 func (p *PrefixedBadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
+	if p.IsClosed() {
+		return nil, fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
 	var results []*T
 	prefix = p.prefix + prefix
 	err := p.manager.db.View(func(txn *badger.Txn) error {
@@ -650,13 +697,38 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 				p.prefix, pendingCount, remainingCount, duration, interval)
 
 		case <-p.closeCh:
+			// ✅ 优化：添加超时保护，避免无限等待
+			logx.Infof("收到关闭信号 [prefix=%s]", p.prefix)
+
 			p.syncMutex.Lock()
-			for p.syncInProgress {
+			if p.syncInProgress {
 				p.syncMutex.Unlock()
-				time.Sleep(100 * time.Millisecond)
-				p.syncMutex.Lock()
+
+				// 等待同步完成，最多等待 10 秒
+				logx.Infof("等待当前同步操作完成 [prefix=%s]", p.prefix)
+				timeout := time.After(10 * time.Second)
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-timeout:
+						logx.Errorf("等待同步完成超时（10秒），强制退出 [prefix=%s]", p.prefix)
+						return
+					case <-ticker.C:
+						p.syncMutex.Lock()
+						if !p.syncInProgress {
+							p.syncMutex.Unlock()
+							logx.Infof("同步操作已完成 [prefix=%s]", p.prefix)
+							logx.Infof("syncToOtherDB 退出 [prefix=%s]", p.prefix)
+							return
+						}
+						p.syncMutex.Unlock()
+					}
+				}
+			} else {
+				p.syncMutex.Unlock()
 			}
-			p.syncMutex.Unlock()
 
 			logx.Infof("syncToOtherDB 退出 [prefix=%s]", p.prefix)
 			return
@@ -863,6 +935,18 @@ func (p *PrefixedBadgerDB[T]) onSyncAfter(items []*SyncQueueItem[T]) {
 		if err != nil {
 			logx.Errorf("执行 OnSyncAfter 失败: %v", err)
 		}
+	}
+}
+func setHashCode(item any) {
+	if item == nil {
+		return
+	}
+	if rowCode, ok := item.(types.IRowCode); ok {
+		hash := rowCode.GetHash()
+		if hash == "" {
+			logx.Errorf("IRowCode GetHash 返回空字符串，可能导致 key 生成失败")
+		}
+		rowCode.SetHashcode(hash)
 	}
 }
 
@@ -1488,13 +1572,72 @@ func (p *PrefixedBadgerDB[T]) CountByPrefix(subPrefix string) (int, error) {
 
 // Close 关闭实例
 func (p *PrefixedBadgerDB[T]) Close() error {
-	close(p.closeCh)
-	p.wg.Wait()
+	return p.CloseWithTimeout(30*time.Second, 10*time.Second)
+}
 
-	p.manager.RemoveRef(p.prefix)
+// CloseWithTimeout 带超时的关闭实例
+func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Duration) error {
+	// ✅ 使用 sync.Once 确保只关闭一次
+	p.closeOnce.Do(func() {
+		// 标记为已关闭
+		p.closeMu.Lock()
+		p.closed = true
+		p.closeMu.Unlock()
 
-	logx.Infof("共享BadgerDB实例已关闭 [prefix=%s]", p.prefix)
+		// 关闭 channel，通知 goroutine 退出
+		close(p.closeCh)
+
+		// ✅ 等待 goroutine 退出（带超时）
+		done := make(chan struct{})
+		go func() {
+			p.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			logx.Infof("后台同步 goroutine 已退出 [prefix=%s]", p.prefix)
+		case <-time.After(waitTimeout):
+			logx.Errorf("等待后台 goroutine 退出超时（%v），强制关闭 [prefix=%s]", waitTimeout, p.prefix)
+
+			// ✅ 检查是否还在同步中
+			p.syncMutex.Lock()
+			if p.syncInProgress {
+				logx.Errorf("检测到正在进行的同步操作（等待最多 %v）[prefix=%s]", syncTimeout, p.prefix)
+
+				// 等待同步完成或超时
+				syncDone := make(chan struct{})
+				go func() {
+					for p.syncInProgress {
+						time.Sleep(100 * time.Millisecond)
+					}
+					close(syncDone)
+				}()
+
+				select {
+				case <-syncDone:
+					logx.Infof("同步操作已完成 [prefix=%s]", p.prefix)
+				case <-time.After(syncTimeout):
+					logx.Errorf("等待同步完成超时（%v），强制退出 [prefix=%s]", syncTimeout, p.prefix)
+				}
+			}
+			p.syncMutex.Unlock()
+		}
+
+		// 移除管理器引用
+		p.manager.RemoveRef(p.prefix)
+
+		logx.Infof("共享BadgerDB实例已关闭 [prefix=%s]", p.prefix)
+	})
+
 	return nil
+}
+
+// IsClosed 检查实例是否已关闭
+func (p *PrefixedBadgerDB[T]) IsClosed() bool {
+	p.closeMu.RLock()
+	defer p.closeMu.RUnlock()
+	return p.closed
 }
 
 // 🆕 CheckAndEnforceLimit 检查并执行数量限制

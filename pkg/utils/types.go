@@ -223,11 +223,10 @@ func SetPropertyValue(sender interface{}, name string, value interface{}) error 
 		})
 		if vv.CanSet() && value != nil {
 			v, err := valueToTypeValue(value, vv.Type())
-			if err == nil {
-				vv.Set(v)
-			} else {
-				return fmt.Errorf("设置%s属性值%s异常:%s", name, value, err)
+			if err != nil {
+				return fmt.Errorf("设置%s属性值%v异常:%s", name, value, err)
 			}
+			vv.Set(v)
 		}
 	}
 	return nil
@@ -235,11 +234,20 @@ func SetPropertyValue(sender interface{}, name string, value interface{}) error 
 func valueToTypeValue(value interface{}, changeType reflect.Type) (reflect.Value, error) {
 	vtype := reflect.TypeOf(value)
 	vv := reflect.ValueOf(value)
-	if vtype != changeType {
-		ss := convertString(vv)
-		return convertOp1(ss, vtype)
+
+	// 如果类型相同，直接返回
+	if vtype == changeType {
+		return vv, nil
 	}
-	return vv, nil
+
+	// 如果可以直接转换，使用Convert
+	if vtype.ConvertibleTo(changeType) {
+		return vv.Convert(changeType), nil
+	}
+
+	// 否则，通过字符串中转进行转换
+	ss := convertString(vv)
+	return convertOp1(ss, changeType)
 }
 func GetParentType(target interface{}) interface{} {
 	stype := reflect.TypeOf(target)

@@ -10,6 +10,14 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// badgerLogger 日志适配器
+type badgerLogger struct{}
+
+func (l *badgerLogger) Errorf(f string, v ...interface{})   { logx.Errorf(f, v...) }
+func (l *badgerLogger) Warningf(f string, v ...interface{}) { logx.Infof(f, v...) }
+func (l *badgerLogger) Infof(f string, v ...interface{})    { logx.Infof(f, v...) }
+func (l *badgerLogger) Debugf(f string, v ...interface{})   {}
+
 type ISyncAfterDelete[T types.IModel] interface {
 	IsSyncAfterDelete() bool
 }

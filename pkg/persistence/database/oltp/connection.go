@@ -66,7 +66,17 @@ func (cm *ConnectionManager) GetConnection(key string) (*gorm.DB, bool) {
 	}
 	return nil, false
 }
+func (cm *ConnectionManager) Remove(key string) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	if info, exists := cm.connections[key]; exists && info.DB != nil {
+		if sqlDB, err := info.DB.DB(); err == nil {
+			sqlDB.Close()
+		}
+		delete(cm.connections, key)
+	}
 
+}
 func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()

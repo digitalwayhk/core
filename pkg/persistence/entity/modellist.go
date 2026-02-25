@@ -534,12 +534,12 @@ func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) e
 	return err
 }
 func (own *ModelList[T]) load(item *types.SearchItem) error {
-	defer func() {
-		if err := recover(); err != nil {
-			msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法 或 error:" + fmt.Sprint(err) + "/r/n 查询信息:" + utils.PrintObj(item))
-			logx.Error(msg)
-		}
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法 或 error:" + fmt.Sprint(err) + "/r/n 查询信息:" + utils.PrintObj(item))
+	// 		logx.Error(msg)
+	// 	}
+	// }()
 	if err := own.searchHook(item); err != nil {
 		return err
 	}

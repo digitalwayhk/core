@@ -206,7 +206,7 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 		if item.IsPreload {
 			db = db.Preload(clause.Associations)
 		}
-		tx = db.Find(result)
+		tx = db.Scan(result)
 		if tx.Error != nil {
 			logx.Errorf("load find error: %v", tx.Error)
 			return tx.Error

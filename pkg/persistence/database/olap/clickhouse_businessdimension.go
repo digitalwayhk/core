@@ -386,6 +386,7 @@ func (ch *ClickHouse) UpdateBusinessViewConfig(config *BusinessDimensionConfig) 
 // 🆕 批量创建业务视图（从配置列表）
 func (ch *ClickHouse) CreateBusinessViewsFromConfigs(configs []*BusinessDimensionConfig) error {
 	for _, config := range configs {
+		config.CreatedAt = time.Now()
 		// 保存配置
 		if err := ch.SaveBusinessViewConfig(config); err != nil {
 			logx.Errorf("保存配置失败 [%s]: %v", config.ViewName, err)
