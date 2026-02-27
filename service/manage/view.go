@@ -106,6 +106,7 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 }
 func (own *View[T]) getmv(req types.IRequest) (IManageView, *view.ViewModel) {
 	vm := &view.ViewModel{}
+	vm.ShowComvtp = true
 	if own.instance != nil {
 		if mv, ok := own.instance.(IManageView); ok {
 			if ms, ok := own.instance.(IManageService); ok {
