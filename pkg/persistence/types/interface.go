@@ -96,6 +96,9 @@ type IRowState interface {
 type IScopes interface {
 	ScopesHandler() func(*gorm.DB) *gorm.DB
 }
+type ISession interface {
+	GetSession() *gorm.Session
+}
 type IScopesTableName interface {
 	TableName() string
 }

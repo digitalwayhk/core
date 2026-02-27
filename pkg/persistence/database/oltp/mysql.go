@@ -838,11 +838,26 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 
 func (m *MySQL) Transaction() error {
 	// 🔧 确保数据库连接已建立
-	if m.db == nil {
-		return errors.New("database connection not established, call GetDBName() and GetDB() first")
-	}
+	// if m.db == nil {
+	// 	// 🆕 如果没有数据库名，无法开启事务
+	// 	if m.Name == "" {
+	// 		return errors.New("database name not set, cannot start transaction")
+	// 	}
+
+	// 	// 🆕 自动获取数据库连接
+	// 	_, err := m.GetDB()
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to establish database connection: %v", err)
+	// 	}
+	// }
+
+	// // 🔧 确保连接有效
+	// if err := m.ensureValidConnection(); err != nil {
+	// 	return fmt.Errorf("database connection is invalid: %v", err)
+	// }
 
 	m.isTansaction = true
+	logx.Info("✅ 事务已开启")
 	return nil
 }
 
@@ -1124,4 +1139,96 @@ func (m *MySQL) clearTableCache() {
 		}
 		return true
 	})
+}
+
+// Exists 判断数据行是否存在
+func (m *MySQL) Exists(data interface{}) (bool, error) {
+	err := m.init(data)
+	if err != nil {
+		return false, err
+	}
+
+	// 确保表存在
+	if err := m.ensureTable(data); err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if m.isTansaction {
+		db = m.tx
+	} else {
+		db = m.db
+	}
+
+	// 🔧 调用通用方法
+	return existsData(db, data)
+}
+
+// ExistsByCondition 根据自定义条件判断数据行是否存在
+func (m *MySQL) ExistsByCondition(model interface{}, condition string, args ...interface{}) (bool, error) {
+	err := m.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	// 确保表存在
+	if err := m.ensureTable(model); err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if m.isTansaction {
+		db = m.tx
+	} else {
+		db = m.db
+	}
+
+	// 🔧 调用通用方法
+	return existsByCondition(db, model, condition, args...)
+}
+
+// ExistsByHashcode 根据 hashcode 判断数据行是否存在（快速方法）
+func (m *MySQL) ExistsByHashcode(model interface{}, hashcode string) (bool, error) {
+	err := m.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	// 确保表存在
+	if err := m.ensureTable(model); err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if m.isTansaction {
+		db = m.tx
+	} else {
+		db = m.db
+	}
+
+	// 🔧 调用通用方法
+	return existsByHashcode(db, model, hashcode)
+}
+
+// ExistsByID 根据 ID 判断数据行是否存在（快速方法）
+func (m *MySQL) ExistsByID(model interface{}, id int64) (bool, error) {
+	err := m.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	// 确保表存在
+	if err := m.ensureTable(model); err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if m.isTansaction {
+		db = m.tx
+	} else {
+		db = m.db
+	}
+
+	// 🔧 调用通用方法
+	return existsByID(db, model, id)
 }

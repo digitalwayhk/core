@@ -747,3 +747,74 @@ func (own *Sqlite) DetachDatabase(aliasName string) error {
 	sql := fmt.Sprintf("DETACH DATABASE %s", aliasName)
 	return own.db.Exec(sql).Error
 }
+
+// Exists 判断数据行是否存在
+func (s *Sqlite) Exists(data interface{}) (bool, error) {
+	err := s.init(data)
+	if err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if s.isTansaction {
+		db = s.tx
+	} else {
+		db = s.db
+	}
+
+	// 🔧 调用通用方法
+	return existsData(db, data)
+}
+
+// ExistsByCondition 根据自定义条件判断数据行是否存在
+func (s *Sqlite) ExistsByCondition(model interface{}, condition string, args ...interface{}) (bool, error) {
+	err := s.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if s.isTansaction {
+		db = s.tx
+	} else {
+		db = s.db
+	}
+
+	return existsByCondition(db, model, condition, args...)
+}
+
+// ExistsByHashcode 根据 hashcode 判断数据行是否存在
+func (s *Sqlite) ExistsByHashcode(model interface{}, hashcode string) (bool, error) {
+	err := s.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if s.isTansaction {
+		db = s.tx
+	} else {
+		db = s.db
+	}
+
+	return existsByHashcode(db, model, hashcode)
+}
+
+// ExistsByID 根据 ID 判断数据行是否存在
+func (s *Sqlite) ExistsByID(model interface{}, id int64) (bool, error) {
+	err := s.init(model)
+	if err != nil {
+		return false, err
+	}
+
+	var db *gorm.DB
+	if s.isTansaction {
+		db = s.tx
+	} else {
+		db = s.db
+	}
+
+	return existsByID(db, model, id)
+}
+
+// ...existing code...

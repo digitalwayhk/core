@@ -62,6 +62,9 @@ func createData(db *gorm.DB, data interface{}) error {
 		}
 		return nil
 	}
+	if iss, ok := data.(types.ISession); ok {
+		db = db.Session(iss.GetSession())
+	}
 	tx := db.Create(data)
 	if tx.Error != nil {
 		logx.Errorf("create data error: %v", tx.Error)
@@ -69,6 +72,9 @@ func createData(db *gorm.DB, data interface{}) error {
 	}
 	return nil
 }
+
+// ...existing code...
+
 func updateData(db *gorm.DB, data interface{}) error {
 	if db == nil {
 		return errors.New("database connection is nil")
@@ -80,6 +86,32 @@ func updateData(db *gorm.DB, data interface{}) error {
 		}
 		return nil
 	}
+	if iss, ok := data.(types.ISession); ok {
+		db = db.Session(iss.GetSession())
+	}
+
+	// 🔧 如果数据实现了 IModel 接口，使用 hashcode 作为条件
+	if model, ok := data.(types.IModel); ok {
+		// 获取 hashcode（假设在 IModel 中有 GetHashcode 方法）
+		hashcode := getHashcode(data)
+		if hashcode != "" {
+			tx := db.Where("hashcode = ?", hashcode).Updates(data)
+			if tx.Error != nil {
+				logx.Errorf("update data error: %v", tx.Error)
+				return tx.Error
+			}
+			return nil
+		}
+
+		// 如果没有 hashcode，使用 ID
+		tx := db.Where("id = ?", model.GetID()).Updates(data)
+		if tx.Error != nil {
+			logx.Errorf("update data error: %v", tx.Error)
+			return tx.Error
+		}
+		return nil
+	}
+
 	tx := db.Save(data)
 	if tx.Error != nil {
 		logx.Errorf("update data error: %v", tx.Error)
@@ -87,6 +119,33 @@ func updateData(db *gorm.DB, data interface{}) error {
 	}
 	return nil
 }
+
+// getHashcode 通过反射获取 hashcode 字段
+func getHashcode(data interface{}) string {
+	if rowcode, ok := data.(types.IRowCode); ok {
+		return rowcode.GetHash()
+	}
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+
+	field := v.FieldByName("Hashcode")
+	if !field.IsValid() {
+		return ""
+	}
+
+	if field.Kind() == reflect.String {
+		return field.String()
+	}
+
+	return ""
+}
+
 func deleteData(db *gorm.DB, data interface{}) error {
 	if db == nil {
 		return errors.New("database connection is nil")
@@ -98,18 +157,34 @@ func deleteData(db *gorm.DB, data interface{}) error {
 		}
 		return nil
 	}
+	if iss, ok := data.(types.ISession); ok {
+		db = db.Session(iss.GetSession())
+	}
+	if rowcode, ok := data.(types.IRowCode); ok {
+		code := rowcode.GetHash()
+		if code != "" {
+			tx := db.Where("hashcode = ?", code).Delete(data)
+			if tx.Error != nil {
+				logx.Errorf("delete data error: %v", tx.Error)
+				return tx.Error
+			}
+			return nil
+		}
+	}
 	if model, ok := data.(types.IModel); ok {
-		tx := db.Delete(data, "id = ?", model.GetID())
-		if tx.Error != nil {
-			logx.Errorf("delete data error: %v", tx.Error)
-			return tx.Error
+		if model.GetID() > 0 {
+			tx := db.Where("id = ?", model.GetID()).Delete(data)
+			if tx.Error != nil {
+				logx.Errorf("delete data error: %v", tx.Error)
+				return tx.Error
+			}
+			return nil
 		}
-	} else {
-		tx := db.Delete(data)
-		if tx.Error != nil {
-			logx.Errorf("delete data error: %v", tx.Error)
-			return tx.Error
-		}
+	}
+	tx := db.Delete(data)
+	if tx.Error != nil {
+		logx.Errorf("delete data error: %v", tx.Error)
+		return tx.Error
 	}
 	return nil
 }
@@ -264,4 +339,123 @@ func DropTable(db *gorm.DB, dst interface{}) error {
 		return err
 	}
 	return nil
+}
+
+// existsData 判断数据行是否存在（通用方法）
+func existsData(db *gorm.DB, data interface{}) (bool, error) {
+	if db == nil {
+		return false, errors.New("database connection is nil")
+	}
+
+	// 🔧 优先使用 hashcode 作为查询条件
+	if rowcode, ok := data.(types.IRowCode); ok {
+		hashcode := rowcode.GetHash()
+		if hashcode == "" {
+			hashcode = rowcode.GetHash()
+		}
+
+		if hashcode != "" {
+			var count int64
+			err := db.Model(data).Where("hashcode = ?", hashcode).Count(&count).Error
+			if err != nil {
+				return false, err
+			}
+			return count > 0, nil
+		}
+	}
+
+	// 🔧 使用 ID 作为查询条件
+	if model, ok := data.(types.IModel); ok {
+		id := model.GetID()
+		if id > 0 {
+			var count int64
+			err := db.Model(data).Where("id = ?", id).Count(&count).Error
+			if err != nil {
+				return false, err
+			}
+			return count > 0, nil
+		}
+	}
+
+	// 🔧 通过反射获取主键字段
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return false, errors.New("data must be a struct or pointer to struct")
+	}
+
+	// 尝试获取 ID 字段
+	if idField := v.FieldByName("ID"); idField.IsValid() && idField.Kind() == reflect.Int64 {
+		id := idField.Int()
+		if id > 0 {
+			var count int64
+			err := db.Model(data).Where("id = ?", id).Count(&count).Error
+			if err != nil {
+				return false, err
+			}
+			return count > 0, nil
+		}
+	}
+
+	return false, errors.New("cannot determine primary key: no hashcode, ID field, or IModel interface found")
+}
+
+// existsByCondition 根据自定义条件判断数据行是否存在（通用方法）
+func existsByCondition(db *gorm.DB, model interface{}, condition string, args ...interface{}) (bool, error) {
+	if db == nil {
+		return false, errors.New("database connection is nil")
+	}
+
+	if condition == "" {
+		return false, errors.New("condition cannot be empty")
+	}
+
+	var count int64
+	err := db.Model(model).Where(condition, args...).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// existsByHashcode 根据 hashcode 判断数据行是否存在（通用方法）
+func existsByHashcode(db *gorm.DB, model interface{}, hashcode string) (bool, error) {
+	if db == nil {
+		return false, errors.New("database connection is nil")
+	}
+
+	if hashcode == "" {
+		return false, errors.New("hashcode cannot be empty")
+	}
+
+	var count int64
+	err := db.Model(model).Where("hashcode = ?", hashcode).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// existsByID 根据 ID 判断数据行是否存在（通用方法）
+func existsByID(db *gorm.DB, model interface{}, id int64) (bool, error) {
+	if db == nil {
+		return false, errors.New("database connection is nil")
+	}
+
+	if id <= 0 {
+		return false, errors.New("id must be greater than 0")
+	}
+
+	var count int64
+	err := db.Model(model).Where("id = ?", id).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }

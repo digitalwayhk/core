@@ -961,7 +961,10 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 		logx.Errorf("未找到同步操作对象")
 		return nil
 	}
-
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
+	}
 	successKeys := make([]string, 0, len(items))
 	physicalDeleteKeys := make([]string, 0, len(items))
 
@@ -977,28 +980,53 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 		if wrapper.Item == nil {
 			continue
 		}
-
-		err := syncAction.Insert(wrapper.Item)
+		// 🆕 先检查数据是否存在（如果支持）
+		shouldUpdate := false
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && exists {
+				shouldUpdate = true
+				logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
+			}
+		}
+		var err error
+		if shouldUpdate {
+			// 直接更新
+			err = syncAction.Update(wrapper.Item)
+		} else {
+			// 尝试插入
+			err = syncAction.Insert(wrapper.Item)
+		}
 		if err != nil {
-			// 🔧 处理主键冲突 - 尝试更新
-			if strings.Contains(err.Error(), "duplicate key") ||
+			// 🔧 处理主键/唯一索引冲突 - 尝试更新
+			if strings.Contains(err.Error(), "Duplicate entry") ||
+				strings.Contains(err.Error(), "Error 1062") ||
+				strings.Contains(err.Error(), "duplicate key") ||
 				strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				logx.Infof("插入冲突，尝试更新 [%s]", wrapper.Key)
 
-				err = syncAction.Update(wrapper.Item)
-				if err == nil {
+				logx.Infof("插入冲突（唯一索引），尝试更新 [%s]: %v", wrapper.Key, err)
+
+				// 🆕 尝试更新
+				updateErr := syncAction.Update(wrapper.Item)
+				if updateErr == nil {
+					wrapper.IsSynced = true
+
 					// 🔧 修复：更新成功后也要检查是否物理删除
 					if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
 						if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
+							logx.Infof("ISyncAfterDelete 返回 true，将物理删除 [%s]", wrapper.Key)
 							physicalDeleteKeys = append(physicalDeleteKeys, wrapper.Key)
 							continue // 不加入 successKeys
 						}
 					}
+
 					successKeys = append(successKeys, wrapper.Key)
+					logx.Infof("✅ 插入冲突，更新成功 [%s]", wrapper.Key)
 					continue
 				}
 
-				logx.Errorf("更新失败 [%s]: %v", wrapper.Key, err)
+				// 🆕 更新也失败，详细记录错误
+				logx.Errorf("插入冲突后更新失败 [%s]: 插入错误=%v, 更新错误=%v", wrapper.Key, err, updateErr)
 				hasError = true
 				continue
 			}
@@ -1008,7 +1036,9 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 			hasError = true
 			continue
 		}
+
 		wrapper.IsSynced = true
+
 		// 🔧 插入成功，检查是否需要物理删除
 		if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
 			if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
@@ -1017,9 +1047,9 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 				continue // 🔧 不加入 successKeys
 			}
 		}
+
 		// 插入成功且不需要物理删除
 		successKeys = append(successKeys, wrapper.Key)
-
 	}
 
 	// 🔧 提交事务
@@ -1029,6 +1059,8 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 		if rollbackErr := syncAction.Rollback(); rollbackErr != nil {
 			logx.Errorf("回滚失败: %v", rollbackErr)
 		}
+
+		// 🆕 降级为逐条处理（会重试插入->更新）
 		successKeys = p.insertItemsOneByOne(items)
 	}
 
@@ -1041,6 +1073,9 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 
 	if hasError {
 		logx.Errorf("批量插入部分失败，成功: %d, 物理删除: %d, 总数: %d",
+			len(successKeys), len(physicalDeleteKeys), len(items))
+	} else {
+		logx.Infof("✅ 批量插入完成，成功: %d, 物理删除: %d, 总数: %d",
 			len(successKeys), len(physicalDeleteKeys), len(items))
 	}
 
@@ -1062,7 +1097,10 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 		logx.Errorf("未找到同步操作对象")
 		return nil
 	}
-
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
+	}
 	successKeys := make([]string, 0, len(items))
 	physicalDeleteKeys := make([]string, 0, len(items))
 
@@ -1103,8 +1141,23 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 			if wrapper.Item == nil {
 				continue
 			}
-
-			err := syncAction.Update(wrapper.Item)
+			// 🆕 先检查数据是否存在（如果支持）
+			shouldInsert := true
+			if existsChecker, ok := syncAction.(IExists); ok {
+				exists, err := existsChecker.Exists(wrapper.Item)
+				if err == nil && exists {
+					shouldInsert = false
+					logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
+				}
+			}
+			var err error
+			if shouldInsert {
+				// 直接更新
+				err = syncAction.Insert(wrapper.Item)
+			} else {
+				// 尝试插入
+				err = syncAction.Update(wrapper.Item)
+			}
 
 			if err != nil {
 				// 🔧 检查事务错误
@@ -1315,65 +1368,125 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 	return successKeys
 }
 
-// 🆕 逐条插入（无事务）
+// 🆕 逐条插入（无事务）- 增强错误处理
 func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []string {
 	successKeys := make([]string, 0, len(items))
-
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
+	}
 	for _, wrapper := range items {
 		if wrapper.Item == nil {
 			continue
 		}
+
 		wrapper.IsSynced = false
 		syncAction := p.getDataAction(wrapper.Item)
-		err := syncAction.Insert(wrapper.Item)
-		if err != nil {
-			// 🔧 处理主键冲突 - 尝试更新
-			if strings.Contains(err.Error(), "duplicate key") ||
-				strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				logx.Infof("插入冲突，尝试更新 [%s]", wrapper.Key)
 
-				err = syncAction.Update(wrapper.Item)
-				if err == nil {
+		// 🆕 先检查数据是否存在（如果支持）
+		shouldUpdate := false
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && exists {
+				shouldUpdate = true
+				logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
+			}
+		}
+		var err error
+		if shouldUpdate {
+			// 直接更新
+			err = syncAction.Update(wrapper.Item)
+		} else {
+			// 尝试插入
+			err = syncAction.Insert(wrapper.Item)
+		}
+		if err != nil {
+			// 🔧 处理主键/唯一索引冲突 - 尝试更新
+			if strings.Contains(err.Error(), "Duplicate entry") ||
+				strings.Contains(err.Error(), "Error 1062") ||
+				strings.Contains(err.Error(), "duplicate key") ||
+				strings.Contains(err.Error(), "UNIQUE constraint failed") {
+
+				logx.Infof("插入冲突（唯一索引），尝试更新 [%s]: %v", wrapper.Key, err)
+
+				updateErr := syncAction.Update(wrapper.Item)
+				if updateErr == nil {
+					wrapper.IsSynced = true
+
+					// 检查是否需要物理删除
+					if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
+						if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
+							if deleteErr := p.delete(wrapper.Key, false); deleteErr != nil {
+								logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, deleteErr)
+							}
+							continue // 不加入 successKeys
+						}
+					}
+
 					successKeys = append(successKeys, wrapper.Key)
+					logx.Infof("✅ 插入冲突，更新成功 [%s]", wrapper.Key)
 					continue
 				}
 
-				logx.Errorf("更新失败 [%s]: %v", wrapper.Key, err)
+				logx.Errorf("插入冲突后更新失败 [%s]: 插入错误=%v, 更新错误=%v", wrapper.Key, err, updateErr)
 				continue
 			}
 
 			logx.Errorf("插入失败 [%s]: %v", wrapper.Key, err)
 			continue
 		}
+
 		wrapper.IsSynced = true
+
+		// 插入成功，检查是否需要物理删除
 		if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
 			if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
-				err := p.delete(wrapper.Key, false)
-				if err != nil {
-					logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, err)
+				if deleteErr := p.delete(wrapper.Key, false); deleteErr != nil {
+					logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, deleteErr)
 				}
 				continue
 			}
 		}
-		successKeys = append(successKeys, wrapper.Key)
 
+		successKeys = append(successKeys, wrapper.Key)
 	}
 
+	logx.Infof("✅ 逐条插入完成，成功: %d/%d", len(successKeys), len(items))
 	return successKeys
 }
 
 // 🆕 逐条更新（无事务）
 func (p *PrefixedBadgerDB[T]) updateItemsOneByOne(items []*SyncQueueItem[T]) []string {
 	successKeys := make([]string, 0, len(items))
-
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
+	}
 	for _, wrapper := range items {
 		if wrapper.Item == nil {
 			continue
 		}
 		wrapper.IsSynced = false
 		syncAction := p.getDataAction(wrapper.Item)
-		err := syncAction.Update(wrapper.Item)
 
+		// 🆕 先检查数据是否存在（如果支持）
+		shouldUpdate := false
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && exists {
+				shouldUpdate = true
+				logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
+			}
+		}
+
+		var err error
+		if shouldUpdate {
+			// 直接更新
+			err = syncAction.Update(wrapper.Item)
+		} else {
+			// 尝试插入
+			err = syncAction.Insert(wrapper.Item)
+		}
 		if err != nil {
 			// 🔧 处理记录不存在 - 尝试插入
 			if strings.Contains(err.Error(), "record not found") ||
@@ -1818,4 +1931,125 @@ func (p *PrefixedBadgerDB[T]) SetWithAutoLimit(item *T, ttl time.Duration, fn ..
 	}()
 
 	return nil
+}
+
+// ForceSyncAll 强制同步所有待同步数据（阻塞式）
+func (p *PrefixedBadgerDB[T]) ForceSyncAll() error {
+	p.closeMu.RLock()
+	if p.closed {
+		p.closeMu.RUnlock()
+		return fmt.Errorf("BadgerDB 实例已关闭")
+	}
+	p.closeMu.RUnlock()
+
+	if !p.syncDB || p.syncList == nil {
+		return fmt.Errorf("同步功能未启用")
+	}
+
+	logx.Info("🔄 开始强制同步所有待同步数据...")
+
+	totalSynced := 0
+	maxIterations := 100 // 防止无限循环
+
+	for i := 0; i < maxIterations; i++ {
+		// 获取待同步数量
+		pendingCount, err := p.GetPendingSyncCount()
+		if err != nil {
+			logx.Errorf("获取待同步数量失败: %v", err)
+			return err
+		}
+
+		if pendingCount == 0 {
+			logx.Infof("✅ 强制同步完成，共同步 %d 条数据", totalSynced)
+			return nil
+		}
+
+		logx.Infof("📊 剩余待同步: %d 条（第 %d 次迭代）", pendingCount, i+1)
+
+		// 🔧 修复：调用 processSyncQueue 不传参数
+		err = p.processSyncQueue()
+		if err != nil {
+			logx.Errorf("强制同步失败: %v", err)
+			return err
+		}
+
+		// 🔧 检查同步后的剩余数量
+		newPendingCount, _ := p.GetPendingSyncCount()
+		syncedInThisBatch := pendingCount - newPendingCount
+
+		if syncedInThisBatch <= 0 {
+			logx.Errorf("⚠️ 同步未取得进展，退出循环（剩余: %d）", newPendingCount)
+			break
+		}
+
+		totalSynced += syncedInThisBatch
+		logx.Infof("✅ 本批次同步: %d 条", syncedInThisBatch)
+	}
+
+	remainingCount, _ := p.GetPendingSyncCount()
+	if remainingCount > 0 {
+		return fmt.Errorf("强制同步未完成，剩余 %d 条未同步数据", remainingCount)
+	}
+
+	logx.Infof("✅ 强制同步完成，共同步 %d 条数据", totalSynced)
+	return nil
+}
+
+// ForceSyncAsync 异步强制同步（不阻塞）
+func (p *PrefixedBadgerDB[T]) ForceSyncAsync() {
+	go func() {
+		if err := p.ForceSyncAll(); err != nil {
+			logx.Errorf("异步强制同步失败: %v", err)
+		}
+	}()
+}
+
+// GetSyncStatus 获取同步状态
+func (p *PrefixedBadgerDB[T]) GetSyncStatus() SyncStatus {
+	p.closeMu.RLock()
+	defer p.closeMu.RUnlock()
+
+	pendingCount, _ := p.GetPendingSyncCount()
+	totalCount := p.getTotalCount()
+
+	return SyncStatus{
+		PendingCount:   pendingCount,
+		TotalCount:     totalCount,
+		SyncedCount:    totalCount - pendingCount,
+		SyncInProgress: p.syncInProgress,
+		IsClosed:       p.closed,
+	}
+}
+
+// getTotalCount 获取总数据量
+func (p *PrefixedBadgerDB[T]) getTotalCount() int {
+	count := 0
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		prefix := []byte(p.prefix)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			count++
+		}
+		return nil
+	})
+
+	if err != nil {
+		logx.Errorf("获取总数失败: %v", err)
+		return 0
+	}
+
+	return count
+}
+
+// SyncStatus 同步状态
+type SyncStatus struct {
+	PendingCount   int  // 待同步数量
+	TotalCount     int  // 总数据量
+	SyncedCount    int  // 已同步数量
+	SyncInProgress bool // 是否正在同步
+	IsClosed       bool // 是否已关闭
 }
