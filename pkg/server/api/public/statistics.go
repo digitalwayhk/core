@@ -26,30 +26,30 @@ func (own *Statistics) Validation(req types.IRequest) error {
 func (own *Statistics) Do(req types.IRequest) (interface{}, error) {
 	items := make([]*router.AggregatedStats, 0)
 	if own.ServiceName != "" {
-		sc := router.GetContext(own.ServiceName)
-		if sc != nil {
-			stat, err := own.getServiceStatistics(sc)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, stat)
-		}
-	} else {
-		scs := router.GetContexts()
-		for _, sc := range scs {
-			stat, err := own.getServiceStatistics(sc)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, stat)
-		}
+		//sc := router.GetContext(own.ServiceName)
+		// if sc != nil {
+		// 	stat, err := own.getServiceStatistics(sc)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	items = append(items, stat)
+		// }
+		// } else {
+		// 	scs := router.GetContexts()
+		// 	for _, sc := range scs {
+		// 		stat, err := own.getServiceStatistics(sc)
+		// 		if err != nil {
+		// 			return nil, err
+		// 		}
+		// 		items = append(items, stat)
+		// 	}
 	}
 	return items, nil
 }
 
 func (own *Statistics) getServiceStatistics(sc *router.ServiceContext) (*router.AggregatedStats, error) {
-	stats := sc.GetAllRouterStats(own.FilterTypes, own.SortBy, own.Order)
-	return stats, nil
+	//stats := sc.GetAllRouterStats(own.FilterTypes, own.SortBy, own.Order)
+	return nil, nil
 }
 
 func (own *Statistics) RouterInfo() *types.RouterInfo {
