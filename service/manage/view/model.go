@@ -239,6 +239,7 @@ func (own *SearchItem) ToSearchItem() *types.SearchItem {
 						w.Value = val
 						continue
 					}
+					w.Column = field.PropField
 					w.Value, _ = utils.AnyToTypeData(w.Value, field.FieldType)
 				}
 			}
