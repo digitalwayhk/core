@@ -26,7 +26,7 @@ func (own *Operation[T]) New(instance interface{}) st.IRouter {
 			own.instance = instance
 		}
 	}
-	if gl, ok := instance.(IGetModelList); ok {
+	if gl, ok := own.instance.(IGetModelList); ok {
 		l := gl.GetList()
 		own.list = l.(*entity.ModelList[T])
 	}
