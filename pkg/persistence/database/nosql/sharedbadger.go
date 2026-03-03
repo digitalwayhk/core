@@ -215,7 +215,7 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 		wrapper.Op = OpUpdate
 		wrapper.Item = item
 		wrapper.UpdatedAt = time.Now()
-		wrapper.IsSynced = !needSync
+		wrapper.IsSynced = false
 		if irde, ok := any(item).(types.IRowDate); ok {
 			irde.SetUpdatedAt(wrapper.UpdatedAt)
 		}
@@ -227,7 +227,7 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 			Op:        OpInsert,
 			CreatedAt: now,
 			UpdatedAt: now,
-			IsSynced:  !needSync,
+			IsSynced:  false,
 			IsDeleted: false,
 		}
 		if irde, ok := any(item).(types.IRowDate); ok {
@@ -1286,10 +1286,15 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 	return successKeys
 }
 
-// 🆕 批量删除（使用事务）
+// 🆕 批量删除（使用事务）- 增强版
 func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueItem[T]) []string {
 	if len(items) == 0 {
 		return nil
+	}
+
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
 	}
 
 	syncAction := p.getDataAction(items[0].Item)
@@ -1314,12 +1319,41 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 			continue
 		}
 
+		// 🆕 删除前检查数据是否存在
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && !exists {
+				logx.Infof("数据不存在，跳过删除 [%s]", wrapper.Key)
+				successKeys = append(successKeys, wrapper.Key)
+				continue
+			}
+
+			// 🔧 如果数据存在，打印详细信息
+			if exists {
+				logx.Infof("🔍 准备删除数据 [%s]: %+v", wrapper.Key, wrapper.Item)
+			}
+		}
+
 		err := syncAction.Delete(wrapper.Item)
+
 		if err == nil {
+			// 🆕 删除成功后，再次验证数据是否真的被删除了
+			if existsChecker, ok := syncAction.(IExists); ok {
+				stillExists, checkErr := existsChecker.Exists(wrapper.Item)
+				if checkErr == nil && stillExists {
+					logx.Errorf("❌ 删除操作返回成功，但数据依然存在！[%s]", wrapper.Key)
+					logx.Errorf("   数据详情: %+v", wrapper.Item)
+					hasError = true
+					continue
+				}
+			}
+
 			// 删除成功
 			successKeys = append(successKeys, wrapper.Key)
 			wrapper.IsSynced = true
+			logx.Infof("✅ 删除成功并验证 [%s]", wrapper.Key)
 		}
+
 		if err != nil {
 			// 🔧 处理记录不存在 - 视为成功
 			if strings.Contains(err.Error(), "record not found") ||
@@ -1328,11 +1362,11 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 				successKeys = append(successKeys, wrapper.Key)
 				continue
 			}
+
 			logx.Errorf("删除失败 [%s]: %v", wrapper.Key, err)
 			hasError = true
 			continue
 		}
-
 	}
 
 	// 🔧 提交事务
@@ -1362,7 +1396,10 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 
 	if hasError {
 		logx.Errorf("批量删除部分失败，成功: %d/%d", len(successKeys), len(items))
+	} else {
+		logx.Infof("✅ 批量删除完成，成功: %d/%d", len(successKeys), len(items))
 	}
+
 	count := len(successKeys)
 	p.incrementPendingCount(-count)
 	return successKeys
@@ -1537,10 +1574,21 @@ func (p *PrefixedBadgerDB[T]) updateItemsOneByOne(items []*SyncQueueItem[T]) []s
 // 🆕 逐条删除（无事务）
 func (p *PrefixedBadgerDB[T]) deleteItemsOneByOne(items []*SyncQueueItem[T], syncAction types.IDataAction) []string {
 	successKeys := make([]string, 0, len(items))
-
+	// 🆕 检查是否支持 Exists 方法
+	type IExists interface {
+		Exists(data interface{}) (bool, error)
+	}
 	for _, wrapper := range items {
 		if wrapper.Item == nil {
 			continue
+		}
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && !exists {
+				logx.Infof("数据不存在，跳过删除 [%s]", wrapper.Key)
+				successKeys = append(successKeys, wrapper.Key)
+				continue
+			}
 		}
 		wrapper.IsSynced = false
 		err := syncAction.Delete(wrapper.Item)
@@ -1582,7 +1630,7 @@ func (p *PrefixedBadgerDB[T]) deleteItemsOneByOne(items []*SyncQueueItem[T], syn
 	return successKeys
 }
 
-// 🆕 批量更新同步状态（一次 BadgerDB 事务）
+// 🆕 批量更新同步状态（CAS 模式，避免覆盖）
 func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string) error {
 	if len(keys) == 0 {
 		return nil
@@ -1608,6 +1656,36 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string) error {
 			if err != nil {
 				logx.Errorf("反序列化失败 [%s]: %v", key, err)
 				continue
+			}
+
+			// 🔧 CAS 检查：如果 UpdatedAt 被更新了，说明有新的写入
+			// 保持 IsSynced = false，等待下次同步
+			originalUpdateTime := wrapper.UpdatedAt
+
+			// 🔧 只有在 UpdatedAt 未变化的情况下才更新同步状态
+			// 如果变化了，说明数据被重新 Set 了，应该保持未同步状态
+			currentItem, err := txn.Get([]byte(key))
+			if err == nil {
+				var currentWrapper SyncQueueItem[T]
+				err = currentItem.Value(func(val []byte) error {
+					return json.Unmarshal(val, &currentWrapper)
+				})
+
+				if err == nil {
+					// 检查 UpdatedAt 是否被更新
+					if !currentWrapper.UpdatedAt.Equal(originalUpdateTime) {
+						logx.Infof("⚠️ 数据已被更新，跳过同步状态更新 [%s]", key)
+						continue
+					}
+
+					// 检查是否已经是已同步状态（可能被其他同步线程处理了）
+					if currentWrapper.IsSynced {
+						logx.Infof("数据已同步，跳过 [%s]", key)
+						continue
+					}
+
+					wrapper = currentWrapper
+				}
 			}
 
 			// 更新同步状态
