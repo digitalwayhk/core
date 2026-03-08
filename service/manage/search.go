@@ -133,6 +133,25 @@ func (own *Search[T]) foreignSearch(req types.IRequest) (interface{}, error) {
 
 	ps := own.SearchItem.ToSearchItem()
 	ps.Model = own.list.NewItem()
+	typeName := utils.GetTypeName(ps.Model)
+	if typeName != own.SearchItem.Foreign.ManyObjectTypeName {
+		// 先按字段名/json标签查找，再按元素类型名查找
+		nType := utils.GetPropertyType(own.SearchItem.Parent, own.SearchItem.Foreign.ManyObjectTypeName)
+		if nType == nil {
+			nType = utils.GetPropertyTypeByElemName(own.SearchItem.Parent, own.SearchItem.Foreign.ManyObjectTypeName)
+		}
+		if nType != nil {
+			// 取切片元素类型（去除 []*）
+			et := nType.Type
+			if et.Kind() == reflect.Slice || et.Kind() == reflect.Array {
+				et = et.Elem()
+			}
+			if et.Kind() == reflect.Ptr {
+				et = et.Elem()
+			}
+			ps.Model = utils.NewInterfaceByType(et)
+		}
+	}
 	sf := utils.GetPropertyType(ps.Model, own.SearchItem.Foreign.OneObjectField)
 	if sf != nil {
 		vf := sf.Type.Elem()
