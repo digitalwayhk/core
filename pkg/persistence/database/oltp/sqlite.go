@@ -194,7 +194,7 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
-			NoLowerCase:   true,
+			//NoLowerCase:   true,
 		},
 		PrepareStmt:              false,
 		DisableAutomaticPing:     false,

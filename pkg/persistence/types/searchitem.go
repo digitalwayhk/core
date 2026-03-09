@@ -37,6 +37,10 @@ type SearchItem struct {
 	db            *gorm.DB
 }
 
+func (own *SearchItem) SetDB(db *gorm.DB) *SearchItem {
+	own.db = db
+	return own
+}
 func (own *SearchItem) GetColumnName(name string) string {
 	if own.db == nil {
 		return name

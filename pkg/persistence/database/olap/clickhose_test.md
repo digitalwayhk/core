@@ -87,3 +87,64 @@ docker rm -f clickhouse-test
 
 # 删除所有 ClickHouse 相关容器
 # docker ps -a | grep clickhouse | awk '{print $1}' | xargs docker rm -f
+
+# ==================== 第二台 ClickHouse（完全独立）====================
+
+# 端口规划：
+#   HTTP 接口：9004 -> 8123
+#   原生协议：9005 -> 9000
+#   数据卷：   /data/clickhouse2/data  /data/clickhouse2/logs
+
+# 1. 清理旧容器
+docker rm -f clickhouse2 2>/dev/null || true
+
+# 2. 启动 ClickHouse2
+docker run -d \
+  --name clickhouse2 \
+  --restart=always \
+  --log-opt max-size=50g \
+  --log-opt max-file=3 \
+  --memory="2g" \
+  --cpus="2" \
+  -p 9004:8123 \
+  -p 9005:9000 \
+  -e CLICKHOUSE_DB=default \
+  -e CLICKHOUSE_USER=default \
+  -e CLICKHOUSE_PASSWORD=futures_2026_Tes! \
+  -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+  --ulimit nofile=262144:262144 \
+  -v /data/clickhouse2/data:/var/lib/clickhouse \
+  -v /data/clickhouse2/logs:/var/log/clickhouse-server \
+  clickhouse/clickhouse-server:latest
+
+# 3. 等待启动完成
+echo "等待 ClickHouse2 启动..."
+sleep 10
+
+# 4. 验证连接
+echo "验证连接..."
+docker exec clickhouse2 clickhouse-client --query "SELECT version()"
+
+# 5. 测试是否可以创建数据库
+docker exec clickhouse2 clickhouse-client --query "CREATE DATABASE IF NOT EXISTS test"
+docker exec clickhouse2 clickhouse-client --query "SHOW DATABASES"
+
+# 6. 查看日志确认启动成功
+echo "查看启动日志..."
+docker logs clickhouse2 --tail 20
+
+# ==================== 调试 ====================
+
+# 进入容器
+# docker exec -it clickhouse2 bash
+
+# 进入客户端
+# docker exec -it clickhouse2 clickhouse-client
+
+# 查看日志
+# docker logs -f clickhouse2
+
+# ==================== 清理 ====================
+
+# 停止并删除
+docker rm -f clickhouse2
