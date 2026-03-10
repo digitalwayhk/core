@@ -1,8 +1,6 @@
 package public
 
 import (
-	"net/http"
-
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
@@ -53,7 +51,6 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 
 func (own *GetMenu) RouterInfo() *types.RouterInfo {
 	info := api.ServerRouterInfo(own)
-	info.Method = http.MethodGet
 	return info
 }
 
