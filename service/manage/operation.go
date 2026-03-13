@@ -36,6 +36,10 @@ func (own *Operation[T]) Parse(req st.IRequest) error {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
 	}
+	if gml, ok := own.instance.(IGetModelList); ok {
+		list := gml.GetList()
+		own.list = list.(*entity.ModelList[T])
+	}
 	if ms, ok := own.instance.(IManageService); ok {
 		err := ms.ParseBefore(own, req)
 		if err != nil {
@@ -53,10 +57,6 @@ func (own *Operation[T]) Parse(req st.IRequest) error {
 		if err != nil {
 			return err
 		}
-	}
-	if gml, ok := own.instance.(IGetModelList); ok {
-		list := gml.GetList()
-		own.list = list.(*entity.ModelList[T])
 	}
 	return nil
 }

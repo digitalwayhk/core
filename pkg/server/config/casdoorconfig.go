@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"gopkg.in/yaml.v3"
@@ -51,8 +52,12 @@ func (con *CasDoorConfig) ReloadConfig() error {
 	if err != nil {
 		return err
 	}
+	endpoint := data.Server.Endpoint
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "https://" + endpoint
+	}
 	casdoorsdk.InitConfig(
-		data.Server.Endpoint,
+		endpoint,
 		data.Server.ClientID,
 		data.Server.ClientSecret,
 		data.Certificate,

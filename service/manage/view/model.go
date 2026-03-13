@@ -189,9 +189,12 @@ type ForeignModel struct {
 }
 
 type SearchWhere struct {
-	Name   string      `json:"name"`
-	Symbol string      `json:"symbol"`
-	Value  interface{} `json:"value"`
+	Name     string      `json:"name"`
+	Symbol   string      `json:"symbol"`
+	Value    interface{} `json:"value"`
+	Relation string      `json:"relation"`
+	Prefix   string      `json:"prefix"`
+	Suffix   string      `json:"suffix"`
 }
 type SearchSort struct {
 	Name   string `json:"name"`
