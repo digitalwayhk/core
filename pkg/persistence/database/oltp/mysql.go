@@ -162,33 +162,25 @@ func (m *MySQL) GetConfig() *Config {
 // ==================== 核心方法（与 SQLite 保持一致）====================
 
 func (m *MySQL) ensureValidConnection() error {
-	// 🔧 检查连接是否为 nil
+	// m.db 为 nil 表示本实例尚未关联连接（懒加载），直接从连接池获取，不走重建流程
 	if m.db == nil {
-		logx.Info("🔧 连接为 nil，尝试重新创建连接...")
-		return m.recreateConnection()
+		db, err := m.GetDB()
+		if err != nil {
+			return err
+		}
+		m.db = db
+		return nil
 	}
 
-	// 🔧 测试连接
+	// 测试已有连接是否仍然可用
 	sqlDB, err := m.db.DB()
 	if err != nil {
 		logx.Errorf("获取底层数据库连接失败: %v", err)
 		return m.recreateConnection()
 	}
 
-	// 🔧 检查连接是否已关闭
 	if err := sqlDB.Ping(); err != nil {
-		errStr := err.Error()
-
-		// 🔧 连接已关闭，需要重建
-		if strings.Contains(errStr, "database is closed") ||
-			strings.Contains(errStr, "connection refused") ||
-			strings.Contains(errStr, "bad connection") {
-			logx.Infof("🔧 检测到连接已关闭，尝试重新连接: %v", err)
-			return m.recreateConnection()
-		}
-
-		// 其他网络错误也尝试重连
-		logx.Errorf("数据库连接ping失败: %v", err)
+		logx.Infof("🔧 检测到连接异常，尝试重新连接: %v", err)
 		return m.recreateConnection()
 	}
 
@@ -606,24 +598,31 @@ func (m *MySQL) HasTable(model interface{}) error {
 		TableName: tableName,
 	}
 
+	// 命中缓存：表已确认存在且迁移完毕，直接返回
+	if _, cached := tableCache.Load(cacheKey); cached {
+		return nil
+	}
+
 	migrationLock.Lock()
 	defer migrationLock.Unlock()
 
-	// 🔧 强制检查数据库中的表是否真实存在（不信任缓存）
+	// 双检锁：加锁后再判断一次缓存，防止并发重复迁移
+	if _, cached := tableCache.Load(cacheKey); cached {
+		return nil
+	}
+
+	// 查询数据库确认表是否真实存在
 	var count int64
 	err = m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
 		m.Name, tableName).Scan(&count).Error
 
 	if err != nil {
 		logx.Errorf("检查表是否存在失败: %s.%s, 错误: %v", m.Name, tableName, err)
-		// 🔧 清除缓存
-		tableCache.Delete(cacheKey)
 		return err
 	}
 
-	// 🔧 表已存在且缓存有效
+	// 表已存在，检查并补全字段/索引
 	if count > 0 {
-		// 表存在，但可能需要更新结构
 		modelForMigration := reflect.New(finalType).Interface()
 		if err := m.safeAutoMigrate(modelForMigration, tableName); err != nil {
 			logx.Errorf("更新表结构失败: %s, 错误: %v", tableName, err)
@@ -773,18 +772,15 @@ func (m *MySQL) safeAutoMigrate(model interface{}, tableName string) error {
 
 	// 🔧 手动创建索引（跳过已存在的）
 	for _, idx := range stmt.Schema.ParseIndexes() {
-		// 跳过有问题的索引名称
-		if strings.Contains(idx.Name, "hashcode") {
-			logx.Infof("⚠️ 跳过 hashcode 索引: %s.%s", tableName, idx.Name)
-			continue
-		}
-
 		if !migrator.HasIndex(model, idx.Name) {
 			if err := migrator.CreateIndex(model, idx.Name); err != nil {
 				errStr := err.Error()
+				// 忽略：索引已存在、重复键、重复值（表中已有重复数据无法建唯一索引）
 				if !strings.Contains(errStr, "Duplicate key") &&
 					!strings.Contains(errStr, "Error 1061") &&
-					!strings.Contains(errStr, "already exists") {
+					!strings.Contains(errStr, "already exists") &&
+					!strings.Contains(errStr, "Error 1062") &&
+					!strings.Contains(errStr, "Duplicate entry") {
 					logx.Infof("⚠️ 创建索引失败（忽略）: %s.%s - %v", tableName, idx.Name, err)
 				}
 			} else {
