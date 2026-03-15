@@ -236,13 +236,13 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 		}
 	}
 
+	if len(fn) > 0 {
+		fn[0](wrapper)
+	}
+
 	data, err := json.Marshal(wrapper)
 	if err != nil {
 		return nil, fmt.Errorf("序列化失败: %w", err)
-	}
-
-	if len(fn) > 0 {
-		fn[0](wrapper)
 	}
 	return data, nil
 }
@@ -916,7 +916,9 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 
 	// 批量更新同步状态
 	if len(successKeys) > 0 {
-		p.batchUpdateSyncedStatus(successKeys)
+		if err := p.batchUpdateSyncedStatus(successKeys); err != nil {
+			logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
+		}
 	}
 	return successKeys, nil
 }
@@ -1638,72 +1640,68 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string) error {
 
 	now := time.Now()
 
-	return p.manager.db.Update(func(txn *badger.Txn) error {
-		for _, key := range keys {
-			item, err := txn.Get([]byte(key))
-			if err != nil {
-				if err == badger.ErrKeyNotFound {
+	// ErrConflict 时最多重试 3 次（业务层并发写同一 key 时需要重试）
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := p.manager.db.Update(func(txn *badger.Txn) error {
+			for _, key := range keys {
+				item, err := txn.Get([]byte(key))
+				if err != nil {
+					if err == badger.ErrKeyNotFound {
+						continue
+					}
+					logx.Errorf("获取key失败 [%s]: %v", key, err)
 					continue
 				}
-				logx.Errorf("获取key失败 [%s]: %v", key, err)
-				continue
-			}
 
-			var wrapper SyncQueueItem[T]
-			err = item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &wrapper)
-			})
-			if err != nil {
-				logx.Errorf("反序列化失败 [%s]: %v", key, err)
-				continue
-			}
+				var wrapper SyncQueueItem[T]
+				if err = item.Value(func(val []byte) error {
+					return json.Unmarshal(val, &wrapper)
+				}); err != nil {
+					logx.Errorf("反序列化失败 [%s]: %v", key, err)
+					continue
+				}
 
-			// 🔧 CAS 检查：如果 UpdatedAt 被更新了，说明有新的写入
-			// 保持 IsSynced = false，等待下次同步
-			originalUpdateTime := wrapper.UpdatedAt
+				// 已同步，跳过
+				if wrapper.IsSynced {
+					continue
+				}
 
-			// 🔧 只有在 UpdatedAt 未变化的情况下才更新同步状态
-			// 如果变化了，说明数据被重新 Set 了，应该保持未同步状态
-			currentItem, err := txn.Get([]byte(key))
-			if err == nil {
-				var currentWrapper SyncQueueItem[T]
-				err = currentItem.Value(func(val []byte) error {
-					return json.Unmarshal(val, &currentWrapper)
-				})
+				// 有新写入（业务层在同步期间更新了数据），保留 IsSynced=false 让下次循环重新同步
+				if attempt > 0 && !wrapper.UpdatedAt.IsZero() && wrapper.UpdatedAt.After(now) {
+					continue
+				}
 
-				if err == nil {
-					// 检查 UpdatedAt 是否被更新
-					if !currentWrapper.UpdatedAt.Equal(originalUpdateTime) {
-						logx.Infof("⚠️ 数据已被更新，跳过同步状态更新 [%s]", key)
-						continue
-					}
+				wrapper.IsSynced = true
+				wrapper.SyncedAt = now
 
-					// 检查是否已经是已同步状态（可能被其他同步线程处理了）
-					if currentWrapper.IsSynced {
-						logx.Infof("数据已同步，跳过 [%s]", key)
-						continue
-					}
+				data, err := json.Marshal(&wrapper)
+				if err != nil {
+					logx.Errorf("序列化失败 [%s]: %v", key, err)
+					continue
+				}
 
-					wrapper = currentWrapper
+				if err := txn.Set([]byte(key), data); err != nil {
+					return err // 把错误传播出去触发整体回滚
 				}
 			}
+			return nil
+		})
 
-			// 更新同步状态
-			wrapper.IsSynced = true
-			wrapper.SyncedAt = now
-
-			data, err := json.Marshal(&wrapper)
-			if err != nil {
-				logx.Errorf("序列化失败 [%s]: %v", key, err)
-				continue
-			}
-
-			if err := txn.Set([]byte(key), data); err != nil {
-				logx.Errorf("更新同步状态失败 [%s]: %v", key, err)
-			}
+		if err == nil {
+			return nil
 		}
-		return nil
-	})
+
+		// 并发冲突：重试
+		if err == badger.ErrConflict && attempt < maxRetries-1 {
+			logx.Infof("⚠️ 更新同步状态冲突，重试 [%d/%d] prefix=%s", attempt+1, maxRetries, p.prefix)
+			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+			continue
+		}
+
+		return err
+	}
+	return nil
 }
 
 func (p *PrefixedBadgerDB[T]) Count() (int, error) {

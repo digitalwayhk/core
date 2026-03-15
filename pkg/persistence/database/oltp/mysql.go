@@ -221,32 +221,15 @@ func (m *MySQL) recreateConnection() error {
 	return fmt.Errorf("重建连接失败: 已达到最大重试次数")
 }
 
-// 🔧 清理当前连接（增强版）
+// cleanupCurrentConnection 清空本实例持有的连接引用
 func (m *MySQL) cleanupCurrentConnection() {
-	if m.db == nil {
-		return
-	}
-
-	// 关闭底层连接
-	if sqlDB, err := m.db.DB(); err == nil {
-		if closeErr := sqlDB.Close(); closeErr != nil {
-			logx.Errorf("关闭数据库连接失败: %v", closeErr)
-		} else {
-			logx.Info("🔧 已关闭旧的数据库连接")
-		}
-	}
-
-	// 清空当前连接
+	// 只清空本实例的引用，不关闭也不从共享连接池中移除连接。
+	// 原因：contManager 是全局共享的，多个 MySQL 实例可能持有同一个 *gorm.DB 引用。
+	// 如果将共享连接 Close() 掉，其他实例执行查询时会得到 "database is closed"，
+	// 而它们再尝试重建时又会把刚创建的新连接关掉，形成无限循环。
 	m.db = nil
 	m.tx = nil
 	m.isTansaction = false
-
-	// 从连接池中移除
-	if m.Name != "" {
-		connKey := m.getConnectionKey()
-		connManager.Remove(connKey)
-		logx.Infof("🔧 已从连接池移除: %s", connKey)
-	}
 }
 
 // 延迟表检查方法
@@ -304,8 +287,8 @@ func (m *MySQL) GetDB() (*gorm.DB, error) {
 					m.db = db
 					return db, nil
 				} else {
-					// 连接不健康，关闭并清理
-					sqlDB.Close()
+					// 连接不健康，仅从缓存中清除引用，不调用 Close()
+					// 调用 Close() 会影响所有持有同一 *gorm.DB 的实例
 					connManager.SetConnection(connKey, nil)
 				}
 			}
