@@ -3,6 +3,7 @@ package oltp
 import (
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -598,17 +599,24 @@ func (m *MySQL) HasTable(model interface{}) error {
 		TableName: tableName,
 	}
 
-	// 命中缓存：表已确认存在且迁移完毕，直接返回
-	if _, cached := tableCache.Load(cacheKey); cached {
-		return nil
+	// DB_FORCE_MIGRATE=true 时跳过缓存，强制检查并重建/修改表（用于开发调试或上线前结构同步）
+	forceMigrate := os.Getenv("DB_FORCE_MIGRATE") == "true"
+
+	if !forceMigrate {
+		// 命中缓存：表已确认存在且迁移完毕，直接返回
+		if _, cached := tableCache.Load(cacheKey); cached {
+			return nil
+		}
 	}
 
 	migrationLock.Lock()
 	defer migrationLock.Unlock()
 
-	// 双检锁：加锁后再判断一次缓存，防止并发重复迁移
-	if _, cached := tableCache.Load(cacheKey); cached {
-		return nil
+	if !forceMigrate {
+		// 双检锁：加锁后再判断一次缓存，防止并发重复迁移
+		if _, cached := tableCache.Load(cacheKey); cached {
+			return nil
+		}
 	}
 
 	// 查询数据库确认表是否真实存在
