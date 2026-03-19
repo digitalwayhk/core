@@ -238,31 +238,36 @@ func (m *MySQL) ensureTable(data interface{}) error {
 }
 
 func (m *MySQL) GetDBName(data interface{}) error {
-	// 1️⃣ 优先使用 config 中配置的数据库名
+	// 1️⃣ config 中硬编码的数据库名优先级最高（静态配置场景）
 	if m.config.Database != "" {
 		m.Name = m.config.Database
 		return nil
 	}
 
-	// 2️⃣ 如果 m.Name 已设置，直接使用
-	if m.Name != "" {
-		return nil
-	}
-
-	// 3️⃣ 从模型获取数据库名
+	// 2️⃣ 从模型动态获取数据库名（多库路由场景：每次调用都取，不缓存）
+	// 先于静态缓存 m.Name 检查，确保 TradeRecordModel/OrderDoneRecordModel
+	// 等多交易对模型能按各自的 GetRemoteDBName() 路由到正确的库，
+	// 而不会被第一次调用时的结果固化。
 	if idb, ok := data.(types.IDBName); ok {
-		// 优先使用 GetRemoteDBName（MySQL 场景）
 		dbName := idb.GetRemoteDBName()
 		if dbName == "" {
-			// 如果 GetRemoteDBName 为空，尝试 GetLocalDBName
 			dbName = idb.GetLocalDBName()
 		}
-
-		if dbName == "" {
-			return errors.New("db name is empty")
+		if dbName != "" {
+			if m.Name != dbName {
+				// 目标库发生变化，丢弃旧连接以便 ensureValidConnection 重新建立
+				m.Name = dbName
+				if !m.isTansaction {
+					// 事务外切换库：清空连接，下一步 ensureValidConnection 重建
+					m.db = nil
+				}
+			}
+			return nil
 		}
+	}
 
-		m.Name = dbName
+	// 3️⃣ 使用缓存的 m.Name（模型未提供 GetRemoteDBName 时的兜底）
+	if m.Name != "" {
 		return nil
 	}
 
