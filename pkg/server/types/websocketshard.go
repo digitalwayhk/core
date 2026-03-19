@@ -340,7 +340,13 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 	if len(clients) == 0 {
 		return
 	}
-	logx.Infof("准备向 %d 个客户端发送消息 hash:%d for %s，\napi:%s\ndata:%s", len(clients), hash, own.Path, utils.PrintObj(ndata), utils.PrintObj(message))
+	logx.Infow("准备发送WebSocket消息",
+		logx.Field("clients", len(clients)),
+		logx.Field("hash", hash),
+		logx.Field("path", own.Path),
+		logx.Field("api", utils.PrintObj(ndata)),
+		logx.Field("data", utils.PrintObj(message)),
+	)
 	// 🔧 批量发送
 	own.recordWebSocketBroadcast(len(clients))
 	hashStr := strconv.FormatUint(hash, 10)
