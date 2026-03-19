@@ -340,7 +340,7 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 	if len(clients) == 0 {
 		return
 	}
-
+	logx.Infof("准备向 %d 个客户端发送消息 hash:%d for %s，\napi:%s\ndata:%s", len(clients), hash, own.Path, utils.PrintObj(ndata), utils.PrintObj(message))
 	// 🔧 批量发送
 	own.recordWebSocketBroadcast(len(clients))
 	hashStr := strconv.FormatUint(hash, 10)
@@ -355,6 +355,7 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 		batch := clients[i:end]
 		go own.sendBatch(batch, hashStr, ndata)
 	}
+	logx.Infof("已启动 %d 个批次发送任务 for %s", (len(clients)+batchSize-1)/batchSize, own.Path)
 }
 
 // 🔧 优化 getShard（添加边界检查）
