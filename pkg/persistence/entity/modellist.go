@@ -206,9 +206,10 @@ func setHash(item interface{}, hash string) {
 }
 func modelUpdateValid[T types.IModel](list *ModelList[T], item interface{}) error {
 	if im, ok := item.(types.IModel); ok {
-		list.searchItem.Model = item
-		old, err := list.SearchId(im.GetID())
-		list.searchItem.Model = nil
+		// 通过 fn callback 传递 model，避免直接修改共享字段 list.searchItem.Model
+		old, err := list.SearchId(im.GetID(), func(si *types.SearchItem) {
+			si.Model = item
+		})
 		if err != nil {
 			return err
 		}
@@ -418,10 +419,13 @@ func (own *ModelList[T]) SearchName(name string, fn ...func(item *types.SearchIt
 func (own *ModelList[T]) SearchWhere(name string, value interface{}, fn ...func(item *types.SearchItem)) ([]*T, error) {
 	item := own.GetSearchItem()
 	item.AddWhereN(name, value)
+	// 先记录默认 size，再执行 fn，以便判断调用方是否有意设置了 size
+	defaultSize := item.Size
 	for _, f := range fn {
 		f(item)
 	}
-	if item.Size <= 10 {
+	// 只有调用方未主动修改 size（仍为默认值）时才应用 500 上限
+	if item.Size == defaultSize {
 		item.Size = 500
 	}
 	var err error
@@ -534,12 +538,12 @@ func (own *ModelList[T]) OnLoad(ada types.IDataAction, item *types.SearchItem) e
 	return err
 }
 func (own *ModelList[T]) load(item *types.SearchItem) error {
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法 或 error:" + fmt.Sprint(err) + "/r/n 查询信息:" + utils.PrintObj(item))
-	// 		logx.Error(msg)
-	// 	}
-	// }()
+	defer func() {
+		if err := recover(); err != nil {
+			msg := errors.New(utils.GetTypeName(own.hideEntity) + " 基础类型未初始化,缺失 NewModel 方法 或 error:" + fmt.Sprint(err) + "/r/n 查询信息:" + utils.PrintObj(item))
+			logx.Error(msg)
+		}
+	}()
 	if err := own.searchHook(item); err != nil {
 		return err
 	}
@@ -605,15 +609,12 @@ func (own *ModelList[T]) OnUpdate(ada types.IDataAction, item *T) error {
 	// 		})
 	// 	}
 	// })
-	var err error
-	if err == nil && own.onUpdate != nil {
-		err = own.onUpdate(item)
-		if err != nil {
+	if own.onUpdate != nil {
+		if err := own.onUpdate(item); err != nil {
 			return err
 		}
 	}
-	err = ada.Update(item)
-	return err
+	return ada.Update(item)
 
 }
 func (own *ModelList[T]) OnDelete(ada types.IDataAction, item *T) error {

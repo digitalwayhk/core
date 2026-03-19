@@ -19,9 +19,10 @@ import (
 )
 
 type ClickHouse struct {
-	db       *gorm.DB
-	config   *Config
-	configDB *gorm.DB
+	db            *gorm.DB
+	config        *Config
+	configDB      *gorm.DB
+	insertBuffers sync.Map // map[string]*insertBuffer，按 Go 类型名分组的写入缓冲
 }
 
 // ClickHouse 配置
@@ -157,6 +158,133 @@ func DefaultTableEngineConfig() *TableEngineConfig {
 		TTLMode:          "DELETE",             // 🆕 默认删除模式
 		IndexGranularity: 8192,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 客户端插入缓冲（解决单条 INSERT 网络往返慢的问题）
+// 每个 Go 类型对应一个 insertBuffer，满 100 条或 500ms 到期时触发批量写入。
+// ---------------------------------------------------------------------------
+
+const (
+	insertBufMaxSize  = 100
+	insertBufInterval = 500 * time.Millisecond
+)
+
+type insertBuffer struct {
+	mu         sync.Mutex
+	items      []interface{}
+	elemType   reflect.Type // 非指针类型，用于构造 []T 切片
+	ch         *ClickHouse
+	flushTimer *time.Timer
+}
+
+func newInsertBuffer(ch *ClickHouse, elemType reflect.Type) *insertBuffer {
+	return &insertBuffer{
+		ch:       ch,
+		elemType: elemType,
+	}
+}
+
+// add 将单条记录加入缓冲，达到阈值时立即同步刷写。
+func (b *insertBuffer) add(item interface{}) {
+	b.mu.Lock()
+	b.items = append(b.items, item)
+	count := len(b.items)
+	reachedMax := count >= insertBufMaxSize
+	if b.flushTimer == nil && !reachedMax {
+		b.flushTimer = time.AfterFunc(insertBufInterval, b.timerFlush)
+	}
+	if reachedMax {
+		items := b.items
+		b.items = nil
+		if b.flushTimer != nil {
+			b.flushTimer.Stop()
+			b.flushTimer = nil
+		}
+		b.mu.Unlock()
+		b.doFlush(items)
+		return
+	}
+	b.mu.Unlock()
+}
+
+// timerFlush 由 time.AfterFunc 触发，非阻塞地刷写当前缓冲。
+func (b *insertBuffer) timerFlush() {
+	b.mu.Lock()
+	items := b.items
+	b.items = nil
+	b.flushTimer = nil
+	b.mu.Unlock()
+	b.doFlush(items)
+}
+
+// flush 强制同步刷写（用于 Close/Flush 调用）。
+func (b *insertBuffer) flush() {
+	b.mu.Lock()
+	items := b.items
+	b.items = nil
+	if b.flushTimer != nil {
+		b.flushTimer.Stop()
+		b.flushTimer = nil
+	}
+	b.mu.Unlock()
+	b.doFlush(items)
+}
+
+// doFlush 使用反射将 []interface{} 转换为 []T，然后批量写入 ClickHouse。
+func (b *insertBuffer) doFlush(items []interface{}) {
+	if len(items) == 0 {
+		return
+	}
+	sliceType := reflect.SliceOf(b.elemType)
+	sliceVal := reflect.MakeSlice(sliceType, 0, len(items))
+	for _, item := range items {
+		v := reflect.ValueOf(item)
+		// 统一解引用指针，使元素类型与 elemType 一致
+		for v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		if v.Type() != b.elemType {
+			logx.Errorf("ClickHouse 缓冲写入: 类型不匹配 期望=%v 实际=%v", b.elemType, v.Type())
+			continue
+		}
+		sliceVal = reflect.Append(sliceVal, v)
+	}
+	if sliceVal.Len() == 0 {
+		return
+	}
+	if err := b.ch.db.CreateInBatches(sliceVal.Interface(), 1000).Error; err != nil {
+		logx.Errorf("ClickHouse [%s] 批量写入失败: %v", b.elemType.Name(), err)
+	}
+}
+
+// getOrCreateBuffer 获取或新建指定类型的缓冲队列。
+func (ch *ClickHouse) getOrCreateBuffer(elemType reflect.Type) *insertBuffer {
+	key := elemType.String()
+	if buf, ok := ch.insertBuffers.Load(key); ok {
+		return buf.(*insertBuffer)
+	}
+	buf := newInsertBuffer(ch, elemType)
+	actual, _ := ch.insertBuffers.LoadOrStore(key, buf)
+	return actual.(*insertBuffer)
+}
+
+// bufferInsert 将单个对象投入对应类型的缓冲队列。
+func (ch *ClickHouse) bufferInsert(item interface{}) {
+	v := reflect.ValueOf(item)
+	elemType := v.Type()
+	if elemType.Kind() == reflect.Ptr {
+		elemType = elemType.Elem()
+	}
+	ch.getOrCreateBuffer(elemType).add(item)
+}
+
+// Flush 强制将所有类型的缓冲队列立即写入 ClickHouse，通常在关闭前调用。
+func (ch *ClickHouse) Flush() {
+	ch.insertBuffers.Range(func(_, value interface{}) bool {
+		value.(*insertBuffer).flush()
+		return true
+	})
 }
 
 // 🆕 DecimalValue - 自定义 Decimal 类型包装器,用于 ClickHouse 的 Scan 和 Value 实现
@@ -726,21 +854,35 @@ func (ch *ClickHouse) QueryStats(tableName string, granularity string, startTime
 	return results, err
 }
 
-// 插入数据
+// Insert 将单条记录投入客户端缓冲队列，由后台定时或积满后批量写入 ClickHouse。
+// 写入错误会通过日志上报，不阻塞调用方。
 func (ch *ClickHouse) Insert(data interface{}) error {
 	if data == nil {
 		return fmt.Errorf("插入数据不能为 nil")
 	}
-
 	v := reflect.ValueOf(data)
 	if v.Kind() == reflect.Ptr && v.IsNil() {
 		return fmt.Errorf("插入数据不能为空指针")
 	}
+	ch.bufferInsert(data)
+	return nil
+}
 
+// InsertSync 同步直接写入（不经过缓冲），适用于需要立即入库的场景。
+func (ch *ClickHouse) InsertSync(data interface{}) error {
+	if data == nil {
+		return fmt.Errorf("插入数据不能为 nil")
+	}
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return fmt.Errorf("插入数据不能为空指针")
+	}
 	return ch.db.Create(data).Error
 }
 
-// 批量插入
+// BatchInsert 批量插入。
+// 当切片元素数 >= insertBufMaxSize 时直接写入（已经是大批量，无需再缓冲）；
+// 否则拆开逐条投入对应类型的缓冲队列，积满后一起批量写入。
 func (ch *ClickHouse) BatchInsert(data interface{}) error {
 	if data == nil {
 		return fmt.Errorf("批量插入数据不能为 nil")
@@ -768,7 +910,16 @@ func (ch *ClickHouse) BatchInsert(data interface{}) error {
 		}
 	}
 
-	return ch.db.CreateInBatches(data, 1000).Error
+	// 大批量直接写入，无需缓冲
+	if v.Len() >= insertBufMaxSize {
+		return ch.db.CreateInBatches(data, 1000).Error
+	}
+
+	// 小批量投入缓冲队列
+	for i := 0; i < v.Len(); i++ {
+		ch.bufferInsert(v.Index(i).Interface())
+	}
+	return nil
 }
 
 // 辅助方法
@@ -961,6 +1112,8 @@ func (ch *ClickHouse) getDecimalFields(model interface{}) []string {
 }
 
 func (ch *ClickHouse) Close() error {
+	// 关闭前先将缓冲中的数据全部写入 ClickHouse
+	ch.Flush()
 	sqlDB, err := ch.db.DB()
 	if err != nil {
 		return err

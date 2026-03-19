@@ -10,10 +10,10 @@ import (
 
 type Model struct {
 	ID         uint      `gorm:"primarykey" json:"id,string"`
-	CreatedAt  time.Time `json:"createdat"`
-	UpdatedAt  time.Time `json:"updatedat"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
-	Hashcode   string    `gorm:"column:hashcode;type:varchar(100);uniqueIndex" json:"hashcode"`
+	Hashcode   string    `gorm:"column:hashcode;type:varchar(500);uniqueIndex" json:"hashCode"`
 }
 
 func NewModel() *Model {
