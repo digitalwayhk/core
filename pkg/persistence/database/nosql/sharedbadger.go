@@ -1377,15 +1377,32 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 
 		successKeys = p.deleteItemsOneByOne(items, newSyncAction)
 	} else {
-		// 🔧 Commit 成功后，做一次非阻断性验证（仅记录日志，不影响流程）
+		// Commit 成功后，用独立连接做一次真正的验证。
+		// 若数据仍存在（可能是并发重新写入或 Delete 条件有误），
+		// 将该 key 从 successKeys 中移除，使其保留在 BadgerDB 队列中，下次同步重试。
 		if existsChecker, ok := syncAction.(IExists); ok {
+			// 构建需要移除的 key 集合
+			retryKeys := make(map[string]struct{})
 			for _, wrapper := range items {
 				if wrapper.Item == nil || !wrapper.IsSynced {
 					continue
 				}
 				if stillExists, checkErr := existsChecker.Exists(wrapper.Item); checkErr == nil && stillExists {
-					logx.Errorf("⚠️ Commit 后数据仍存在（可能有并发写入），将在下次同步中重试 [%s]", wrapper.Key)
+					logx.Errorf("⚠️ Commit 后数据仍存在，保留队列下次重试 [%s]", wrapper.Key)
+					retryKeys[wrapper.Key] = struct{}{}
+					wrapper.IsSynced = false
 				}
+			}
+			// 从 successKeys 中剔除需要重试的 key
+			if len(retryKeys) > 0 {
+				filtered := successKeys[:0]
+				for _, k := range successKeys {
+					if _, shouldRetry := retryKeys[k]; !shouldRetry {
+						filtered = append(filtered, k)
+					}
+				}
+				successKeys = filtered
+				hasError = true
 			}
 		}
 	}
