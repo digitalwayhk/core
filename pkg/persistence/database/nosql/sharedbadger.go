@@ -1339,21 +1339,10 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 		err := syncAction.Delete(wrapper.Item)
 
 		if err == nil {
-			// 🆕 删除成功后，再次验证数据是否真的被删除了
-			if existsChecker, ok := syncAction.(IExists); ok {
-				stillExists, checkErr := existsChecker.Exists(wrapper.Item)
-				if checkErr == nil && stillExists {
-					logx.Errorf("❌ 删除操作返回成功，但数据依然存在！[%s]", wrapper.Key)
-					logx.Errorf("   数据详情: %+v", wrapper.Item)
-					hasError = true
-					continue
-				}
-			}
-
-			// 删除成功
+			// 事务内 Delete 返回 nil 即视为成功，不在未提交事务内做 Exists 验证
+			// （Exists 走独立连接，看不到未提交删除，会产生误报导致无限重试）
 			successKeys = append(successKeys, wrapper.Key)
 			wrapper.IsSynced = true
-			logx.Infof("✅ 删除成功并验证 [%s]", wrapper.Key)
 		}
 
 		if err != nil {
@@ -1387,6 +1376,18 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 		}
 
 		successKeys = p.deleteItemsOneByOne(items, newSyncAction)
+	} else {
+		// 🔧 Commit 成功后，做一次非阻断性验证（仅记录日志，不影响流程）
+		if existsChecker, ok := syncAction.(IExists); ok {
+			for _, wrapper := range items {
+				if wrapper.Item == nil || !wrapper.IsSynced {
+					continue
+				}
+				if stillExists, checkErr := existsChecker.Exists(wrapper.Item); checkErr == nil && stillExists {
+					logx.Errorf("⚠️ Commit 后数据仍存在（可能有并发写入），将在下次同步中重试 [%s]", wrapper.Key)
+				}
+			}
+		}
 	}
 
 	// 物理删除本地缓存
