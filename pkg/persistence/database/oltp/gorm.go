@@ -73,14 +73,12 @@ func createData(db *gorm.DB, data interface{}) error {
 	return nil
 }
 
-// ...existing code...
-
 func updateData(db *gorm.DB, data interface{}) error {
 	if db == nil {
 		return errors.New("database connection is nil")
 	}
 	if ist, ok := data.(types.IScopes); ok {
-		tx := db.Scopes(ist.ScopesHandler()).Updates(data)
+		tx := db.Scopes(ist.ScopesHandler()).Select("*").Updates(data)
 		if tx.Error != nil {
 			return tx.Error
 		}
@@ -90,12 +88,11 @@ func updateData(db *gorm.DB, data interface{}) error {
 		db = db.Session(iss.GetSession())
 	}
 
-	// 🔧 如果数据实现了 IModel 接口，使用 hashcode 作为条件
+	// 使用 hashcode 或 ID 定位记录，Select("*") 确保零值字段也被更新
 	if model, ok := data.(types.IModel); ok {
-		// 获取 hashcode（假设在 IModel 中有 GetHashcode 方法）
 		hashcode := getHashcode(data)
 		if hashcode != "" {
-			tx := db.Where("hashcode = ?", hashcode).Updates(data)
+			tx := db.Model(data).Where("hashcode = ?", hashcode).Select("*").Updates(data)
 			if tx.Error != nil {
 				logx.Errorf("update data error: %v", tx.Error)
 				return tx.Error
@@ -103,8 +100,7 @@ func updateData(db *gorm.DB, data interface{}) error {
 			return nil
 		}
 
-		// 如果没有 hashcode，使用 ID
-		tx := db.Where("id = ?", model.GetID()).Updates(data)
+		tx := db.Model(data).Where("id = ?", model.GetID()).Select("*").Updates(data)
 		if tx.Error != nil {
 			logx.Errorf("update data error: %v", tx.Error)
 			return tx.Error
@@ -112,6 +108,7 @@ func updateData(db *gorm.DB, data interface{}) error {
 		return nil
 	}
 
+	// Save 本身更新全部字段（含零值），保留作为兜底
 	tx := db.Save(data)
 	if tx.Error != nil {
 		logx.Errorf("update data error: %v", tx.Error)

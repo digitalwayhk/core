@@ -172,33 +172,251 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 	needSync := p.syncDB
 	p.syncLock.RUnlock()
 
-	err := p.manager.db.Update(func(txn *badger.Txn) error {
-		for _, item := range items {
-			key := p.generateKey(item)
-			if key == "" {
-				return badger.ErrEmptyKey
-			}
+	// BadgerDB 单事务有内存上限（默认约 10MB），超过会触发 ErrTxnTooBig。
+	// 按固定批次分组提交，每批最多 1000 条。
+	const batchSize = 1000
+	successCount := 0
 
-			data, err := p.setItem(key, needSync, item)
-			if err != nil {
-				return err
-			}
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		batch := items[start:end]
 
-			entry := badger.NewEntry([]byte(key), data)
-			if err := txn.SetEntry(entry); err != nil {
-				return err
+		err := p.manager.db.Update(func(txn *badger.Txn) error {
+			for _, item := range batch {
+				key := p.generateKey(item)
+				if key == "" {
+					return badger.ErrEmptyKey
+				}
+
+				data, err := p.setItem(key, needSync, item)
+				if err != nil {
+					return err
+				}
+
+				entry := badger.NewEntry([]byte(key), data)
+				if err := txn.SetEntry(entry); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("BatchInsert 第 %d-%d 条失败（已成功 %d 条）: %w", start, end, successCount, err)
+		}
+		successCount += len(batch)
+	}
+
+	if needSync {
+		p.incrementPendingCount(successCount)
+	}
+	return nil
+}
+
+// BatchLoad 将远端数据库拉取的数据批量写入本地 BadgerDB，标记为已同步（不会触发反向同步回远端）。
+// 适用于用户登录时把远程数据拉到本地的场景。
+func (p *PrefixedBadgerDB[T]) BatchLoad(items ...*T) error {
+	if p.IsClosed() {
+		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	const batchSize = 1000
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		batch := items[start:end]
+
+		err := p.manager.db.Update(func(txn *badger.Txn) error {
+			now := time.Now()
+			for _, item := range batch {
+				key := p.generateKey(item)
+				if key == "" {
+					return badger.ErrEmptyKey
+				}
+				wrapper := &SyncQueueItem[T]{
+					Key:       key,
+					Item:      item,
+					Op:        OpUpdate, // 远端数据直接写入本地，标记为更新（如果不存在则相当于插入）
+					CreatedAt: now,
+					UpdatedAt: now,
+					IsSynced:  true, // 来自远端，无需再同步
+					SyncedAt:  now,
+				}
+				data, err := json.Marshal(wrapper)
+				if err != nil {
+					return fmt.Errorf("序列化失败 [%s]: %w", key, err)
+				}
+				if err := txn.Set([]byte(key), data); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("BatchLoad 第 %d-%d 条失败: %w", start, end, err)
+		}
+	}
+	return nil
+}
+
+// DeleteBySubPrefix 删除所有 key 以 subPrefix 开头的本地数据（物理删除，不触发同步）。
+// 适用于用户退出时清理本地缓存。
+// subPrefix 不需要带 p.prefix，方法内部自动拼接，例如传入 "102765296354105388888:" 即可。
+//
+// 行为：
+//   - 已同步（IsSynced=true）的条目立即删除；
+//   - 未同步（IsSynced=false）的条目跳过，由后台 goroutine 等待同步完成后自动删除；
+//   - 返回值为本次立即删除的数量。
+func (p *PrefixedBadgerDB[T]) DeleteBySubPrefix(subPrefix string) (int, error) {
+	if p.IsClosed() {
+		return 0, fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
+
+	fullPrefix := p.prefix + subPrefix
+
+	// 扫描所有匹配的 key，按同步状态分组
+	var syncedKeys, pendingKeys []string
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek([]byte(fullPrefix)); it.ValidForPrefix([]byte(fullPrefix)); it.Next() {
+			key := string(it.Item().Key())
+			synced := true // 反序列化失败时保守视为已同步（直接删除）
+			_ = it.Item().Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err == nil && !wrapper.IsSynced {
+					synced = false
+				}
+				return nil
+			})
+			if synced {
+				syncedKeys = append(syncedKeys, key)
+			} else {
+				pendingKeys = append(pendingKeys, key)
 			}
 		}
 		return nil
 	})
-
-	if err == nil && needSync {
-		p.incrementPendingCount(len(items))
+	if err != nil {
+		return 0, fmt.Errorf("扫描 key 失败 [prefix=%s]: %w", fullPrefix, err)
 	}
-	return err
+
+	// 立即删除已同步的条目
+	deleted := 0
+	if len(syncedKeys) > 0 {
+		deleted, err = p.physicalDeleteKeys(syncedKeys)
+		if err != nil {
+			return deleted, err
+		}
+	}
+
+	// 对未同步的条目，后台等待同步完成后再删除
+	if len(pendingKeys) > 0 {
+		logx.Infof("DeleteBySubPrefix: 已删除 %d 条，%d 条待同步，后台自动清理中 [prefix=%s]",
+			deleted, len(pendingKeys), fullPrefix)
+		go p.waitAndDeleteKeys(pendingKeys, fullPrefix)
+	}
+
+	return deleted, nil
 }
 
-// setItem 内部方法（复用原有逻辑）
+// waitAndDeleteKeys 后台轮询，等待指定 key 同步完成后物理删除。
+func (p *PrefixedBadgerDB[T]) waitAndDeleteKeys(keys []string, logPrefix string) {
+	const (
+		pollInterval = 5 * time.Second
+		maxWait      = 10 * time.Minute
+	)
+	deadline := time.Now().Add(maxWait)
+	remaining := keys
+
+	for len(remaining) > 0 {
+		if time.Now().After(deadline) {
+			logx.Errorf("DeleteBySubPrefix 后台清理超时，%d 条数据未能删除 [prefix=%s]", len(remaining), logPrefix)
+			return
+		}
+		if p.IsClosed() {
+			return
+		}
+
+		time.Sleep(pollInterval)
+
+		// 重新检查哪些已同步完成
+		var readyKeys, stillPending []string
+		_ = p.manager.db.View(func(txn *badger.Txn) error {
+			for _, k := range remaining {
+				item, err := txn.Get([]byte(k))
+				if err == badger.ErrKeyNotFound {
+					continue // 已不存在，忽略
+				}
+				if err != nil {
+					stillPending = append(stillPending, k)
+					continue
+				}
+				synced := true
+				_ = item.Value(func(val []byte) error {
+					var wrapper SyncQueueItem[T]
+					if err := json.Unmarshal(val, &wrapper); err == nil && !wrapper.IsSynced {
+						synced = false
+					}
+					return nil
+				})
+				if synced {
+					readyKeys = append(readyKeys, k)
+				} else {
+					stillPending = append(stillPending, k)
+				}
+			}
+			return nil
+		})
+
+		if len(readyKeys) > 0 {
+			n, err := p.physicalDeleteKeys(readyKeys)
+			if err != nil {
+				logx.Errorf("DeleteBySubPrefix 后台删除失败: %v [prefix=%s]", err, logPrefix)
+			} else {
+				logx.Infof("DeleteBySubPrefix 后台清理 %d 条 [prefix=%s]", n, logPrefix)
+			}
+		}
+		remaining = stillPending
+	}
+	logx.Infof("DeleteBySubPrefix 后台清理完成 [prefix=%s]", logPrefix)
+}
+
+// physicalDeleteKeys 分批物理删除指定 key 列表（每批 1000 条）。
+func (p *PrefixedBadgerDB[T]) physicalDeleteKeys(keys []string) (int, error) {
+	const batchSize = 1000
+	deleted := 0
+	for start := 0; start < len(keys); start += batchSize {
+		end := start + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[start:end]
+		err := p.manager.db.Update(func(txn *badger.Txn) error {
+			for _, k := range batch {
+				if err := txn.Delete([]byte(k)); err != nil && err != badger.ErrKeyNotFound {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return deleted, fmt.Errorf("physicalDeleteKeys 第 %d-%d 条失败（已删 %d 条）: %w", start, end, deleted, err)
+		}
+		deleted += len(batch)
+	}
+	return deleted, nil
+}
+
 func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...func(wrapper *SyncQueueItem[T])) ([]byte, error) {
 	if item == nil {
 		return nil, fmt.Errorf("item 不能为空")
@@ -871,47 +1089,73 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	}
 	p.syncLock.RUnlock()
 
-	// 按操作类型分组
-	var (
-		insertItems []*SyncQueueItem[T]
-		updateItems []*SyncQueueItem[T]
-		deleteItems []*SyncQueueItem[T]
-	)
+	// 按「操作类型 + 目标 DB 名」双维分组，确保每个事务只操作同一个库。
+	// 若所有 item 的 GetRemoteDBName() 结果相同，行为等同于原来的单分组逻辑。
+	type groupKey struct {
+		op     OpType
+		dbName string
+	}
+	groups := make(map[groupKey][]*SyncQueueItem[T])
+	groupOrder := make([]groupKey, 0) // 保留插入顺序，使处理顺序可预测
 
 	for _, wrapper := range items {
 		setHashCode(wrapper.Item)
 
-		switch wrapper.Op {
-		case OpInsert:
-			insertItems = append(insertItems, wrapper)
-		case OpUpdate:
-			updateItems = append(updateItems, wrapper)
-		case OpDelete:
-			deleteItems = append(deleteItems, wrapper)
+		dbName := ""
+		if idb, ok := any(wrapper.Item).(types.IDBName); ok {
+			dbName = idb.GetRemoteDBName()
+			if dbName == "" {
+				dbName = idb.GetLocalDBName()
+			}
 		}
+		key := groupKey{op: wrapper.Op, dbName: dbName}
+		if _, exists := groups[key]; !exists {
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], wrapper)
 	}
 
 	successKeys := make([]string, 0, len(items))
 
-	// 批量插入（带错误处理）
-	if len(insertItems) > 0 {
-		keys := p.batchInsertWithErrorHandling(insertItems)
-		successKeys = append(successKeys, keys...)
-		p.onSyncAfter(insertItems)
-	}
+	for _, key := range groupOrder {
+		groupItems := groups[key]
 
-	// 批量更新（带错误处理）
-	if len(updateItems) > 0 {
-		keys := p.batchUpdateWithErrorHandling(updateItems)
-		successKeys = append(successKeys, keys...)
-		p.onSyncAfter(updateItems)
-	}
+		// 在 isTansaction=false 时完成路由：getDataAction 设置 searchItem.Model → GetDBName 读取
+		// GetRemoteDBName() → 若库名变化则 m.db=nil → ensureValidConnection 建立新连接。
+		// 之后传给批量函数，批量函数直接使用已路由的 action，无需再次路由。
+		groupAction := p.getDataAction(groupItems[0].Item)
+		if groupAction == nil {
+			logx.Errorf("未找到同步操作对象 [db=%s, op=%s]", key.dbName, key.op)
+			continue
+		}
+		if _, err := groupAction.GetModelDB(groupItems[0].Item); err != nil {
+			logx.Errorf("路由目标 DB 失败 [db=%s, op=%s]: %v，降级为逐条处理", key.dbName, key.op, err)
+			switch key.op {
+			case OpInsert:
+				successKeys = append(successKeys, p.insertItemsOneByOne(groupItems)...)
+			case OpUpdate:
+				successKeys = append(successKeys, p.updateItemsOneByOne(groupItems)...)
+			case OpDelete:
+				successKeys = append(successKeys, p.deleteItemsOneByOne(groupItems, groupAction)...)
+			}
+			p.onSyncAfter(groupItems)
+			continue
+		}
 
-	// 批量删除（带错误处理）
-	if len(deleteItems) > 0 {
-		keys := p.batchDeleteWithErrorHandling(deleteItems)
-		successKeys = append(successKeys, keys...)
-		p.onSyncAfter(deleteItems)
+		switch key.op {
+		case OpInsert:
+			keys := p.batchInsertWithErrorHandling(groupItems, groupAction)
+			successKeys = append(successKeys, keys...)
+			p.onSyncAfter(groupItems)
+		case OpUpdate:
+			keys := p.batchUpdateWithErrorHandling(groupItems, groupAction)
+			successKeys = append(successKeys, keys...)
+			p.onSyncAfter(groupItems)
+		case OpDelete:
+			keys := p.batchDeleteWithErrorHandling(groupItems, groupAction)
+			successKeys = append(successKeys, keys...)
+			p.onSyncAfter(groupItems)
+		}
 	}
 
 	// 批量更新同步状态
@@ -953,14 +1197,8 @@ func setHashCode(item any) {
 }
 
 // 🆕 批量插入（使用事务）
-func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueItem[T]) []string {
+func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueItem[T], syncAction types.IDataAction) []string {
 	if len(items) == 0 {
-		return nil
-	}
-
-	syncAction := p.getDataAction(items[0].Item)
-	if syncAction == nil {
-		logx.Errorf("未找到同步操作对象")
 		return nil
 	}
 	// 🆕 检查是否支持 Exists 方法
@@ -1089,14 +1327,8 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 }
 
 // 🆕 带超时的批量更新
-func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueItem[T]) []string {
+func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueItem[T], syncAction types.IDataAction) []string {
 	if len(items) == 0 {
-		return nil
-	}
-
-	syncAction := p.getDataAction(items[0].Item)
-	if syncAction == nil {
-		logx.Errorf("未找到同步操作对象")
 		return nil
 	}
 	// 🆕 检查是否支持 Exists 方法
@@ -1289,7 +1521,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 }
 
 // 🆕 批量删除（使用事务）- 增强版
-func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueItem[T]) []string {
+func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueItem[T], syncAction types.IDataAction) []string {
 	if len(items) == 0 {
 		return nil
 	}
@@ -1297,12 +1529,6 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 	// 🆕 检查是否支持 Exists 方法
 	type IExists interface {
 		Exists(data interface{}) (bool, error)
-	}
-
-	syncAction := p.getDataAction(items[0].Item)
-	if syncAction == nil {
-		logx.Errorf("未找到同步操作对象")
-		return nil
 	}
 
 	successKeys := make([]string, 0, len(items))

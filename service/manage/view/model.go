@@ -267,9 +267,12 @@ func vsTops(vs *SearchItem, ps *types.SearchItem) {
 	ps.Size = vs.Size
 	for _, w := range vs.WhereList {
 		ps.AddWhere(&types.WhereItem{
-			Column: w.Name,
-			Value:  w.Value,
-			Symbol: w.Symbol,
+			Column:   w.Name,
+			Value:    w.Value,
+			Symbol:   w.Symbol,
+			Relation: w.Relation,
+			Prefix:   w.Prefix,
+			Suffix:   w.Suffix,
 		})
 	}
 	for _, s := range vs.SortList {
