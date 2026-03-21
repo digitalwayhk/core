@@ -144,7 +144,10 @@ func (wns *WebSocketNotificationSystem) processJob(workerID int, job *noticeJob)
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				logx.Errorf("Worker %d NoticeFiltersRouter panic: %v", workerID, err)
+				path := job.router.GetPath()
+				data := job.message
+				logx.Errorf("Worker %d NoticeFiltersRouter panic: %v, path: %s, data: %v\nStack: %s",
+					workerID, err, path, data, debug.Stack())
 				done <- struct {
 					ok   bool
 					data interface{}
