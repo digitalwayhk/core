@@ -326,7 +326,14 @@ func (m *MySQL) init(data interface{}) error {
 
 	if m.isTansaction {
 		if m.tx == nil {
+			// 兜底懒加载（Transaction() 已 eager Begin，正常不走这里）
 			m.tx = m.db.Begin()
+			if m.tx.Error != nil {
+				err := m.tx.Error
+				m.tx = nil
+				m.isTansaction = false
+				return fmt.Errorf("懒加载事务失败: %v", err)
+			}
 		}
 	}
 
@@ -829,27 +836,18 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 }
 
 func (m *MySQL) Transaction() error {
-	// 🔧 确保数据库连接已建立
-	// if m.db == nil {
-	// 	// 🆕 如果没有数据库名，无法开启事务
-	// 	if m.Name == "" {
-	// 		return errors.New("database name not set, cannot start transaction")
-	// 	}
-
-	// 	// 🆕 自动获取数据库连接
-	// 	_, err := m.GetDB()
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to establish database connection: %v", err)
-	// 	}
-	// }
-
-	// // 🔧 确保连接有效
-	// if err := m.ensureValidConnection(); err != nil {
-	// 	return fmt.Errorf("database connection is invalid: %v", err)
-	// }
-
+	// eager Begin：在 isTansaction=false 期间立即验证连接并开启真实事务。
+	// 若此时连接已死，立即返回错误，调用方降级为逐条操作，避免
+	// "一批数据全部失败再 Rollback 失败" 的连锁场景。
+	if err := m.ensureValidConnection(); err != nil {
+		return fmt.Errorf("事务开启前连接检查失败: %v", err)
+	}
+	tx := m.db.Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("开启事务失败: %v", tx.Error)
+	}
+	m.tx = tx
 	m.isTansaction = true
-	logx.Info("✅ 事务已开启")
 	return nil
 }
 
@@ -902,6 +900,23 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		}
 
 		return fn(m.db, data)
+	}
+
+	// 🔧 连接级错误（bad connection / commands out of sync）：刷新连接池空闲连接
+	// （SetMaxIdleConns(0) 立即关闭全部空闲连接，清除协议失步的坏连接），然后重试一次。
+	// 仅在非事务场景下重试；事务场景由调用方的 Rollback+逐条降级处理。
+	if !m.isTansaction && isConnectionError(err) {
+		logx.Infof("🔧 检测到连接错误，刷新连接池后重试: %v", err)
+		if sqlDB, e := m.db.DB(); e == nil {
+			sqlDB.SetMaxIdleConns(0)                     // 驱逐全部空闲坏连接
+			sqlDB.SetMaxIdleConns(m.config.MaxIdleConns) // 恢复连接池大小
+		}
+		retryErr := fn(m.db, data)
+		if retryErr != nil {
+			logx.Errorf("连接错误重试仍失败: %v", retryErr)
+			return retryErr
+		}
+		return nil
 	}
 
 	return err
@@ -960,6 +975,21 @@ func (m *MySQL) isTableNotExistsError(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "Table") && strings.Contains(errStr, "doesn't exist") ||
 		strings.Contains(errStr, "Error 1146") // MySQL 错误码：表不存在
+}
+
+// isConnectionError 判断是否是连接级错误（坏连接、MySQL 协议失步等）。
+// go-sql-driver 的 "commands out of sync" / "invalid connection" 不返回 driver.ErrBadConn，
+// 所以 database/sql 不会自动重试，需要在业务层主动处理。
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "bad connection") ||
+		strings.Contains(s, "invalid connection") ||
+		strings.Contains(s, "commands out of sync") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "connection reset by peer")
 }
 
 // Update 更新数据（同样优化）
@@ -1037,11 +1067,14 @@ func (m *MySQL) GetRunDB() interface{} {
 }
 
 func (m *MySQL) Rollback() error {
-	if m.tx != nil {
-		err := m.tx.Rollback().Error
+	// 始终重置事务状态，防止回滚失败（如连接已断）时 isTansaction 残留，
+	// 导致后续逐条降级操作误入事务分支开启未提交的新事务。
+	defer func() {
 		m.tx = nil
 		m.isTansaction = false
-		return err
+	}()
+	if m.tx != nil {
+		return m.tx.Rollback().Error
 	}
 	return nil
 }
