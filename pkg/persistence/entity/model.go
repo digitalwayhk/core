@@ -9,11 +9,11 @@ import (
 )
 
 type Model struct {
-	ID         uint      `gorm:"primarykey" json:"id,string"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
-	ModelState int       `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
-	Hashcode   string    `gorm:"column:hashcode;type:varchar(500);uniqueIndex" json:"hashCode"`
+	ID         uint       `gorm:"primarykey" json:"id,string"`
+	CreatedAt  *time.Time `json:"createdAt"`
+	UpdatedAt  *time.Time `json:"updatedAt"`
+	ModelState int        `gorm:"-" json:"modelState"` // 0: normal, 1: add, 2: update, 3: remove
+	Hashcode   string     `gorm:"column:hashcode;type:varchar(500);uniqueIndex" json:"hashCode"`
 }
 
 func NewModel() *Model {
@@ -96,16 +96,16 @@ func (own *Model) SetField(field string, value interface{}) error {
 }
 
 func (own *Model) SetCreatedAt(t time.Time) {
-	own.CreatedAt = t
+	own.CreatedAt = &t
 }
-func (own *Model) GetCreatedAt() time.Time {
+func (own *Model) GetCreatedAt() *time.Time {
 	return own.CreatedAt
 }
-func (own *Model) GetUpdatedAt() time.Time {
+func (own *Model) GetUpdatedAt() *time.Time {
 	return own.UpdatedAt
 }
 func (own *Model) SetUpdatedAt(t time.Time) {
-	own.UpdatedAt = t
+	own.UpdatedAt = &t
 }
 
 // func (own *Model) MarshalJSON() ([]byte, error) {

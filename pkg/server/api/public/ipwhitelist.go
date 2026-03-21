@@ -80,7 +80,9 @@ func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 		}
 	} else {
 		row.Timeout = own.Timeout
-		row.CreatedAt = time.Now()
+		now := time.Now()
+		row.UpdatedAt = &now
+		row.CreatedAt = &now
 		err := list.Update(row)
 		if err != nil {
 			return nil, err
