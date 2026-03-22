@@ -28,8 +28,10 @@ type BadgerDBConfig struct {
 	AutoSync        bool          `json:"auto_sync" yaml:"auto_sync"`                 // 是否自动同步到其他DB（默认 false）
 	SyncInterval    time.Duration `json:"sync_interval" yaml:"sync_interval"`         // 同步间隔（默认 1s）
 	SyncBatchSize   int           `json:"sync_batch_size" yaml:"sync_batch_size"`     // 同步批次大小（默认 1000）
-	SyncMinInterval time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"` // 最小同步间隔（默认 1s）
-	SyncMaxInterval time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"` // 最大同步间隔（默认 10s）
+	SyncMinInterval    time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`    // 最小同步间隔（默认 1s）
+	SyncMaxInterval    time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`    // 最大同步间隔（默认 10s）
+	SyncBatchDelay     time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`     // 触发同步前的积累窗口，让小写入合并成大 batch（默认 10ms）
+	SyncMaxConcurrency int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"` // 全局最大并发 MySQL 事务数（默认 8）
 
 	// 清理配置
 	AutoCleanup     bool          `json:"auto_cleanup" yaml:"auto_cleanup"`         // 是否自动清理（默认 false）

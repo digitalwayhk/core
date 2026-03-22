@@ -77,6 +77,8 @@ func DefaultSharedConfig(path string) BadgerDBConfig {
 		SyncMinInterval:      1 * time.Second,
 		SyncMaxInterval:      5 * time.Minute,
 		SyncBatchSize:        500,
+		SyncBatchDelay:       100 * time.Millisecond,
+		SyncMaxConcurrency:   8,
 		AutoCleanup:          true,
 		CleanupInterval:      30 * time.Minute,
 		KeepDuration:         24 * time.Hour,

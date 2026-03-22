@@ -16,6 +16,47 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// IMaxConcurrencyHint 由支持连接池的 DB 适配器实现，提示允许的最大并发数
+type IMaxConcurrencyHint interface {
+	GetMaxOpenConns() int
+}
+
+// adapterSemasMu 保护 adapterSemas 的并发访问
+var adapterSemasMu sync.Mutex
+
+// adapterSemas 以 adapter 指针值为键，持有各连接池的并发信号量。
+// 作用域是 adapter 实例（连接池）而非 basePath：同一 adapter 的所有 prefix 共享同一信号量。
+var adapterSemas = map[uintptr]chan struct{}{}
+
+// getOrCreateAdapterSema 为 action 对应的连接池返回（或创建）专属信号量。
+// 容量 = MaxOpenConns × 75%；若 adapter 未实现 IMaxConcurrencyHint 或 MaxOpenConns=0，默认 8。
+func getOrCreateAdapterSema(action types.IDataAction) chan struct{} {
+	v := reflect.ValueOf(action)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		// 非指针或空 adapter：退化为独立信号量
+		return make(chan struct{}, 8)
+	}
+	ptr := v.Pointer()
+
+	adapterSemasMu.Lock()
+	defer adapterSemasMu.Unlock()
+	if sema, ok := adapterSemas[ptr]; ok {
+		return sema
+	}
+	concurrency := 8
+	if hint, ok := action.(IMaxConcurrencyHint); ok {
+		if n := hint.GetMaxOpenConns(); n > 0 {
+			concurrency = n * 3 / 4
+			if concurrency < 1 {
+				concurrency = 1
+			}
+		}
+	}
+	sema := make(chan struct{}, concurrency)
+	adapterSemas[ptr] = sema
+	return sema
+}
+
 // ScanResult 分页扫描结果
 type ScanResult[T types.IModel] struct {
 	Items   []*T   `json:"items"`    // 数据列表
@@ -53,10 +94,14 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
 	syncInProgress bool
+	syncExecMu     sync.Mutex // 保证 processSyncQueue 串行执行，防止并发调用
 	closeCh        chan struct{}
+	syncTrigger    chan struct{} // 写入时立即触发同步，无需等待 ticker
 	wg             sync.WaitGroup
 	syncOnce       sync.Once
 	isAutoClean    bool
+
+	syncSema chan struct{} // 连接池并发信号量，与持有同一 adapter 的其他实例共享
 
 	// 待同步计数缓存
 	pendingCountCache int
@@ -80,9 +125,10 @@ func NewSharedBadgerDB[T types.IModel](basePath string, config ...BadgerDBConfig
 	manager.AddRef(prefix)
 
 	db := &PrefixedBadgerDB[T]{
-		manager: manager,
-		prefix:  prefix,
-		closeCh: make(chan struct{}),
+		manager:     manager,
+		prefix:      prefix,
+		closeCh:     make(chan struct{}),
+		syncTrigger: make(chan struct{}, 1),
 	}
 
 	logx.Infof("共享BadgerDB实例已创建 [prefix=%s]", prefix)
@@ -118,6 +164,14 @@ func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
 	}
 
 	p.syncList = list
+
+	// 绑定连接池信号量：以 adapter 指针为键，同一连接池的所有 prefix 共用同一信号量。
+	if list != nil {
+		if action := list.GetAction(); action != nil {
+			p.syncSema = getOrCreateAdapterSema(action)
+			logx.Infof("同步信号量已绑定 [prefix=%s, cap=%d]", p.prefix, cap(p.syncSema))
+		}
+	}
 
 	if list != nil && p.syncDB {
 		p.syncOnce.Do(func() {
@@ -157,6 +211,7 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 
 	if err == nil && needSync {
 		p.incrementPendingCount(1)
+		p.triggerSync()
 	}
 	return err
 }
@@ -212,6 +267,7 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 
 	if needSync {
 		p.incrementPendingCount(successCount)
+		p.triggerSync()
 	}
 	return nil
 }
@@ -436,6 +492,9 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 		wrapper.IsSynced = false
 		if irde, ok := any(item).(types.IRowDate); ok {
 			irde.SetUpdatedAt(wrapper.UpdatedAt)
+			if irde.GetCreatedAt() == nil {
+				irde.SetCreatedAt(wrapper.CreatedAt)
+			}
 		}
 	} else {
 		now := time.Now()
@@ -570,7 +629,8 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 		return fmt.Errorf("未启用同步数据库功能，无法执行软删除")
 	}
 
-	return p.manager.db.Update(func(txn *badger.Txn) error {
+	softDeleted := false
+	err := p.manager.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
@@ -603,8 +663,14 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 			return fmt.Errorf("序列化失败: %w", err)
 		}
 
+		softDeleted = true
 		return txn.Set([]byte(key), data)
 	})
+	if err == nil && softDeleted {
+		p.incrementPendingCount(1)
+		p.triggerSync()
+	}
+	return err
 }
 
 // Scan 扫描数据（仅扫描当前前缀）
@@ -785,6 +851,14 @@ func (p *PrefixedBadgerDB[T]) incrementPendingCount(delta int) {
 	p.pendingCountMutex.Unlock()
 }
 
+// triggerSync 通知 syncToOtherDB 立即执行同步（非阻塞，幂等）
+func (p *PrefixedBadgerDB[T]) triggerSync() {
+	select {
+	case p.syncTrigger <- struct{}{}:
+	default:
+	}
+}
+
 // getDataAction 获取同步操作
 func (p *PrefixedBadgerDB[T]) getDataAction(item *T) types.IDataAction {
 	if p.syncList != nil {
@@ -822,17 +896,23 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 		if err == nil && pendingCount > 0 {
 			logx.Infof("启动时发现待同步数据 [prefix=%s, count=%d], 立即执行同步", p.prefix, pendingCount)
 
+			// 初始化 pendingCountCache，避免 ticker 因 cache=0 跳过同步
+			p.pendingCountMutex.Lock()
+			p.pendingCountCache = pendingCount
+			p.pendingCountMutex.Unlock()
+
 			p.syncMutex.Lock()
 			p.syncInProgress = true
 			p.syncMutex.Unlock()
 
 			start := time.Now()
-			if err := p.processSyncQueue(); err != nil {
-				logx.Errorf("初始同步失败 [prefix=%s]: %v", p.prefix, err)
+			if _, err := p.processSyncQueue(); err != nil {
 			}
 			duration := time.Since(start)
 
-			remainingCount, _ := p.GetPendingSyncCount()
+			p.pendingCountMutex.RLock()
+			remainingCount := p.pendingCountCache
+			p.pendingCountMutex.RUnlock()
 
 			p.syncMutex.Lock()
 			p.syncInProgress = false
@@ -862,15 +942,12 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 				continue
 			}
 
-			pendingCount, err := p.GetPendingSyncCount()
-			if err != nil {
-				logx.Errorf("获取待同步数量失败 [prefix=%s]: %v", p.prefix, err)
-				interval = min(interval*2, maxInterval)
-				ticker.Reset(interval)
-				continue
-			}
+			// 用 pendingCountCache 替代全表扫描，避免大数据量下超时阻塞
+			p.pendingCountMutex.RLock()
+			pendingCount := p.pendingCountCache
+			p.pendingCountMutex.RUnlock()
 
-			if pendingCount == 0 {
+			if pendingCount <= 0 {
 				interval = min(interval*2, maxInterval)
 				ticker.Reset(interval)
 				continue
@@ -880,8 +957,6 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 			if p.syncInProgress {
 				p.syncMutex.Unlock()
 				logx.Infof("上次同步未完成，跳过本次 [prefix=%s]", p.prefix)
-				interval = min(interval*2, maxInterval)
-				ticker.Reset(interval)
 				continue
 			}
 			p.syncInProgress = true
@@ -889,13 +964,16 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 
 			start := time.Now()
 
-			if err := p.processSyncQueue(); err != nil {
+			synced, err := p.processSyncQueue()
+			if err != nil {
 				logx.Errorf("同步失败 [prefix=%s]: %v", p.prefix, err)
 			}
 
 			duration := time.Since(start)
 
-			remainingCount, _ := p.GetPendingSyncCount()
+			p.pendingCountMutex.RLock()
+			remainingCount := p.pendingCountCache
+			p.pendingCountMutex.RUnlock()
 
 			p.syncMutex.Lock()
 			p.syncInProgress = false
@@ -904,6 +982,12 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 			// 🔧 动态调整间隔
 			if remainingCount > 0 {
 				interval = minInterval
+				if synced == 0 {
+					// trigger case 已在处理这批数据，ticker 空转，不重复触发
+					ticker.Reset(interval)
+					continue
+				}
+				p.triggerSync() // 还有数据，立即再触发一次
 			} else if duration < interval/2 {
 				interval = max(interval/2, minInterval)
 			} else if duration > interval {
@@ -911,8 +995,54 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 			}
 
 			ticker.Reset(interval)
-			logx.Infof("同步完成 [prefix=%s, 处理: %d, 剩余: %d, 耗时: %v, 下次间隔: %v]",
-				p.prefix, pendingCount, remainingCount, duration, interval)
+			if synced > 0 {
+				logx.Infof("同步完成 [prefix=%s, 同步: %d, 剩余: %d, 耗时: %v, 下次间隔: %v]",
+					p.prefix, synced, remainingCount, duration, interval)
+			}
+
+		case <-p.syncTrigger:
+			// 写入数据后立即触发同步（不受 ticker 间隔限制）
+			p.syncLock.RLock()
+			hasDB := p.syncDB
+			p.syncLock.RUnlock()
+
+			if !hasDB {
+				continue
+			}
+
+			p.syncMutex.Lock()
+			if p.syncInProgress {
+				p.syncMutex.Unlock()
+				continue
+			}
+			p.syncInProgress = true
+			p.syncMutex.Unlock()
+
+			// 短暂等待让窗口期内的小写入能合并到同一个 batch（减少小事务）
+			if d := p.manager.config.SyncBatchDelay; d > 0 {
+				time.Sleep(d)
+			}
+
+			synced, err := p.processSyncQueue()
+			if err != nil {
+				logx.Errorf("触发同步失败 [prefix=%s]: %v", p.prefix, err)
+			}
+
+			p.syncMutex.Lock()
+			p.syncInProgress = false
+			p.syncMutex.Unlock()
+
+			p.pendingCountMutex.RLock()
+			remaining := p.pendingCountCache
+			p.pendingCountMutex.RUnlock()
+
+			if synced > 0 {
+				logx.Infof("触发同步完成 [prefix=%s, 同步: %d, 剩余: %d]", p.prefix, synced, remaining)
+			}
+			// 若还有数据，继续触发直到消费完
+			if remaining > 0 && synced > 0 {
+				p.triggerSync()
+			}
 
 		case <-p.closeCh:
 			// ✅ 优化：添加超时保护，避免无限等待
@@ -954,23 +1084,34 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 	}
 }
 
-// 🔧 修复 processSyncQueue: 返回同步成功的数量
-func (p *PrefixedBadgerDB[T]) processSyncQueue() error {
+// processSyncQueue 执行一轮同步，返回实际同步成功数和错误
+func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
+	// 串行执行：如果有另一个调用正在进行，等其完成后再执行一次（不跳过）
+	// 这样既防止并发事务冲突，又确保直接调用方（如测试）总能观察到最新的同步状态
+	p.syncExecMu.Lock()
+	defer p.syncExecMu.Unlock()
+
 	unsyncedItems, err := p.getUnsyncedBatch(p.manager.config.SyncBatchSize)
 	if err != nil {
-		return fmt.Errorf("获取未同步数据失败: %w", err)
+		return 0, fmt.Errorf("获取未同步数据失败: %w", err)
 	}
 
 	if len(unsyncedItems) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	logx.Infof("开始同步 [prefix=%s, 数量: %d]", p.prefix, len(unsyncedItems))
 
+	// 获取连接池信号量：限制同一 adapter 的并发 MySQL 事务数，防止打崩连接池
+	if p.syncSema != nil {
+		p.syncSema <- struct{}{}
+		defer func() { <-p.syncSema }()
+	}
+
 	_, err = p.syncBatch(unsyncedItems)
 	if err != nil {
 		logx.Errorf("批量同步失败 [prefix=%s]: %v", p.prefix, err)
-		return err
+		return 0, err
 	}
 	successCount := 0
 	for _, item := range unsyncedItems {
@@ -979,7 +1120,7 @@ func (p *PrefixedBadgerDB[T]) processSyncQueue() error {
 		}
 	}
 	logx.Infof("同步成功 [prefix=%s, 成功: %d/%d]", p.prefix, successCount, len(unsyncedItems))
-	return nil
+	return successCount, nil
 }
 
 // 🔧 修复 GetPendingSyncCount: 添加超时保护
@@ -2286,19 +2427,14 @@ func (p *PrefixedBadgerDB[T]) ForceSyncAll() error {
 
 		logx.Infof("📊 剩余待同步: %d 条（第 %d 次迭代）", pendingCount, i+1)
 
-		// 🔧 修复：调用 processSyncQueue 不传参数
-		err = p.processSyncQueue()
+		syncedInThisBatch, err := p.processSyncQueue()
 		if err != nil {
 			logx.Errorf("强制同步失败: %v", err)
 			return err
 		}
 
-		// 🔧 检查同步后的剩余数量
-		newPendingCount, _ := p.GetPendingSyncCount()
-		syncedInThisBatch := pendingCount - newPendingCount
-
 		if syncedInThisBatch <= 0 {
-			logx.Errorf("⚠️ 同步未取得进展，退出循环（剩余: %d）", newPendingCount)
+			logx.Errorf("⚠️ 同步未取得进展，退出循环（剩余: %d）", pendingCount)
 			break
 		}
 

@@ -95,7 +95,7 @@ func newTestDBLocal(t *testing.T) *PrefixedBadgerDB[testFund] {
 // triggerSync 在测试中手动触发一次同步队列处理。
 func triggerSync(t *testing.T, db *PrefixedBadgerDB[testFund]) {
 	t.Helper()
-	if err := db.processSyncQueue(); err != nil {
+	if _, err := db.processSyncQueue(); err != nil {
 		t.Fatalf("processSyncQueue 失败: %v", err)
 	}
 }
@@ -535,8 +535,9 @@ func TestSync_SoftDelete_RemovesFromMySQL(t *testing.T) {
 func TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally(t *testing.T) {
 	const userID = "sync_sad_u"
 	db := newTestDB(t)
-	cleanupMySQL(t, db, userID)
-	t.Cleanup(func() { cleanupMySQL(t, db, userID) })
+	// Status=2 路由到 test_funds_remote2，需用带路由的 cleanup
+	cleanupMySQLRouted(t, db, userID, 2)
+	t.Cleanup(func() { cleanupMySQLRouted(t, db, userID, 2) })
 
 	item := newFund(userID, "BNB", 300.0)
 	item.Status = 2 // IsSyncAfterDelete() = true
@@ -544,8 +545,8 @@ func TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally(t *testing.T) {
 	db.Set(item, 0)
 	triggerSync(t, db)
 
-	// MySQL 有记录
-	if findInMySQL(t, db, item) == nil {
+	// MySQL 有记录（Status=2 路由到 test_funds_remote2，需用带路由的查询）
+	if findInMySQLRouted(t, db, item) == nil {
 		t.Fatal("MySQL 中应存在该记录")
 	}
 
@@ -1544,4 +1545,95 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ============================================================
+// 五、SyncBatchDelay 与 syncSema 集成测试（需要 MySQL）
+// ============================================================
+
+// TestSyncBatchDelay_MergesRapidWrites 验证在 BatchDelay 窗口内的快速写入被聚合同步
+//
+// 场景：短窗口内写入 N 条 → 均出现在 MySQL → 不丢失任何数据
+// 侧重验证「正确性」：批聚合后同步的数据完整无缺
+func TestSyncBatchDelay_MergesRapidWrites(t *testing.T) {
+	const (
+		userPrefix = "bdelay_"
+		writes     = 20 // 在 BatchDelay 窗口内的写入总数
+	)
+
+	db := newTestDB(t)
+	for i := 0; i < writes; i++ {
+		cleanupMySQL(t, db, userPrefix+fmt.Sprintf("%02d", i))
+	}
+	t.Cleanup(func() {
+		for i := 0; i < writes; i++ {
+			cleanupMySQL(t, db, userPrefix+fmt.Sprintf("%02d", i))
+		}
+	})
+
+	// 在 BatchDelay 窗口（默认 100ms）内快速写入所有数据
+	start := time.Now()
+	for i := 0; i < writes; i++ {
+		f := newFund(userPrefix+fmt.Sprintf("%02d", i), "M0", float64(i))
+		if err := db.Set(f, 0); err != nil {
+			t.Fatalf("Set[%d] 失败: %v", i, err)
+		}
+	}
+	writeElapsed := time.Since(start)
+	t.Logf("写入 %d 条耗时 %v（BatchDelay 窗口=100ms）", writes, writeElapsed)
+
+	// 手动触发一次同步（聚合后处理）
+	triggerSync(t, db)
+
+	// 验证：所有数据均已同步到 MySQL
+	missing := 0
+	for i := 0; i < writes; i++ {
+		f := newFund(userPrefix+fmt.Sprintf("%02d", i), "M0", float64(i))
+		if findInMySQL(t, db, f) == nil {
+			missing++
+			t.Errorf("第 %d 条数据未同步到 MySQL [key=%s]", i, f.GetHash())
+		}
+	}
+	if missing == 0 {
+		t.Logf("✅ %d 条数据全部同步到 MySQL，BatchDelay 聚合正确", writes)
+	}
+}
+
+// TestSyncBatchDelay_PendingCountConsistency 验证批量写入后 pendingCount 与实际待同步数一致
+func TestSyncBatchDelay_PendingCountConsistency(t *testing.T) {
+	const (
+		userID = "bdelay_count"
+		writes = 10
+	)
+
+	db := newTestDB(t)
+	cleanupMySQL(t, db, userID)
+	t.Cleanup(func() { cleanupMySQL(t, db, userID) })
+
+	// 快速写入（不同 market，每条独立 key）
+	for i := 0; i < writes; i++ {
+		f := newFund(userID, fmt.Sprintf("M%d", i), float64(i))
+		if err := db.Set(f, 0); err != nil {
+			t.Fatalf("Set[%d] 失败: %v", i, err)
+		}
+	}
+
+	// 写完后 cache 应 >= writes（可能更多，来自其他测试；但不应为 0）
+	db.pendingCountMutex.RLock()
+	cacheAfterWrite := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	if cacheAfterWrite <= 0 {
+		t.Errorf("写入 %d 条后 pendingCountCache = %d，应 > 0", writes, cacheAfterWrite)
+	}
+
+	// 同步完成后 cache 应减少
+	triggerSync(t, db)
+	db.pendingCountMutex.RLock()
+	cacheAfterSync := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+
+	if cacheAfterSync >= cacheAfterWrite {
+		t.Errorf("同步后 pendingCountCache 未减少: 同步前=%d, 同步后=%d", cacheAfterWrite, cacheAfterSync)
+	}
+	t.Logf("pendingCount 变化: %d → %d（减少 %d）", cacheAfterWrite, cacheAfterSync, cacheAfterWrite-cacheAfterSync)
 }

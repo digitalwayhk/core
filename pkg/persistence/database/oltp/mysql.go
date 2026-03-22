@@ -160,6 +160,14 @@ func (m *MySQL) GetConfig() *Config {
 	return m.config
 }
 
+// GetMaxOpenConns 实现 IMaxConcurrencyHint，返回连接池最大连接数
+func (m *MySQL) GetMaxOpenConns() int {
+	if m.config == nil {
+		return 0
+	}
+	return m.config.MaxOpenConns
+}
+
 // ==================== 核心方法（与 SQLite 保持一致）====================
 
 func (m *MySQL) ensureValidConnection() error {

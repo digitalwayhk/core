@@ -663,6 +663,11 @@ func (own *ModelList[T]) SetDBAdapter(ada types.IDataAction) {
 	own.ada = ada
 }
 
+// GetAction 返回底层数据操作适配器，供需要内省查询的组延方使用
+func (own *ModelList[T]) GetAction() types.IDataAction {
+	return own.ada
+}
+
 func (own *ModelList[T]) GetDB() (*gorm.DB, error) {
 	item := own.GetSearchItem()
 	if item.Model == nil {

@@ -119,21 +119,28 @@ func (cm *ConnectionManager) CloseAll() {
 	}
 }
 
-// 🔧 新增：清理过期连接
+// 新增：清理过期连接
 func (cm *ConnectionManager) CleanupExpired() {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
 	now := time.Now()
 	for key, info := range cm.connections {
-		// 清理超过10分钟未使用的连接
-		if now.Sub(info.LastUsed) > 10*time.Minute {
-			if sqlDB, err := info.DB.DB(); err == nil {
-				sqlDB.Close()
-			}
-			delete(cm.connections, key)
-			logx.Infof("清理过期数据库连接: %s", key)
+		// 超过 30 分钟未使用（原 10 分钟太短，活跃连接会被关闭）
+		if now.Sub(info.LastUsed) < 30*time.Minute {
+			continue
 		}
+		// Ping 确诺连接真正空闲且已无事务；若 Ping 失败则也删除（坏连接）
+		if sqlDB, err := info.DB.DB(); err == nil {
+			pingErr := sqlDB.Ping()
+			sqlDB.Close()
+			if pingErr != nil {
+				logx.Infof("清理坏连接: %s, err=%v", key, pingErr)
+			} else {
+				logx.Infof("清理过期空闲连接: %s (未使用 %.1f 分钟)", key, now.Sub(info.LastUsed).Minutes())
+			}
+		}
+		delete(cm.connections, key)
 	}
 }
 
@@ -390,6 +397,8 @@ func performSmartGC() {
 }
 
 func logCleanupStats() {
+	// GC 前后分别采样，只有 GC 后仍占用的内存才是真正的内存压力
+	runtime.GC()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -405,18 +414,23 @@ func logCleanupStats() {
 
 	goroutineCount := runtime.NumGoroutine()
 
-	logx.Infof("📊 系统统计 - 内存: %dMB, Goroutines: %d, 表缓存: %d, DB连接: %d",
-		m.Alloc/1024/1024,
-		goroutineCount,
-		tableCount,
-		connCount)
+	// HeapInuse: GC 后仍在使用的堆内存（排除待回收对象）
+	// HeapSys:   OS 为堆分配的总虚拟内存
+	// Sys:       进程向 OS 申请的总运行时内存（最接近 RSS）
+	heapMB := m.HeapInuse / 1024 / 1024
+	sysMB := m.Sys / 1024 / 1024
 
-	// 🔧 如果指标异常，发出警告
+	logx.Infof("📊 系统统计 - 堆内存(GC后): %dMB, 进程内存(Sys): %dMB, Goroutines: %d, 表缓存: %d, DB连接: %d",
+		heapMB, sysMB, goroutineCount, tableCount, connCount)
+
 	if goroutineCount > 10000 {
 		logx.Errorf("⚠️  Goroutine数量过多: %d", goroutineCount)
 	}
-	if m.Alloc/1024/1024 > 500 {
-		logx.Errorf("⚠️  内存使用过高: %dMB", m.Alloc/1024/1024)
+	// 用 HeapInuse （GC后实际占用）判断内存压力，阈值 800MB
+	// （原来用 Alloc 含待回收对象，500MB 阈值导致大量误报）
+	if heapMB > 800 {
+		logx.Errorf("⚠️  堆内存过高(GC后仍): HeapInuse=%dMB, Sys=%dMB, NumGC=%d, NextGC=%dMB",
+			heapMB, sysMB, m.NumGC, m.NextGC/1024/1024)
 	}
 	if connCount > 50 {
 		logx.Errorf("⚠️  数据库连接过多: %d", connCount)

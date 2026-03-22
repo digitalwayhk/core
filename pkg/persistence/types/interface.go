@@ -86,8 +86,8 @@ type IRowCode interface {
 type IRowDate interface {
 	SetCreatedAt(t time.Time)
 	SetUpdatedAt(t time.Time)
-	GetCreatedAt() time.Time
-	GetUpdatedAt() time.Time
+	GetCreatedAt() *time.Time
+	GetUpdatedAt() *time.Time
 }
 type IRowState interface {
 	GetModelState() int
