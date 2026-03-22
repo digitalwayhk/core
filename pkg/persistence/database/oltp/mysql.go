@@ -636,31 +636,27 @@ func (m *MySQL) HasTable(model interface{}) error {
 		return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
 	}
 
-	// 🔧 表不存在，创建表
+	// 表不存在，创建表
 	logx.Infof("🔧 表不存在，开始创建: %s.%s", m.Name, tableName)
 
 	modelForMigration := reflect.New(finalType).Interface()
-
-	// 🔧 使用更安全的创建方式
 	migrator := m.db.Migrator()
 
-	// 方式1：先尝试 CreateTable
 	if err := migrator.CreateTable(modelForMigration); err != nil {
 		errStr := err.Error()
 
-		// 如果是"表已存在"错误，说明并发创建了
+		// 并发场景：其他进程/goroutine 已建好了
 		if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "Error 1050") {
 			logx.Infof("⚠️ 表已被其他进程创建: %s", tableName)
 			tableCache.Store(cacheKey, true)
 			return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
 		}
 
-		// 其他错误，尝试 AutoMigrate
-		logx.Errorf("CreateTable 失败，尝试 AutoMigrate: %s, 错误: %v", tableName, err)
-		if err := m.safeAutoMigrate(modelForMigration, tableName); err != nil {
-			logx.Errorf("AutoMigrate 也失败: %s, 错误: %v", tableName, err)
-			return err
-		}
+		// 其他错误：直接返回，不再调 safeAutoMigrate。
+		// safeAutoMigrate 只负责给已存在的表补列/索引，对不存在的表
+		// 它会把所有 AddColumn 错误静默吞掉并返回 nil，误导调用方。
+		logx.Errorf("CreateTable 失败: %s.%s, 错误: %v", m.Name, tableName, err)
+		return err
 	}
 
 	// 🔧 再次验证表是否创建成功
@@ -810,10 +806,27 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 	if item.IsStatistical {
 		return sum(m.db, item, result)
 	}
-	if m.isTansaction {
-		return load(m.tx, item, result)
+
+	runLoad := func() error {
+		if m.isTansaction {
+			return load(m.tx, item, result)
+		}
+		return load(m.db, item, result)
 	}
-	return load(m.db, item, result)
+
+	loadErr := runLoad()
+	if loadErr != nil && m.isTableNotExistsError(loadErr) {
+		// ensureTable 建表后仍收到 Error 1146（极罕见，如并发 DROP 或路由切库）
+		// 清除缓存强制重建，然后重试一次
+		logx.Infof("🔧 Load 检测到表不存在，尝试重建: %v", loadErr)
+		tableName := m.db.NamingStrategy.TableName(reflect.TypeOf(item.Model).Elem().Name())
+		tableCache.Delete(TableCacheKey{DBPath: m.Name, TableName: tableName})
+		if rebuildErr := m.ensureTable(item.Model); rebuildErr != nil {
+			return loadErr
+		}
+		return runLoad()
+	}
+	return loadErr
 }
 
 func (m *MySQL) Raw(sql string, data interface{}) error {
