@@ -21,6 +21,14 @@ type IMaxConcurrencyHint interface {
 	GetMaxOpenConns() int
 }
 
+// IActionCloner 由支持并发安全 clone 的 adapter 实现。
+// 对于有状态的 adapter（如 MySQL，事务状态挂在实例字段），
+// 多个 goroutine 并发调用 Transaction/Insert/Commit 会导致 m.tx 竞争。
+// Clone() 应返回一个共享连接池但拥有独立事务状态的新实例。
+type IActionCloner interface {
+	Clone() types.IDataAction
+}
+
 // adapterSemasMu 保护 adapterSemas 的并发访问
 var adapterSemasMu sync.Mutex
 
@@ -200,7 +208,6 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 	if err != nil {
 		return err
 	}
-
 	err = p.manager.db.Update(func(txn *badger.Txn) error {
 		entry := badger.NewEntry([]byte(key), data)
 		if ttl > 0 {
@@ -859,7 +866,9 @@ func (p *PrefixedBadgerDB[T]) triggerSync() {
 	}
 }
 
-// getDataAction 获取同步操作
+// getDataAction 获取同步操作。
+// 若 adapter 实现了 IActionCloner，则自动 Clone 一个独立实例，
+// 避免多个同步 goroutine 共享同一 MySQL 实例的 m.tx/m.isTansaction 字段导致竞争。
 func (p *PrefixedBadgerDB[T]) getDataAction(item *T) types.IDataAction {
 	if p.syncList != nil {
 		model := item
@@ -872,6 +881,11 @@ func (p *PrefixedBadgerDB[T]) getDataAction(item *T) types.IDataAction {
 		searchItem := p.syncList.GetSearchItem()
 		searchItem.Model = model
 		action := p.syncList.GetDBAdapter(searchItem)
+		if action != nil {
+			if cloner, ok := action.(IActionCloner); ok {
+				return cloner.Clone()
+			}
+		}
 		return action
 	}
 	return nil

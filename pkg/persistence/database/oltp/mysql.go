@@ -138,6 +138,8 @@ type MySQL struct {
 	tables       map[string]*TableMaster
 	IsLog        bool
 	config       *Config
+	// isClone 标记此实例由 Clone() 创建，ensureValidConnection 时需用 Session 包装 *gorm.DB。
+	isClone bool
 }
 
 func NewConnectionManager() *ConnectionManager {
@@ -177,7 +179,12 @@ func (m *MySQL) ensureValidConnection() error {
 		if err != nil {
 			return err
 		}
-		m.db = db
+		if m.isClone {
+			// clone 实例需独立 Statement，避免与其他 goroutine 共用 *gorm.DB 状态。
+			m.db = db.Session(&gorm.Session{NewDB: true})
+		} else {
+			m.db = db
+		}
 		return nil
 	}
 
@@ -222,6 +229,9 @@ func (m *MySQL) recreateConnection() error {
 		}
 
 		m.db = db
+		if m.isClone {
+			m.db = db.Session(&gorm.Session{NewDB: true})
+		}
 		logx.Info("✅ 数据库连接重建成功")
 		return nil
 	}
@@ -854,6 +864,26 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 	}
 	m.db.Exec(sql, data)
 	return m.db.Error
+}
+
+// Clone 返回一个独立事务状态的新实例，供并发 goroutine 使用。
+// 底层 *sql.DB 连接池通过 Session(NewDB:true) 共享，但 GORM 的 Statement
+// 是独立的，避免多 goroutine 共用同一 *gorm.DB 导致的协议错乱（commands out of sync）。
+func (m *MySQL) Clone() *MySQL {
+	clone := &MySQL{
+		Name:    m.Name,
+		tables:  m.tables, // 共享表缓存（map 只读，无并发写）
+		IsLog:   m.IsLog,
+		config:  m.config, // 共享配置（只读）
+		isClone: true,     // 标记为 clone，ensureValidConnection 时用 Session 包装
+		// tx、isTansaction、UpdateTime 均由新实例独立持有
+	}
+	if m.db != nil {
+		// Session(NewDB:true) 创建独立 Statement 但共享底层 *sql.DB 连接池的新实例，
+		// 确保并发调用 Begin / Find / Create 等时互不干扰 gorm 内部状态。
+		clone.db = m.db.Session(&gorm.Session{NewDB: true})
+	}
+	return clone
 }
 
 func (m *MySQL) Transaction() error {

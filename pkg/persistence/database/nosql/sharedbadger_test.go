@@ -44,7 +44,7 @@ func (own *testFund) GetLocalDBName() string {
 	return "test_funds"
 }
 func (own *testFund) GetRemoteDBName() string {
-	return "test_funds_remote" + fmt.Sprintf("%d", own.Status)
+	return "test_funds_remote_" + fmt.Sprintf("%d", own.Status)
 }
 
 // newFund 快速构造测试用 fund
