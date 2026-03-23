@@ -162,6 +162,8 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 	if err != nil {
 		msg := fmt.Sprintf("参数解析异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "parse", msg, 600)
+		logx.Error(err)
+		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
 	}
 	return own.ExecDo(api, req)
@@ -196,6 +198,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "validation", msg, 700)
 		logx.Error(err)
+		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
 	}
 
@@ -219,6 +222,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
 		err = NewTypeError(own.ServiceName, own.Path, "do", msg, 800)
 		logx.Error(err)
+		fmt.Println(err.Error())
 	} else {
 		if own.useCache && data != nil {
 			own.setCache(api, data)
