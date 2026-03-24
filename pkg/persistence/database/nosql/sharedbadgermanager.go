@@ -59,32 +59,33 @@ var (
 // DefaultSharedConfig 共享模式配置（适合多个小表共享）
 func DefaultSharedConfig(path string) BadgerDBConfig {
 	return BadgerDBConfig{
-		Path:                 path,
-		Mode:                 "shared",
-		MemTableSize:         128 << 20, // 128MB（比独立模式大）
-		NumCompactors:        8,         // 增加 compactor
-		NumLevelZeroTables:   4,
-		NumLevelZeroStall:    8,
-		ValueLogFileSize:     512 << 20, // 512MB（比独立模式大）
-		ValueThreshold:       1024,
-		SyncWrites:           false,
-		DetectConflicts:      true,
-		GCInterval:           10 * time.Minute,
-		GCDiscardRatio:       0.5,
-		EnableLogger:         false,
-		PeriodicSync:         true,
-		PeriodicSyncInterval: 3 * time.Second,
-		AutoSync:             true,
-		SyncInterval:         2 * time.Second,
-		SyncMinInterval:      1 * time.Second,
-		SyncMaxInterval:      5 * time.Minute,
-		SyncBatchSize:        500,
-		SyncBatchDelay:       100 * time.Millisecond,
-		SyncMaxConcurrency:   8,
-		AutoCleanup:          true,
-		CleanupInterval:      30 * time.Minute,
-		KeepDuration:         24 * time.Hour,
-		SizeThreshold:        500 * 1024 * 1024, // 500MB 触发清理
+		Path:                       path,
+		Mode:                       "shared",
+		MemTableSize:               128 << 20, // 128MB（比独立模式大）
+		NumCompactors:              8,         // 增加 compactor
+		NumLevelZeroTables:         4,
+		NumLevelZeroStall:          8,
+		ValueLogFileSize:           512 << 20, // 512MB（比独立模式大）
+		ValueThreshold:             1024,
+		SyncWrites:                 false,
+		DetectConflicts:            true,
+		GCInterval:                 10 * time.Minute,
+		GCDiscardRatio:             0.5,
+		EnableLogger:               false,
+		PeriodicSync:               true,
+		PeriodicSyncInterval:       3 * time.Second,
+		AutoSync:                   true,
+		SyncInterval:               2 * time.Second,
+		SyncMinInterval:            1 * time.Second,
+		SyncMaxInterval:            5 * time.Minute,
+		SyncBatchSize:              500,
+		SyncBatchDelay:             100 * time.Millisecond,
+		SyncMaxConcurrency:         8,
+		DeferredDeletePollInterval: 5 * time.Second,
+		AutoCleanup:                true,
+		CleanupInterval:            30 * time.Minute,
+		KeepDuration:               24 * time.Hour,
+		SizeThreshold:              500 * 1024 * 1024, // 500MB 触发清理
 	}
 }
 

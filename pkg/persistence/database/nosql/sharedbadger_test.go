@@ -26,6 +26,7 @@ type testFund struct {
 	Status               int           `json:"status"`
 	SyncAfterDeleteDelay time.Duration `json:"-"`
 	SyncAfterDeleteCalls int32         `json:"-"`
+	SyncAfterDeletePanic bool          `json:"-"`
 }
 
 func NewtestFund() *testFund {
@@ -41,6 +42,9 @@ func (f *testFund) GetHash() string {
 }
 func (f *testFund) IsSyncAfterDelete() bool {
 	atomic.AddInt32(&f.SyncAfterDeleteCalls, 1)
+	if f.SyncAfterDeletePanic {
+		panic("sync after delete panic")
+	}
 	if f.SyncAfterDeleteDelay > 0 {
 		time.Sleep(f.SyncAfterDeleteDelay)
 	}
@@ -67,10 +71,22 @@ func newFund(userID, market string, balance float64) *testFund {
 // 测试基础设施
 // ============================================================
 
-// newTestDB 创建带 MySQL 同步的 PrefixedBadgerDB（MySQL 需已运行）。
-func newTestDB(t *testing.T) *PrefixedBadgerDB[testFund] {
+const testDeferredDeletePollInterval = 20 * time.Millisecond
+
+func newTestConfig(path string) BadgerDBConfig {
+	config := DefaultSharedConfig(path)
+	config.DeferredDeletePollInterval = testDeferredDeletePollInterval
+	config.SyncBatchDelay = 0
+	config.SyncMinInterval = 20 * time.Millisecond
+	if config.SyncInterval < config.SyncMinInterval {
+		config.SyncInterval = config.SyncMinInterval
+	}
+	return config
+}
+
+func newTestDBWithConfig(t *testing.T, config BadgerDBConfig) *PrefixedBadgerDB[testFund] {
 	t.Helper()
-	db, err := NewSharedBadgerDB[testFund](t.TempDir())
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
 	if err != nil {
 		t.Fatalf("NewSharedBadgerDB 失败: %v", err)
 	}
@@ -87,15 +103,26 @@ func newTestDB(t *testing.T) *PrefixedBadgerDB[testFund] {
 	return db
 }
 
-// newTestDBLocal 创建不带 MySQL 同步的纯本地 BadgerDB（不依赖外部服务）。
-func newTestDBLocal(t *testing.T) *PrefixedBadgerDB[testFund] {
+func newTestDBLocalWithConfig(t *testing.T, config BadgerDBConfig) *PrefixedBadgerDB[testFund] {
 	t.Helper()
-	db, err := NewSharedBadgerDB[testFund](t.TempDir())
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
 	if err != nil {
 		t.Fatalf("NewSharedBadgerDB 失败: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// newTestDB 创建带 MySQL 同步的 PrefixedBadgerDB（MySQL 需已运行）。
+func newTestDB(t *testing.T) *PrefixedBadgerDB[testFund] {
+	t.Helper()
+	return newTestDBWithConfig(t, newTestConfig(t.TempDir()))
+}
+
+// newTestDBLocal 创建不带 MySQL 同步的纯本地 BadgerDB（不依赖外部服务）。
+func newTestDBLocal(t *testing.T) *PrefixedBadgerDB[testFund] {
+	t.Helper()
+	return newTestDBLocalWithConfig(t, newTestConfig(t.TempDir()))
 }
 
 // triggerSync 在测试中手动触发一次同步队列处理。
@@ -211,6 +238,38 @@ func writeRawWrapper(t *testing.T, db *PrefixedBadgerDB[testFund], item *testFun
 	}
 }
 
+func markWrapperSynced(t *testing.T, db *PrefixedBadgerDB[testFund], item *testFund) {
+	t.Helper()
+	key := db.prefix + item.GetHash()
+	err := db.manager.db.Update(func(txn *badger.Txn) error {
+		existing, err := txn.Get([]byte(key))
+		if err != nil {
+			return err
+		}
+
+		var wrapper SyncQueueItem[testFund]
+		if err := existing.Value(func(val []byte) error {
+			return json.Unmarshal(val, &wrapper)
+		}); err != nil {
+			return err
+		}
+
+		now := time.Now()
+		wrapper.IsSynced = true
+		wrapper.SyncedAt = now
+		wrapper.UpdatedAt = now
+
+		data, err := json.Marshal(&wrapper)
+		if err != nil {
+			return err
+		}
+		return txn.Set([]byte(key), data)
+	})
+	if err != nil {
+		t.Fatalf("markWrapperSynced 失败 [%s]: %v", key, err)
+	}
+}
+
 // ============================================================
 // 一、纯本地 BadgerDB CRUD（不依赖 MySQL）
 // ============================================================
@@ -285,6 +344,53 @@ func TestLocal_Delete_PhysicalDeleteWhenNoSync(t *testing.T) {
 	if getWrapperFromBadger(t, db, item) != nil {
 		t.Error("物理删除后 wrapper 应为 nil")
 	}
+}
+
+// TestLocal_DeleteByItemWithSyncFalse_ImmediateWhenAlreadySynced 已同步条目执行本地删除时应立即物理删除。
+func TestLocal_DeleteByItemWithSyncFalse_ImmediateWhenAlreadySynced(t *testing.T) {
+	db := newTestDBLocal(t)
+	db.syncDB = true
+	item := newFund("local_u4b", "USDC", 1.0)
+
+	writeRawWrapper(t, db, item, true)
+	if err := db.DeleteByItemWithSync(item, false); err != nil {
+		t.Fatalf("DeleteByItemWithSync(false) 失败: %v", err)
+	}
+	if keyExistsInBadger(t, db, item) {
+		t.Fatal("已同步条目执行本地删除后应立即物理删除")
+	}
+}
+
+// TestLocal_DeleteByItemWithSyncFalse_PendingKeptUntilSynced 未同步条目本地删除时应保留到同步完成后再删。
+func TestLocal_DeleteByItemWithSyncFalse_PendingKeptUntilSynced(t *testing.T) {
+	if testing.Short() {
+		t.Skip("需要等待后台轮询，-short 跳过")
+	}
+
+	db := newTestDBLocal(t)
+	db.syncDB = true
+	item := newFund("local_u4c", "DAI", 1.0)
+
+	writeRawWrapper(t, db, item, false)
+	if err := db.DeleteByItemWithSync(item, false); err != nil {
+		t.Fatalf("DeleteByItemWithSync(false) 失败: %v", err)
+	}
+	if !keyExistsInBadger(t, db, item) {
+		t.Fatal("未同步条目不应被立即物理删除")
+	}
+
+	wrapper := getWrapperFromBadger(t, db, item)
+	if wrapper == nil {
+		t.Fatal("wrapper 不存在")
+	}
+	if wrapper.IsDeleted {
+		t.Fatal("needSync=false 时不应把删除状态写成软删除")
+	}
+
+	markWrapperSynced(t, db, item)
+	waitFor(t, 7*time.Second, 200*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, item)
+	}, "未同步条目在标记为已同步后应被后台物理删除")
 }
 
 // TestLocal_Scan_FiltersDeleted Scan 不返回软删除条目
@@ -684,6 +790,43 @@ func TestSync_IsSyncAfterDelete_DeduplicatesSameKey(t *testing.T) {
 	}
 }
 
+func TestSync_IsSyncAfterDelete_PanicRecovered(t *testing.T) {
+	db := newTestDBLocal(t)
+	panicItem := newFund("sync_panic_u", "ATOM", 11.0)
+	panicItem.Status = 2
+	panicItem.SyncAfterDeletePanic = true
+	normalItem := newFund("sync_panic_u", "DOGE", 22.0)
+	normalItem.Status = 2
+
+	writeRawWrapper(t, db, panicItem, true)
+	writeRawWrapper(t, db, normalItem, true)
+
+	panicWrapper := getWrapperFromBadger(t, db, panicItem)
+	normalWrapper := getWrapperFromBadger(t, db, normalItem)
+	if panicWrapper == nil || normalWrapper == nil {
+		t.Fatal("前置条件失败：wrapper 不存在")
+	}
+
+	db.scheduleSyncAfterDelete([]syncAfterDeleteCandidate[testFund]{
+		{Key: panicWrapper.Key, Item: panicItem, UpdatedAt: panicWrapper.UpdatedAt},
+		{Key: normalWrapper.Key, Item: normalItem, UpdatedAt: normalWrapper.UpdatedAt},
+	})
+
+	waitFor(t, 2*time.Second, 20*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, normalItem)
+	}, "IsSyncAfterDelete panic 后，后续正常项仍应被继续处理")
+
+	if !keyExistsInBadger(t, db, panicItem) {
+		t.Fatal("panic 的条目不应被误删")
+	}
+	if calls := atomic.LoadInt32(&panicItem.SyncAfterDeleteCalls); calls != 1 {
+		t.Fatalf("panic 条目的 IsSyncAfterDelete 应执行 1 次，实际 %d 次", calls)
+	}
+	if calls := atomic.LoadInt32(&normalItem.SyncAfterDeleteCalls); calls != 1 {
+		t.Fatalf("正常条目的 IsSyncAfterDelete 应执行 1 次，实际 %d 次", calls)
+	}
+}
+
 // TestSync_InsertConflict_FallsBackToUpdate
 // 同一 hash 已在 MySQL，再次同步相同 hash（Balance 变化）应 fallback 为更新
 func TestSync_InsertConflict_FallsBackToUpdate(t *testing.T) {
@@ -964,6 +1107,128 @@ func TestSync_DeleteBySubPrefix_MultiUserIsolation(t *testing.T) {
 	// userB 的数据在 MySQL 中仍存在
 	if findInMySQL(t, db, itemB) == nil {
 		t.Error("userB 在 MySQL 中的数据不应被删除")
+	}
+}
+
+// TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete
+// Set 写入未同步数据 -> DeleteByItemWithSync(false) -> 先同步到 MySQL，再由本地延迟删除流程清理 BadgerDB。
+func TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("需要等待后台延迟删除，-short 跳过")
+	}
+
+	const userID = "delete_local_after_sync_u"
+	db := newTestDB(t)
+	cleanupMySQL(t, db, userID)
+	t.Cleanup(func() { cleanupMySQL(t, db, userID) })
+
+	item := newFund(userID, "ADA", 88.8)
+	if err := db.Set(item, 0); err != nil {
+		t.Fatalf("Set 失败: %v", err)
+	}
+	if !keyExistsInBadger(t, db, item) {
+		t.Fatal("Set 后 BadgerDB 中应存在本地数据")
+	}
+	if got := findInMySQL(t, db, item); got != nil {
+		t.Fatal("同步前 MySQL 中不应已有该记录")
+	}
+
+	if err := db.DeleteByItemWithSync(item, false); err != nil {
+		t.Fatalf("DeleteByItemWithSync(false) 失败: %v", err)
+	}
+
+	wrapper := getWrapperFromBadger(t, db, item)
+	if wrapper == nil {
+		t.Fatal("未同步条目执行本地删除后，wrapper 应暂时保留")
+	}
+	if wrapper.IsDeleted {
+		t.Fatal("DeleteByItemWithSync(false) 不应把本地条目标记为软删除")
+	}
+
+	triggerSync(t, db)
+
+	got := findInMySQL(t, db, item)
+	if got == nil {
+		t.Fatal("同步后 MySQL 中应存在该记录")
+	}
+	if got.Balance != 88.8 {
+		t.Fatalf("MySQL 中 Balance 应为 88.8，实际 %v", got.Balance)
+	}
+
+	waitFor(t, 7*time.Second, 200*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, item)
+	}, "同步完成后，本地延迟删除流程应物理清理 BadgerDB 中的 key")
+
+	got = findInMySQL(t, db, item)
+	if got == nil {
+		t.Fatal("本地删除后不应影响 MySQL 中已同步的数据")
+	}
+}
+
+// TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix
+// 多条记录逐条 DeleteByItemWithSync(false) 的效果应与 DeleteBySubPrefix 一致：
+// 已同步条目立即删本地；未同步条目待同步完成后删本地；远端数据保留。
+func TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("需要等待后台延迟删除，-short 跳过")
+	}
+
+	const userID = "delete_local_multi_u"
+	db := newTestDB(t)
+	cleanupMySQL(t, db, userID)
+	t.Cleanup(func() { cleanupMySQL(t, db, userID) })
+
+	synced1 := newFund(userID, "BTC", 11.0)
+	synced2 := newFund(userID, "ETH", 22.0)
+	pending := newFund(userID, "SOL", 33.0)
+	items := []*testFund{synced1, synced2, pending}
+
+	db.Set(synced1, 0)
+	db.Set(synced2, 0)
+	triggerSync(t, db)
+	db.Set(pending, 0)
+
+	for _, item := range items {
+		if err := db.DeleteByItemWithSync(item, false); err != nil {
+			t.Fatalf("DeleteByItemWithSync(false) 失败 [%s]: %v", item.GetHash(), err)
+		}
+	}
+
+	if keyExistsInBadger(t, db, synced1) {
+		t.Fatal("已同步条目 synced1 应立即从 BadgerDB 删除")
+	}
+	if keyExistsInBadger(t, db, synced2) {
+		t.Fatal("已同步条目 synced2 应立即从 BadgerDB 删除")
+	}
+	if !keyExistsInBadger(t, db, pending) {
+		t.Fatal("未同步条目 pending 不应被立即删除")
+	}
+
+	pendingWrapper := getWrapperFromBadger(t, db, pending)
+	if pendingWrapper == nil {
+		t.Fatal("pending 的 wrapper 应暂时保留")
+	}
+	if pendingWrapper.IsDeleted {
+		t.Fatal("DeleteByItemWithSync(false) 不应把 pending 标记为软删除")
+	}
+
+	triggerSync(t, db)
+
+	waitFor(t, 1*time.Second, 20*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, pending)
+	}, "pending 同步完成后应被本地延迟删除流程清理")
+
+	for _, item := range items {
+		got := findInMySQL(t, db, item)
+		if got == nil {
+			t.Fatalf("远端 MySQL 中应保留记录 [%s]", item.GetHash())
+		}
+		if got.Balance != item.Balance {
+			t.Fatalf("远端 Balance 不匹配 [%s]，期望 %v，实际 %v", item.GetHash(), item.Balance, got.Balance)
+		}
+	}
+	if count, _ := db.GetPendingSyncCount(); count != 0 {
+		t.Fatalf("全部处理完成后 PendingCount 应为 0，实际 %d", count)
 	}
 }
 

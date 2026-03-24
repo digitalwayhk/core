@@ -25,13 +25,14 @@ type BadgerDBConfig struct {
 	EnableLogger       bool  `json:"enable_logger" yaml:"enable_logger"`                 // 启用日志（默认 true）
 
 	// 同步配置
-	AutoSync        bool          `json:"auto_sync" yaml:"auto_sync"`                 // 是否自动同步到其他DB（默认 false）
-	SyncInterval    time.Duration `json:"sync_interval" yaml:"sync_interval"`         // 同步间隔（默认 1s）
-	SyncBatchSize   int           `json:"sync_batch_size" yaml:"sync_batch_size"`     // 同步批次大小（默认 1000）
-	SyncMinInterval    time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`    // 最小同步间隔（默认 1s）
-	SyncMaxInterval    time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`    // 最大同步间隔（默认 10s）
-	SyncBatchDelay     time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`     // 触发同步前的积累窗口，让小写入合并成大 batch（默认 10ms）
-	SyncMaxConcurrency int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"` // 全局最大并发 MySQL 事务数（默认 8）
+	AutoSync                   bool          `json:"auto_sync" yaml:"auto_sync"`                                         // 是否自动同步到其他DB（默认 false）
+	SyncInterval               time.Duration `json:"sync_interval" yaml:"sync_interval"`                                 // 同步间隔（默认 1s）
+	SyncBatchSize              int           `json:"sync_batch_size" yaml:"sync_batch_size"`                             // 同步批次大小（默认 1000）
+	SyncMinInterval            time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`                         // 最小同步间隔（默认 1s）
+	SyncMaxInterval            time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`                         // 最大同步间隔（默认 10s）
+	SyncBatchDelay             time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`                           // 触发同步前的积累窗口，让小写入合并成大 batch（默认 10ms）
+	SyncMaxConcurrency         int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                   // 全局最大并发 MySQL 事务数（默认 8）
+	DeferredDeletePollInterval time.Duration `json:"deferred_delete_poll_interval" yaml:"deferred_delete_poll_interval"` // 本地延迟删除轮询间隔（默认 5s）
 
 	// 清理配置
 	AutoCleanup     bool          `json:"auto_cleanup" yaml:"auto_cleanup"`         // 是否自动清理（默认 false）
@@ -67,11 +68,12 @@ func DefaultProductionConfig(path string) BadgerDBConfig {
 		EnableLogger:       true,
 
 		// 同步配置
-		AutoSync:        false,
-		SyncInterval:    1 * time.Second,
-		SyncBatchSize:   1000,
-		SyncMinInterval: 1 * time.Second,
-		SyncMaxInterval: 10 * time.Second,
+		AutoSync:                   false,
+		SyncInterval:               1 * time.Second,
+		SyncBatchSize:              1000,
+		SyncMinInterval:            1 * time.Second,
+		SyncMaxInterval:            10 * time.Second,
+		DeferredDeletePollInterval: 5 * time.Second,
 
 		// 清理配置
 		AutoCleanup:     false,
@@ -108,11 +110,12 @@ func DefaultFastConfig(path string) BadgerDBConfig {
 		EnableLogger:       false,
 
 		// 同步配置
-		AutoSync:        false,
-		SyncInterval:    1 * time.Second,
-		SyncBatchSize:   1000,
-		SyncMinInterval: 500 * time.Millisecond,
-		SyncMaxInterval: 5 * time.Second,
+		AutoSync:                   false,
+		SyncInterval:               1 * time.Second,
+		SyncBatchSize:              1000,
+		SyncMinInterval:            500 * time.Millisecond,
+		SyncMaxInterval:            5 * time.Second,
+		DeferredDeletePollInterval: 5 * time.Second,
 
 		// 清理配置
 		AutoCleanup:     false,
@@ -146,6 +149,10 @@ func (c *BadgerDBConfig) Validate() error {
 
 	if c.SyncMaxInterval <= 0 {
 		c.SyncMaxInterval = 10 * time.Second
+	}
+
+	if c.DeferredDeletePollInterval <= 0 {
+		c.DeferredDeletePollInterval = 5 * time.Second
 	}
 
 	if c.CleanupInterval <= 0 {

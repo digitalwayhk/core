@@ -410,23 +410,58 @@ func (p *PrefixedBadgerDB[T]) DeleteBySubPrefix(subPrefix string) (int, error) {
 	}
 
 	fullPrefix := p.prefix + subPrefix
+	keys, err := p.collectKeysByPrefix(fullPrefix)
+	if err != nil {
+		return 0, err
+	}
+	return p.deleteLocalKeysWithDeferredSync(keys, fullPrefix, false)
+}
 
-	// 扫描所有匹配的 key，按同步状态分组
-	var syncedKeys, pendingKeys []string
+func (p *PrefixedBadgerDB[T]) collectKeysByPrefix(fullPrefix string) ([]string, error) {
+	keys := make([]string, 0)
 	err := p.manager.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		for it.Seek([]byte(fullPrefix)); it.ValidForPrefix([]byte(fullPrefix)); it.Next() {
-			key := string(it.Item().Key())
+			keys = append(keys, string(it.Item().Key()))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("扫描 key 失败 [prefix=%s]: %w", fullPrefix, err)
+	}
+	return keys, nil
+}
+
+func (p *PrefixedBadgerDB[T]) splitKeysBySyncStatus(keys []string) ([]string, []string, error) {
+	if len(keys) == 0 {
+		return nil, nil, nil
+	}
+
+	syncedKeys := make([]string, 0, len(keys))
+	pendingKeys := make([]string, 0)
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		for _, key := range keys {
+			item, err := txn.Get([]byte(key))
+			if err != nil {
+				if err == badger.ErrKeyNotFound {
+					continue
+				}
+				return err
+			}
+
 			synced := true // 反序列化失败时保守视为已同步（直接删除）
-			_ = it.Item().Value(func(val []byte) error {
+			if err := item.Value(func(val []byte) error {
 				var wrapper SyncQueueItem[T]
-				if err := json.Unmarshal(val, &wrapper); err == nil && !wrapper.IsSynced {
+				if unmarshalErr := json.Unmarshal(val, &wrapper); unmarshalErr == nil && !wrapper.IsSynced {
 					synced = false
 				}
 				return nil
-			})
+			}); err != nil {
+				return err
+			}
+
 			if synced {
 				syncedKeys = append(syncedKeys, key)
 			} else {
@@ -436,7 +471,15 @@ func (p *PrefixedBadgerDB[T]) DeleteBySubPrefix(subPrefix string) (int, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("扫描 key 失败 [prefix=%s]: %w", fullPrefix, err)
+		return nil, nil, err
+	}
+	return syncedKeys, pendingKeys, nil
+}
+
+func (p *PrefixedBadgerDB[T]) deleteLocalKeysWithDeferredSync(keys []string, logPrefix string, triggerSync bool) (int, error) {
+	syncedKeys, pendingKeys, err := p.splitKeysBySyncStatus(keys)
+	if err != nil {
+		return 0, fmt.Errorf("检查 key 同步状态失败 [prefix=%s]: %w", logPrefix, err)
 	}
 
 	// 立即删除已同步的条目
@@ -450,9 +493,12 @@ func (p *PrefixedBadgerDB[T]) DeleteBySubPrefix(subPrefix string) (int, error) {
 
 	// 对未同步的条目，后台等待同步完成后再删除
 	if len(pendingKeys) > 0 {
-		logx.Infof("DeleteBySubPrefix: 已删除 %d 条，%d 条待同步，后台自动清理中 [prefix=%s]",
-			deleted, len(pendingKeys), fullPrefix)
-		go p.waitAndDeleteKeys(pendingKeys, fullPrefix)
+		logx.Infof("本地延迟删除: 已删除 %d 条，%d 条待同步，后台自动清理中 [prefix=%s]",
+			deleted, len(pendingKeys), logPrefix)
+		if triggerSync {
+			p.triggerSync()
+		}
+		go p.waitAndDeleteKeys(pendingKeys, logPrefix)
 	}
 
 	return deleted, nil
@@ -461,15 +507,15 @@ func (p *PrefixedBadgerDB[T]) DeleteBySubPrefix(subPrefix string) (int, error) {
 // waitAndDeleteKeys 后台轮询，等待指定 key 同步完成后物理删除。
 func (p *PrefixedBadgerDB[T]) waitAndDeleteKeys(keys []string, logPrefix string) {
 	const (
-		pollInterval = 5 * time.Second
-		maxWait      = 10 * time.Minute
+		maxWait = 10 * time.Minute
 	)
+	pollInterval := p.manager.config.DeferredDeletePollInterval
 	deadline := time.Now().Add(maxWait)
 	remaining := keys
 
 	for len(remaining) > 0 {
 		if time.Now().After(deadline) {
-			logx.Errorf("DeleteBySubPrefix 后台清理超时，%d 条数据未能删除 [prefix=%s]", len(remaining), logPrefix)
+			logx.Errorf("本地延迟删除后台清理超时，%d 条数据未能删除 [prefix=%s]", len(remaining), logPrefix)
 			return
 		}
 		if p.IsClosed() {
@@ -510,14 +556,14 @@ func (p *PrefixedBadgerDB[T]) waitAndDeleteKeys(keys []string, logPrefix string)
 		if len(readyKeys) > 0 {
 			n, err := p.physicalDeleteKeys(readyKeys)
 			if err != nil {
-				logx.Errorf("DeleteBySubPrefix 后台删除失败: %v [prefix=%s]", err, logPrefix)
+				logx.Errorf("本地延迟删除后台删除失败: %v [prefix=%s]", err, logPrefix)
 			} else {
-				logx.Infof("DeleteBySubPrefix 后台清理 %d 条 [prefix=%s]", n, logPrefix)
+				logx.Infof("本地延迟删除后台清理 %d 条 [prefix=%s]", n, logPrefix)
 			}
 		}
 		remaining = stillPending
 	}
-	logx.Infof("DeleteBySubPrefix 后台清理完成 [prefix=%s]", logPrefix)
+	logx.Infof("本地延迟删除后台清理完成 [prefix=%s]", logPrefix)
 }
 
 // physicalDeleteKeys 分批物理删除指定 key 列表（每批 1000 条）。
@@ -657,6 +703,9 @@ func (p *PrefixedBadgerDB[T]) Delete(key string) error {
 	return p.delete(fullKey, needSync)
 }
 func (p *PrefixedBadgerDB[T]) DeleteByItem(item *T) error {
+	if item == nil {
+		return fmt.Errorf("item 不能为空")
+	}
 	key := p.generateKey(item)
 	if key == "" {
 		return badger.ErrEmptyKey
@@ -669,13 +718,30 @@ func (p *PrefixedBadgerDB[T]) DeleteByItem(item *T) error {
 	return p.delete(key, needSync)
 }
 func (p *PrefixedBadgerDB[T]) DeleteByItemWithSync(item *T, needSync bool) error {
+	if item == nil {
+		return fmt.Errorf("item 不能为空")
+	}
 	key := p.generateKey(item)
 	if key == "" {
 		return badger.ErrEmptyKey
 	}
+	if !needSync {
+		return p.deleteLocalOnly(key)
+	}
 
 	return p.delete(key, needSync)
 }
+
+func (p *PrefixedBadgerDB[T]) deleteLocalOnly(key string) error {
+	if !p.syncDB {
+		return p.manager.db.Update(func(txn *badger.Txn) error {
+			return txn.Delete([]byte(key))
+		})
+	}
+	_, err := p.deleteLocalKeysWithDeferredSync([]string{key}, key, true)
+	return err
+}
+
 func (p *PrefixedBadgerDB[T]) batchDelete(keys []string) error {
 	if len(keys) == 0 {
 		return nil
@@ -1569,23 +1635,8 @@ func (p *PrefixedBadgerDB[T]) processSyncAfterDelete(candidates []syncAfterDelet
 		}
 		processed++
 
-		syncAfterDelete, ok := any(candidate.Item).(ISyncAfterDelete[T])
-		if !ok {
-			continue
-		}
-
-		start := time.Now()
-		needDelete := syncAfterDelete.IsSyncAfterDelete()
-		if cost := time.Since(start); cost > 200*time.Millisecond {
-			logx.Infof("IsSyncAfterDelete 执行较慢 [key=%s, cost=%v]", candidate.Key, cost)
-		}
-		if !needDelete {
-			continue
-		}
-
-		deletedNow, err := p.deleteSyncedKeyIfUnchanged(candidate)
-		if err != nil {
-			logx.Errorf("异步删除本地同步缓存失败 [%s]: %v", candidate.Key, err)
+		deletedNow, handled := p.processSingleSyncAfterDeleteCandidate(candidate)
+		if !handled {
 			continue
 		}
 		if deletedNow {
@@ -1593,6 +1644,38 @@ func (p *PrefixedBadgerDB[T]) processSyncAfterDelete(candidates []syncAfterDelet
 		}
 	}
 	return processed, deleted
+}
+
+func (p *PrefixedBadgerDB[T]) processSingleSyncAfterDeleteCandidate(candidate syncAfterDeleteCandidate[T]) (deleted bool, handled bool) {
+	syncAfterDelete, ok := any(candidate.Item).(ISyncAfterDelete[T])
+	if !ok {
+		return false, false
+	}
+
+	var needDelete bool
+	start := time.Now()
+	func() {
+		// defer func() {
+		// 	if recovered := recover(); recovered != nil {
+		// 		logx.Errorf("IsSyncAfterDelete 执行发生恐慌 [key=%s, model=%T]: %v", candidate.Key, candidate.Item, recovered)
+		// 		needDelete = false
+		// 	}
+		// }()
+		needDelete = syncAfterDelete.IsSyncAfterDelete()
+	}()
+	if cost := time.Since(start); cost > 200*time.Millisecond {
+		logx.Infof("IsSyncAfterDelete 执行较慢 [key=%s, cost=%v]", candidate.Key, cost)
+	}
+	if !needDelete {
+		return false, true
+	}
+
+	deletedNow, err := p.deleteSyncedKeyIfUnchanged(candidate)
+	if err != nil {
+		logx.Errorf("异步删除本地同步缓存失败 [%s]: %v", candidate.Key, err)
+		return false, true
+	}
+	return deletedNow, true
 }
 
 func (p *PrefixedBadgerDB[T]) deleteSyncedKeyIfUnchanged(candidate syncAfterDeleteCandidate[T]) (bool, error) {
