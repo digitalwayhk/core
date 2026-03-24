@@ -1,7 +1,6 @@
 package nosql
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -29,12 +28,37 @@ type IActionCloner interface {
 	Clone() types.IDataAction
 }
 
+// ISyncPoolKeyProvider 由能根据模型路由结果给出真实连接池标识的 adapter 实现。
+// 用于让 sync semaphore 的作用域与底层连接池保持一致，而不是绑定到 adapter 实例指针。
+type ISyncPoolKeyProvider interface {
+	GetSyncPoolKey(data interface{}) string
+}
+
 // adapterSemasMu 保护 adapterSemas 的并发访问
 var adapterSemasMu sync.Mutex
 
+// poolSemasMu 保护 poolSemas 的并发访问
+var poolSemasMu sync.Mutex
+
 // adapterSemas 以 adapter 指针值为键，持有各连接池的并发信号量。
-// 作用域是 adapter 实例（连接池）而非 basePath：同一 adapter 的所有 prefix 共享同一信号量。
+// 仅作为无法识别真实连接池时的退化方案使用。
 var adapterSemas = map[uintptr]chan struct{}{}
+
+// poolSemas 以真实连接池标识为键，持有各连接池的并发信号量。
+var poolSemas = map[string]chan struct{}{}
+
+func getActionConcurrency(action types.IDataAction) int {
+	concurrency := 8
+	if hint, ok := action.(IMaxConcurrencyHint); ok {
+		if n := hint.GetMaxOpenConns(); n > 0 {
+			concurrency = n * 3 / 4
+			if concurrency < 1 {
+				concurrency = 1
+			}
+		}
+	}
+	return concurrency
+}
 
 // getOrCreateAdapterSema 为 action 对应的连接池返回（或创建）专属信号量。
 // 容量 = MaxOpenConns × 75%；若 adapter 未实现 IMaxConcurrencyHint 或 MaxOpenConns=0，默认 8。
@@ -51,18 +75,37 @@ func getOrCreateAdapterSema(action types.IDataAction) chan struct{} {
 	if sema, ok := adapterSemas[ptr]; ok {
 		return sema
 	}
-	concurrency := 8
-	if hint, ok := action.(IMaxConcurrencyHint); ok {
-		if n := hint.GetMaxOpenConns(); n > 0 {
-			concurrency = n * 3 / 4
-			if concurrency < 1 {
-				concurrency = 1
-			}
-		}
-	}
+	concurrency := getActionConcurrency(action)
 	sema := make(chan struct{}, concurrency)
 	adapterSemas[ptr] = sema
 	return sema
+}
+
+func getOrCreatePoolSema(poolKey string, concurrency int) chan struct{} {
+	if poolKey == "" {
+		return nil
+	}
+
+	poolSemasMu.Lock()
+	defer poolSemasMu.Unlock()
+	if sema, ok := poolSemas[poolKey]; ok {
+		return sema
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	sema := make(chan struct{}, concurrency)
+	poolSemas[poolKey] = sema
+	return sema
+}
+
+func getSyncSema(action types.IDataAction, data interface{}) chan struct{} {
+	if provider, ok := action.(ISyncPoolKeyProvider); ok {
+		if poolKey := provider.GetSyncPoolKey(data); poolKey != "" {
+			return getOrCreatePoolSema(poolKey, getActionConcurrency(action))
+		}
+	}
+	return getOrCreateAdapterSema(action)
 }
 
 // ScanResult 分页扫描结果
@@ -109,7 +152,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	syncOnce       sync.Once
 	isAutoClean    bool
 
-	syncSema chan struct{} // 连接池并发信号量，与持有同一 adapter 的其他实例共享
+	syncSema chan struct{} // 默认/兼容用信号量容量预览；真正同步时按目标连接池动态获取
 
 	// 待同步计数缓存
 	pendingCountCache int
@@ -1116,12 +1159,6 @@ func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
 
 	logx.Infof("开始同步 [prefix=%s, 数量: %d]", p.prefix, len(unsyncedItems))
 
-	// 获取连接池信号量：限制同一 adapter 的并发 MySQL 事务数，防止打崩连接池
-	if p.syncSema != nil {
-		p.syncSema <- struct{}{}
-		defer func() { <-p.syncSema }()
-	}
-
 	_, err = p.syncBatch(unsyncedItems)
 	if err != nil {
 		logx.Errorf("批量同步失败 [prefix=%s]: %v", p.prefix, err)
@@ -1141,48 +1178,36 @@ func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
 func (p *PrefixedBadgerDB[T]) GetPendingSyncCount() (int, error) {
 	count := 0
 
-	// 🆕 添加超时保护
-	done := make(chan error, 1)
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		opts.PrefetchSize = 100 // 🔧 限制预取大小
+		it := txn.NewIterator(opts)
+		defer it.Close()
 
-	go func() {
-		err := p.manager.db.View(func(txn *badger.Txn) error {
-			opts := badger.DefaultIteratorOptions
-			opts.PrefetchValues = true
-			opts.PrefetchSize = 100 // 🔧 限制预取大小
-			it := txn.NewIterator(opts)
-			defer it.Close()
+		for it.Seek([]byte(p.prefix)); it.ValidForPrefix([]byte(p.prefix)); it.Next() {
+			item := it.Item()
 
-			for it.Seek([]byte(p.prefix)); it.ValidForPrefix([]byte(p.prefix)); it.Next() {
-				item := it.Item()
-
-				err := item.Value(func(val []byte) error {
-					var wrapper SyncQueueItem[T]
-					if err := json.Unmarshal(val, &wrapper); err != nil {
-						return err
-					}
-
-					if !wrapper.IsSynced {
-						count++
-					}
-					return nil
-				})
-
-				if err != nil {
-					continue
+			err := item.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if err := json.Unmarshal(val, &wrapper); err != nil {
+					return err
 				}
-			}
-			return nil
-		})
-		done <- err
-	}()
 
-	// 🆕 等待完成或超时
-	select {
-	case err := <-done:
-		return count, err
-	case <-time.After(5 * time.Second):
-		return 0, fmt.Errorf("获取待同步数量超时 [prefix=%s]", p.prefix)
-	}
+				if !wrapper.IsSynced {
+					count++
+				}
+				return nil
+			})
+
+			if err != nil {
+				continue
+			}
+		}
+		return nil
+	})
+
+	return count, err
 }
 
 // getUnsyncedBatch 获取未同步数据（限定前缀）
@@ -1271,7 +1296,6 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	}
 
 	successKeys := make([]string, 0, len(items))
-
 	for _, key := range groupOrder {
 		groupItems := groups[key]
 
@@ -1285,6 +1309,10 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 		}
 		if _, err := groupAction.GetModelDB(groupItems[0].Item); err != nil {
 			logx.Errorf("路由目标 DB 失败 [db=%s, op=%s]: %v，降级为逐条处理", key.dbName, key.op, err)
+			sema := getSyncSema(groupAction, groupItems[0].Item)
+			if sema != nil {
+				sema <- struct{}{}
+			}
 			switch key.op {
 			case OpInsert:
 				successKeys = append(successKeys, p.insertItemsOneByOne(groupItems)...)
@@ -1293,8 +1321,16 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 			case OpDelete:
 				successKeys = append(successKeys, p.deleteItemsOneByOne(groupItems, groupAction)...)
 			}
+			if sema != nil {
+				<-sema
+			}
 			p.onSyncAfter(groupItems)
 			continue
+		}
+
+		sema := getSyncSema(groupAction, groupItems[0].Item)
+		if sema != nil {
+			sema <- struct{}{}
 		}
 
 		switch key.op {
@@ -1311,12 +1347,18 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 			successKeys = append(successKeys, keys...)
 			p.onSyncAfter(groupItems)
 		}
+
+		if sema != nil {
+			<-sema
+		}
 	}
 
 	// 批量更新同步状态
 	if len(successKeys) > 0 {
 		if err := p.batchUpdateSyncedStatus(successKeys); err != nil {
 			logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
+		} else {
+			p.incrementPendingCount(-len(successKeys))
 		}
 	}
 	return successKeys, nil
@@ -1463,6 +1505,8 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 	if len(physicalDeleteKeys) > 0 {
 		if err := p.batchDelete(physicalDeleteKeys); err != nil {
 			logx.Errorf("批量物理删除本地缓存失败: %v", err)
+		} else {
+			p.incrementPendingCount(-len(physicalDeleteKeys))
 		}
 	}
 
@@ -1473,10 +1517,6 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 		logx.Infof("✅ 批量插入完成，成功: %d, 物理删除: %d, 总数: %d",
 			len(successKeys), len(physicalDeleteKeys), len(items))
 	}
-
-	// 🔧 减少待同步计数
-	count := len(successKeys) + len(physicalDeleteKeys)
-	p.incrementPendingCount(-count)
 
 	return successKeys // 🔧 只返回需要更新同步状态的 keys
 }
@@ -1493,10 +1533,6 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 	successKeys := make([]string, 0, len(items))
 	physicalDeleteKeys := make([]string, 0, len(items))
 
-	// 🆕 添加超时保护
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	// 🔧 开启事务
 	if err := syncAction.Transaction(); err != nil {
 		logx.Errorf("开启事务失败: %v，降级为逐条更新", err)
@@ -1512,65 +1548,64 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 		}
 	}()
 
-	// 🆕 使用通道接收结果
-	done := make(chan struct{})
 	hasError := false
 
-	go func() {
-		// 在事务中逐条更新
-		for _, wrapper := range items {
-			select {
-			case <-ctx.Done():
-				logx.Errorf("更新超时，停止批量更新")
+	// 在事务中逐条更新
+	for _, wrapper := range items {
+		if wrapper.Item == nil {
+			continue
+		}
+		shouldInsert := true
+		if existsChecker, ok := syncAction.(IExists); ok {
+			exists, err := existsChecker.Exists(wrapper.Item)
+			if err == nil && exists {
+				shouldInsert = false
+				logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
+			}
+		}
+
+		var err error
+		if shouldInsert {
+			err = syncAction.Insert(wrapper.Item)
+		} else {
+			err = syncAction.Update(wrapper.Item)
+		}
+
+		if err != nil {
+			if strings.Contains(err.Error(), "transaction has already been committed") ||
+				strings.Contains(err.Error(), "transaction has already been rolled back") {
+				logx.Errorf("事务已失效，停止批量更新 [%s]", wrapper.Key)
 				hasError = true
-				return
-			default:
+				break
 			}
 
-			if wrapper.Item == nil {
-				continue
+			if strings.Contains(err.Error(), "Rows are closed") ||
+				strings.Contains(err.Error(), "context canceled") {
+				logx.Errorf("连接已关闭，停止批量更新 [%s]", wrapper.Key)
+				hasError = true
+				break
 			}
-			// 🆕 先检查数据是否存在（如果支持）
-			shouldInsert := true
-			if existsChecker, ok := syncAction.(IExists); ok {
-				exists, err := existsChecker.Exists(wrapper.Item)
-				if err == nil && exists {
-					shouldInsert = false
-					logx.Infof("数据已存在，直接更新 [%s]", wrapper.Key)
-				}
-			}
-			var err error
-			if shouldInsert {
-				// 直接更新
+
+			if strings.Contains(err.Error(), "record not found") ||
+				strings.Contains(err.Error(), "no rows") {
+				logx.Infof("记录不存在，尝试插入 [%s]", wrapper.Key)
+
 				err = syncAction.Insert(wrapper.Item)
-			} else {
-				// 尝试插入
-				err = syncAction.Update(wrapper.Item)
-			}
-
-			if err != nil {
-				// 🔧 检查事务错误
-				if strings.Contains(err.Error(), "transaction has already been committed") ||
-					strings.Contains(err.Error(), "transaction has already been rolled back") {
-					logx.Errorf("事务已失效，停止批量更新 [%s]", wrapper.Key)
-					hasError = true
-					return
+				if err == nil {
+					if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
+						if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
+							physicalDeleteKeys = append(physicalDeleteKeys, wrapper.Key)
+							continue
+						}
+					}
+					successKeys = append(successKeys, wrapper.Key)
+					continue
 				}
 
-				// 🔧 检查连接错误
-				if strings.Contains(err.Error(), "Rows are closed") ||
-					strings.Contains(err.Error(), "context canceled") {
-					logx.Errorf("连接已关闭，停止批量更新 [%s]", wrapper.Key)
-					hasError = true
-					return
-				}
-
-				// 🔧 处理记录不存在
-				if strings.Contains(err.Error(), "record not found") ||
-					strings.Contains(err.Error(), "no rows") {
-					logx.Infof("记录不存在，尝试插入 [%s]", wrapper.Key)
-
-					err = syncAction.Insert(wrapper.Item)
+				if strings.Contains(err.Error(), "duplicate key") ||
+					strings.Contains(err.Error(), "UNIQUE constraint failed") {
+					logx.Errorf("插入冲突，重试更新 [%s]", wrapper.Key)
+					err = syncAction.Update(wrapper.Item)
 					if err == nil {
 						if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
 							if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
@@ -1581,57 +1616,29 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 						successKeys = append(successKeys, wrapper.Key)
 						continue
 					}
-
-					// 插入也失败
-					if strings.Contains(err.Error(), "duplicate key") ||
-						strings.Contains(err.Error(), "UNIQUE constraint failed") {
-						logx.Errorf("插入冲突，重试更新 [%s]", wrapper.Key)
-						err = syncAction.Update(wrapper.Item)
-						if err == nil {
-							if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
-								if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
-									physicalDeleteKeys = append(physicalDeleteKeys, wrapper.Key)
-									continue
-								}
-							}
-							successKeys = append(successKeys, wrapper.Key)
-							continue
-						}
-					}
-
-					logx.Errorf("插入失败 [%s]: %v", wrapper.Key, err)
-					hasError = true
-					continue
 				}
 
-				logx.Errorf("更新失败 [%s]: %v", wrapper.Key, err)
+				logx.Errorf("插入失败 [%s]: %v", wrapper.Key, err)
 				hasError = true
 				continue
 			}
 
-			wrapper.IsSynced = true
-
-			// 更新成功，检查是否需要物理删除
-			if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
-				if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
-					logx.Infof("ISyncAfterDelete 返回 true，将物理删除 [%s]", wrapper.Key)
-					physicalDeleteKeys = append(physicalDeleteKeys, wrapper.Key)
-					continue
-				}
-			}
-
-			successKeys = append(successKeys, wrapper.Key)
+			logx.Errorf("更新失败 [%s]: %v", wrapper.Key, err)
+			hasError = true
+			continue
 		}
-		close(done)
-	}()
 
-	// 🆕 等待完成或超时
-	select {
-	case <-done:
-		// 正常完成
-	case <-ctx.Done():
-		logx.Errorf("批量更新超时 [数量: %d]", len(items))
-		hasError = true
+		wrapper.IsSynced = true
+
+		if syncAfterDelete, ok := any(wrapper.Item).(ISyncAfterDelete[T]); ok {
+			if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
+				logx.Infof("ISyncAfterDelete 返回 true，将物理删除 [%s]", wrapper.Key)
+				physicalDeleteKeys = append(physicalDeleteKeys, wrapper.Key)
+				continue
+			}
+		}
+
+		successKeys = append(successKeys, wrapper.Key)
 	}
 
 	// 🔧 提交或回滚事务
@@ -1661,6 +1668,8 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 	if len(physicalDeleteKeys) > 0 {
 		if err := p.batchDelete(physicalDeleteKeys); err != nil {
 			logx.Errorf("批量物理删除失败: %v", err)
+		} else {
+			p.incrementPendingCount(-len(physicalDeleteKeys))
 		}
 	}
 
@@ -1668,9 +1677,6 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 		logx.Errorf("批量更新部分失败，成功: %d, 物理删除: %d, 总数: %d",
 			len(successKeys), len(physicalDeleteKeys), len(items))
 	}
-
-	count := len(successKeys) + len(physicalDeleteKeys)
-	p.incrementPendingCount(-count)
 
 	return successKeys
 }
@@ -1801,14 +1807,13 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 		logx.Infof("✅ 批量删除完成，成功: %d/%d", len(successKeys), len(items))
 	}
 
-	count := len(successKeys)
-	p.incrementPendingCount(-count)
 	return successKeys
 }
 
 // 🆕 逐条插入（无事务）- 增强错误处理
 func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []string {
 	successKeys := make([]string, 0, len(items))
+	physicalDeletedCount := 0
 	// 🆕 检查是否支持 Exists 方法
 	type IExists interface {
 		Exists(data interface{}) (bool, error)
@@ -1856,6 +1861,8 @@ func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []s
 						if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
 							if deleteErr := p.delete(wrapper.Key, false); deleteErr != nil {
 								logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, deleteErr)
+							} else {
+								physicalDeletedCount++
 							}
 							continue // 不加入 successKeys
 						}
@@ -1881,12 +1888,17 @@ func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []s
 			if needDelete := syncAfterDelete.IsSyncAfterDelete(); needDelete {
 				if deleteErr := p.delete(wrapper.Key, false); deleteErr != nil {
 					logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, deleteErr)
+				} else {
+					physicalDeletedCount++
 				}
 				continue
 			}
 		}
 
 		successKeys = append(successKeys, wrapper.Key)
+	}
+	if physicalDeletedCount > 0 {
+		p.incrementPendingCount(-physicalDeletedCount)
 	}
 
 	logx.Infof("✅ 逐条插入完成，成功: %d/%d", len(successKeys), len(items))
@@ -1896,6 +1908,7 @@ func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []s
 // 🆕 逐条更新（无事务）
 func (p *PrefixedBadgerDB[T]) updateItemsOneByOne(items []*SyncQueueItem[T]) []string {
 	successKeys := make([]string, 0, len(items))
+	physicalDeletedCount := 0
 	// 🆕 检查是否支持 Exists 方法
 	type IExists interface {
 		Exists(data interface{}) (bool, error)
@@ -1961,12 +1974,17 @@ func (p *PrefixedBadgerDB[T]) updateItemsOneByOne(items []*SyncQueueItem[T]) []s
 				err := p.delete(wrapper.Key, false)
 				if err != nil {
 					logx.Errorf("物理删除本地缓存失败 [%s]: %v", wrapper.Key, err)
+				} else {
+					physicalDeletedCount++
 				}
 				continue
 			}
 		}
 		successKeys = append(successKeys, wrapper.Key)
 
+	}
+	if physicalDeletedCount > 0 {
+		p.incrementPendingCount(-physicalDeletedCount)
 	}
 
 	return successKeys

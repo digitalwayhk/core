@@ -475,6 +475,71 @@ func TestSyncSema_AutoSizing_ZeroMaxOpenConns_KeepsDefault(t *testing.T) {
 	t.Logf("MaxOpenConns=0 时信号量容量正确为默认 %d", wantCap)
 }
 
+// TestSyncSema_SharedAcrossAdaptersSamePool 验证不同 MySQL adapter 实例若路由到同一真实连接池，会共享同一 semaphore。
+func TestSyncSema_SharedAcrossAdaptersSamePool(t *testing.T) {
+	cfg := &oltp.Config{
+		Host:         "127.0.0.1",
+		Port:         3306,
+		Username:     "root",
+		Password:     "pw",
+		MaxOpenConns: 20,
+	}
+	action1 := oltp.NewMySQL(cfg)
+	action2 := oltp.NewMySQL(cfg)
+	item := newFund("user-1", "BTC", 1)
+	item.Status = 7
+
+	sema1 := getSyncSema(action1, item)
+	sema2 := getSyncSema(action2, item)
+
+	if sema1 == nil || sema2 == nil {
+		t.Fatalf("期望返回非 nil semaphore")
+	}
+	if sema1 != sema2 {
+		t.Fatalf("同一真实连接池应共享同一 semaphore: sema1=%p sema2=%p", sema1, sema2)
+	}
+
+	wantCap := cfg.MaxOpenConns * 3 / 4
+	if got := cap(sema1); got != wantCap {
+		t.Fatalf("共享 semaphore 容量 = %d，期望 %d", got, wantCap)
+	}
+	if poolKey := action1.GetSyncPoolKey(item); poolKey == "" {
+		t.Fatalf("期望生成非空 pool key")
+	}
+	if poolKey1, poolKey2 := action1.GetSyncPoolKey(item), action2.GetSyncPoolKey(item); poolKey1 != poolKey2 {
+		t.Fatalf("同一真实连接池 pool key 应一致: %q != %q", poolKey1, poolKey2)
+	}
+}
+
+// TestSyncSema_SplitAcrossDifferentRemoteDBs 验证同一 adapter 路由到不同远程 DB 时使用不同 semaphore。
+func TestSyncSema_SplitAcrossDifferentRemoteDBs(t *testing.T) {
+	cfg := &oltp.Config{
+		Host:         "127.0.0.1",
+		Port:         3306,
+		Username:     "root",
+		Password:     "pw",
+		MaxOpenConns: 20,
+	}
+	action := oltp.NewMySQL(cfg)
+	item1 := newFund("user-1", "BTC", 1)
+	item1.Status = 1
+	item2 := newFund("user-1", "ETH", 1)
+	item2.Status = 2
+
+	sema1 := getSyncSema(action, item1)
+	sema2 := getSyncSema(action, item2)
+
+	if sema1 == nil || sema2 == nil {
+		t.Fatalf("期望返回非 nil semaphore")
+	}
+	if sema1 == sema2 {
+		t.Fatalf("不同远程 DB 应使用不同 semaphore: sema1=%p sema2=%p", sema1, sema2)
+	}
+	if poolKey1, poolKey2 := action.GetSyncPoolKey(item1), action.GetSyncPoolKey(item2); poolKey1 == poolKey2 {
+		t.Fatalf("不同远程 DB 的 pool key 应不同: %q == %q", poolKey1, poolKey2)
+	}
+}
+
 // TestSyncSema_LimitsConcurrentCalls 验证信号量限制并发 MySQL 事务数
 func TestSyncSema_LimitsConcurrentCalls(t *testing.T) {
 	db := newTestDBLocal(t)

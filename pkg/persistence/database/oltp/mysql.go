@@ -170,6 +170,29 @@ func (m *MySQL) GetMaxOpenConns() int {
 	return m.config.MaxOpenConns
 }
 
+// GetSyncPoolKey 返回当前模型会命中的真实连接池标识，用于共享同步限流信号量。
+func (m *MySQL) GetSyncPoolKey(data interface{}) string {
+	if m == nil || m.config == nil {
+		return ""
+	}
+	dbName := ""
+	if m.config.Database != "" {
+		dbName = m.config.Database
+	} else if idb, ok := data.(types.IDBName); ok {
+		dbName = idb.GetRemoteDBName()
+		if dbName == "" {
+			dbName = idb.GetLocalDBName()
+		}
+	}
+	if dbName == "" {
+		dbName = m.Name
+	}
+	if dbName == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d/%s", m.config.Host, m.config.Port, dbName)
+}
+
 // ==================== 核心方法（与 SQLite 保持一致）====================
 
 func (m *MySQL) ensureValidConnection() error {

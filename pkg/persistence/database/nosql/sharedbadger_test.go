@@ -1280,14 +1280,83 @@ func TestConcurrent_MultiUser_DataIsolation(t *testing.T) {
 // 七、多远程 DB 路由测试（GetRemoteDBName 根据 Status 返回不同库名）
 // ============================================================
 
-// findInMySQLRouted 通过 item.Status 让 GetRemoteDBName() 自动路由到正确的 MySQL DB。
-// 利用 SearchHash 的 fn 回调将 item 设为 SearchItem.Model，从而驱动 MySQL.GetDBName 路由。
-func findInMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], item *testFund) *testFund {
+func newRoutedQueryList(t *testing.T, db *PrefixedBadgerDB[testFund]) *entity.ModelList[testFund] {
 	t.Helper()
 	if db.syncList == nil {
 		t.Fatal("syncList 未初始化，无法查询 MySQL")
 	}
-	got, _ := db.syncList.SearchHash(item.GetHash(), func(si *types.SearchItem) {
+	action := db.syncList.GetAction()
+	if action == nil {
+		t.Fatal("syncList action 未初始化，无法查询 MySQL")
+	}
+	if cloner, ok := action.(IActionCloner); ok {
+		action = cloner.Clone()
+	}
+	return entity.NewModelList[testFund](action)
+}
+
+func routedDBName(status int) string {
+	probe := &testFund{Model: entity.NewModel(), Status: status}
+	return probe.GetRemoteDBName()
+}
+
+func newFixedQueryList(t *testing.T, db *PrefixedBadgerDB[testFund], database string) *entity.ModelList[testFund] {
+	t.Helper()
+	if db.syncList == nil {
+		t.Fatal("syncList 未初始化，无法查询 MySQL")
+	}
+	baseAction := db.syncList.GetAction()
+	mysqlAction, ok := baseAction.(*oltp.MySQL)
+	if !ok || mysqlAction == nil {
+		t.Fatal("syncList action 不是 *oltp.MySQL，无法固定数据库查询")
+	}
+	baseCfg := mysqlAction.GetConfig()
+	if baseCfg == nil {
+		t.Fatal("MySQL 配置为空，无法固定数据库查询")
+	}
+	cfg := *baseCfg
+	cfg.Database = database
+	action := oltp.NewMySQL(&cfg)
+	return entity.NewModelList[testFund](action)
+}
+
+func findInMySQLDatabase(t *testing.T, db *PrefixedBadgerDB[testFund], database string, item *testFund) *testFund {
+	t.Helper()
+	list := newFixedQueryList(t, db, database)
+	got, _ := list.SearchHash(item.GetHash())
+	return got
+}
+
+func countMySQLInDatabase(t *testing.T, db *PrefixedBadgerDB[testFund], database, userID string) int {
+	t.Helper()
+	list := newFixedQueryList(t, db, database)
+	items, _ := list.SearchWhere("user_id", userID)
+	return len(items)
+}
+
+func cleanupMySQLDatabase(t *testing.T, db *PrefixedBadgerDB[testFund], database, userID string) {
+	t.Helper()
+	list := newFixedQueryList(t, db, database)
+	items, err := list.SearchWhere("user_id", userID)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	si := list.GetSearchItem()
+	action := list.GetDBAdapter(si)
+	if action == nil {
+		return
+	}
+	for _, item := range items {
+		_ = action.Delete(item)
+	}
+}
+
+// findInMySQLRouted 通过 item.Status 让 GetRemoteDBName() 自动路由到正确的 MySQL DB。
+// 利用 SearchHash 的 fn 回调将 item 设为 SearchItem.Model，从而驱动 MySQL.GetDBName 路由。
+func findInMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], item *testFund) *testFund {
+	t.Helper()
+	list := newRoutedQueryList(t, db)
+	got, _ := list.SearchHash(item.GetHash(), func(si *types.SearchItem) {
 		si.Model = item // Status 字段驱动 GetRemoteDBName() 路由
 	})
 	return got
@@ -1296,19 +1365,17 @@ func findInMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], item *testF
 // cleanupMySQLRouted 按 status 路由到正确 DB，删除同 userID 的全部记录。
 func cleanupMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], userID string, status int) {
 	t.Helper()
-	if db.syncList == nil {
-		return
-	}
+	list := newRoutedQueryList(t, db)
 	probe := &testFund{Model: entity.NewModel(), UserID: userID, Status: status}
-	items, err := db.syncList.SearchWhere("user_id", userID, func(si *types.SearchItem) {
+	items, err := list.SearchWhere("user_id", userID, func(si *types.SearchItem) {
 		si.Model = probe
 	})
 	if err != nil || len(items) == 0 {
 		return
 	}
-	si := db.syncList.GetSearchItem()
+	si := list.GetSearchItem()
 	si.Model = probe
-	action := db.syncList.GetDBAdapter(si)
+	action := list.GetDBAdapter(si)
 	if action == nil {
 		return
 	}
@@ -1320,11 +1387,9 @@ func cleanupMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], userID str
 // countMySQLRouted 按 status 路由到正确 DB，统计 userID 的记录数。
 func countMySQLRouted(t *testing.T, db *PrefixedBadgerDB[testFund], userID string, status int) int {
 	t.Helper()
-	if db.syncList == nil {
-		return 0
-	}
+	list := newRoutedQueryList(t, db)
 	probe := &testFund{Model: entity.NewModel(), UserID: userID, Status: status}
-	items, _ := db.syncList.SearchWhere("user_id", userID, func(si *types.SearchItem) {
+	items, _ := list.SearchWhere("user_id", userID, func(si *types.SearchItem) {
 		si.Model = probe
 	})
 	return len(items)
@@ -1351,17 +1416,18 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 
 	db := newTestDB(t)
 
-	// 初始化：按各自 Status 路由，清除两个库中的遗留数据
+	db0Name := routedDBName(0)
+	db1Name := routedDBName(1)
+
+	// 初始化：直接按目标 DB 清除遗留数据，避免查询路由问题污染基线
 	for _, uid := range allUIDs {
-		for _, s := range []int{0, 1} {
-			cleanupMySQLRouted(t, db, uid, s)
-		}
+		cleanupMySQLDatabase(t, db, db0Name, uid)
+		cleanupMySQLDatabase(t, db, db1Name, uid)
 	}
 	t.Cleanup(func() {
 		for _, uid := range allUIDs {
-			for _, s := range []int{0, 1} {
-				cleanupMySQLRouted(t, db, uid, s)
-			}
+			cleanupMySQLDatabase(t, db, db0Name, uid)
+			cleanupMySQLDatabase(t, db, db1Name, uid)
 		}
 	})
 
@@ -1414,45 +1480,44 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 		t.Errorf("同步后 PendingCount 应为 0，实际 %d", count)
 	}
 
-	// crossProbe 构造同 hash 但 Status 取反的探针，用于串库检测
+	// crossProbe 构造同 hash 但 Status 取反的探针，用于查询路由检测
 	crossProbe := func(item *testFund) *testFund {
 		p := newFund(item.UserID, item.Market, 0)
 		p.Status = 1 - item.Status // 路由到另一个库
 		return p
 	}
 
-	// ── 验证：插入组 ─────────────────────────────────────────
-	t.Run("Insert_DB0", func(t *testing.T) {
+	// ── 验证：写入路由（直接查固定 DB）─────────────────────────
+	t.Run("WriteRoute_Insert_DB0", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(insertUID0, m, 100)
 			item.Status = 0
-			if findInMySQLRouted(t, db, item) == nil {
+			if findInMySQLDatabase(t, db, db0Name, item) == nil {
 				t.Errorf("[DB0] 插入组 %s 缺失", item.GetHash())
 			}
-			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+			if findInMySQLDatabase(t, db, db1Name, item) != nil {
 				t.Errorf("[串库] 插入组 %s 出现在 DB1（应在 DB0）", item.GetHash())
 			}
 		}
 	})
-	t.Run("Insert_DB1", func(t *testing.T) {
+	t.Run("WriteRoute_Insert_DB1", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(insertUID1, m, 200)
 			item.Status = 1
-			if findInMySQLRouted(t, db, item) == nil {
+			if findInMySQLDatabase(t, db, db1Name, item) == nil {
 				t.Errorf("[DB1] 插入组 %s 缺失", item.GetHash())
 			}
-			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+			if findInMySQLDatabase(t, db, db0Name, item) != nil {
 				t.Errorf("[串库] 插入组 %s 出现在 DB0（应在 DB1）", item.GetHash())
 			}
 		}
 	})
 
-	// ── 验证：更新组 ─────────────────────────────────────────
-	t.Run("Update_DB0", func(t *testing.T) {
+	t.Run("WriteRoute_Update_DB0", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(updateUID0, m, 0)
 			item.Status = 0
-			got := findInMySQLRouted(t, db, item)
+			got := findInMySQLDatabase(t, db, db0Name, item)
 			if got == nil {
 				t.Errorf("[DB0] 更新组 %s 缺失", item.GetHash())
 				return
@@ -1461,16 +1526,16 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 				t.Errorf("[DB0] 更新组 %s Balance 应为 %.f，实际 %.f",
 					item.GetHash(), 500+updDelta, got.Balance)
 			}
-			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+			if findInMySQLDatabase(t, db, db1Name, item) != nil {
 				t.Errorf("[串库] 更新组 %s 出现在 DB1", item.GetHash())
 			}
 		}
 	})
-	t.Run("Update_DB1", func(t *testing.T) {
+	t.Run("WriteRoute_Update_DB1", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(updateUID1, m, 0)
 			item.Status = 1
-			got := findInMySQLRouted(t, db, item)
+			got := findInMySQLDatabase(t, db, db1Name, item)
 			if got == nil {
 				t.Errorf("[DB1] 更新组 %s 缺失", item.GetHash())
 				return
@@ -1479,18 +1544,17 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 				t.Errorf("[DB1] 更新组 %s Balance 应为 %.f，实际 %.f",
 					item.GetHash(), 600+updDelta, got.Balance)
 			}
-			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+			if findInMySQLDatabase(t, db, db0Name, item) != nil {
 				t.Errorf("[串库] 更新组 %s 出现在 DB0", item.GetHash())
 			}
 		}
 	})
 
-	// ── 验证：删除组 ─────────────────────────────────────────
-	t.Run("Delete_DB0", func(t *testing.T) {
+	t.Run("WriteRoute_Delete_DB0", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(deleteUID0, m, 700)
 			item.Status = 0
-			if findInMySQLRouted(t, db, item) != nil {
+			if findInMySQLDatabase(t, db, db0Name, item) != nil {
 				t.Errorf("[DB0] 删除组 %s 同步后应已从 DB0 删除", item.GetHash())
 			}
 			if keyExistsInBadger(t, db, item) {
@@ -1498,11 +1562,11 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 			}
 		}
 	})
-	t.Run("Delete_DB1", func(t *testing.T) {
+	t.Run("WriteRoute_Delete_DB1", func(t *testing.T) {
 		for _, m := range markets {
 			item := newFund(deleteUID1, m, 800)
 			item.Status = 1
-			if findInMySQLRouted(t, db, item) != nil {
+			if findInMySQLDatabase(t, db, db1Name, item) != nil {
 				t.Errorf("[DB1] 删除组 %s 同步后应已从 DB1 删除", item.GetHash())
 			}
 			if keyExistsInBadger(t, db, item) {
@@ -1511,40 +1575,148 @@ func TestSync_MultiDB_RoutingByStatus(t *testing.T) {
 		}
 	})
 
-	// ── 验证：各库记录数（确认无多余数据） ───────────────────
-	t.Run("RecordCount", func(t *testing.T) {
+	t.Run("WriteRoute_RecordCount", func(t *testing.T) {
 		// DB0（Status=0）：插入组和更新组各 len(markets) 条，删除组为 0
-		if n := countMySQLRouted(t, db, insertUID0, 0); n != len(markets) {
+		if n := countMySQLInDatabase(t, db, db0Name, insertUID0); n != len(markets) {
 			t.Errorf("DB0 insertUID0 应有 %d 条，实际 %d 条", len(markets), n)
 		}
-		if n := countMySQLRouted(t, db, updateUID0, 0); n != len(markets) {
+		if n := countMySQLInDatabase(t, db, db0Name, updateUID0); n != len(markets) {
 			t.Errorf("DB0 updateUID0 应有 %d 条，实际 %d 条", len(markets), n)
 		}
-		if n := countMySQLRouted(t, db, deleteUID0, 0); n != 0 {
+		if n := countMySQLInDatabase(t, db, db0Name, deleteUID0); n != 0 {
 			t.Errorf("DB0 deleteUID0 应有 0 条（已删除），实际 %d 条", n)
 		}
 		// DB1（Status=1）：同理
-		if n := countMySQLRouted(t, db, insertUID1, 1); n != len(markets) {
+		if n := countMySQLInDatabase(t, db, db1Name, insertUID1); n != len(markets) {
 			t.Errorf("DB1 insertUID1 应有 %d 条，实际 %d 条", len(markets), n)
 		}
-		if n := countMySQLRouted(t, db, updateUID1, 1); n != len(markets) {
+		if n := countMySQLInDatabase(t, db, db1Name, updateUID1); n != len(markets) {
 			t.Errorf("DB1 updateUID1 应有 %d 条，实际 %d 条", len(markets), n)
 		}
-		if n := countMySQLRouted(t, db, deleteUID1, 1); n != 0 {
+		if n := countMySQLInDatabase(t, db, db1Name, deleteUID1); n != 0 {
 			t.Errorf("DB1 deleteUID1 应有 0 条（已删除），实际 %d 条", n)
 		}
-		// 串库：用反向 Status 路由查询，均应为 0 条
+		// 串库：直接查另一库，均应为 0 条
 		for _, uid := range []string{insertUID1, updateUID1, deleteUID1} {
-			if n := countMySQLRouted(t, db, uid, 0); n != 0 {
+			if n := countMySQLInDatabase(t, db, db0Name, uid); n != 0 {
 				t.Errorf("[串库] DB0 中不应含 %s 的数据，实际 %d 条", uid, n)
 			}
 		}
 		for _, uid := range []string{insertUID0, updateUID0, deleteUID0} {
-			if n := countMySQLRouted(t, db, uid, 1); n != 0 {
+			if n := countMySQLInDatabase(t, db, db1Name, uid); n != 0 {
 				t.Errorf("[串库] DB1 中不应含 %s 的数据，实际 %d 条", uid, n)
 			}
 		}
 	})
+
+	// ── 验证：查询路由（动态路由查询，与写入路由分开）───────────
+	t.Run("QueryRoute_Insert_DB0", func(t *testing.T) {
+		for _, m := range markets {
+			item := newFund(insertUID0, m, 100)
+			item.Status = 0
+			if findInMySQLRouted(t, db, item) == nil {
+				t.Errorf("[查询路由][DB0] 插入组 %s 缺失", item.GetHash())
+			}
+			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+				t.Errorf("[查询路由][串库] 插入组 %s 用 DB1 路由时不应命中", item.GetHash())
+			}
+		}
+	})
+	t.Run("QueryRoute_Insert_DB1", func(t *testing.T) {
+		for _, m := range markets {
+			item := newFund(insertUID1, m, 200)
+			item.Status = 1
+			if findInMySQLRouted(t, db, item) == nil {
+				t.Errorf("[查询路由][DB1] 插入组 %s 缺失", item.GetHash())
+			}
+			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+				t.Errorf("[查询路由][串库] 插入组 %s 用 DB0 路由时不应命中", item.GetHash())
+			}
+		}
+	})
+	t.Run("QueryRoute_Update_DB0", func(t *testing.T) {
+		for _, m := range markets {
+			item := newFund(updateUID0, m, 0)
+			item.Status = 0
+			got := findInMySQLRouted(t, db, item)
+			if got == nil {
+				t.Errorf("[查询路由][DB0] 更新组 %s 缺失", item.GetHash())
+				continue
+			}
+			if got.Balance != 500+updDelta {
+				t.Errorf("[查询路由][DB0] 更新组 %s Balance 应为 %.f，实际 %.f", item.GetHash(), 500+updDelta, got.Balance)
+			}
+			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+				t.Errorf("[查询路由][串库] 更新组 %s 用 DB1 路由时不应命中", item.GetHash())
+			}
+		}
+	})
+	t.Run("QueryRoute_Update_DB1", func(t *testing.T) {
+		for _, m := range markets {
+			item := newFund(updateUID1, m, 0)
+			item.Status = 1
+			got := findInMySQLRouted(t, db, item)
+			if got == nil {
+				t.Errorf("[查询路由][DB1] 更新组 %s 缺失", item.GetHash())
+				continue
+			}
+			if got.Balance != 600+updDelta {
+				t.Errorf("[查询路由][DB1] 更新组 %s Balance 应为 %.f，实际 %.f", item.GetHash(), 600+updDelta, got.Balance)
+			}
+			if findInMySQLRouted(t, db, crossProbe(item)) != nil {
+				t.Errorf("[查询路由][串库] 更新组 %s 用 DB0 路由时不应命中", item.GetHash())
+			}
+		}
+	})
+}
+
+// TestSync_MultiDB_Routing_Stress 对多库路由做一轮较高负载同步，观察吞吐与 pendingCount 是否稳定归零。
+func TestSync_MultiDB_Routing_Stress(t *testing.T) {
+	db := newTestDB(t)
+	const (
+		usersPerDB = 20
+		markets    = 5
+	)
+	statuses := []int{0, 1}
+	var probes []*testFund
+	for _, status := range statuses {
+		for userIndex := 0; userIndex < usersPerDB; userIndex++ {
+			uid := fmt.Sprintf("stress_u_%d_%d", status, userIndex)
+			cleanupMySQLRouted(t, db, uid, status)
+			for marketIndex := 0; marketIndex < markets; marketIndex++ {
+				item := newFund(uid, fmt.Sprintf("M%d", marketIndex), float64(status*100+marketIndex))
+				item.Status = status
+				probes = append(probes, item)
+				if err := db.Set(item, 0); err != nil {
+					t.Fatalf("Set 失败 [status=%d user=%s]: %v", status, uid, err)
+				}
+			}
+		}
+	}
+	start := time.Now()
+	triggerSync(t, db)
+	duration := time.Since(start)
+
+	if pending, err := db.GetPendingSyncCount(); err != nil {
+		t.Fatalf("GetPendingSyncCount 失败: %v", err)
+	} else if pending != 0 {
+		t.Fatalf("压测后 pending 应归零，实际 %d", pending)
+	}
+	if db.pendingCountCache != 0 {
+		t.Fatalf("压测后 pendingCountCache 应归零，实际 %d", db.pendingCountCache)
+	}
+
+	missing := 0
+	for _, probe := range probes {
+		if findInMySQLRouted(t, db, probe) == nil {
+			missing++
+		}
+	}
+	if missing > 0 {
+		t.Fatalf("压测后有 %d 条记录未同步到目标远程库", missing)
+	}
+
+	t.Logf("多库路由压测完成: 总记录=%d, 远程库数=%d, 耗时=%v, pendingCountCache=%d", len(probes), len(statuses), duration, db.pendingCountCache)
 }
 
 // ============================================================
