@@ -20,10 +20,12 @@ import (
 
 type testFund struct {
 	*entity.Model
-	UserID  string  `json:"user_id"`
-	Market  string  `json:"market"`
-	Balance float64 `json:"balance"`
-	Status  int     `json:"status"`
+	UserID               string        `json:"user_id"`
+	Market               string        `json:"market"`
+	Balance              float64       `json:"balance"`
+	Status               int           `json:"status"`
+	SyncAfterDeleteDelay time.Duration `json:"-"`
+	SyncAfterDeleteCalls int32         `json:"-"`
 }
 
 func NewtestFund() *testFund {
@@ -38,6 +40,10 @@ func (f *testFund) GetHash() string {
 	return f.UserID + ":" + f.Market
 }
 func (f *testFund) IsSyncAfterDelete() bool {
+	atomic.AddInt32(&f.SyncAfterDeleteCalls, 1)
+	if f.SyncAfterDeleteDelay > 0 {
+		time.Sleep(f.SyncAfterDeleteDelay)
+	}
 	return f.Status == 2
 }
 func (own *testFund) GetLocalDBName() string {
@@ -165,6 +171,18 @@ func getWrapperFromBadger(t *testing.T, db *PrefixedBadgerDB[testFund], item *te
 		t.Fatalf("getWrapper 失败: %v", err)
 	}
 	return w
+}
+
+func waitFor(t *testing.T, timeout, interval time.Duration, condition func() bool, message string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(interval)
+	}
+	t.Fatal(message)
 }
 
 // writeRawWrapper 绕过业务逻辑，直接向 BadgerDB 写入指定同步状态的 wrapper（测试辅助）。
@@ -531,7 +549,7 @@ func TestSync_SoftDelete_RemovesFromMySQL(t *testing.T) {
 }
 
 // TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally
-// Status=2 (IsSyncAfterDelete=true)：插入并同步后 MySQL 存在，BadgerDB 物理键删除
+// Status=2 (IsSyncAfterDelete=true)：插入并同步后 MySQL 存在，BadgerDB 最终异步物理删除
 func TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally(t *testing.T) {
 	const userID = "sync_sad_u"
 	db := newTestDB(t)
@@ -550,9 +568,119 @@ func TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally(t *testing.T) {
 		t.Fatal("MySQL 中应存在该记录")
 	}
 
-	// BadgerDB 物理键已删除（因为 IsSyncAfterDelete=true）
-	if keyExistsInBadger(t, db, item) {
-		t.Error("IsSyncAfterDelete=true 时同步后 BadgerDB 本地缓存应物理删除")
+	waitFor(t, 3*time.Second, 20*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, item)
+	}, "IsSyncAfterDelete=true 时同步后 BadgerDB 本地缓存应最终异步物理删除")
+}
+
+func TestSync_IsSyncAfterDelete_RunsAsync(t *testing.T) {
+	db := newTestDBLocal(t)
+	item := newFund("sync_async_u", "ARB", 88.0)
+	item.Status = 2
+	item.SyncAfterDeleteDelay = 400 * time.Millisecond
+
+	writeRawWrapper(t, db, item, true)
+	wrapper := getWrapperFromBadger(t, db, item)
+	if wrapper == nil {
+		t.Fatal("前置条件失败：BadgerDB 中应存在 wrapper")
+	}
+
+	start := time.Now()
+	db.scheduleSyncAfterDelete([]syncAfterDeleteCandidate[testFund]{
+		{
+			Key:       wrapper.Key,
+			Item:      item,
+			UpdatedAt: wrapper.UpdatedAt,
+		},
+	})
+	elapsed := time.Since(start)
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("scheduleSyncAfterDelete 不应被慢 IsSyncAfterDelete 阻塞，耗时 %v", elapsed)
+	}
+
+	if !keyExistsInBadger(t, db, item) {
+		t.Fatal("异步删除刚启动时，本地 key 不应立即消失")
+	}
+
+	waitFor(t, 2*time.Second, 20*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, item)
+	}, "异步 IsSyncAfterDelete 执行后，本地 key 应被物理删除")
+}
+
+func TestSync_IsSyncAfterDelete_BatchedQueue(t *testing.T) {
+	db := newTestDBLocal(t)
+	const total = 64
+	items := make([]*testFund, 0, total)
+	candidates := make([]syncAfterDeleteCandidate[testFund], 0, total)
+
+	for i := 0; i < total; i++ {
+		item := newFund(fmt.Sprintf("sync_batch_u_%d", i), "OP", float64(i+1))
+		item.Status = 2
+		item.SyncAfterDeleteDelay = 20 * time.Millisecond
+		items = append(items, item)
+		writeRawWrapper(t, db, item, true)
+		wrapper := getWrapperFromBadger(t, db, item)
+		if wrapper == nil {
+			t.Fatalf("前置条件失败：第 %d 条 wrapper 不存在", i)
+		}
+		candidates = append(candidates, syncAfterDeleteCandidate[testFund]{
+			Key:       wrapper.Key,
+			Item:      item,
+			UpdatedAt: wrapper.UpdatedAt,
+		})
+	}
+
+	start := time.Now()
+	for _, candidate := range candidates {
+		db.scheduleSyncAfterDelete([]syncAfterDeleteCandidate[testFund]{candidate})
+	}
+	elapsed := time.Since(start)
+	if elapsed >= 200*time.Millisecond {
+		t.Fatalf("高频入队不应被逐条 IsSyncAfterDelete 阻塞，耗时 %v", elapsed)
+	}
+
+	waitFor(t, 4*time.Second, 20*time.Millisecond, func() bool {
+		for _, item := range items {
+			if keyExistsInBadger(t, db, item) {
+				return false
+			}
+		}
+		return true
+	}, "高频入队后，后台 worker 应最终完成全部本地删除")
+}
+
+func TestSync_IsSyncAfterDelete_DeduplicatesSameKey(t *testing.T) {
+	db := newTestDBLocal(t)
+	item := newFund("sync_dedupe_u", "AVAX", 66.0)
+	item.Status = 2
+	item.SyncAfterDeleteDelay = 50 * time.Millisecond
+
+	writeRawWrapper(t, db, item, true)
+	wrapper := getWrapperFromBadger(t, db, item)
+	if wrapper == nil {
+		t.Fatal("前置条件失败：BadgerDB 中应存在 wrapper")
+	}
+
+	for i := 0; i < 32; i++ {
+		db.scheduleSyncAfterDelete([]syncAfterDeleteCandidate[testFund]{
+			{
+				Key:       wrapper.Key,
+				Item:      item,
+				UpdatedAt: wrapper.UpdatedAt,
+			},
+		})
+	}
+
+	if queueLen := db.getSyncAfterDeleteQueueLength(); queueLen != 1 {
+		t.Fatalf("同一个 key 重复入队后队列长度应为 1，实际 %d", queueLen)
+	}
+
+	waitFor(t, 2*time.Second, 20*time.Millisecond, func() bool {
+		return !keyExistsInBadger(t, db, item)
+	}, "同一个 key 去重后，后台 worker 应最终完成本地删除")
+
+	if calls := atomic.LoadInt32(&item.SyncAfterDeleteCalls); calls != 1 {
+		t.Fatalf("同一个 key 重复入队后 IsSyncAfterDelete 应只执行一次，实际 %d 次", calls)
 	}
 }
 

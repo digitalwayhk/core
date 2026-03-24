@@ -19,6 +19,8 @@ func (l *badgerLogger) Infof(f string, v ...interface{})    { logx.Infof(f, v...
 func (l *badgerLogger) Debugf(f string, v ...interface{})   {}
 
 type ISyncAfterDelete[T types.IModel] interface {
+	// IsSyncAfterDelete 在远端同步成功且本地状态已标记为 IsSynced=true 后异步执行。
+	// 该方法应保持轻量；即使执行较慢，也不应阻塞主同步流程。
 	IsSyncAfterDelete() bool
 }
 type IOnSyncAfter[T types.IModel] interface {
