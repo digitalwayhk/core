@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,8 +52,21 @@ func (c *Config) MysqlDSN() string {
 	if c.Loc == "" {
 		c.Loc = "Local"
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s",
 		c.Username, c.Password, c.Host, c.Port, c.Database, c.Charset, c.ParseTime, c.Loc)
+	if c.MaxIdleConns > 0 {
+		dsn += "&maxIdleConns=" + strconv.Itoa(c.MaxIdleConns)
+	}
+	if c.MaxOpenConns > 0 {
+		dsn += "&maxOpenConns=" + strconv.Itoa(c.MaxOpenConns)
+	}
+	if c.MaxLifetime > 0 {
+		dsn += "&maxLifetime=" + c.MaxLifetime.String()
+	}
+	if c.IsLog {
+		dsn += "&isLog=true"
+	}
+	return dsn
 }
 func (c *Config) SetMysqlDSN(dsn string) error {
 	// 例: user:pass@tcp(host:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local
@@ -103,9 +117,23 @@ func (c *Config) SetMysqlDSN(dsn string) error {
 			case "charset":
 				c.Charset = kvParts[1]
 			case "parseTime":
-				c.ParseTime = kvParts[1] == "true" || kvParts[1] == "True"
+				c.ParseTime = strings.EqualFold(kvParts[1], "true")
 			case "loc":
 				c.Loc = kvParts[1]
+			case "maxIdleConns":
+				if v, err := strconv.Atoi(kvParts[1]); err == nil {
+					c.MaxIdleConns = v
+				}
+			case "maxOpenConns":
+				if v, err := strconv.Atoi(kvParts[1]); err == nil {
+					c.MaxOpenConns = v
+				}
+			case "maxLifetime":
+				if v, err := time.ParseDuration(kvParts[1]); err == nil {
+					c.MaxLifetime = v
+				}
+			case "isLog":
+				c.IsLog = strings.EqualFold(kvParts[1], "true")
 			}
 		}
 	}

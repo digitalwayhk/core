@@ -81,22 +81,14 @@ func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
-	// 🔧 如果已存在，先关闭旧连接
+	// 取出旧连接引用（替换后延迟关闭，给正在使用的 goroutine 宽限期）
+	var oldDB *gorm.DB
 	if oldInfo, exists := cm.connections[key]; exists && oldInfo.DB != nil {
-		if sqlDB, err := oldInfo.DB.DB(); err == nil {
-			sqlDB.Close()
-		}
+		oldDB = oldInfo.DB
 	}
 
 	if db != nil {
-		// 🔧 优化数据库连接池配置
-		if sqlDB, err := db.DB(); err == nil {
-			sqlDB.SetMaxOpenConns(10)                  // 最大打开连接数
-			sqlDB.SetMaxIdleConns(5)                   // 最大空闲连接数
-			sqlDB.SetConnMaxLifetime(30 * time.Minute) // 连接最大生命周期
-			sqlDB.SetConnMaxIdleTime(10 * time.Minute) // 空闲连接最大存活时间
-		}
-
+		// 连接池参数由 configureConnectionPool() 在 newDB() 中设置，此处不再覆盖
 		cm.connections[key] = &ConnectionInfo{
 			DB:        db,
 			CreatedAt: time.Now(),
@@ -104,6 +96,16 @@ func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 		}
 	} else {
 		delete(cm.connections, key)
+	}
+
+	// 延迟关闭旧连接，给正在使用旧连接的操作宽限期
+	if oldDB != nil && oldDB != db {
+		go func(toClose *gorm.DB) {
+			time.Sleep(30 * time.Second)
+			if sqlDB, err := toClose.DB(); err == nil {
+				sqlDB.Close()
+			}
+		}(oldDB)
 	}
 }
 
