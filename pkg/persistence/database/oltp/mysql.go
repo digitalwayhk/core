@@ -135,6 +135,7 @@ type MySQL struct {
 	db           *gorm.DB
 	tx           *gorm.DB
 	isTansaction bool
+	txDBName     string
 	tables       map[string]*TableMaster
 	IsLog        bool
 	config       *Config
@@ -271,6 +272,7 @@ func (m *MySQL) cleanupCurrentConnection() {
 	m.db = nil
 	m.tx = nil
 	m.isTansaction = false
+	m.txDBName = ""
 }
 
 // 延迟表检查方法
@@ -279,10 +281,18 @@ func (m *MySQL) ensureTable(data interface{}) error {
 }
 
 func (m *MySQL) GetDBName(data interface{}) error {
+	resolvedDBName, err := m.resolveDBName(data)
+	if err != nil {
+		return err
+	}
+
+	return m.applyResolvedDBName(resolvedDBName)
+}
+
+func (m *MySQL) resolveDBName(data interface{}) (string, error) {
 	// 1️⃣ config 中硬编码的数据库名优先级最高（静态配置场景）
 	if m.config.Database != "" {
-		m.Name = m.config.Database
-		return nil
+		return m.config.Database, nil
 	}
 
 	// 2️⃣ 从模型动态获取数据库名（多库路由场景：每次调用都取，不缓存）
@@ -295,24 +305,46 @@ func (m *MySQL) GetDBName(data interface{}) error {
 			dbName = idb.GetLocalDBName()
 		}
 		if dbName != "" {
-			if m.Name != dbName {
-				// 目标库发生变化，丢弃旧连接以便 ensureValidConnection 重新建立
-				m.Name = dbName
-				if !m.isTansaction {
-					// 事务外切换库：清空连接，下一步 ensureValidConnection 重建
-					m.db = nil
-				}
-			}
-			return nil
+			return dbName, nil
 		}
 	}
 
 	// 3️⃣ 使用缓存的 m.Name（模型未提供 GetRemoteDBName 时的兜底）
 	if m.Name != "" {
-		return nil
+		return m.Name, nil
 	}
 
-	return errors.New("db name is empty: config.Database, m.Name and model.GetRemoteDBName() are all empty")
+	return "", errors.New("db name is empty: config.Database, m.Name and model.GetRemoteDBName() are all empty")
+}
+
+func (m *MySQL) applyResolvedDBName(dbName string) error {
+	if m.isTansaction {
+		if m.txDBName == "" {
+			if dbName == "" {
+				return errors.New("transaction db name is empty")
+			}
+			m.txDBName = dbName
+		}
+
+		if dbName != "" && dbName != m.txDBName {
+			return fmt.Errorf("transaction is bound to db %s, got %s", m.txDBName, dbName)
+		}
+
+		dbName = m.txDBName
+	}
+
+	if dbName == "" {
+		return errors.New("db name is empty")
+	}
+
+	if m.Name != dbName {
+		m.Name = dbName
+		if !m.isTansaction || m.tx == nil {
+			m.db = nil
+		}
+	}
+
+	return nil
 }
 func (m *MySQL) GetModelDB(model interface{}) (interface{}, error) {
 	err := m.init(model)
@@ -355,8 +387,12 @@ func (m *MySQL) GetDB() (*gorm.DB, error) {
 
 // 🔧 修复 init 方法 - 确保调用顺序正确
 func (m *MySQL) init(data interface{}) error {
-	err := m.GetDBName(data)
+	resolvedDBName, err := m.resolveDBName(data)
 	if err != nil {
+		return err
+	}
+
+	if err := m.applyResolvedDBName(resolvedDBName); err != nil {
 		return err
 	}
 
@@ -892,13 +928,15 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 // Clone 返回一个独立事务状态的新实例，供并发 goroutine 使用。
 // 底层 *sql.DB 连接池通过 Session(NewDB:true) 共享，但 GORM 的 Statement
 // 是独立的，避免多 goroutine 共用同一 *gorm.DB 导致的协议错乱（commands out of sync）。
-func (m *MySQL) Clone() *MySQL {
+func (m *MySQL) Clone() types.IDataAction {
 	clone := &MySQL{
-		Name:    m.Name,
-		tables:  m.tables, // 共享表缓存（map 只读，无并发写）
-		IsLog:   m.IsLog,
-		config:  m.config, // 共享配置（只读）
-		isClone: true,     // 标记为 clone，ensureValidConnection 时用 Session 包装
+		Name:         m.Name,
+		txDBName:     m.txDBName,
+		tables:       m.tables, // 共享表缓存（map 只读，无并发写）
+		IsLog:        m.IsLog,
+		config:       m.config, // 共享配置（只读）
+		isClone:      true,     // 标记为 clone，ensureValidConnection 时用 Session 包装
+		isTansaction: m.isTansaction,
 		// tx、isTansaction、UpdateTime 均由新实例独立持有
 	}
 	if m.db != nil {
@@ -910,18 +948,16 @@ func (m *MySQL) Clone() *MySQL {
 }
 
 func (m *MySQL) Transaction() error {
-	// eager Begin：在 isTansaction=false 期间立即验证连接并开启真实事务。
-	// 若此时连接已死，立即返回错误，调用方降级为逐条操作，避免
-	// "一批数据全部失败再 Rollback 失败" 的连锁场景。
-	if err := m.ensureValidConnection(); err != nil {
-		return fmt.Errorf("事务开启前连接检查失败: %v", err)
+	if m.isTansaction {
+		return nil
 	}
-	tx := m.db.Begin()
-	if tx.Error != nil {
-		return fmt.Errorf("开启事务失败: %v", tx.Error)
-	}
-	m.tx = tx
+	m.tx = nil
 	m.isTansaction = true
+	if m.config != nil && m.config.Database != "" {
+		m.txDBName = m.config.Database
+	} else {
+		m.txDBName = ""
+	}
 	return nil
 }
 
@@ -1128,6 +1164,7 @@ func (m *MySQL) Delete(data interface{}) error {
 
 func (m *MySQL) Commit() error {
 	m.isTansaction = false
+	m.txDBName = ""
 	if m.tx != nil {
 		err := m.tx.Commit().Error
 		m.tx = nil
@@ -1146,6 +1183,7 @@ func (m *MySQL) Rollback() error {
 	defer func() {
 		m.tx = nil
 		m.isTansaction = false
+		m.txDBName = ""
 	}()
 	if m.tx != nil {
 		return m.tx.Rollback().Error
@@ -1170,6 +1208,7 @@ func (m *MySQL) DeleteDB() error {
 	m.db = nil
 	m.tx = nil
 	m.isTansaction = false
+	m.txDBName = ""
 
 	// 创建临时连接用于删除数据库
 	tempDB, err := gorm.Open(mysql.Open(m.buildDSN()), &gorm.Config{})
@@ -1212,6 +1251,7 @@ func (m *MySQL) closeAllConnections() error {
 		}
 		m.tx = nil
 		m.isTansaction = false
+		m.txDBName = ""
 	}
 
 	// 关闭主数据库连接

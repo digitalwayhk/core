@@ -1,6 +1,7 @@
 package nosql
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -67,6 +68,86 @@ func newFund(userID, market string, balance float64) *testFund {
 	}
 }
 
+type testLedger struct {
+	*entity.Model
+	Owner  string  `json:"owner"`
+	Code   string  `json:"code"`
+	Amount float64 `json:"amount"`
+	DBName string  `json:"db_name" gorm:"-"`
+}
+
+func NewtestLedger() *testLedger {
+	return &testLedger{Model: entity.NewModel()}
+}
+
+func (l *testLedger) NewModel() {
+	if l.Model == nil {
+		l.Model = entity.NewModel()
+	}
+}
+
+func (l *testLedger) GetHash() string {
+	return l.Owner + ":" + l.Code
+}
+
+func (l *testLedger) GetLocalDBName() string {
+	return l.DBName
+}
+
+func (l *testLedger) GetRemoteDBName() string {
+	return l.DBName
+}
+
+func newLedger(owner, code string, amount float64, dbName string) *testLedger {
+	return &testLedger{
+		Model:  entity.NewModel(),
+		Owner:  owner,
+		Code:   code,
+		Amount: amount,
+		DBName: dbName,
+	}
+}
+
+type testPosition struct {
+	*entity.Model
+	Owner  string  `json:"owner"`
+	Symbol string  `json:"symbol"`
+	Qty    float64 `json:"qty"`
+	DBName string  `json:"db_name" gorm:"-"`
+}
+
+func NewtestPosition() *testPosition {
+	return &testPosition{Model: entity.NewModel()}
+}
+
+func (p *testPosition) NewModel() {
+	if p.Model == nil {
+		p.Model = entity.NewModel()
+	}
+}
+
+func (p *testPosition) GetHash() string {
+	return p.Owner + ":" + p.Symbol
+}
+
+func (p *testPosition) GetLocalDBName() string {
+	return p.DBName
+}
+
+func (p *testPosition) GetRemoteDBName() string {
+	return p.DBName
+}
+
+func newPosition(owner, symbol string, qty float64, dbName string) *testPosition {
+	return &testPosition{
+		Model:  entity.NewModel(),
+		Owner:  owner,
+		Symbol: symbol,
+		Qty:    qty,
+		DBName: dbName,
+	}
+}
+
 // ============================================================
 // 测试基础设施
 // ============================================================
@@ -111,6 +192,232 @@ func newTestDBLocalWithConfig(t *testing.T, config BadgerDBConfig) *PrefixedBadg
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+func newManualSyncDBWithConfig[T types.IModel](t *testing.T, config BadgerDBConfig, list *entity.ModelList[T]) *PrefixedBadgerDB[T] {
+	t.Helper()
+	db, err := NewSharedBadgerDB[T](config.Path, config)
+	if err != nil {
+		t.Fatalf("NewSharedBadgerDB 失败: %v", err)
+	}
+	db.syncDB = list != nil
+	db.syncList = list
+	if list != nil {
+		if action := list.GetAction(); action != nil {
+			db.syncSema = getOrCreateAdapterSema(action)
+		}
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func cloneQueryAction(action types.IDataAction) types.IDataAction {
+	if cloner, ok := action.(IActionCloner); ok {
+		return cloner.Clone()
+	}
+	return action
+}
+
+func findByHashWithAction[T types.IModel](t *testing.T, action types.IDataAction, probe *T) *T {
+	t.Helper()
+	hashable, ok := any(probe).(types.IRowCode)
+	if !ok {
+		t.Fatal("probe 未实现 IRowCode")
+	}
+	list := entity.NewModelList[T](cloneQueryAction(action))
+	got, err := list.SearchHash(hashable.GetHash(), func(si *types.SearchItem) {
+		si.Model = probe
+	})
+	if err != nil {
+		t.Fatalf("SearchHash 失败: %v", err)
+	}
+	return got
+}
+
+type injectedFailureMySQLState struct {
+	failTransaction  int32
+	failCommit       int32
+	transactionCalls int32
+	transactionFails int32
+	commitCalls      int32
+	commitFailures   int32
+}
+
+type injectedFailureMySQLAction struct {
+	base  types.IDataAction
+	state *injectedFailureMySQLState
+}
+
+func newInjectedFailureMySQLAction() *injectedFailureMySQLAction {
+	return &injectedFailureMySQLAction{
+		base: oltp.NewMySQL(&oltp.Config{
+			Host:     "127.0.0.1",
+			Port:     3306,
+			Username: "root",
+			Password: "your_password",
+		}),
+		state: &injectedFailureMySQLState{},
+	}
+}
+
+func (a *injectedFailureMySQLAction) setFailCommit(enabled bool) {
+	if enabled {
+		atomic.StoreInt32(&a.state.failCommit, 1)
+		return
+	}
+	atomic.StoreInt32(&a.state.failCommit, 0)
+}
+
+func (a *injectedFailureMySQLAction) setFailTransaction(enabled bool) {
+	if enabled {
+		atomic.StoreInt32(&a.state.failTransaction, 1)
+		return
+	}
+	atomic.StoreInt32(&a.state.failTransaction, 0)
+}
+
+func (a *injectedFailureMySQLAction) Clone() types.IDataAction {
+	clonedBase := a.base
+	if cloner, ok := a.base.(IActionCloner); ok {
+		clonedBase = cloner.Clone()
+	}
+	return &injectedFailureMySQLAction{
+		base:  clonedBase,
+		state: a.state,
+	}
+}
+
+func (a *injectedFailureMySQLAction) GetMaxOpenConns() int {
+	if hint, ok := a.base.(IMaxConcurrencyHint); ok {
+		return hint.GetMaxOpenConns()
+	}
+	return 0
+}
+
+func (a *injectedFailureMySQLAction) GetSyncPoolKey(data interface{}) string {
+	if provider, ok := a.base.(ISyncPoolKeyProvider); ok {
+		return provider.GetSyncPoolKey(data)
+	}
+	return ""
+}
+
+func (a *injectedFailureMySQLAction) Exists(data interface{}) (bool, error) {
+	existsChecker, ok := a.base.(interface {
+		Exists(data interface{}) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	return existsChecker.Exists(data)
+}
+
+func (a *injectedFailureMySQLAction) Transaction() error {
+	atomic.AddInt32(&a.state.transactionCalls, 1)
+	if atomic.LoadInt32(&a.state.failTransaction) == 1 {
+		atomic.AddInt32(&a.state.transactionFails, 1)
+		return errors.New("injected transaction failure for batch fallback")
+	}
+	return a.base.Transaction()
+}
+
+func (a *injectedFailureMySQLAction) Load(item *types.SearchItem, result interface{}) error {
+	return a.base.Load(item, result)
+}
+
+func (a *injectedFailureMySQLAction) Insert(data interface{}) error {
+	return a.base.Insert(data)
+}
+
+func (a *injectedFailureMySQLAction) Update(data interface{}) error {
+	return a.base.Update(data)
+}
+
+func (a *injectedFailureMySQLAction) Delete(data interface{}) error {
+	return a.base.Delete(data)
+}
+
+func (a *injectedFailureMySQLAction) Raw(sql string, data interface{}) error {
+	return a.base.Raw(sql, data)
+}
+
+func (a *injectedFailureMySQLAction) Exec(sql string, data interface{}) error {
+	return a.base.Exec(sql, data)
+}
+
+func (a *injectedFailureMySQLAction) GetModelDB(model interface{}) (interface{}, error) {
+	return a.base.GetModelDB(model)
+}
+
+func (a *injectedFailureMySQLAction) Commit() error {
+	atomic.AddInt32(&a.state.commitCalls, 1)
+	if atomic.LoadInt32(&a.state.failCommit) == 1 {
+		atomic.AddInt32(&a.state.commitFailures, 1)
+		return errors.New("injected commit failure for batch fallback")
+	}
+	return a.base.Commit()
+}
+
+func (a *injectedFailureMySQLAction) GetRunDB() interface{} {
+	return a.base.GetRunDB()
+}
+
+func (a *injectedFailureMySQLAction) Rollback() error {
+	return a.base.Rollback()
+}
+
+func cleanupNamedMySQLDB(dbName string) {
+	adapter := oltp.NewMySQL(&oltp.Config{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Username: "root",
+		Password: "your_password",
+	})
+	adapter.Name = dbName
+	_ = adapter.DeleteDB()
+}
+
+func cleanupNamedSqliteDB(dbName string) {
+	adapter := oltp.NewSqlite()
+	adapter.Name = dbName
+	_ = adapter.DeleteDB()
+}
+
+func runConcurrentManualSync[T1 types.IModel, T2 types.IModel](t *testing.T, db1 *PrefixedBadgerDB[T1], db2 *PrefixedBadgerDB[T2]) {
+	t.Helper()
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	start := make(chan struct{})
+	runSync := func(fn func() (int, error)) {
+		defer wg.Done()
+		<-start
+		_, err := fn()
+		errCh <- err
+	}
+	wg.Add(2)
+	go runSync(db1.processSyncQueue)
+	go runSync(db2.processSyncQueue)
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("processSyncQueue 失败: %v", err)
+		}
+	}
+}
+
+func requireCommitFallbackTriggered(t *testing.T, action *injectedFailureMySQLAction, wantAtLeast int32) {
+	t.Helper()
+	if got := atomic.LoadInt32(&action.state.commitFailures); got < wantAtLeast {
+		t.Fatalf("期望至少触发 %d 次 batch commit 失败回退，实际 %d", wantAtLeast, got)
+	}
+}
+
+func requireTransactionFallbackTriggered(t *testing.T, action *injectedFailureMySQLAction, wantAtLeast int32) {
+	t.Helper()
+	if got := atomic.LoadInt32(&action.state.transactionFails); got < wantAtLeast {
+		t.Fatalf("期望至少触发 %d 次 batch transaction 失败回退，实际 %d", wantAtLeast, got)
+	}
 }
 
 // newTestDB 创建带 MySQL 同步的 PrefixedBadgerDB（MySQL 需已运行）。
@@ -183,6 +490,26 @@ func keyExistsInBadger(t *testing.T, db *PrefixedBadgerDB[testFund], item *testF
 	}
 	if err != nil {
 		t.Fatalf("keyExistsInBadger 失败: %v", err)
+	}
+	return true
+}
+
+func keyExistsInBadgerGeneric[T types.IModel](t *testing.T, db *PrefixedBadgerDB[T], item *T) bool {
+	t.Helper()
+	rowCode, ok := any(item).(types.IRowCode)
+	if !ok {
+		t.Fatal("item 未实现 IRowCode")
+	}
+	key := db.prefix + rowCode.GetHash()
+	err := db.manager.db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get([]byte(key))
+		return err
+	})
+	if err == badger.ErrKeyNotFound {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("keyExistsInBadgerGeneric 失败: %v", err)
 	}
 	return true
 }
@@ -1665,6 +1992,659 @@ func TestConcurrent_MultiUser_DataIsolation(t *testing.T) {
 				t.Errorf("%s 的 UserID 应为 %s，实际 %s（数据污染！）",
 					item.GetHash(), concUID(prefix, u), got.UserID)
 			}
+		}
+	}
+}
+
+// TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB
+// 两个不同前缀的 PrefixedBadgerDB 共享同一个 MySQL action，并发同步到同一远端库。
+// 重点验证 clone + pool semaphore 下不会因为共享 action 而串事务或丢数据。
+func TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := oltp.NewMySQL(&oltp.Config{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Username: "root",
+		Password: "your_password",
+	})
+
+	remoteDB := fmt.Sprintf("shared_prefix_same_%d", time.Now().UnixNano()%1000000)
+	cleanupMySQLConcurrencyDB := func(dbName string) {
+		adapter := oltp.NewMySQL(&oltp.Config{
+			Host:     "127.0.0.1",
+			Port:     3306,
+			Username: "root",
+			Password: "your_password",
+		})
+		adapter.Name = dbName
+		_ = adapter.DeleteDB()
+	}
+	cleanupMySQLConcurrencyDB(remoteDB)
+	t.Cleanup(func() { cleanupMySQLConcurrencyDB(remoteDB) })
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const recordsPerPrefix = 12
+	for i := 0; i < recordsPerPrefix; i++ {
+		position := newPosition("shared_same_position", fmt.Sprintf("P%02d", i), float64(i), remoteDB)
+		if err := positionDB.Set(position, 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+
+		ledger := newLedger("shared_same_ledger", fmt.Sprintf("L%02d", i), float64(i)+100, remoteDB)
+		if err := ledgerDB.Set(ledger, 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	start := make(chan struct{})
+	runSync := func(fn func() (int, error)) {
+		defer wg.Done()
+		<-start
+		_, err := fn()
+		errCh <- err
+	}
+
+	wg.Add(2)
+	go runSync(positionDB.processSyncQueue)
+	go runSync(ledgerDB.processSyncQueue)
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("processSyncQueue 失败: %v", err)
+		}
+	}
+
+	for i := 0; i < recordsPerPrefix; i++ {
+		positionProbe := newPosition("shared_same_position", fmt.Sprintf("P%02d", i), 0, remoteDB)
+		gotPosition := findByHashWithAction(t, sharedAction, positionProbe)
+		if gotPosition == nil {
+			t.Fatalf("position 记录缺失: %s", positionProbe.GetHash())
+		}
+
+		ledgerProbe := newLedger("shared_same_ledger", fmt.Sprintf("L%02d", i), 0, remoteDB)
+		gotLedger := findByHashWithAction(t, sharedAction, ledgerProbe)
+		if gotLedger == nil {
+			t.Fatalf("ledger 记录缺失: %s", ledgerProbe.GetHash())
+		}
+	}
+	if count, _ := positionDB.GetPendingSyncCount(); count != 0 {
+		t.Fatalf("positionDB PendingCount 应为 0，实际 %d", count)
+	}
+	if count, _ := ledgerDB.GetPendingSyncCount(); count != 0 {
+		t.Fatalf("ledgerDB PendingCount 应为 0，实际 %d", count)
+	}
+}
+
+// TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs
+// 两个不同前缀共享同一个 MySQL action，并发同步到不同远端库。
+// 重点验证动态路由和 clone 不会把一侧写入串到另一侧数据库。
+func TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := oltp.NewMySQL(&oltp.Config{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		Username: "root",
+		Password: "your_password",
+	})
+
+	dbNameA := fmt.Sprintf("shared_prefix_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("shared_prefix_b_%d", time.Now().UnixNano()%1000000)
+	cleanupRemoteDB := func(dbName string) {
+		adapter := oltp.NewMySQL(&oltp.Config{
+			Host:     "127.0.0.1",
+			Port:     3306,
+			Username: "root",
+			Password: "your_password",
+		})
+		adapter.Name = dbName
+		_ = adapter.DeleteDB()
+	}
+	cleanupRemoteDB(dbNameA)
+	cleanupRemoteDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupRemoteDB(dbNameA)
+		cleanupRemoteDB(dbNameB)
+	})
+
+	ledgerDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testLedger](sharedAction))
+	ledgerDB2 := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const recordsPerPrefix = 10
+	for i := 0; i < recordsPerPrefix; i++ {
+		if err := ledgerDB.Set(newLedger("shared_diff_a", fmt.Sprintf("A%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB2.Set(newLedger("shared_diff_b", fmt.Sprintf("B%02d", i), float64(i)+1000, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB2.Set 失败: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	start := make(chan struct{})
+	runSync := func(fn func() (int, error)) {
+		defer wg.Done()
+		<-start
+		_, err := fn()
+		errCh <- err
+	}
+
+	wg.Add(2)
+	go runSync(ledgerDB.processSyncQueue)
+	go runSync(ledgerDB2.processSyncQueue)
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("processSyncQueue 失败: %v", err)
+		}
+	}
+
+	for i := 0; i < recordsPerPrefix; i++ {
+		probeA := newLedger("shared_diff_a", fmt.Sprintf("A%02d", i), 0, dbNameA)
+		probeAWrong := newLedger("shared_diff_a", fmt.Sprintf("A%02d", i), 0, dbNameB)
+		if got := findByHashWithAction(t, sharedAction, probeA); got == nil {
+			t.Fatalf("A 库记录缺失: %s", probeA.GetHash())
+		}
+		if got := findByHashWithAction(t, sharedAction, probeAWrong); got != nil {
+			t.Fatalf("A 库记录串到了 B 库: %s", probeA.GetHash())
+		}
+
+		probeB := newLedger("shared_diff_b", fmt.Sprintf("B%02d", i), 0, dbNameB)
+		probeBWrong := newLedger("shared_diff_b", fmt.Sprintf("B%02d", i), 0, dbNameA)
+		if got := findByHashWithAction(t, sharedAction, probeB); got == nil {
+			t.Fatalf("B 库记录缺失: %s", probeB.GetHash())
+		}
+		if got := findByHashWithAction(t, sharedAction, probeBWrong); got != nil {
+			t.Fatalf("B 库记录串到了 A 库: %s", probeB.GetHash())
+		}
+	}
+}
+
+func TestGetDataAction_ClonesStatefulSqliteAdapter(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	sqliteAction := oltp.NewSqlite()
+	db := newManualSyncDBWithConfig(t, config, entity.NewModelList[testFund](sqliteAction))
+
+	item := newFund("sqlite_clone_u", "BTC", 1)
+	action1 := db.getDataAction(item)
+	action2 := db.getDataAction(item)
+
+	if action1 == nil || action2 == nil {
+		t.Fatal("getDataAction 返回了 nil")
+	}
+	if action1 == action2 {
+		t.Fatal("有状态的 SQLite adapter 应返回独立实例，不能复用同一指针")
+	}
+	if _, ok := action1.(*oltp.Sqlite); !ok {
+		t.Fatalf("期望 action1 为 *oltp.Sqlite，实际 %T", action1)
+	}
+	if _, ok := action2.(*oltp.Sqlite); !ok {
+		t.Fatalf("期望 action2 为 *oltp.Sqlite，实际 %T", action2)
+	}
+}
+
+func TestConcurrent_BatchInsertFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+	sharedAction.setFailCommit(true)
+
+	dbNameA := fmt.Sprintf("fallback_ins_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_ins_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 8
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_insert_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_insert_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireCommitFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_insert_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got == nil {
+			t.Fatalf("insert fallback 后 position 缺失: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_insert_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got == nil {
+			t.Fatalf("insert fallback 后 ledger 缺失: L%02d", i)
+		}
+	}
+}
+
+func TestConcurrent_BatchUpdateFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+
+	dbNameA := fmt.Sprintf("fallback_upd_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_upd_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 6
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_update_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_update_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	sharedAction.setFailCommit(true)
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_update_pos", fmt.Sprintf("P%02d", i), float64(i)+1000, dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set(update) 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_update_led", fmt.Sprintf("L%02d", i), float64(i)+2000, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set(update) 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireCommitFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_update_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got == nil || got.Qty != float64(i)+1000 {
+			if got == nil {
+				t.Fatalf("update fallback 后 position 缺失: P%02d", i)
+			}
+			t.Fatalf("update fallback 后 position 数值错误: got=%v want=%v", got.Qty, float64(i)+1000)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_update_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got == nil || got.Amount != float64(i)+2000 {
+			if got == nil {
+				t.Fatalf("update fallback 后 ledger 缺失: L%02d", i)
+			}
+			t.Fatalf("update fallback 后 ledger 数值错误: got=%v want=%v", got.Amount, float64(i)+2000)
+		}
+	}
+}
+
+func TestConcurrent_BatchDeleteFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+
+	dbNameA := fmt.Sprintf("fallback_del_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_del_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 6
+	for i := 0; i < total; i++ {
+		position := newPosition("fb_delete_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA)
+		ledger := newLedger("fb_delete_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB)
+		if err := positionDB.Set(position, 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(ledger, 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	sharedAction.setFailCommit(true)
+	for i := 0; i < total; i++ {
+		if err := positionDB.DeleteByItem(newPosition("fb_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); err != nil {
+			t.Fatalf("positionDB.DeleteByItem 失败: %v", err)
+		}
+		if err := ledgerDB.DeleteByItem(newLedger("fb_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); err != nil {
+			t.Fatalf("ledgerDB.DeleteByItem 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireCommitFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got != nil {
+			t.Fatalf("delete fallback 后 position 仍存在: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got != nil {
+			t.Fatalf("delete fallback 后 ledger 仍存在: L%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, positionDB, newPosition("fb_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)) {
+			t.Fatalf("delete fallback 后 position 本地键仍存在: P%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, ledgerDB, newLedger("fb_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)) {
+			t.Fatalf("delete fallback 后 ledger 本地键仍存在: L%02d", i)
+		}
+	}
+}
+
+func TestConcurrent_BatchInsertTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+	sharedAction.setFailTransaction(true)
+
+	dbNameA := fmt.Sprintf("fallback_tx_ins_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_tx_ins_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 8
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_tx_insert_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_tx_insert_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireTransactionFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_tx_insert_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got == nil {
+			t.Fatalf("transaction fallback 后 position 缺失: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_tx_insert_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got == nil {
+			t.Fatalf("transaction fallback 后 ledger 缺失: L%02d", i)
+		}
+	}
+}
+
+func TestConcurrent_BatchUpdateTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+
+	dbNameA := fmt.Sprintf("fallback_tx_upd_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_tx_upd_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 6
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_tx_update_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_tx_update_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	sharedAction.setFailTransaction(true)
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("fb_tx_update_pos", fmt.Sprintf("P%02d", i), float64(i)+1000, dbNameA), 0); err != nil {
+			t.Fatalf("positionDB.Set(update) 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("fb_tx_update_led", fmt.Sprintf("L%02d", i), float64(i)+2000, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDB.Set(update) 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireTransactionFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_tx_update_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got == nil || got.Qty != float64(i)+1000 {
+			if got == nil {
+				t.Fatalf("transaction fallback 后 position 缺失: P%02d", i)
+			}
+			t.Fatalf("transaction fallback 后 position 数值错误: got=%v want=%v", got.Qty, float64(i)+1000)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_tx_update_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got == nil || got.Amount != float64(i)+2000 {
+			if got == nil {
+				t.Fatalf("transaction fallback 后 ledger 缺失: L%02d", i)
+			}
+			t.Fatalf("transaction fallback 后 ledger 数值错误: got=%v want=%v", got.Amount, float64(i)+2000)
+		}
+	}
+}
+
+func TestConcurrent_BatchDeleteTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := newInjectedFailureMySQLAction()
+
+	dbNameA := fmt.Sprintf("fallback_tx_del_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("fallback_tx_del_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedMySQLDB(dbNameA)
+	cleanupNamedMySQLDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedMySQLDB(dbNameA)
+		cleanupNamedMySQLDB(dbNameB)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 6
+	for i := 0; i < total; i++ {
+		position := newPosition("fb_tx_delete_pos", fmt.Sprintf("P%02d", i), float64(i), dbNameA)
+		ledger := newLedger("fb_tx_delete_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbNameB)
+		if err := positionDB.Set(position, 0); err != nil {
+			t.Fatalf("positionDB.Set 失败: %v", err)
+		}
+		if err := ledgerDB.Set(ledger, 0); err != nil {
+			t.Fatalf("ledgerDB.Set 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	sharedAction.setFailTransaction(true)
+	for i := 0; i < total; i++ {
+		if err := positionDB.DeleteByItem(newPosition("fb_tx_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); err != nil {
+			t.Fatalf("positionDB.DeleteByItem 失败: %v", err)
+		}
+		if err := ledgerDB.DeleteByItem(newLedger("fb_tx_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); err != nil {
+			t.Fatalf("ledgerDB.DeleteByItem 失败: %v", err)
+		}
+	}
+
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+	requireTransactionFallbackTriggered(t, sharedAction, 2)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("fb_tx_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)); got != nil {
+			t.Fatalf("transaction fallback 后 position 仍存在: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("fb_tx_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)); got != nil {
+			t.Fatalf("transaction fallback 后 ledger 仍存在: L%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, positionDB, newPosition("fb_tx_delete_pos", fmt.Sprintf("P%02d", i), 0, dbNameA)) {
+			t.Fatalf("transaction fallback 后 position 本地键仍存在: P%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, ledgerDB, newLedger("fb_tx_delete_led", fmt.Sprintf("L%02d", i), 0, dbNameB)) {
+			t.Fatalf("transaction fallback 后 ledger 本地键仍存在: L%02d", i)
+		}
+	}
+}
+
+func TestConcurrent_SharedSqliteActionAcrossPrefixes_SameDB(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := oltp.NewSqlite()
+
+	dbName := fmt.Sprintf("sqlite_shared_same_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedSqliteDB(dbName)
+	t.Cleanup(func() {
+		cleanupNamedSqliteDB(dbName)
+	})
+
+	positionDB := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testPosition](sharedAction))
+	ledgerDB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 6
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), float64(i), dbName), 0); err != nil {
+			t.Fatalf("positionDB.Set(insert) 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), float64(i)+100, dbName), 0); err != nil {
+			t.Fatalf("ledgerDB.Set(insert) 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), 0, dbName)); got == nil {
+			t.Fatalf("same-db 并发插入后 position 缺失: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), 0, dbName)); got == nil {
+			t.Fatalf("same-db 并发插入后 ledger 缺失: L%02d", i)
+		}
+	}
+
+	for i := 0; i < total; i++ {
+		if err := positionDB.Set(newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), float64(i)+500, dbName), 0); err != nil {
+			t.Fatalf("positionDB.Set(update) 失败: %v", err)
+		}
+		if err := ledgerDB.Set(newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), float64(i)+1500, dbName), 0); err != nil {
+			t.Fatalf("ledgerDB.Set(update) 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), 0, dbName)); got == nil || got.Qty != float64(i)+500 {
+			if got == nil {
+				t.Fatalf("same-db 并发更新后 position 缺失: P%02d", i)
+			}
+			t.Fatalf("same-db 并发更新后 position 数值错误: got=%v want=%v", got.Qty, float64(i)+500)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), 0, dbName)); got == nil || got.Amount != float64(i)+1500 {
+			if got == nil {
+				t.Fatalf("same-db 并发更新后 ledger 缺失: L%02d", i)
+			}
+			t.Fatalf("same-db 并发更新后 ledger 数值错误: got=%v want=%v", got.Amount, float64(i)+1500)
+		}
+	}
+
+	for i := 0; i < total; i++ {
+		if err := positionDB.DeleteByItem(newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), 0, dbName)); err != nil {
+			t.Fatalf("positionDB.DeleteByItem 失败: %v", err)
+		}
+		if err := ledgerDB.DeleteByItem(newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), 0, dbName)); err != nil {
+			t.Fatalf("ledgerDB.DeleteByItem 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, positionDB, ledgerDB)
+
+	for i := 0; i < total; i++ {
+		if got := findByHashWithAction(t, sharedAction, newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), 0, dbName)); got != nil {
+			t.Fatalf("same-db 并发删除后 position 仍存在: P%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), 0, dbName)); got != nil {
+			t.Fatalf("same-db 并发删除后 ledger 仍存在: L%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, positionDB, newPosition("sqlite_same_pos", fmt.Sprintf("P%02d", i), 0, dbName)) {
+			t.Fatalf("same-db 并发删除后 position 本地键仍存在: P%02d", i)
+		}
+		if keyExistsInBadgerGeneric(t, ledgerDB, newLedger("sqlite_same_led", fmt.Sprintf("L%02d", i), 0, dbName)) {
+			t.Fatalf("same-db 并发删除后 ledger 本地键仍存在: L%02d", i)
+		}
+	}
+}
+
+func TestConcurrent_SharedSqliteActionAcrossPrefixes_DifferentDBs(t *testing.T) {
+	configA := newTestConfig(t.TempDir())
+	configB := newTestConfig(t.TempDir())
+	sharedAction := oltp.NewSqlite()
+
+	dbNameA := fmt.Sprintf("sqlite_shared_diff_a_%d", time.Now().UnixNano()%1000000)
+	dbNameB := fmt.Sprintf("sqlite_shared_diff_b_%d", time.Now().UnixNano()%1000000)
+	cleanupNamedSqliteDB(dbNameA)
+	cleanupNamedSqliteDB(dbNameB)
+	t.Cleanup(func() {
+		cleanupNamedSqliteDB(dbNameA)
+		cleanupNamedSqliteDB(dbNameB)
+	})
+
+	ledgerDBA := newManualSyncDBWithConfig(t, configA, entity.NewModelList[testLedger](sharedAction))
+	ledgerDBB := newManualSyncDBWithConfig(t, configB, entity.NewModelList[testLedger](sharedAction))
+
+	const total = 8
+	for i := 0; i < total; i++ {
+		if err := ledgerDBA.Set(newLedger("sqlite_diff_a", fmt.Sprintf("A%02d", i), float64(i), dbNameA), 0); err != nil {
+			t.Fatalf("ledgerDBA.Set 失败: %v", err)
+		}
+		if err := ledgerDBB.Set(newLedger("sqlite_diff_b", fmt.Sprintf("B%02d", i), float64(i)+1000, dbNameB), 0); err != nil {
+			t.Fatalf("ledgerDBB.Set 失败: %v", err)
+		}
+	}
+	runConcurrentManualSync(t, ledgerDBA, ledgerDBB)
+
+	for i := 0; i < total; i++ {
+		probeA := newLedger("sqlite_diff_a", fmt.Sprintf("A%02d", i), 0, dbNameA)
+		probeAWrong := newLedger("sqlite_diff_a", fmt.Sprintf("A%02d", i), 0, dbNameB)
+		probeB := newLedger("sqlite_diff_b", fmt.Sprintf("B%02d", i), 0, dbNameB)
+		probeBWrong := newLedger("sqlite_diff_b", fmt.Sprintf("B%02d", i), 0, dbNameA)
+
+		if got := findByHashWithAction(t, sharedAction, probeA); got == nil || got.Amount != float64(i) {
+			if got == nil {
+				t.Fatalf("A 库 ledger 缺失: A%02d", i)
+			}
+			t.Fatalf("A 库 ledger 数值错误: got=%v want=%v", got.Amount, float64(i))
+		}
+		if got := findByHashWithAction(t, sharedAction, probeAWrong); got != nil {
+			t.Fatalf("A 库 ledger 串到了 B 库: A%02d", i)
+		}
+		if got := findByHashWithAction(t, sharedAction, probeB); got == nil || got.Amount != float64(i)+1000 {
+			if got == nil {
+				t.Fatalf("B 库 ledger 缺失: B%02d", i)
+			}
+			t.Fatalf("B 库 ledger 数值错误: got=%v want=%v", got.Amount, float64(i)+1000)
+		}
+		if got := findByHashWithAction(t, sharedAction, probeBWrong); got != nil {
+			t.Fatalf("B 库 ledger 串到了 A 库: B%02d", i)
 		}
 	}
 }

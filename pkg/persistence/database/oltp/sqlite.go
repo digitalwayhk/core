@@ -576,6 +576,45 @@ func (own *Sqlite) Exec(sql string, data interface{}) error {
 	return own.db.Error
 }
 
+// Clone 返回一个共享底层连接池但拥有独立事务状态的新实例，
+// 供 sharedbadger 等并发同步场景使用，避免多个 goroutine 复用同一 tx/isTansaction 状态。
+func (own *Sqlite) Clone() types.IDataAction {
+	clone := &Sqlite{
+		Name:         own.Name,
+		Size:         own.Size,
+		UpdateTime:   own.UpdateTime,
+		Path:         own.Path,
+		tables:       own.tables,
+		IsLog:        own.IsLog,
+		isTansaction: own.isTansaction,
+	}
+	if own.db != nil {
+		clone.db = own.db.Session(&gorm.Session{NewDB: true})
+	}
+	return clone
+}
+
+// GetMaxOpenConns 告诉 sharedbadger：同一个 SQLite 文件只应串行执行写事务。
+func (own *Sqlite) GetMaxOpenConns() int {
+	return 1
+}
+
+// GetSyncPoolKey 返回当前模型对应的 SQLite 文件路径，
+// 让 sharedbadger 能按底层库文件而不是 adapter 指针做并发隔离。
+func (own *Sqlite) GetSyncPoolKey(data interface{}) string {
+	if own.Path != "" {
+		return own.Path
+	}
+	if err := own.GetDBName(data); err != nil {
+		return ""
+	}
+	path, err := own.getPath()
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // Transaction 开启事务
 func (own *Sqlite) Transaction() error {
 	own.isTansaction = true

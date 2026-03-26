@@ -208,11 +208,12 @@ func startGlobalCleanup() {
 			}
 
 			// 🔧 串行执行清理任务，每个都有超时保护
+		cleanupLoop:
 			for _, task := range cleanupTasks {
 				select {
 				case <-ctx.Done():
 					logx.Alert("清理任务超时，跳过后续任务")
-					break
+					break cleanupLoop
 				default:
 					func() {
 						defer func() {
