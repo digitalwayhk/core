@@ -3,6 +3,7 @@ package nosql
 import (
 	"fmt"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -1125,6 +1126,18 @@ func (p *PrefixedBadgerDB[T]) rebuildSyncQueue() (int, error) {
 // syncToOtherDB 同步到其他数据库（修复死循环问题 + 立即同步）
 func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 	defer p.wg.Done()
+	// 捕获 BadgerDB 内部可能产生的 nil pointer panic（如 memtable 轮换期间的竞态），
+	// 防止意外崩溃导致整个服务退出。同步 goroutine 退出后，服务仍可正常运行，
+	// 服务重启时 syncOnce 会重新启动同步 goroutine。
+	defer func() {
+		if r := recover(); r != nil {
+			p.syncMutex.Lock()
+			p.syncInProgress = false
+			p.syncMutex.Unlock()
+			logx.Errorf("syncToOtherDB panic recovered, sync goroutine exiting [prefix=%s]: %v\n%s",
+				p.prefix, r, string(debug.Stack()))
+		}
+	}()
 
 	config := p.manager.config
 	interval := config.SyncInterval

@@ -200,6 +200,18 @@ func NewBadgerDBWithConfig[T any](config BadgerDBConfig) (*BadgerDB[T], error) {
 			}
 		}
 
+		// 检查是否是 MANIFEST/文件缺失导致的损坏（进程中途 panic 后重启时出现）
+		// BadgerDB 是本地缓存，数据源在 MySQL，清空重建是安全的
+		if isCorruptionError(err) && i == 0 {
+			logx.Errorf("BadgerDB 文件损坏，清空目录重建 [path=%s]: %v", config.Path, err)
+			if clearErr := clearBadgerData(config.Path); clearErr != nil {
+				logx.Errorf("清空BadgerDB目录失败: %v", clearErr)
+				return nil, fmt.Errorf("打开 BadgerDB 失败: %w", err)
+			}
+			logx.Infof("BadgerDB 目录已清空，重新初始化 [path=%s]", config.Path)
+			continue
+		}
+
 		return nil, fmt.Errorf("打开 BadgerDB 失败: %w", err)
 	}
 
@@ -869,4 +881,29 @@ func (s *DBStatistics) String() string {
 		s.VLogSize/(1024*1024),
 		s.TotalSize/(1024*1024),
 	)
+}
+
+// isCorruptionError 检测 BadgerDB 是否因进程中途崩溃导致的文件缺失/MANIFEST 损坏。
+// 此类错误在服务 panic 后重启时出现：MANIFEST 已引用某文件但物理文件未创建。
+// BadgerDB 在这种情况下是本地缓存，清空重建安全，数据源头在 MySQL。
+func isCorruptionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "no such file or directory") ||
+		strings.Contains(s, "Value log truncate required") ||
+		strings.Contains(s, "manifest file") ||
+		strings.Contains(s, "MANIFEST")
+}
+
+// clearBadgerData 删除并重建 BadgerDB 目录（数据会丢失，只在确认是缓存场景时调用）。
+func clearBadgerData(path string) error {
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("清空BadgerDB目录失败 [path=%s]: %w", path, err)
+	}
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return fmt.Errorf("重建BadgerDB目录失败 [path=%s]: %w", path, err)
+	}
+	return nil
 }
