@@ -59,12 +59,12 @@ func DefaultProductionConfig(path string) BadgerDBConfig {
 		// BadgerDB 配置
 		SyncWrites:         true,
 		DetectConflicts:    true,
-		NumCompactors:      4,
-		ValueLogFileSize:   128 << 20, // 128MB
-		MemTableSize:       64 << 20,  // 64MB
+		NumCompactors:      2,
+		ValueLogFileSize:   1 << 20,  // 1MB：BadgerDB 最小值，防止单文件过大
+		MemTableSize:       16 << 20, // 16MB：减小 flush 批次，降低 CPU 峰值
 		NumLevelZeroTables: 4,
 		NumLevelZeroStall:  8,
-		ValueThreshold:     1024,
+		ValueThreshold:     1 << 16, // 64KB：TaskRecord(<5KB) 走 LSM，不进 vlog
 		EnableLogger:       true,
 
 		// 同步配置
@@ -102,11 +102,11 @@ func DefaultFastConfig(path string) BadgerDBConfig {
 		SyncWrites:         false,
 		DetectConflicts:    false,
 		NumCompactors:      2,
-		ValueLogFileSize:   64 << 20, // 64MB
-		MemTableSize:       8 << 20,  // 8MB
+		ValueLogFileSize:   1 << 20, // 1MB：BadgerDB 最小值
+		MemTableSize:       8 << 20, // 8MB
 		NumLevelZeroTables: 2,
 		NumLevelZeroStall:  4,
-		ValueThreshold:     1024,
+		ValueThreshold:     1 << 16, // 64KB：值走 LSM，不进 vlog
 		EnableLogger:       false,
 
 		// 同步配置
