@@ -80,12 +80,9 @@ func DefaultSharedConfig(path string) BadgerDBConfig {
 		SyncMaxInterval:            5 * time.Minute,
 		SyncBatchSize:              500,
 		SyncBatchDelay:             100 * time.Millisecond,
-		SyncMaxConcurrency:         8,
 		DeferredDeletePollInterval: 5 * time.Second,
-		AutoCleanup:                true,
-		CleanupInterval:            30 * time.Minute,
-		KeepDuration:               24 * time.Hour,
-		SizeThreshold:              500 * 1024 * 1024, // 500MB 触发清理
+		// 共享模式当前未接入 SyncMaxConcurrency 与 AutoCleanup 这组配置，
+		// 这里不再设置默认值，避免造成“已启用”的误解。
 	}
 }
 

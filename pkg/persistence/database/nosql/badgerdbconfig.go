@@ -31,14 +31,14 @@ type BadgerDBConfig struct {
 	SyncMinInterval            time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`                         // 最小同步间隔（默认 1s）
 	SyncMaxInterval            time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`                         // 最大同步间隔（默认 10s）
 	SyncBatchDelay             time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`                           // 触发同步前的积累窗口，让小写入合并成大 batch（默认 10ms）
-	SyncMaxConcurrency         int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                   // 全局最大并发 MySQL 事务数（默认 8）
+	SyncMaxConcurrency         int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                   // 预留字段：共享模式当前未接线；当前并发度由 adapter 的 GetMaxOpenConns 推导
 	DeferredDeletePollInterval time.Duration `json:"deferred_delete_poll_interval" yaml:"deferred_delete_poll_interval"` // 本地延迟删除轮询间隔（默认 5s）
 
 	// 清理配置
-	AutoCleanup     bool          `json:"auto_cleanup" yaml:"auto_cleanup"`         // 是否自动清理（默认 false）
-	CleanupInterval time.Duration `json:"cleanup_interval" yaml:"cleanup_interval"` // 清理检查间隔（默认 1h）
-	KeepDuration    time.Duration `json:"keep_duration" yaml:"keep_duration"`       // 数据保留时长（默认 24h）
-	SizeThreshold   int64         `json:"size_threshold" yaml:"size_threshold"`     // 触发清理的大小阈值（默认 1GB）
+	AutoCleanup     bool          `json:"auto_cleanup" yaml:"auto_cleanup"`         // 预留字段：共享模式当前未按该开关/阈值执行自动清理
+	CleanupInterval time.Duration `json:"cleanup_interval" yaml:"cleanup_interval"` // 预留字段：共享模式当前未使用该周期配置
+	KeepDuration    time.Duration `json:"keep_duration" yaml:"keep_duration"`       // 预留字段：共享模式当前未使用该保留时长配置
+	SizeThreshold   int64         `json:"size_threshold" yaml:"size_threshold"`     // 预留字段：共享模式当前未使用该容量阈值配置
 
 	// GC 配置
 	GCInterval     time.Duration `json:"gc_interval" yaml:"gc_interval"`           // GC 间隔（默认 5min）
