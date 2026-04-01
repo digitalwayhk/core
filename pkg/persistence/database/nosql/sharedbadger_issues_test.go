@@ -1,6 +1,10 @@
 package nosql
 
 import (
+	"bytes"
+	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -733,4 +737,181 @@ func TestIssue_ConcurrentSetAndSync_EventualConsistency(t *testing.T) {
 			"  MySQL:    Amount=%.0f",
 			finalWrapper.Item.Amount, finalWrapper.IsSynced, mysqlItem.Amount)
 	}
+}
+
+// ============================================================
+// 问题 7: ValueThreshold/ValueLogFileSize 配置不合理 → vlog 无限增长 → 内存/CPU 飙升
+//
+// 线上现象 (2026-04-01, fu_funds / po_positions / tr_trades 服务):
+//   - fu_funds:    1.6 GB vlog （fid2/fid3 各 513MB 废弃率 99.8%，长达数小时未被 GC 清理）
+//   - po_positions: 2.4 GB vlog，CPU 持续 110%
+//   - tr_trades:   1.6 GB vlog，CPU 持续 110%
+//   - 内存：funds 1.7 GiB，positions 2.7 GiB（几乎全是 mmap vlog 文件）
+//
+// 根本原因（三层叠加）：
+//   1. ValueThreshold = 1024 → SyncQueueItem（典型 1-5 KB）写入 vlog，不是 LSM
+//   2. BadgerDB GC (RunValueLogGC) 通过 discardStats.MaxDiscard() 来选文件；
+//      高频写入下，活跃 vlog 文件的废弃量（内存统计）超过旧 sealed 文件，
+//      pickLog 选中活跃文件（fid == maxFid）→ 不能 GC → 返回 ErrNoRewrite，
+//      sealed 文件（99%+ 废弃）永远无法被清理
+//   3. ValueLogFileSize = 512MB：一个文件要写满 512MB 才 sealed，
+//      大量历史 vlog 内容无机会进入 GC 候选池
+//   + MemTableSize = 128MB：内存表过大，flush CPU 峰值高
+//   + NumCompactors = 8：多余的 compactor goroutine 空转消耗 CPU
+//
+// 修复方案：
+//   将 DefaultSharedConfig 中以下参数调整为对小数据量高频写入场景的合理值：
+//   - ValueThreshold:  1024    → 1 << 16 (64KB)
+//     效果：SyncQueueItem（<10KB）全部 inline 存入 LSM，vlog 不再增长，无 GC 问题
+//   - ValueLogFileSize: 512MB  → 1MB（BadgerDB 允许的最小值）
+//   - MemTableSize:    128MB   → 16MB（减少 flush 时 CPU 峰值）
+//   - NumCompactors:    8      → 2（节省 CPU）
+// ============================================================
+
+// vlogDirSize 返回目录下所有 .vlog 文件的总字节数
+func vlogDirSize(dir string) int64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".vlog") {
+			if fi, err := e.Info(); err == nil {
+				total += fi.Size()
+			}
+		}
+	}
+	return total
+}
+
+// vlogFileCount 返回目录下 .vlog 文件的数量
+func vlogFileCount(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".vlog") {
+			count++
+		}
+	}
+	return count
+}
+
+// TestIssue_SmallValueThreshold_VlogGrowsUnboundedly 验证：
+// 当 ValueThreshold 较小时，SyncQueueItem 数据被写入 vlog（而非 LSM），
+// 随着高频写入/更新，vlog 持续增长，BadgerDB GC 无法有效回收（见备注中的 pickLog 缺陷），
+// 导致磁盘和内存无限膨胀。
+//
+// Red 阶段：ValueThreshold=64（当前 DefaultSharedConfig=1024 的缩小等比配置），
+//
+//	512 字节 value > 64 → 写 vlog → vlog 膨胀
+//
+// Green 阶段：ValueThreshold=64KB（修复后配置），
+//
+//	512 字节 value < 64KB → inline 进 LSM → vlog 不增长 → 问题消失
+func TestIssue_SmallValueThreshold_VlogGrowsUnboundedly(t *testing.T) {
+	// ---- 辅助函数：构造 BadgerDB 选项 ----
+	makeOpts := func(dir string, valueThreshold int64) badger.Options {
+		return badger.DefaultOptions(dir).
+			WithValueLogFileSize(1 << 20). // 1MB（BadgerDB 最小值，保持固定）
+			WithValueThreshold(valueThreshold).
+			WithNumVersionsToKeep(1). // 只保留最新版本
+			WithDetectConflicts(false).
+			WithNumCompactors(2).
+			WithLogger(nil)
+	}
+
+	// ---- 通用测试函数 ----
+	runScenario := func(t *testing.T, dir string, valueThreshold int64) (vlogSizeBefore, vlogSizeAfterGC int64, gcRounds int) {
+		t.Helper()
+
+		db, err := badger.Open(makeOpts(dir, valueThreshold))
+		require.NoError(t, err)
+		defer db.Close()
+
+		const keyCount = 2500  // 写入量 ≈ 2500×512B = 1.25MB
+		const valueSize = 512  // 代表典型 SyncQueueItem 大小（~1-5KB）
+		const updateRounds = 4 // 模拟 freeze/unfreeze 的反复写入
+
+		value := bytes.Repeat([]byte("v"), valueSize)
+
+		// 初始写入
+		for i := 0; i < keyCount; i++ {
+			require.NoError(t, db.Update(func(txn *badger.Txn) error {
+				return txn.Set([]byte(fmt.Sprintf("key_%04d", i)), value)
+			}))
+		}
+
+		// 多轮更新（覆盖旧值，模拟 freeze 覆盖更新）
+		for r := 0; r < updateRounds; r++ {
+			newVal := bytes.Repeat([]byte(fmt.Sprintf("%c", 'a'+r)), valueSize)
+			for i := 0; i < keyCount; i++ {
+				require.NoError(t, db.Update(func(txn *badger.Txn) error {
+					return txn.Set([]byte(fmt.Sprintf("key_%04d", i)), newVal)
+				}))
+			}
+		}
+
+		vlogSizeBefore = vlogDirSize(dir)
+
+		// 运行最多 20 轮 GC
+		for gcRounds < 20 {
+			err := db.RunValueLogGC(0.5)
+			if err == nil {
+				gcRounds++
+			} else if err == badger.ErrNoRewrite {
+				break
+			} else {
+				break
+			}
+		}
+
+		vlogSizeAfterGC = vlogDirSize(dir)
+		return
+	}
+
+	// ─── Red：ValueThreshold=64，values(512B) > 64 → 写 vlog → GC 无效 ───
+	t.Run("Red_SmallThreshold_VlogBloats", func(t *testing.T) {
+		dir := t.TempDir()
+		sizeBefore, sizeAfter, gcRounds := runScenario(t, dir, 64)
+
+		t.Logf("ValueThreshold=64B: GC前vlog=%dKB, GC后=%dKB, GC轮数=%d",
+			sizeBefore/1024, sizeAfter/1024, gcRounds)
+
+		const liveDataSize = int64(2500 * 512) // 1.25MB live 数据
+
+		// vlog 远超 live 数据（说明大量历史数据未被 GC 清理）
+		if sizeAfter > liveDataSize*3 {
+			t.Errorf("[问题复现] vlog=%dKB 远超 live 数据 %dKB (>3倍)\n"+
+				"  根因: ValueThreshold=64B，SyncQueueItem(512B)被写入 vlog，\n"+
+				"        BadgerDB GC 因 pickLog 缺陷无法回收废弃的 vlog 空间。\n"+
+				"  线上: fu_funds 1.6GB vlog, positions 2.4GB, CPU 110%%",
+				sizeAfter/1024, liveDataSize/1024)
+		} else {
+			t.Logf("(GC 有效，可能 compaction 自动清理了 discard stats，调整参数重试)")
+		}
+	})
+
+	// ─── Green：ValueThreshold=64KB，values(512B) < 64KB → inline LSM → vlog 不增长 ───
+	t.Run("Green_LargeThreshold_VlogStaysSmall", func(t *testing.T) {
+		dir := t.TempDir()
+		sizeBefore, sizeAfter, gcRounds := runScenario(t, dir, 64<<10) // 64KB
+
+		t.Logf("ValueThreshold=64KB: GC前vlog=%dKB, GC后=%dKB, GC轮数=%d",
+			sizeBefore/1024, sizeAfter/1024, gcRounds)
+
+		const liveDataSize = int64(2500 * 512)
+
+		// 修复后：vlog 应非常小（values 走 LSM，vlog 只有极少量 tx 元数据）
+		if sizeAfter > liveDataSize*3 {
+			t.Errorf("[修复未生效] vlog=%dKB 仍然过大（>%dKB），提高 ValueThreshold 未解决问题",
+				sizeAfter/1024, liveDataSize*3/1024)
+		} else {
+			t.Logf("vlog 大小受控：%dKB（live 数据 %dKB，values 走 LSM）",
+				sizeAfter/1024, liveDataSize/1024)
+		}
+	})
 }

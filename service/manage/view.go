@@ -258,6 +258,9 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 		}
 	}
 
+	sort.SliceStable(fields, func(i, j int) bool {
+		return fields[i].Index < fields[j].Index
+	})
 	return fields
 }
 func getField(field reflect.StructField, typeName string) *view.FieldModel {

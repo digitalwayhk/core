@@ -61,12 +61,12 @@ func DefaultSharedConfig(path string) BadgerDBConfig {
 	return BadgerDBConfig{
 		Path:                       path,
 		Mode:                       "shared",
-		MemTableSize:               128 << 20, // 128MB（比独立模式大）
-		NumCompactors:              8,         // 增加 compactor
+		MemTableSize:               16 << 20, // 16MB：减小 flush 批次，降低 CPU 峰值
+		NumCompactors:              2,        // 减少空闲压缩 goroutine
 		NumLevelZeroTables:         4,
 		NumLevelZeroStall:          8,
-		ValueLogFileSize:           512 << 20, // 512MB（比独立模式大）
-		ValueThreshold:             1024,
+		ValueLogFileSize:           1 << 20, // 1MB：BadgerDB 最小值，防止单文件过大
+		ValueThreshold:             1 << 16, // 64KB：SyncQueueItem(<10KB) 走 LSM，不进 vlog
 		SyncWrites:                 false,
 		DetectConflicts:            true,
 		GCInterval:                 10 * time.Minute,
@@ -280,7 +280,7 @@ func (m *SharedBadgerManager) runGC() {
 			lsmAfter, vlogAfter := m.db.Size()
 
 			if reclaimed > 0 {
-				fmt.Printf("共享DB GC完成 [回收: %d轮, LSM: %dMB->%dMB, VLog: %dMB->%dMB]",
+				logx.Infof("共享DB GC完成 [回收: %d轮, LSM: %dMB->%dMB, VLog: %dMB->%dMB]",
 					reclaimed,
 					lsmBefore/(1024*1024), lsmAfter/(1024*1024),
 					vlogBefore/(1024*1024), vlogAfter/(1024*1024),
