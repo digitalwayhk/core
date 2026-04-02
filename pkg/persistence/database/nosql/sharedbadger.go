@@ -2217,36 +2217,14 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 		}
 
 		successKeys = p.deleteItemsOneByOne(items, newSyncAction)
-	} else {
-		// Commit 成功后，用独立连接做一次真正的验证。
-		// 若数据仍存在（可能是并发重新写入或 Delete 条件有误），
-		// 将该 key 从 successKeys 中移除，使其保留在 BadgerDB 队列中，下次同步重试。
-		if existsChecker, ok := syncAction.(IExists); ok {
-			// 构建需要移除的 key 集合
-			retryKeys := make(map[string]struct{})
-			for _, wrapper := range items {
-				if wrapper.Item == nil || !wrapper.IsSynced {
-					continue
-				}
-				if stillExists, checkErr := existsChecker.Exists(wrapper.Item); checkErr == nil && stillExists {
-					logx.Errorf("⚠️ Commit 后数据仍存在，保留队列下次重试 [%s]", wrapper.Key)
-					retryKeys[wrapper.Key] = struct{}{}
-					wrapper.IsSynced = false
-				}
-			}
-			// 从 successKeys 中剔除需要重试的 key
-			if len(retryKeys) > 0 {
-				filtered := successKeys[:0]
-				for _, k := range successKeys {
-					if _, shouldRetry := retryKeys[k]; !shouldRetry {
-						filtered = append(filtered, k)
-					}
-				}
-				successKeys = filtered
-				hasError = true
-			}
-		}
 	}
+	// 注意：不在 Commit 后再做 Exists 复核。
+	// Commit 后事务已结束，Exists 能看到最终状态；但存在两种死循环场景：
+	//   1. 业务使用软删除（写 deleted_at），Exists 不过滤该字段 → 永远返回 true
+	//   2. Delete 命中 0 行但未报错（删除条件与主键不完全匹配）→ Commit 成功但数据未变，Exists 返回 true
+	// 以上两种情况都会导致 key 永远留在队列、每秒重试，形成死循环。
+	// Delete() + Commit() 均返回 nil 即视为远端删除成功。
+	// 并发重写场景由新写入自身的 sync 队列条目负责处理，此处无需额外检测。
 
 	// 物理删除本地缓存
 	for _, key := range successKeys {
