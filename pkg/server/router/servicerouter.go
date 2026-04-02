@@ -151,7 +151,19 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 		}
 	}()
 	index := strings.Index(pack, "api")
-	Pathtype := types.ApiType(pack[index+4:])
+	strpath := pack[index+4:]
+	if strings.Contains(strpath, "/") {
+		if strings.Contains(string(strpath), "public/") {
+			strpath = string(types.PublicType)
+		}
+		if strings.Contains(string(strpath), "private/") {
+			strpath = string(types.PrivateType)
+		}
+		if strings.Contains(string(strpath), "manage/") {
+			strpath = string(types.ManageType)
+		}
+	}
+	Pathtype := types.ApiType(strpath)
 	servicepack := pack[:index-1]
 	index = strings.LastIndex(servicepack, "/")
 	servername := strings.ToLower(servicepack[index+1:])
