@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 type TypeError struct {
 	Code        int    `json:"code"`
 	Message     string `json:"message"`
@@ -20,7 +22,7 @@ func NewTypeError(serviceName, path, ot, mes string, code int) *TypeError {
 	}
 }
 func (own *TypeError) Error() string {
-	return own.Message
+	return fmt.Sprintf("[%s] %s %s (code=%d): %s", own.ServiceName, own.Type, own.Path, own.Code, own.Message)
 }
 
 func (own *TypeError) GetSuggest() string {
