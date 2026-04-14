@@ -1040,6 +1040,33 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		return fn(m.db, data)
 	}
 
+	// 🔧 数据库不存在错误（Error 1049: Unknown database）。
+	// 场景：DB 被运行时删除（如 APP_ENV=test 清库操作）。
+	// Ping() 仍然成功（连接的是 MySQL server，不是某个具体库），所以
+	// ensureValidConnection() 无法感知，需在此处主动重建库 + 重连。
+	if !m.isTansaction && (strings.Contains(errStr, "Unknown database") || strings.Contains(errStr, "Error 1049")) {
+		logx.Infof("🔧 检测到数据库不存在，尝试重建数据库并重连: %v", err)
+
+		// 清除连接缓存，让 newDB() 重新走 checkDatabaseExists → ensureDatabase 流程
+		connKey := m.getConnectionKey()
+		connManager.SetConnection(connKey, nil)
+		m.cleanupCurrentConnection()
+
+		if rebuildErr := m.recreateConnection(); rebuildErr != nil {
+			logx.Errorf("❌ 数据库重建失败: %v", rebuildErr)
+			return rebuildErr
+		}
+
+		// 确保表存在
+		if tableErr := m.ensureTable(data); tableErr != nil {
+			logx.Errorf("❌ 重建数据库后建表失败: %v", tableErr)
+			return tableErr
+		}
+
+		logx.Infof("🔄 数据库重建成功，重试操作...")
+		return fn(m.db, data)
+	}
+
 	// 🔧 连接级错误（bad connection / commands out of sync）：刷新连接池空闲连接
 	// （SetMaxIdleConns(0) 立即关闭全部空闲连接，清除协议失步的坏连接），然后重试一次。
 	// 仅在非事务场景下重试；事务场景由调用方的 Rollback+逐条降级处理。
