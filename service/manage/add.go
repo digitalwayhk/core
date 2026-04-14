@@ -35,6 +35,13 @@ func (own *Add[T]) Validation(req types.IRequest) error {
 	err = own.Operation.ValidationAfter(own, req)
 	return err
 }
+func setModelID(model interface{}, id uint) {
+	if im, ok := model.(pt.IModel); ok {
+		if im.GetID() == 0 {
+			im.SetID(id)
+		}
+	}
+}
 func (own *Add[T]) Do(req types.IRequest) (interface{}, error) {
 	if ms, ok := own.instance.(IRequestSet); ok {
 		ms.SetReq(req)
@@ -48,7 +55,7 @@ func (own *Add[T]) Do(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
-	utils.SetPropertyValue(own.Model, "ID", req.NewID())
+	setModelID(own.Model, req.NewID())
 	uid, uname := req.GetUser()
 	if uid != "" {
 		utils.SetPropertyValue(own.Model, "CreatedUser", uid)
