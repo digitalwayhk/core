@@ -143,9 +143,9 @@ func (own *RouterInfo) GetServiceName() string {
 //		}
 //		return nil
 //	}
-func (own *RouterInfo) Exec(req IRequest) IResponse {
+func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	api := own.New()
-	// 🔧 使用 defer 确保对象回收
+	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
 	defer func() {
 		if config.INITSERVER {
 			return
@@ -156,6 +156,10 @@ func (own *RouterInfo) Exec(req IRequest) IResponse {
 
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+			if resp == nil {
+				panicErr := NewTypeError(own.ServiceName, own.Path, "panic", fmt.Sprintf("%v", err), 500)
+				resp = req.NewResponse(nil, panicErr)
+			}
 		}
 	}()
 	err := api.Parse(req)

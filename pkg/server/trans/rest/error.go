@@ -49,6 +49,10 @@ type ErrorDetail struct {
 
 // 统一的响应处理
 func HandleResponse(w http.ResponseWriter, res types.IResponse) {
+	if res == nil {
+		writeErrorResponse(w, StatusInternalServerError, "响应结果为空", nil)
+		return
+	}
 	if res.GetSuccess() {
 		// 成功响应 200
 		httpx.OkJson(w, res)
