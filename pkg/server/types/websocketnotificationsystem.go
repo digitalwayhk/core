@@ -66,6 +66,20 @@ func (wns *WebSocketNotificationSystem) Start() {
 
 		wns.isStarted.Store(true)
 		logx.Info("✅ 全局 WebSocket 通知系统启动完成")
+
+		// 🔧 每 5 分钟重置统计，防止历史 droppedJobs 累积导致 IsHealthy 永久返回 false
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					wns.ResetStats()
+				case <-wns.closeCh:
+					return
+				}
+			}
+		}()
 	})
 }
 
