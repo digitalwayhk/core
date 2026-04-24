@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ===== IsInteger =====
@@ -82,5 +81,4 @@ func TestIsNumberOrNilFloat(t *testing.T) {
 	assert.False(t, IsNumberOrNilFloat("abc"))
 }
 
-// ===== Unused import guard =====
-var _ = require.NoError
+

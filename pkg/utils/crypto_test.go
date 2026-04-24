@@ -94,8 +94,8 @@ func TestDecryptAES_InvalidBase64(t *testing.T) {
 
 func TestDecryptAES_TooShort(t *testing.T) {
 	// Valid base64 but ciphertext too short for nonce
-	import64 := "YQ==" // base64 of "a" (1 byte)
-	_, err := DecryptAES(import64, "key")
+	shortBase64 := "YQ==" // base64 of "a" (1 byte)
+	_, err := DecryptAES(shortBase64, "key")
 	assert.Error(t, err)
 }
 
