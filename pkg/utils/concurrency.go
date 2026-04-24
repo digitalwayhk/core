@@ -65,7 +65,7 @@ func (t *ConcurrencyTasks[T]) doFun(i int) {
 		// 从panic中恢复
 		if e := recover(); e != nil {
 			err := e.(error)
-			logx.Infof("[PANIC]param=%s,err=%v\n", param, err)
+			logx.Infof("[PANIC]param=%v,err=%v\n", param, err)
 		}
 	}()
 	defer t.wg.Done()
