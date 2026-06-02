@@ -1,0 +1,130 @@
+package router_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// fakeService is a minimal types.IService implementation used by lifecycle tests.
+type fakeService struct{ name string }
+
+func (f *fakeService) ServiceName() string                    { return f.name }
+func (f *fakeService) Routers() []types.IRouter               { return nil }
+func (f *fakeService) SubscribeRouters() []*types.ObserveArgs { return nil }
+
+// TestNewServiceContext_SetsClusterProvider verifies that, with the default
+// auto/local configuration, NewServiceContext produces a non-nil ClusterProvider.
+func TestNewServiceContext_SetsClusterProvider(t *testing.T) {
+	sc := router.NewServiceContext(&fakeService{"sctest-cluster-provider"})
+	require.NotNil(t, sc)
+	assert.NotNil(t, sc.ClusterProvider, "ClusterProvider should be set with default config")
+}
+
+// TestNewServiceContext_SetsTransportSelector verifies that the default gRPC
+// transport configuration results in a non-nil TransportSelector.
+func TestNewServiceContext_SetsTransportSelector(t *testing.T) {
+	sc := router.NewServiceContext(&fakeService{"sctest-transport-selector"})
+	require.NotNil(t, sc)
+	assert.NotNil(t, sc.TransportSelector, "TransportSelector should be set with default transport config")
+}
+
+// TestNewServiceContext_ClusterSwitcherInitialCurrent verifies that the
+// ClusterSwitcher's initial Current() provider is the same as ClusterProvider.
+func TestNewServiceContext_ClusterSwitcherInitialCurrent(t *testing.T) {
+	sc := router.NewServiceContext(&fakeService{"sctest-switcher-init"})
+	require.NotNil(t, sc)
+	require.NotNil(t, sc.ClusterSwitcher, "ClusterSwitcher should be initialised")
+	assert.Equal(t, sc.ClusterProvider, sc.ClusterSwitcher.Current(),
+		"ClusterSwitcher.Current() should equal ClusterProvider after initialisation")
+}
+
+// TestNewServiceContext_CachedByName verifies that the global scontext cache
+// returns the same *ServiceContext for the same service name.
+func TestNewServiceContext_CachedByName(t *testing.T) {
+	svc := &fakeService{"sctest-cache"}
+	sc1 := router.NewServiceContext(svc)
+	sc2 := router.NewServiceContext(svc)
+	assert.Same(t, sc1, sc2, "NewServiceContext should return the cached instance for the same name")
+}
+
+// TestSetRunState_TrueRegistersNode verifies that SetRunState(true) registers
+// this service's node in the cluster provider so it appears in List().
+func TestSetRunState_TrueRegistersNode(t *testing.T) {
+	const svcName = "sctest-runstate-register"
+	sc := router.NewServiceContext(&fakeService{svcName})
+	require.NotNil(t, sc)
+
+	sc.SetRunState(true)
+	t.Cleanup(func() { sc.SetRunState(false) })
+
+	// Allow the synchronous Register call inside SetRunState to complete.
+	require.Eventually(t, func() bool {
+		nodes, err := sc.ClusterProvider.List(context.Background(), svcName)
+		if err != nil {
+			return false
+		}
+		for _, n := range nodes {
+			if n.ServiceName == svcName {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond,
+		"node should appear in ClusterProvider after SetRunState(true)")
+}
+
+// TestSetRunState_FalseAfterTrue_CleansCrossNodeBroker verifies that
+// SetRunState(false) stops and nils the CrossNodeBroker.
+func TestSetRunState_FalseAfterTrue_CleansCrossNodeBroker(t *testing.T) {
+	const svcName = "sctest-runstate-clean"
+	sc := router.NewServiceContext(&fakeService{svcName})
+	require.NotNil(t, sc)
+
+	sc.SetRunState(true)
+	time.Sleep(30 * time.Millisecond)
+
+	// CrossNodeBroker should be created.
+	assert.NotNil(t, sc.CrossNodeBroker, "CrossNodeBroker should be set after SetRunState(true)")
+
+	sc.SetRunState(false)
+	assert.Nil(t, sc.CrossNodeBroker, "CrossNodeBroker should be nil after SetRunState(false)")
+}
+
+// TestSyncProviderAfterSwitch_UpdatesClusterProvider verifies that after a
+// Begin→Complete switch cycle, SyncProviderAfterSwitch updates ClusterProvider
+// to the newly promoted provider.
+func TestSyncProviderAfterSwitch_UpdatesClusterProvider(t *testing.T) {
+	const svcName = "sctest-sync-provider"
+	sc := router.NewServiceContext(&fakeService{svcName})
+	require.NotNil(t, sc)
+	require.NotNil(t, sc.ClusterSwitcher)
+
+	// Create a fresh local provider to switch to.
+	newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+	newProvider.Start()
+	t.Cleanup(func() { newProvider.Close() })
+
+	ctx := context.Background()
+
+	err := sc.ClusterSwitcher.Begin(ctx, newProvider)
+	require.NoError(t, err)
+
+	err = sc.ClusterSwitcher.Complete(ctx)
+	require.NoError(t, err)
+
+	err = sc.SyncProviderAfterSwitch()
+	require.NoError(t, err)
+
+	// Verify that ClusterProvider has been updated to the new provider.
+	got, ok := sc.ClusterProvider.(*cluster.LocalProvider)
+	require.True(t, ok, "ClusterProvider should still be a *cluster.LocalProvider")
+	assert.Same(t, newProvider, got,
+		"ClusterProvider should point to the newly promoted provider after sync")
+}
