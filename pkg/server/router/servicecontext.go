@@ -42,9 +42,10 @@ type ServiceContext struct {
 	Hub               interface{} `json:"-"`
 	StateChan         chan bool   `json:"-"`
 	serverOption      *types.ServerOption
-	TransportSelector transport.TransportSelector `json:"-"`
-	ClusterProvider   cluster.DiscoveryProvider   `json:"-"`
-	membership        *cluster.MembershipManager  `json:"-"`
+	TransportSelector  transport.TransportSelector  `json:"-"`
+	ClusterProvider    cluster.DiscoveryProvider    `json:"-"`
+	membership         *cluster.MembershipManager   `json:"-"`
+	CrossNodeBroker    *cluster.CrossNodeNoticeBroker `json:"-"`
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -281,6 +282,28 @@ func (own *ServiceContext) SetPid(pid int) {
 }
 func (own *ServiceContext) SetRunState(state bool) {
 	own.isStart = state
+
+	if state {
+		// Phase 6: initialise cross-node WebSocket forwarding when the cluster
+		// provider is available and a broker has not yet been created.
+		if own.ClusterProvider != nil && own.CrossNodeBroker == nil {
+			nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
+				own.Config.DataCenterID, own.Config.MachineID)
+			own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
+				own.ClusterProvider, own.Service.Name, nodeID,
+			)
+			types.SetCrossNodeForwarder(own.CrossNodeBroker)
+		}
+	} else {
+		// Phase 6: drain on shutdown.
+		if own.CrossNodeBroker != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			own.CrossNodeBroker.DrainAndStop(ctx)
+			own.CrossNodeBroker = nil
+		}
+	}
+
 	// 🔧 非阻塞发送，避免死锁
 	select {
 	case own.StateChan <- state:

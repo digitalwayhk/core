@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"time"
@@ -66,6 +67,11 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	}
 
 	own.recordWebSocketConnect(hash)
+
+	// Notify cross-node forwarder about new local subscription.
+	if f := GetCrossNodeForwarder(); f != nil {
+		go f.OnSubscriptionChange(own.Path, hash, true)
+	}
 	return hash
 }
 
@@ -123,6 +129,13 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	}
 
 	own.recordWebSocketDisconnect(hash)
+
+	// Notify cross-node forwarder that local subscription may be gone.
+	if needUnregister {
+		if f := GetCrossNodeForwarder(); f != nil {
+			go f.OnSubscriptionChange(own.Path, hash, false)
+		}
+	}
 }
 
 // 🔧 优化广播（使用单例）
@@ -208,6 +221,14 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		if dropped > 0 {
 			logx.Errorf("%s 提交任务: 成功:%d, 丢弃:%d",
 				own.Path, submitted, dropped)
+		}
+
+		// Forward notice to peer nodes for the same subscriptions.
+		if f := GetCrossNodeForwarder(); f != nil {
+			ctx := context.Background()
+			for _, hash := range hashes {
+				f.ForwardNotice(ctx, own.Path, hash, message)
+			}
 		}
 	}()
 }
@@ -426,4 +447,49 @@ func (own *RouterInfo) initShards() {
 	}
 
 	logx.Infof("✅ 分片初始化完成 for %s", own.Path)
+}
+
+// ExecuteLocalNotice delivers a forwarded cross-node notice to local subscribers
+// for the given hash bucket. This is called by the manage relay endpoint when a
+// peer node forwards a NoticeWebSocket message to this node.
+func (own *RouterInfo) ExecuteLocalNotice(hash uint64, message interface{}) {
+	if own == nil {
+		return
+	}
+	iwsr, ok := own.instance.(IWebSocketRouterNotice)
+	if !ok {
+		return
+	}
+	own.RLock()
+	api, exists := own.rArgs[hash]
+	own.RUnlock()
+	if !exists || api == nil {
+		return
+	}
+
+	notifySys := getGlobalNotificationSystem()
+	notifySys.Start()
+	if !notifySys.IsHealthy() {
+		return
+	}
+
+	notifySys.Submit(&noticeJob{
+		hash:    hash,
+		api:     api,
+		message: message,
+		iwsr:    iwsr,
+		router:  own,
+	})
+}
+
+// GetSubscribedHashes returns the set of active subscription hashes (routerArg hashes)
+// for this RouterInfo. Used by the cross-node forwarder to track local subscriptions.
+func (own *RouterInfo) GetSubscribedHashes() []uint64 {
+	own.RLock()
+	defer own.RUnlock()
+	hashes := make([]uint64, 0, len(own.rArgs))
+	for h := range own.rArgs {
+		hashes = append(hashes, h)
+	}
+	return hashes
 }
