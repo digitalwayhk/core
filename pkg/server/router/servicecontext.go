@@ -12,7 +12,9 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/transport"
+	transportgrpc "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -42,10 +44,13 @@ type ServiceContext struct {
 	Hub               interface{} `json:"-"`
 	StateChan         chan bool   `json:"-"`
 	serverOption      *types.ServerOption
-	TransportSelector  transport.TransportSelector  `json:"-"`
-	ClusterProvider    cluster.DiscoveryProvider    `json:"-"`
-	membership         *cluster.MembershipManager   `json:"-"`
-	CrossNodeBroker    *cluster.CrossNodeNoticeBroker `json:"-"`
+	TransportSelector transport.TransportSelector    `json:"-"`
+	MQManager         *mq.MQManager                  `json:"-"`
+	ClusterProvider   cluster.DiscoveryProvider      `json:"-"`
+	ClusterSwitcher   cluster.ProviderSwitcher       `json:"-"`
+	membership        *cluster.MembershipManager     `json:"-"`
+	CrossNodeBroker   *cluster.CrossNodeNoticeBroker `json:"-"`
+	nodeID            string
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -201,6 +206,25 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		}
 	}
 
+	if err := initCluster(sc); err != nil {
+		logx.Errorf("cluster: init failed: %v", err)
+	}
+	if con.Transport.GRPC.Enable {
+		sc.TransportSelector = transport.NewDefaultSelector(
+			transportgrpc.New(con.Transport.GRPC.MaxRecvMsgSize, con.Transport.GRPC.MaxSendMsgSize),
+		)
+	}
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		mgr, mqErr := mq.BuildManager(ctx, &con.MQ)
+		cancel()
+		if mqErr != nil {
+			logx.Errorf("mq: init failed: %v", mqErr)
+		} else {
+			sc.MQManager = mgr
+		}
+	}
+
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
 	scontext[name] = sc
@@ -284,23 +308,53 @@ func (own *ServiceContext) SetRunState(state bool) {
 	own.isStart = state
 
 	if state {
-		// Phase 6: initialise cross-node WebSocket forwarding when the cluster
-		// provider is available and a broker has not yet been created.
-		if own.ClusterProvider != nil && own.CrossNodeBroker == nil {
+		if own.ClusterProvider != nil && own.membership == nil {
 			nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
 				own.Config.DataCenterID, own.Config.MachineID)
+			own.nodeID = nodeID
+			node := &cluster.NodeInfo{
+				ID:           nodeID,
+				ServiceName:  own.Service.Name,
+				DataCenterID: int64(own.Config.DataCenterID),
+				MachineID:    int64(own.Config.MachineID),
+				Address:      own.Config.RunIp,
+				Port:         own.Config.Port,
+				SocketPort:   own.Config.SocketPort,
+				Weight:       1,
+			}
+			if regErr := own.ClusterProvider.Register(context.Background(), node); regErr != nil {
+				logx.Errorf("cluster: register node %s: %v", nodeID, regErr)
+			} else {
+				interval := own.Config.Cluster.HeartbeatInterval
+				if interval == 0 {
+					interval = 3 * time.Second
+				}
+				own.membership = cluster.NewMembershipManager(own.ClusterProvider, nodeID, interval)
+				own.membership.Start(context.Background())
+			}
+		}
+		if own.ClusterProvider != nil && own.CrossNodeBroker == nil {
+			if own.nodeID == "" {
+				own.nodeID = fmt.Sprintf("%s-%d-%d", own.Service.Name,
+					own.Config.DataCenterID, own.Config.MachineID)
+			}
 			own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
-				own.ClusterProvider, own.Service.Name, nodeID,
+				own.ClusterProvider, own.Service.Name, own.nodeID,
 			)
 			types.SetCrossNodeForwarder(own.CrossNodeBroker)
 		}
 	} else {
-		// Phase 6: drain on shutdown.
 		if own.CrossNodeBroker != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			own.CrossNodeBroker.DrainAndStop(ctx)
 			own.CrossNodeBroker = nil
+		}
+		if own.membership != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			own.membership.Stop(ctx)
+			own.membership = nil
 		}
 	}
 
@@ -630,6 +684,20 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 	return own.Service.CallService(payload)
 }
 
+func initCluster(sc *ServiceContext) error {
+	provider, err := cluster.BuildProvider(&sc.Config.Cluster, processLocalRegistry)
+	if err != nil {
+		return err
+	}
+	sc.ClusterProvider = provider
+	if provider != nil {
+		sc.ClusterSwitcher = cluster.NewClusterSwitcher(provider)
+	} else {
+		sc.ClusterSwitcher = nil
+	}
+	return nil
+}
+
 // claimMachineID registers this service in the process-local cluster registry.
 // If the configured MachineID is already taken, it auto-allocates the next free ID.
 // Returns the (possibly new) MachineID to use for Snowflake initialisation.
@@ -655,7 +723,11 @@ func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error)
 	}
 
 	// Slot conflict — auto-allocate.
-	newMachine := processLocalRegistry.AllocateMachineID(dc)
+	maxMachineID := int64(1023)
+	if con.Cluster.Claim.MachineIDMax > 0 {
+		maxMachineID = int64(con.Cluster.Claim.MachineIDMax)
+	}
+	newMachine := processLocalRegistry.AllocateMachineID(serviceName, dc, maxMachineID)
 	if newMachine < 0 {
 		return machine, fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
 	}

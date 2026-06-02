@@ -39,6 +39,10 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	if own.rArgs == nil {
 		own.rArgs = make(map[uint64]IRouter)
 	}
+	if own.rHashClients == nil {
+		own.rHashClients = make(map[uint64]int)
+	}
+	own.rHashClients[hash]++
 	needRegister := false
 	if _, ok := own.rArgs[hash]; !ok {
 		own.rArgs[hash] = router
@@ -86,33 +90,25 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	shard.mu.Lock()
 	req := shard.clients[client]
 	delete(shard.clients, client)
-	clientCount := len(shard.clients)
 	shard.mu.Unlock()
 
 	// 🔧 检查是否需要清理路由
 	var needUnregister bool
 	var api IRouter
 
-	if clientCount == 0 {
-		own.Lock()
-		// 再次检查所有分片是否都没有该 hash 的客户端
-		totalCount := 0
-		for i := 0; i < shardCount; i++ {
-			s := own.rWebSocketShards[i]
-			s.mu.RLock()
-			totalCount += len(s.clients)
-			s.mu.RUnlock()
-		}
-
-		if totalCount == 0 {
+	own.Lock()
+	if own.rHashClients != nil {
+		own.rHashClients[hash]--
+		if own.rHashClients[hash] <= 0 {
+			delete(own.rHashClients, hash)
 			api = own.rArgs[hash]
 			if api != nil {
 				needUnregister = true
 			}
 			delete(own.rArgs, hash)
 		}
-		own.Unlock()
 	}
+	own.Unlock()
 
 	// 🔧 在锁外调用接口
 	if needUnregister && api != nil {
@@ -445,6 +441,7 @@ func (own *RouterInfo) initShards() {
 			clients: make(map[IWebSocket]IRequest),
 		}
 	}
+	own.rHashClients = make(map[uint64]int)
 
 	logx.Infof("✅ 分片初始化完成 for %s", own.Path)
 }

@@ -16,13 +16,13 @@ func newTestProvider() *cluster.LocalProvider {
 
 func newNode(id, service string, dc, machine int64) *cluster.NodeInfo {
 	return &cluster.NodeInfo{
-		ID:          id,
-		ServiceName: service,
+		ID:           id,
+		ServiceName:  service,
 		DataCenterID: dc,
-		MachineID:   machine,
-		Address:     "127.0.0.1",
-		Port:        8080,
-		Weight:      1,
+		MachineID:    machine,
+		Address:      "127.0.0.1",
+		Port:         8080,
+		Weight:       1,
 	}
 }
 
@@ -178,6 +178,49 @@ func TestLocalProvider_AllocateMachineID(t *testing.T) {
 	require.NoError(t, p.Register(ctx, newNode("n0", "svc", 0, 0)))
 	require.NoError(t, p.Register(ctx, newNode("n1", "svc", 0, 1)))
 
-	id := p.AllocateMachineID(0)
+	id := p.AllocateMachineID("svc", 0)
 	assert.Equal(t, int64(2), id)
+}
+
+func TestLocalProvider_CrossServiceIsolation(t *testing.T) {
+	p := newTestProvider()
+	defer p.Close()
+	ctx := context.Background()
+
+	require.NoError(t, p.Register(ctx, newNode("funds-1", "funds", 0, 1)))
+	require.NoError(t, p.Register(ctx, newNode("orders-1", "orders", 0, 1)))
+}
+
+func TestLocalProvider_SameServiceConflict(t *testing.T) {
+	p := newTestProvider()
+	defer p.Close()
+	ctx := context.Background()
+
+	require.NoError(t, p.Register(ctx, newNode("orders-1", "orders", 0, 1)))
+	err := p.Register(ctx, newNode("orders-2", "orders", 0, 1))
+	assert.ErrorIs(t, err, cluster.ErrSlotConflict)
+}
+
+func TestLocalProvider_AllocateMachineID_ServiceIsolated(t *testing.T) {
+	p := newTestProvider()
+	defer p.Close()
+	ctx := context.Background()
+
+	require.NoError(t, p.Register(ctx, newNode("funds-0", "funds", 0, 0)))
+
+	id := p.AllocateMachineID("orders", 0)
+	assert.Equal(t, int64(0), id)
+}
+
+func TestLocalProvider_ListAllServices(t *testing.T) {
+	p := newTestProvider()
+	defer p.Close()
+	ctx := context.Background()
+
+	require.NoError(t, p.Register(ctx, newNode("funds-1", "funds", 0, 1)))
+	require.NoError(t, p.Register(ctx, newNode("orders-2", "orders", 0, 2)))
+
+	nodes, err := p.List(ctx, "")
+	require.NoError(t, err)
+	assert.Len(t, nodes, 2)
 }

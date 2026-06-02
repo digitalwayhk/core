@@ -48,6 +48,10 @@ type CrossNodeNoticeBroker struct {
 
 	stopped bool
 	stopMu  sync.Mutex
+
+	// localSubs tracks this node's own subscriptions (for drain).
+	localSubsMu sync.RWMutex
+	localSubs   map[string]map[uint64]bool // routePath -> hash set
 }
 
 // NewCrossNodeNoticeBroker creates a broker backed by the given provider.
@@ -58,6 +62,7 @@ func NewCrossNodeNoticeBroker(provider DiscoveryProvider, serviceName, localNode
 		localNodeID: localNodeID,
 		httpClient:  &http.Client{Timeout: 3 * time.Second},
 		subs:        make(map[string]map[uint64]map[string]bool),
+		localSubs:   make(map[string]map[uint64]bool),
 	}
 }
 
@@ -104,6 +109,19 @@ func (b *CrossNodeNoticeBroker) OnSubscriptionChange(routePath string, hash uint
 	}
 	b.stopMu.Unlock()
 
+	b.localSubsMu.Lock()
+	if active {
+		if b.localSubs[routePath] == nil {
+			b.localSubs[routePath] = make(map[uint64]bool)
+		}
+		b.localSubs[routePath][hash] = true
+	} else {
+		if b.localSubs[routePath] != nil {
+			delete(b.localSubs[routePath], hash)
+		}
+	}
+	b.localSubsMu.Unlock()
+
 	summary := &subscriptionSummaryPayload{
 		RoutePath: routePath,
 		Hash:      hash,
@@ -147,27 +165,28 @@ func (b *CrossNodeNoticeBroker) UpdatePeerSubscription(routePath string, hash ui
 // DrainAndStop broadcasts subscription-removed events for all local subscriptions
 // and marks the broker as stopped. Called by ServiceContext.Stop().
 func (b *CrossNodeNoticeBroker) DrainAndStop(ctx context.Context) {
-	b.stopMu.Lock()
-	b.stopped = true
-	b.stopMu.Unlock()
+	_ = ctx
 
-	// The caller is responsible for removing local subscriptions; we just
-	// broadcast the removal summaries so peers can clean up their registries.
-	b.subMu.RLock()
-	type pathHash struct{ path string; hash uint64 }
+	b.localSubsMu.RLock()
+	type pathHash struct {
+		path string
+		hash uint64
+	}
 	toRemove := make([]pathHash, 0)
-	for path, hashes := range b.subs {
+	for path, hashes := range b.localSubs {
 		for hash := range hashes {
-			if hashes[hash][b.localNodeID] {
-				toRemove = append(toRemove, pathHash{path, hash})
-			}
+			toRemove = append(toRemove, pathHash{path, hash})
 		}
 	}
-	b.subMu.RUnlock()
+	b.localSubsMu.RUnlock()
 
 	for _, item := range toRemove {
 		b.OnSubscriptionChange(item.path, item.hash, false)
 	}
+
+	b.stopMu.Lock()
+	b.stopped = true
+	b.stopMu.Unlock()
 }
 
 // peerNodesForHash returns node IDs that have subscribers for routePath+hash,

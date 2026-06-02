@@ -45,6 +45,83 @@ func (m *mockWebSocket) Messages() []interface{} {
 	return cp
 }
 
+type mockResponse struct{}
+
+func (m *mockResponse) GetSuccess() bool                                { return true }
+func (m *mockResponse) GetMessage() string                              { return "" }
+func (m *mockResponse) GetData(instanceType ...interface{}) interface{} { return nil }
+func (m *mockResponse) GetError() error                                 { return nil }
+
+type mockRequest struct{ serviceName string }
+
+func (m *mockRequest) GetTraceId() string        { return "trace" }
+func (m *mockRequest) GetUser() (string, string) { return "", "" }
+func (m *mockRequest) GetClientIP() string       { return "127.0.0.1" }
+func (m *mockRequest) NewID() uint               { return 1 }
+func (m *mockRequest) Authorized() bool          { return true }
+func (m *mockRequest) CallService(types.IRouter, ...func(types.IResponse)) (types.IResponse, error) {
+	return &mockResponse{}, nil
+}
+func (m *mockRequest) CallTargetService(types.IRouter, *types.TargetInfo, ...func(types.IResponse)) (types.IResponse, error) {
+	return &mockResponse{}, nil
+}
+func (m *mockRequest) GetValue(string) string                         { return "" }
+func (m *mockRequest) Bind(interface{}) error                         { return nil }
+func (m *mockRequest) GoZeroBind(interface{}) error                   { return nil }
+func (m *mockRequest) NewResponse(interface{}, error) types.IResponse { return &mockResponse{} }
+func (m *mockRequest) GetPath() string                                { return "" }
+func (m *mockRequest) GetClaims(string) interface{}                   { return nil }
+func (m *mockRequest) ServiceName() string                            { return m.serviceName }
+func (m *mockRequest) GetServerInfo() *types.TargetInfo               { return nil }
+func (m *mockRequest) GetTargetServerInfo(string) *types.TargetInfo   { return nil }
+
+type mockRouter struct {
+	info   *types.RouterInfo
+	hash   uint64
+	regs   int32
+	unregs int32
+}
+
+func (m *mockRouter) Parse(types.IRequest) error             { return nil }
+func (m *mockRouter) Validation(types.IRequest) error        { return nil }
+func (m *mockRouter) Do(types.IRequest) (interface{}, error) { return nil, nil }
+func (m *mockRouter) RouterInfo() *types.RouterInfo          { return m.info }
+func (m *mockRouter) RegisterWebSocket(types.IWebSocket, types.IRequest) {
+	atomic.AddInt32(&m.regs, 1)
+}
+func (m *mockRouter) UnRegisterWebSocket(types.IWebSocket, types.IRequest) {
+	atomic.AddInt32(&m.unregs, 1)
+}
+func (m *mockRouter) NoticeFiltersRouter(message interface{}, api types.IRouter) (bool, interface{}) {
+	return true, message
+}
+func (m *mockRouter) GetHashKey() uint64 { return m.hash }
+
+func newRouterInfo(path string) *types.RouterInfo {
+	return &types.RouterInfo{
+		Path:        path,
+		ServiceName: "svc",
+		PathType:    types.PublicType,
+	}
+}
+
+func newMockRouter(info *types.RouterInfo, hash uint64) *mockRouter {
+	router := &mockRouter{info: info, hash: hash}
+	info.SetInstance(router)
+	return router
+}
+
+func waitFor(t *testing.T, check func() bool) {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
+}
+
 // noticeCapture is an ICrossNodeForwarder that records calls for assertions.
 type noticeCapture struct {
 	mu      sync.Mutex
@@ -107,13 +184,18 @@ func TestCrossNodeBrokerDrainAndStop(t *testing.T) {
 	provider.Start()
 
 	broker := cluster.NewCrossNodeNoticeBroker(provider, "svc", "nodeA")
+	types.SetCrossNodeForwarder(broker)
+	defer types.SetCrossNodeForwarder(nil)
 
-	// Register a local subscription so DrainAndStop has something to broadcast.
-	broker.UpdatePeerSubscription("/ws/price", 99, "nodeA", true)
+	info := newRouterInfo("/ws/price")
+	router := newMockRouter(info, 99)
+	ws := &mockWebSocket{}
+	req := &mockRequest{serviceName: "svc"}
+	info.RegisterWebSocketClient(router, ws, req)
+	time.Sleep(100 * time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	// Should not hang or panic.
 	broker.DrainAndStop(ctx)
 }
 
@@ -124,14 +206,18 @@ func TestCrossNodeForwarderHookOnRegister(t *testing.T) {
 	types.SetCrossNodeForwarder(capture)
 	defer types.SetCrossNodeForwarder(nil)
 
-	ri := &types.RouterInfo{
-		Path: "/ws/test",
-	}
+	info := newRouterInfo("/ws/test")
+	router := newMockRouter(info, 123)
+	ws := &mockWebSocket{}
+	req := &mockRequest{serviceName: "svc"}
 
-	// Minimal mock implementations
-	_ = ri // Would normally call ri.RegisterWebSocketClient(router, ws, req)
-	// Instead we test the forwarder directly.
-	types.GetCrossNodeForwarder().OnSubscriptionChange("/ws/test", 123, true)
+	info.RegisterWebSocketClient(router, ws, req)
+
+	waitFor(t, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		return len(capture.subs) == 1
+	})
 
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
@@ -141,24 +227,32 @@ func TestCrossNodeForwarderHookOnRegister(t *testing.T) {
 	if !capture.subs[0].active {
 		t.Error("expected active=true")
 	}
+	if capture.subs[0].hash != 123 {
+		t.Fatalf("expected hash 123, got %d", capture.subs[0].hash)
+	}
 }
 
 // TestCrossNodeForwarderHookOnNotice verifies that ForwardNotice is called
 // after local dispatch.
 func TestCrossNodeForwarderHookOnNotice(t *testing.T) {
-	var forwardCount int64
 	cap := &noticeCapture{}
 	types.SetCrossNodeForwarder(cap)
 	defer types.SetCrossNodeForwarder(nil)
 
-	// Directly exercise ForwardNotice so we can count calls.
-	ctx := context.Background()
-	types.GetCrossNodeForwarder().ForwardNotice(ctx, "/ws/trade", 77, "data")
-	atomic.AddInt64(&forwardCount, 1)
+	info := newRouterInfo("/ws/trade")
+	router := newMockRouter(info, 77)
+	ws := &mockWebSocket{}
+	req := &mockRequest{serviceName: "svc"}
+	info.RegisterWebSocketClient(router, ws, req)
 
-	if atomic.LoadInt64(&forwardCount) != 1 {
-		t.Fatalf("expected 1 forward, got %d", forwardCount)
-	}
+	info.NoticeWebSocket("data")
+
+	waitFor(t, func() bool {
+		cap.mu.Lock()
+		defer cap.mu.Unlock()
+		return len(cap.notices) == 1
+	})
+
 	cap.mu.Lock()
 	defer cap.mu.Unlock()
 	if len(cap.notices) != 1 {
@@ -176,14 +270,57 @@ func TestCrossNodeForwarderUnregisterHook(t *testing.T) {
 	types.SetCrossNodeForwarder(capture)
 	defer types.SetCrossNodeForwarder(nil)
 
-	types.GetCrossNodeForwarder().OnSubscriptionChange("/ws/order", 55, false)
+	info := newRouterInfo("/ws/order")
+	routerA := newMockRouter(info, 55)
+	routerB := newMockRouter(info, 66)
+	wsA := &mockWebSocket{}
+	wsB := &mockWebSocket{}
+	req := &mockRequest{serviceName: "svc"}
+
+	hashA := info.RegisterWebSocketClient(routerA, wsA, req)
+	_ = info.RegisterWebSocketClient(routerB, wsB, req)
+
+	waitFor(t, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		return len(capture.subs) >= 2
+	})
+
+	info.UnRegisterWebSocketHash(hashA, wsA)
+
+	waitFor(t, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		for _, sub := range capture.subs {
+			if sub.hash == hashA && !sub.active {
+				return true
+			}
+		}
+		return false
+	})
+
+	if atomic.LoadInt32(&routerA.unregs) != 1 {
+		t.Fatalf("expected routerA unregister hook once, got %d", atomic.LoadInt32(&routerA.unregs))
+	}
+	if atomic.LoadInt32(&routerB.unregs) != 0 {
+		t.Fatalf("expected routerB unregister hook not called, got %d", atomic.LoadInt32(&routerB.unregs))
+	}
 
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
-	if len(capture.subs) != 1 {
-		t.Fatalf("expected 1 sub event, got %d", len(capture.subs))
+	var sawHashAInactive, sawHashBInactive bool
+	for _, sub := range capture.subs {
+		if sub.hash == hashA && !sub.active {
+			sawHashAInactive = true
+		}
+		if sub.hash == 66 && !sub.active {
+			sawHashBInactive = true
+		}
 	}
-	if capture.subs[0].active {
-		t.Error("expected active=false")
+	if !sawHashAInactive {
+		t.Fatal("expected inactive event for hashA")
+	}
+	if sawHashBInactive {
+		t.Fatal("did not expect inactive event for hashB")
 	}
 }

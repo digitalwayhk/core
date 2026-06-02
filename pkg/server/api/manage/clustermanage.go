@@ -2,6 +2,7 @@ package manage
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
@@ -13,8 +14,8 @@ import (
 
 // ClusterStatus returns the active cluster provider and node list.
 type ClusterStatus struct {
-	ServiceName  string            `json:"service_name"`
-	ProviderName string            `json:"provider_name,omitempty"`
+	ServiceName  string              `json:"service_name"`
+	ProviderName string              `json:"provider_name,omitempty"`
 	Nodes        []*cluster.NodeInfo `json:"nodes,omitempty"`
 }
 
@@ -49,8 +50,8 @@ func (c *ClusterStatus) RouterInfo() *types.RouterInfo {
 
 // ClusterNodes returns nodes for a service, optionally filtered by status.
 type ClusterNodes struct {
-	ServiceName string `json:"service_name"`
-	Status      string `json:"status,omitempty"`
+	ServiceName string              `json:"service_name"`
+	Status      string              `json:"status,omitempty"`
 	Nodes       []*cluster.NodeInfo `json:"nodes,omitempty"`
 }
 
@@ -94,13 +95,50 @@ type ClusterSwitchProvider struct {
 func (c *ClusterSwitchProvider) Parse(req types.IRequest) error    { return req.Bind(c) }
 func (c *ClusterSwitchProvider) Validation(_ types.IRequest) error { return nil }
 
-func (c *ClusterSwitchProvider) Do(_ types.IRequest) (interface{}, error) {
-	// Placeholder: full ProviderSwitcher wiring requires a ClusterSwitcher on
-	// the ServiceContext — to be completed when Phase 5 is fully deployed.
-	return &ClusterSwitchProvider{
-		Action: c.Action,
-		Result: "provider switch scheduled; ClusterSwitcher must be initialised via service startup options",
-	}, nil
+func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
+	sc := router.GetContext(req.ServiceName())
+	if sc == nil || sc.ClusterSwitcher == nil {
+		return &ClusterSwitchProvider{
+			Action: c.Action,
+			Result: "cluster switcher not initialised",
+		}, nil
+	}
+
+	ctx := context.Background()
+	var err error
+	switch c.Action {
+	case "begin":
+		to, buildErr := buildTargetProvider(c.TargetProvider, c.Endpoints)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		err = sc.ClusterSwitcher.Begin(ctx, to)
+	case "complete":
+		err = sc.ClusterSwitcher.Complete(ctx)
+	case "rollback":
+		err = sc.ClusterSwitcher.Rollback(ctx)
+	default:
+		return nil, fmt.Errorf("unknown action: %s", c.Action)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ClusterSwitchProvider{Action: c.Action, Result: "ok"}, nil
+}
+
+func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProvider, error) {
+	switch name {
+	case "etcd":
+		return cluster.NewEtcdProvider(endpoints)
+	case "consul":
+		addr := ""
+		if len(endpoints) > 0 {
+			addr = endpoints[0]
+		}
+		return cluster.NewConsulProvider(addr)
+	default:
+		return nil, fmt.Errorf("unsupported target provider: %s", name)
+	}
 }
 
 func (c *ClusterSwitchProvider) RouterInfo() *types.RouterInfo {
@@ -110,4 +148,3 @@ func (c *ClusterSwitchProvider) RouterInfo() *types.RouterInfo {
 	info.Auth = true
 	return info
 }
-

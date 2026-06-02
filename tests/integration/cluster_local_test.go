@@ -51,7 +51,7 @@ func TestClusterLocal_DualNodeAutoMachineID(t *testing.T) {
 	assert.ErrorIs(t, err, cluster.ErrSlotConflict)
 
 	// Auto-allocate next free slot (lowest ID not in use; 0 is free since n1 holds 1).
-	newID := p.AllocateMachineID(0)
+	newID := p.AllocateMachineID("svc", 0)
 	assert.NotEqual(t, int64(1), newID, "auto-allocated ID must differ from the conflicting one")
 	assert.GreaterOrEqual(t, newID, int64(0))
 

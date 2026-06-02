@@ -1,5 +1,4 @@
-//go:build !go1.20
-// +build !go1.20
+//go:build go1.20
 
 package quic
 
@@ -9,38 +8,35 @@ import (
 	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/trans/quic/testdata"
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
 )
 
 type Server struct {
-	server  *http3.Server
+	server  *http.Server
 	context *router.ServiceContext
 }
 
 func NewServer(context *router.ServiceContext) *Server {
 	return &Server{
-		server: &http3.Server{
-			Handler:    setupHandler(context),
-			Addr:       context.Config.RunIp + ":" + strconv.Itoa(context.Config.Port+100),
-			QuicConfig: &quic.Config{},
+		server: &http.Server{
+			Addr:    context.Config.RunIp + ":" + strconv.Itoa(context.Config.Port+100),
+			Handler: setupHandler(context),
 		},
 		context: context,
 	}
 }
+
 func (own *Server) Start() {
 	s1 := fmt.Sprintf("Starting %s server QUIC at %s:%d success\n", own.context.Config.Name, own.context.Config.RunIp, own.context.Config.Port+100)
 	fmt.Print(s1)
-	err := own.server.ListenAndServeTLS(testdata.GetCertificatePaths())
-	if err != nil {
+	if err := own.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		panic(err)
 	}
 }
+
 func (own *Server) Stop() {
 	if own.server != nil {
-		own.server.Close()
+		_ = own.server.Close()
 	}
 }
 

@@ -297,7 +297,7 @@ func (wns *WebSocketNotificationSystem) IsHealthy() bool {
 	capacity := cap(wns.jobChan)
 
 	if float64(pending)/float64(capacity) > 0.9 {
-		logx.Errorf("⚠️ 通知队列使用率超过 90%")
+		logx.Error("⚠️ 通知队列使用率超过 90%")
 		return false
 	}
 

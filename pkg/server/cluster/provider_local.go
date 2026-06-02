@@ -12,9 +12,9 @@ import (
 // but has no network distribution; all nodes must share the same process
 // (or the registry must be passed by pointer).
 type LocalProvider struct {
-	mu              sync.RWMutex
-	nodes           map[string]*NodeInfo // nodeID → node
-	watchers        map[string][]watcherEntry
+	mu               sync.RWMutex
+	nodes            map[string]*NodeInfo // nodeID → node
+	watchers         map[string][]watcherEntry
 	heartbeatTimeout time.Duration
 	suspectTimeout   time.Duration
 	cooldown         time.Duration
@@ -74,7 +74,7 @@ func (p *LocalProvider) Register(_ context.Context, node *NodeInfo) error {
 		if existing.ID == node.ID {
 			continue // same node refreshing
 		}
-		if existing.DataCenterID == node.DataCenterID && existing.MachineID == node.MachineID {
+		if existing.ServiceName == node.ServiceName && existing.DataCenterID == node.DataCenterID && existing.MachineID == node.MachineID {
 			if existing.Status == NodeStatusRunning {
 				return fmt.Errorf("%w: datacenter=%d machine=%d held by %s",
 					ErrSlotConflict, node.DataCenterID, node.MachineID, existing.ID)
@@ -150,7 +150,7 @@ func (p *LocalProvider) List(_ context.Context, serviceName string, statuses ...
 
 	var result []*NodeInfo
 	for _, n := range p.nodes {
-		if n.ServiceName != serviceName {
+		if serviceName != "" && n.ServiceName != serviceName {
 			continue
 		}
 		if len(statusSet) > 0 {
@@ -248,19 +248,24 @@ func (p *LocalProvider) advanceStates() {
 	}
 }
 
-// AllocateMachineID finds the lowest available MachineID (0–1023) not currently
-// held by a running node for the given DataCenterID. Returns -1 if all slots are full.
-func (p *LocalProvider) AllocateMachineID(dataCenterID int64) int64 {
+// AllocateMachineID finds the lowest available MachineID for the given service
+// and DataCenterID. Returns -1 if all slots are full.
+func (p *LocalProvider) AllocateMachineID(serviceName string, dataCenterID int64, maxMachineID ...int64) int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	max := int64(1023)
+	if len(maxMachineID) > 0 && maxMachineID[0] > 0 {
+		max = maxMachineID[0]
+	}
+
 	used := make(map[int64]bool)
 	for _, n := range p.nodes {
-		if n.DataCenterID == dataCenterID && n.Status == NodeStatusRunning {
+		if n.ServiceName == serviceName && n.DataCenterID == dataCenterID && n.Status == NodeStatusRunning {
 			used[n.MachineID] = true
 		}
 	}
-	for id := int64(0); id <= 1023; id++ {
+	for id := int64(0); id <= max; id++ {
 		if !used[id] {
 			return id
 		}
