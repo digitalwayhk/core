@@ -211,7 +211,12 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		}
 		logx.Errorf("cluster: init failed (degraded): %v", err)
 	}
-	if sel := transport.BuildSelector(con.Transport); sel != nil {
+	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
+		// Any error from BuildSelector means the user explicitly configured a
+		// transport protocol that cannot be built (e.g. quic, mq not yet implemented).
+		// This is a hard misconfiguration — prevent silent fallback to legacy HTTP.
+		panic(fmt.Sprintf("transport: init failed: %v", selErr))
+	} else if sel != nil {
 		sc.TransportSelector = sel
 	}
 	{
@@ -754,7 +759,7 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 		if err == nil {
 			return result, nil
 		}
-		logx.Debugf("transport selector failed (%v), falling back to HTTP CallService", err)
+		logx.Errorf("transport selector failed (%v), falling back to HTTP CallService", err)
 	}
 	return own.Service.CallService(payload)
 }
