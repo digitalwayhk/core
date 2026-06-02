@@ -17,11 +17,13 @@ type clusterSwitcher struct {
 	pending     DiscoveryProvider
 	inProgress  bool
 	switchedAt  time.Time
+	serviceName string
 }
 
-// NewClusterSwitcher creates a switcher starting with the given provider.
-func NewClusterSwitcher(initial DiscoveryProvider) ProviderSwitcher {
-	return &clusterSwitcher{current: initial}
+// NewClusterSwitcher creates a switcher starting with the given provider,
+// scoped to the given service name for node migration.
+func NewClusterSwitcher(initial DiscoveryProvider, serviceName string) ProviderSwitcher {
+	return &clusterSwitcher{current: initial, serviceName: serviceName}
 }
 
 func (s *clusterSwitcher) Current() DiscoveryProvider {
@@ -41,8 +43,8 @@ func (s *clusterSwitcher) Begin(ctx context.Context, to DiscoveryProvider) error
 	if s.current == nil {
 		return ErrNotStarted
 	}
-	// Copy all current running nodes to the new provider.
-	nodes, err := s.current.List(ctx, "")
+	// Copy all current running nodes for this service to the new provider.
+	nodes, err := s.current.List(ctx, s.serviceName)
 	if err != nil {
 		// Non-fatal: new provider may not have history yet.
 		logx.Errorf("cluster switcher: list current nodes: %v", err)

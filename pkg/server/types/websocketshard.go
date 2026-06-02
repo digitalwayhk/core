@@ -88,9 +88,16 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	// 🔧 只锁单个分片
 	shard := own.getShard(hash)
 	shard.mu.Lock()
-	req := shard.clients[client]
-	delete(shard.clients, client)
+	req, existed := shard.clients[client]
+	if existed {
+		delete(shard.clients, client)
+	}
 	shard.mu.Unlock()
+
+	if !existed {
+		// Client was not in this hash shard — guard against double-unregister.
+		return
+	}
 
 	// 🔧 检查是否需要清理路由
 	var needUnregister bool
@@ -99,7 +106,11 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	own.Lock()
 	if own.rHashClients != nil {
 		own.rHashClients[hash]--
-		if own.rHashClients[hash] <= 0 {
+		if own.rHashClients[hash] < 0 {
+			logx.Errorf("rHashClients[%d] underflow detected, resetting to 0", hash)
+			own.rHashClients[hash] = 0
+		}
+		if own.rHashClients[hash] == 0 {
 			delete(own.rHashClients, hash)
 			api = own.rArgs[hash]
 			if api != nil {

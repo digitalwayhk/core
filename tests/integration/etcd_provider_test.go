@@ -34,13 +34,13 @@ func TestClusterEtcd_RegisterAndList(t *testing.T) {
 
 	ctx := context.Background()
 	n := &cluster.NodeInfo{
-		ID:          "test-etcd-register-node",
-		ServiceName: "test-etcd-svc",
+		ID:           "test-etcd-register-node",
+		ServiceName:  "test-etcd-svc",
 		DataCenterID: 1,
-		MachineID:   5,
-		Address:     "127.0.0.1",
-		Port:        9001,
-		Weight:      1,
+		MachineID:    5,
+		Address:      "127.0.0.1",
+		Port:         9001,
+		Weight:       1,
 	}
 	require.NoError(t, p.Register(ctx, n))
 	defer p.Deregister(ctx, n.ID)
@@ -64,25 +64,25 @@ func TestClusterEtcd_SlotConflict(t *testing.T) {
 
 	ctx := context.Background()
 	n1 := &cluster.NodeInfo{
-		ID:          "test-etcd-conflict-n1",
-		ServiceName: "test-etcd-conflict-svc",
+		ID:           "test-etcd-conflict-n1",
+		ServiceName:  "test-etcd-conflict-svc",
 		DataCenterID: 0,
-		MachineID:   1,
-		Address:     "127.0.0.1",
-		Port:        9002,
-		Weight:      1,
+		MachineID:    1,
+		Address:      "127.0.0.1",
+		Port:         9002,
+		Weight:       1,
 	}
 	require.NoError(t, p.Register(ctx, n1))
 	defer p.Deregister(ctx, n1.ID)
 
 	n2 := &cluster.NodeInfo{
-		ID:          "test-etcd-conflict-n2",
-		ServiceName: "test-etcd-conflict-svc",
+		ID:           "test-etcd-conflict-n2",
+		ServiceName:  "test-etcd-conflict-svc",
 		DataCenterID: 0,
-		MachineID:   1,
-		Address:     "127.0.0.1",
-		Port:        9003,
-		Weight:      1,
+		MachineID:    1,
+		Address:      "127.0.0.1",
+		Port:         9003,
+		Weight:       1,
 	}
 	err = p.Register(ctx, n2)
 	assert.ErrorIs(t, err, cluster.ErrSlotConflict)
@@ -100,13 +100,13 @@ func TestClusterEtcd_Heartbeat_KeepsAlive(t *testing.T) {
 
 	ctx := context.Background()
 	n := &cluster.NodeInfo{
-		ID:          "test-etcd-heartbeat-node",
-		ServiceName: "test-etcd-hb-svc",
+		ID:           "test-etcd-heartbeat-node",
+		ServiceName:  "test-etcd-hb-svc",
 		DataCenterID: 0,
-		MachineID:   2,
-		Address:     "127.0.0.1",
-		Port:        9004,
-		Weight:      1,
+		MachineID:    2,
+		Address:      "127.0.0.1",
+		Port:         9004,
+		Weight:       1,
 	}
 	require.NoError(t, p.Register(ctx, n))
 	defer p.Deregister(ctx, n.ID)
@@ -135,13 +135,13 @@ func TestClusterEtcd_Watch(t *testing.T) {
 	defer cancel()
 
 	n := &cluster.NodeInfo{
-		ID:          "test-etcd-watch-node",
-		ServiceName: "test-etcd-watch-svc",
+		ID:           "test-etcd-watch-node",
+		ServiceName:  "test-etcd-watch-svc",
 		DataCenterID: 0,
-		MachineID:   3,
-		Address:     "127.0.0.1",
-		Port:        9005,
-		Weight:      1,
+		MachineID:    3,
+		Address:      "127.0.0.1",
+		Port:         9005,
+		Weight:       1,
 	}
 	require.NoError(t, p.Register(ctx, n))
 	defer p.Deregister(ctx, n.ID)
@@ -169,13 +169,13 @@ func TestClusterEtcd_AllocateMachineID(t *testing.T) {
 	// Register machines 0 and 1; machine 2 should be free.
 	for i := int64(0); i < 2; i++ {
 		n := &cluster.NodeInfo{
-			ID:          fmt.Sprintf("%s-n%d", svc, i),
-			ServiceName: svc,
+			ID:           fmt.Sprintf("%s-n%d", svc, i),
+			ServiceName:  svc,
 			DataCenterID: 0,
-			MachineID:   i,
-			Address:     "127.0.0.1",
-			Port:        int(9010 + i),
-			Weight:      1,
+			MachineID:    i,
+			Address:      "127.0.0.1",
+			Port:         int(9010 + i),
+			Weight:       1,
 		}
 		require.NoError(t, p.Register(ctx, n))
 		defer p.Deregister(ctx, n.ID)
@@ -199,17 +199,17 @@ func TestClusterEtcd_ProviderSwitcher(t *testing.T) {
 	ctx := context.Background()
 	// Register a node in the local provider.
 	n := &cluster.NodeInfo{
-		ID:          "switcher-local-node",
-		ServiceName: "switcher-svc",
+		ID:           "switcher-local-node",
+		ServiceName:  "switcher-svc",
 		DataCenterID: 0,
-		MachineID:   0,
-		Address:     "127.0.0.1",
-		Port:        9020,
-		Weight:      1,
+		MachineID:    0,
+		Address:      "127.0.0.1",
+		Port:         9020,
+		Weight:       1,
 	}
 	require.NoError(t, local.Register(ctx, n))
 
-	switcher := cluster.NewClusterSwitcher(local)
+	switcher := cluster.NewClusterSwitcher(local, "switcher-svc")
 
 	// Begin migration to etcd.
 	etcdP, err := cluster.NewEtcdProvider(etcdEndpoints())

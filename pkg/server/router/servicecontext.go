@@ -14,7 +14,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/transport"
-	transportgrpc "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -207,19 +206,23 @@ func NewServiceContext(service types.IService) *ServiceContext {
 	}
 
 	if err := initCluster(sc); err != nil {
-		logx.Errorf("cluster: init failed: %v", err)
+		if con.Cluster.Mode == "on" {
+			panic(fmt.Sprintf("cluster: required provider init failed (mode=on): %v", err))
+		}
+		logx.Errorf("cluster: init failed (degraded): %v", err)
 	}
-	if con.Transport.GRPC.Enable {
-		sc.TransportSelector = transport.NewDefaultSelector(
-			transportgrpc.New(con.Transport.GRPC.MaxRecvMsgSize, con.Transport.GRPC.MaxSendMsgSize),
-		)
+	if sel := transport.BuildSelector(con.Transport); sel != nil {
+		sc.TransportSelector = sel
 	}
 	{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		mgr, mqErr := mq.BuildManager(ctx, &con.MQ)
 		cancel()
 		if mqErr != nil {
-			logx.Errorf("mq: init failed: %v", mqErr)
+			if con.MQ.Mode == "on" {
+				panic(fmt.Sprintf("mq: required provider init failed (mode=on): %v", mqErr))
+			}
+			logx.Errorf("mq: init failed (degraded): %v", mqErr)
 		} else {
 			sc.MQManager = mgr
 		}
@@ -367,6 +370,74 @@ func (own *ServiceContext) SetRunState(state bool) {
 		logx.Debugf("StateChan已满，跳过状态通知: %s", own.Service.Name)
 	}
 }
+
+// SyncProviderAfterSwitch updates ClusterProvider to match the switcher's
+// current provider and, if the service is already running, restarts membership
+// and the CrossNode broker with the new provider.
+func (own *ServiceContext) SyncProviderAfterSwitch() error {
+	if own.ClusterSwitcher == nil {
+		return nil
+	}
+	newProvider := own.ClusterSwitcher.Current()
+	if newProvider == own.ClusterProvider {
+		return nil
+	}
+	own.ClusterProvider = newProvider
+
+	if !own.isStart {
+		return nil
+	}
+
+	if own.membership != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		own.membership.Stop(stopCtx)
+		cancel()
+		own.membership = nil
+	}
+	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
+		own.Config.DataCenterID, own.Config.MachineID)
+	own.nodeID = nodeID
+	if newProvider != nil {
+		node := &cluster.NodeInfo{
+			ID:           nodeID,
+			ServiceName:  own.Service.Name,
+			DataCenterID: int64(own.Config.DataCenterID),
+			MachineID:    int64(own.Config.MachineID),
+			Address:      own.Config.RunIp,
+			Port:         own.Config.Port,
+			SocketPort:   own.Config.SocketPort,
+			Weight:       1,
+		}
+		if regErr := newProvider.Register(context.Background(), node); regErr != nil {
+			logx.Errorf("cluster: re-register node %s after switch: %v", nodeID, regErr)
+		} else {
+			interval := own.Config.Cluster.HeartbeatInterval
+			if interval == 0 {
+				interval = 3 * time.Second
+			}
+			own.membership = cluster.NewMembershipManager(newProvider, nodeID, interval)
+			own.membership.Start(context.Background())
+		}
+	}
+
+	if own.CrossNodeBroker != nil {
+		drainCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		own.CrossNodeBroker.DrainAndStop(drainCtx)
+		cancel()
+		own.CrossNodeBroker = nil
+	}
+	if newProvider != nil {
+		own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
+			newProvider, own.Service.Name, nodeID,
+		)
+		types.SetCrossNodeForwarder(own.CrossNodeBroker)
+	} else {
+		types.SetCrossNodeForwarder(nil)
+	}
+
+	return nil
+}
+
 func (own *ServiceContext) IsRun() bool {
 	return own.isStart
 }
@@ -670,16 +741,20 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	return res, nil
 }
 
-// sendPayload dispatches a payload either through the configured TransportSelector
-// (registry → balancer → transport fallback chain) or falls back to the built-in
-// HTTP-based Service.CallService when no selector is configured.
+// sendPayload dispatches a payload. When a TransportSelector is configured,
+// it is used for all payloads regardless of TargetAddress, allowing
+// service-discovery-resolved targets to be used by the selector.
 func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
-	if own.TransportSelector != nil && payload.TargetAddress != "" {
+	if own.TransportSelector != nil {
 		target := payload.TargetAddress
 		if payload.TargetPort > 0 {
 			target = target + ":" + strconv.Itoa(payload.TargetPort)
 		}
-		return transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+		result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+		if err == nil {
+			return result, nil
+		}
+		logx.Debugf("transport selector failed (%v), falling back to HTTP CallService", err)
 	}
 	return own.Service.CallService(payload)
 }
@@ -691,7 +766,7 @@ func initCluster(sc *ServiceContext) error {
 	}
 	sc.ClusterProvider = provider
 	if provider != nil {
-		sc.ClusterSwitcher = cluster.NewClusterSwitcher(provider)
+		sc.ClusterSwitcher = cluster.NewClusterSwitcher(provider, sc.Service.Name)
 	} else {
 		sc.ClusterSwitcher = nil
 	}
