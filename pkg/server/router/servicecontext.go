@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -17,15 +19,16 @@ import (
 )
 
 type ServiceContext struct {
-	Config       *config.ServerConfig
-	Service      *types.Service
-	snow         idgen.ISnowWorker
-	Router       *ServiceRouter
-	isStart      bool
-	Pid          int
-	Hub          interface{} `json:"-"`
-	StateChan    chan bool   `json:"-"`
-	serverOption *types.ServerOption
+	Config            *config.ServerConfig
+	Service           *types.Service
+	snow              idgen.ISnowWorker
+	Router            *ServiceRouter
+	isStart           bool
+	Pid               int
+	Hub               interface{} `json:"-"`
+	StateChan         chan bool   `json:"-"`
+	serverOption      *types.ServerOption
+	TransportSelector transport.TransportSelector `json:"-"`
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -529,7 +532,7 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	if callback != nil {
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
-			values, err := own.Service.CallService(payload)
+			values, err := own.sendPayload(context.Background(), payload)
 			//TODO:网络错误，进入重试流程，超过重试次数，返回错误
 			if err != nil {
 				for _, ecb := range errcallback {
@@ -546,7 +549,7 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 			callback[0](res)
 		}
 	} else {
-		values, err := own.Service.CallService(payload)
+		values, err := own.sendPayload(context.Background(), payload)
 		//TODO:网络错误，应该进入重试流程，未实现
 		if err != nil {
 			logx.Errorf("CallService 网络错误 Payload:%s ,Error:%s", utils.PrintObj(payload), err.Error())
@@ -559,6 +562,20 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		}
 	}
 	return res, nil
+}
+
+// sendPayload dispatches a payload either through the configured TransportSelector
+// (registry → balancer → transport fallback chain) or falls back to the built-in
+// HTTP-based Service.CallService when no selector is configured.
+func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+	if own.TransportSelector != nil && payload.TargetAddress != "" {
+		target := payload.TargetAddress
+		if payload.TargetPort > 0 {
+			target = target + ":" + strconv.Itoa(payload.TargetPort)
+		}
+		return transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+	}
+	return own.Service.CallService(payload)
 }
 func GetResponseData[T any](response interface{}) *T {
 	res := &Response{}
