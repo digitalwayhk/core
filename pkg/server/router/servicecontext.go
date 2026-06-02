@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -17,6 +19,18 @@ import (
 	"github.com/yitter/idgenerator-go/idgen"
 	"github.com/zeromicro/go-zero/core/logx"
 )
+
+// processLocalRegistry is a shared in-memory cluster registry for all ServiceContexts
+// within the same process. This enables intra-process MachineID conflict detection.
+var processLocalRegistry = cluster.NewLocalProvider(
+	10*time.Second,
+	10*time.Second,
+	30*time.Second,
+)
+
+func init() {
+	processLocalRegistry.Start()
+}
 
 type ServiceContext struct {
 	Config            *config.ServerConfig
@@ -29,6 +43,8 @@ type ServiceContext struct {
 	StateChan         chan bool   `json:"-"`
 	serverOption      *types.ServerOption
 	TransportSelector transport.TransportSelector `json:"-"`
+	ClusterProvider   cluster.DiscoveryProvider   `json:"-"`
+	membership        *cluster.MembershipManager  `json:"-"`
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -171,6 +187,19 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		}
 	}
 	sc.Config = con
+
+	// Phase 4: claim a unique MachineID in the process-local registry before
+	// initialising Snowflake, preventing ID collisions between services in the
+	// same process or between hot-reload replicas.
+	if con.Cluster.Mode != "off" {
+		machineID, err := claimMachineID(con, sc.Service.Name)
+		if err != nil {
+			logx.Errorf("cluster: MachineID claim failed (%v), proceeding with config value", err)
+		} else {
+			con.MachineID = uint(machineID)
+		}
+	}
+
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
 	scontext[name] = sc
@@ -577,6 +606,45 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 	}
 	return own.Service.CallService(payload)
 }
+
+// claimMachineID registers this service in the process-local cluster registry.
+// If the configured MachineID is already taken, it auto-allocates the next free ID.
+// Returns the (possibly new) MachineID to use for Snowflake initialisation.
+func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error) {
+	ctx := context.Background()
+	dc := int64(con.DataCenterID)
+	machine := int64(con.MachineID)
+
+	nodeID := fmt.Sprintf("%s-%d-%d", serviceName, dc, machine)
+	node := &cluster.NodeInfo{
+		ID:           nodeID,
+		ServiceName:  serviceName,
+		DataCenterID: dc,
+		MachineID:    machine,
+		Address:      "127.0.0.1",
+		Port:         con.Port,
+		Weight:       1,
+	}
+
+	err := processLocalRegistry.Register(ctx, node)
+	if err == nil {
+		return machine, nil
+	}
+
+	// Slot conflict — auto-allocate.
+	newMachine := processLocalRegistry.AllocateMachineID(dc)
+	if newMachine < 0 {
+		return machine, fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
+	}
+	node.ID = fmt.Sprintf("%s-%d-%d", serviceName, dc, newMachine)
+	node.MachineID = newMachine
+	if regErr := processLocalRegistry.Register(ctx, node); regErr != nil {
+		return machine, regErr
+	}
+	logx.Infof("cluster: auto-allocated MachineID=%d for %s (was %d)", newMachine, serviceName, machine)
+	return newMachine, nil
+}
+
 func GetResponseData[T any](response interface{}) *T {
 	res := &Response{}
 	bytes, err := json.Marshal(response)
