@@ -2,6 +2,7 @@ package router_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -154,7 +155,36 @@ func TestTransportConfig_QuicInternal_ValidatePasses(t *testing.T) {
 	require.NoError(t, err, "TransportConfig.Validate should accept 'quic' (BuildSelector handles the panic)")
 }
 
-// TestMQConfig_ModeOnEmptyUsage_ValidateFails verifies that when MQ.Mode=on but
+// TestNewServiceContextWithConfig_TransportMQ_Panics verifies that when
+// Transport.Internal is set to "mq" (not yet implemented), BuildSelector
+// returns an error and NewServiceContextWithConfig panics with a message
+// that mentions both "mq" and "not implemented".
+func TestNewServiceContextWithConfig_TransportMQ_Panics(t *testing.T) {
+	const svcName = "sctest-panic-transport-mq"
+	con := config.NewServiceDefaultConfig(svcName, 29986)
+	con.Transport.Internal = "mq"
+
+	var recovered interface{}
+	didPanic := func() (panicked bool) {
+		defer func() {
+			recovered = recover()
+			panicked = recovered != nil
+		}()
+		router.NewServiceContextWithConfig(&fakeService{svcName}, con)
+		return false
+	}()
+
+	require.True(t, didPanic,
+		"NewServiceContextWithConfig should panic when Transport.Internal=mq")
+
+	panicMsg := fmt.Sprintf("%v", recovered)
+	assert.Contains(t, panicMsg, "mq",
+		"panic message should contain 'mq'")
+	assert.Contains(t, panicMsg, "not implemented",
+		"panic message should contain 'not implemented'")
+}
+
+// TestMQConfig_ModeOnEmptyUsage_ValidateFails verifies that when MQ.Mode=on and
 // Usage is empty, Validate returns an error.
 // Note: ApplyDefaults() fills Usage with a default, so this test calls Validate directly.
 func TestMQConfig_ModeOnEmptyUsage_ValidateFails(t *testing.T) {

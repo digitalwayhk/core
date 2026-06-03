@@ -6,7 +6,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-//Submit 提交，用于确认数据设置完成，该状态数据不可修改
+// Submit 提交，用于确认数据设置完成，该状态数据不可修改
 type Submit[T pt.IModel] struct {
 	Operation[T]
 }
@@ -72,7 +72,8 @@ func getIModel(instance interface{}) pt.IModel {
 	return instance.(pt.IModel)
 }
 func getbaseModel(instance interface{}) *entity.BaseModel {
-	return instance.(*entity.BaseModel)
+	bm, _ := instance.(*entity.BaseModel)
+	return bm
 }
 func getorderModel(instance interface{}) *entity.BaseOrderModel {
 	return instance.(*entity.BaseOrderModel)

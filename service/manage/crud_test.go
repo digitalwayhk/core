@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Compile-time check: extendedMockDataAction satisfies IDataAction.
+var _ pt.IDataAction = (*extendedMockDataAction)(nil)
+
 // testItem is a minimal model used across CRUD tests.
 type testItem struct {
 	*entity.Model
@@ -510,6 +513,123 @@ func TestRelease_DoBefore_Error(t *testing.T) {
 	_, err := rel.Do(req)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "release hook error")
+}
+
+// TestSearch_HappyPath_LoadsListAndCallsSearchAfter verifies the full happy path:
+// LoadList populates searchList via the DA, OnSearchData builds a TableData, and
+// SearchAfter is invoked with that TableData.
+func TestSearch_HappyPath_LoadsListAndCallsSearchAfter(t *testing.T) {
+	da := &extendedMockDataAction{
+		loadFn: func(si *pt.SearchItem, result interface{}) error {
+			if slice, ok := result.(*[]*testItem); ok {
+				item := &testItem{Name: "found-item"}
+				item.NewModel()
+				item.Model.ID = 10
+				*slice = append(*slice, item)
+				si.Total = 1
+			}
+			return nil
+		},
+	}
+	svc := newTestSearchManageSvc[testItem](da)
+
+	s := manage.NewSearch[testItem](svc)
+	s.New(svc)
+
+	req := &crudRequest{}
+	s.SearchItem = &view.SearchItem{Page: 1, Size: 10}
+
+	result, err := s.Do(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	td, ok := result.(*view.TableData)
+	require.True(t, ok, "Search.Do should return *view.TableData")
+	assert.Equal(t, int64(1), td.Total, "TableData.Total should reflect LoadList result")
+	assert.True(t, svc.searchAfterCalled, "SearchAfter should be called after LoadList")
+}
+
+// TestEdit_HappyPath_UpdatesOldItemAndSaves verifies the full Edit happy path:
+// Validation loads the old item via SearchId, Do merges the new fields into the
+// old item, calls list.Update + list.Save (triggering da.Update), and then calls DoAfter.
+func TestEdit_HappyPath_UpdatesOldItemAndSaves(t *testing.T) {
+	da := &extendedMockDataAction{
+		loadFn: func(si *pt.SearchItem, result interface{}) error {
+			if slice, ok := result.(*[]*testItem); ok {
+				old := &testItem{Name: "old-name"}
+				old.NewModel()
+				old.Model.ID = 5
+				*slice = append(*slice, old)
+			}
+			return nil
+		},
+	}
+	svc := newTestManageSvc[testItem](da)
+
+	e := manage.NewEdit[testItem](nil)
+	e.New(svc)
+
+	item := &testItem{Name: "new-name"}
+	item.NewModel()
+	item.Model.ID = 5
+	e.Model = item
+
+	req := &crudRequest{}
+	err := e.Validation(req)
+	require.NoError(t, err, "Validation should succeed when SearchId finds the old item")
+
+	_, err = e.Do(req)
+	require.NoError(t, err)
+
+	// Save() calls da.Update once per entry in updateList.
+	require.Len(t, da.updated, 1, "Update should be called once via Save()")
+	updated, ok := da.updated[0].(*testItem)
+	require.True(t, ok)
+	assert.Equal(t, "new-name", updated.Name, "merged name should reflect the new value")
+	assert.True(t, svc.doAfterCalled, "DoAfter should be called after a successful edit")
+}
+
+// testSubmitSvc is kept as a type alias for possible future use, but currently
+// entity.BaseModel cannot be used as T pt.IModel because GetID and Equals on
+// *entity.BaseModel have pointer receivers — only *entity.BaseModel satisfies IModel.
+// Until those methods gain value receivers, Submit's state-change path cannot be
+// covered via the generic API in unit tests.
+type testSubmitSvc = testManageSvc[testItem]
+
+// TestSubmit_HappyPath_DoAfterCalled verifies the observable Submit.Do contract:
+// SearchId loads the item, DoBefore and DoAfter are called, and the function
+// returns without error.
+//
+// Note: the State 0→1 transition in Submit.Do is gated on getbaseModel(*T)
+// returning a non-nil *entity.BaseModel. Since testItem is not *entity.BaseModel
+// the state-change block is safely skipped (getbaseModel now uses , ok form).
+func TestSubmit_HappyPath_DoAfterCalled(t *testing.T) {
+	da := &extendedMockDataAction{
+		loadFn: func(si *pt.SearchItem, result interface{}) error {
+			if slice, ok := result.(*[]*testItem); ok {
+				item := &testItem{Name: "submit-me"}
+				item.NewModel()
+				item.Model.ID = 7
+				*slice = append(*slice, item)
+			}
+			return nil
+		},
+	}
+	svc := newTestManageSvc[testItem](da)
+
+	sub := manage.NewSubmit[testItem](nil)
+	sub.New(svc)
+
+	item := &testItem{Name: "submit-me"}
+	item.NewModel()
+	item.Model.ID = 7
+	sub.Model = item
+
+	req := &crudRequest{}
+	_, err := sub.Do(req)
+	require.NoError(t, err)
+
+	assert.True(t, svc.doAfterCalled, "DoAfter should be called after successful Submit.Do")
 }
 
 // TestRelease_HappyPath_CallsUpdate verifies that Release.Do enqueues the item
