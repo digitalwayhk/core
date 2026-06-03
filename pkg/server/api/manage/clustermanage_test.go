@@ -34,18 +34,18 @@ func (r *mockRequest) Bind(v interface{}) error {
 }
 
 // Stubs for the remaining IRequest methods.
-func (r *mockRequest) GetTraceId() string                                                        { return "" }
-func (r *mockRequest) GetUser() (string, string)                                                 { return "", "" }
-func (r *mockRequest) GetClientIP() string                                                       { return "127.0.0.1" }
-func (r *mockRequest) NewID() uint                                                               { return 0 }
-func (r *mockRequest) Authorized() bool                                                          { return true }
-func (r *mockRequest) GetValue(string) string                                                    { return "" }
-func (r *mockRequest) GoZeroBind(interface{}) error                                              { return nil }
-func (r *mockRequest) NewResponse(interface{}, error) types.IResponse                           { return nil }
-func (r *mockRequest) GetPath() string                                                           { return "" }
-func (r *mockRequest) GetClaims(string) interface{}                                              { return nil }
-func (r *mockRequest) GetServerInfo() *types.TargetInfo                                         { return nil }
-func (r *mockRequest) GetTargetServerInfo(string) *types.TargetInfo                             { return nil }
+func (r *mockRequest) GetTraceId() string                             { return "" }
+func (r *mockRequest) GetUser() (string, string)                      { return "", "" }
+func (r *mockRequest) GetClientIP() string                            { return "127.0.0.1" }
+func (r *mockRequest) NewID() uint                                    { return 0 }
+func (r *mockRequest) Authorized() bool                               { return true }
+func (r *mockRequest) GetValue(string) string                         { return "" }
+func (r *mockRequest) GoZeroBind(interface{}) error                   { return nil }
+func (r *mockRequest) NewResponse(interface{}, error) types.IResponse { return nil }
+func (r *mockRequest) GetPath() string                                { return "" }
+func (r *mockRequest) GetClaims(string) interface{}                   { return nil }
+func (r *mockRequest) GetServerInfo() *types.TargetInfo               { return nil }
+func (r *mockRequest) GetTargetServerInfo(string) *types.TargetInfo   { return nil }
 func (r *mockRequest) CallService(types.IRouter, ...func(types.IResponse)) (types.IResponse, error) {
 	return nil, nil
 }
@@ -195,88 +195,170 @@ func TestClusterNodes_NoContext_ReturnsEmptyList(t *testing.T) {
 // manually calling ClusterSwitcher.Begin (bypassing buildTargetProvider), the
 // API complete action promotes the pending provider and updates ClusterProvider.
 func TestClusterSwitchProvider_PreseededBegin_CompleteSucceeds(t *testing.T) {
-const svcName = "manage-test-begin-complete"
-sc := router.NewServiceContext(&fakeManageSvc{svcName})
-require.NotNil(t, sc)
+	const svcName = "manage-test-begin-complete"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
 
-newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
-newProvider.Start()
-t.Cleanup(func() { newProvider.Close() })
+	newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+	newProvider.Start()
+	t.Cleanup(func() { newProvider.Close() })
 
-err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
-require.NoError(t, err, "direct Begin should succeed")
+	err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
+	require.NoError(t, err, "direct Begin should succeed")
 
-api := &manage.ClusterSwitchProvider{Action: "complete"}
-req := &mockRequest{serviceName: svcName}
-result, err := api.Do(req)
-require.NoError(t, err)
-require.NotNil(t, result)
-status, ok := result.(*manage.ClusterSwitchProvider)
-require.True(t, ok)
-assert.Equal(t, "ok", status.Result)
+	api := &manage.ClusterSwitchProvider{Action: "complete"}
+	req := &mockRequest{serviceName: svcName}
+	result, err := api.Do(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterSwitchProvider)
+	require.True(t, ok)
+	assert.Equal(t, "ok", status.Result)
 
-// SyncProviderAfterSwitch is called inside Do("complete"); ClusterProvider
-// should now point to the newly promoted provider.
-assert.Same(t, newProvider, sc.ClusterProvider,
-"ClusterProvider should be updated to newProvider after complete")
+	// SyncProviderAfterSwitch is called inside Do("complete"); ClusterProvider
+	// should now point to the newly promoted provider.
+	assert.Same(t, newProvider, sc.ClusterProvider,
+		"ClusterProvider should be updated to newProvider after complete")
 }
 
 // TestClusterSwitchProvider_PreseededBegin_RollbackSucceeds verifies that after
 // manually calling ClusterSwitcher.Begin, the API rollback action aborts the
 // migration and leaves ClusterProvider unchanged.
 func TestClusterSwitchProvider_PreseededBegin_RollbackSucceeds(t *testing.T) {
-const svcName = "manage-test-begin-rollback"
-sc := router.NewServiceContext(&fakeManageSvc{svcName})
-require.NotNil(t, sc)
+	const svcName = "manage-test-begin-rollback"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
 
-originalProvider := sc.ClusterProvider
+	originalProvider := sc.ClusterProvider
 
-newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
-newProvider.Start()
-t.Cleanup(func() { newProvider.Close() })
+	newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+	newProvider.Start()
+	t.Cleanup(func() { newProvider.Close() })
 
-err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
-require.NoError(t, err)
+	err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
+	require.NoError(t, err)
 
-api := &manage.ClusterSwitchProvider{Action: "rollback"}
-req := &mockRequest{serviceName: svcName}
-result, err := api.Do(req)
-require.NoError(t, err)
-require.NotNil(t, result)
-status, ok := result.(*manage.ClusterSwitchProvider)
-require.True(t, ok)
-assert.Equal(t, "ok", status.Result)
+	api := &manage.ClusterSwitchProvider{Action: "rollback"}
+	req := &mockRequest{serviceName: svcName}
+	result, err := api.Do(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterSwitchProvider)
+	require.True(t, ok)
+	assert.Equal(t, "ok", status.Result)
 
-// After rollback the original provider should still be active.
-assert.Same(t, originalProvider, sc.ClusterProvider,
-"ClusterProvider should remain unchanged after rollback")
-assert.NotSame(t, newProvider, sc.ClusterProvider)
+	// After rollback the original provider should still be active.
+	assert.Same(t, originalProvider, sc.ClusterProvider,
+		"ClusterProvider should remain unchanged after rollback")
+	assert.NotSame(t, newProvider, sc.ClusterProvider)
 }
 
 // TestClusterStatus_AfterProviderSwitch_ReturnsNewProvider verifies that
 // ClusterStatus reflects the new provider after a successful switch.
 func TestClusterStatus_AfterProviderSwitch_ReturnsNewProvider(t *testing.T) {
-const svcName = "manage-test-status-after-switch"
-sc := router.NewServiceContext(&fakeManageSvc{svcName})
-require.NotNil(t, sc)
+	const svcName = "manage-test-status-after-switch"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
 
-newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
-newProvider.Start()
-t.Cleanup(func() { newProvider.Close() })
+	newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+	newProvider.Start()
+	t.Cleanup(func() { newProvider.Close() })
 
-require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), newProvider))
+	require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), newProvider))
 
-completeAPI := &manage.ClusterSwitchProvider{Action: "complete"}
-_, err := completeAPI.Do(&mockRequest{serviceName: svcName})
-require.NoError(t, err)
+	completeAPI := &manage.ClusterSwitchProvider{Action: "complete"}
+	_, err := completeAPI.Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
 
-// ClusterStatus should now reflect the updated provider.
-statusAPI := &manage.ClusterStatus{}
-result, err := statusAPI.Do(&mockRequest{serviceName: svcName})
-require.NoError(t, err)
-require.NotNil(t, result)
-status, ok := result.(*manage.ClusterStatus)
-require.True(t, ok)
-assert.Equal(t, newProvider.Name(), status.ProviderName,
-"ClusterStatus should report the new provider after a successful switch")
+	// ClusterStatus should now reflect the updated provider.
+	statusAPI := &manage.ClusterStatus{}
+	result, err := statusAPI.Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterStatus)
+	require.True(t, ok)
+	assert.Equal(t, newProvider.Name(), status.ProviderName,
+		"ClusterStatus should report the new provider after a successful switch")
+}
+
+// --- Full API begin→complete/rollback tests using TargetProvider="local" ---
+
+// TestClusterSwitchProvider_BeginLocal_Succeeds verifies that the begin action
+// with TargetProvider="local" (newly supported) returns ok without error.
+func TestClusterSwitchProvider_BeginLocal_Succeeds(t *testing.T) {
+	const svcName = "manage-test-api-begin-local"
+	mustCreateContext(t, svcName)
+
+	api := &manage.ClusterSwitchProvider{
+		Action:         "begin",
+		TargetProvider: "local",
+	}
+	req := &mockRequest{serviceName: svcName}
+
+	result, err := api.Do(req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterSwitchProvider)
+	require.True(t, ok)
+	assert.Equal(t, "ok", status.Result, "begin with local provider should succeed")
+}
+
+// TestClusterSwitchProvider_APIBeginThenComplete_Succeeds verifies the full
+// begin→complete flow when both actions go through the ClusterSwitchProvider
+// API (i.e. begin uses buildTargetProvider("local", …)).
+func TestClusterSwitchProvider_APIBeginThenComplete_Succeeds(t *testing.T) {
+	const svcName = "manage-test-api-full-complete"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
+
+	beginAPI := &manage.ClusterSwitchProvider{
+		Action:         "begin",
+		TargetProvider: "local",
+	}
+	beginReq := &mockRequest{serviceName: svcName}
+	_, err := beginAPI.Do(beginReq)
+	require.NoError(t, err, "API begin with local provider should succeed")
+
+	completeAPI := &manage.ClusterSwitchProvider{Action: "complete"}
+	completeReq := &mockRequest{serviceName: svcName}
+	result, err := completeAPI.Do(completeReq)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterSwitchProvider)
+	require.True(t, ok)
+	assert.Equal(t, "ok", status.Result)
+
+	// After complete, ClusterProvider must equal the new Current().
+	require.NotNil(t, sc.ClusterSwitcher)
+	assert.Equal(t, sc.ClusterProvider, sc.ClusterSwitcher.Current(),
+		"ClusterProvider should equal ClusterSwitcher.Current() after API begin→complete")
+}
+
+// TestClusterSwitchProvider_APIBeginThenRollback_Succeeds verifies the full
+// begin→rollback flow when both actions go through the API.
+func TestClusterSwitchProvider_APIBeginThenRollback_Succeeds(t *testing.T) {
+	const svcName = "manage-test-api-full-rollback"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
+
+	originalProvider := sc.ClusterProvider
+
+	beginAPI := &manage.ClusterSwitchProvider{
+		Action:         "begin",
+		TargetProvider: "local",
+	}
+	_, err := beginAPI.Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err, "API begin with local provider should succeed")
+
+	rollbackAPI := &manage.ClusterSwitchProvider{Action: "rollback"}
+	result, err := rollbackAPI.Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	status, ok := result.(*manage.ClusterSwitchProvider)
+	require.True(t, ok)
+	assert.Equal(t, "ok", status.Result)
+
+	// After rollback ClusterProvider should remain the original.
+	assert.Same(t, originalProvider, sc.ClusterProvider,
+		"ClusterProvider should not change after API begin→rollback")
 }

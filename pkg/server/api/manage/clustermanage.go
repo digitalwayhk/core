@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -139,6 +140,10 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 
 func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProvider, error) {
 	switch name {
+	case "local":
+		p := cluster.NewLocalProvider(30*time.Second, 10*time.Second, 30*time.Second)
+		p.Start()
+		return p, nil
 	case "etcd":
 		return cluster.NewEtcdProvider(endpoints)
 	case "consul":

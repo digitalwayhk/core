@@ -192,7 +192,30 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		}
 	}
 	sc.Config = con
+	initServiceContextPost(sc, service, con, name)
+	return scontext[name]
+}
 
+// NewServiceContextWithConfig creates a ServiceContext using the provided
+// config directly, bypassing file-based config loading. Intended for testing
+// and programmatic service bootstrap where the caller manages configuration.
+func NewServiceContextWithConfig(service types.IService, con *config.ServerConfig) *ServiceContext {
+	name := strings.ToLower(service.ServiceName())
+	if sc, ok := scontext[name]; ok {
+		return sc
+	}
+	sc := &ServiceContext{}
+	sc.StateChan = make(chan bool, 1)
+	sc.Service = initService(service, sc)
+	sc.Config = con
+	initServiceContextPost(sc, service, con, name)
+	return scontext[name]
+}
+
+// initServiceContextPost performs the post-config initialisation shared by
+// NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
+// cluster/transport/MQ provider setup, Snowflake, and router wiring.
+func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig, name string) {
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
 	// same process or between hot-reload replicas.
@@ -236,7 +259,6 @@ func NewServiceContext(service types.IService) *ServiceContext {
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
 	scontext[name] = sc
-	return scontext[name]
 }
 func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	service := &types.Service{
