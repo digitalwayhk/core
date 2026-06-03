@@ -12,6 +12,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -45,6 +46,8 @@ type ServiceContext struct {
 	serverOption      *types.ServerOption
 	TransportSelector transport.TransportSelector    `json:"-"`
 	MQManager         *mq.MQManager                  `json:"-"`
+	EventStream       *event.Stream                  `json:"-"`
+	EventBridge       *event.MQBridge                `json:"-"`
 	ClusterProvider   cluster.DiscoveryProvider      `json:"-"`
 	ClusterSwitcher   cluster.ProviderSwitcher       `json:"-"`
 	membership        *cluster.MembershipManager     `json:"-"`
@@ -60,6 +63,30 @@ func (own *ServiceContext) GetServerOption() *types.ServerOption {
 }
 func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
 	own.serverOption = so
+}
+
+// EnableEventBridge wires an in-process event.Stream to the MQManager so that
+// event.Envelope values can be published and consumed via the MQ provider.
+// It is called automatically during NewServiceContext when MQ.Usage contains
+// "event-stream", and is also exposed for use in tests.
+func (own *ServiceContext) EnableEventBridge() {
+	if own.MQManager == nil {
+		return
+	}
+	if own.EventStream == nil {
+		own.EventStream = event.NewStream()
+	}
+	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
+}
+
+// containsUsage reports whether usage slice contains the given value.
+func containsUsage(usage []string, value string) bool {
+	for _, u := range usage {
+		if u == value {
+			return true
+		}
+	}
+	return false
 }
 func (own *ServiceContext) getStatsManager() *StatsManager {
 	return NewStatsManager(own.Service.Name, own.Router.GetRouters())
@@ -253,6 +280,10 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Errorf("mq: init failed (degraded): %v", mqErr)
 		} else {
 			sc.MQManager = mgr
+			// Wire MQ-backed event stream when usage includes "event-stream".
+			if mgr != nil && containsUsage(con.MQ.Usage, "event-stream") {
+				sc.EnableEventBridge()
+			}
 		}
 	}
 

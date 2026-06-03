@@ -8,6 +8,8 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	evtpkg "github.com/digitalwayhk/core/pkg/server/event"
+	mqpkg "github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/assert"
@@ -268,4 +270,74 @@ func TestNewServiceContextWithConfig_MQModeOn_Panics(t *testing.T) {
 	assert.Panics(t, func() {
 		router.NewServiceContextWithConfig(&fakeService{svcName}, con)
 	}, "NewServiceContextWithConfig should panic when MQ.Mode=on and provider is unreachable")
+}
+
+// ---------- EventBridge tests ----------
+
+// syncMQProvider is an in-memory MQProvider for testing EnableEventBridge.
+// Publish synchronously calls any registered subscriber handler.
+type syncMQProvider struct {
+	handler func(msg *mqpkg.Message)
+}
+
+func (p *syncMQProvider) Name() string                    { return "sync-fake" }
+func (p *syncMQProvider) Connect(_ context.Context) error { return nil }
+func (p *syncMQProvider) Close() error                    { return nil }
+func (p *syncMQProvider) Health(_ context.Context) error  { return nil }
+func (p *syncMQProvider) Publish(_ context.Context, subject string, data []byte, _ *mqpkg.PublishOptions) error {
+	if p.handler != nil {
+		p.handler(&mqpkg.Message{
+			Subject: subject,
+			Data:    data,
+			Ack:     func() error { return nil },
+		})
+	}
+	return nil
+}
+func (p *syncMQProvider) Subscribe(_ context.Context, _ string, handler func(*mqpkg.Message)) (func(), error) {
+	p.handler = handler
+	return func() { p.handler = nil }, nil
+}
+
+// TestEventBridge_PublishSubscribeRoundtrip verifies the framework path:
+// ServiceContext.EnableEventBridge creates a non-nil EventStream and EventBridge,
+// and an event.Envelope can be published via MQBridge then consumed through the
+// in-process Stream.
+func TestEventBridge_PublishSubscribeRoundtrip(t *testing.T) {
+	provider := &syncMQProvider{}
+	mgr := mqpkg.NewManager()
+	mgr.Register(provider)
+	require.NoError(t, mgr.SetCurrent("sync-fake"))
+
+	sc := &router.ServiceContext{MQManager: mgr}
+	sc.EnableEventBridge()
+
+	require.NotNil(t, sc.EventStream, "EnableEventBridge should set EventStream")
+	require.NotNil(t, sc.EventBridge, "EnableEventBridge should set EventBridge")
+
+	ctx := context.Background()
+	const subject = "test.events"
+
+	// Subscribe on both the MQ bridge path and the in-process stream.
+	received := make(chan *evtpkg.Envelope, 1)
+	sc.EventStream.Subscribe("test-type", func(env *evtpkg.Envelope) {
+		received <- env
+	})
+	_, err := sc.EventBridge.Subscribe(ctx, subject)
+	require.NoError(t, err)
+
+	env := &evtpkg.Envelope{
+		Type: "test-type",
+		ID:   "evt-roundtrip-001",
+		Data: []byte(`"hello bridge"`),
+	}
+	require.NoError(t, sc.EventBridge.Publish(ctx, subject, env))
+
+	select {
+	case got := <-received:
+		assert.Equal(t, env.ID, got.ID, "roundtrip envelope ID should match")
+		assert.Equal(t, env.Type, got.Type, "roundtrip envelope Type should match")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event bridge roundtrip")
+	}
 }

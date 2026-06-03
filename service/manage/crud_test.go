@@ -3,6 +3,7 @@ package manage_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
@@ -29,7 +30,6 @@ func (t *testItem) NewModel() {
 	}
 }
 
-// testManageSvc[T] implements IManageService, IManageView, and IGetModelList.
 // It uses a pre-initialised ModelList so tests control the DB adapter.
 type testManageSvc[T pt.IModel] struct {
 	// DoBefore control
@@ -438,6 +438,14 @@ func (t *testBaseItem) NewModel() {
 	}
 }
 
+func newTestBaseItem(id uint, state int) *testBaseItem {
+	bm := entity.NewBaseModel()
+	bm.Model.ID = id
+	bm.State = state
+	bm.Code = fmt.Sprintf("item-%d", id) // UpdateValid requires non-empty Code
+	return &testBaseItem{BaseModel: bm}
+}
+
 // --- Submit tests ---
 
 // TestSubmit_DoBefore_Stop verifies that when DoBefore returns stop=true in
@@ -632,7 +640,37 @@ func TestSubmit_HappyPath_DoAfterCalled(t *testing.T) {
 	assert.True(t, svc.doAfterCalled, "DoAfter should be called after successful Submit.Do")
 }
 
-// TestRelease_HappyPath_CallsUpdate verifies that Release.Do enqueues the item
+// TestSubmit_HappyPath_StateChangeAndSave verifies that Submit.Do sets State
+// from 0 to 1 and calls Update+Save when T embeds *entity.BaseModel.
+func TestSubmit_HappyPath_StateChangeAndSave(t *testing.T) {
+	existing := newTestBaseItem(10, 0) // State=0
+
+	da := &extendedMockDataAction{
+		loadFn: func(si *pt.SearchItem, result interface{}) error {
+			if slice, ok := result.(*[]*testBaseItem); ok {
+				*slice = append(*slice, existing)
+			}
+			return nil
+		},
+	}
+	svc := newTestManageSvc[testBaseItem](da)
+
+	sub := manage.NewSubmit[testBaseItem](nil)
+	sub.New(svc)
+	sub.Model = newTestBaseItem(10, 0) // same ID
+
+	req := &crudRequest{}
+	_, err := sub.Do(req)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, existing.State, "Submit.Do should set State from 0 to 1")
+	require.Len(t, da.updated, 1, "Update should be called once via Save()")
+	updated, ok := da.updated[0].(*testBaseItem)
+	require.True(t, ok, "updated item should be *testBaseItem")
+	assert.Equal(t, 1, updated.State, "Updated item should have State=1")
+	assert.True(t, svc.doAfterCalled, "DoAfter should be called after successful Submit.Do")
+}
+
 // for update (adds to updateList) when no DoBefore hook is set.
 // Note: Release.Do does not call list.Save, so the DB adapter is not invoked;
 // the item lands in UpdateArray() instead.
