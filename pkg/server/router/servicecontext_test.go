@@ -341,3 +341,59 @@ func TestEventBridge_PublishSubscribeRoundtrip(t *testing.T) {
 		t.Fatal("timed out waiting for event bridge roundtrip")
 	}
 }
+
+// TestNewServiceContextWithConfig_EventBridgeAutoInit verifies that when
+// NewServiceContextWithConfig is called with MQ.Usage containing "event-stream",
+// the framework automatically wires sc.MQManager, sc.EventStream, and sc.EventBridge.
+// A fake synchronous MQ provider is injected via RegisterProviderFactory to avoid
+// requiring a real Redis/NATS server.
+func TestNewServiceContextWithConfig_EventBridgeAutoInit(t *testing.T) {
+	const (
+		svcName      = "sctest-event-bridge-autoinit"
+		providerName = "fake-sync-autoinit"
+	)
+
+	// Register a fake in-process provider so BuildManager can succeed without
+	// a real MQ broker.
+	mqpkg.RegisterProviderFactory(providerName, func(_ context.Context, _ *config.MQConfig) (mqpkg.MQProvider, error) {
+		return &syncMQProvider{}, nil
+	})
+
+	con := config.NewServiceDefaultConfig(svcName, 29984)
+	con.MQ.Mode = "on"
+	con.MQ.Provider = providerName
+	con.MQ.Usage = []string{"event-stream"}
+
+	sc := router.NewServiceContextWithConfig(&fakeService{svcName}, con)
+	require.NotNil(t, sc)
+
+	assert.NotNil(t, sc.MQManager, "MQManager should be initialized via fake provider")
+	assert.NotNil(t, sc.EventStream, "EventStream should be auto-wired when usage contains event-stream")
+	assert.NotNil(t, sc.EventBridge, "EventBridge should be auto-wired when usage contains event-stream")
+
+	// Verify a full Publish → Subscribe roundtrip through the auto-wired bridge.
+	ctx := context.Background()
+	const subject = "test.autoinit.events"
+
+	received := make(chan *evtpkg.Envelope, 1)
+	sc.EventStream.Subscribe("autoinit-type", func(env *evtpkg.Envelope) {
+		received <- env
+	})
+	_, err := sc.EventBridge.Subscribe(ctx, subject)
+	require.NoError(t, err)
+
+	env := &evtpkg.Envelope{
+		Type: "autoinit-type",
+		ID:   "evt-autoinit-001",
+		Data: []byte(`"hello auto-bridge"`),
+	}
+	require.NoError(t, sc.EventBridge.Publish(ctx, subject, env))
+
+	select {
+	case got := <-received:
+		assert.Equal(t, env.ID, got.ID, "auto-init roundtrip envelope ID should match")
+		assert.Equal(t, env.Type, got.Type, "auto-init roundtrip envelope Type should match")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for auto-init event bridge roundtrip")
+	}
+}
