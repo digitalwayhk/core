@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
 
 // fakeService is a minimal types.IService implementation used by lifecycle tests.
 type fakeService struct{ name string }
@@ -127,4 +129,66 @@ func TestSyncProviderAfterSwitch_UpdatesClusterProvider(t *testing.T) {
 	require.True(t, ok, "ClusterProvider should still be a *cluster.LocalProvider")
 	assert.Same(t, newProvider, got,
 		"ClusterProvider should point to the newly promoted provider after sync")
+}
+
+// TestClusterConfig_ModeOnEmptyEndpoints_ValidateFails verifies that when
+// Cluster.Mode=on and Provider=etcd but Endpoints is empty, Validate returns
+// an error (which ReadConfig and NewServiceContext would panic on in production).
+func TestClusterConfig_ModeOnEmptyEndpoints_ValidateFails(t *testing.T) {
+cfg := config.ClusterConfig{
+Mode:     "on",
+Provider: "etcd",
+// Providers.Etcd.Endpoints is left nil (empty)
+}
+cfg.ApplyDefaults()
+err := cfg.Validate()
+require.Error(t, err, "ClusterConfig.Validate should fail with Mode=on, Provider=etcd and no endpoints")
+}
+
+// TestTransportConfig_QuicInternal_ValidatePasses verifies that TransportConfig.Validate
+// accepts "quic" as an Internal value (the panic would occur later in BuildSelector,
+// not at validation time).
+func TestTransportConfig_QuicInternal_ValidatePasses(t *testing.T) {
+cfg := config.TransportConfig{Internal: "quic"}
+cfg.ApplyDefaults()
+err := cfg.Validate()
+require.NoError(t, err, "TransportConfig.Validate should accept 'quic' (BuildSelector handles the panic)")
+}
+
+// TestMQConfig_ModeOnEmptyUsage_ValidateFails verifies that when MQ.Mode=on but
+// Usage is empty, Validate returns an error.
+// Note: ApplyDefaults() fills Usage with a default, so this test calls Validate directly.
+func TestMQConfig_ModeOnEmptyUsage_ValidateFails(t *testing.T) {
+cfg := config.MQConfig{Mode: "on", Provider: "redis-stream"}
+// Deliberately skip ApplyDefaults so Usage remains empty.
+err := cfg.Validate()
+require.Error(t, err, "MQConfig.Validate should fail when Mode=on and Usage is empty")
+}
+
+// TestSetRunState_FalseAfterTrue_DeregistersNode verifies that after SetRunState(false)
+// the service node is removed from the cluster provider's running list.
+func TestSetRunState_FalseAfterTrue_DeregistersNode(t *testing.T) {
+const svcName = "sctest-deregister-node"
+sc := router.NewServiceContext(&fakeService{svcName})
+require.NotNil(t, sc)
+
+sc.SetRunState(true)
+
+// Wait until node appears in the provider.
+require.Eventually(t, func() bool {
+nodes, _ := sc.ClusterProvider.List(context.Background(), svcName)
+for _, n := range nodes {
+if n.ServiceName == svcName {
+return true
+}
+}
+return false
+}, 2*time.Second, 20*time.Millisecond, "node should appear after SetRunState(true)")
+
+sc.SetRunState(false)
+
+// Node should no longer appear as running.
+nodes, err := sc.ClusterProvider.List(context.Background(), svcName, cluster.NodeStatusRunning)
+require.NoError(t, err)
+assert.Empty(t, nodes, "no running nodes should remain after SetRunState(false)")
 }

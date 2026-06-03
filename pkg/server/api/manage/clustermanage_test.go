@@ -1,10 +1,13 @@
 package manage_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/api/manage"
+	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/assert"
@@ -184,4 +187,96 @@ func TestClusterNodes_NoContext_ReturnsEmptyList(t *testing.T) {
 	nodes, ok := result.(*manage.ClusterNodes)
 	require.True(t, ok)
 	assert.Empty(t, nodes.Nodes)
+}
+
+// --- ClusterSwitchProvider success path tests ---
+
+// TestClusterSwitchProvider_PreseededBegin_CompleteSucceeds verifies that after
+// manually calling ClusterSwitcher.Begin (bypassing buildTargetProvider), the
+// API complete action promotes the pending provider and updates ClusterProvider.
+func TestClusterSwitchProvider_PreseededBegin_CompleteSucceeds(t *testing.T) {
+const svcName = "manage-test-begin-complete"
+sc := router.NewServiceContext(&fakeManageSvc{svcName})
+require.NotNil(t, sc)
+
+newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+newProvider.Start()
+t.Cleanup(func() { newProvider.Close() })
+
+err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
+require.NoError(t, err, "direct Begin should succeed")
+
+api := &manage.ClusterSwitchProvider{Action: "complete"}
+req := &mockRequest{serviceName: svcName}
+result, err := api.Do(req)
+require.NoError(t, err)
+require.NotNil(t, result)
+status, ok := result.(*manage.ClusterSwitchProvider)
+require.True(t, ok)
+assert.Equal(t, "ok", status.Result)
+
+// SyncProviderAfterSwitch is called inside Do("complete"); ClusterProvider
+// should now point to the newly promoted provider.
+assert.Same(t, newProvider, sc.ClusterProvider,
+"ClusterProvider should be updated to newProvider after complete")
+}
+
+// TestClusterSwitchProvider_PreseededBegin_RollbackSucceeds verifies that after
+// manually calling ClusterSwitcher.Begin, the API rollback action aborts the
+// migration and leaves ClusterProvider unchanged.
+func TestClusterSwitchProvider_PreseededBegin_RollbackSucceeds(t *testing.T) {
+const svcName = "manage-test-begin-rollback"
+sc := router.NewServiceContext(&fakeManageSvc{svcName})
+require.NotNil(t, sc)
+
+originalProvider := sc.ClusterProvider
+
+newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+newProvider.Start()
+t.Cleanup(func() { newProvider.Close() })
+
+err := sc.ClusterSwitcher.Begin(context.Background(), newProvider)
+require.NoError(t, err)
+
+api := &manage.ClusterSwitchProvider{Action: "rollback"}
+req := &mockRequest{serviceName: svcName}
+result, err := api.Do(req)
+require.NoError(t, err)
+require.NotNil(t, result)
+status, ok := result.(*manage.ClusterSwitchProvider)
+require.True(t, ok)
+assert.Equal(t, "ok", status.Result)
+
+// After rollback the original provider should still be active.
+assert.Same(t, originalProvider, sc.ClusterProvider,
+"ClusterProvider should remain unchanged after rollback")
+assert.NotSame(t, newProvider, sc.ClusterProvider)
+}
+
+// TestClusterStatus_AfterProviderSwitch_ReturnsNewProvider verifies that
+// ClusterStatus reflects the new provider after a successful switch.
+func TestClusterStatus_AfterProviderSwitch_ReturnsNewProvider(t *testing.T) {
+const svcName = "manage-test-status-after-switch"
+sc := router.NewServiceContext(&fakeManageSvc{svcName})
+require.NotNil(t, sc)
+
+newProvider := cluster.NewLocalProvider(10*time.Second, 10*time.Second, 30*time.Second)
+newProvider.Start()
+t.Cleanup(func() { newProvider.Close() })
+
+require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), newProvider))
+
+completeAPI := &manage.ClusterSwitchProvider{Action: "complete"}
+_, err := completeAPI.Do(&mockRequest{serviceName: svcName})
+require.NoError(t, err)
+
+// ClusterStatus should now reflect the updated provider.
+statusAPI := &manage.ClusterStatus{}
+result, err := statusAPI.Do(&mockRequest{serviceName: svcName})
+require.NoError(t, err)
+require.NotNil(t, result)
+status, ok := result.(*manage.ClusterStatus)
+require.True(t, ok)
+assert.Equal(t, newProvider.Name(), status.ProviderName,
+"ClusterStatus should report the new provider after a successful switch")
 }
