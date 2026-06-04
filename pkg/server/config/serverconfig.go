@@ -31,7 +31,65 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string `json:",optional"`
+	MelodyConfigPath      string          `json:",optional"`
+	Cluster               ClusterConfig   `json:",optional"`
+	Transport             TransportConfig `json:",optional"`
+	MQ                    MQConfig        `json:",optional"`
+}
+
+// ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
+// ReadConfig、NewServiceDefaultConfig、Save 均必须调用此方法。
+func (con *ServerConfig) ApplyDefaults() {
+	if con.AttachServices == nil {
+		con.AttachServices = make(map[string]*AttachAddress)
+	}
+	if con.CustomerDataList == nil {
+		con.CustomerDataList = make([]*CustomerData, 0)
+	}
+	if con.WhiteList == nil {
+		con.WhiteList = make([]string, 0)
+	}
+	con.Cluster.ApplyDefaults()
+	con.Transport.ApplyDefaults()
+	con.MQ.ApplyDefaults()
+}
+
+// Validate 校验 ServerConfig 中各子配置的合法性。
+func (con *ServerConfig) Validate() error {
+	if err := con.Cluster.Validate(); err != nil {
+		return err
+	}
+	if err := con.Transport.Validate(); err != nil {
+		return err
+	}
+	if err := con.MQ.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReloadExternalConfigs 加载外部配置文件（Casdoor、Melody）。
+func (con *ServerConfig) ReloadExternalConfigs() {
+	if con.Auth.CasDoor.Enable {
+		if err := con.Auth.CasDoor.ReloadConfig(); err != nil {
+			panic(err)
+		}
+	}
+	if con.ManageAuth.CasDoor.Enable {
+		if err := con.ManageAuth.CasDoor.ReloadConfig(); err != nil {
+			panic(err)
+		}
+	}
+	if con.ServerManageAuth.CasDoor.Enable {
+		if err := con.ServerManageAuth.CasDoor.ReloadConfig(); err != nil {
+			panic(err)
+		}
+	}
+	if con.MelodyConfigPath != "" {
+		if err := loadMelodyConfig(con.MelodyConfigPath); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
@@ -121,9 +179,10 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.WhiteList = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
 	con.MelodyConfigPath = ""
-	// con.Shutdown.WaitTime = time.Duration(5.5 * float64(time.Second))
-	// con.Shutdown.WrapUpTime = time.Duration(1 * float64(time.Second))
-	//con.MelodyConfig = NewMelodyConfig()
+	con.ApplyDefaults()
+	if err := con.Validate(); err != nil {
+		panic(err)
+	}
 	return &con
 }
 func ReadConfig(servicename string) *ServerConfig {
@@ -133,35 +192,20 @@ func ReadConfig(servicename string) *ServerConfig {
 	}
 	con := &ServerConfig{}
 	conf.MustLoad(file, con)
-	if con.Auth.CasDoor.Enable {
-		err := con.Auth.CasDoor.ReloadConfig()
-		if err != nil {
-			panic(err)
-		}
+	con.ApplyDefaults()
+	if err := con.Validate(); err != nil {
+		panic(err)
 	}
-	if con.ManageAuth.CasDoor.Enable {
-		err := con.ManageAuth.CasDoor.ReloadConfig()
-		if err != nil {
-			panic(err)
-		}
-	}
-	if con.ServerManageAuth.CasDoor.Enable {
-		err := con.ServerManageAuth.CasDoor.ReloadConfig()
-		if err != nil {
-			panic(err)
-		}
-	}
-	if con.MelodyConfigPath != "" {
-		err := loadMelodyConfig(con.MelodyConfigPath)
-		if err != nil {
-			panic(err)
-		}
-	}
+	con.ReloadExternalConfigs()
 	return con
 }
 func (own *ServerConfig) Save() error {
 	if utils.IsTest() {
 		return nil
+	}
+	own.ApplyDefaults()
+	if err := own.Validate(); err != nil {
+		return err
 	}
 	file := CONFIGDIRPATH + own.Name + ".json"
 	if !utils.IsExista(file) {
@@ -169,12 +213,6 @@ func (own *ServerConfig) Save() error {
 		if err != nil {
 			panic(err)
 		}
-	}
-	if own.CustomerDataList == nil {
-		own.CustomerDataList = make([]*CustomerData, 0)
-	}
-	if own.WhiteList == nil {
-		own.WhiteList = make([]string, 0)
 	}
 	data, err := json.Marshal(own)
 	if err != nil {

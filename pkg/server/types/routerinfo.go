@@ -52,6 +52,7 @@ type RouterInfo struct {
 	useCache          bool                                     //是否使用缓存
 	cacheTime         time.Duration                            //缓存时间
 	rArgs             map[uint64]IRouter                       //路由参数
+	rHashClients      map[uint64]int                           // per-hash client count for accurate unregister detection
 	//rWebSocketClient  map[uint64]map[IWebSocket]IRequest       //websocket客户端
 	// 🔧 使用分片替代单一 map
 	rWebSocketShards [shardCount]*websocketShard // 替代 rWebSocketClient

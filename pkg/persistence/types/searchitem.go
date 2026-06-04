@@ -8,18 +8,31 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+// Symbol constants for WhereItem query operators.
+const (
+	SymbolIsNull    = "isnull"
+	SymbolIsNotNull = "isnotnull"
+	SymbolLike      = "like"
+	SymbolNotLike   = "notlike"
+	SymbolLeft      = "left"
+	SymbolRight     = "right"
+	SymbolIn        = "in"
+	SymbolNotIn     = "notin"
+	SymbolBetween   = "between"
+)
+
 var symbolMap map[string]string = make(map[string]string)
 
 func init() {
-	symbolMap["isnull"] = " IS NULL"
-	symbolMap["isnotnull"] = " IS NOT NULL"
-	symbolMap["like"] = " LIKE"
-	symbolMap["notlike"] = " NOT LIKE"
-	symbolMap["left"] = " LIKE"
-	symbolMap["right"] = " LIKE"
-	symbolMap["in"] = " IN"
-	symbolMap["notin"] = " NOT IN"
-	symbolMap["between"] = " BETWEEN"
+	symbolMap[SymbolIsNull] = " IS NULL"
+	symbolMap[SymbolIsNotNull] = " IS NOT NULL"
+	symbolMap[SymbolLike] = " LIKE"
+	symbolMap[SymbolNotLike] = " NOT LIKE"
+	symbolMap[SymbolLeft] = " LIKE"
+	symbolMap[SymbolRight] = " LIKE"
+	symbolMap[SymbolIn] = " IN"
+	symbolMap[SymbolNotIn] = " NOT IN"
+	symbolMap[SymbolBetween] = " BETWEEN"
 }
 
 type SearchItem struct {
@@ -90,31 +103,31 @@ func (own *SearchItem) Where(db *gorm.DB) (string, []interface{}) {
 		// 🔧 处理特殊符号
 		if mappedSymbol, ok := symbolMap[symbolLower]; ok {
 			switch symbolLower {
-			case "isnull", "isnotnull":
+			case SymbolIsNull, SymbolIsNotNull:
 				// IS NULL / IS NOT NULL 不需要值
 				w = own.buildWhereClause(w, col, item, mappedSymbol, false)
 
-			case "like", "notlike":
+			case SymbolLike, SymbolNotLike:
 				// LIKE 查询,值不变
 				w = own.buildWhereClause(w, col, item, mappedSymbol, true)
 				values = append(values, item.Value)
 
-			case "left":
+			case SymbolLeft:
 				// 左模糊: value%
 				w = own.buildWhereClause(w, col, item, " LIKE", true)
 				values = append(values, fmt.Sprintf("%s%%", item.Value))
 
-			case "right":
+			case SymbolRight:
 				// 右模糊: %value
 				w = own.buildWhereClause(w, col, item, " LIKE", true)
-				values = append(values, fmt.Sprintf("%%s", item.Value))
+				values = append(values, fmt.Sprintf("%%%s", item.Value))
 
-			case "in", "notin":
+			case SymbolIn, SymbolNotIn:
 				// IN / NOT IN 查询
 				w = own.buildWhereClause(w, col, item, mappedSymbol, true)
 				values = append(values, item.Value)
 
-			case "between":
+			case SymbolBetween:
 				// BETWEEN 查询
 				w = own.buildBetweenClause(w, col, item)
 				if betweenValues, ok := item.Value.([]interface{}); ok && len(betweenValues) == 2 {
@@ -323,12 +336,12 @@ func (own *WhereItem) End() *WhereItem {
 }
 
 func (own *WhereItem) Like() *WhereItem {
-	own.Symbol = "like"
+	own.Symbol = SymbolLike
 	return own
 }
 
 func (own *WhereItem) NotLike() *WhereItem {
-	own.Symbol = "notlike"
+	own.Symbol = SymbolNotLike
 	return own
 }
 
@@ -338,27 +351,27 @@ func (own *WhereItem) Not() *WhereItem {
 }
 
 func (own *WhereItem) IsNull() *WhereItem {
-	own.Symbol = "isnull"
+	own.Symbol = SymbolIsNull
 	return own
 }
 
 func (own *WhereItem) IsNotNull() *WhereItem {
-	own.Symbol = "isnotnull"
+	own.Symbol = SymbolIsNotNull
 	return own
 }
 
 func (own *WhereItem) In() *WhereItem {
-	own.Symbol = "in"
+	own.Symbol = SymbolIn
 	return own
 }
 
 func (own *WhereItem) NotIn() *WhereItem {
-	own.Symbol = "notin"
+	own.Symbol = SymbolNotIn
 	return own
 }
 
 func (own *WhereItem) Between() *WhereItem {
-	own.Symbol = "between"
+	own.Symbol = SymbolBetween
 	return own
 }
 

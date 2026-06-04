@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package coretransport;
+
+option go_package = "github.com/digitalwayhk/core/pkg/server/transport/grpc/proto;coretransport";
+
+// CoreTransport is the gRPC service for inter-service calls within the core framework.
+service CoreTransport {
+  // Call forwards a PayloadRequest to the target service and returns its response.
+  rpc Call(PayloadRequest) returns (PayloadResponse);
+  // Health checks whether the remote service is reachable and healthy.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message PayloadRequest {
+  string trace_id           = 1;
+  string source_address     = 2;
+  int32  source_port        = 3;
+  int32  source_socket_port = 4;
+  string source_service     = 5;
+  string target_address     = 6;
+  int32  target_port        = 7;
+  int32  target_socket_port = 8;
+  string target_service     = 9;
+  string source_path        = 10;
+  string target_path        = 11;
+  string user_id            = 12;
+  string user_name          = 13;
+  string client_ip          = 14;
+  bool   auth               = 15;
+  bytes  data               = 16;
+  string http_method        = 17;
+  string token              = 18;
+}
+
+message PayloadResponse {
+  bytes  data  = 1;
+  string error = 2;
+}
+
+message HealthRequest {
+  string service = 1;
+}
+
+message HealthResponse {
+  bool   healthy = 1;
+  string message = 2;
+}

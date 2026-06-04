@@ -36,7 +36,11 @@ func (own *DemoService) Routers() []types.IRouter {
 	routers = append(routers, &private.AddOrder{})
 
 	//api/manage 文件夹下的管理路由,管理路由包含增删改查路由
+	// TokenManage: 基础示例，直接嵌入 manage.ManageService[T]
 	routers = append(routers, manage.NewTokenManage().Routers()...)
+
+	// OrderManage: 高级示例，演示多层继承、自定义按钮、SearchBefore 等模式
+	routers = append(routers, manage.NewOrderManage().Routers()...)
 
 	return routers
 }

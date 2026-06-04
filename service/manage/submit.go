@@ -1,12 +1,14 @@
 package manage
 
 import (
+	"reflect"
+
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-//Submit 提交，用于确认数据设置完成，该状态数据不可修改
+// Submit 提交，用于确认数据设置完成，该状态数据不可修改
 type Submit[T pt.IModel] struct {
 	Operation[T]
 }
@@ -58,8 +60,12 @@ func (own *Submit[T]) Do(req types.IRequest) (interface{}, error) {
 	if bm != nil {
 		if bm.State == 0 {
 			bm.State = 1
-			own.list.Update(model)
-			own.list.Save()
+			if err := own.list.Update(model); err != nil {
+				return nil, err
+			}
+			if err := own.list.Save(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if submit, ok := own.instance.(IManageService); ok {
@@ -72,7 +78,31 @@ func getIModel(instance interface{}) pt.IModel {
 	return instance.(pt.IModel)
 }
 func getbaseModel(instance interface{}) *entity.BaseModel {
-	return instance.(*entity.BaseModel)
+	// Direct type assertion for *entity.BaseModel.
+	if bm, ok := instance.(*entity.BaseModel); ok {
+		return bm
+	}
+	// Walk anonymous (embedded) fields to find *entity.BaseModel.
+	// This handles typical business models: type Product struct { *entity.BaseModel; ... }
+	v := reflect.ValueOf(instance)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+	bmType := reflect.TypeOf(&entity.BaseModel{})
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous && f.Type == bmType {
+			fv := v.Field(i)
+			if !fv.IsNil() {
+				return fv.Interface().(*entity.BaseModel)
+			}
+		}
+	}
+	return nil
 }
 func getorderModel(instance interface{}) *entity.BaseOrderModel {
 	return instance.(*entity.BaseOrderModel)
