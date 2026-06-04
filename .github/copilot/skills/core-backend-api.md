@@ -72,36 +72,106 @@ type IRouter interface {
 
 ## 2. 实体 / 模型层
 
-### entity.Model（基础，无业务状态）
+### 🔑 核心约定（必读）
+
+1. **自动建表建库**：调用 `entity.NewModelList[T](nil)` 时框架自动检测并创建表（GORM AutoMigrate），
+   无需编写 SQL 或手动迁移脚本。新增字段后重启即自动补列。
+2. **一个 model 文件 = 一张表**：每个 Go 文件只定义一个业务模型结构体，
+   对该表的所有字段、索引、关联关系、业务验证逻辑，全部写在同一文件。
+   修改表结构时只需改一个文件。
+3. **可无缝切换数据库**：默认 SQLite（开发），配置 MySQL 后业务代码零改动。
+   切换方式通过 `IDBName` 或配置文件实现，不侵入 model 代码。
+4. **表名默认规则**：`entity.Model.GetLocalDBName()` 返回 `"models"`，即所有模型默认存储在
+   同一个 `models` 数据库。实现 `IDBName` 接口可路由到独立库/表。
+
+---
+
+### 基础类型选择指南
+
+| 嵌入类型 | 适用场景 | 包含字段 | GetHash 默认值 |
+|----------|----------|----------|---------------|
+| `*entity.Model` | 通用实体（商品、用户、菜单等） | ID, CreatedAt, UpdatedAt, Hashcode | ID |
+| `*entity.BaseModel` | 带业务状态的实体（有 Code 唯一标识） | + State, Code, Name, Describe, 操作人 | Code |
+| `*entity.BaseOrderModel` | 单据/交易（不可删除，TraceID+UserID 唯一） | + TraceID, Code, UserID, State | TraceID+UserID |
+| `*entity.BaseRecordModel` | 日志/记录（只写不改不删） | + TraceID | TraceID |
+
+---
+
+### entity.Model（通用实体）
 
 ```go
+// models/product.go
+package models
+
 import "github.com/digitalwayhk/core/pkg/persistence/entity"
 
-type Book struct {
-    *entity.Model                   // ID、CreatedAt、UpdatedAt、Hashcode
-    Title  string `json:"title"`
-    Author string `json:"author"`
+// Product 商品表。一个 model 文件对应一张表，所有字段、关联、验证都在此文件。
+type Product struct {
+    *entity.Model
+    Name     string  `json:"name"  desc:"商品名称"`
+    Price    int64   `json:"price" desc:"价格（分）"`
+    Category string  `json:"category" desc:"分类"`
+    // 外键关联：一个商品对应多个订单行
+    OrderLines []*OrderLine `json:"orderlines,omitempty" gorm:"foreignkey:ProductID"`
 }
 
-func NewBook() *Book { return &Book{Model: entity.NewModel()} }
+func NewProduct() *Product { return &Product{Model: entity.NewModel()} }
 
-// 必须实现 NewModel()，供 ModelList.NewItem() 调用
-func (own *Book) NewModel() {
+// NewModel 必须实现，供 ModelList.NewItem() 调用
+func (own *Product) NewModel() {
     if own.Model == nil {
         own.Model = entity.NewModel()
     }
 }
 ```
 
-### entity.BaseModel（带业务状态）
-
-当业务需要 `State`（0=待提交, 1=已提交, 2=已发布）时使用：
+### entity.BaseModel（带业务状态 + Code 唯一标识）
 
 ```go
+// models/token.go
+package models
+
+import "github.com/digitalwayhk/core/pkg/persistence/entity"
+
+// Token 币种表。Code 是业务唯一键，State 控制生命周期（0=待上线 1=上线 2=下线）。
+type Token struct {
+    *entity.BaseModel               // Code, Name, State, Describe, 操作人...
+    Symbol   string `json:"symbol" desc:"交易对符号"`
+    Decimals int    `json:"decimals" desc:"精度位数"`
+}
+
+func NewToken() *Token { return &Token{BaseModel: entity.NewBaseModel()} }
+
+func (own *Token) NewModel() {
+    if own.BaseModel == nil {
+        own.BaseModel = entity.NewBaseModel()
+    }
+}
+// GetHash 默认使用 Code（由 BaseModel 提供），Code 唯一即不需要覆写。
+// ⚠️ 若实体没有业务 Code，必须覆写为 ID 哈希（见下方 Order 示例）。
+```
+
+### entity.BaseModel 无 Code 时的 GetHash 修复
+
+```go
+// models/order.go
+package models
+
+import (
+    "github.com/digitalwayhk/core/pkg/persistence/entity"
+    "github.com/shopspring/decimal"
+)
+
+// Order 订单表。无 Code 字段，GetHash 必须委托给 Model（ID 哈希），否则所有空 Code 会哈希碰撞。
 type Order struct {
-    *entity.BaseModel               // 在 Model 基础上增加 State、Code、Name 等
-    UserID string `json:"userid"`
-    Amount decimal.Decimal `json:"amount"`
+    *entity.BaseModel
+    UserID  string          `json:"userid"  desc:"用户ID"`
+    Price   decimal.Decimal `json:"price"   desc:"成交价"`
+    Amount  decimal.Decimal `json:"amount"  desc:"成交量"`
+    TokenID uint            `json:"tokenid" desc:"币种ID"`
+    // 自关联：子订单
+    ChildDetail []*Order `json:"childdetail,omitempty" gorm:"foreignkey:ParentID"`
+    ParentID    uint     `json:"parentid"`
 }
 
 func NewOrder() *Order { return &Order{BaseModel: entity.NewBaseModel()} }
@@ -112,30 +182,213 @@ func (own *Order) NewModel() {
     }
 }
 
-// ⚠️ BaseModel.GetHash() 使用 Code 字段。
-// 若业务实体没有 Code，必须覆写 GetHash() 避免哈希碰撞：
+// ⚠️ 覆写 GetHash：无 Code 时委托给 Model.GetHash()（ID 哈希），防止碰撞
 func (own *Order) GetHash() string {
     if own.BaseModel != nil && own.BaseModel.Model != nil {
-        return own.BaseModel.Model.GetHash() // 使用 ID 哈希
+        return own.BaseModel.Model.GetHash()
     }
     return own.BaseModel.GetHash()
 }
 ```
 
-### ModelList（持久化操作）
+### entity.BaseOrderModel（单据，不可删除）
 
 ```go
-list := entity.NewModelList[Order](nil)
+// models/tradeorder.go
+package models
 
-item := list.NewItem()      // 创建新实例（自动设置雪花 ID）
-_ = list.Add(item)          // 添加到列表
-_ = list.Save()             // 持久化
+import (
+    "github.com/digitalwayhk/core/pkg/persistence/entity"
+    "github.com/shopspring/decimal"
+)
 
-rows, total, _ := list.SearchAll(page, size)
-rows, _ = list.SearchWhere("UserID", userID)
-_ = list.Update(item)       // 更新
-_ = list.Delete(item)       // 删除（软删除）
+// TradeOrder 交易单据。TraceID+UserID 构成唯一键，不允许删除。
+type TradeOrder struct {
+    *entity.BaseOrderModel          // TraceID, Code, UserID, State；RemoveValid 返回错误
+    Price  decimal.Decimal `json:"price"`
+    Amount decimal.Decimal `json:"amount"`
+}
+
+func NewTradeOrder() *TradeOrder { return &TradeOrder{BaseOrderModel: entity.NewBaseOrderModel()} }
+
+func (own *TradeOrder) NewModel() {
+    if own.BaseOrderModel == nil {
+        own.BaseOrderModel = entity.NewBaseOrderModel()
+    }
+}
+// GetHash 由 BaseOrderModel 提供：utils.HashCodes(TraceID, UserID) —— 不需要覆写
 ```
+
+### entity.BaseRecordModel（日志，只写不改不删）
+
+```go
+// models/auditlog.go
+package models
+
+import "github.com/digitalwayhk/core/pkg/persistence/entity"
+
+// AuditLog 审计日志。只允许写入，UpdateValid/RemoveValid 均返回错误。
+type AuditLog struct {
+    *entity.BaseRecordModel         // TraceID；UpdateValid/RemoveValid 直接报错
+    Action   string `json:"action"   desc:"操作"`
+    Operator string `json:"operator" desc:"操作人"`
+    Detail   string `json:"detail"   desc:"详情"`
+}
+
+func NewAuditLog() *AuditLog { return &AuditLog{BaseRecordModel: entity.NewBaseRecordModel()} }
+
+func (own *AuditLog) NewModel() {
+    if own.BaseRecordModel == nil {
+        own.BaseRecordModel = entity.NewBaseRecordModel()
+    }
+}
+// GetHash 由 BaseRecordModel 提供：utils.HashCodes(TraceID) —— 不需要覆写
+```
+
+---
+
+### 可选 Hook 接口（写在 model 文件中）
+
+#### IDBName — 路由到独立库
+
+```go
+// 默认所有模型都存入 "models" 库。
+// 实现此接口后，该表会存入独立数据库文件（SQLite）或独立 MySQL 数据库。
+func (own *IPWhiteModel) GetLocalDBName() string  { return "security" }
+func (own *IPWhiteModel) GetRemoteDBName() string { return "security" }
+```
+
+#### IScopesTableName — 自定义表名
+
+```go
+// 默认表名由 GORM 根据结构名生成（蛇形）。需要自定义时实现：
+func (own *OrderArchive) TableName() string { return "order_archives_2024" }
+```
+
+#### IModelValidHook — 写操作前置验证
+
+```go
+// 在 Add/Update/Remove 真正执行前调用。返回错误则拒绝操作。
+// entity.Model 已提供空实现；entity.BaseModel/BaseOrderModel/BaseRecordModel 已有内置校验。
+// 在 model 文件中覆写：
+
+func (own *Product) AddValid() error {
+    if own.Name == "" { return errors.New("商品名不能为空") }
+    if own.Price < 0  { return errors.New("价格不能为负") }
+    return nil
+}
+
+func (own *Product) UpdateValid(old interface{}) error {
+    if own.Price < 0 { return errors.New("价格不能为负") }
+    return nil
+}
+
+func (own *Product) RemoveValid() error {
+    // 业务约束：已上架商品不可删除
+    if own.State > 0 { return errors.New("已上架商品不能删除") }
+    return nil
+}
+```
+
+#### IModelSearchHook — 自定义查询条件注入
+
+```go
+// SearchWhere 在每次查询前调用，可动态注入额外条件（如租户隔离、逻辑删除过滤）。
+func (own *Product) SearchWhere(ws []*types.WhereItem) ([]*types.WhereItem, error) {
+    // 仅查询未删除的商品
+    ws = append(ws, &types.WhereItem{Column: "deleted_at", Symbol: "isnull"})
+    return ws, nil
+}
+```
+
+#### GetHash — 唯一标识计算
+
+```go
+// GetHash 决定去重逻辑：Add 时若 GetHash() 与已有记录碰撞，视为重复插入。
+// 规则：
+//   - entity.Model:          使用 Hashcode 字段（若非空）或 ID
+//   - entity.BaseModel:      使用 Code 字段
+//   - entity.BaseOrderModel: 使用 TraceID + UserID
+//   - entity.BaseRecordModel:使用 TraceID
+// 自定义示例（按业务唯一键）：
+func (own *MenuModel) GetHash() string {
+    return utils.HashCodes(own.Url) // Url 是菜单的业务唯一键
+}
+```
+
+#### IsPreload — 查询时自动预加载关联
+
+```go
+// 实现此方法返回 true，查询时自动 Preload 所有 gorm 外键关联字段。
+func (own *MenuModel) IsPreload() bool { return true }
+```
+
+---
+
+### ModelList 完整 API
+
+```go
+list := entity.NewModelList[Product](nil) // nil = 使用默认 DB adapter
+
+// ── 写操作 ──
+item := list.NewItem()           // 创建实例并调用 NewModel()
+_ = list.Add(item)               // 入队（调用 AddValid 验证）
+_ = list.Update(item)            // 更新（调用 UpdateValid 验证）
+_ = list.Remove(item)            // 删除（调用 RemoveValid 验证）
+_ = list.Save()                  // 提交所有待处理操作到 DB
+
+// ── 快捷查询 ──
+item, _  := list.SearchId(id)                     // 按 ID 查询
+item, _  := list.SearchCode("CODE-001")            // 按 Code 查询（BaseModel）
+item, _  := list.SearchHash(hash)                 // 按 Hashcode 查询
+items, _ := list.SearchName("iPhone")             // 按 Name 查询（BaseModel）
+items, _ := list.SearchWhere("Category", "phone") // 按任意字段等值查询
+
+// ── 分页查询 ──
+rows, total, _ := list.SearchAll(page, size)
+
+// ── 带条件分页查询 ──
+rows, total, _ := list.SearchAll(1, 20, func(si *pt.SearchItem) {
+    si.AddWhereN("Category", "phone")          // WHERE category = 'phone'
+    si.AddWhere(&pt.WhereItem{
+        Column: "Price",
+        Symbol: "between",
+        Value:  []int64{1000, 5000},           // BETWEEN 1000 AND 5000
+    })
+    si.AddWhere(&pt.WhereItem{
+        Column:   "Name",
+        Symbol:   "like",
+        Value:    "iPhone",                    // LIKE '%iPhone%'
+        Relation: "And",
+    })
+    si.AddSortN("Price", true)                 // ORDER BY price ASC
+})
+
+// ── 聚合 ──
+total, _ := list.SearchSum("Price", func(si *pt.SearchItem) {
+    si.AddWhereN("Category", "phone")
+})
+
+// ── 单条 ──
+item, _ := list.SearchOne(func(si *pt.SearchItem) {
+    si.AddWhereN("Name", "iPhone 15")
+})
+```
+
+### SearchItem 支持的 Symbol
+
+| Symbol | SQL | 备注 |
+|--------|-----|------|
+| `""` / `"="` | `= value` | 默认等值 |
+| `"like"` | `LIKE '%value%'` | 模糊查询 |
+| `"left"` | `LIKE 'value%'` | 前缀 |
+| `"right"` | `LIKE '%value'` | 后缀 |
+| `"in"` | `IN (v1, v2)` | Value 传切片 |
+| `"notin"` | `NOT IN (...)` | |
+| `"between"` | `BETWEEN v1 AND v2` | Value 传 `[2]T` 或 `[]T` |
+| `"isnull"` | `IS NULL` | |
+| `"isnotnull"` | `IS NOT NULL` | |
+| `">"` `">="` `"<"` `"<="` `"!="` | 比较运算符 | |
 
 ---
 
@@ -774,12 +1027,28 @@ func main() {
 
 ## 17. 关键约定汇总
 
+### Model 层约定
+
+| 约定 | 说明 |
+|------|------|
+| **一个 model 文件 = 一张表** | 每个 Go 文件只定义一个结构体；该表的字段、关联、验证全部写在此文件 |
+| **自动建表，无需 migration** | `NewModelList[T](nil)` 首次使用时自动 `AutoMigrate`；新增字段重启即生效 |
+| **数据库可替换，代码零改动** | 默认 SQLite；改配置文件即切 MySQL；实现 `IDBName` 可按模型路由到不同库 |
+| **`NewModel()` 方法必须实现** | 供 `ModelList.NewItem()` 调用，负责初始化嵌入的 `*entity.Model` / `*entity.BaseModel` |
+| **`entity.BaseModel` 覆写 `GetHash()`** | 若实体无 `Code`，必须委托 `Model.GetHash()`（ID哈希）防止碰撞 |
+| **BaseOrderModel 不可删除** | `RemoveValid()` 已内置返回错误；单据类型永远用此基类 |
+| **BaseRecordModel 不可改不可删** | `UpdateValid/RemoveValid` 已内置返回错误；日志/流水永远用此基类 |
+| **写操作验证放在 Valid 方法** | `AddValid/UpdateValid/RemoveValid` 在 DB 操作前自动调用 |
+| **默认库名 "models"** | 所有模型默认存入 `models` DB；实现 `GetLocalDBName()` 可改为独立库 |
+| **外键关联用 gorm 标签** | `gorm:"foreignkey:XxxID"` 或 `gorm:"foreignkey:ID;references:XxxID"` |
+| **`IsPreload() bool`** | 返回 true 时查询自动预加载所有 gorm 关联字段 |
+
+### API 层约定
+
 | 约定 | 说明 |
 |------|------|
 | 每个 IRouter 自己管理字段 | `Parse` 直接绑定到 `own` 本身；不使用全局状态 |
 | `Validation` 返回 `nil` 才执行 `Do` | 所有参数校验放在 `Validation`，业务逻辑放在 `Do` |
-| `entity.BaseModel` 覆写 `GetHash()` | 若实体无 `Code`，必须委托 `Model.GetHash()`（ID哈希）防止碰撞 |
-| `NewModel()` 方法必须实现 | 供 `ModelList.NewItem()` 调用，初始化嵌入的 `*entity.Model` / `*entity.BaseModel` |
 | Manage 多层继承先调上层 | `ViewModel/ViewFieldModel/ViewCommandModel` 必须先调 `own.上层.Xxx(...)` |
 | `DoBefore` 返回 `stop=true` 中止执行 | `stop=true` 时框架不继续执行后续操作，只返回 `result/err` |
 | `SearchBefore` 返回 `stop=true` 跳过 DB | 适合内存缓存或全量本地数据源 |
