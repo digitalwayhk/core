@@ -6,13 +6,18 @@
 生成后端 API、管理服务、WebSocket 推送、MQ 事件流和集群配置。
 读完本文件即可独立生成符合框架规范的后端代码，无需额外询问。
 
-**模块路径：** `github.com/digitalwayhk/core`
+**模块路径：** `github.com/digitalwayhk/core`（通过 `go.mod` 引用，不是直接修改框架仓库）
 **Go 版本：** 1.21+
+
+> ⚠️ **核心原则：** 业务代码写在**你自己的仓库**里，通过 `go.mod` 引用框架。
+> 不要把业务逻辑代码写进 `github.com/digitalwayhk/core` 仓库，
+> 也不要使用 `replace github.com/digitalwayhk/core => ../core`（仅临时本地调试时允许）。
 
 ---
 
 ## 目录
 
+0. [快速开始（新项目接入）](#0-快速开始新项目接入)
 1. [框架核心概念](#1-框架核心概念)
 2. [实体 / 模型层](#2-实体--模型层)
 3. [Public API（无需登录）](#3-public-api无需登录)
@@ -37,6 +42,81 @@
     - 18.4 获取测试 Token（TestToken）
     - 18.5 直接调用 API
     - 18.6 ModelAttribute schema 类型说明
+
+---
+
+## 0. 快速开始（新项目接入）
+
+### 引用框架（go.mod）
+
+在你自己的仓库里通过 `go get` 引入：
+
+```sh
+go mod init github.com/yourorg/yourservice
+go get github.com/digitalwayhk/core@latest
+```
+
+`go.mod` 示例：
+
+```
+module github.com/yourorg/yourservice
+
+go 1.21
+
+require github.com/digitalwayhk/core v0.x.x
+```
+
+> **禁止做法：** 不要把业务代码写进 `github.com/digitalwayhk/core` 仓库；
+> 不要在 `go.mod` 里加 `replace github.com/digitalwayhk/core => ../core`（仅临时本地调试允许）。
+
+---
+
+### 推荐目录结构
+
+```
+yourservice/
+├── cmd/
+│   └── main.go              # 入口（见第 15 节）
+├── etc/
+│   └── {serviceName}.yaml   # 配置文件（见下方）
+├── models/                  # 数据模型；一个文件 = 一张表
+│   ├── product.go
+│   └── order.go
+├── api/
+│   ├── public/              # 无需登录的 API（见第 3 节）
+│   ├── private/             # 需要 JWT 的 API（见第 4 节）
+│   └── manage/              # 管理后台 API（见第 5 节）
+└── service.go               # 服务注册（见第 14 节）
+```
+
+---
+
+### 最简配置文件 `etc/{serviceName}.yaml`
+
+```yaml
+Name: myservice
+Host: 0.0.0.0
+Port: 18080
+```
+
+> 数据库默认 SQLite，首次启动自动建库建表，无需手动配置。
+> 切换 MySQL 只需在 yaml 中增加 DB 段，业务代码零改动。
+
+---
+
+### 启动并验证
+
+```sh
+go run ./cmd/main.go
+
+# TestToken 接口验证服务正常（见第 18.4 节）
+curl "http://localhost:18080/api/myservice/public/testtoken?userid=test&type=0"
+```
+
+正常返回：
+```json
+{ "success": true, "data": "eyJhbG...", "code": 200 }
+```
 
 ---
 
@@ -1054,6 +1134,8 @@ func main() {
 
 | 约定 | 说明 |
 |------|------|
+| **框架通过 go.mod 引用** | `go get github.com/digitalwayhk/core@latest`；业务代码写在自己仓库，不改框架代码 |
+| **配置文件** | `etc/{serviceName}.yaml`，最小只需 `Name / Host / Port`；数据库自动初始化 |
 | 每个 IRouter 自己管理字段 | `Parse` 直接绑定到 `own` 本身；不使用全局状态 |
 | `Validation` 返回 `nil` 才执行 `Do` | 所有参数校验放在 `Validation`，业务逻辑放在 `Do` |
 | Manage 多层继承先调上层 | `ViewModel/ViewFieldModel/ViewCommandModel` 必须先调 `own.上层.Xxx(...)` |
@@ -1285,10 +1367,17 @@ interface CommandAttribute {
 
 ---
 
-> **⚠️ 以下能力尚不成熟，暂不使用：**
-> - **WayPage 组件**（`src/components/WayPlus/WayPage`）：自动渲染完整 CRUD 页面，功能完整但集成规范待稳定。
-> - **JWT 前端拦截器**（`requestErrorConfig.ts`）：依赖 casdoor_token 的 localStorage 方案待完善。
+> **⚠️ 不要依赖 core 仓库内置前端集成：**
+>
+> 以下前端能力存在于 core 仓库的 `web/admin` 子模块中，尚不稳定，
+> 业务项目**不应依赖**这些组件或集成方式：
+>
+> - **WayPage 组件**（`src/components/WayPlus/WayPage`）：自动渲染完整 CRUD 页面，集成规范待稳定。
+> - **JWT 前端拦截器**（`requestErrorConfig.ts`）：依赖 `casdoor_token` 的 localStorage 方案待完善。
 > - **Umi 路由配置**（`config/routes.ts`）：动态菜单路由 `/main/:s/:c` 方案待稳定。
 > - **开发代理配置**（`config/proxy.ts`）：目标地址依项目而定，暂不作为通用示例。
 >
-> 当前推荐做法：使用 **TestToken + curl / fetch** 直接调用 API 验证后端逻辑（见 18.4、18.5）。
+> **推荐做法：**
+> - 后端验证：使用 **TestToken + curl / fetch** 直接调用 API（见 18.4、18.5）。
+> - 业务前端：自行实现 HTTP 请求（`axios` / `fetch`），按 18.1 解析 `ResultData` 响应格式；
+>   不要直接引用或依赖 core 仓库中的前端代码。
