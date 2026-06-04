@@ -91,16 +91,24 @@ yourservice/
 
 ---
 
-### 最简配置文件 `etc/{serviceName}.yaml`
+### 配置文件（自动生成）
 
-```yaml
-Name: myservice
-Host: 0.0.0.0
-Port: 18080
+**不需要预先创建任何配置文件。** 框架在首次启动时自动生成：
+
+- 文件路径：`etc/{serviceName}.json`（JSON 格式）
+- 默认端口：8080（第一个服务），之后每增加一个服务 +1
+- 首次运行后配置文件写入磁盘，后续修改该文件即可覆盖默认值
+
+```sh
+go run ./cmd/main.go
+# 首次运行后，etc/myservice.json 自动生成
 ```
 
-> 数据库默认 SQLite，首次启动自动建库建表，无需手动配置。
-> 切换 MySQL 只需在 yaml 中增加 DB 段，业务代码零改动。
+端口也可通过命令行参数临时覆盖（不影响已保存的配置文件）：
+
+```sh
+go run ./cmd/main.go -p 9090
+```
 
 ---
 
@@ -108,14 +116,10 @@ Port: 18080
 
 ```sh
 go run ./cmd/main.go
+# etc/myservice.json 首次运行时自动生成（默认端口 8080）
 
 # TestToken 接口验证服务正常（见第 18.4 节）
-curl "http://localhost:18080/api/myservice/public/testtoken?userid=test&type=0"
-```
-
-正常返回：
-```json
-{ "success": true, "data": "eyJhbG...", "code": 200 }
+curl "http://localhost:8080/api/myservice/public/testtoken?userid=test&type=0"
 ```
 
 ---
@@ -1092,7 +1096,7 @@ func main() {
 }
 ```
 
-默认配置文件：`etc/{serviceName}.yaml`（go-zero RestConf 格式）。
+默认端口 8080，配置文件 `etc/{serviceName}.json` 首次运行自动生成，无需预先创建。
 
 ---
 
@@ -1135,7 +1139,7 @@ func main() {
 | 约定 | 说明 |
 |------|------|
 | **框架通过 go.mod 引用** | `go get github.com/digitalwayhk/core@latest`；业务代码写在自己仓库，不改框架代码 |
-| **配置文件** | `etc/{serviceName}.yaml`，最小只需 `Name / Host / Port`；数据库自动初始化 |
+| **配置文件** | `etc/{serviceName}.json`（JSON），首次运行自动生成；无需预先创建 |
 | 每个 IRouter 自己管理字段 | `Parse` 直接绑定到 `own` 本身；不使用全局状态 |
 | `Validation` 返回 `nil` 才执行 `Do` | 所有参数校验放在 `Validation`，业务逻辑放在 `Do` |
 | Manage 多层继承先调上层 | `ViewModel/ViewFieldModel/ViewCommandModel` 必须先调 `own.上层.Xxx(...)` |
