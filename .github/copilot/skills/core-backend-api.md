@@ -31,6 +31,12 @@
 16. [路由路径规则](#16-路由路径规则)
 17. [关键约定汇总](#17-关键约定汇总)
 18. [前端调用 API（Web 集成）](#18-前端调用-apiweb-集成)
+    - 18.1 统一响应格式
+    - 18.2 URL 规则与三个核心请求
+    - 18.3 SearchItem 参数结构
+    - 18.4 获取测试 Token（TestToken）
+    - 18.5 直接调用 API
+    - 18.6 ModelAttribute schema 类型说明
 
 ---
 
@@ -1065,237 +1071,224 @@ func main() {
 ## 18. 前端调用 API（Web 集成）
 
 前端基于 **Umi + Ant Design Pro（React）**，框架提供了一套约定式的 API 调用机制。
-所有接口均为 `POST`，响应统一为 `ResultData` 结构。
+所有接口均为 `POST`（除 TestToken 为 `GET`），响应统一为 `ResultData` 结构。
 
 ### 18.1 统一响应格式
 
+所有后端接口（Public / Private / Manage）均返回同一结构：
+
 ```typescript
 interface ResultData {
-  success: boolean;    // true = 成功
-  code: number;        // 业务状态码
-  message: string;     // 错误描述
-  data: TableData | object;  // 业务数据
-  showtype: number;    // 前端展示方式（0=静默 1=warn 2=error 3=notification）
+  success: boolean;              // true = 成功
+  code: number;                  // 业务状态码
+  message: string;               // 错误描述（success=false 时有效）
+  data: TableData | object;      // 业务数据
+  showtype: number;              // 前端展示方式（0=静默 1=warn 2=error 3=notification）
   traceid: string;
   host: string;
 }
 
 interface TableData {
-  rows: any[];         // 数据行
-  total: number;       // 总记录数（用于分页）
+  rows: any[];    // 数据行（Search 结果）
+  total: number;  // 总记录数（用于分页）
 }
 ```
 
-### 18.2 三个核心请求函数（`request.ts`）
+### 18.2 URL 规则与三个核心请求
+
+**URL 规则：**
+```
+Public  API:  POST /api/{serviceName}/public/{structNameLower}
+Private API:  POST /api/{serviceName}/private/{structNameLower}
+Manage  View: POST /api/manage/{serviceName}/{controllerName}/view
+Manage  Srch: POST /api/manage/{serviceName}/{controllerName}/search
+Manage  Cmd:  POST /api/manage/{serviceName}/{controllerName}/{command}
+```
+
+`request.ts` 封装了三个函数（`c` 是 controller path，`m` 是命令名）：
 
 ```typescript
 import { init, search, execute } from '@/components/WayPlus/request';
 
-// 1. init — 获取 Manage Schema（字段、命令按钮、子模型）
+// 1. init — 获取 Manage schema（字段、命令按钮、子模型）
 //    POST /api/{c}/view
-await init({ c: 'manage/demo/ordermanage', s: 'demo' });
+const schema = await init({ c: 'manage/demo/ordermanage', s: 'demo' });
 
 // 2. search — 分页查询
 //    POST /api/{c}/search，body = SearchItem
-await search({ c: 'manage/demo/ordermanage', s: 'demo', item: searchItem });
+const result = await search({ c: 'manage/demo/ordermanage', s: 'demo', item: searchItem });
 
-// 3. execute — 执行命令（add/edit/remove/submit/release/自定义）
+// 3. execute — 执行命令（add / edit / remove / submit / release / 自定义）
 //    POST /api/{c}/{m}，body = 表单数据
-await execute({ c: 'manage/demo/ordermanage', m: 'add', s: 'demo', item: formData });
+const result = await execute({ c: 'manage/demo/ordermanage', m: 'add', s: 'demo', item: formData });
 ```
 
-**URL 组成规则：**
-- `c` = `manage/{serviceName}/{controllerName}` （全小写）
-- `m` = 命令名（`add` / `edit` / `remove` / `submit` / `release` / 自定义 Operation 名）
-- 完整 URL：`/api/{c}/{view|search|m}`
-
-### 18.3 SearchItem 前端参数结构
+### 18.3 SearchItem 参数结构
 
 ```typescript
 interface SearchItem {
-  page: number;        // 页码，从 1 开始
-  size: number;        // 每页条数，默认 10
+  page: number;          // 页码，从 1 开始
+  size: number;          // 每页条数，默认 10
   whereList?: SearchWhere[];
   sortList?: string[];
-  // 以下仅在外键/子表查询时使用
-  field?: WayFieldAttribute;
-  foreign?: ForeignAttribute;
-  parent?: any;
-  childmodel?: ChildModelAttribute;
 }
 
 interface SearchWhere {
-  name: string;    // 字段名（porpfield，Go 属性名）
-  symbol: string;  // 操作符：= / like / in / between / isnull / > / < 等
-  value: string;   // 查询值
+  name: string;    // 字段名（Go 属性名，与后端 SearchItem.AddWhereN 的字段名对应）
+  symbol: string;  // 操作符：= / like / in / between / isnull / > / >= / < / <= / !=
+  value: string;   // 查询值（数字也传字符串，后端自动转换）
 }
 
-// 示例：查询名称包含 "iPhone" 且价格 > 1000 的记录
+// 示例
 const item: SearchItem = {
   page: 1,
   size: 20,
   whereList: [
-    { name: 'Name',  symbol: 'like',  value: 'iPhone' },
-    { name: 'Price', symbol: '>',     value: '1000'   },
+    { name: 'Name',  symbol: 'like', value: 'iPhone' },
+    { name: 'Price', symbol: '>',    value: '1000'   },
   ],
   sortList: [],
 };
 ```
 
-### 18.4 认证（JWT Bearer Token）
+### 18.4 获取测试 Token（开发 / 调试用）
 
-前端请求拦截器自动从 `localStorage` 读取 token 并附加到 `Authorization` 头：
+框架内置 `TestToken` 接口，**无需登录即可获取 JWT**，专为开发调试设计。
 
-```typescript
-// requestErrorConfig.ts — 自动注入，无需手动处理
-const token = localStorage.getItem('casdoor_token');
-config.headers = { ...config.headers, Authorization: `Bearer ${token}` };
+```
+GET /api/{serviceName}/public/testtoken?userid={userId}&type={tokenType}
 ```
 
-401 响应时自动清除 token 并跳转 `/user/login`。
+| 参数 | 说明 |
+|------|------|
+| `userid` | 任意用户 ID 字符串（必填） |
+| `type` | `0` = 普通用户 token（用于 Private API）<br>`1` = 管理员 token（用于 Manage API）<br>`2` = 服务管理 token（用于 ServerManage API） |
 
-### 18.5 WayPage 组件（零配置 CRUD 页面）
+**示例（curl）：**
+```bash
+# 获取普通用户 token（用于调用 /private/ 接口）
+curl "http://localhost:18080/api/demo/public/testtoken?userid=user001&type=0"
 
-`WayPage` 是最核心的业务页面组件，自动渲染**工具栏（搜索+命令按钮）+ 数据表格 + 编辑表单**，
-完全由后端 `View` 接口返回的 schema 驱动，前端不需要手写表单字段。
-
-```typescript
-// src/pages/views/main.tsx — 框架内置的通用 Manage 页面
-import WayPage from '@/components/WayPlus/WayPage/index';
-import { init, search, execute } from '@/components/WayPlus/request';
-
-// URL: /main/:s/:c  例如 /main/demo/ordermanage
-const MainPage = () => {
-  const params = useParams<{ s: string; c: string }>();
-  const { s, c } = params;
-  const controllerPath = `manage/${s}/${c}`;
-
-  return (
-    <WayPage
-      controller={c}
-      service={s}
-      title="订单管理"
-      init={() => init({ c: controllerPath, s })}
-      search={(item) => search({ c: controllerPath, s, item })}
-      execute={(method, item) => execute({ c: controllerPath, m: method, s, item })}
-    />
-  );
-};
+# 获取管理员 token（用于调用 /manage/ 接口）
+curl "http://localhost:18080/api/demo/public/testtoken?userid=admin001&type=1"
 ```
 
-**WayPage 工作原理：**
-1. 挂载时调用 `init()` → `POST /api/manage/{s}/{c}/view` → 获取 `ModelAttribute` schema
-2. 若 `autoload=true` 自动触发 `search()` → `POST .../search`
-3. 用户点按钮（add/edit/remove/submit…）→ 调用 `execute(command, data)` → `POST .../{command}`
-4. 操作成功后自动刷新表格
-
-**WayPage Props：**
-
-| prop | 类型 | 说明 |
-|------|------|------|
-| `controller` | `string` | 控制器名称（小写，如 `ordermanage`） |
-| `service` | `string` | 服务名称（小写，如 `demo`） |
-| `title` | `string` | 页面标题 |
-| `init` | `() => Promise<ResultData>` | 初始化 schema 的函数 |
-| `search` | `(item: SearchItem) => Promise<ResultData>` | 分页查询函数 |
-| `execute` | `(cmd: string, item: any) => Promise<ResultData>` | 命令执行函数 |
-| `onCommandClick` | `(cmd: string) => void` | 拦截命令点击（自定义处理） |
-| `onExpandedRowTabPane` | `(childmodel, record) => ReactElement` | 行展开区域自定义渲染 |
-
-### 18.6 Umi 路由配置
-
-框架内置了通用管理页面路由，已覆盖所有 Manage 接口：
-
-```typescript
-// config/routes.ts — 已内置，所有 Manage 页面共用此路由
+**返回值**（`data` 字段即为 token 字符串）：
+```json
 {
-  name: 'main',
-  path: '/main/:s/:c',          // :s = 服务名, :c = 控制器名
-  component: './views/main',    // → WayPage 自动渲染
+  "success": true,
+  "data": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "code": 200
 }
 ```
 
-菜单由后端 `GET /api/servermanage/getmenu` 动态下发，前端自动生成侧边栏。
+**使用 token 调用 Private API：**
+```bash
+TOKEN=$(curl -s "http://localhost:18080/api/demo/public/testtoken?userid=user001&type=0" | jq -r .data)
 
-### 18.7 直接调用 Public / Private API
+curl -X POST "http://localhost:18080/api/demo/private/addorder" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"userid":"user001","amount":"100.00","tokenid":"1"}'
+```
 
-不通过 WayPage，直接请求后端 Public/Private 接口：
+**在 Go API handler 中读取 token 中的用户信息：**
+```go
+func (own *AddOrder) Do(req types.IRequest) (interface{}, error) {
+    uid, uname := req.GetUser()  // 从 JWT token 中提取 uid 和 uname
+    _ = uname
+    // uid 即 testtoken?userid= 传入的值
+    own.UserID = uid
+    // ...
+}
+```
+
+**⚠️ 注意：** `TestToken` 是注册在 `public` 包下的无鉴权接口，生产环境应通过网关/防火墙屏蔽该路径，或在正式上线前替换为真实的认证流程（Casdoor / Logto）。
+
+### 18.5 直接调用 API（无需 WayPage）
+
+任何 HTTP 客户端均可调用，以下示例使用 `fetch` / `axios`：
 
 ```typescript
-import { request } from 'umi';
-
 // Public API（无需 token）
-const result = await request('/api/demo/public/getorder', {
+const res = await fetch('/api/demo/public/getorder', {
   method: 'POST',
-  data: { id: '12345' },
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ id: '12345' }),
 });
+const result = await res.json();  // ResultData
 
-// Private API（requestInterceptors 自动附加 Bearer token）
-const result = await request('/api/demo/private/addorder', {
+// Private API（需要在 Authorization 头中传 Bearer token）
+const token = '/* 从 testtoken 接口获取 */';
+const res = await fetch('/api/demo/private/addorder', {
   method: 'POST',
-  data: { userid: 'u1', amount: '100.00', tokenid: '1' },
-});
-
-// 处理响应
-if (result.success) {
-  const data = result.data;   // 业务数据
-} else {
-  console.error(result.message);
-}
-```
-
-### 18.8 开发代理配置
-
-```typescript
-// config/proxy.ts — 开发环境代理，将 /api/* 转发到后端服务
-export default {
-  dev: {
-    '/api/': {
-      target: 'http://localhost:18080',  // 改为本地后端地址
-      changeOrigin: true,
-    },
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
   },
-};
+  body: JSON.stringify({ userid: 'user001', amount: '100.00', tokenid: '1' }),
+});
+
+// Manage Search
+const res = await fetch('/api/manage/demo/ordermanage/search', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${manageToken}`,   // type=1 的 token
+  },
+  body: JSON.stringify({ page: 1, size: 10, whereList: [], sortList: [] }),
+});
 ```
 
-### 18.9 ModelAttribute schema 类型说明
+### 18.6 ModelAttribute schema 类型说明
 
-后端 `View` 接口返回 `ModelAttribute`，它完整描述了表格、表单、命令按钮的元信息：
+后端 `View` 接口（`POST /api/manage/{s}/{c}/view`）返回 `ModelAttribute`，
+描述所有字段和命令按钮的元信息，用于动态渲染 UI：
 
 ```typescript
 interface ModelAttribute {
   name?: string;           // 控制器名称
   title?: string;          // 页面标题
   servicename?: string;    // 服务名
-  autoload?: boolean;      // true = 挂载后自动查询
-  viewtype?: string;       // 'form' = 以表单视图显示（单条记录）；默认表格视图
-  fields?: WayFieldAttribute[];      // 字段列表（驱动表格列和表单控件）
-  commands?: CommandAttribute[];     // 按钮列表（驱动工具栏）
-  childmodels?: ChildModelAttribute[]; // 子表（行展开显示）
+  autoload?: boolean;      // true = 进入页面自动查询
+  viewtype?: string;       // 'form' = 表单视图（单条记录）；默认表格+列表视图
+  fields?: WayFieldAttribute[];
+  commands?: CommandAttribute[];
+  childmodels?: ChildModelAttribute[];
 }
 
 interface WayFieldAttribute {
-  field: string;           // JSON 字段名（用于提交数据）
-  porpfield?: string;      // Go 属性名（用于查询 where）
-  title?: string;          // 列标题/表单标签
-  type?: string;           // 类型：string/int/int64/decimal/bool/date/datetime
-  visible?: boolean;       // 是否在表格中显示
+  field: string;           // JSON 字段名（提交数据时用）
+  porpfield?: string;      // Go 属性名（SearchWhere.name 使用此值）
+  title?: string;          // 列标题 / 表单标签
+  type?: string;           // string / int / int64 / decimal / bool / date / datetime
+  visible?: boolean;       // 是否在表格中显示列
   isedit?: boolean;        // 是否在表单中可编辑
   issearch?: boolean;      // 是否出现在搜索栏
-  required?: boolean;      // 表单必填校验
-  iskey?: boolean;         // 是否为主键（id）
-  comvtp?: ComboxAttribute;  // 下拉枚举（isvtp=true 时）
-  foreign?: ForeignAttribute;// 外键关联
+  required?: boolean;      // 表单必填
+  iskey?: boolean;         // 是否为主键（id 字段）
+  comvtp?: ComboxAttribute;   // 下拉枚举（isvtp=true 启用）
+  foreign?: ForeignAttribute; // 外键关联
 }
 
 interface CommandAttribute {
-  command: string;         // 命令名，对应后端路由（add/edit/remove/submit/release/自定义）
-  name: string;            // 显示名称
-  isselectrow?: boolean;   // true = 需要先选中一行才能点击
-  selectmultiple?: boolean;// true = 支持多选
-  isalert?: boolean;       // true = 执行前弹确认框
-  editshow?: boolean;      // true = 在编辑表单中显示（不在工具栏）
-  issplit?: boolean;       // true = 按钮分组（在下拉里）
-  splitname?: string;      // 分组按钮的父按钮名
+  command: string;          // 命令名 → 对应 execute() 的 m 参数
+  name: string;             // 显示名称
+  isselectrow?: boolean;    // true = 需先选中一行
+  selectmultiple?: boolean; // true = 支持多选
+  isalert?: boolean;        // true = 执行前弹确认框
+  editshow?: boolean;       // true = 在编辑表单内显示（不在工具栏）
+  issplit?: boolean;        // true = 按钮放入下拉分组
+  splitname?: string;       // 分组父按钮名称
 }
 ```
+
+---
+
+> **⚠️ 以下能力尚不成熟，暂不使用：**
+> - **WayPage 组件**（`src/components/WayPlus/WayPage`）：自动渲染完整 CRUD 页面，功能完整但集成规范待稳定。
+> - **JWT 前端拦截器**（`requestErrorConfig.ts`）：依赖 casdoor_token 的 localStorage 方案待完善。
+> - **Umi 路由配置**（`config/routes.ts`）：动态菜单路由 `/main/:s/:c` 方案待稳定。
+> - **开发代理配置**（`config/proxy.ts`）：目标地址依项目而定，暂不作为通用示例。
+>
+> 当前推荐做法：使用 **TestToken + curl / fetch** 直接调用 API 验证后端逻辑（见 18.4、18.5）。
