@@ -7,7 +7,7 @@
 读完本文件即可独立生成符合框架规范的后端代码，无需额外询问。
 
 **模块路径：** `github.com/digitalwayhk/core`（通过 `go.mod` 引用，不是直接修改框架仓库）
-**Go 版本：** 1.21+
+**Go 版本：** 1.26+
 
 > ⚠️ **核心原则：** 业务代码写在**你自己的仓库**里，通过 `go.mod` 引用框架。
 > 不要把业务逻辑代码写进 `github.com/digitalwayhk/core` 仓库，
@@ -61,9 +61,9 @@ go get github.com/digitalwayhk/core@latest
 ```
 module github.com/yourorg/yourservice
 
-go 1.21
+go 1.26
 
-require github.com/digitalwayhk/core v0.x.x
+require github.com/digitalwayhk/core v0.0.0
 ```
 
 > **禁止做法：** 不要把业务代码写进 `github.com/digitalwayhk/core` 仓库；
@@ -221,15 +221,19 @@ type IRouter interface {
 | `req.CallService(router, cb...)` | 同步/异步调用另一个服务的路由 |
 | `req.ServiceName()` | 当前服务名 |
 
-### API 类型（ApiType）
+### API 类型（ApiType）与实际 URL
 
-| 常量 | 路径前缀 | 鉴权 |
-|------|----------|------|
-| `types.PublicType` | `/api/{service}/public/...` | 无需登录 |
-| `types.PrivateType` | `/api/{service}/private/...` | 需要 JWT |
-| `types.ManageType` | `/api/{service}/manage/...` | 需要管理 JWT |
+| 常量 | 实际 URL 路径 | 鉴权 |
+|------|--------------|------|
+| `types.PublicType` | `/api/{serviceName}/{structNameLower}` | 无需登录 |
+| `types.PrivateType` | `/api/{serviceName}/{structNameLower}` | 需要 JWT |
+| `types.ManageType` | `/api/manage/{serviceName}/{controllerNameLower}/{opNameLower}` | 需要管理 JWT |
 
-类型由 **包目录名** 自动推断（`api/public/`→ PublicType，`api/private/`→ PrivateType，`api/manage/`→ ManageType）。
+> ⚠️ **URL 中没有 `/public/` 或 `/private/` 前缀。**  
+> 目录名（`api/public/`、`api/private/`）只用于推断 ApiType（决定是否需要 JWT），**不出现在实际路由路径中**。  
+> `ManageService` 的路由由框架统一挂载在 `/api/manage/...` 下。
+
+类型由 **包目录路径** 自动推断（`api/public/`→ PublicType，`api/private/`→ PrivateType，`api/manage/`→ ManageType）。
 
 ---
 
@@ -558,7 +562,11 @@ item, _ := list.SearchOne(func(si *pt.SearchItem) {
 ## 3. Public API（无需登录）
 
 **目录：** `api/public/`  
-**路径：** `/api/{service}/public/{structname}`（全小写结构名）
+**实际路径：** `/api/{serviceName}/{structNameLower}`（无 `/public/` 前缀）  
+**鉴权：** 无（`auth: false`）
+
+> 写完 handler 后，必须在 `api/release/routers.go` 的 `GetPublicRouters()` 中添加该路由，
+> `service.go` 才会注册它。
 
 ```go
 package public
@@ -620,7 +628,10 @@ func (own *CreateOrder) GetResponse() interface{} {
 ## 4. Private API（需要登录）
 
 **目录：** `api/private/`  
-路径和实现与 Public 相同，框架自动要求 JWT 鉴权。
+**实际路径：** `/api/{serviceName}/{structNameLower}`（与 Public 相同，无 `/private/` 前缀）  
+**鉴权：** 需要 Bearer JWT（`auth: true`）
+
+> 写完 handler 后，必须在 `api/release/routers.go` 的对应函数中添加该路由。
 
 ```go
 package private
@@ -661,6 +672,67 @@ func (own *AddOrder) RouterInfo() *types.RouterInfo {
 
 ---
 
+## 4.1 release/routers.go — 路由发布注册表
+
+**每个服务必须有 `api/release/routers.go`**，它是路由的"发布清单"。  
+框架只注册 `service.go` 的 `Routers()` 所返回的路由，  
+而 `Routers()` 通过调用 `release.GetPublicRouters()` / `release.GetManageRouters()` 等函数来收集路由。
+
+> **新增一个 handler 后，必须在此文件中添加，否则框架不会注册该路由。**
+
+```go
+// api/release/routers.go
+package release
+
+import (
+    "yourmodule/api/manage"
+    "yourmodule/api/private"
+    "yourmodule/api/public"
+    "github.com/digitalwayhk/core/pkg/server/types"
+)
+
+// GetPublicRouters 返回所有无需登录的路由（auth: false）
+// 路由路径格式：/api/{serviceName}/{structNameLower}
+func GetPublicRouters() []types.IRouter {
+    return []types.IRouter{
+        &public.Ping{},
+        &public.GetProducts{},
+        &public.PlaceOrder{},    // ← 新增时在此添加
+    }
+}
+
+// GetPrivateRouters 返回需要 JWT 的路由（auth: true）
+// 路由路径格式：/api/{serviceName}/{structNameLower}
+func GetPrivateRouters() []types.IRouter {
+    return []types.IRouter{
+        &private.AddOrder{},     // ← 新增时在此添加
+    }
+}
+
+// GetManageRouters 返回管理后台路由（auth: true，管理员 JWT）
+// 路由路径格式：/api/manage/{serviceName}/{controllerNameLower}/{op}
+func GetManageRouters() []types.IRouter {
+    routers := make([]types.IRouter, 0)
+    routers = append(routers, manage.NewProductManage().Routers()...)
+    routers = append(routers, manage.NewOrderManage().Routers()...)
+    return routers
+}
+```
+
+`service.go` 中的 `Routers()` 直接调用以上函数：
+
+```go
+func (own *MyService) Routers() []types.IRouter {
+    routers := make([]types.IRouter, 0)
+    routers = append(routers, release.GetPublicRouters()...)
+    routers = append(routers, release.GetPrivateRouters()...)
+    routers = append(routers, release.GetManageRouters()...)
+    return routers
+}
+```
+
+---
+
 ## 5. 标准 Manage 管理服务
 
 **目录：** `api/manage/`  
@@ -691,8 +763,8 @@ func (own *ProductManage) ViewModel(v *view.ViewModel) {
     v.AutoLoad = true
 }
 
-// 在 service.go 注册：
-// manage.NewProductManage().Routers()...
+// 在 api/release/routers.go 的 GetManageRouters() 中添加：
+// routers = append(routers, manage.NewProductManage().Routers()...)
 ```
 
 ### 自动生成的路由
@@ -1116,26 +1188,20 @@ package myservice
 
 import (
     "github.com/digitalwayhk/core/pkg/server/types"
-    "yourmodule/api/manage"
-    "yourmodule/api/private"
-    "yourmodule/api/public"
+    "yourmodule/api/release"
 )
 
 type MyService struct{}
 
 func (own *MyService) ServiceName() string { return "myservice" }
 
+// Routers 通过 release 包收集所有已发布的路由。
+// 新增 API 时，在 api/release/routers.go 对应函数中添加，不要直接修改此函数。
 func (own *MyService) Routers() []types.IRouter {
-    routers := []types.IRouter{
-        // Public
-        &public.Ping{},
-        &public.GetProducts{},
-        // Private
-        &private.AddOrder{},
-    }
-    // Manage（返回多个路由，用 ... 展开）
-    routers = append(routers, manage.NewProductManage().Routers()...)
-    routers = append(routers, manage.NewOrderManage().Routers()...)
+    routers := make([]types.IRouter, 0)
+    routers = append(routers, release.GetPublicRouters()...)
+    routers = append(routers, release.GetPrivateRouters()...)
+    routers = append(routers, release.GetManageRouters()...)
     return routers
 }
 
@@ -1174,17 +1240,43 @@ func main() {
 
 ## 16. 路由路径规则
 
+### Public / Private API
+
 ```
-/api/{serviceName}/{apiType}/{structNameLower}
+/api/{serviceName}/{structNameLower}
+```
+
+- 目录 `api/public/` 或 `api/private/` **只影响鉴权**，不影响 URL
+- 服务名取自 `ServiceName()` 返回值（全小写）
+- 结构名全小写，例如 `PlaceOrder` → `placeorder`
+
+示例：
+- `package public`，服务名 `trades`，结构 `PlaceOrder` → `POST /api/trades/placeorder`（auth: false）
+- `package private`，服务名 `trades`，结构 `AddOrder` → `POST /api/trades/addorder`（auth: true）
+
+### ManageService API
+
+```
+/api/manage/{serviceName}/{controllerNameLower}/{opNameLower}
 ```
 
 示例：
-- `package public`, 服务名 `demo`, 结构 `GetOrder` → `/api/demo/public/getorder`
-- `package private`, 服务名 `demo`, 结构 `AddOrder` → `/api/demo/private/addorder`
-- `ManageService[Product]` 中的 `Search` → `/api/demo/manage/productmanage/search`
-- 自定义 Operation `ExportData` → `/api/demo/manage/productmanage/exportdata`
+- `ProductManage`（服务名 `demo`）中的 `Search` → `POST /api/manage/demo/productmanage/search`
+- 自定义 Operation `ExportData` → `POST /api/manage/demo/productmanage/exportdata`
 
-**`router.DefaultRouterInfo(own)`** 会自动推断路径和 ApiType（依据包路径中 `public` / `private` / `manage` 关键字）。
+### 框架内置路由（servermanage）
+
+框架自动注册以下系统路由（不需要业务代码）：
+
+```
+GET  /api/{serviceName}/testtoken      # 获取测试 JWT
+GET  /api/health                       # 健康检查
+POST /api/servermanage/queryservice    # 服务发现
+POST /api/servermanage/queryrouters    # 路由查询
+...
+```
+
+**`router.DefaultRouterInfo(own)`** 自动推断路径和 ApiType（依据包路径中 `public` / `private` / `manage` 关键字）。
 
 ---
 
@@ -1223,6 +1315,8 @@ func main() {
 | go test 运行管理服务测试 | `go test ./service/manage/...` |
 | go build 验证编译 | `go build ./...` 无错误后再提交 |
 | gofmt 所有新增 Go 文件 | `gofmt -w 文件路径` |
+| **URL 无 `/public/` `/private/` 前缀** | 目录名只决定鉴权；实际 URL = `/api/{svc}/{structLower}` |
+| **新增 API 必须在 release/routers.go 注册** | `service.go` 通过调用 `release.GetPublicRouters()` 等函数收集路由；不在 release 中添加则不生效 |
 
 ---
 
@@ -1256,12 +1350,14 @@ interface TableData {
 
 **URL 规则：**
 ```
-Public  API:  POST /api/{serviceName}/public/{structNameLower}
-Private API:  POST /api/{serviceName}/private/{structNameLower}
+Public  API:  POST /api/{serviceName}/{structNameLower}
+Private API:  POST /api/{serviceName}/{structNameLower}   （需要 Authorization: Bearer token）
 Manage  View: POST /api/manage/{serviceName}/{controllerName}/view
 Manage  Srch: POST /api/manage/{serviceName}/{controllerName}/search
 Manage  Cmd:  POST /api/manage/{serviceName}/{controllerName}/{command}
 ```
+
+> ⚠️ Public 和 Private API 的 URL 格式相同；区别在于 Private 需要携带 Bearer token，框架通过路由的 PathType 来验证。
 
 `request.ts` 封装了三个函数（`c` 是 controller path，`m` 是命令名）：
 
