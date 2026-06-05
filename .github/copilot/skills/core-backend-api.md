@@ -22,6 +22,7 @@
 2. [实体 / 模型层](#2-实体--模型层)
 3. [Public API（无需登录）](#3-public-api无需登录)
 4. [Private API（需要登录）](#4-private-api需要登录)
+    - 4.1 [release/routers.go — 路由发布注册表](#41-releaseroutersgo--路由发布注册表)
 5. [标准 Manage 管理服务](#5-标准-manage-管理服务)
 6. [Manage Hook 扩展](#6-manage-hook-扩展)
 7. [高级 Manage 模式（AppManage + IDoBefore）](#7-高级-manage-模式appmanage--idobefore)
@@ -35,13 +36,14 @@
 15. [入口 main.go](#15-入口-maingo)
 16. [路由路径规则](#16-路由路径规则)
 17. [关键约定汇总](#17-关键约定汇总)
-18. [前端调用 API（Web 集成）](#18-前端调用-apiweb-集成)
-    - 18.1 统一响应格式
-    - 18.2 URL 规则与三个核心请求
-    - 18.3 SearchItem 参数结构
-    - 18.4 获取测试 Token（TestToken）
-    - 18.5 直接调用 API
-    - 18.6 ModelAttribute schema 类型说明
+18. [OpenAPI 文档接口](#18-openapi-文档接口)
+19. [前端调用 API（Web 集成）](#19-前端调用-apiweb-集成)
+    - 19.1 统一响应格式
+    - 19.2 URL 规则与三个核心请求
+    - 19.3 SearchItem 参数结构
+    - 19.4 获取测试 Token（TestToken）
+    - 19.5 直接调用 API
+    - 19.6 ModelAttribute schema 类型说明
 
 ---
 
@@ -142,7 +144,7 @@ internal/core/{serviceName}/
 │   ├── public/                  # 无需登录的 API（见第 3 节）
 │   ├── private/                 # 需要 JWT 的 API（见第 4 节）
 │   ├── manage/                  # 管理后台 API（见第 5 节）
-│   └── release/                 # 跨服务内部调用 API（ManageType，不对外暴露）
+│   └── release/                 # 发布API,供service.go调用
 ├── models/                      # 数据模型，一个文件 = 一张表（见第 2 节）
 │   ├── order.go
 │   └── market.go
@@ -1271,6 +1273,7 @@ func main() {
 ```
 GET  /api/{serviceName}/testtoken      # 获取测试 JWT
 GET  /api/health                       # 健康检查
+POST /api/servermanage/openapi         # OpenAPI 3.0 文档（见第 18 节）
 POST /api/servermanage/queryservice    # 服务发现
 POST /api/servermanage/queryrouters    # 路由查询
 ...
@@ -1320,7 +1323,109 @@ POST /api/servermanage/queryrouters    # 路由查询
 
 ---
 
-## 18. 前端调用 API（Web 集成）
+## 18. OpenAPI 文档接口
+
+框架内置 **OpenAPI 3.0.1** 文档生成器，服务启动后无需额外配置即可使用。
+
+### 访问地址
+
+```
+# 直接访问服务（本地开发）
+POST http://localhost:{port}/api/servermanage/openapi
+
+# 通过 nginx 网关访问（生产/测试环境）
+POST http://localhost/api/openapi
+```
+
+> 返回标准 OpenAPI 3.0.1 JSON，可直接导入 Swagger UI、Postman、Apifox 等工具。
+
+### 包含内容
+
+| 内容 | 说明 |
+|------|------|
+| **所有 Public 接口** | auth: false 的业务路由，完整请求/响应 schema |
+| **所有 Private 接口** | auth: true 的业务路由，自动标注 Bearer 安全要求 |
+| **服务分组（Tags）** | 每个服务名作为一个 Tag，多服务时分组清晰 |
+| **Server URL** | 每个服务的实际访问地址（含端口） |
+| **TestToken 提示** | Bearer scheme 的 description 中包含 TestToken 获取地址 |
+
+> ⚠️ **Manage 路由不包含在 OpenAPI 文档中**，仅 Public + Private 路由会被导出。
+
+### curl 示例
+
+```bash
+# 获取本地服务的 OpenAPI 文档
+curl -s -X POST http://localhost:8080/api/servermanage/openapi | jq .
+
+# 通过 nginx 获取（需要指定目标服务名，由网关路由）
+curl -s -X POST http://localhost/api/openapi | jq .
+```
+
+### 返回格式（OpenAPI 3.0.1）
+
+```json
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Open API",
+    "description": "Project API Document includ private and public",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "http://localhost:8080/" }
+  ],
+  "tags": [
+    { "name": "trades", "description": "http://localhost:8080/" }
+  ],
+  "paths": {
+    "/api/trades/placeorder": {
+      "post": {
+        "tags": ["trades"],
+        "summary": "PlaceOrder",
+        "operationId": "api_trades_placeorder",
+        "requestBody": { ... },
+        "responses": { ... }
+      }
+    },
+    "/api/trades/getorders": {
+      "get": {
+        "tags": ["trades"],
+        "summary": "GetOrders",
+        "parameters": [ ... ],
+        "security": [{ "Bearer": [] }]    // Private 路由自动加此字段
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Get TestToken from http://localhost:8080/api/servermanage/testtoken?userid=12345"
+      }
+    }
+  }
+}
+```
+
+### 与 Swagger UI 集成
+
+将 OpenAPI 端点 URL 填入 Swagger UI 的 `url` 参数即可实时预览：
+
+```html
+<!-- swagger-ui dist -->
+<script>
+  SwaggerUIBundle({
+    url: "http://localhost:8080/api/servermanage/openapi",
+    dom_id: '#swagger-ui',
+  })
+</script>
+```
+
+---
+
+## 19. 前端调用 API（Web 集成）
 
 前端基于 **Umi + Ant Design Pro（React）**，框架提供了一套约定式的 API 调用机制。
 所有接口均为 `POST`（除 TestToken 为 `GET`），响应统一为 `ResultData` 结构。
