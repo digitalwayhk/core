@@ -73,21 +73,93 @@ require github.com/digitalwayhk/core v0.x.x
 
 ### 推荐目录结构
 
+框架支持**单服务**和**多服务**两种项目布局，按需选择。
+
+---
+
+#### 单服务项目
+
+适用于功能单一、规模较小的项目：
+
 ```
 yourservice/
 ├── cmd/
-│   └── main.go              # 入口（见第 15 节）
-├── etc/
-│   └── {serviceName}.yaml   # 配置文件（见下方）
-├── models/                  # 数据模型；一个文件 = 一张表
-│   ├── product.go
-│   └── order.go
-├── api/
-│   ├── public/              # 无需登录的 API（见第 3 节）
-│   ├── private/             # 需要 JWT 的 API（见第 4 节）
-│   └── manage/              # 管理后台 API（见第 5 节）
-└── service.go               # 服务注册（见第 14 节）
+│   └── main.go                  # 服务入口（见第 15 节）
+├── deploy/
+│   ├── environments/
+│   │   ├── local/               # 本地开发环境配置
+│   │   ├── test/                # 测试环境配置
+│   │   └── prod/                # 生产环境配置
+│   └── docker/                  # Docker / docker-compose 文件
+├── internal/core/{serviceName}/ # 服务业务代码（见下方服务子目录说明）
+├── go.mod
+└── go.sum
 ```
+
+---
+
+#### 多服务项目（推荐，参考 futures 工程）
+
+适用于拆分多个业务领域的中大型项目，每个服务独立目录，共享 `internal/pkg`：
+
+```
+yourproject/
+├── cmd/                              # 各服务独立入口
+│   ├── {serviceA}/
+│   │   └── main.go                  # 单独启动 serviceA
+│   ├── {serviceB}/
+│   │   └── main.go                  # 单独启动 serviceB
+│   └── all-in-one/
+│       └── main.go                  # 合并启动所有服务（开发/单机部署用）
+├── deploy/                           # 部署相关
+│   ├── environments/
+│   │   ├── local/                   # 本地环境（etc/*.json 由框架自动生成）
+│   │   ├── test/                    # 测试环境
+│   │   └── prod/                    # 生产环境
+│   └── docker/                      # Dockerfile、docker-compose.yml
+├── internal/
+│   ├── core/                        # 各业务服务（一个目录 = 一个服务）
+│   │   ├── {serviceA}/              # 服务 A（见下方服务子目录说明）
+│   │   └── {serviceB}/              # 服务 B
+│   └── pkg/                         # 跨服务共享包
+│       ├── models/                  # 共享数据模型
+│       ├── services/                # 共享业务逻辑
+│       └── api/                     # 共享 API 工具（如公共按钮、vo 等）
+├── go.mod
+└── go.sum
+```
+
+---
+
+#### 服务子目录说明（`internal/core/{serviceName}/`）
+
+每个服务目录的内部结构统一如下：
+
+```
+internal/core/{serviceName}/
+├── service.go                   # 服务注册，实现 IService 接口（见第 14 节）
+├── api/
+│   ├── public/                  # 无需登录的 API（见第 3 节）
+│   ├── private/                 # 需要 JWT 的 API（见第 4 节）
+│   ├── manage/                  # 管理后台 API（见第 5 节）
+│   └── release/                 # 跨服务内部调用 API（ManageType，不对外暴露）
+├── models/                      # 数据模型，一个文件 = 一张表（见第 2 节）
+│   ├── order.go
+│   └── market.go
+├── services/                    # 业务逻辑层（供 api/ 和 task/ 调用）
+│   ├── trade/
+│   └── risk/
+├── task/                        # 定时任务 / 后台 Worker
+├── send/                        # WebSocket 推送 / 跨服务通知（见第 9–10 节）
+└── test/                        # 本服务的集成测试
+    └── api_test/                # API 层测试
+```
+
+> **注意：**
+> - `service.go` 放在服务根目录（不是 `internal/core/` 根目录）
+> - `models/` 可按领域建子目录（如 `models/orders/`、`models/markets/`），但每个 Go 文件只定义一个模型
+> - `task/` 对应框架的后台定时/消费逻辑，不是 Go test 文件
+> - `test/` 存放该服务的 Go test 文件；`api_test/` 下放 API 集成测试
 
 ---
 
