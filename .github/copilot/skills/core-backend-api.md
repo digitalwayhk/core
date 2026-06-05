@@ -37,13 +37,18 @@
 16. [路由路径规则](#16-路由路径规则)
 17. [关键约定汇总](#17-关键约定汇总)
 18. [OpenAPI 文档接口](#18-openapi-文档接口)
-19. [前端调用 API（Web 集成）](#19-前端调用-apiweb-集成)
-    - 19.1 统一响应格式
-    - 19.2 URL 规则与三个核心请求
-    - 19.3 SearchItem 参数结构
-    - 19.4 获取测试 Token（TestToken）
-    - 19.5 直接调用 API
-    - 19.6 ModelAttribute schema 类型说明
+19. [最佳实践：基础类型分层](#19-最佳实践基础类型分层)
+    - 19.1 三层继承结构
+    - 19.2 项目共享层 `internal/pkg/`
+    - 19.3 服务专属基础类型
+    - 19.4 何时修改哪一层
+20. [前端调用 API（Web 集成）](#20-前端调用-apiweb-集成)
+    - 20.1 统一响应格式
+    - 20.2 URL 规则与三个核心请求
+    - 20.3 SearchItem 参数结构
+    - 20.4 获取测试 Token（TestToken）
+    - 20.5 直接调用 API
+    - 20.6 ModelAttribute schema 类型说明
 
 ---
 
@@ -1425,12 +1430,394 @@ curl -s -X POST http://localhost/api/openapi | jq .
 
 ---
 
-## 19. 前端调用 API（Web 集成）
+## 19. 最佳实践：基础类型分层
+
+多服务项目中，**不要让各服务直接继承框架类型**。
+正确做法是建立三层继承结构，把公共行为封装在各层基础类型中，
+修改时只改一处即可传播到所有服务。
+
+---
+
+### 19.1 三层继承结构
+
+```
+框架层（github.com/digitalwayhk/core）
+  └── entity.Model / entity.BaseModel
+  └── manage.ManageService[T]
+  └── types.IRouter / types.IRequest
+
+项目共享层（internal/pkg/）           ← 所有服务公用
+  └── models/com_model.go   →  Com_Model（含全项目公共字段、DB 连接工厂）
+  └── api/com_api.go         →  ComApi（含公共 Parse/Validation 及工具方法）
+  └── services/com_manageservice.go → ManageService[T]（含公共 ViewFieldModel、DoBefore 分发）
+
+服务专属层（internal/core/{serviceName}/）  ← 仅该服务使用
+  └── models/{svc}_model.go  →  Svc_Model（设置该服务 DB 名、Model 缓存策略）
+  └── api/{svc}_api.go        →  SvcApi（含该服务公共请求字段如 MarketID）
+```
+
+**继承关系示意：**
+
+```
+entity.Model
+  └── Com_Model          (internal/pkg/models)
+        └── Tr_Model     (internal/core/trades/models)
+              └── Order  (业务模型)
+
+manage.ManageService[T]
+  └── ComManageService[T]   (internal/pkg/services)
+        └── OrderManage     (具体 Manage 控制器)
+
+ComApi                     (internal/pkg/api)
+  └── TrApi                (internal/core/trades/api)
+        └── PlaceOrder     (具体 handler)
+```
+
+---
+
+### 19.2 项目共享层 `internal/pkg/`
+
+#### `internal/pkg/models/com_model.go`
+
+所有服务模型的公共基类。集中定义：
+- 全项目公共字段（如 `TrackingID`）
+- 数据库连接工厂（从环境变量读 DSN，统一切换 MySQL）
+
+```go
+// internal/pkg/models/com_model.go
+package models
+
+import "github.com/digitalwayhk/core/pkg/persistence/entity"
+import persisttypes "github.com/digitalwayhk/core/pkg/persistence/types"
+
+// Com_Model 全项目基础模型。所有业务模型应从此派生。
+// 修改此处字段/行为，整个项目所有模型自动生效。
+type Com_Model struct {
+    *entity.Model
+    TrackingID string `json:"tracking_id"` // 请求追踪ID
+}
+
+func NewModel() *Com_Model {
+    return &Com_Model{Model: entity.NewModel()}
+}
+
+func (own *Com_Model) NewModel() {
+    if own.Model == nil {
+        own.Model = entity.NewModel()
+    }
+}
+
+// Com_ModelList 全项目公共 ModelList，封装连接获取逻辑
+type Com_ModelList[T persisttypes.IModel] struct {
+    *entity.ModelList[T]
+}
+
+func NewModelList[T persisttypes.IModel](action persisttypes.IDataAction) *Com_ModelList[T] {
+    return &Com_ModelList[T]{
+        ModelList: entity.NewModelList[T](action),
+    }
+}
+```
+
+#### `internal/pkg/api/com_api.go`
+
+所有服务 handler 的公共基类。集中定义：
+- 默认 `Parse/Validation/Do` 空实现（子类按需覆写）
+- 公共工具方法（如 `GetUintID` 从 query 解析 uint）
+
+```go
+// internal/pkg/api/com_api.go
+package api
+
+import (
+    "fmt"
+    "strconv"
+    "github.com/digitalwayhk/core/pkg/server/router"
+    "github.com/digitalwayhk/core/pkg/server/types"
+)
+
+// ComApi 全项目 handler 公共基类。
+// 提供默认空实现和公共工具方法；业务 handler 嵌入此类型后只需覆写需要的方法。
+type ComApi struct{}
+
+func (own *ComApi) Parse(req types.IRequest) error      { return nil }
+func (own *ComApi) Validation(req types.IRequest) error  { return nil }
+func (own *ComApi) Do(req types.IRequest) (interface{}, error) { return nil, nil }
+func (own *ComApi) RouterInfo() *types.RouterInfo {
+    return router.DefaultRouterInfo(own)
+}
+
+// GetUintID 从 query 参数读取 uint，支持 camelCase / snake_case 两种写法
+func (own *ComApi) GetUintID(req types.IRequest, key string) (uint, error) {
+    idStr := req.GetValue(key)
+    if idStr == "" {
+        return 0, nil
+    }
+    id, err := strconv.Atoi(idStr)
+    if err != nil {
+        return 0, fmt.Errorf("invalid %s: %s", key, idStr)
+    }
+    return uint(id), nil
+}
+```
+
+#### `internal/pkg/services/com_manageservice.go`
+
+所有服务 Manage 控制器的公共基类。集中定义：
+- 公共字段显示规则（隐藏 UpdatedUserID 等系统字段）
+- `IDoBefore[T]` 接口 + 自动分发逻辑
+- 默认只暴露 View + Search（写操作由子类追加）
+
+```go
+// internal/pkg/services/com_manageservice.go
+package services
+
+import (
+    persisttypes "github.com/digitalwayhk/core/pkg/persistence/types"
+    stypes "github.com/digitalwayhk/core/pkg/server/types"
+    "github.com/digitalwayhk/core/service/manage"
+    "github.com/digitalwayhk/core/service/manage/view"
+    "strings"
+)
+
+// IDoBefore 服务级钩子接口，供各 Manage 控制器实现。
+// 分发由 ManageService.DoBefore 自动完成，控制器只需实现对应方法。
+type IDoBefore[T persisttypes.IModel] interface {
+    AddBefore(add *manage.Add[T], req stypes.IRequest) (interface{}, error, bool)
+    EditBefore(edit *manage.Edit[T], req stypes.IRequest) (interface{}, error, bool)
+    RemoveBefore(remove *manage.Remove[T], req stypes.IRequest) (interface{}, error, bool)
+}
+
+// ManageService 全项目 Manage 公共基类，封装框架 manage.ManageService[T]。
+type ManageService[T persisttypes.IModel] struct {
+    *manage.ManageService[T]
+    instance interface{}
+    doBefore IDoBefore[T]
+}
+
+func NewManageService[T persisttypes.IModel](instance interface{}) *ManageService[T] {
+    own := &ManageService[T]{instance: instance}
+    own.ManageService = manage.NewManageService[T](instance)
+    if do, ok := instance.(IDoBefore[T]); ok {
+        own.doBefore = do
+    }
+    return own
+}
+
+// Routers 默认只暴露只读路由；写路由由子类 Routers() 追加
+func (own *ManageService[T]) Routers() []stypes.IRouter {
+    return []stypes.IRouter{own.View, own.Search}
+}
+
+// ViewModel 全项目默认设置
+func (own *ManageService[T]) ViewModel(v *view.ViewModel) {
+    v.AutoLoad = true
+}
+
+// ViewFieldModel 全项目公共字段规则（仅需在此改一次，所有 Manage 生效）
+func (own *ManageService[T]) ViewFieldModel(model interface{}, field *view.FieldModel) {
+    // 隐藏操作人系统字段
+    if field.IsFieldOrTitle("UpdatedUserName", "UpdatedUserID", "CreatedUserName", "CreatedUserID") {
+        field.Visible = false
+    }
+    // 时间字段统一展示
+    if field.IsFieldOrTitle("CreatedAt") {
+        field.Title = "创建时间"
+        field.Visible = true
+        field.Index = 800
+        field.IsSearch = true
+    }
+    // ID 后缀的外键字段默认隐藏
+    if strings.HasSuffix(field.Field, "id") {
+        field.Visible = false
+        field.IsEdit = false
+    }
+}
+
+// DoBefore 自动分发到 IDoBefore 具体方法
+func (own *ManageService[T]) DoBefore(sender interface{}, req stypes.IRequest) (interface{}, error, bool) {
+    if own.doBefore == nil {
+        return nil, nil, false
+    }
+    switch s := sender.(type) {
+    case *manage.Add[T]:    return own.doBefore.AddBefore(s, req)
+    case *manage.Edit[T]:   return own.doBefore.EditBefore(s, req)
+    case *manage.Remove[T]: return own.doBefore.RemoveBefore(s, req)
+    }
+    return nil, nil, false
+}
+```
+
+---
+
+### 19.3 服务专属基础类型
+
+每个服务在自己的目录下建立服务级基础类型，**嵌入项目共享层**，添加本服务独有的公共行为。
+
+#### `internal/core/{serviceName}/models/{svc}_model.go`
+
+```go
+// internal/core/trades/models/tr_model.go
+package models
+
+import (
+    commonmodels "yourproject/internal/pkg/models"
+    persisttypes "github.com/digitalwayhk/core/pkg/persistence/types"
+)
+
+// Tr_Model trades 服务基础模型。设置该服务专属的 DB 名称。
+// 所有 trades 业务模型应从此派生，而非直接从 Com_Model 派生。
+type Tr_Model struct {
+    *commonmodels.Com_Model
+}
+
+func NewTr_Model() *Tr_Model {
+    return &Tr_Model{Com_Model: commonmodels.NewModel()}
+}
+
+func (own *Tr_Model) NewModel() {
+    if own.Com_Model == nil {
+        own.Com_Model = commonmodels.NewModel()
+    }
+}
+
+// GetLocalDBName 该服务所有模型默认存入同一个本地 DB
+func (own *Tr_Model) GetLocalDBName() string { return "tr_trades" }
+
+// GetRemoteDBName 该服务所有模型默认存入同一个远程 DB
+func (own *Tr_Model) GetRemoteDBName() string { return "db_trades" }
+
+// Tr_ModelList 封装该服务的 ModelList，统一注入服务专属的 DB 连接
+type Tr_ModelList[T persisttypes.IModel] struct {
+    *commonmodels.Com_ModelList[T]
+}
+
+func NewTr_ModelList[T persisttypes.IModel]() *Tr_ModelList[T] {
+    return &Tr_ModelList[T]{
+        Com_ModelList: commonmodels.NewModelList[T](getTradesDBAction()),
+    }
+}
+
+// getTradesDBAction 从环境变量读取 trades 专属 MySQL DSN（降级到项目默认）
+func getTradesDBAction() persisttypes.IDataAction {
+    if action := commonmodels.GetMySQLDBByEnv("PROJ_MYSQL_DSN_TRADES"); action != nil {
+        return action
+    }
+    return commonmodels.ResolveMySQLAction() // 降级到全项目默认
+}
+```
+
+#### `internal/core/{serviceName}/api/{svc}_api.go`
+
+```go
+// internal/core/trades/api/tr_api.go
+package api
+
+import (
+    "fmt"
+    "net/http"
+    commonapi "yourproject/internal/pkg/api"
+    "github.com/digitalwayhk/core/pkg/server/router"
+    "github.com/digitalwayhk/core/pkg/server/types"
+)
+
+// TrApi trades 服务 handler 公共基类。
+// 所有 trades handler 应嵌入 TrApi，而非直接嵌入 ComApi。
+type TrApi struct {
+    commonapi.ComApi
+    MarketID uint `json:"marketId,string"` // trades 所有接口都需要市场ID
+}
+
+func (own *TrApi) Parse(req types.IRequest) error {
+    var err error
+    if own.MarketID, err = own.GetUintID(req, "marketId"); err != nil {
+        return err
+    }
+    return own.ComApi.Parse(req)
+}
+
+func (own *TrApi) Validation(req types.IRequest) error {
+    if own.MarketID == 0 {
+        return fmt.Errorf("marketId is required")
+    }
+    return nil
+}
+
+// RouterInfo 默认 GET，需要 POST 的 handler 单独覆写
+func (own *TrApi) RouterInfo() *types.RouterInfo {
+    info := router.DefaultRouterInfo(own)
+    info.Method = http.MethodGet
+    return info
+}
+```
+
+#### 业务 handler 使用服务基础类型
+
+```go
+// internal/core/trades/api/public/place_order.go
+package public
+
+import (
+    "yourproject/internal/core/trades/api"
+    "yourproject/internal/core/trades/models"
+    stypes "github.com/digitalwayhk/core/pkg/server/types"
+    "net/http"
+)
+
+type PlaceOrder struct {
+    api.TrApi                          // 嵌入服务基础类型（已含 MarketID 字段）
+    Price  string `json:"price"`
+    Amount string `json:"amount"`
+}
+
+func (own *PlaceOrder) Validation(req stypes.IRequest) error {
+    if err := own.TrApi.Validation(req); err != nil { // 先调父类验证 MarketID
+        return err
+    }
+    if own.Price == "" || own.Amount == "" {
+        return fmt.Errorf("price and amount required")
+    }
+    return nil
+}
+
+func (own *PlaceOrder) Do(req stypes.IRequest) (interface{}, error) {
+    list := models.NewTr_ModelList[Order]() // 使用服务级 ModelList（自动注入正确的 DB 连接）
+    // ... 业务逻辑
+    return order, nil
+}
+
+func (own *PlaceOrder) RouterInfo() *stypes.RouterInfo {
+    info := own.TrApi.RouterInfo()
+    info.Method = http.MethodPost // 覆写为 POST
+    return info
+}
+```
+
+---
+
+### 19.4 何时修改哪一层
+
+| 需求 | 修改位置 | 影响范围 |
+|------|----------|----------|
+| 全项目所有模型新增公共字段（如审计字段） | `internal/pkg/models/com_model.go` | 全部服务所有模型 |
+| 切换全项目默认数据库连接逻辑 | `internal/pkg/models/com_model.go` 的连接工厂 | 全部服务 |
+| Manage 列表统一隐藏/展示某字段 | `internal/pkg/services/com_manageservice.go` 的 `ViewFieldModel` | 全部服务所有 Manage 页 |
+| 全项目 handler 新增公共工具方法 | `internal/pkg/api/com_api.go` | 全部服务所有 handler |
+| 某服务所有模型切换 DB 名称 | `internal/core/{svc}/models/{svc}_model.go` 的 `GetLocalDBName` | 该服务所有模型 |
+| 某服务所有接口新增公共请求字段 | `internal/core/{svc}/api/{svc}_api.go` | 该服务所有 handler |
+| 某个具体接口的逻辑 | 具体 handler 文件 | 仅该接口 |
+
+> **原则：** 能在上层解决的问题不下放到下层，越靠近根的改动影响面越大，
+> 改之前确认所有继承方都适用该变更。
+
+---
+
+## 20. 前端调用 API（Web 集成）
 
 前端基于 **Umi + Ant Design Pro（React）**，框架提供了一套约定式的 API 调用机制。
 所有接口均为 `POST`（除 TestToken 为 `GET`），响应统一为 `ResultData` 结构。
 
-### 18.1 统一响应格式
+### 20.1 统一响应格式
 
 所有后端接口（Public / Private / Manage）均返回同一结构：
 
@@ -1451,7 +1838,7 @@ interface TableData {
 }
 ```
 
-### 18.2 URL 规则与三个核心请求
+### 20.2 URL 规则与三个核心请求
 
 **URL 规则：**
 ```
@@ -1482,7 +1869,7 @@ const result = await search({ c: 'manage/demo/ordermanage', s: 'demo', item: sea
 const result = await execute({ c: 'manage/demo/ordermanage', m: 'add', s: 'demo', item: formData });
 ```
 
-### 18.3 SearchItem 参数结构
+### 20.3 SearchItem 参数结构
 
 ```typescript
 interface SearchItem {
@@ -1510,7 +1897,7 @@ const item: SearchItem = {
 };
 ```
 
-### 18.4 获取测试 Token（开发 / 调试用）
+### 20.4 获取测试 Token（开发 / 调试用）
 
 框架内置 `TestToken` 接口，**无需登录即可获取 JWT**，专为开发调试设计。
 
@@ -1564,7 +1951,7 @@ func (own *AddOrder) Do(req types.IRequest) (interface{}, error) {
 
 **⚠️ 注意：** `TestToken` 是注册在 `public` 包下的无鉴权接口，生产环境应通过网关/防火墙屏蔽该路径，或在正式上线前替换为真实的认证流程（Casdoor / Logto）。
 
-### 18.5 直接调用 API（无需 WayPage）
+### 20.5 直接调用 API（无需 WayPage）
 
 任何 HTTP 客户端均可调用，以下示例使用 `fetch` / `axios`：
 
@@ -1599,7 +1986,7 @@ const res = await fetch('/api/manage/demo/ordermanage/search', {
 });
 ```
 
-### 18.6 ModelAttribute schema 类型说明
+### 20.6 ModelAttribute schema 类型说明
 
 后端 `View` 接口（`POST /api/manage/{s}/{c}/view`）返回 `ModelAttribute`，
 描述所有字段和命令按钮的元信息，用于动态渲染 UI：
