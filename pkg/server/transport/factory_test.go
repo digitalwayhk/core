@@ -38,14 +38,33 @@ func TestBuildSelector_EmptyConfig(t *testing.T) {
 	assert.Nil(t, sel)
 }
 
-// --- Unimplemented protocol tests (R3) ---
-
-func TestBuildSelector_QuicInternalReturnsError(t *testing.T) {
+// TestBuildSelector_QUICPrimary verifies that "quic" is now a fully registered
+// protocol and produces a valid selector.
+func TestBuildSelector_QUICPrimary(t *testing.T) {
 	sel, err := BuildSelector(config.TransportConfig{Internal: "quic"})
-	assert.Nil(t, sel)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "quic")
-	assert.Contains(t, err.Error(), "not implemented")
+	require.NoError(t, err)
+	require.NotNil(t, sel)
+
+	ds, ok := sel.(*DefaultSelector)
+	require.True(t, ok)
+	assert.Equal(t, "quic", ds.primary.Name())
+	assert.Empty(t, ds.fallback)
+}
+
+func TestBuildSelector_QUICFallback(t *testing.T) {
+	sel, err := BuildSelector(config.TransportConfig{
+		Internal: "grpc",
+		Fallback: []string{"quic", "http"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, sel)
+
+	ds, ok := sel.(*DefaultSelector)
+	require.True(t, ok)
+	assert.Equal(t, "grpc", ds.primary.Name())
+	require.Len(t, ds.fallback, 2)
+	assert.Equal(t, "quic", ds.fallback[0].Name())
+	assert.Equal(t, "http", ds.fallback[1].Name())
 }
 
 func TestBuildSelector_MQInternalReturnsError(t *testing.T) {
@@ -79,7 +98,7 @@ func TestBuildSelector_FallbackMQSkippedOrderPreserved(t *testing.T) {
 // error rather than (nil, nil).
 func TestBuildSelector_AllFallbackUnimplementedReturnsError(t *testing.T) {
 	sel, err := BuildSelector(config.TransportConfig{
-		Fallback: []string{"mq", "quic"},
+		Fallback: []string{"mq"},
 	})
 	assert.Nil(t, sel)
 	require.Error(t, err)

@@ -86,6 +86,62 @@ func TestMQManager_Publish_Delegates(t *testing.T) {
 	assert.Equal(t, [][]byte{[]byte("hello")}, p.published)
 }
 
+// --- MQManager transparent switching tests ---
+
+// TestMQManager_Publish_TransparentDoubleWrite verifies that when a BeginSwitch
+// is in progress, MQManager.Publish writes to both providers automatically —
+// callers do not need to know about the Switcher.
+func TestMQManager_Publish_TransparentDoubleWrite(t *testing.T) {
+	mgr := mq.NewManager()
+	oldP := &mockProvider{name: "redis-stream", healthy: true}
+	mgr.Register(oldP)
+	require.NoError(t, mgr.SetCurrent("redis-stream"))
+
+	newP := &mockProvider{name: "nats-jetstream", healthy: true}
+	require.NoError(t, mgr.BeginSwitch(context.Background(), newP, false))
+
+	require.NoError(t, mgr.Publish(context.Background(), "subj", []byte("msg"), nil))
+
+	// Both providers should have received the message.
+	assert.Len(t, oldP.published, 1)
+	assert.Len(t, newP.published, 1)
+}
+
+func TestMQManager_CompleteSwitch_SwitchesCurrentAndClearsState(t *testing.T) {
+	mgr := mq.NewManager()
+	oldP := &mockProvider{name: "redis-stream", healthy: true}
+	mgr.Register(oldP)
+	require.NoError(t, mgr.SetCurrent("redis-stream"))
+
+	newP := &mockProvider{name: "nats-jetstream", healthy: true}
+	require.NoError(t, mgr.BeginSwitch(context.Background(), newP, false))
+
+	ctx := context.Background()
+	require.NoError(t, mgr.CompleteSwitch(ctx, 0))
+
+	// After completion, new provider is active and switcher is cleared.
+	assert.Equal(t, "nats-jetstream", mgr.Current().Name())
+	assert.Nil(t, mgr.GetSwitcher())
+	// Old provider should have been closed.
+	assert.True(t, oldP.closed)
+}
+
+func TestMQManager_RollbackSwitch_RestoresOldProvider(t *testing.T) {
+	mgr := mq.NewManager()
+	oldP := &mockProvider{name: "redis-stream", healthy: true}
+	mgr.Register(oldP)
+	require.NoError(t, mgr.SetCurrent("redis-stream"))
+
+	newP := &mockProvider{name: "nats-jetstream", healthy: true}
+	require.NoError(t, mgr.BeginSwitch(context.Background(), newP, false))
+
+	require.NoError(t, mgr.RollbackSwitch())
+
+	assert.Equal(t, "redis-stream", mgr.Current().Name())
+	assert.True(t, newP.closed)
+	assert.Nil(t, mgr.GetSwitcher())
+}
+
 // --- MQSwitcher tests ---
 
 func TestMQSwitcher_DoubleWrite(t *testing.T) {

@@ -8,6 +8,7 @@ type TargetServer struct {
 	IP         string
 	HttpPort   int
 	SocketPort int
+	QUICPort   int
 }
 
 type PayLoad struct {
@@ -19,6 +20,7 @@ type PayLoad struct {
 	TargetAddress    string
 	TargetPort       int
 	TargetSocketPort int
+	TargetQUICPort   int
 	TargetService    string
 	SourcePath       string
 	TargetPath       string
