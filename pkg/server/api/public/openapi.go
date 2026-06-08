@@ -164,14 +164,62 @@ func getRequestBody(api interface{}, doc *openapi3.T) *openapi3.RequestBodyRef {
 	if len(schema.Value.Properties) == 0 {
 		return nil
 	}
-	//doc.Components.Schemas[utils.GetTypeName(api)] = schema
+	applyStructTags(api, schema.Value)
 	body := openapi3.NewRequestBody()
-
 	body.WithDescription(getTag(api))
 	body.WithJSONSchema(schema.Value)
 	body.WithRequired(true)
 	ref.Value = body
 	return ref
+}
+
+// applyStructTags enriches the generated OpenAPI schema with metadata from
+// struct field tags that openapi3gen does not handle natively:
+//
+//   - `example:"..."` sets the field's example value
+//   - `format:"..."` sets the field's format (e.g. "date-time", "uuid")
+//   - `required:"true"` adds the field name to the schema's required list
+func applyStructTags(api interface{}, schema *openapi3.Schema) {
+	if api == nil || schema == nil {
+		return
+	}
+	t := reflect.TypeOf(api)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Resolve the JSON property name.
+		jsonName := field.Tag.Get("json")
+		if jsonName == "" {
+			jsonName = field.Name
+		}
+		if idx := strings.Index(jsonName, ","); idx >= 0 {
+			jsonName = jsonName[:idx]
+		}
+		if jsonName == "-" || jsonName == "" {
+			continue
+		}
+
+		propRef, ok := schema.Properties[jsonName]
+		if !ok || propRef == nil || propRef.Value == nil {
+			continue
+		}
+
+		if ex := field.Tag.Get("example"); ex != "" {
+			propRef.Value.Example = ex
+		}
+		if fmtTag := field.Tag.Get("format"); fmtTag != "" {
+			propRef.Value.Format = fmtTag
+		}
+		if field.Tag.Get("required") == "true" {
+			schema.Required = append(schema.Required, jsonName)
+		}
+	}
 }
 func getTag(api interface{}) string {
 	desc := ""

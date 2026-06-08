@@ -44,7 +44,13 @@ func (own *Release[T]) Do(req types.IRequest) (interface{}, error) {
 	if id == 0 {
 		return nil, errors.New("id is 0")
 	}
-	if release, ok := own.instance.(IManageService); ok {
+
+	// Prefer the typed IReleaseHook[T] over the generic DoBefore.
+	if hook, ok := own.instance.(IReleaseHook[T]); ok {
+		if err := hook.OnRelease(own.Model, req); err != nil {
+			return nil, err
+		}
+	} else if release, ok := own.instance.(IManageService); ok {
 		data, err, stop := release.DoBefore(own, req)
 		if stop {
 			return data, err
@@ -53,6 +59,7 @@ func (own *Release[T]) Do(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
+
 	err := own.list.Update(own.Model)
 	if err != nil {
 		return nil, err

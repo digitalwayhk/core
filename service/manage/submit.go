@@ -47,7 +47,14 @@ func (own *Submit[T]) Do(req types.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if submit, ok := own.instance.(IManageService); ok {
+
+	// Prefer the typed ISubmitHook[T] over the generic DoBefore to avoid
+	// type assertions on sender inside the controller.
+	if hook, ok := own.instance.(ISubmitHook[T]); ok {
+		if err := hook.OnSubmit(model, req); err != nil {
+			return nil, err
+		}
+	} else if submit, ok := own.instance.(IManageService); ok {
 		data, err, stop := submit.DoBefore(own, req)
 		if stop {
 			return data, err
@@ -56,6 +63,7 @@ func (own *Submit[T]) Do(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
+
 	bm := getbaseModel(model)
 	if bm != nil {
 		if bm.State == 0 {

@@ -79,6 +79,18 @@ func (own *ServiceContext) EnableEventBridge() {
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
 }
 
+// NewEventPublisher returns an event.IPublisher scoped to the given MQ subject.
+// When an MQBridge is active (MQ mode=on/auto with event-stream usage), events
+// are delivered cross-node via the MQ provider.  Otherwise they are dispatched
+// in-process via the local Stream.  Returns nil if neither stream nor bridge
+// has been initialised (e.g. MQ mode=off and no explicit EnableEventBridge call).
+func (own *ServiceContext) NewEventPublisher(subject string) event.IPublisher {
+	if own.EventStream == nil && own.EventBridge == nil {
+		return nil
+	}
+	return event.NewPublisher(own.EventStream, own.EventBridge, subject)
+}
+
 // containsUsage reports whether usage slice contains the given value.
 func containsUsage(usage []string, value string) bool {
 	for _, u := range usage {
