@@ -2,7 +2,10 @@ package router_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -396,4 +399,104 @@ func TestNewServiceContextWithConfig_EventBridgeAutoInit(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for auto-init event bridge roundtrip")
 	}
+}
+
+// TestNewServiceContext_ReadConfigInitializesRuntimeSubsystems verifies the
+// production bootstrap path: NewServiceContext reads the persisted service
+// config and initialises cluster, transport, MQ/event-stream, and the
+// cross-node broker when the service is marked running.
+func TestNewServiceContext_ReadConfigInitializesRuntimeSubsystems(t *testing.T) {
+	const svcName = "sctest-readconfig-runtime"
+
+	mqpkg.RegisterProviderFactory("kafka", func(_ context.Context, _ *config.MQConfig) (mqpkg.MQProvider, error) {
+		return &syncMQProvider{}, nil
+	})
+
+	oldConfigDir := config.CONFIGDIRPATH
+	config.CONFIGDIRPATH = t.TempDir() + string(os.PathSeparator)
+	t.Cleanup(func() {
+		config.CONFIGDIRPATH = oldConfigDir
+	})
+
+	con := config.NewServiceDefaultConfig(svcName, 29983)
+	con.Cluster.Mode = "auto"
+	con.Cluster.Provider = "local"
+	con.Transport.Internal = "http"
+	con.Transport.Fallback = []string{"http"}
+	con.MQ.Mode = "on"
+	con.MQ.Provider = "kafka"
+	con.MQ.Usage = []string{"event-stream"}
+	con.MQ.Kafka.Brokers = []string{"local-test"}
+	con.ApplyDefaults()
+	require.NoError(t, con.Validate())
+
+	data := mustMarshalConfigForReadConfig(t, con)
+	require.NoError(t, os.WriteFile(filepath.Join(config.CONFIGDIRPATH, svcName+".json"), data, 0o600))
+
+	sc := router.NewServiceContext(&fakeService{svcName})
+	require.NotNil(t, sc)
+	require.NotNil(t, sc.ClusterProvider, "NewServiceContext should build ClusterProvider from file config")
+	require.NotNil(t, sc.TransportSelector, "NewServiceContext should build TransportSelector from file config")
+	require.NotNil(t, sc.MQManager, "NewServiceContext should build MQManager from file config")
+	require.NotNil(t, sc.EventStream, "NewServiceContext should create EventStream for event-stream usage")
+	require.NotNil(t, sc.EventBridge, "NewServiceContext should wire EventBridge for event-stream usage")
+
+	sc.SetRunState(true)
+	t.Cleanup(func() {
+		sc.SetRunState(false)
+	})
+	require.NotNil(t, sc.CrossNodeBroker, "SetRunState(true) should start CrossNodeNoticeBroker when ClusterProvider exists")
+	assert.NotNil(t, types.GetCrossNodeForwarder(), "cross-node forwarder should be globally registered while running")
+}
+
+func mustMarshalConfigForReadConfig(t *testing.T, con *config.ServerConfig) []byte {
+	t.Helper()
+	data, err := json.Marshal(con)
+	require.NoError(t, err)
+
+	var m map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &m))
+
+	setConfigString(m, con.Profiling.UploadRate.String(), "Profiling", "UploadRate")
+	setConfigString(m, con.Profiling.CheckInterval.String(), "Profiling", "CheckInterval")
+	setConfigString(m, con.Profiling.ProfilingDuration.String(), "Profiling", "ProfilingDuration")
+	setConfigString(m, con.Shutdown.WrapUpTime.String(), "Shutdown", "WrapUpTime")
+	setConfigString(m, con.Shutdown.WaitTime.String(), "Shutdown", "WaitTime")
+	setConfigString(m, fmt.Sprintf("%dh", int(con.Signature.Expiry/time.Hour)), "Signature", "Expiry")
+	setConfigValue(m, []interface{}{}, "Signature", "PrivateKeys")
+
+	setConfigString(m, con.Cluster.HeartbeatInterval.String(), "Cluster", "HeartbeatInterval")
+	setConfigString(m, con.Cluster.HeartbeatTimeout.String(), "Cluster", "HeartbeatTimeout")
+	setConfigString(m, con.Cluster.SuspectTimeout.String(), "Cluster", "SuspectTimeout")
+	setConfigString(m, con.Cluster.InstanceReuseCooldown.String(), "Cluster", "InstanceReuseCooldown")
+	setConfigString(m, con.Cluster.Providers.Etcd.TTL.String(), "Cluster", "Providers", "Etcd", "TTL")
+	setConfigString(m, con.Cluster.Providers.Consul.TTL.String(), "Cluster", "Providers", "Consul", "TTL")
+
+	setConfigString(m, con.MQ.RequestReply.Timeout.String(), "MQ", "RequestReply", "Timeout")
+	setConfigString(m, con.MQ.Retry.InitialDelay.String(), "MQ", "Retry", "InitialDelay")
+	setConfigString(m, con.MQ.Retry.MaxDelay.String(), "MQ", "Retry", "MaxDelay")
+	setConfigString(m, con.MQ.Switch.DualWriteDuration.String(), "MQ", "Switch", "DualWriteDuration")
+
+	data, err = json.Marshal(m)
+	require.NoError(t, err)
+	return data
+}
+
+func setConfigString(m map[string]interface{}, value string, path ...string) {
+	setConfigValue(m, value, path...)
+}
+
+func setConfigValue(m map[string]interface{}, value interface{}, path ...string) {
+	if len(path) == 0 {
+		return
+	}
+	cur := m
+	for _, key := range path[:len(path)-1] {
+		next, ok := cur[key].(map[string]interface{})
+		if !ok {
+			return
+		}
+		cur = next
+	}
+	cur[path[len(path)-1]] = value
 }

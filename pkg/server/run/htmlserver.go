@@ -84,7 +84,7 @@ func (own *HTMLServer) Start() {
 					http.Handle("/", http.FileServer(http.FS(op.Demo.File)))
 					isview = false
 				}
-				fmt.Printf(n + "的Demo服务已经启动,请访问 http://localhost" + pts + "/" + op.Demo.Pattern + " 查看\n")
+				fmt.Printf("%s的Demo服务已经启动,请访问 http://localhost%s/%s 查看\n", n, pts, op.Demo.Pattern)
 			}
 		}
 	}
@@ -95,7 +95,7 @@ func (own *HTMLServer) Start() {
 		// http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 	http.ServeFile(w, r, "dist/index.html")
 		// })
-		fmt.Printf("开发视图服务已经启动,请访问 http://localhost" + pts + " 查看\n")
+		fmt.Printf("开发视图服务已经启动,请访问 http://localhost%s 查看\n", pts)
 	}
 	fmt.Println("===========================================================")
 	http.ListenAndServe(":"+strconv.Itoa(own.Port), nil)

@@ -2,7 +2,6 @@ package socket
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -30,9 +29,9 @@ func echo(conn *net.TCPConn) {
 }
 
 func (own *Client) Connect() error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", own.IP, own.Port))
+	conn, err := net.Dial("tcp", net.JoinHostPort(own.IP, fmt.Sprint(own.Port)))
 	if err != nil {
-		return errors.New(fmt.Sprintf("conn server %s:%d failed, err:%v\n", own.IP, own.Port, err))
+		return fmt.Errorf("conn server %s:%d failed, err:%v", own.IP, own.Port, err)
 	}
 	own.conn = conn
 	return nil
@@ -41,16 +40,16 @@ func (own *Client) Connect() error {
 func (own *Client) Send(msg []byte) ([]byte, error) {
 	mbyte, err := EncodeBytes(msg)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("encode data failed, err:%v\n", err))
+		return nil, fmt.Errorf("encode data failed, err:%v", err)
 	}
 	_, err = own.conn.Write(mbyte)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("send data failed, err:%v\n", err))
+		return nil, fmt.Errorf("send data failed, err:%v", err)
 	}
 	reader := bufio.NewReader(own.conn)
 	recv, err := DecodeBytes(reader)
 	if err != nil {
-		logx.Error("client read from conn failed, err:%v\n", err)
+		logx.Errorf("client read from conn failed, err:%v", err)
 	}
 	return recv, nil
 }

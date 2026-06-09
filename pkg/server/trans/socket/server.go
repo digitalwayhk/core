@@ -41,7 +41,7 @@ func (own *Server) process(conn net.Conn) {
 		// 读取客户端发送的数据
 		recv, err := DecodeBytes(reader)
 		if err != nil {
-			logx.Error("process DecodeBytes from conn failed, err:%v\n", err)
+			logx.Errorf("process DecodeBytes from conn failed, err:%v", err)
 			continue
 		}
 		data := own.Receive(recv)
@@ -49,12 +49,12 @@ func (own *Server) process(conn net.Conn) {
 		// 将接受到的数据返回给客户端
 		wres, err := EncodeBytes(value)
 		if err != nil {
-			logx.Error("process EncodeBytes from conn failed, err:%v\n", err)
+			logx.Errorf("process EncodeBytes from conn failed, err:%v", err)
 			continue
 		}
 		_, err = conn.Write(wres)
 		if err != nil {
-			logx.Error("process write from conn failed, err:%v\n", err)
+			logx.Errorf("process write from conn failed, err:%v", err)
 			continue
 		}
 	}
@@ -94,9 +94,9 @@ func (own *Server) Stop() {
 }
 
 func (own *Server) tcpLisen() error {
-	listen, err := net.Listen("tcp", fmt.Sprintf("%s:%d", own.IP, own.Port))
+	listen, err := net.Listen("tcp", net.JoinHostPort(own.IP, fmt.Sprint(own.Port)))
 	if err != nil {
-		return errors.New(fmt.Sprintf("listen failed, err:%v\n", err))
+		return fmt.Errorf("listen failed, err:%v", err)
 	} else {
 		//fmt.Println("===========================================================")
 		fmt.Printf("Starting %s socket listen %s:%d success\n", own.Name, own.IP, own.Port)
@@ -107,7 +107,7 @@ func (own *Server) tcpLisen() error {
 			conn, err := own.listen.Accept()
 			//logx.Info(fmt.Sprintf("accept conn from %s:%d", conn.RemoteAddr().String(), own.Port))
 			if err != nil {
-				logx.Error("accept failed, err:%v\n", err)
+				logx.Errorf("accept failed, err:%v", err)
 				continue
 			}
 			// 启动一个单独的 goroutine 去处理连接
