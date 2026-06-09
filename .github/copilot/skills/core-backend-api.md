@@ -7,7 +7,7 @@
 读完本文件即可独立生成符合框架规范的后端代码，无需额外询问。
 
 **模块路径：** `github.com/digitalwayhk/core`
-**Go 版本：** 1.21+
+**Go 版本：** 1.26+
 
 ---
 
@@ -62,9 +62,9 @@ type IRouter interface {
 
 | 常量 | 路径前缀 | 鉴权 |
 |------|----------|------|
-| `types.PublicType` | `/api/{service}/public/...` | 无需登录 |
-| `types.PrivateType` | `/api/{service}/private/...` | 需要 JWT |
-| `types.ManageType` | `/api/{service}/manage/...` | 需要管理 JWT |
+| `types.PublicType` | `/api/{service}/{router}` | 无需登录 |
+| `types.PrivateType` | `/api/{service}/{router}` | 需要 JWT |
+| `types.ManageType` | `/api/manage/{service}/{manage}/{operation}` | 需要管理 JWT |
 
 类型由 **包目录名** 自动推断（`api/public/`→ PublicType，`api/private/`→ PrivateType，`api/manage/`→ ManageType）。
 
@@ -142,7 +142,7 @@ _ = list.Delete(item)       // 删除（软删除）
 ## 3. Public API（无需登录）
 
 **目录：** `api/public/`  
-**路径：** `/api/{service}/public/{structname}`（全小写结构名）
+**路径：** `/api/{service}/{structname}`（全小写结构名；URL 不包含 `public`）
 
 ```go
 package public
@@ -204,7 +204,7 @@ func (own *CreateOrder) GetResponse() interface{} {
 ## 4. Private API（需要登录）
 
 **目录：** `api/private/`  
-路径和实现与 Public 相同，框架自动要求 JWT 鉴权。
+路径和实现与 Public 相同，URL 不包含 `private`，框架自动要求 JWT 鉴权。
 
 ```go
 package private
@@ -283,7 +283,7 @@ func (own *ProductManage) ViewModel(v *view.ViewModel) {
 
 | 路由 | 路径（示例）| 说明 |
 |------|------------|------|
-| View | GET `/api/{svc}/manage/productmanage/view` | 获取页面 Schema |
+| View | GET `/api/manage/{svc}/productmanage/view` | 获取页面 Schema |
 | Search | POST `.../search` | 分页查询列表 |
 | Add | POST `.../add` | 新增 |
 | Edit | POST `.../edit` | 编辑 |
@@ -752,23 +752,23 @@ func main() {
 }
 ```
 
-默认配置文件：`etc/{serviceName}.yaml`（go-zero RestConf 格式）。
+默认配置文件：`etc/{serviceName}.json`（框架首次启动时自动生成）。
 
 ---
 
 ## 16. 路由路径规则
 
 ```
-/api/{serviceName}/{apiType}/{structNameLower}
+/api/{serviceName}/{structNameLower}
 ```
 
 示例：
-- `package public`, 服务名 `demo`, 结构 `GetOrder` → `/api/demo/public/getorder`
-- `package private`, 服务名 `demo`, 结构 `AddOrder` → `/api/demo/private/addorder`
-- `ManageService[Product]` 中的 `Search` → `/api/demo/manage/productmanage/search`
-- 自定义 Operation `ExportData` → `/api/demo/manage/productmanage/exportdata`
+- `package public`, 服务名 `demo`, 结构 `GetOrder` → `/api/demo/getorder`
+- `package private`, 服务名 `demo`, 结构 `AddOrder` → `/api/demo/addorder`
+- `ManageService[Product]` 中的 `Search` → `/api/manage/demo/productmanage/search`
+- 自定义 Operation `ExportData` → `/api/manage/demo/productmanage/exportdata`
 
-**`router.DefaultRouterInfo(own)`** 会自动推断路径和 ApiType（依据包路径中 `public` / `private` / `manage` 关键字）。
+**`router.DefaultRouterInfo(own)`** 会自动推断普通路由路径和 ApiType（依据包路径中 `public` / `private` / `manage` 关键字），但普通路由路径不包含 ApiType。标准 Manage CRUD 和自定义 Operation 使用 `manage.RouterInfo(own)`。
 
 ---
 

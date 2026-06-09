@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Digitalway Core"
+  short_description: "Build backend services with github.com/digitalwayhk/core patterns."
+  default_prompt: "Use this skill to implement, review, or explain a digitalwayhk/core service, router, model, manage CRUD endpoint, WebSocket observe, or framework example."
