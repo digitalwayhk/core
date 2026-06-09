@@ -34,8 +34,8 @@ import (
 
 // QUICTransport implements transport.Transport over QUIC streams.
 type QUICTransport struct {
-	clientTLS *tls.Config     // used when dialling peers
-	serverTLS *tls.Config     // used when listening (Start)
+	clientTLS *tls.Config // used when dialling peers
+	serverTLS *tls.Config // used when listening (Start)
 	quicConf  *quicgo.Config
 	listener  quicgo.Listener
 }
@@ -49,8 +49,7 @@ func New() *QUICTransport {
 			NextProtos:         []string{"core-quic"},
 		},
 		quicConf: &quicgo.Config{
-			MaxIdleTimeout:  30 * time.Second,
-			KeepAlive:       true,
+			MaxIdleTimeout: 30 * time.Second,
 		},
 	}
 }

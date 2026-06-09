@@ -28,7 +28,7 @@ func newNode(id, service string, dc, machine int64) *cluster.NodeInfo {
 
 // --- Registration ---
 
-func TestLocalProvider_RegisterAndList(t *testing.T) {
+func TestLocalProvider_RegisterAndList1(t *testing.T) {
 	p := newTestProvider()
 	defer p.Close()
 
