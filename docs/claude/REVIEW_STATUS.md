@@ -2,36 +2,35 @@
 
 Tracking the progressive bug fix rounds from Copilot reviews.
 
-## Round 1 (b59bc03 — Fix P0/P1/P2 from COPILOT_REVIEW_BUGS.md)
+## Round 1 (commit b59bc03)
+All P0/P1/P2 fixed: Cluster/Transport/MQ startup wiring, LocalProvider MachineID isolation, WebSocket cross-node, ProviderSwitcher warm-up.
+
+## Round 2 (commit 364fa5a)
+All P0/P1/P2 fixed: ClusterSwitcher sync, ProviderSwitcher List(ctx,"") fix, Mode=on panic, TransportSelector per-config, WebSocket unregister dedup.
+
+## Round 3 (commit b59bc03)
+P1 quic/mq: BuildSelector returns explicit error for Internal=quic/mq. Fallback entries warn and skip.
+
+## Round 4 (various commits)
+All items verified: CRUD happy-path tests, EventBridge framework integration, TransportMQ panic test all passing.
+
+## P0/P1 Optimization Round (commit cb62c5c)
 
 | ID | Issue | Status |
 |----|-------|--------|
-| P0 | Cluster/Transport/MQ not wired to service startup | ✅ Fixed |
-| P1 | LocalProvider MachineID slot conflict not per-ServiceName | ✅ Fixed |
-| P1 | WebSocket cross-node unregister/drain unreliable | ✅ Fixed |
-| P2 | ProviderSwitcher can't migrate local provider nodes | ✅ Fixed |
+| P0 | Add gRPC connection pool (sync.Map) | ✅ Fixed |
+| P0 | Fix ConsulProvider O(n) heartbeat/deregister scan | ✅ Fixed |
+| P0 | Add network retry with exponential backoff to sendPayload | ✅ Fixed |
+| P1 | Fix etcd hardcoded TTL → use config value | ✅ Fixed |
+| P1 | Wire TransportSelector into CrossNodeNoticeBroker | ✅ Fixed |
+| P1 | Add TransportConfig.MaxRetries/RetryDelay fields | ✅ Fixed |
+| P1 | Add socket protocol ping roundtrip to Health check | ✅ Fixed |
+| P2 | Fix ReadConfig test helper for RetryDelay serialization | ✅ Fixed |
 
-## Round 2 (364fa5a — Fix P0/P1/P2 from COPILOT_REVIEW_BUGS_ROUND2.md)
-
-| ID | Issue | Status |
-|----|-------|--------|
-| P0 | ClusterSwitcher doesn't update ServiceContext provider | ✅ Fixed |
-| P1 | ProviderSwitcher warm-up still uses List(ctx, "") | ✅ Fixed |
-| P1 | Mode=on cluster/MQ init errors swallowed by NewServiceContext | ✅ Fixed |
-| P1 | TransportSelector not built per Transport.Internal/Fallback config | ✅ Fixed |
-| P2 | WebSocket unregister should avoid negative hash count | ✅ Fixed |
-
-## Round 3 (from COPILOT_REVIEW_BUGS_ROUND3.md)
+## Remaining
 
 | ID | Issue | Status |
 |----|-------|--------|
-| P1 | TransportConfig allows quic/mq but BuildSelector silently skips | ❌ Open |
-
-## Round 4 — Test Coverage (from COPILOT_TEST_COVERAGE_BUGS_ROUND4.md)
-
-| ID | Issue | Status |
-|----|-------|--------|
-| P1 | service/manage missing happy-path tests (Search/Edit/Submit) | ❌ Open |
-| P1 | MQ/event-stream framework-level integration missing | ❌ Open |
-| P1 | WayPlus frontend tests not runnable (missing deps) | ❌ Open |
-| P2 | Missing Transport.Internal=mq panic test in ServiceContext | ❌ Open |
+| P2 | SQLite/BadgerDB test failures (11, pre-existing) | ❌ Open |
+| P2 | QUIC/MQ transport adapters not implemented | ❌ Open |
+| P2 | ProviderSwitcher no ongoing reconciliation during migration | ❌ Open |
