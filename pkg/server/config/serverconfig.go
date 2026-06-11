@@ -206,8 +206,9 @@ func ReadConfig(servicename string) *ServerConfig {
 	return con
 }
 
-// migrateConfig rewrites the config file in-place if any time.Duration field
-// is stored as a JSON number. This handles upgrades from older core versions.
+// migrateConfig rewrites the config file in-place to fix known format issues
+// from older core versions: numeric time.Duration fields, null slices that
+// should be empty arrays, etc. Migration errors are logged but non-fatal.
 func migrateConfig(file string) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
@@ -217,10 +218,9 @@ func migrateConfig(file string) {
 	if json.Unmarshal(raw, &m) != nil {
 		return
 	}
-	// Walk the map and convert int64/float64 values under known duration keys
-	// to their string equivalents.
-	needsRewrite := migrateDurations(m)
-	if !needsRewrite {
+
+	changed := migrateDurations(m) || migrateNullSlices(m)
+	if !changed {
 		return
 	}
 	out, err := json.Marshal(m)
@@ -228,6 +228,27 @@ func migrateConfig(file string) {
 		return
 	}
 	os.WriteFile(file, out, 0o666)
+}
+
+// migrateNullSlices converts nil JSON values to empty arrays for fields
+// whose Go types are slices that must not be nil (e.g. []string).
+func migrateNullSlices(m map[string]interface{}) bool {
+	changed := false
+	for _, key := range []string{"PrivateKeys", "Endpoints", "Brokers", "NameServers"} {
+		if v, ok := m[key]; ok && v == nil {
+			m[key] = []interface{}{}
+			changed = true
+		}
+	}
+	// Recurse into nested objects.
+	for _, v := range m {
+		if nested, ok := v.(map[string]interface{}); ok {
+			if migrateNullSlices(nested) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // migrateDurations walks a JSON map and converts numeric values at duration
@@ -298,7 +319,9 @@ func (own *ServerConfig) Save() error {
 
 	// Handle fields that need special treatment.
 	if own.Signature.PrivateKeys == nil {
-		m["PrivateKeys"] = []interface{}{}
+		if sig, ok := m["Signature"].(map[string]interface{}); ok {
+			sig["PrivateKeys"] = []interface{}{}
+		}
 	}
 	// Signature.Expiry is serialized as nanoseconds; convert to hours string.
 	if expH := int(own.Signature.Expiry / time.Hour); expH > 0 {
