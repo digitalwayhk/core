@@ -28,7 +28,7 @@ func TestClusterEtcd_RegisterAndList(t *testing.T) {
 	if os.Getenv("CORE_TEST_ETCD") == "" {
 		t.Skip("CORE_TEST_ETCD not set")
 	}
-	p, err := cluster.NewEtcdProvider(etcdEndpoints())
+	p, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer p.Close()
 
@@ -58,7 +58,7 @@ func TestClusterEtcd_SlotConflict(t *testing.T) {
 	if os.Getenv("CORE_TEST_ETCD") == "" {
 		t.Skip("CORE_TEST_ETCD not set")
 	}
-	p, err := cluster.NewEtcdProvider(etcdEndpoints())
+	p, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer p.Close()
 
@@ -94,7 +94,7 @@ func TestClusterEtcd_Heartbeat_KeepsAlive(t *testing.T) {
 	if os.Getenv("CORE_TEST_ETCD") == "" {
 		t.Skip("CORE_TEST_ETCD not set")
 	}
-	p, err := cluster.NewEtcdProvider(etcdEndpoints())
+	p, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer p.Close()
 
@@ -119,7 +119,7 @@ func TestClusterEtcd_Watch(t *testing.T) {
 	if os.Getenv("CORE_TEST_ETCD") == "" {
 		t.Skip("CORE_TEST_ETCD not set")
 	}
-	p, err := cluster.NewEtcdProvider(etcdEndpoints())
+	p, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer p.Close()
 
@@ -159,7 +159,7 @@ func TestClusterEtcd_AllocateMachineID(t *testing.T) {
 	if os.Getenv("CORE_TEST_ETCD") == "" {
 		t.Skip("CORE_TEST_ETCD not set")
 	}
-	p, err := cluster.NewEtcdProvider(etcdEndpoints())
+	p, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer p.Close()
 
@@ -212,7 +212,7 @@ func TestClusterEtcd_ProviderSwitcher(t *testing.T) {
 	switcher := cluster.NewClusterSwitcher(local, "switcher-svc")
 
 	// Begin migration to etcd.
-	etcdP, err := cluster.NewEtcdProvider(etcdEndpoints())
+	etcdP, err := cluster.NewEtcdProvider(etcdEndpoints(), 0)
 	require.NoError(t, err)
 	defer etcdP.Close()
 
