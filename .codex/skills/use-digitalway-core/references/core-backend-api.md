@@ -393,20 +393,20 @@ MQ is configured through EventBridge and MQ providers; it is not a direct transp
 Other systems can reference a pushed branch directly during development or testing:
 
 ```sh
-go get github.com/digitalwayhk/core@optimize/code-cleanup
+go get github.com/digitalwayhk/core@codex/optimize-code-cleanup
 ```
 
 Go resolves branch names to pseudo-versions in `go.mod`. Branch references move when new commits are pushed, so production systems should prefer a tag or exact commit:
 
 ```sh
-go get github.com/digitalwayhk/core@7118bb0
+go get github.com/digitalwayhk/core@841bb9c
 go get github.com/digitalwayhk/core@v0.0.247
 ```
 
 For scripts or CI that need the source tree directly, checkout the branch:
 
 ```sh
-git clone -b optimize/code-cleanup git@github.com:digitalwayhk/core.git
+git clone -b codex/optimize-code-cleanup git@github.com:digitalwayhk/core.git
 ```
 
 ## Validation Commands

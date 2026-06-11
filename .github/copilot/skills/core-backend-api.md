@@ -39,20 +39,20 @@
 开发或测试阶段，其他系统可以直接引用已推送分支：
 
 ```sh
-go get github.com/digitalwayhk/core@optimize/code-cleanup
+go get github.com/digitalwayhk/core@codex/optimize-code-cleanup
 ```
 
 Go 会把分支名解析成 `go.mod` 中的伪版本。分支会随后续 push 改变；生产环境更建议引用 tag 或具体 commit：
 
 ```sh
-go get github.com/digitalwayhk/core@7118bb0
+go get github.com/digitalwayhk/core@841bb9c
 go get github.com/digitalwayhk/core@v0.0.247
 ```
 
 CI 或脚本需要直接拉源码时可 checkout 分支：
 
 ```sh
-git clone -b optimize/code-cleanup git@github.com:digitalwayhk/core.git
+git clone -b codex/optimize-code-cleanup git@github.com:digitalwayhk/core.git
 ```
 
 ---
