@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	consulapi "github.com/hashicorp/consul/api"
@@ -21,7 +22,8 @@ const consulCheckDeregisterCritical = "30s"
 //	Tags: ["core-cluster", "<serviceName>"]
 //	Meta: JSON-encoded extra NodeInfo fields
 type ConsulProvider struct {
-	client *consulapi.Client
+	client       *consulapi.Client
+	nodeServices sync.Map // nodeID → serviceName mapping to avoid O(n) catalog scans
 }
 
 // NewConsulProvider creates a provider connected to the given Consul address.
@@ -83,6 +85,8 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 	if err := c.client.Agent().ServiceRegister(svc); err != nil {
 		return fmt.Errorf("consul: register service: %w", err)
 	}
+	// Cache nodeID→serviceName for O(1) lookup in Heartbeat/Deregister/Get.
+	c.nodeServices.Store(node.ID, node.ServiceName)
 	// Mark passing immediately.
 	checkID := "service:" + svc.ID
 	return c.client.Agent().UpdateTTL(checkID, "registered", consulapi.HealthPassing)
@@ -90,13 +94,14 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 
 // Deregister removes the node from Consul.
 func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
-	// We need the serviceName to build the service ID; scan registrations to find it.
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+	svcName := c.serviceNameForNode(nodeID)
+	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if e.Service.Meta["node_id"] == nodeID {
+			c.nodeServices.Delete(nodeID)
 			return c.client.Agent().ServiceDeregister(e.Service.ID)
 		}
 	}
@@ -105,7 +110,8 @@ func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
 
 // Heartbeat updates the TTL health check to passing.
 func (c *ConsulProvider) Heartbeat(ctx context.Context, nodeID string) error {
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+	svcName := c.serviceNameForNode(nodeID)
+	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
 	if err != nil {
 		return err
 	}
@@ -120,7 +126,8 @@ func (c *ConsulProvider) Heartbeat(ctx context.Context, nodeID string) error {
 
 // Get returns the NodeInfo for the given nodeID.
 func (c *ConsulProvider) Get(_ context.Context, nodeID string) (*NodeInfo, error) {
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+	svcName := c.serviceNameForNode(nodeID)
+	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +137,15 @@ func (c *ConsulProvider) Get(_ context.Context, nodeID string) (*NodeInfo, error
 		}
 	}
 	return nil, ErrNodeNotFound
+}
+
+// serviceNameForNode returns the cached serviceName for the given nodeID.
+// Falls back to "" (all services) if no cached entry exists.
+func (c *ConsulProvider) serviceNameForNode(nodeID string) string {
+	if v, ok := c.nodeServices.Load(nodeID); ok {
+		return v.(string)
+	}
+	return ""
 }
 
 // List returns nodes for the given service, optionally filtered by status.

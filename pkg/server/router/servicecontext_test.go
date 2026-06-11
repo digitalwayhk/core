@@ -469,6 +469,7 @@ func mustMarshalConfigForReadConfig(t *testing.T, con *config.ServerConfig) []by
 	setConfigString(m, con.Cluster.HeartbeatTimeout.String(), "Cluster", "HeartbeatTimeout")
 	setConfigString(m, con.Cluster.SuspectTimeout.String(), "Cluster", "SuspectTimeout")
 	setConfigString(m, con.Cluster.InstanceReuseCooldown.String(), "Cluster", "InstanceReuseCooldown")
+	setConfigString(m, con.Transport.RetryDelay.String(), "Transport", "RetryDelay")
 	setConfigString(m, con.Cluster.Providers.Etcd.TTL.String(), "Cluster", "Providers", "Etcd", "TTL")
 	setConfigString(m, con.Cluster.Providers.Consul.TTL.String(), "Cluster", "Providers", "Consul", "TTL")
 

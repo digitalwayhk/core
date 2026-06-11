@@ -19,7 +19,7 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 	case "", "local":
 		return sharedLocal, nil
 	case "etcd":
-		p, err := NewEtcdProvider(cfg.Providers.Etcd.Endpoints)
+		p, err := NewEtcdProvider(cfg.Providers.Etcd.Endpoints, cfg.Providers.Etcd.TTL)
 		if err != nil {
 			if cfg.Mode == "on" {
 				return nil, fmt.Errorf("cluster: etcd required but unavailable: %w", err)

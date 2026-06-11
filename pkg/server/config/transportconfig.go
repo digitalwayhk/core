@@ -1,15 +1,18 @@
 package config
 
 import "errors"
+import "time"
 
 // TransportConfig 内部传输配置。Internal 指定首选协议，Fallback 为降级顺序。
 type TransportConfig struct {
-	Internal string              `json:",optional"` // grpc | http | socket | quic | mq
-	Fallback []string            `json:",optional"`
-	HTTP     HTTPTransportConfig  `json:",optional"`
-	Socket   SocketTransportConfig `json:",optional"`
-	QUIC     QUICTransportConfig  `json:",optional"`
-	GRPC     GRPCTransportConfig  `json:",optional"`
+	Internal   string                `json:",optional"` // grpc | http | socket | quic | mq
+	Fallback   []string              `json:",optional"`
+	MaxRetries int           `json:",optional"` // 网络错误重试次数，0=不重试
+	RetryDelay time.Duration `json:",optional"` // 重试基础延迟，默认 100ms
+	HTTP       HTTPTransportConfig   `json:",optional"`
+	Socket     SocketTransportConfig `json:",optional"`
+	QUIC       QUICTransportConfig   `json:",optional"`
+	GRPC       GRPCTransportConfig   `json:",optional"`
 }
 
 // HTTPTransportConfig HTTP 传输配置。
@@ -53,6 +56,12 @@ func (t *TransportConfig) ApplyDefaults() {
 	}
 	if t.GRPC.MaxSendMsgSize == 0 {
 		t.GRPC.MaxSendMsgSize = 4 * 1024 * 1024
+	}
+	if t.MaxRetries == 0 && t.RetryDelay == 0 {
+		t.MaxRetries = 2
+	}
+	if t.RetryDelay == 0 {
+		t.RetryDelay = 100 * time.Millisecond
 	}
 	// 默认启用 HTTP（兼容现有调用路径）
 	if !t.HTTP.Enable && t.Internal == "" {

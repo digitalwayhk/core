@@ -121,6 +121,77 @@ func (b *blockingServer) Call(ctx context.Context, _ *pb.PayloadRequest) (*pb.Pa
 	return nil, ctx.Err()
 }
 
+func TestGRPCTransport_ConnectionPooling_ReusesConnections(t *testing.T) {
+	addr, stop := startTestServer(t, func(_ context.Context, payload *coretypes.PayLoad) ([]byte, error) {
+		return []byte("ok"), nil
+	})
+	defer stop()
+
+	tr := grpctransport.New(0, 0)
+
+	// Before any calls, pool should be empty.
+	assert.Equal(t, 0, tr.PooledConns(), "pool should start empty")
+
+	// First call — creates a new connection.
+	_, err := tr.Send(context.Background(), &coretypes.PayLoad{TraceID: "c1"}, addr)
+	require.NoError(t, err)
+	assert.Equal(t, 1, tr.PooledConns(), "pool should have 1 connection after first call")
+
+	// Second call to same target — must reuse the cached connection.
+	_, err = tr.Send(context.Background(), &coretypes.PayLoad{TraceID: "c2"}, addr)
+	require.NoError(t, err)
+	assert.Equal(t, 1, tr.PooledConns(), "pool should still have 1 connection after second call (reused)")
+
+	// Health check also reuses connections.
+	require.NoError(t, tr.Health(context.Background(), addr))
+	assert.Equal(t, 1, tr.PooledConns(), "Health check should reuse existing connection")
+}
+
+func TestGRPCTransport_ConnectionPooling_SeparateTargets(t *testing.T) {
+	addr1, stop1 := startTestServer(t, func(_ context.Context, _ *coretypes.PayLoad) ([]byte, error) {
+		return []byte("server1"), nil
+	})
+	defer stop1()
+	addr2, stop2 := startTestServer(t, func(_ context.Context, _ *coretypes.PayLoad) ([]byte, error) {
+		return []byte("server2"), nil
+	})
+	defer stop2()
+
+	tr := grpctransport.New(0, 0)
+
+	// Call two different targets.
+	_, err := tr.Send(context.Background(), &coretypes.PayLoad{}, addr1)
+	require.NoError(t, err)
+	_, err = tr.Send(context.Background(), &coretypes.PayLoad{}, addr2)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, tr.PooledConns(), "different targets should have separate connections")
+}
+
+func TestGRPCTransport_ConnectionPooling_CloseEvictsAll(t *testing.T) {
+	addr1, stop1 := startTestServer(t, func(_ context.Context, _ *coretypes.PayLoad) ([]byte, error) {
+		return []byte("ok"), nil
+	})
+	defer stop1()
+	addr2, stop2 := startTestServer(t, func(_ context.Context, _ *coretypes.PayLoad) ([]byte, error) {
+		return []byte("ok"), nil
+	})
+	defer stop2()
+
+	tr := grpctransport.New(0, 0)
+
+	// Populate pool with two connections.
+	_, err := tr.Send(context.Background(), &coretypes.PayLoad{}, addr1)
+	require.NoError(t, err)
+	_, err = tr.Send(context.Background(), &coretypes.PayLoad{}, addr2)
+	require.NoError(t, err)
+	assert.Equal(t, 2, tr.PooledConns())
+
+	// Stop should close and evict all pooled connections.
+	require.NoError(t, tr.Stop(context.Background()))
+	assert.Equal(t, 0, tr.PooledConns(), "Stop should evict all pooled connections")
+}
+
 func TestGRPCTransport_Timeout(t *testing.T) {
 	addr, stop := startRawGRPCServer(t)
 	defer stop()

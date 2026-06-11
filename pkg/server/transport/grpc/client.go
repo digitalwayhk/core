@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -16,6 +17,7 @@ import (
 type GRPCTransport struct {
 	maxRecvMsgSize int
 	maxSendMsgSize int
+	pool           sync.Map // map[string]*grpc.ClientConn
 }
 
 // New returns a GRPCTransport. If msgSize is 0 the default (4 MiB) is used.
@@ -33,7 +35,26 @@ func (g *GRPCTransport) Name() string { return "grpc" }
 
 func (g *GRPCTransport) Start(_ context.Context) error { return nil }
 
-func (g *GRPCTransport) Stop(_ context.Context) error { return nil }
+func (g *GRPCTransport) Stop(_ context.Context) error {
+	g.pool.Range(func(key, value interface{}) bool {
+		if cc, ok := value.(*grpc.ClientConn); ok {
+			cc.Close()
+		}
+		g.pool.Delete(key)
+		return true
+	})
+	return nil
+}
+
+// PooledConns returns the number of cached gRPC connections in the pool.
+func (g *GRPCTransport) PooledConns() int {
+	count := 0
+	g.pool.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
 
 // Supports returns true when the target looks like a gRPC address (host:port without http scheme).
 func (g *GRPCTransport) Supports(_ context.Context, _ *coretypes.PayLoad, target string) bool {
@@ -41,12 +62,12 @@ func (g *GRPCTransport) Supports(_ context.Context, _ *coretypes.PayLoad, target
 }
 
 // Send dials the target, invokes the Call RPC, and returns the raw response bytes.
+// Connections are pooled and reused across calls to the same target.
 func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, target string) ([]byte, error) {
-	cc, err := g.dial(target)
+	cc, err := g.getConn(target)
 	if err != nil {
 		return nil, err
 	}
-	defer cc.Close()
 	client := pb.NewCoreTransportClient(cc)
 	resp, err := client.Call(ctx, payloadToPB(payload))
 	if err != nil {
@@ -60,11 +81,10 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 
 // Health checks the target gRPC server by calling the Health RPC.
 func (g *GRPCTransport) Health(ctx context.Context, target string) error {
-	cc, err := g.dial(target)
+	cc, err := g.getConn(target)
 	if err != nil {
 		return err
 	}
-	defer cc.Close()
 	client := pb.NewCoreTransportClient(cc)
 	resp, err := client.Health(ctx, &pb.HealthRequest{})
 	if err != nil {
@@ -74,6 +94,25 @@ func (g *GRPCTransport) Health(ctx context.Context, target string) error {
 		return fmt.Errorf("grpc: target %s reports unhealthy: %s", target, resp.Message)
 	}
 	return nil
+}
+
+// getConn returns a pooled grpc.ClientConn for target, creating one if needed.
+func (g *GRPCTransport) getConn(target string) (*grpc.ClientConn, error) {
+	if cached, ok := g.pool.Load(target); ok {
+		return cached.(*grpc.ClientConn), nil
+	}
+	cc, err := g.dial(target)
+	if err != nil {
+		return nil, err
+	}
+	// Store only if not already cached by a concurrent caller; discard our copy
+	// if the race was lost to avoid leaking connections.
+	actual, loaded := g.pool.LoadOrStore(target, cc)
+	if loaded {
+		cc.Close()
+		return actual.(*grpc.ClientConn), nil
+	}
+	return cc, nil
 }
 
 func (g *GRPCTransport) dial(target string) (*grpc.ClientConn, error) {

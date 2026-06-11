@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,6 +19,13 @@ type forwardedNotice struct {
 	Hash      uint64          `json:"hash"`
 	Message   json.RawMessage `json:"message"`
 }
+
+// CrossNodeSender is an optional hook for sending cross-node HTTP requests.
+// When set on a CrossNodeNoticeBroker, it is used instead of the default
+// http.Client to deliver notices and subscription summaries. This allows
+// the caller to inject a transport-level retry/timeout/fallback layer
+// (e.g. TransportSelector) without importing the transport package.
+type CrossNodeSender func(ctx context.Context, target string, data []byte, path string) ([]byte, error)
 
 // subscriptionSummaryPayload is the JSON payload sent to peer nodes
 // when local subscription state changes.
@@ -41,6 +49,7 @@ type CrossNodeNoticeBroker struct {
 	serviceName string
 	localNodeID string
 	httpClient  *http.Client
+	sender      CrossNodeSender // optional transport-level sender (falls back to httpClient)
 
 	// peer subscription registry: routePath -> hash -> nodeID set
 	subMu sync.RWMutex
@@ -64,6 +73,14 @@ func NewCrossNodeNoticeBroker(provider DiscoveryProvider, serviceName, localNode
 		subs:        make(map[string]map[uint64]map[string]bool),
 		localSubs:   make(map[string]map[uint64]bool),
 	}
+}
+
+// SetSender configures an optional transport-level sender for cross-node
+// HTTP requests. When set, notices and subscription summaries are routed
+// through the sender (which may use gRPC, socket, or the configured transport
+// selector) instead of the default http.Client.
+func (b *CrossNodeNoticeBroker) SetSender(sender CrossNodeSender) {
+	b.sender = sender
 }
 
 // ForwardNotice implements types.ICrossNodeForwarder.
@@ -235,6 +252,19 @@ func (b *CrossNodeNoticeBroker) post(node *NodeInfo, path string, payload interf
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
+	target := node.Address + ":" + strconv.Itoa(node.Port)
+
+	// Try the transport-level sender first (e.g. configured gRPC/socket transport).
+	if b.sender != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if _, err := b.sender(ctx, target, data, path); err == nil {
+			return nil
+		}
+		// Fall through to direct HTTP on sender failure.
+		logx.Errorf("CrossNodeBroker: sender failed for %s, falling back to direct HTTP: %v", node.ID, err)
+	}
+
 	url := fmt.Sprintf("http://%s:%d%s", node.Address, node.Port, path)
 	resp, err := b.httpClient.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {

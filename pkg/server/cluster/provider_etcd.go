@@ -10,7 +10,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-const etcdTTL = 10 // lease TTL in seconds
+// DefaultEtcdTTL is the default lease TTL when no TTL is configured.
+const DefaultEtcdTTL = 10 * time.Second
 
 // EtcdProvider implements DiscoveryProvider using etcd v3.
 // Nodes are stored as JSON values under the key prefix:
@@ -20,12 +21,17 @@ type EtcdProvider struct {
 	client  *clientv3.Client
 	prefix  string
 	leases  map[string]clientv3.LeaseID
+	ttl     time.Duration // lease TTL from config
 }
 
 // NewEtcdProvider creates a provider connected to the given etcd endpoints.
-func NewEtcdProvider(endpoints []string) (*EtcdProvider, error) {
+// ttl is the lease TTL; if zero, DefaultEtcdTTL is used.
+func NewEtcdProvider(endpoints []string, ttl time.Duration) (*EtcdProvider, error) {
 	if len(endpoints) == 0 {
 		return nil, errors.New("etcd: no endpoints provided")
+	}
+	if ttl <= 0 {
+		ttl = DefaultEtcdTTL
 	}
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -38,6 +44,7 @@ func NewEtcdProvider(endpoints []string) (*EtcdProvider, error) {
 		client: cli,
 		prefix: "/core/cluster",
 		leases: make(map[string]clientv3.LeaseID),
+		ttl:    ttl,
 	}, nil
 }
 
@@ -63,7 +70,7 @@ func (e *EtcdProvider) Register(ctx context.Context, node *NodeInfo) error {
 	}
 
 	// Grant lease for TTL-based expiry.
-	lease, err := e.client.Grant(ctx, etcdTTL)
+	lease, err := e.client.Grant(ctx, int64(e.ttl.Seconds()))
 	if err != nil {
 		return fmt.Errorf("etcd: grant lease: %w", err)
 	}

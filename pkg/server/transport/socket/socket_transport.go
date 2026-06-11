@@ -47,17 +47,40 @@ func (s *SocketTransport) Send(_ context.Context, payload *coretypes.PayLoad, _ 
 	return sendRecv(conn, data)
 }
 
-// Health dials the socket port and closes immediately to verify reachability.
-func (s *SocketTransport) Health(_ context.Context, target string) error {
+// Health dials the socket port, sends a ping frame, and verifies the peer
+// responds with a valid frame. This confirms the target is actually running
+// the socket protocol, not just listening on a TCP port.
+func (s *SocketTransport) Health(ctx context.Context, target string) error {
 	host, port, err := parseHostPort(target)
 	if err != nil {
 		return err
 	}
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 3*time.Second)
+	dialer := net.Dialer{Timeout: 3 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return err
 	}
-	conn.Close()
+	defer conn.Close()
+
+	// Set a deadline for the ping roundtrip.
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		return err
+	}
+
+	// Send a minimal ping frame.
+	ping := []byte("ping")
+	encoded, err := encodeFrame(ping)
+	if err != nil {
+		return fmt.Errorf("socket: health encode: %w", err)
+	}
+	if _, err := conn.Write(encoded); err != nil {
+		return fmt.Errorf("socket: health write: %w", err)
+	}
+
+	// Read the response — any valid frame means the peer speaks the protocol.
+	if _, err := decodeFrame(bufio.NewReader(conn)); err != nil {
+		return fmt.Errorf("socket: health read: %w", err)
+	}
 	return nil
 }
 

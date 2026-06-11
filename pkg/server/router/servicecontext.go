@@ -402,6 +402,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 			own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
 				own.ClusterProvider, own.Service.Name, own.nodeID,
 			)
+			if own.TransportSelector != nil {
+				own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
+			}
 			types.SetCrossNodeForwarder(own.CrossNodeBroker)
 		}
 	} else {
@@ -488,6 +491,9 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 		own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
 			newProvider, own.Service.Name, nodeID,
 		)
+		if own.TransportSelector != nil {
+			own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
+		}
 		types.SetCrossNodeForwarder(own.CrossNodeBroker)
 	} else {
 		types.SetCrossNodeForwarder(nil)
@@ -768,7 +774,6 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
 			values, err := own.sendPayload(context.Background(), payload)
-			//TODO:网络错误，进入重试流程，超过重试次数，返回错误
 			if err != nil {
 				for _, ecb := range errcallback {
 					res.err = err
@@ -785,7 +790,6 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		}
 	} else {
 		values, err := own.sendPayload(context.Background(), payload)
-		//TODO:网络错误，应该进入重试流程，未实现
 		if err != nil {
 			logx.Errorf("CallService 网络错误 Payload:%s ,Error:%s", utils.PrintObj(payload), err.Error())
 			return nil, err
@@ -799,22 +803,70 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	return res, nil
 }
 
-// sendPayload dispatches a payload. When a TransportSelector is configured,
-// it is used for all payloads regardless of TargetAddress, allowing
-// service-discovery-resolved targets to be used by the selector.
+// sendPayload dispatches a payload with retry on network errors.
+// When a TransportSelector is configured, it is used for all payloads
+// regardless of TargetAddress, allowing service-discovery-resolved targets
+// to be used by the selector. On failure, the legacy HTTP path is tried.
 func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
-	if own.TransportSelector != nil {
-		target := payload.TargetAddress
-		if payload.TargetPort > 0 {
-			target = target + ":" + strconv.Itoa(payload.TargetPort)
-		}
-		result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
-		if err == nil {
-			return result, nil
-		}
-		logx.Errorf("transport selector failed (%v), falling back to HTTP CallService", err)
+	maxRetries := own.Config.Transport.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1 // at least one attempt
 	}
-	return own.Service.CallService(payload)
+	retryDelay := own.Config.Transport.RetryDelay
+	if retryDelay <= 0 {
+		retryDelay = 100 * time.Millisecond
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if own.TransportSelector != nil {
+			target := payload.TargetAddress
+			if payload.TargetPort > 0 {
+				target = target + ":" + strconv.Itoa(payload.TargetPort)
+			}
+			result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+			logx.Errorf("transport selector failed (%v), attempt %d/%d", err, attempt+1, maxRetries)
+		} else {
+			result, err := own.Service.CallService(payload)
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+			logx.Errorf("CallService failed (%v), attempt %d/%d", err, attempt+1, maxRetries)
+		}
+		// Exponential backoff: delay * 2^(attempt)
+		if attempt < maxRetries-1 && retryDelay > 0 {
+			sleepDuration := retryDelay * time.Duration(1<<attempt)
+			if sleepDuration > 5*time.Second {
+				sleepDuration = 5 * time.Second // cap at 5s
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(sleepDuration):
+			}
+		}
+	}
+	return nil, fmt.Errorf("sendPayload: all %d attempts failed, last error: %w", maxRetries, lastErr)
+}
+
+// makeCrossNodeSender creates a cross-node sender that routes through
+// the configured TransportSelector when available.
+func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
+	return func(ctx context.Context, target string, data []byte, path string) ([]byte, error) {
+		payload := &types.PayLoad{
+			TargetPath:   path,
+			Data:         data,
+			HttpMethod:   "POST",
+			Auth:         true,
+			SourceService: own.Service.Name,
+		}
+		return transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+	}
 }
 
 func initCluster(sc *ServiceContext) error {

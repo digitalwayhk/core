@@ -145,7 +145,7 @@ func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProv
 		p.Start()
 		return p, nil
 	case "etcd":
-		return cluster.NewEtcdProvider(endpoints)
+		return cluster.NewEtcdProvider(endpoints, 0)
 	case "consul":
 		addr := ""
 		if len(endpoints) > 0 {
