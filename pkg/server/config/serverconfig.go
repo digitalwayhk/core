@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -190,6 +191,11 @@ func ReadConfig(servicename string) *ServerConfig {
 	if !utils.IsExista(file) {
 		return nil
 	}
+
+	// Auto-migrate old config files whose time.Duration fields were serialized
+	// as int64 nanoseconds (e.g. 3000000000) instead of strings (e.g. "3s").
+	migrateConfig(file)
+
 	con := &ServerConfig{}
 	conf.MustLoad(file, con)
 	con.ApplyDefaults()
@@ -198,6 +204,67 @@ func ReadConfig(servicename string) *ServerConfig {
 	}
 	con.ReloadExternalConfigs()
 	return con
+}
+
+// migrateConfig rewrites the config file in-place if any time.Duration field
+// is stored as a JSON number. This handles upgrades from older core versions.
+func migrateConfig(file string) {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(raw, &m) != nil {
+		return
+	}
+	// Walk the map and convert int64/float64 values under known duration keys
+	// to their string equivalents.
+	needsRewrite := migrateDurations(m)
+	if !needsRewrite {
+		return
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	os.WriteFile(file, out, 0o666)
+}
+
+// migrateDurations walks a JSON map and converts numeric values at duration
+// keys to their string forms. Returns true if any conversion was done.
+func migrateDurations(m map[string]interface{}) bool {
+	changed := false
+	for k, v := range m {
+		switch v := v.(type) {
+		case float64:
+			if isDurationKey(k) {
+				dur := time.Duration(int64(v))
+				m[k] = dur.String()
+				changed = true
+			}
+		case map[string]interface{}:
+			if migrateDurations(v) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// isDurationKey returns true for JSON keys that are known time.Duration fields.
+// Keep in sync with all time.Duration fields across config structs.
+func isDurationKey(k string) bool {
+	switch k {
+	case
+		"UploadRate", "CheckInterval", "ProfilingDuration",
+		"WrapUpTime", "WaitTime",
+		"HeartbeatInterval", "HeartbeatTimeout", "SuspectTimeout",
+		"InstanceReuseCooldown", "TTL",
+		"RetryDelay", "InitialDelay", "MaxDelay",
+		"DualWriteDuration":
+		return true
+	}
+	return false
 }
 func (own *ServerConfig) Save() error {
 	if utils.IsTest() {
@@ -214,40 +281,90 @@ func (own *ServerConfig) Save() error {
 			panic(err)
 		}
 	}
+
+	// Marshal to a map so we can fix time.Duration fields before writing.
 	data, err := json.Marshal(own)
 	if err != nil {
 		return err
 	}
-	str := string(data)
-	expity := 1
-	if own.Signature.Expiry > 0 {
-		expity = int(own.Signature.Expiry / time.Hour)
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
 	}
-	//,\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}
-	// UploadRate is the duration for which profiling data is uploaded.
-	//UploadRate time.Duration `json:",default=15s"`
-	// CheckInterval is the interval to check if profiling should start.
-	//CheckInterval time.Duration `json:",default=10s"`
-	// ProfilingDuration is the duration for which profiling data is collected.
-	//ProfilingDuration time.Duration `json:",default=2m"`
-	str = strings.Replace(str, "\"UploadRate\":"+strconv.Itoa(int(own.Profiling.UploadRate)), "\"UploadRate\":\"15s\"", -1)
-	str = strings.Replace(str, "\"CheckInterval\":"+strconv.Itoa(int(own.Profiling.CheckInterval)), "\"CheckInterval\":\"10s\"", -1)
-	str = strings.Replace(str, "\"ProfilingDuration\":"+strconv.Itoa(int(own.Profiling.ProfilingDuration)), "\"ProfilingDuration\":\"2m\"", -1)
-	str = strings.Replace(str, "\"WrapUpTime\":"+strconv.Itoa(int(own.Shutdown.WrapUpTime)), "\"WrapUpTime\":\"1s\"", -1)
-	str = strings.Replace(str, "\"WaitTime\":"+strconv.Itoa(int(own.Shutdown.WaitTime)), "\"WaitTime\":\"5.5s\"", -1)
-	str = strings.Replace(str, "\"Expiry\":"+strconv.Itoa(int(own.Signature.Expiry)), "\"Expiry\":\""+strconv.Itoa(int(expity))+"h\"", -1)
-	if own.Signature.PrivateKeys == nil {
-		str = strings.Replace(str, "\"PrivateKeys\":null", "\"PrivateKeys\":[]", -1)
-	}
-	// if own.AttachServices == nil || len(own.AttachServices) == 0 {
-	// 	str = strings.Replace(str, "\"AttachServices\":null", "\"AttachServices\":[]", -1)
-	// }
 
-	err = os.WriteFile(file, utils.String2Bytes(str), 0777)
+	// Walk the config struct with reflection to find all time.Duration fields
+	// and convert them from int64 nanoseconds to their string form (e.g. "3s").
+	fixDurations(reflect.ValueOf(own).Elem(), m)
+
+	// Handle fields that need special treatment.
+	if own.Signature.PrivateKeys == nil {
+		m["PrivateKeys"] = []interface{}{}
+	}
+	// Signature.Expiry is serialized as nanoseconds; convert to hours string.
+	if expH := int(own.Signature.Expiry / time.Hour); expH > 0 {
+		if sig, ok := m["Signature"].(map[string]interface{}); ok {
+			sig["Expiry"] = strconv.Itoa(expH) + "h"
+		}
+	}
+
+	out, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return nil
+	return os.WriteFile(file, utils.String2Bytes(string(out)), 0o777)
+}
+
+// fixDurations walks v (a struct value) and replaces every time.Duration
+// field's entry in m with the duration's .String() form. Embedded structs
+// are flattened; named struct fields recurse with their json tag as key.
+func fixDurations(v reflect.Value, m map[string]interface{}) {
+	t := v.Type()
+	n := t.NumField()
+	for i := 0; i < n; i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		fv := v.Field(i)
+		ft := f.Type
+
+		// Determine the JSON key for this field.
+		jsonKey := f.Name
+		if tag := f.Tag.Get("json"); tag != "" {
+			if name := strings.Split(tag, ",")[0]; name != "" {
+				jsonKey = name
+			}
+		}
+
+		if ft == reflect.TypeOf(time.Duration(0)) {
+			// time.Duration → convert nanoseconds → string.
+			if fv.IsValid() {
+				dur := time.Duration(fv.Int())
+				if entry, ok := m[jsonKey]; ok {
+					// Only replace if the entry is a number (don't touch strings).
+					if _, isNum := entry.(float64); isNum {
+						m[jsonKey] = dur.String()
+					}
+				}
+			}
+			continue
+		}
+
+		// Handle pointer types — dereference if non-nil.
+		if ft.Kind() == reflect.Ptr && !fv.IsNil() {
+			fv = fv.Elem()
+			ft = fv.Type()
+		}
+
+		if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+			if f.Anonymous {
+				// Embedded struct — flatten its fields into the same map.
+				fixDurations(fv, m)
+			} else if nested, ok := m[jsonKey].(map[string]interface{}); ok {
+				fixDurations(fv, nested)
+			}
+		}
+	}
 }
 func (con *ServerConfig) SetAttachService(name string, address string, port, socketport int) {
 	if con.AttachServices == nil {
