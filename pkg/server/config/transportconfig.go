@@ -57,10 +57,10 @@ func (t *TransportConfig) ApplyDefaults() {
 	if t.GRPC.MaxSendMsgSize == 0 {
 		t.GRPC.MaxSendMsgSize = 4 * 1024 * 1024
 	}
-	if t.MaxRetries == 0 && t.RetryDelay == 0 {
+	if t.MaxRetries == 0 {
 		t.MaxRetries = 2
 	}
-	if t.RetryDelay == 0 {
+	if t.RetryDelay <= 0 {
 		t.RetryDelay = 100 * time.Millisecond
 	}
 	// 默认启用 HTTP（兼容现有调用路径）

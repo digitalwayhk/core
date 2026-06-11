@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"net"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
@@ -803,66 +804,71 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	return res, nil
 }
 
-// sendPayload dispatches a payload with retry on network errors.
-// When a TransportSelector is configured, it is used for all payloads
-// regardless of TargetAddress, allowing service-discovery-resolved targets
-// to be used by the selector. On failure, the legacy HTTP path is tried.
+// sendPayload dispatches a payload. When a TransportSelector is configured,
+// the transport chain is retried with exponential backoff; on exhaustion the
+// legacy HTTP path is tried once as a final fallback. Without a
+// TransportSelector, the legacy path is called exactly once (no retry) to
+// avoid duplicating non-idempotent operations.
 func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
-	maxRetries := own.Config.Transport.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 1 // at least one attempt
-	}
-	retryDelay := own.Config.Transport.RetryDelay
-	if retryDelay <= 0 {
-		retryDelay = 100 * time.Millisecond
-	}
+	if own.TransportSelector != nil {
+		target := payload.TargetAddress
+		if payload.TargetPort > 0 {
+			target = target + ":" + strconv.Itoa(payload.TargetPort)
+		}
+		maxRetries := own.Config.Transport.MaxRetries
+		if maxRetries <= 0 {
+			maxRetries = 1
+		}
+		retryDelay := own.Config.Transport.RetryDelay
 
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if own.TransportSelector != nil {
-			target := payload.TargetAddress
-			if payload.TargetPort > 0 {
-				target = target + ":" + strconv.Itoa(payload.TargetPort)
-			}
+		var lastErr error
+		for attempt := 0; attempt < maxRetries; attempt++ {
 			result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
 			if err == nil {
 				return result, nil
 			}
 			lastErr = err
-			logx.Errorf("transport selector failed (%v), attempt %d/%d", err, attempt+1, maxRetries)
-		} else {
-			result, err := own.Service.CallService(payload)
-			if err == nil {
-				return result, nil
-			}
-			lastErr = err
-			logx.Errorf("CallService failed (%v), attempt %d/%d", err, attempt+1, maxRetries)
-		}
-		// Exponential backoff: delay * 2^(attempt)
-		if attempt < maxRetries-1 && retryDelay > 0 {
-			sleepDuration := retryDelay * time.Duration(1<<attempt)
-			if sleepDuration > 5*time.Second {
-				sleepDuration = 5 * time.Second // cap at 5s
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(sleepDuration):
+			logx.Errorf("transport selector failed: %v (attempt %d/%d)", err, attempt+1, maxRetries)
+
+			if attempt < maxRetries-1 && retryDelay > 0 {
+				sleepDuration := retryDelay * time.Duration(1<<attempt)
+				if sleepDuration > 5*time.Second {
+					sleepDuration = 5 * time.Second
+				}
+				timer := time.NewTimer(sleepDuration)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, ctx.Err()
+				case <-timer.C:
+				}
 			}
 		}
+		// All transport retries exhausted; one-shot legacy HTTP fallback.
+		logx.Errorf("transport selector exhausted after %d attempts (last: %v), falling back to legacy HTTP", maxRetries, lastErr)
+		return own.Service.CallService(payload)
 	}
-	return nil, fmt.Errorf("sendPayload: all %d attempts failed, last error: %w", maxRetries, lastErr)
+	// No TransportSelector: one-shot legacy path, no retry.
+	return own.Service.CallService(payload)
 }
 
 // makeCrossNodeSender creates a cross-node sender that routes through
 // the configured TransportSelector when available.
 func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
 	return func(ctx context.Context, target string, data []byte, path string) ([]byte, error) {
+		host, portStr, err := net.SplitHostPort(target)
+		if err != nil {
+			host = target
+			portStr = "80"
+		}
+		port, _ := strconv.Atoi(portStr)
 		payload := &types.PayLoad{
-			TargetPath:   path,
-			Data:         data,
-			HttpMethod:   "POST",
-			Auth:         true,
+			TargetAddress: host,
+			TargetPort:    port,
+			TargetPath:    path,
+			Data:          data,
+			HttpMethod:    "POST",
+			Auth:          true,
 			SourceService: own.Service.Name,
 		}
 		return transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
