@@ -45,7 +45,7 @@ go get github.com/digitalwayhk/core@codex/optimize-code-cleanup
 Go 会把分支名解析成 `go.mod` 中的伪版本。分支会随后续 push 改变；生产环境更建议引用 tag 或具体 commit：
 
 ```sh
-go get github.com/digitalwayhk/core@71d9e11
+go get github.com/digitalwayhk/core@96d312d
 go get github.com/digitalwayhk/core@v0.0.247
 ```
 
