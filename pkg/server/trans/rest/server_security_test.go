@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"net/http"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,4 +26,10 @@ func TestNormalizeCorsOriginsPreservesExplicitOrigins(t *testing.T) {
 	origins := normalizeCorsOrigins([]string{" https://admin.example.com ", "", "*"})
 
 	require.Equal(t, []string{"https://admin.example.com", "*"}, origins)
+}
+
+func TestNewLogtoHandlerRejectsInvalidConfig(t *testing.T) {
+	_, err := newLogtoHandler(func(http.ResponseWriter, *http.Request) {}, config.LogtoConfig{})
+
+	require.ErrorContains(t, err, "issuer")
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/safe/logto"
@@ -43,7 +44,9 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	}
 	ser.IsCors = isCors
 	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
-	ser.register()
+	if err := ser.register(); err != nil {
+		return nil, err
+	}
 	return ser, nil
 }
 
@@ -100,14 +103,16 @@ func (own *Server) Stop() {
 	own.context.SetRunState(false)
 	own.Server.Stop()
 }
-func (own *Server) register() {
+func (own *Server) register() error {
 	routers := own.context.Router.GetRouters()
 	count := len(routers)
 	fmt.Println("===========================================================")
 	fmt.Printf("%s Register Service Routes Start. \n", own.context.Config.Name)
 	fmt.Println("Routes Count : " + strconv.Itoa(count))
 	for _, api := range routers {
-		handers(own, api)
+		if err := handers(own, api); err != nil {
+			return err
+		}
 	}
 	if own.IsWebSocket {
 		own.websocket()
@@ -115,16 +120,21 @@ func (own *Server) register() {
 	}
 	fmt.Printf("%s Register Service Routes End. \n", own.context.Config.Name)
 	fmt.Println("===========================================================")
+	return nil
 }
 
-func handers(own *Server, api *types.RouterInfo) {
+func handers(own *Server, api *types.RouterInfo) error {
 	opts := make([]rest.RouteOption, 0)
 	path := api.Path
 	handler := RouteHandler(own.context.Router)
 	if api.Auth {
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			if own.context.Config.ManageAuth.Logto.Enable {
-				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
+				authHandler, err := newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto)
+				if err != nil {
+					return fmt.Errorf("initialize manage Logto authentication: %w", err)
+				}
+				handler = authHandler.ServeHTTP
 			} else if own.context.Config.ManageAuth.CasDoor.Enable {
 				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
 			} else {
@@ -133,7 +143,11 @@ func handers(own *Server, api *types.RouterInfo) {
 
 		} else {
 			if own.context.Config.Auth.Logto.Enable {
-				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
+				authHandler, err := newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto)
+				if err != nil {
+					return fmt.Errorf("initialize Logto authentication: %w", err)
+				}
+				handler = authHandler.ServeHTTP
 			} else if own.context.Config.Auth.CasDoor.Enable {
 				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
 			} else {
@@ -150,10 +164,21 @@ func handers(own *Server, api *types.RouterInfo) {
 		},
 	}, opts...)
 	fmt.Printf("register auth: %t ,method: %s ,route: %s \n", api.Auth, api.Method, path)
+	return nil
 }
+
+func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
+	return logto.NewAuthHandler(next, logto.AuthConfig{
+		Issuer:           cfg.Issuer,
+		ExpectedAudience: cfg.ExpectedAudience,
+	})
+}
+
 func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 	for _, rou := range routers {
-		handers(own, rou)
+		if err := handers(own, rou); err != nil {
+			panic(err)
+		}
 	}
 }
 
