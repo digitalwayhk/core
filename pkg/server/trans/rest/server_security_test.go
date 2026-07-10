@@ -2,6 +2,7 @@ package rest
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -32,4 +33,29 @@ func TestNewLogtoHandlerRejectsInvalidConfig(t *testing.T) {
 	_, err := newLogtoHandler(func(http.ResponseWriter, *http.Request) {}, config.LogtoConfig{})
 
 	require.ErrorContains(t, err, "issuer")
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	handler := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	require.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, "no-referrer", recorder.Header().Get("Referrer-Policy"))
+	require.Equal(t, "DENY", recorder.Header().Get("X-Frame-Options"))
+}
+
+func TestSecurityHeadersPreserveExistingValues(t *testing.T) {
+	handler := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	recorder := httptest.NewRecorder()
+	recorder.Header().Set("Referrer-Policy", "same-origin")
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	require.Equal(t, "same-origin", recorder.Header().Get("Referrer-Policy"))
 }

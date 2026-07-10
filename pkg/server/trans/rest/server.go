@@ -155,6 +155,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 			}
 		}
 	}
+	handler = securityHeaders(http.HandlerFunc(handler)).ServeHTTP
 
 	own.Server.AddRoutes([]rest.Route{
 		{
@@ -172,6 +173,22 @@ func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handle
 		Issuer:           cfg.Issuer,
 		ExpectedAudience: cfg.ExpectedAudience,
 	})
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers := w.Header()
+		setHeaderIfEmpty(headers, "X-Content-Type-Options", "nosniff")
+		setHeaderIfEmpty(headers, "Referrer-Policy", "no-referrer")
+		setHeaderIfEmpty(headers, "X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setHeaderIfEmpty(headers http.Header, name, value string) {
+	if headers.Get(name) == "" {
+		headers.Set(name, value)
+	}
 }
 
 func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
@@ -301,7 +318,7 @@ func (own *Server) websocket() {
 	own.Server.AddRoute(rest.Route{
 		Method:  http.MethodGet,
 		Path:    "/ws",
-		Handler: websocketHandler(own.context),
+		Handler: securityHeaders(websocketHandler(own.context)).ServeHTTP,
 	}, opts...)
 }
 

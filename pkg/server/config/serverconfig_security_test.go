@@ -60,3 +60,14 @@ func TestServerConfigValidatesTrustedProxies(t *testing.T) {
 	cfg.TrustedProxies = []string{"not-an-ip"}
 	require.ErrorContains(t, cfg.Validate(), "TrustedProxies")
 }
+
+func TestServerConfigPreservesGoZeroLimits(t *testing.T) {
+	cfg := NewServiceDefaultConfig("limit-defaults", 18081)
+
+	require.Equal(t, int64(1<<20), cfg.MaxBytes)
+	require.Equal(t, 10000, cfg.MaxConns)
+	require.True(t, cfg.Middlewares.MaxBytes)
+	require.True(t, cfg.Middlewares.MaxConns)
+	require.True(t, cfg.Middlewares.Breaker)
+	require.True(t, cfg.Middlewares.Shedding)
+}
