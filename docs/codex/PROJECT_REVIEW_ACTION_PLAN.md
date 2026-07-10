@@ -80,7 +80,7 @@ Update this table after each task. A task is complete only when the command in `
 | 8. Global logging and exception audit | Not started |  | Runtime logs use `logx` structured events, carry trace context at request/cross-service boundaries, pass sensitive-data scans, and contain no unapproved console/fatal output |
 | 9. Architecture hardening backlog | Not started |  | Issues are either fixed or converted to tracked docs with file paths and test commands |
 | 10. README/docs and scenario usage guide | Not started |  | README, skill reference, and scenario guide agree on routes, models, maturity, logging, and reuse policy |
-| 11. Security baseline and authentication isolation | In progress (11.1-11.4 complete) | `a8f1c0d`, `804a2de`, `937d381`, `daa2c57`, `5e4bcd8` | Config files are `0600`, CORS is explicit, Logto policy is isolated, and auth/internal causes are hidden; trusted proxies and security headers remain |
+| 11. Security baseline and authentication isolation | In progress (11.1-11.5 complete) | `a8f1c0d`, `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d` | Config/CORS/auth/error/proxy boundaries are hardened and tested; security headers and go-zero limit evidence remain |
 | 12. Request isolation, global state, and lifecycle | Not started |  | Request/race/lifecycle tests pass with idempotent shutdown and no known leaked workers |
 | 13. Persistence correctness and external-test separation | Not started |  | Persistence unit tests pass without external services; Docker-backed database suites pass when enabled |
 | 14. Configuration-to-runtime capability contract | Not started |  | Every accepted MQ/cluster/transport field has a runtime consumer and behavior test or is rejected |

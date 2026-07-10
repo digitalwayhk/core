@@ -200,6 +200,8 @@ git commit -m "fix: hide authentication error details"
 
 ## Task 11.5: Trusted Proxy Client IP Resolution
 
+**Status:** Completed in `503a01d`.
+
 **Files:**
 - Create: `pkg/utils/ip_test.go`
 - Modify: `pkg/utils/ip.go`
@@ -208,25 +210,25 @@ git commit -m "fix: hide authentication error details"
 - Modify: `pkg/server/trans/rest/server.go`
 - Modify: `pkg/server/run/htmlserver.go`
 
-- [ ] **Step 1: Write failing trust tests**
+- [x] **Step 1: Write failing trust tests**
 
-Define `ClientPublicIP(r *http.Request, trustedProxies ...string) string`. Test that forwarding headers are ignored for an untrusted `RemoteAddr`, honored for a trusted exact IP or CIDR, the first valid forwarded IP is selected, malformed entries are skipped, and direct IPv4/IPv6 addresses are returned correctly.
+Define `ClientPublicIP(r *http.Request, trustedProxies ...string) string`. Test that forwarding headers are ignored for an untrusted `RemoteAddr`, honored for a trusted exact IP or CIDR, malformed entries are skipped, and direct IPv4/IPv6 addresses are returned correctly. For a forwarded chain, walk right-to-left, remove trusted proxy hops, and return the first untrusted address so a client-controlled leftmost value cannot override the address appended by a trusted proxy.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./pkg/utils -run TestClientPublicIP -count=1`
 
 Expected: FAIL because forwarding headers are currently trusted unconditionally.
 
-- [ ] **Step 3: Implement netip-based trust evaluation**
+- [x] **Step 3: Implement netip-based trust evaluation**
 
-Parse `RemoteAddr` with `net.SplitHostPort` and `netip.ParseAddr`; parse each configured proxy as an address or prefix. Only inspect `X-Forwarded-For` and `X-Real-IP` when the direct peer matches a configured trusted proxy. With no trusted proxy configuration, return the direct peer.
+Parse `RemoteAddr` with `net.SplitHostPort` and `netip.ParseAddr`; parse each configured proxy as an address or prefix. Only inspect `X-Forwarded-For` and `X-Real-IP` when the direct peer matches a configured trusted proxy. Walk `X-Forwarded-For` from right to left and return the first address outside the trusted set. With no trusted proxy configuration, return the direct peer.
 
-- [ ] **Step 4: Add and validate configuration**
+- [x] **Step 4: Add and validate configuration**
 
 Add `TrustedProxies []string` to `ServerConfig`, default it to an empty slice, validate every value as an IP or CIDR, and pass it at each request/whitelist boundary. Invalid proxy configuration must fail before serving traffic.
 
-- [ ] **Step 5: Verify GREEN and race safety**
+- [x] **Step 5: Verify GREEN and race safety**
 
 Run:
 
@@ -235,7 +237,7 @@ go test ./pkg/utils ./pkg/server/config ./pkg/server/router ./pkg/server/trans/r
 go test -race ./pkg/utils ./pkg/server/router -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/utils/ip.go pkg/utils/ip_test.go pkg/server/config/serverconfig.go pkg/server/router/request.go pkg/server/trans/rest/server.go pkg/server/run/htmlserver.go
