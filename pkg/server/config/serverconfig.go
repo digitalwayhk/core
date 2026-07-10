@@ -227,7 +227,14 @@ func migrateConfig(file string) {
 	if err != nil {
 		return
 	}
-	os.WriteFile(file, out, 0o666)
+	_ = writeConfigFile(file, out)
+}
+
+func writeConfigFile(file string, data []byte) error {
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(file, 0o600)
 }
 
 // migrateNullSlices converts nil JSON values to empty arrays for fields
@@ -334,7 +341,7 @@ func (own *ServerConfig) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(file, utils.String2Bytes(string(out)), 0o777)
+	return writeConfigFile(file, utils.String2Bytes(string(out)))
 }
 
 // fixDurations walks v (a struct value) and replaces every time.Duration
