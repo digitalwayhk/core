@@ -68,11 +68,13 @@ git commit -m "fix: protect server configuration files"
 
 ## Task 11.2: Explicit CORS Origins
 
+**Status:** Completed in `937d381`.
+
 **Files:**
 - Create: `pkg/server/trans/rest/server_security_test.go`
 - Modify: `pkg/server/trans/rest/server.go`
 
-- [ ] **Step 1: Write failing option tests**
+- [x] **Step 1: Write failing option tests**
 
 Extract a package-private helper that validates CORS input and returns go-zero run options. Test that disabled CORS returns no option, enabled CORS with no origin returns an error, and explicit origins are retained. Include `"*"` only as an explicit caller choice.
 
@@ -80,17 +82,17 @@ Extract a package-private helper that validates CORS input and returns go-zero r
 func restRunOptions(isCors bool, origins []string) ([]rest.RunOption, error)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./pkg/server/trans/rest -run TestRestRunOptions -count=1`
 
 Expected: FAIL because no helper exists and `origin` is ignored.
 
-- [ ] **Step 3: Implement fail-closed CORS construction**
+- [x] **Step 3: Implement fail-closed CORS construction**
 
 Call `rest.WithCors(origins...)` only when `isCors` is true and at least one non-empty origin is supplied. Make `NewServer` return `(*Server, error)`, propagate the error through `run.(*WebServer).newWebServer`, and let `initServer` stop startup with the existing boundary error handling.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -99,7 +101,7 @@ go test ./pkg/server/trans/rest ./pkg/server/run -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/server/trans/rest/server.go pkg/server/trans/rest/server_security_test.go pkg/server/run/server.go
