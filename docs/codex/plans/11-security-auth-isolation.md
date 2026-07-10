@@ -20,40 +20,37 @@
 
 ## Task 11.1: Least-Permission Configuration Files
 
+**Status:** Completed in `804a2de`.
+
 **Files:**
 - Create: `pkg/server/config/serverconfig_security_test.go`
 - Modify: `pkg/server/config/serverconfig.go`
 
-- [ ] **Step 1: Write failing permission tests**
+- [x] **Step 1: Write failing permission tests**
 
-Add tests in package `config` that temporarily replace `CONFIGDIRPATH`, call `ServerConfig.Save`, and invoke `migrateConfig` on a legacy JSON file. Assert both resulting files have `mode.Perm() == 0o600`; preserve and restore `CONFIGDIRPATH` with `t.Cleanup`.
+Add tests in package `config` for a package-private `writeConfigFile` helper and for `migrateConfig`. `ServerConfig.Save` deliberately returns early under `go test`, so testing the shared write boundary avoids disabling that existing isolation. Assert a new file and an existing `0666` file both end with `mode.Perm() == 0o600`.
 
 ```go
-func TestServerConfigSaveWritesPrivateFile(t *testing.T) {
-	dir := t.TempDir() + string(os.PathSeparator)
-	old := CONFIGDIRPATH
-	CONFIGDIRPATH = dir
-	t.Cleanup(func() { CONFIGDIRPATH = old })
-
-	cfg := NewServiceDefaultConfig("secure-save", 18080)
-	require.NoError(t, cfg.Save())
-	info, err := os.Stat(filepath.Join(dir, "secure-save.json"))
+func TestWriteConfigFileUsesPrivateMode(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "service.json")
+	require.NoError(t, writeConfigFile(file, []byte(`{"Name":"secure"}`)))
+	info, err := os.Stat(file)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
-Run: `go test ./pkg/server/config -run 'TestServerConfigSaveWritesPrivateFile|TestMigrateConfigPreservesPrivateFileMode' -count=1`
+Run: `go test ./pkg/server/config -run 'TestWriteConfigFileUsesPrivateMode|TestWriteConfigFileTightensExistingMode|TestMigrateConfigTightensFileMode' -count=1`
 
 Expected: FAIL because current writes use `0o777` and `0o666`.
 
-- [ ] **Step 3: Implement minimal permission handling**
+- [x] **Step 3: Implement minimal permission handling**
 
-Use `0o600` for both writes. After a migration rewrite, call `os.Chmod(file, 0o600)` so an existing permissive file is tightened even though `os.WriteFile` does not change the mode of an existing file.
+Implement `writeConfigFile(file string, data []byte) error` with `os.WriteFile(..., 0o600)` followed by `os.Chmod(file, 0o600)`. Use it from both `Save` and `migrateConfig`, so an existing permissive file is tightened even though `os.WriteFile` alone does not change its mode.
 
-- [ ] **Step 4: Verify GREEN and regression**
+- [x] **Step 4: Verify GREEN and regression**
 
 Run:
 
@@ -62,7 +59,7 @@ go test ./pkg/server/config -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/server/config/serverconfig.go pkg/server/config/serverconfig_security_test.go
