@@ -165,31 +165,33 @@ git commit -m "fix: isolate Logto authentication policy"
 
 ## Task 11.4: Generic Authentication and Framework Error Responses
 
+**Status:** Completed in `5e4bcd8`.
+
 **Files:**
 - Modify: `pkg/server/safe/logto/authmiddleware_test.go`
 - Create: `pkg/server/trans/rest/error_security_test.go`
 - Modify: `pkg/server/safe/logto/authmiddleware.go`
 - Modify: `pkg/server/trans/rest/error.go`
 
-- [ ] **Step 1: Write failing disclosure tests**
+- [x] **Step 1: Write failing disclosure tests**
 
 Assert malformed, expired, wrong-audience, wrong-issuer, JWKS-refresh, whitelist, and internal errors preserve their intended HTTP status but do not include token parser text, expected claims, issuer URLs, stack/error strings, or supplied secret fixtures in the response body.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./pkg/server/safe/logto ./pkg/server/trans/rest -run 'TestAuthResponseDoesNotDiscloseCause|TestWriteErrorResponseDoesNotDiscloseCause' -count=1`
 
 Expected: FAIL because current handlers return `err.Error()` and expected claim values.
 
-- [ ] **Step 3: Implement safe public messages**
+- [x] **Step 3: Implement safe public messages**
 
 Return stable generic messages such as `authentication failed` and omit `ErrorDetail.Details["error"]` from framework-generated responses. Wrap and return internal causes to the owning boundary; use structured `logx` only where Task 11 owns a terminal authentication decision, without tokens or claims.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `go test ./pkg/server/safe/logto ./pkg/server/trans/rest -count=1`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/server/safe/logto pkg/server/trans/rest/error.go pkg/server/trans/rest/error_security_test.go
