@@ -70,9 +70,9 @@ Update this table after each task. A task is complete only when the command in `
 
 | Task | Status | Commit | Completion evidence |
 | --- | --- | --- | --- |
-| 1. Dependency upgrade isolation | Not started |  | `git status --short` shows no unreviewed `go.mod/go.sum` drift |
+| 1. Dependency upgrade isolation | Completed | `f72447f` | `go mod verify`, `go mod tidy -diff`, server vet, and scoped compatibility tests pass; dependency files are committed separately |
 | 2. Docker Compose integration stack | Not started |  | Default profile is healthy for etcd/consul/redis/nats; `--profile kafka` is healthy when explicitly requested |
-| 3. Test command script | Not started |  | `./scripts/test.sh quick` and `./scripts/test.sh server` pass without requiring `rtk` |
+| 3. Test command script | Completed | `0d29df1` | `bash -n`, `quick`, and `server` pass; an unknown mode exits 2 with usage and the script does not require `rtk` |
 | 4. External integration tests via Docker | Not started |  | `./scripts/test.sh integration-external` passes etcd/consul/redis/nats suites |
 | 5. Kafka provider gap decision | Not started |  | Either provider tests are implemented or docs explicitly mark Kafka as config-only |
 | 6. go-zero capability and reuse audit | Not started |  | `docs/codex/GO_ZERO_REUSE_AUDIT.md` records evidence and a keep/replace/remove decision for every reviewed subsystem |
@@ -95,7 +95,7 @@ Update this table after each task. A task is complete only when the command in `
 - Review: `go.sum`
 - Modify if needed: no code files in this task
 
-- [ ] **Step 1: Inspect current dependency drift**
+- [x] **Step 1: Inspect current dependency drift**
 
 Run:
 
@@ -106,7 +106,7 @@ git diff -- go.mod | sed -n '1,220p'
 
 Expected: only dependency version and direct/indirect classification changes appear.
 
-- [ ] **Step 2: Decide commit boundary**
+- [x] **Step 2: Decide commit boundary**
 
 If the dependency upgrade is intended, commit only `go.mod` and `go.sum`:
 
@@ -117,7 +117,7 @@ git commit -m "chore: update core dependency versions"
 
 If the dependency upgrade is not intended, ask before reverting because these files are already user/local changes.
 
-- [ ] **Step 3: Verify dependency-upgrade compatibility**
+- [x] **Step 3: Verify dependency-upgrade compatibility**
 
 Run:
 
@@ -259,7 +259,7 @@ Expected: etcd, consul, redis, and nats are healthy in the default profile; Kafk
 - Create: `scripts/test.sh`
 - Modify: `.gitignore` only if local artifacts are introduced
 
-- [ ] **Step 1: Create script directory and script**
+- [x] **Step 1: Create script directory and script**
 
 Create `scripts/test.sh`:
 
@@ -306,7 +306,7 @@ case "${1:-quick}" in
 esac
 ```
 
-- [ ] **Step 2: Make it executable**
+- [x] **Step 2: Make it executable**
 
 Run:
 
@@ -314,7 +314,7 @@ Run:
 chmod +x scripts/test.sh
 ```
 
-- [ ] **Step 3: Verify quick modes**
+- [x] **Step 3: Verify quick modes**
 
 Run:
 
