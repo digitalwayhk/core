@@ -15,9 +15,7 @@ const testKeyID = "auth-test-key"
 
 func TestAuthHandlersKeepIndependentPolicy(t *testing.T) {
 	secret := []byte("auth-test-secret-with-enough-entropy")
-	jwks := keyfunc.NewGiven(map[string]keyfunc.GivenKey{
-		testKeyID: keyfunc.NewGivenHMAC(secret, keyfunc.GivenKeyOptions{Algorithm: jwt.SigningMethodHS256.Alg()}),
-	})
+	jwks := testJWKS(secret)
 
 	handlerA := AuthMiddleware(jwks, successHandler(), AuthConfig{
 		Issuer:           "https://tenant-a.example",
@@ -65,6 +63,46 @@ func TestNewAuthHandlerRejectsInvalidConfig(t *testing.T) {
 	_, err := NewAuthHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), AuthConfig{})
 
 	require.ErrorContains(t, err, "issuer")
+}
+
+func TestAuthResponseDoesNotDiscloseCause(t *testing.T) {
+	secret := []byte("auth-test-secret-with-enough-entropy")
+	handler := AuthMiddleware(testJWKS(secret), successHandler(), AuthConfig{
+		Issuer:           "https://tenant.example",
+		ExpectedAudience: "expected-api",
+	})
+	wrongAudience := signToken(t, secret, "https://tenant.example/oidc", "private-api-name")
+
+	tests := []struct {
+		name          string
+		authorization string
+	}{
+		{name: "missing header"},
+		{name: "invalid scheme", authorization: "Basic credentials"},
+		{name: "malformed token", authorization: "Bearer secret-token-fixture"},
+		{name: "wrong audience", authorization: "Bearer " + wrongAudience},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/private", nil)
+			if tt.authorization != "" {
+				req.Header.Set("Authorization", tt.authorization)
+			}
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			require.Equal(t, http.StatusUnauthorized, recorder.Code)
+			require.Equal(t, "authentication failed\n", recorder.Body.String())
+		})
+	}
+}
+
+func testJWKS(secret []byte) *keyfunc.JWKS {
+	return keyfunc.NewGiven(map[string]keyfunc.GivenKey{
+		testKeyID: keyfunc.NewGivenHMAC(secret, keyfunc.GivenKeyOptions{Algorithm: jwt.SigningMethodHS256.Alg()}),
+	})
 }
 
 func successHandler() http.Handler {

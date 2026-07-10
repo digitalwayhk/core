@@ -44,13 +44,13 @@ func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		if tokenString == authHeader {
-			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
@@ -65,28 +65,32 @@ func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.
 		if err != nil {
 			if strings.Contains(err.Error(), "the given key ID was not found in the JWKS") {
 				if refreshErr := jwks.Refresh(r.Context(), keyfunc.RefreshOptions{}); refreshErr != nil {
-					http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+					writeAuthenticationFailed(w)
 					return
 				}
 
 				token, err = parseToken()
 				if err != nil {
-					http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+					writeAuthenticationFailed(w)
 					return
 				}
 			} else {
-				http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+				writeAuthenticationFailed(w)
 				return
 			}
 		}
 
 		if !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func writeAuthenticationFailed(w http.ResponseWriter) {
+	http.Error(w, "authentication failed", http.StatusUnauthorized)
 }
 
 func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error) {

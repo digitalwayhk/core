@@ -119,8 +119,7 @@ func writeErrorResponse(w http.ResponseWriter, statusCode int, message string, e
 
 	if err != nil {
 		response.Error = &ErrorDetail{
-			Type:    getErrorType(statusCode),
-			Details: map[string]string{"error": err.Error()},
+			Type: getErrorType(statusCode),
 		}
 	}
 
