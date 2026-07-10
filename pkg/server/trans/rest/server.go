@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -28,7 +29,11 @@ type Server struct {
 	IsCors      bool
 }
 
-func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) *Server {
+func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
+	options, err := restRunOptions(isCors, origin)
+	if err != nil {
+		return nil, err
+	}
 	ser := &Server{
 		context: context,
 	}
@@ -37,13 +42,32 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 		context.Config.Timeout = 0
 	}
 	ser.IsCors = isCors
-	if ser.IsCors {
-		ser.Server = rest.MustNewServer(context.Config.RestConf, rest.WithCors())
-	} else {
-		ser.Server = rest.MustNewServer(context.Config.RestConf)
-	}
+	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
 	ser.register()
-	return ser
+	return ser, nil
+}
+
+func restRunOptions(isCors bool, origins []string) ([]rest.RunOption, error) {
+	if !isCors {
+		return nil, nil
+	}
+
+	origins = normalizeCorsOrigins(origins)
+	if len(origins) == 0 {
+		return nil, errors.New("at least one CORS origin is required")
+	}
+
+	return []rest.RunOption{rest.WithCors(origins...)}, nil
+}
+
+func normalizeCorsOrigins(origins []string) []string {
+	normalized := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			normalized = append(normalized, origin)
+		}
+	}
+	return normalized
 }
 func (own *Server) Start() {
 	pid := utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port)

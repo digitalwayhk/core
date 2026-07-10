@@ -199,7 +199,9 @@ func (own *WebServer) initServer() {
 			msg := "初始化服务器异常，服务名称：" + ctx.Config.Name + "，错误信息：" + err.Error()
 			panic(msg)
 		}
-		own.newWebServer(ctx)
+		if err := own.newWebServer(ctx); err != nil {
+			panic(fmt.Sprintf("初始化 HTTP 服务失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
+		}
 		own.newInternalServer(ctx)
 		own.htmls.AddServiceRouter(ctx.Router)
 	}
@@ -221,14 +223,19 @@ func (own *WebServer) serverArgs() {
 		own.SocketPort = *socket
 	}
 }
-func (own *WebServer) newWebServer(ctx *router.ServiceContext) {
+func (own *WebServer) newWebServer(ctx *router.ServiceContext) error {
 	var rs *rest.Server
+	var err error
 	if opt, ok := own.serverOption[ctx.Service.Name]; ok {
-		rs = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors, opt.OriginCors...)
+		rs, err = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors, opt.OriginCors...)
 	} else {
-		rs = rest.NewServer(ctx, false, false)
+		rs, err = rest.NewServer(ctx, false, false)
+	}
+	if err != nil {
+		return err
 	}
 	ctx.SetHttpServer(rs)
+	return nil
 }
 func (own *WebServer) newInternalServer(ctx *router.ServiceContext) {
 	if own.SocketPort > 0 {
