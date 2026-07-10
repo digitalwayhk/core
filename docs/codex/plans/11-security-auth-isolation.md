@@ -110,12 +110,14 @@ git commit -m "fix: require explicit CORS origins"
 
 ## Task 11.3: Immutable Per-Handler Logto Policy
 
+**Status:** Completed in `daa2c57`.
+
 **Files:**
 - Create: `pkg/server/safe/logto/authmiddleware_test.go`
 - Modify: `pkg/server/safe/logto/authmiddleware.go`
 - Modify: `pkg/server/trans/rest/server.go`
 
-- [ ] **Step 1: Write failing concurrent policy tests**
+- [x] **Step 1: Write failing concurrent policy tests**
 
 Introduce an immutable policy type and make middleware validation use it rather than package globals:
 
@@ -131,21 +133,21 @@ func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error)
 
 Use two local JWKS test servers and run handlers concurrently with distinct issuer/audience pairs. Each matching token must succeed only against its own handler under `go test -race`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test -race ./pkg/server/safe/logto -run TestAuthHandlersKeepIndependentPolicy -count=1`
 
 Expected: FAIL because policy currently lives in mutable package globals.
 
-- [ ] **Step 3: Implement local policy and startup errors**
+- [x] **Step 3: Implement local policy and startup errors**
 
 Normalize issuer trailing slashes once, derive `jwksURL` and accepted issuer from the local config, and return JWKS initialization errors instead of calling `log.Fatal`. Update REST route registration to construct each Logto handler once and propagate construction errors to `NewServer`.
 
-- [ ] **Step 4: Preserve compatibility deliberately**
+- [x] **Step 4: Preserve compatibility deliberately**
 
 Keep the old exported `AuthHandler(next, issuer, audience) http.Handler` only as a deprecated wrapper if repository consumers require it. The wrapper must never terminate the process; internal startup code must use `NewAuthHandler` and handle its error.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -154,7 +156,7 @@ go test -race ./pkg/server/safe/logto ./pkg/server/trans/rest -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/server/safe/logto pkg/server/trans/rest/server.go
