@@ -246,30 +246,32 @@ git commit -m "fix: trust forwarding headers only from configured proxies"
 
 ## Task 11.6: Security Headers and Existing go-zero Limits
 
+**Status:** Completed in `0bc1a14`.
+
 **Files:**
 - Modify: `pkg/server/trans/rest/server_security_test.go`
 - Modify: `pkg/server/trans/rest/server.go`
 - Modify: `docs/codex/plans/11-security-auth-isolation.md` to record final capability evidence for Task 14
 
-- [ ] **Step 1: Write failing header and limit tests**
+- [x] **Step 1: Write failing header and limit tests**
 
 Test a package-private middleware that adds `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY` without overwriting stricter caller values. Add a configuration test proving go-zero `RestConf.MaxBytes`, `MaxConns`, and their middleware flags remain enabled after `ServerConfig.ApplyDefaults`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./pkg/server/trans/rest ./pkg/server/config -run 'TestSecurityHeaders|TestServerConfigPreservesGoZeroLimits' -count=1`
 
 Expected: header test FAILS because the middleware does not exist; limit test records the current go-zero behavior.
 
-- [ ] **Step 3: Add the narrow header middleware**
+- [x] **Step 3: Add the narrow header middleware**
 
 Wrap registered HTTP routes with the security-header middleware. Do not add HSTS until TLS termination ownership is explicit, and do not duplicate go-zero body/connection limits.
 
-- [ ] **Step 4: Record rate-limit support honestly**
+- [x] **Step 4: Record rate-limit support honestly**
 
 Record service-global max connections, body limits, breaker, and shedding as `Stable` in this plan's completion evidence. Record distributed auth/API rate limiting as `Unsupported` until Task 14 approves a go-zero `core/limit` Redis-backed configuration and behavior test; reject any future rate-limit config that lacks a runtime provider. Task 14 must copy this evidence into its capability matrix.
 
-- [ ] **Step 5: Verify Task 11 as a whole**
+- [x] **Step 5: Verify Task 11 as a whole**
 
 Run:
 
@@ -279,7 +281,7 @@ go test ./pkg/server/... ./pkg/utils -count=1
 go test -race ./pkg/server/safe/logto ./pkg/server/router ./pkg/utils -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/server/trans/rest pkg/server/config docs/codex/plans/11-security-auth-isolation.md
@@ -288,4 +290,15 @@ git commit -m "fix: establish HTTP security baseline"
 
 ## Completion Evidence
 
-Task 11 is complete only when all six commits are recorded in the master plan, the full Task 11 verification commands pass, no authentication policy globals or `log.Fatal` remain, CORS cannot silently become wildcard, forwarded headers require trusted proxies, config files are `0600`, and public authentication/framework error bodies contain no internal causes.
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Config file permissions | Stable | New and migrated files are tested as `0600` in `serverconfig_security_test.go` |
+| Explicit CORS allowlist | Stable | Enabled CORS rejects empty origins and passes explicit values to go-zero `WithCors` |
+| Logto policy isolation | Stable | Concurrent per-handler issuer/audience tests pass under `-race` |
+| Safe auth/framework responses | Stable | Secret-bearing error fixtures are absent from captured response bodies |
+| Trusted forwarding proxies | Stable | Direct, exact IP, CIDR, IPv6, malformed, and right-to-left chain tests pass |
+| Body and connection limits | Stable | go-zero 1 MiB `MaxBytes`, 10000 `MaxConns`, breaker, and shedding defaults are asserted |
+| HTTP security headers | Stable | REST routes and WebSocket handshakes set tested non-overwriting headers |
+| Distributed auth/API rate limiting | Unsupported | No configuration is accepted; Task 14 must approve a go-zero `core/limit` provider and behavior contract before adding one |
+
+Task 11 completed with implementation commits `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, and `0bc1a14`. Final verification passed for server/utils vet, Logto/Router/Utils race tests, the full server/utils test suite, and static security assertions. No authentication policy globals or `log.Fatal` remain, CORS cannot silently become wildcard, forwarded headers require trusted proxies, config files are `0600`, and public authentication/framework error bodies contain no internal causes.

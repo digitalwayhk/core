@@ -80,7 +80,7 @@ Update this table after each task. A task is complete only when the command in `
 | 8. Global logging and exception audit | Not started |  | Runtime logs use `logx` structured events, carry trace context at request/cross-service boundaries, pass sensitive-data scans, and contain no unapproved console/fatal output |
 | 9. Architecture hardening backlog | Not started |  | Issues are either fixed or converted to tracked docs with file paths and test commands |
 | 10. README/docs and scenario usage guide | Not started |  | README, skill reference, and scenario guide agree on routes, models, maturity, logging, and reuse policy |
-| 11. Security baseline and authentication isolation | In progress (11.1-11.5 complete) | `a8f1c0d`, `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d` | Config/CORS/auth/error/proxy boundaries are hardened and tested; security headers and go-zero limit evidence remain |
+| 11. Security baseline and authentication isolation | Completed | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14` | Config/CORS/auth/error/proxy/header tests pass; go-zero limits are verified and distributed rate limiting is explicitly unsupported pending Task 14 |
 | 12. Request isolation, global state, and lifecycle | Not started |  | Request/race/lifecycle tests pass with idempotent shutdown and no known leaked workers |
 | 13. Persistence correctness and external-test separation | Not started |  | Persistence unit tests pass without external services; Docker-backed database suites pass when enabled |
 | 14. Configuration-to-runtime capability contract | Not started |  | Every accepted MQ/cluster/transport field has a runtime consumer and behavior test or is rejected |
@@ -924,19 +924,19 @@ Add a short anti-pattern section covering shared request state, bypassing ModelL
 - Modify: `pkg/server/safe/logto/authmiddleware.go`
 - Modify: client IP and request-boundary helpers under `pkg/server`
 
-- [ ] **Step 1: Record the trust-boundary threat model**
+- [x] **Step 1: Record the trust-boundary threat model**
 
 Document secrets at rest, JWT issuer/audience ownership, browser origins, trusted reverse proxies, body-size limits, public error exposure, and abuse controls. Include current evidence: permissive config modes, broad CORS fallback, package-global auth settings, and unconditional forwarded-IP trust.
 
-- [ ] **Step 2: Add failing security regression tests**
+- [x] **Step 2: Add failing security regression tests**
 
 Cover config files written as `0600`, two concurrent auth handlers with different issuer/audience values, rejected unapproved origins, spoofed forwarding headers from untrusted peers, request-size limits, generic client errors, and security headers. Tests must prove manage and user auth cannot overwrite each other's policy.
 
-- [ ] **Step 3: Make defaults explicit and fail closed**
+- [x] **Step 3: Make defaults explicit and fail closed**
 
 Move auth policy into immutable per-handler configuration; require an explicit CORS allowlist outside development; trust forwarding headers only from configured proxy CIDRs; support environment or secret-provider overrides without serializing resolved secrets; add bounded bodies, appropriate HTTP security headers, and auth/API rate limits.
 
-- [ ] **Step 4: Verify secret and response hygiene**
+- [x] **Step 4: Verify secret and response hygiene**
 
 Run focused tests plus a repository scan for permissive secret-file modes, raw token/claim logging, internal error text returned to clients, and wildcard production CORS.
 
