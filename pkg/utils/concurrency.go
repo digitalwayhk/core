@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"github.com/zeromicro/go-zero/core/logx"
 	"sync"
 )
@@ -64,11 +65,13 @@ func (t *ConcurrencyTasks[T]) doFun(i int) {
 	defer func() {
 		// 从panic中恢复
 		if e := recover(); e != nil {
-			err := e.(error)
-			logx.Infof("[PANIC]param=%s,err=%v\n", param, err)
+			err := fmt.Errorf("panic: %v", e)
+			t.Results[i] = err
+			logx.Errorf("[PANIC]param=%v,err=%v", param, err)
 		}
+		<-t.ch
+		t.wg.Done()
 	}()
-	defer t.wg.Done()
 	//执行
 	param = t.Params[i]
 	r, err := t.Func(param)
@@ -77,7 +80,6 @@ func (t *ConcurrencyTasks[T]) doFun(i int) {
 	} else {
 		t.Results[i] = r
 	}
-	<-t.ch
 }
 
 func (t *ConcurrencyTasks[T]) Successes() int {

@@ -136,7 +136,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.Name = servicename
 	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\"}"
 	conf.LoadConfigFromJsonBytes([]byte(str), &con)
-	con.Telemetry.Batcher = "jaeger"
+	con.Telemetry.Batcher = "zipkin"
 	ip := utils.GetLocalIP()
 	con.Log.ServiceName = servicename + "-" + ip
 	con.Log.KeepDays = 10
