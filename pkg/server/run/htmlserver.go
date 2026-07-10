@@ -121,7 +121,7 @@ func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 			path := url[:last]
 			ss := getService(servicename, service)
 			req := router.NewRequest(ss, r)
-			ip := utils.ClientPublicIP(r)
+			ip := utils.ClientPublicIP(r, ss.Service.Config.TrustedProxies...)
 			err := trans.VerifyIPWhiteList(ss.Service.Config, ip)
 			if err != nil {
 				httpx.OkJson(w, req.NewResponse(nil, err))

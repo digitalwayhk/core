@@ -185,7 +185,7 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
-		ip := utils.ClientPublicIP(r)
+		ip := utils.ClientPublicIP(r, rou.Service.Config.TrustedProxies...)
 
 		// IP 白名单验证
 		err := trans.VerifyIPWhiteList(rou.Service.Config, ip)
@@ -321,7 +321,7 @@ func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		//startTime := time.Now()
 
-		ip := utils.ClientPublicIP(r)
+		ip := utils.ClientPublicIP(r, sc.Config.TrustedProxies...)
 		melodyManager := sc.Hub.(*melody.MelodyManager)
 		if melodyManager == nil {
 			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)

@@ -42,7 +42,11 @@ func getRequestInfo(r *http.Request, req *Request) {
 	path := strings.Split(url, "?")[0]
 	req.apiPath = path
 	req.http = r
-	req.clientIP = utils.ClientPublicIP(r)
+	trustedProxies := []string(nil)
+	if req.service != nil && req.service.Config != nil {
+		trustedProxies = req.service.Config.TrustedProxies
+	}
+	req.clientIP = utils.ClientPublicIP(r, trustedProxies...)
 	ctext := r.Context()
 	obj := ctext.Value("uid")
 	if obj != nil {

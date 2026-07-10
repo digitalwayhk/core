@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/netip"
 	"os"
 	"reflect"
 	"strconv"
@@ -29,6 +31,7 @@ type ServerConfig struct {
 	Debug                 bool
 	IsWhiteList           bool
 	WhiteList             []string
+	TrustedProxies        []string
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
@@ -50,6 +53,9 @@ func (con *ServerConfig) ApplyDefaults() {
 	if con.WhiteList == nil {
 		con.WhiteList = make([]string, 0)
 	}
+	if con.TrustedProxies == nil {
+		con.TrustedProxies = make([]string, 0)
+	}
 	con.Cluster.ApplyDefaults()
 	con.Transport.ApplyDefaults()
 	con.MQ.ApplyDefaults()
@@ -57,6 +63,15 @@ func (con *ServerConfig) ApplyDefaults() {
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
 func (con *ServerConfig) Validate() error {
+	for i, proxy := range con.TrustedProxies {
+		proxy = strings.TrimSpace(proxy)
+		if _, err := netip.ParseAddr(proxy); err == nil {
+			continue
+		}
+		if _, err := netip.ParsePrefix(proxy); err != nil {
+			return fmt.Errorf("TrustedProxies[%d] must be an IP address or CIDR: %q", i, proxy)
+		}
+	}
 	if err := con.Cluster.Validate(); err != nil {
 		return err
 	}
@@ -178,6 +193,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.Debug = false
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
+	con.TrustedProxies = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
 	con.MelodyConfigPath = ""
 	con.ApplyDefaults()
@@ -241,7 +257,7 @@ func writeConfigFile(file string, data []byte) error {
 // whose Go types are slices that must not be nil (e.g. []string).
 func migrateNullSlices(m map[string]interface{}) bool {
 	changed := false
-	for _, key := range []string{"PrivateKeys", "Endpoints", "Brokers", "NameServers"} {
+	for _, key := range []string{"PrivateKeys", "Endpoints", "Brokers", "NameServers", "TrustedProxies"} {
 		if v, ok := m[key]; ok && v == nil {
 			m[key] = []interface{}{}
 			changed = true

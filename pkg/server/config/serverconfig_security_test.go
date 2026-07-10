@@ -42,3 +42,21 @@ func TestMigrateConfigTightensFileMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+func TestServerConfigDefaultsTrustedProxiesToEmpty(t *testing.T) {
+	cfg := &ServerConfig{}
+
+	cfg.ApplyDefaults()
+
+	require.NotNil(t, cfg.TrustedProxies)
+	require.Empty(t, cfg.TrustedProxies)
+}
+
+func TestServerConfigValidatesTrustedProxies(t *testing.T) {
+	cfg := &ServerConfig{TrustedProxies: []string{"127.0.0.1", "10.0.0.0/8", "2001:db8::/32"}}
+	cfg.ApplyDefaults()
+	require.NoError(t, cfg.Validate())
+
+	cfg.TrustedProxies = []string{"not-an-ip"}
+	require.ErrorContains(t, cfg.Validate(), "TrustedProxies")
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -67,23 +68,68 @@ func HasLocalIP(ip net.IP) bool {
 		(ip4[0] == 192 && ip4[1] == 168) // 192.168.0.0/16
 }
 
-func ClientPublicIP(r *http.Request) string {
-	var ip string
-	for _, ip = range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
-		ip = strings.TrimSpace(ip)
-		if ip != "" {
-			return ip
-		}
+func ClientPublicIP(r *http.Request, trustedProxies ...string) string {
+	if r == nil {
+		return ""
 	}
-	ip = strings.TrimSpace(r.Header.Get("X-Real-Ip"))
-	if ip != "" {
-		return ip
+	direct, ok := remoteIP(r.RemoteAddr)
+	if !ok {
+		return ""
+	}
+	trusted := proxyPrefixes(trustedProxies)
+	if !containsIP(trusted, direct) {
+		return direct.String()
 	}
 
-	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
-		return ip
+	forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(forwarded) - 1; i >= 0; i-- {
+		candidate, err := netip.ParseAddr(strings.TrimSpace(forwarded[i]))
+		if err == nil && !containsIP(trusted, candidate.Unmap()) {
+			return candidate.Unmap().String()
+		}
 	}
-	return ""
+
+	if candidate, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("X-Real-IP"))); err == nil {
+		return candidate.Unmap().String()
+	}
+	return direct.String()
+}
+
+func remoteIP(remoteAddr string) (netip.Addr, bool) {
+	host := strings.TrimSpace(remoteAddr)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap(), true
+}
+
+func proxyPrefixes(proxies []string) []netip.Prefix {
+	prefixes := make([]netip.Prefix, 0, len(proxies))
+	for _, proxy := range proxies {
+		proxy = strings.TrimSpace(proxy)
+		if prefix, err := netip.ParsePrefix(proxy); err == nil {
+			prefixes = append(prefixes, prefix)
+			continue
+		}
+		if addr, err := netip.ParseAddr(proxy); err == nil {
+			addr = addr.Unmap()
+			prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+		}
+	}
+	return prefixes
+}
+
+func containsIP(prefixes []netip.Prefix, addr netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func ScanPort(protocol string, hostname string, port int) bool {
