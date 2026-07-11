@@ -61,9 +61,9 @@ go test -race ./service/manage ./pkg/server/api/manage -run 'Test.*RequestIsolat
 
 - [ ] **步骤 3：用显式参数替换共享存储**
 
-`SearchAfter` 优先调用请求感知接口，再回退旧 `IGetDefaultItems`。`MenuManage` 将 `req` 显式传入默认项生成和递归更新逻辑。删除框架内部所有 `SetReq` 调用、`ManageService.Req` 字段和默认写入实现。
+`SearchAfter` 优先调用请求感知接口，再回退旧 `IGetDefaultItems`。`MenuManage` 将 `req` 显式传入默认项生成和递归更新逻辑。删除框架内部所有 `SetReq` 调用，使生产请求不再写共享字段。
 
-兼容规则：保留已导出的 `IRequestSet` 类型一个发布周期并标记废弃，但框架不再调用它；业务扩展应直接使用现有 hook 的 `req` 参数。
+兼容规则：`ManageService.Req`、`SetReq` 和 `IRequestSet` 均为导出 API，本任务保留它们并添加中文 `Deprecated` 注释，以维持源码兼容；框架不再调用 `SetReq`。依赖该副作用的业务属于行为迁移，必须改用 hook 的 `req` 参数或 `GetDefaultItemsWithRequest`。真正删除放到任务 15 或下一个主版本。
 
 - [ ] **步骤 4：验证 GREEN 并提交**
 
@@ -96,7 +96,7 @@ go test -race ./pkg/server/router ./pkg/server/api/public ./pkg/server/run -run 
 
 - [ ] **步骤 3：建立唯一同步入口**
 
-以包内 `sync.RWMutex` 保护上下文和测试结果。构造同名 `ServiceContext` 时串行化启动期初始化，避免重复 MachineID claim、MQ 或 Provider 副作用。`GetContexts` 返回新 map；新增 `SetTestResult` 与 `GetTestResult`，内部调用方不得直接访问 map。
+以包内 `sync.RWMutex` 保护上下文和测试结果。注册表锁只登记按服务名区分的“初始化中”条目，条目包含 `ready` channel、结果和错误；首个调用者在锁外执行配置 I/O、MachineID claim、MQ 和 Provider 初始化，同名调用者等待 `ready`，不同服务仍可并行。panic 或失败必须清理占位并唤醒等待者。`GetContexts` 返回新 map；新增 `SetTestResult` 与 `GetTestResult`，内部调用方不得直接访问 map。
 
 - [ ] **步骤 4：验证 GREEN 并提交**
 
@@ -117,7 +117,7 @@ git commit -m "fix: synchronize service registries"
 
 - [ ] **步骤 1：编写实例隔离和快照测试**
 
-证明两个 `WebServer` 的启动回调互不影响；并发增加上下文、设置选项和读取不会竞态；`GetServerOptions` 返回快照；并发设置/获取内部服务安全且类型不匹配不会 panic。
+证明两个 `WebServer` 的启动回调互不影响；并发增加上下文、设置选项和读取不会竞态；`GetServerOptions` 返回深度足够的快照，修改返回 map 或 `ServerOption` 普通字段/slice 不影响内部状态；并发设置/获取内部服务安全且类型不匹配不会 panic。
 
 - [ ] **步骤 2：实现并验证**
 
@@ -191,25 +191,29 @@ git commit -m "fix: scope cross-node forwarders by service"
 - 修改：`pkg/server/router/servicecontext.go`
 - 修改：`pkg/server/cluster/membership.go`
 - 修改：`pkg/server/run/server.go`
-- 修改：`pkg/server/run/fiberserver.go`
+- 修改：`pkg/server/run/htmlserver.go`
+- 修改：`pkg/server/trans/rest/server.go`
+- 按需清理：`pkg/server/run/fiberserver.go`（当前不在实际启动路径）
 - 修改：相关测试
 
 - [ ] **步骤 1：编写重复启动/关闭测试**
 
-并发调用 start/stop，断言只注册和注销一次、heartbeat 在 deadline 内退出、broker 只 drain 一次。验证业务 `IStopService` 在 `WebServer.Start` 返回前完成，且 `FiberServer.Stop` 调用 Fiber shutdown。
+并发调用 start/stop，断言只注册和注销一次、heartbeat 在 deadline 内退出、broker 只 drain 一次。验证 `WebServer.Stop` 后 listener 关闭、所有 `Start` goroutine 返回、业务 `IStopService` 已完成且重复 Stop 不阻塞。两个 WebServer 实例不得因全局 HTTP mux 重复注册而 panic。
 
 - [ ] **步骤 2：实现单一 owner**
 
-`ServiceContext` 使用生命周期 mutex、运行 context/cancel 和明确状态；锁内只做状态转换，锁外执行 Provider。`MembershipManager` 用 `sync.Once` 与 wait group 实现幂等退出。`WebServer` 先停止 server group，再同步或有界等待业务 `Stop`。
+`ServiceContext` 使用生命周期 mutex、运行 context/cancel 和明确状态；锁内只做状态转换，锁外执行 Provider。`MembershipManager` 用 `sync.Once` 与 wait group 实现幂等退出。`WebServer` 持有实例级 `ServiceGroup`、状态和 `Stop`。
+
+复用 go-zero：通过其 REST `StartWithOpts` 获取实际 `*http.Server`，包装层 `Stop` 使用 deadline 调用 `Shutdown`；继续使用 `ServiceGroup` 的并发启动与一次性停止语义，不自建第二套 service group 或信号监听器。`HTMLServer` 改为拥有独立 `http.ServeMux` 和 `http.Server`，并实现同样的有界 Shutdown。
 
 MQ、Transport 和数据库只调用成熟客户端已有的 `Close`/`Stop`，不得创造新的连接池或 worker。
 
 - [ ] **步骤 3：验证并提交**
 
 ```bash
-go test -race ./pkg/server/cluster ./pkg/server/router ./pkg/server/run -count=1
+go test -race ./pkg/server/cluster ./pkg/server/router ./pkg/server/run ./pkg/server/trans/rest -count=1
 go test ./pkg/server/... -count=10
-git add pkg/server/cluster/membership.go pkg/server/router/servicecontext.go pkg/server/run
+git add pkg/server/cluster/membership.go pkg/server/router/servicecontext.go pkg/server/run pkg/server/trans/rest/server.go
 git commit -m "fix: make service lifecycle deterministic"
 ```
 
@@ -224,11 +228,13 @@ git commit -m "fix: make service lifecycle deterministic"
 
 - [ ] **步骤 1：编写迁移窗口失败测试**
 
-覆盖 `Begin` 后新增节点进入 pending、节点离线/删除后的完整快照、`Complete` 和 `Rollback` 取消 watcher、重复快照幂等，以及 pending 暂时失败后可恢复。
+覆盖 `Begin` 后新增节点进入 pending、running 转 offline、offline 仍在快照、节点删除、乱序 Watch 回调、取消时正在 Register、`Complete` 和 `Rollback` 等待 watcher 退出、重复快照幂等，以及没有新 Watch 事件时 pending 暂时失败后仍可恢复。
 
 - [ ] **步骤 2：实现 Watch 驱动的全量对账**
 
-`Begin` 首次复制后订阅 current provider。每次回调对 pending 注册当前节点，并注销上次镜像中已不存在的节点。保存 cancel，在完成或回滚前先取消。锁只保护指针、状态和镜像元数据，Provider 调用全部在锁外。
+`Begin` 首次复制后订阅 current provider。只镜像 `NodeStatusRunning`，suspect/offline/删除节点均从 pending 注销；首次 List 与 Watch 使用同一过滤规则。Watch callback 只把最新快照提交给单一有界 reconciliation worker，由 worker 串行处理并以 migration generation 丢弃旧事件。失败时对最新快照做有界指数退避，直到成功、被新快照替代或迁移 context 取消。
+
+`Complete`/`Rollback` 的固定顺序为：停止接收快照、取消 Watch、等待 worker 和在途 Provider 调用结束、再切换或关闭 Provider。`Begin` 的首次 List 或 Watch 失败必须返回错误并保持未迁移状态。锁只保护指针、状态和镜像元数据，Provider 调用全部在锁外。
 
 - [ ] **步骤 3：验证并提交**
 
@@ -249,13 +255,14 @@ git commit -m "fix: reconcile cluster provider migration"
 
 - [ ] **步骤 1：增加稳定测试入口**
 
-为 `scripts/test.sh` 增加 `concurrency` 模式，只运行本任务拥有的包。不得让文档声明但未实现的模式返回含糊的 `exit 2`。
+为 `scripts/test.sh` 增加 `concurrency` 模式，只运行本任务拥有的包，并包含 `pkg/server/trans/rest`。不得让文档声明但未实现的模式返回含糊的 `exit 2`。
 
 - [ ] **步骤 2：执行最终门禁**
 
 ```bash
 ./scripts/test.sh concurrency
-go test -race ./service/manage ./pkg/server/api/manage ./pkg/server/router ./pkg/server/run ./pkg/server/types ./pkg/server/cluster -count=1
+go test -race ./service/manage ./pkg/server/api/manage ./pkg/server/router ./pkg/server/run ./pkg/server/trans/rest ./pkg/server/types ./pkg/server/cluster -count=1
+go test -race ./pkg/server/run ./pkg/server/router ./pkg/server/cluster ./pkg/server/trans/rest -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown' -count=20
 go test ./pkg/server/... -count=1
 go vet ./pkg/server/... ./service/manage/...
 ```
@@ -263,6 +270,12 @@ go vet ./pkg/server/... ./service/manage/...
 - [ ] **步骤 3：更新能力矩阵**
 
 重复启动/关闭测试至少 20 次，以 channel/wait group 证明 worker 已退出。在总计划记录提交、命令、剩余兼容风险和未纳入项。只有全部门禁通过后才将任务 12 标为完成。
+
+## 进程级 WebSocket Worker 归属
+
+- [ ] 全局通知系统和周期清理 worker 归进程生命周期，不归任一 `WebServer` 实例。
+- [ ] 复用 go-zero `proc.AddShutdownListener` 注册一次关闭，不重复处理系统信号。
+- [ ] 周期清理接受 context/cancel 并可等待退出；测试明确单例关闭后是否允许在同一进程重启。
 
 ## 最终验收清单
 
