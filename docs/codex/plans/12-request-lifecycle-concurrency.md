@@ -114,16 +114,21 @@ git commit -m "fix: synchronize service registries"
 
 **优先级：** P0
 
+**状态：** 已在 `52ac181` 完成。WebServer 实例状态、服务器选项和内部服务注册表已同步；多实例初始化使用活动计数，定向竞态、静态检查和全量服务端回归通过。
+
 **文件：**
 - 修改：`pkg/server/run/server.go`
 - 创建：`pkg/server/run/server_concurrency_test.go`
-- 按需修改：`pkg/server/run/htmlserver.go`
+- 修改：`pkg/server/config/serverconfig.go`
+- 修改：`pkg/server/router/servicecontext.go`
+- 修改：`pkg/server/types/server.go`
+- 修改：读取初始化状态的 router 与 persistence 内部调用点
 
-- [ ] **步骤 1：编写实例隔离和快照测试**
+- [x] **步骤 1：编写实例隔离和快照测试**
 
 证明两个 `WebServer` 的启动回调互不影响；并发增加上下文、设置选项和读取不会竞态；`GetServerOptions` 返回深度足够的快照，修改返回 map 或 `ServerOption` 普通字段/slice 不影响内部状态；并发设置/获取内部服务安全且类型不匹配不会 panic。
 
-- [ ] **步骤 2：实现并验证**
+- [x] **步骤 2：实现并验证**
 
 把进程级 `once` 移入 `WebServer`；为实例 map 使用同一把 `RWMutex`，外部回调在锁外运行。getter 返回快照或单值。为 `typemap` 添加独立 `RWMutex` 并使用安全类型断言。
 
