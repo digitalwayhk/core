@@ -62,13 +62,15 @@ go test ./pkg/persistence/... -count=1 -timeout=5m
 - 修改：`pkg/persistence/database/oltp/sqlite.go`
 - 创建或修改：对应结果传播测试
 
-- [ ] **13.2a 编写 Raw/Scan/Exec 失败测试**
+- [x] **13.2a 编写 Raw/Scan/Exec 失败测试**
 
 使用 SQLite 内存库或可控 GORM dialector，验证无效 SQL、Scan 失败、context 取消和事务回滚返回本次 `Raw/Scan/Exec` 的 result `.Error`。
 
-- [ ] **13.2b 最小修正过时 handle 错误**
+- [x] **13.2b 最小修正过时 handle 错误**
 
 将 `m.db.Raw(...).Scan(...); return m.db.Error` 与 SQLite 对应实现改为返回链式结果 `.Error`；审查同类 Exec/Find/Count 路径，只修正有失败证据的位置。
+
+**完成记录（2026-07-11）：** 新增公开 `Sqlite.Raw/Exec` 回归测试，旧实现能在 GORM 记录本次错误时稳定复现返回 `nil`。MySQL 和 SQLite 已统一返回链式 result `.Error`，聚焦测试连续 20 次通过，完整持久化套件通过。SQLite 已有事务回滚覆盖；当前 `IDataAction.Raw/Exec` 签名不接收 `context.Context`，调用方取消不在本次最小修复中虚假标记为已覆盖，后续如扩展公共接口需单独设计兼容性方案。
 
 **验收：**
 ```bash

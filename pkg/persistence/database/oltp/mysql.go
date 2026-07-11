@@ -940,8 +940,7 @@ func (m *MySQL) Raw(sql string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	m.db.Raw(sql).Scan(data)
-	return m.db.Error
+	return m.db.Raw(sql).Scan(data).Error
 }
 
 func (m *MySQL) Exec(sql string, data interface{}) error {
@@ -949,8 +948,7 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	m.db.Exec(sql, data)
-	return m.db.Error
+	return m.db.Exec(sql, data).Error
 }
 
 // Clone 返回一个独立事务状态的新实例，供并发 goroutine 使用。

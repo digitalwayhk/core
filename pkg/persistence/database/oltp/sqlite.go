@@ -556,8 +556,7 @@ func (own *Sqlite) Raw(sql string, data interface{}) error {
 		return err
 	}
 
-	own.db.Raw(sql).Scan(data)
-	return own.db.Error
+	return own.db.Raw(sql).Scan(data).Error
 }
 
 // Exec 执行 SQL
@@ -572,8 +571,7 @@ func (own *Sqlite) Exec(sql string, data interface{}) error {
 		return err
 	}
 
-	own.db.Exec(sql, data)
-	return own.db.Error
+	return own.db.Exec(sql, data).Error
 }
 
 // Clone 返回一个共享底层连接池但拥有独立事务状态的新实例，
