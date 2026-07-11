@@ -80,27 +80,29 @@ git commit -m "fix: isolate manage requests"
 
 **优先级：** P0
 
+**状态：** 已在 `fc42ae7` 完成。同名初始化、不同名并行、panic 重试、默认序号回收、快照隔离和测试结果并发访问均有回归覆盖。
+
 **文件：**
 - 修改：`pkg/server/router/servicecontext.go`
 - 修改：`pkg/server/router/servicecontext_test.go`
 - 修改：`pkg/server/api/public/openapi.go`
 - 修改：`pkg/server/run/openapi.go`
 
-- [ ] **步骤 1：编写并发与快照失败测试**
+- [x] **步骤 1：编写并发与快照失败测试**
 
 覆盖并发创建/读取不同服务上下文、同名服务只产生一个实例、并发写读 OpenAPI 测试结果，以及修改 `GetContexts()` 返回值不会改变内部注册表。
 
-- [ ] **步骤 2：验证 RED**
+- [x] **步骤 2：验证 RED**
 
 ```bash
 go test -race ./pkg/server/router ./pkg/server/api/public ./pkg/server/run -run 'Test.*Context.*Concurrent|Test.*Context.*Snapshot|Test.*Result.*Concurrent' -count=1
 ```
 
-- [ ] **步骤 3：建立唯一同步入口**
+- [x] **步骤 3：建立唯一同步入口**
 
 以包内 `sync.RWMutex` 保护上下文和测试结果。注册表锁只登记按服务名区分的“初始化中”条目，条目包含 `ready` channel、结果和错误；首个调用者在锁外执行配置 I/O、MachineID claim、MQ 和 Provider 初始化，同名调用者等待 `ready`，不同服务仍可并行。panic 或失败必须清理占位并唤醒等待者。`GetContexts` 返回新 map；新增 `SetTestResult` 与 `GetTestResult`，内部调用方不得直接访问 map。
 
-- [ ] **步骤 4：验证 GREEN 并提交**
+- [x] **步骤 4：验证 GREEN 并提交**
 
 ```bash
 go test -race ./pkg/server/router ./pkg/server/api/public ./pkg/server/run -count=1
