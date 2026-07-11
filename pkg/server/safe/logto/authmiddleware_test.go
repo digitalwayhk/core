@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/MicahParks/keyfunc/v2"
@@ -63,6 +64,32 @@ func TestNewAuthHandlerRejectsInvalidConfig(t *testing.T) {
 	_, err := NewAuthHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), AuthConfig{})
 
 	require.ErrorContains(t, err, "issuer")
+}
+
+func TestHandlerFactoryReusesJWKSAndRejectsUseAfterClose(t *testing.T) {
+	var requests atomic.Int32
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/oidc/jwks" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	t.Cleanup(issuer.Close)
+
+	factory := NewHandlerFactory()
+	cfg := AuthConfig{Issuer: issuer.URL, ExpectedAudience: "api"}
+	for range 2 {
+		_, err := factory.NewAuthHandler(func(http.ResponseWriter, *http.Request) {}, cfg)
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), requests.Load())
+
+	factory.Close()
+	_, err := factory.NewAuthHandler(func(http.ResponseWriter, *http.Request) {}, cfg)
+	require.ErrorContains(t, err, "closed")
 }
 
 func TestAuthResponseDoesNotDiscloseCause(t *testing.T) {

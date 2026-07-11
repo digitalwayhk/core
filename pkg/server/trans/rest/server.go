@@ -25,9 +25,10 @@ import (
 
 type Server struct {
 	*rest.Server
-	context     *router.ServiceContext
-	IsWebSocket bool
-	IsCors      bool
+	context       *router.ServiceContext
+	logtoHandlers *logto.HandlerFactory
+	IsWebSocket   bool
+	IsCors        bool
 }
 
 func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
@@ -36,7 +37,8 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 		return nil, err
 	}
 	ser := &Server{
-		context: context,
+		context:       context,
+		logtoHandlers: logto.NewHandlerFactory(),
 	}
 	ser.IsWebSocket = isWebSocket
 	if ser.IsWebSocket {
@@ -45,6 +47,7 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	ser.IsCors = isCors
 	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
 	if err := ser.register(); err != nil {
+		ser.logtoHandlers.Close()
 		return nil, err
 	}
 	return ser, nil
@@ -102,6 +105,7 @@ func checkRun(context *router.ServiceContext) {
 func (own *Server) Stop() {
 	own.context.SetRunState(false)
 	own.Server.Stop()
+	own.logtoHandlers.Close()
 }
 func (own *Server) register() error {
 	routers := own.context.Router.GetRouters()
@@ -130,7 +134,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 	if api.Auth {
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			if own.context.Config.ManageAuth.Logto.Enable {
-				authHandler, err := newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto)
+				authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto)
 				if err != nil {
 					return fmt.Errorf("initialize manage Logto authentication: %w", err)
 				}
@@ -143,7 +147,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 
 		} else {
 			if own.context.Config.Auth.Logto.Enable {
-				authHandler, err := newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto)
+				authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto)
 				if err != nil {
 					return fmt.Errorf("initialize Logto authentication: %w", err)
 				}
@@ -170,6 +174,13 @@ func handers(own *Server, api *types.RouterInfo) error {
 
 func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
 	return logto.NewAuthHandler(next, logto.AuthConfig{
+		Issuer:           cfg.Issuer,
+		ExpectedAudience: cfg.ExpectedAudience,
+	})
+}
+
+func (own *Server) newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
+	return own.logtoHandlers.NewAuthHandler(next, logto.AuthConfig{
 		Issuer:           cfg.Issuer,
 		ExpectedAudience: cfg.ExpectedAudience,
 	})

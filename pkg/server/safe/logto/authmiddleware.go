@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v2"
@@ -16,6 +17,16 @@ import (
 type AuthConfig struct {
 	Issuer           string
 	ExpectedAudience string
+}
+
+type HandlerFactory struct {
+	mu     sync.Mutex
+	jwks   map[AuthConfig]*keyfunc.JWKS
+	closed bool
+}
+
+func NewHandlerFactory() *HandlerFactory {
+	return &HandlerFactory{jwks: make(map[AuthConfig]*keyfunc.JWKS)}
 }
 
 func (c AuthConfig) validate() error {
@@ -55,30 +66,13 @@ func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.
 			return
 		}
 
-		// 使用 JWKS 验证
-		parseToken := func() (*jwt.Token, error) {
-			return jwt.Parse(tokenString, jwks.Keyfunc,
-				jwt.WithAudience(cfg.ExpectedAudience),
-				jwt.WithIssuer(cfg.issuerClaim()),
-			)
-		}
-		token, err := parseToken()
+		token, err := jwt.Parse(tokenString, jwks.Keyfunc,
+			jwt.WithAudience(cfg.ExpectedAudience),
+			jwt.WithIssuer(cfg.issuerClaim()),
+		)
 		if err != nil {
-			if strings.Contains(err.Error(), "the given key ID was not found in the JWKS") {
-				if refreshErr := jwks.Refresh(r.Context(), keyfunc.RefreshOptions{}); refreshErr != nil {
-					writeAuthenticationFailed(w)
-					return
-				}
-
-				token, err = parseToken()
-				if err != nil {
-					writeAuthenticationFailed(w)
-					return
-				}
-			} else {
-				writeAuthenticationFailed(w)
-				return
-			}
+			writeAuthenticationFailed(w)
+			return
 		}
 
 		if !token.Valid {
@@ -120,6 +114,14 @@ func writeAuthenticationFailed(w http.ResponseWriter) {
 }
 
 func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error) {
+	jwks, err := newJWKS(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return AuthMiddleware(jwks, next, cfg), nil
+}
+
+func newJWKS(cfg AuthConfig) (*keyfunc.JWKS, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -130,6 +132,7 @@ func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error)
 			logx.Errorw("jwks_refresh_failed", logx.Field("error", err))
 		},
 		RefreshTimeout:    10 * time.Second,
+		RefreshRateLimit:  5 * time.Minute,
 		RefreshUnknownKID: true,
 	}
 
@@ -137,7 +140,42 @@ func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error)
 	if err != nil {
 		return nil, fmt.Errorf("load Logto JWKS: %w", err)
 	}
+	return jwks, nil
+}
+
+func (f *HandlerFactory) NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil, errors.New("Logto handler factory is closed")
+	}
+	jwks := f.jwks[cfg]
+	if jwks == nil {
+		var err error
+		jwks, err = newJWKS(cfg)
+		if err != nil {
+			return nil, err
+		}
+		f.jwks[cfg] = jwks
+	}
 	return AuthMiddleware(jwks, next, cfg), nil
+}
+
+func (f *HandlerFactory) Close() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return
+	}
+	for _, jwks := range f.jwks {
+		jwks.EndBackground()
+	}
+	f.jwks = nil
+	f.closed = true
 }
 
 // AuthHandler is kept for source compatibility. New server code must use
