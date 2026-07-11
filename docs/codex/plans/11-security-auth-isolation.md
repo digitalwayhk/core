@@ -308,7 +308,7 @@ Task 11 completed with implementation commits `804a2de`, `937d381`, `daa2c57`, `
 | Item | Status | Commit / evidence |
 | --- | --- | --- |
 | A. Local forwarding addresses fail closed | Completed | `3f4f506`; Utils vet and race tests pass for unconfigured local peers, trusted unsafe candidates, direct loopback, and RFC1918 clients |
-| B. Logto identity binding and nil Request protection | In progress | Requires identity context and RouteHandler regression tests |
+| B. Logto identity binding and nil Request protection | Completed | `e320017`; uid/sub and username fallback context tests, missing-identity rejection, RouteHandler nil guard, vet, and race pass |
 | C. CORS examples and documentation | Planned | Must add explicit local origins without changing fail-closed runtime logic |
 | D. Shared JWKS lifecycle | Under evaluation | Must be owned with cache invalidation and shutdown; no global unbounded cache |
 | E. TrustedProxies docs and security test mode | Planned | Must align skill/docs/examples and executable script modes |
