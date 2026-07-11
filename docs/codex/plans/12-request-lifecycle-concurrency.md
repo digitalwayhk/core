@@ -200,7 +200,7 @@ git commit -m "fix: scope cross-node forwarders by service"
 
 **优先级：** P1
 
-**状态：** 进行中。任务 12.6a 已在 `ffe27c8` 完成：`MembershipManager` 并发 Start/Stop 幂等、注销仅执行一次且 Stop 可等待 worker；`ServiceContext` 已串行化启停与 Provider 切换，相同状态不再重复注册或通知，Provider 调用期间不持有内部状态锁。下一步为 12.6b 服务器关闭链路。
+**状态：** 已完成。任务 12.6a 已在 `ffe27c8` 完成：`MembershipManager` 并发 Start/Stop 幂等、注销仅执行一次且 Stop 可等待 worker；`ServiceContext` 已串行化启停与 Provider 切换，相同状态不再重复注册或通知，Provider 调用期间不持有内部状态锁。任务 12.6b 已在 `f016173` 完成：REST 与 HTML listener 可有界关闭，HTMLServer 使用实例级 mux，WebServer Stop 等待 ServiceGroup、所有 Start 和业务 Stop 返回。
 
 **文件：**
 - 修改：`pkg/server/router/servicecontext.go`
@@ -219,19 +219,21 @@ git commit -m "fix: scope cross-node forwarders by service"
 
 `ServiceContext` 使用实例级操作门串行化启停与 Provider 切换，内部 mutex 只保护状态读写，Provider 调用位于锁外。`MembershipManager` 使用 `sync.Once` 和完成通道实现幂等退出及有界等待。
 
-- [ ] **步骤 1b：编写服务器重复启动/关闭测试**
+- [x] **步骤 1b：编写服务器重复启动/关闭测试**
 
 验证 `WebServer.Stop` 后 listener 关闭、所有 `Start` goroutine 返回、业务 `IStopService` 已完成且重复 Stop 不阻塞。两个 WebServer 实例不得因全局 HTTP mux 重复注册而 panic。
 
-- [ ] **步骤 2b：实现服务器单一 owner**
+- [x] **步骤 2b：实现服务器单一 owner**
 
 `WebServer` 持有实例级 `ServiceGroup`、状态和幂等 `Stop`。
+
+go-zero v1.10.2 的 REST `StartWithOpts` 在 listener 被 `Shutdown` 后仍会等待进程级 shutdown listener。因此 REST 包装器只关闭自己的 `http.Server`，不调用 `proc.Shutdown`；顶层 WebServer 作为整个应用 owner，在所有 ServiceGroup 服务已就绪后统一触发进程级协调器。这不是可用于单个 REST 实例独立重启的 API。
 
 复用 go-zero：通过其 REST `StartWithOpts` 获取实际 `*http.Server`，包装层 `Stop` 使用 deadline 调用 `Shutdown`；继续使用 `ServiceGroup` 的并发启动与一次性停止语义，不自建第二套 service group 或信号监听器。`HTMLServer` 改为拥有独立 `http.ServeMux` 和 `http.Server`，并实现同样的有界 Shutdown。
 
 MQ、Transport 和数据库只调用成熟客户端已有的 `Close`/`Stop`，不得创造新的连接池或 worker。
 
-- [ ] **步骤 3：完成 12.6b 后执行全量验证并提交**
+- [x] **步骤 3：完成 12.6b 后执行全量验证并提交**
 
 ```bash
 go test -race ./pkg/server/cluster ./pkg/server/router ./pkg/server/run ./pkg/server/trans/rest -count=1
@@ -239,6 +241,8 @@ go test ./pkg/server/... -count=10
 git add pkg/server/cluster/membership.go pkg/server/router/servicecontext.go pkg/server/run pkg/server/trans/rest/server.go
 git commit -m "fix: make service lifecycle deterministic"
 ```
+
+验收记录：四个生命周期包全量 `-race` 通过，`go test ./pkg/server/... -count=1` 通过，run/rest 重复 10 次通过，`go vet ./pkg/server/...` 通过。全量 `-count=10` 仍会在 `pkg/server/api/manage` 命中既有的 ClusterSwitcher 测试状态残留（`provider migration already in progress`），纳入任务 12.8 修复，不属于本节服务器生命周期回归。
 
 ## 任务 12.7：Provider 切换期间持续对账
 
