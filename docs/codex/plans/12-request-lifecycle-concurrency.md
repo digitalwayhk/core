@@ -281,18 +281,20 @@ git commit -m "fix: reconcile cluster provider migration"
 
 **优先级：** P1 门禁
 
+**状态：** 已完成。测试入口与 ClusterSwitcher 重复轮次隔离已在 `2f70294` 完成；进程级 WebSocket 通知/周期清理与 Melody 实例 worker 的可等待关闭已在 `f0f70ae` 完成。
+
 **文件：**
 - 修改：`scripts/test.sh`
 - 修改：`docs/codex/PROJECT_REVIEW_ACTION_PLAN.md`
 - 修改：本文件
 
-**已知测试债务：** `pkg/server/api/manage` 的 ClusterSwitcher 测试使用固定服务名并保留迁移状态，`-count=2` 第二轮会命中缓存并报 `provider migration already in progress`；单次测试通过。任务 12.8 必须改为每轮唯一服务名或显式清理迁移状态。
+**已解决测试债务：** `pkg/server/api/manage` 的 BeginLocal 测试通过 `t.Cleanup` 显式 Rollback 自己的迁移，`go test ./pkg/server/api/manage -count=10` 和 `go test ./pkg/server/... -count=10` 均通过。
 
-- [ ] **步骤 1：增加稳定测试入口**
+- [x] **步骤 1：增加稳定测试入口**
 
 为 `scripts/test.sh` 增加 `concurrency` 模式，只运行本任务拥有的包，并包含 `pkg/server/trans/rest`。不得让文档声明但未实现的模式返回含糊的 `exit 2`。
 
-- [ ] **步骤 2：执行最终门禁**
+- [x] **步骤 2：执行最终门禁**
 
 ```bash
 ./scripts/test.sh concurrency
@@ -302,23 +304,25 @@ go test ./pkg/server/... -count=1
 go vet ./pkg/server/... ./service/manage/...
 ```
 
-- [ ] **步骤 3：更新能力矩阵**
+- [x] **步骤 3：更新能力矩阵**
 
 重复启动/关闭测试至少 20 次，以 channel/wait group 证明 worker 已退出。在总计划记录提交、命令、剩余兼容风险和未纳入项。只有全部门禁通过后才将任务 12 标为完成。
 
 ## 进程级 WebSocket Worker 归属
 
-- [ ] 全局通知系统和周期清理 worker 归进程生命周期，不归任一 `WebServer` 实例。
-- [ ] 复用 go-zero `proc.AddShutdownListener` 注册一次关闭，不重复处理系统信号。
-- [ ] 周期清理接受 context/cancel 并可等待退出；测试明确单例关闭后是否允许在同一进程重启。
+- [x] 全局通知系统和周期清理 worker 归进程生命周期，不归任一 `WebServer` 实例。
+- [x] 复用 go-zero `proc.AddShutdownListener` 注册一次关闭，不重复处理系统信号。
+- [x] 周期清理接受 context/cancel 并可等待退出；进程级通知/清理单例关闭后不允许在同一进程重启。
 
 ## 最终验收清单
 
 - [x] 框架生产路径不再向 `ManageService` 或业务管理服务写入请求对象；旧导出字段仅保留源码兼容。
-- [ ] 所有可变进程级 map 都有唯一 owner 和一致同步策略，getter 不返回内部 map。
-- [ ] 两个服务的 CrossNode forwarder 不会互相覆盖或误清理。
-- [ ] `ServiceContext`、membership 和服务器关闭可重复调用，并在 deadline 内完成。
-- [ ] Provider 迁移窗口内新增、删除和离线节点都能对账到 pending。
+- [x] 所有本任务范围内的可变进程级 map 都有唯一 owner 和一致同步策略，getter 不返回内部 map。
+- [x] 两个服务的 CrossNode forwarder 不会互相覆盖或误清理。
+- [x] `ServiceContext`、membership 和服务器关闭可重复调用，并在 deadline 内完成。
+- [x] Provider 迁移窗口内新增、Deregister 和离线节点都能对账到 pending；当前 `ClusterRegistry` 无物理 Delete API。
 - [x] WebSocket 异步回调测试不直接读取未同步状态。
-- [ ] 定向 `-race`、服务端回归和 `go vet` 全部通过。
-- [ ] 每个小节均有独立开发提交、测试证据和审查结论。
+- [x] 定向 `-race`、服务端回归和 `go vet` 全部通过。
+- [x] 每个小节均有独立开发提交、测试证据和审查结论。
+
+**最终门禁记录：** `./scripts/test.sh concurrency`、`go test ./pkg/server/... -count=10`、`go test ./pkg/server/... -count=1` 和 `go vet ./pkg/server/... ./service/manage/...` 均通过。WebSocket worker 关闭及 Submit/Shutdown 并发用例在 race detector 下连续 20 次通过。

@@ -81,7 +81,7 @@
 | 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
-| 12. 请求隔离、全局状态与生命周期 | 进行中（12.1-12.7 已完成） | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28` | 请求与注册表已隔离，服务关闭已幂等可等待，Provider 迁移窗口已持续对账；待完成泄漏与能力门禁 |
+| 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
 | 13. 持久化正确性与外部测试分离 | 未开始 |  | 持久化单元测试不依赖外部服务并通过；启用时，Docker 数据库套件通过 |
 | 14. 配置到运行时能力契约 | 未开始 |  | 每个已接受的 MQ/集群/传输字段都有运行时消费方和行为测试，否则必须拒绝 |
 | 15. 公共 API 兼容性与发布治理 | 未开始 |  | 类型化错误、路由/API 快照、废弃策略、changelog 和消费方兼容性检查通过 |
@@ -946,7 +946,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **优先级：** 请求隔离与竞态为 P0；更广泛的生命周期合并为 P1
 
-**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`；任务 12.1 请求隔离已在 `60b6e3a` 完成，任务 12.2 注册表同步已在 `fc42ae7` 完成，任务 12.3 WebServer 状态隔离已在 `52ac181` 完成，任务 12.4 WebSocket 测试同步已在 `87cc800` 完成，任务 12.5 跨节点转发隔离已在 `b816515` 完成，任务 12.6a MembershipManager 与 ServiceContext 幂等生命周期已在 `ffe27c8` 完成，任务 12.6b REST、HTMLServer 与 WebServer 可等待关闭已在 `f016173` 完成，任务 12.7 Provider 迁移窗口持续对账已在 `8aeed28` 完成。下一节为任务 12.8 竞态、泄漏与能力验收。
+**状态：** 已完成。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`；任务 12.1-12.7 对应提交为 `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`；任务 12.8 测试入口与状态隔离在 `2f70294` 完成，WebSocket worker 生命周期在 `f0f70ae` 完成。下一主任务为任务 13 持久化正确性与外部测试分离。
 
 **文件：**
 - 创建：`docs/codex/plans/12-request-lifecycle-concurrency.md`
@@ -965,7 +965,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 添加并发测试，证明请求 ID 和身份不会跨服务调用泄漏。使用显式参数或请求作用域上下文替换共享请求存储。从注册表返回不可变快照，并以一致方式保护所有可变 map。
 
-- [ ] **步骤 3：建立唯一生命周期 owner**
+- [x] **步骤 3：建立唯一生命周期 owner**
 
 为集群成员、心跳、CrossNodeNoticeBroker、MQ、传输、数据库连接、Fiber/HTTP Server、清理 worker 和后台回调定义有序、幂等的 `Start`/`Close` 行为。使用取消、deadline 和 wait group；传播终止性启动/关闭错误。
 
@@ -973,7 +973,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 在 `Begin -> Complete` 期间，持续镜像或对账迁移开始后注册的节点。测试并发注册、Watch 事件、回滚、完成、重复投递和 Provider 失败，确保不会静默丢失成员。
 
-- [ ] **步骤 5：运行竞态和泄漏门禁**
+- [x] **步骤 5：运行竞态和泄漏门禁**
 
 按包划分竞态测试，并在重复启动/停止周期周围添加有界 goroutine 泄漏检查。记录异步 WebSocket 回调契约，并使测试通过 channel 或 wait group 同步，而非不安全地捕获状态。
 
@@ -1166,7 +1166,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 | `./scripts/test.sh quick` | 格式化/vet + 环境无关快速单元测试 | 否 | 否 |
 | `./scripts/test.sh server` | Server 包单元/集成风格测试 | 否，但必须允许本地端口绑定 | 否 |
 | 计划中：`./scripts/test.sh persistence-unit` | 使用 SQLite/fake 的持久化正确性 | 否 | 否 |
-| 计划中：`./scripts/test.sh race` | 按包划分的请求、注册表、生命周期和回调竞态测试 | 否 | 否 |
+| `./scripts/test.sh concurrency` | 按包划分的请求、注册表、生命周期和回调竞态测试，含 20 次重复关闭门禁 | 否，但必须允许本地端口绑定 | 否 |
 | 计划中：`./scripts/test.sh config-contract` | 通过真实启动/关闭验证配置 | 本地 Provider 不需要 | 否 |
 | `./scripts/test.sh integration-local` | 本地 Provider 集成测试 | 否 | 脚本设置 `CORE_TEST_CLUSTER_LOCAL=1` |
 | `./scripts/test.sh integration-external` | etcd/consul/redis/nats 测试 | 是 | 由脚本默认值设置 |
