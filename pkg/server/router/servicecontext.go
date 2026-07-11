@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
-	"net"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
@@ -178,50 +178,170 @@ func (own *ServiceContext) GetSlowestRoutersJSON(
 const DEFAULTPORT = 8080
 const DEFAULTSOCKETPORT = 0
 
-var scontext map[string]*ServiceContext
-var TestResult map[string]interface{}
+type contextInitialization struct {
+	ready      chan struct{}
+	result     *ServiceContext
+	panicValue interface{}
+	panicked   bool
+}
 
-func init() {
-	scontext = make(map[string]*ServiceContext)
-	TestResult = make(map[string]interface{})
+type serviceContextRegistry struct {
+	mu                   sync.RWMutex
+	contexts             map[string]*ServiceContext
+	initializing         map[string]*contextInitialization
+	nextDefaultSequence  int
+	freeDefaultSequences []int
+}
+
+func newServiceContextRegistry() *serviceContextRegistry {
+	return &serviceContextRegistry{
+		contexts:     make(map[string]*ServiceContext),
+		initializing: make(map[string]*contextInitialization),
+	}
+}
+
+func (r *serviceContextRegistry) get(name string) *ServiceContext {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.contexts[name]
+}
+
+func (r *serviceContextRegistry) snapshot() map[string]*ServiceContext {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	contexts := make(map[string]*ServiceContext, len(r.contexts))
+	for name, sc := range r.contexts {
+		contexts[name] = sc
+	}
+	return contexts
+}
+
+func (r *serviceContextRegistry) getOrInitialize(
+	name string,
+	reserveDefaultSequence bool,
+	initialize func(sequence int) *ServiceContext,
+) *ServiceContext {
+	r.mu.Lock()
+	if sc := r.contexts[name]; sc != nil {
+		r.mu.Unlock()
+		return sc
+	}
+	if entry := r.initializing[name]; entry != nil {
+		r.mu.Unlock()
+		<-entry.ready
+		if entry.panicked {
+			panic(entry.panicValue)
+		}
+		return entry.result
+	}
+
+	sequence := -1
+	if reserveDefaultSequence {
+		sequence = r.reserveDefaultSequence()
+	}
+	entry := &contextInitialization{ready: make(chan struct{})}
+	r.initializing[name] = entry
+	r.mu.Unlock()
+
+	var result *ServiceContext
+	func() {
+		defer func() {
+			if value := recover(); value != nil {
+				entry.panicValue = value
+				entry.panicked = true
+			}
+		}()
+		result = initialize(sequence)
+	}()
+
+	r.mu.Lock()
+	entry.result = result
+	if !entry.panicked && result != nil {
+		r.contexts[name] = result
+	} else if reserveDefaultSequence {
+		r.freeDefaultSequences = append(r.freeDefaultSequences, sequence)
+	}
+	delete(r.initializing, name)
+	close(entry.ready)
+	r.mu.Unlock()
+
+	if entry.panicked {
+		panic(entry.panicValue)
+	}
+	return result
+}
+
+// reserveDefaultSequence 必须在持有 r.mu 时调用。
+func (r *serviceContextRegistry) reserveDefaultSequence() int {
+	for len(r.freeDefaultSequences) > 0 {
+		last := len(r.freeDefaultSequences) - 1
+		sequence := r.freeDefaultSequences[last]
+		r.freeDefaultSequences = r.freeDefaultSequences[:last]
+		if sequence >= len(r.contexts) {
+			return sequence
+		}
+	}
+	if r.nextDefaultSequence < len(r.contexts) {
+		r.nextDefaultSequence = len(r.contexts)
+	}
+	sequence := r.nextDefaultSequence
+	r.nextDefaultSequence++
+	return sequence
+}
+
+var contextRegistry = newServiceContextRegistry()
+
+var testResultMu sync.RWMutex
+
+// Deprecated: 为保持源码兼容暂时保留；框架内部请使用 SetTestResult 和 GetTestResult。
+// 外部直接写入此 map 无法受内部锁保护，仍可能产生并发竞态。
+var TestResult = make(map[string]interface{})
+
+func SetTestResult(path string, result interface{}) {
+	testResultMu.Lock()
+	defer testResultMu.Unlock()
+	TestResult[path] = result
+}
+
+func GetTestResult(path string) interface{} {
+	testResultMu.RLock()
+	defer testResultMu.RUnlock()
+	return TestResult[path]
 }
 
 func NewServiceContext(service types.IService) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	if sc, ok := scontext[name]; ok {
-		return sc
-	}
-	sc := &ServiceContext{}
-	sc.StateChan = make(chan bool, 1)
-	sc.Service = initService(service, sc)
-	con := config.ReadConfig(name)
-	if con == nil {
-		count := len(scontext)
-		port := DEFAULTPORT + count
-		con = config.NewServiceDefaultConfig(name, port)
-		con.DataCenterID = uint(count) + 1
-		con.MachineID = 1
-		con.SocketPort = DEFAULTSOCKETPORT + count
-		con.AttachServices = make(map[string]*config.AttachAddress)
-		for _, as := range sc.Service.AttachService {
-			con.SetAttachService(as.ServiceName, "", 0, 0)
-		}
-		err := con.Save()
-		if err != nil {
-			panic(err)
-		}
-
-	} else {
-		for _, as := range sc.Service.AttachService {
-			if cas, ok := con.AttachServices[as.ServiceName]; ok {
-				as.Address = cas.Address
-				as.Port = cas.Port
+	return contextRegistry.getOrInitialize(name, true, func(sequence int) *ServiceContext {
+		sc := &ServiceContext{}
+		sc.StateChan = make(chan bool, 1)
+		sc.Service = initService(service, sc)
+		con := config.ReadConfig(name)
+		if con == nil {
+			port := DEFAULTPORT + sequence
+			con = config.NewServiceDefaultConfig(name, port)
+			con.DataCenterID = uint(sequence) + 1
+			con.MachineID = 1
+			con.SocketPort = DEFAULTSOCKETPORT + sequence
+			con.AttachServices = make(map[string]*config.AttachAddress)
+			for _, as := range sc.Service.AttachService {
+				con.SetAttachService(as.ServiceName, "", 0, 0)
+			}
+			if err := con.Save(); err != nil {
+				panic(err)
+			}
+		} else {
+			for _, as := range sc.Service.AttachService {
+				if cas, ok := con.AttachServices[as.ServiceName]; ok {
+					as.Address = cas.Address
+					as.Port = cas.Port
+				}
 			}
 		}
-	}
-	sc.Config = con
-	initServiceContextPost(sc, service, con, name)
-	return scontext[name]
+		sc.Config = con
+		initServiceContextPost(sc, service, con)
+		return sc
+	})
 }
 
 // NewServiceContextWithConfig creates a ServiceContext using the provided
@@ -229,21 +349,20 @@ func NewServiceContext(service types.IService) *ServiceContext {
 // and programmatic service bootstrap where the caller manages configuration.
 func NewServiceContextWithConfig(service types.IService, con *config.ServerConfig) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	if sc, ok := scontext[name]; ok {
+	return contextRegistry.getOrInitialize(name, false, func(_ int) *ServiceContext {
+		sc := &ServiceContext{}
+		sc.StateChan = make(chan bool, 1)
+		sc.Service = initService(service, sc)
+		sc.Config = con
+		initServiceContextPost(sc, service, con)
 		return sc
-	}
-	sc := &ServiceContext{}
-	sc.StateChan = make(chan bool, 1)
-	sc.Service = initService(service, sc)
-	sc.Config = con
-	initServiceContextPost(sc, service, con, name)
-	return scontext[name]
+	})
 }
 
 // initServiceContextPost performs the post-config initialisation shared by
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
-func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig, name string) {
+func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
 	// same process or between hot-reload replicas.
@@ -290,7 +409,6 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
-	scontext[name] = sc
 }
 func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	service := &types.Service{
@@ -349,16 +467,16 @@ func safedo(cs types.IRouter, req types.IRequest) {
 	// 	logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", serviceName, path, err.Error()))
 	// }
 	info := cs.RouterInfo()
-	TestResult[info.GetPath()] = nil
+	SetTestResult(info.GetPath(), nil)
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
 		return nil
 	}
-	return scontext[name]
+	return contextRegistry.get(name)
 }
 func GetContexts() map[string]*ServiceContext {
-	return scontext
+	return contextRegistry.snapshot()
 }
 func (own *ServiceContext) NewID() uint {
 	return uint(own.snow.NextId())

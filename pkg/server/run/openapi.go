@@ -129,7 +129,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 		operation.RequestBody = getRequestBody(api, doc)
 	}
 	req := &router.InitRequest{}
-	data := router.TestResult[info.Path]
+	data := router.GetTestResult(info.Path)
 	if data == nil {
 		if igp, ok := api.(types.IRouterResponse); ok {
 			data = igp.GetResponse()
@@ -159,7 +159,7 @@ func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server)
 	api := info.New()
 	oper.RequestBody = getRequestBody(api, doc)
 	req := &router.InitRequest{}
-	data := router.TestResult[info.Path]
+	data := router.GetTestResult(info.Path)
 	ress := getResponse(data, req, doc)
 	for k, v := range ress {
 		oper.AddResponse(k, v)
