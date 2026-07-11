@@ -946,6 +946,8 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **优先级：** 请求隔离与竞态为 P0；更广泛的生命周期合并为 P1
 
+**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`，完成代码风险盘点与测试基线，正在实施任务 12.1 请求隔离。
+
 **文件：**
 - 创建：`docs/codex/plans/12-request-lifecycle-concurrency.md`
 - 修改：`service/manage/manageservice.go`
@@ -955,7 +957,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - 修改：`pkg/server/types/routerinfo.go`
 - 按需修改：Provider、Fiber、WebSocket、MQ、传输和数据库生命周期 owner
 
-- [ ] **步骤 1：盘点可变进程与请求状态**
+- [x] **步骤 1：盘点可变进程与请求状态**
 
 将每个 global/map/goroutine 分类为不可变注册表、已同步注册表、请求本地值或生命周期 owner 持有的 worker。包含 `ManageService.Req`、service/全局类型 map、订阅者 map、etcd lease 状态、空 Fiber 关闭、WebSocket limiter 清理和子系统关闭路径。
 
