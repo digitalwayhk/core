@@ -16,6 +16,24 @@ case "${1:-quick}" in
   security)
     go test ./pkg/server/config ./pkg/server/safe/logto ./pkg/server/trans/rest ./pkg/utils -count=1
     ;;
+  concurrency)
+    go test -race \
+      ./service/manage \
+      ./pkg/server/api/manage \
+      ./pkg/server/router \
+      ./pkg/server/run \
+      ./pkg/server/trans/rest \
+      ./pkg/server/types \
+      ./pkg/server/cluster \
+      -count=1
+    go test -race \
+      ./pkg/server/run \
+      ./pkg/server/router \
+      ./pkg/server/cluster \
+      ./pkg/server/trans/rest \
+      -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown' \
+      -count=20
+    ;;
   integration-local)
     CORE_TEST_CLUSTER_LOCAL=1 go test -tags=integration ./tests/integration -run TestClusterLocal -count=1
     ;;
@@ -33,11 +51,12 @@ case "${1:-quick}" in
   all)
     "$0" quick
     "$0" server
+    "$0" concurrency
     "$0" integration-local
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|integration-local|integration-external|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|concurrency|integration-local|integration-external|all}" >&2
     exit 2
     ;;
 esac

@@ -287,7 +287,11 @@ func TestClusterStatus_AfterProviderSwitch_ReturnsNewProvider(t *testing.T) {
 // with TargetProvider="local" (newly supported) returns ok without error.
 func TestClusterSwitchProvider_BeginLocal_Succeeds(t *testing.T) {
 	const svcName = "manage-test-api-begin-local"
-	mustCreateContext(t, svcName)
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	require.NotNil(t, sc)
+	t.Cleanup(func() {
+		_ = sc.ClusterSwitcher.Rollback(context.Background())
+	})
 
 	api := &manage.ClusterSwitchProvider{
 		Action:         "begin",
