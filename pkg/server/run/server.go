@@ -20,26 +20,37 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/digitalwayhk/core/pkg/server/trans/socket"
 
+	"github.com/zeromicro/go-zero/core/proc"
 	"github.com/zeromicro/go-zero/core/service"
 )
 
 type WebServer struct {
 	sync.RWMutex
-	serviceContexts map[string]*router.ServiceContext
-	serverOption    map[string]*types.ServerOption
-	childServer     map[int]*WebServer
-	htmls           *HTMLServer
-	ViewPort        int
-	serverip        string
-	Port            int
-	SocketPort      int
-	isRun           bool
-	registryVersion uint64
-	optionApplyMu   sync.Mutex
-	initOnce        sync.Once
-	endOnce         sync.Once
-	initializing    atomic.Bool
-	startOnce       sync.Once
+	serviceContexts  map[string]*router.ServiceContext
+	serverOption     map[string]*types.ServerOption
+	childServer      map[int]*WebServer
+	htmls            *HTMLServer
+	ViewPort         int
+	serverip         string
+	Port             int
+	SocketPort       int
+	isRun            bool
+	registryVersion  uint64
+	optionApplyMu    sync.Mutex
+	initOnce         sync.Once
+	endOnce          sync.Once
+	initializing     atomic.Bool
+	startOnce        sync.Once
+	runMu            sync.Mutex
+	runOnce          sync.Once
+	runLifecycleOnce sync.Once
+	shutdownOnce     sync.Once
+	runStarted       atomic.Bool
+	stopped          atomic.Bool
+	runReady         chan struct{}
+	runDone          chan struct{}
+	stopCh           chan struct{}
+	group            *service.ServiceGroup
 }
 
 var _ sync.Locker = (*WebServer)(nil)
@@ -87,7 +98,11 @@ func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 }
 
 func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
-	<-nsc.StateChan
+	select {
+	case <-nsc.StateChan:
+	case <-own.stopChannel():
+		return
+	}
 
 	for {
 		contexts, version := own.serviceContextSnapshotWithVersion()
@@ -255,29 +270,86 @@ func (own *WebServer) htmlServerSnapshot() *HTMLServer {
 }
 
 func (own *WebServer) Start() {
-	own.beginInitialization()
-	own.initServer()
-	group := service.NewServiceGroup()
+	own.prepareRunLifecycle()
+	own.runOnce.Do(func() {
+		own.runMu.Lock()
+		if own.stopped.Load() {
+			own.runMu.Unlock()
+			return
+		}
+		own.runStarted.Store(true)
+		own.runMu.Unlock()
+		own.beginInitialization()
+		own.initServer()
+		group := service.NewServiceGroup()
+		for _, ctx := range own.serviceContextSnapshot() {
+			for _, server := range ctx.GetServers() {
+				if server != nil {
+					group.Add(server)
+				}
+			}
+		}
+		//todo:test quic server
+		// for _, ctx := range own.serviceContexts {
+		// 	group.Add(quic.NewServer(ctx))
+		// }
+		group.Add(own.htmlServerSnapshot())
+		own.runServiceGroup(group)
+	})
+}
+
+func (own *WebServer) Stop() {
+	own.prepareRunLifecycle()
+	own.runMu.Lock()
+	own.stopped.Store(true)
+	started := own.runStarted.Load()
+	own.runMu.Unlock()
+	own.shutdownOnce.Do(func() {
+		close(own.stopCh)
+		if !started {
+			return
+		}
+		select {
+		case <-own.runReady:
+			// go-zero v1.10.2 的 StartWithOpts 在 listener 关闭后仍等待进程级 shutdown listener。
+			// WebServer 是应用级 owner，只在顶层 Stop 中统一触发，避免子服务递归关闭。
+			proc.Shutdown()
+		case <-own.runDone:
+		}
+	})
+	if started {
+		<-own.runDone
+	}
+}
+
+func (own *WebServer) prepareRunLifecycle() {
+	own.runLifecycleOnce.Do(func() {
+		own.runReady = make(chan struct{})
+		own.runDone = make(chan struct{})
+		own.stopCh = make(chan struct{})
+	})
+}
+
+func (own *WebServer) stopChannel() <-chan struct{} {
+	own.prepareRunLifecycle()
+	return own.stopCh
+}
+
+func (own *WebServer) runServiceGroup(group *service.ServiceGroup) {
+	defer close(own.runDone)
 	defer func() {
 		group.Stop()
 		for _, ctx := range own.serviceContextSnapshot() {
 			if stop, ok := ctx.Service.Instance.(types.IStopService); ok {
-				go stop.Stop()
+				stop.Stop()
 			}
 		}
 	}()
-	for _, ctx := range own.serviceContextSnapshot() {
-		for _, server := range ctx.GetServers() {
-			if server != nil {
-				group.Add(server)
-			}
-		}
-	}
-	//todo:test quic server
-	// for _, ctx := range own.serviceContexts {
-	// 	group.Add(quic.NewServer(ctx))
-	// }
-	group.Add(own.htmlServerSnapshot())
+
+	group.Add(service.WithStart(func() { close(own.runReady) }))
+	own.Lock()
+	own.group = group
+	own.Unlock()
 	group.Start()
 }
 

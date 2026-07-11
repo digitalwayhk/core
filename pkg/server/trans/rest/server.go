@@ -1,9 +1,14 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -15,10 +20,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
-	"errors"
-	"fmt"
-	"net/http"
-
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 )
@@ -29,6 +30,12 @@ type Server struct {
 	logtoHandlers *logto.HandlerFactory
 	IsWebSocket   bool
 	IsCors        bool
+	stateMu       sync.Mutex
+	lifecycleMu   sync.Mutex
+	httpServer    *http.Server
+	stopCh        chan struct{}
+	stopOnce      sync.Once
+	stopped       bool
 }
 
 func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
@@ -39,6 +46,7 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	ser := &Server{
 		context:       context,
 		logtoHandlers: logto.NewHandlerFactory(),
+		stopCh:        make(chan struct{}),
 	}
 	ser.IsWebSocket = isWebSocket
 	if ser.IsWebSocket {
@@ -76,11 +84,18 @@ func normalizeCorsOrigins(origins []string) []string {
 	return normalized
 }
 func (own *Server) Start() {
+	own.lifecycleMu.Lock()
+	if own.stopped {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	own.lifecycleMu.Unlock()
+
 	pid := utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port)
 	if pid {
 		panic(fmt.Sprintf("%s 服务的端口%d被占用,不能启动服务", own.context.Service.Name, own.context.Config.Port))
 	}
-	go checkRun(own.context)
+	go own.checkRun()
 	s1 := fmt.Sprintf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
 	if own.IsWebSocket {
 		s2 := fmt.Sprintf("Starting %s websocket at %s:%d success,path:%s:%d/ws \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
@@ -89,23 +104,60 @@ func (own *Server) Start() {
 	} else {
 		fmt.Print(s1)
 	}
-	own.Server.Start()
+	own.Server.StartWithOpts(func(server *http.Server) {
+		own.lifecycleMu.Lock()
+		own.httpServer = server
+		stopped := own.stopped
+		own.lifecycleMu.Unlock()
+		if stopped {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdownCtx)
+		}
+	})
 }
-func checkRun(context *router.ServiceContext) {
+func (own *Server) checkRun() {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
-		time.Sleep(time.Millisecond * 10)
-		pid := utils.ScanPort("tcp", context.Config.Host, context.Config.Port)
-		if pid {
-			//context.SetPid(pid)
-			go context.SetRunState(true)
+		select {
+		case <-own.stopCh:
 			return
+		case <-ticker.C:
+			if utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port) {
+				own.stateMu.Lock()
+				own.lifecycleMu.Lock()
+				stopped := own.stopped
+				own.lifecycleMu.Unlock()
+				if !stopped {
+					own.context.SetRunState(true)
+				}
+				own.stateMu.Unlock()
+				return
+			}
 		}
 	}
 }
 func (own *Server) Stop() {
-	own.context.SetRunState(false)
-	own.Server.Stop()
-	own.logtoHandlers.Close()
+	own.stopOnce.Do(func() {
+		close(own.stopCh)
+		own.stateMu.Lock()
+		own.lifecycleMu.Lock()
+		own.stopped = true
+		server := own.httpServer
+		own.lifecycleMu.Unlock()
+
+		own.context.SetRunState(false)
+		own.stateMu.Unlock()
+		if server != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logx.Errorf("REST 服务关闭失败，服务：%s，错误：%v", own.context.Service.Name, err)
+			}
+			cancel()
+		}
+		own.logtoHandlers.Close()
+	})
 }
 func (own *Server) register() error {
 	routers := own.context.Router.GetRouters()
