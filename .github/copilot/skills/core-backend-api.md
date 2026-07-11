@@ -692,6 +692,8 @@ cfg.Cluster.Providers.Etcd.Endpoints = []string{"127.0.0.1:2379"}
 cfg.Cluster.Providers.Etcd.TTL       = 10 * time.Second
 ```
 
+`ServerConfig.TrustedProxies` 只填写实际连接服务的反向代理 IP/CIDR，例如 `[]string{"127.0.0.1/32", "10.0.0.0/8"}`。默认空列表忽略 `X-Forwarded-For`/`X-Real-IP`，反代部署必须显式配置；未配置时，携带转发头的本地/私网 peer 会 fail closed，不会被识别为本地访问。
+
 ---
 
 ## 13. 传输层选择（Transport）

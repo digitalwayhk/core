@@ -6,6 +6,7 @@
 - `Cluster.Mode` 默认 `auto`，Provider 默认 `local`。
 - `Transport.Internal` 默认 `grpc`，Fallback 默认 `grpc -> http -> socket`。
 - `MQ.Mode` 默认 `auto`，Provider 默认 `redis-stream`，开发阶段优先 Redis Stream。
+- `etc/configdemo.json` 演示反向代理部署的 `TrustedProxies`；该列表只能包含实际代理的 IP/CIDR。
 
 ## 运行
 

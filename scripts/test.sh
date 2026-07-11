@@ -13,6 +13,9 @@ case "${1:-quick}" in
     go vet ./pkg/server/...
     go test ./pkg/server/... -count=1
     ;;
+  security)
+    go test ./pkg/server/config ./pkg/server/safe/logto ./pkg/server/trans/rest ./pkg/utils -count=1
+    ;;
   integration-local)
     CORE_TEST_CLUSTER_LOCAL=1 go test -tags=integration ./tests/integration -run TestClusterLocal -count=1
     ;;
@@ -34,7 +37,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|integration-local|integration-external|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|integration-local|integration-external|all}" >&2
     exit 2
     ;;
 esac

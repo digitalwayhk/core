@@ -344,6 +344,8 @@ CORS is fail-closed: `IsCors: true` requires at least one explicit `OriginCors`.
 
 Configuration is generated on first start under `etc/{serviceName}.json` in current versions.
 
+Set `ServerConfig.TrustedProxies` to the IP addresses or CIDRs of reverse proxies that actually connect to the service, for example `[]string{"127.0.0.1/32", "10.0.0.0/8"}`. The default empty list ignores `X-Forwarded-For` and `X-Real-IP`; reverse-proxy deployments must configure this field explicitly. If an unconfigured local or private peer sends forwarding headers, client-IP resolution fails closed instead of treating the request as local.
+
 ## WebSocket and Observe
 
 Use `SubscribeRouters()` for route-success notifications:

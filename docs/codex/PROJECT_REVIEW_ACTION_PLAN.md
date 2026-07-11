@@ -1163,15 +1163,15 @@ Development may begin when these conditions are recorded:
 | `go vet ./...` | full-project compile/vet baseline | No | No |
 | `./scripts/test.sh quick` | formatting/vet + environment-independent fast unit tests | No | No |
 | `./scripts/test.sh server` | server package unit/integration-style tests | No, but local port binding must be allowed | No |
-| `./scripts/test.sh persistence-unit` | persistence correctness with SQLite/fakes | No | No |
-| `./scripts/test.sh race` | package-partitioned request, registry, lifecycle, and callback race tests | No | No |
-| `./scripts/test.sh config-contract` | configuration validation through real startup/shutdown | No for local providers | No |
+| Planned: `./scripts/test.sh persistence-unit` | persistence correctness with SQLite/fakes | No | No |
+| Planned: `./scripts/test.sh race` | package-partitioned request, registry, lifecycle, and callback race tests | No | No |
+| Planned: `./scripts/test.sh config-contract` | configuration validation through real startup/shutdown | No for local providers | No |
 | `./scripts/test.sh integration-local` | local provider integration tests | No | `CORE_TEST_CLUSTER_LOCAL=1` set by script |
 | `./scripts/test.sh integration-external` | etcd/consul/redis/nats tests | Yes | set by script defaults |
-| `./scripts/test.sh integration-persistence` | MySQL/MongoDB/ClickHouse driver and lifecycle tests | Yes | explicit `CORE_TEST_*` variables set by script |
-| `./scripts/check-logging.sh` | runtime logging policy and sensitive-output guard | No | No |
+| Planned: `./scripts/test.sh integration-persistence` | MySQL/MongoDB/ClickHouse driver and lifecycle tests | Yes | explicit `CORE_TEST_*` variables set by script |
+| Planned: `./scripts/check-logging.sh` | runtime logging policy and sensitive-output guard | No | No |
 | `./scripts/test.sh security` | auth isolation, CORS/proxy, file mode, body, header, and safe-error tests | No | No |
-| `./scripts/test.sh compatibility` | route/OpenAPI/exported API and configured consumer smoke checks | Consumer-dependent | consumer paths or revisions explicitly configured |
+| Planned: `./scripts/test.sh compatibility` | route/OpenAPI/exported API and configured consumer smoke checks | Consumer-dependent | consumer paths or revisions explicitly configured |
 | `CORE_TEST_KAFKA=1 ... TestMQKafka` | Kafka provider contract | Yes | Only after Kafka provider exists |
 
 ## Done Definition
