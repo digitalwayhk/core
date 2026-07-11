@@ -41,9 +41,10 @@ type MelodyManager struct {
 	serviceContext *router.ServiceContext
 
 	// 添加关闭通道
-	closeChan chan struct{}
-	closed    bool
-	closeMu   sync.Mutex
+	closeChan   chan struct{}
+	monitorDone chan struct{}
+	closed      bool
+	closeMu     sync.Mutex
 
 	// 客户端订阅管理
 	subscriptions   map[*melody.Session]*SessionSubscriptions
@@ -83,6 +84,7 @@ func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.M
 		serviceContext:  serviceContext,
 		subscriptions:   make(map[*melody.Session]*SessionSubscriptions),
 		closeChan:       make(chan struct{}), // 🔧 添加关闭通道
+		monitorDone:     make(chan struct{}),
 		connectionLimit: NewConnectionRateLimiter(),
 		connCounter:     &ConnectionCounter{},
 		maxConnections:  config.MaxConnections, // 默认最大连接数
@@ -137,6 +139,8 @@ func (mm *MelodyManager) Close() error {
 
 	mm.closed = true
 	close(mm.closeChan) // 关闭统计监控goroutine
+	mm.connectionLimit.Close()
+	<-mm.monitorDone
 
 	return mm.melody.Close()
 }
@@ -187,7 +191,10 @@ func (mm *MelodyManager) setupHandlers() {
 	})
 
 	// 定期统计
-	go mm.startStatsMonitor()
+	go func() {
+		defer close(mm.monitorDone)
+		mm.startStatsMonitor()
+	}()
 }
 
 // 🔧 新增：处理缓冲区满的错误

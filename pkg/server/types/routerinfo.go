@@ -821,6 +821,14 @@ func (own *RouterInfo) Destroy() {
 var websocketcleanupOnce sync.Once
 var clearMap sync.Map
 
+var periodicWebSocketCleanup struct {
+	sync.Mutex
+	started bool
+	stopped bool
+	cancel  context.CancelFunc
+	done    chan struct{}
+}
+
 // func (own *RouterInfo) ensureWebSocketInit() {
 // 	// 🔧 确保全局清理任务启动
 // 	websocketcleanupOnce.Do(func() {
@@ -842,37 +850,74 @@ var clearMap sync.Map
 // }
 
 func StartPeriodicCleanup() {
+	registerWebSocketProcessShutdown()
+	periodicWebSocketCleanup.Lock()
+	if periodicWebSocketCleanup.started || periodicWebSocketCleanup.stopped {
+		periodicWebSocketCleanup.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	periodicWebSocketCleanup.started = true
+	periodicWebSocketCleanup.cancel = cancel
+	periodicWebSocketCleanup.done = done
+	periodicWebSocketCleanup.Unlock()
+
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			totalCleaned := 0
-			totalRouters := 0
-			totalClients := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				totalCleaned := 0
+				totalRouters := 0
+				totalClients := 0
 
-			clearMap.Range(func(key, value interface{}) bool {
-				if rou, ok := value.(*RouterInfo); ok {
-					totalRouters++
+				clearMap.Range(func(key, value interface{}) bool {
+					if rou, ok := value.(*RouterInfo); ok {
+						totalRouters++
+						beforeCount := rou.GetActiveClientCount()
+						rou.CleanupDeadConnections()
+						afterCount := rou.GetActiveClientCount()
+						totalCleaned += beforeCount - afterCount
+						totalClients += afterCount
+					}
+					return true
+				})
 
-					// 🔧 统计清理前的客户端数量
-					beforeCount := rou.GetActiveClientCount()
-					rou.CleanupDeadConnections()
-					afterCount := rou.GetActiveClientCount()
-
-					cleaned := beforeCount - afterCount
-					totalCleaned += cleaned
-					totalClients += afterCount
+				if totalCleaned > 0 || totalRouters > 0 {
+					logx.Infof("WebSocket清理完成 - 路由数: %d, 活跃客户端: %d, 清理连接: %d",
+						totalRouters, totalClients, totalCleaned)
 				}
-				return true
-			})
-
-			if totalCleaned > 0 || totalRouters > 0 {
-				logx.Infof("🧹 WebSocket清理完成 - 路由数: %d, 活跃客户端: %d, 清理连接: %d",
-					totalRouters, totalClients, totalCleaned)
 			}
 		}
 	}()
+}
+
+// StopPeriodicCleanup 停止进程级 WebSocket 周期清理；关闭后不允许在同一进程重启。
+func StopPeriodicCleanup(ctx context.Context) error {
+	periodicWebSocketCleanup.Lock()
+	if !periodicWebSocketCleanup.stopped {
+		periodicWebSocketCleanup.stopped = true
+		if periodicWebSocketCleanup.cancel != nil {
+			periodicWebSocketCleanup.cancel()
+		}
+	}
+	done := periodicWebSocketCleanup.done
+	periodicWebSocketCleanup.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // GetActiveClientCount 返回当前活跃的websocket客户端数量

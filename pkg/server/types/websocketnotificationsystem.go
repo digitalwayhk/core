@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/proc"
 )
 
 // 🔧 全局 WebSocket 通知系统（所有 RouterInfo 共享）
@@ -15,10 +16,12 @@ type WebSocketNotificationSystem struct {
 	jobChan   chan *noticeJob
 	workers   int
 	closeCh   chan struct{}
+	statsDone chan struct{}
 	wg        sync.WaitGroup
 	once      sync.Once
 	isStarted atomic.Bool // 🆕 使用原子操作
-	mu        sync.Mutex
+	isStopped atomic.Bool
+	mu        sync.RWMutex
 
 	// 🆕 统计信息
 	totalJobs     atomic.Int64
@@ -29,33 +32,55 @@ type WebSocketNotificationSystem struct {
 var (
 	globalNotificationSystem *WebSocketNotificationSystem
 	globalSystemOnce         sync.Once // 🆕 确保只创建一次
+	globalSystemMu           sync.RWMutex
+	websocketShutdownOnce    sync.Once
 )
 
 // 🆕 获取全局通知系统（单例）
 func getGlobalNotificationSystem() *WebSocketNotificationSystem {
 	globalSystemOnce.Do(func() {
-		globalNotificationSystem = &WebSocketNotificationSystem{
+		system := &WebSocketNotificationSystem{
 			jobChan: make(chan *noticeJob, 10000), // 🔧 减少缓冲区（10K 足够）
 			workers: 20,                           // 🔧 减少 worker 数量
 			closeCh: make(chan struct{}),
 		}
+		globalSystemMu.Lock()
+		globalNotificationSystem = system
+		globalSystemMu.Unlock()
+		registerWebSocketProcessShutdown()
 	})
-	return globalNotificationSystem
+	globalSystemMu.RLock()
+	system := globalNotificationSystem
+	globalSystemMu.RUnlock()
+	return system
+}
+
+func registerWebSocketProcessShutdown() {
+	websocketShutdownOnce.Do(func() {
+		proc.AddShutdownListener(func() {
+			globalSystemMu.RLock()
+			system := globalNotificationSystem
+			globalSystemMu.RUnlock()
+			if system != nil {
+				system.Shutdown()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := StopPeriodicCleanup(ctx); err != nil {
+				logx.Errorf("WebSocket 周期清理停止失败: %v", err)
+			}
+		})
+	})
 }
 
 // 🔧 启动全局通知系统（只启动一次）
 func (wns *WebSocketNotificationSystem) Start() {
-	// 🆕 快速检查
-	if wns.isStarted.Load() {
+	wns.mu.Lock()
+	defer wns.mu.Unlock()
+	if wns.isStarted.Load() || wns.isStopped.Load() {
 		return
 	}
-
 	wns.once.Do(func() {
-		// 🆕 双重检查
-		if wns.isStarted.Load() {
-			return
-		}
-
 		logx.Infof("🚀 启动全局 WebSocket 通知系统 (%d workers, 缓冲:%d)",
 			wns.workers, cap(wns.jobChan))
 
@@ -68,7 +93,11 @@ func (wns *WebSocketNotificationSystem) Start() {
 		logx.Info("✅ 全局 WebSocket 通知系统启动完成")
 
 		// 🔧 每 5 分钟重置统计，防止历史 droppedJobs 累积导致 IsHealthy 永久返回 false
+		wns.wg.Add(1)
+		wns.statsDone = make(chan struct{})
 		go func() {
+			defer wns.wg.Done()
+			defer close(wns.statsDone)
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
 			for {
@@ -188,6 +217,8 @@ func (wns *WebSocketNotificationSystem) processJob(workerID int, job *noticeJob)
 
 // 🔧 提交任务（非阻塞，带统计）
 func (wns *WebSocketNotificationSystem) Submit(job *noticeJob) bool {
+	wns.mu.RLock()
+	defer wns.mu.RUnlock()
 	if !wns.isStarted.Load() {
 		logx.Errorf("通知系统未启动，丢弃任务")
 		wns.droppedJobs.Add(1)
@@ -214,15 +245,14 @@ func (wns *WebSocketNotificationSystem) Submit(job *noticeJob) bool {
 
 // 🔧 优雅关闭
 func (wns *WebSocketNotificationSystem) Shutdown() {
-	if !wns.isStarted.Load() {
+	wns.mu.Lock()
+	if wns.isStopped.Load() {
+		wns.mu.Unlock()
 		return
 	}
-
-	wns.mu.Lock()
-	defer wns.mu.Unlock()
-
-	// 再次检查
+	wns.isStopped.Store(true)
 	if !wns.isStarted.Load() {
+		wns.mu.Unlock()
 		return
 	}
 
@@ -233,6 +263,7 @@ func (wns *WebSocketNotificationSystem) Shutdown() {
 
 	// 关闭信号
 	close(wns.closeCh)
+	wns.mu.Unlock()
 
 	// 等待所有 worker 完成（带超时）
 	done := make(chan struct{})
@@ -247,9 +278,6 @@ func (wns *WebSocketNotificationSystem) Shutdown() {
 	case <-time.After(5 * time.Second):
 		logx.Error("⚠️ 等待 worker 停止超时（5秒）")
 	}
-
-	// 关闭任务通道
-	close(wns.jobChan)
 
 	// 🆕 打印最终统计
 	logx.Infof("📊 通知系统统计: 总任务:%d, 已处理:%d, 已丢弃:%d",

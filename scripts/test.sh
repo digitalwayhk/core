@@ -23,6 +23,7 @@ case "${1:-quick}" in
       ./pkg/server/router \
       ./pkg/server/run \
       ./pkg/server/trans/rest \
+      ./pkg/server/trans/websocket/melody \
       ./pkg/server/types \
       ./pkg/server/cluster \
       -count=1
@@ -31,7 +32,9 @@ case "${1:-quick}" in
       ./pkg/server/router \
       ./pkg/server/cluster \
       ./pkg/server/trans/rest \
-      -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown' \
+      ./pkg/server/trans/websocket/melody \
+      ./pkg/server/types \
+      -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown|Test.*Close|Test.*Cleanup' \
       -count=20
     ;;
   integration-local)
