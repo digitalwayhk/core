@@ -52,8 +52,8 @@ func (own *MenuManage) ViewFieldModel(model interface{}, field *view.FieldModel)
 		}
 	}
 }
-func (own *MenuManage) updateMenuModelAll() {
-	items := own.GetDefaultItems()
+func (own *MenuManage) updateMenuModelAll(req types.IRequest) {
+	items := own.GetDefaultItemsWithRequest(req)
 	list := own.GetList().(*entity.ModelList[smodels.MenuModel])
 	for _, item := range items {
 		old, err := list.SearchOne(func(where *pt.SearchItem) {
@@ -85,7 +85,14 @@ func (own *MenuManage) updateMenuModelAll() {
 		}
 	}
 }
+
+// GetDefaultItems 保留用于兼容旧业务扩展。
+// Deprecated: 已废弃，请使用 GetDefaultItemsWithRequest 显式传入请求。
 func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
+	return own.GetDefaultItemsWithRequest(own.Req)
+}
+
+func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels.MenuModel {
 	items := make([]*smodels.MenuModel, 0)
 	dir := NewDirectoryManage()
 	dirList := dir.GetList().(*entity.ModelList[smodels.DirectoryModel])
@@ -114,12 +121,7 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 				if len(dirrows) > 0 {
 					item.DirectoryModelID = dirrows[0].ID
 				} else {
-					diritem := smodels.NewDirectoryModel()
-					diritem.Name = sc.Service.Name
-					diritem.ID = own.Req.NewID()
-					if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
-						diritem.Title = ititle.GetTitle()
-					}
+					diritem := own.newDirectoryModel(req, sc)
 					if err := dirList.Add(diritem); err != nil {
 						logx.Errorf("Add directory model error: %v", err)
 						continue
@@ -146,6 +148,17 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 	}
 	return items
 }
+
+func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceContext) *smodels.DirectoryModel {
+	diritem := smodels.NewDirectoryModel()
+	diritem.Name = sc.Service.Name
+	diritem.ID = req.NewID()
+	if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
+		diritem.Title = ititle.GetTitle()
+	}
+	return diritem
+}
+
 func getMenuModel(info *types.RouterInfo, items []*smodels.MenuModel) *smodels.MenuModel {
 	name := strings.ToLower(info.InstanceName)
 	endIndex := strings.Index(info.Path, name)
@@ -174,9 +187,6 @@ func (own *UpdateMenu) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *UpdateMenu) Validation(req types.IRequest) error {
-	if ms, ok := own.GetInstance().(manage.IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	return nil
 }
 func (own *UpdateMenu) Do(req types.IRequest) (interface{}, error) {
@@ -184,7 +194,7 @@ func (own *UpdateMenu) Do(req types.IRequest) (interface{}, error) {
 		return nil, errors.New("UpdateMenu instance is nil")
 	}
 	if mm, ok := own.GetInstance().(*MenuManage); ok {
-		mm.updateMenuModelAll()
+		mm.updateMenuModelAll(req)
 	}
 	return nil, nil
 }

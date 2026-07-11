@@ -25,9 +25,6 @@ func (own *Submit[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *Submit[T]) Validation(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	err, stop := own.Operation.ValidationBefore(own, req)
 	if err != nil {
 		return err
@@ -39,9 +36,6 @@ func (own *Submit[T]) Validation(req types.IRequest) error {
 	return err
 }
 func (own *Submit[T]) Do(req types.IRequest) (interface{}, error) {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	obm := getIModel(own.Model)
 	model, err := own.list.SearchId(obm.GetID())
 	if err != nil {

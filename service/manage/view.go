@@ -36,9 +36,6 @@ func (own *View[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *View[T]) Parse(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	if ms, ok := own.instance.(IManageService); ok {
 		err := ms.ParseBefore(own, req)
 		if err != nil {
@@ -48,9 +45,6 @@ func (own *View[T]) Parse(req types.IRequest) error {
 	return nil
 }
 func (own *View[T]) Validation(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	if _, ok := own.instance.(IManageService); !ok {
 		return errors.New("instance is not IManageService")
 	}
@@ -70,9 +64,6 @@ func getModelT(item interface{}) *entity.Model {
 	return item.(*entity.Model)
 }
 func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	list := entity.NewModelList[T](nil)
 	if gl, ok := own.instance.(IGetModelList); ok {
 		l := gl.GetList()

@@ -40,11 +40,19 @@ type IGetModelList interface {
 type IGetModelListWhere interface {
 	GetItemList(item *view.SearchItem) interface{}
 }
+
+// IRequestSet 保留用于兼容旧业务扩展。
+// Deprecated: 已废弃，框架不再调用 SetReq；请使用各 hook 的 req 参数。
 type IRequestSet interface {
 	SetReq(req st.IRequest)
 }
 type IGetDefaultItems[T pt.IModel] interface {
 	GetDefaultItems() []*T
+}
+
+// IGetDefaultItemsWithRequest 按当前请求生成默认管理项。
+type IGetDefaultItemsWithRequest[T pt.IModel] interface {
+	GetDefaultItemsWithRequest(req st.IRequest) []*T
 }
 
 type ManageService[T pt.IModel] struct {
@@ -55,7 +63,8 @@ type ManageService[T pt.IModel] struct {
 	Remove  *Remove[T]
 	Submit  *Submit[T]
 	Release *Release[T]
-	Req     st.IRequest
+	// Deprecated: 已废弃，仅保留用于源码兼容；请使用各 hook 的 req 参数。
+	Req st.IRequest
 }
 
 func NewManageService[T pt.IModel](instance interface{}) *ManageService[T] {
@@ -119,18 +128,23 @@ func (own *ManageService[T]) SearchBefore(sender interface{}, req st.IRequest) (
 
 func (own *ManageService[T]) SearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error) {
 	if result.Total == 0 {
-		if idg, ok := own.Search.GetInstance().(IGetDefaultItems[T]); ok {
-			if items := idg.GetDefaultItems(); len(items) > 0 {
-				if list := own.GetList().(*entity.ModelList[T]); list != nil {
-					if err := list.Add(items...); err != nil {
-						return nil, err
-					}
-					if err := list.Save(); err != nil {
-						return nil, err
-					}
-					result.Rows = items
-					result.Total = int64(len(items))
+		var items []*T
+		instance := own.Search.GetInstance()
+		if idg, ok := instance.(IGetDefaultItemsWithRequest[T]); ok {
+			items = idg.GetDefaultItemsWithRequest(req)
+		} else if idg, ok := instance.(IGetDefaultItems[T]); ok {
+			items = idg.GetDefaultItems()
+		}
+		if len(items) > 0 {
+			if list := own.GetList().(*entity.ModelList[T]); list != nil {
+				if err := list.Add(items...); err != nil {
+					return nil, err
 				}
+				if err := list.Save(); err != nil {
+					return nil, err
+				}
+				result.Rows = items
+				result.Total = int64(len(items))
 			}
 		}
 	}
@@ -156,6 +170,9 @@ func (own *ManageService[T]) OnSearchData(list interface{}, total int64) *view.T
 	}
 	return data
 }
+
+// SetReq 保留用于兼容旧业务扩展。
+// Deprecated: 已废弃，框架不再调用；请使用各 hook 的 req 参数。
 func (own *ManageService[T]) SetReq(req st.IRequest) {
 	own.Req = req
 }

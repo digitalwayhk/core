@@ -39,9 +39,6 @@ func (own *Search[T]) New(instance interface{}) types.IRouter {
 }
 
 func (own *Search[T]) Parse(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	own.SearchItem = &view.SearchItem{}
 	err := req.Bind(own.SearchItem)
 	if err != nil {
@@ -60,9 +57,6 @@ func (own *Search[T]) Parse(req types.IRequest) error {
 	return nil
 }
 func (own *Search[T]) Validation(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	if own.SearchItem.Page == 0 {
 		own.SearchItem.Page = 1
 	}
@@ -72,9 +66,6 @@ func (own *Search[T]) Validation(req types.IRequest) error {
 	return nil
 }
 func (own *Search[T]) Do(req types.IRequest) (interface{}, error) {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	var view IManageView = own.instance.(IManageView)
 	if view != nil {
 		own.View = view.GetView()
