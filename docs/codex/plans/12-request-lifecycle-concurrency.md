@@ -200,6 +200,8 @@ git commit -m "fix: scope cross-node forwarders by service"
 
 **优先级：** P1
 
+**状态：** 进行中。任务 12.6a 已在 `ffe27c8` 完成：`MembershipManager` 并发 Start/Stop 幂等、注销仅执行一次且 Stop 可等待 worker；`ServiceContext` 已串行化启停与 Provider 切换，相同状态不再重复注册或通知，Provider 调用期间不持有内部状态锁。下一步为 12.6b 服务器关闭链路。
+
 **文件：**
 - 修改：`pkg/server/router/servicecontext.go`
 - 修改：`pkg/server/cluster/membership.go`
@@ -209,19 +211,27 @@ git commit -m "fix: scope cross-node forwarders by service"
 - 按需清理：`pkg/server/run/fiberserver.go`（当前不在实际启动路径）
 - 修改：相关测试
 
-- [ ] **步骤 1：编写重复启动/关闭测试**
+- [x] **步骤 1a：编写 MembershipManager 与 ServiceContext 重复启停测试**
 
-并发调用 start/stop，断言只注册和注销一次、heartbeat 在 deadline 内退出、broker 只 drain 一次。验证 `WebServer.Stop` 后 listener 关闭、所有 `Start` goroutine 返回、业务 `IStopService` 已完成且重复 Stop 不阻塞。两个 WebServer 实例不得因全局 HTTP mux 重复注册而 panic。
+并发调用 Start/Stop，断言只注册和注销一次、Stop 等待 heartbeat worker 退出，相同 ServiceContext 状态不重复通知。
 
-- [ ] **步骤 2：实现单一 owner**
+- [x] **步骤 2a：实现集群生命周期 owner**
 
-`ServiceContext` 使用生命周期 mutex、运行 context/cancel 和明确状态；锁内只做状态转换，锁外执行 Provider。`MembershipManager` 用 `sync.Once` 与 wait group 实现幂等退出。`WebServer` 持有实例级 `ServiceGroup`、状态和 `Stop`。
+`ServiceContext` 使用实例级操作门串行化启停与 Provider 切换，内部 mutex 只保护状态读写，Provider 调用位于锁外。`MembershipManager` 使用 `sync.Once` 和完成通道实现幂等退出及有界等待。
+
+- [ ] **步骤 1b：编写服务器重复启动/关闭测试**
+
+验证 `WebServer.Stop` 后 listener 关闭、所有 `Start` goroutine 返回、业务 `IStopService` 已完成且重复 Stop 不阻塞。两个 WebServer 实例不得因全局 HTTP mux 重复注册而 panic。
+
+- [ ] **步骤 2b：实现服务器单一 owner**
+
+`WebServer` 持有实例级 `ServiceGroup`、状态和幂等 `Stop`。
 
 复用 go-zero：通过其 REST `StartWithOpts` 获取实际 `*http.Server`，包装层 `Stop` 使用 deadline 调用 `Shutdown`；继续使用 `ServiceGroup` 的并发启动与一次性停止语义，不自建第二套 service group 或信号监听器。`HTMLServer` 改为拥有独立 `http.ServeMux` 和 `http.Server`，并实现同样的有界 Shutdown。
 
 MQ、Transport 和数据库只调用成熟客户端已有的 `Close`/`Stop`，不得创造新的连接池或 worker。
 
-- [ ] **步骤 3：验证并提交**
+- [ ] **步骤 3：完成 12.6b 后执行全量验证并提交**
 
 ```bash
 go test -race ./pkg/server/cluster ./pkg/server/router ./pkg/server/run ./pkg/server/trans/rest -count=1

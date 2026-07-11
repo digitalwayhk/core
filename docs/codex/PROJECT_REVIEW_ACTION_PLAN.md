@@ -81,7 +81,7 @@
 | 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
-| 12. 请求隔离、全局状态与生命周期 | 未开始 |  | 请求/竞态/生命周期测试通过，关闭幂等，且无已知泄漏 worker |
+| 12. 请求隔离、全局状态与生命周期 | 进行中（12.1-12.6a 已完成） | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8` | 请求与注册表已隔离，Membership/ServiceContext 启停已幂等可等待；待完成 HTTP/WebServer 关闭、Provider 对账和泄漏门禁 |
 | 13. 持久化正确性与外部测试分离 | 未开始 |  | 持久化单元测试不依赖外部服务并通过；启用时，Docker 数据库套件通过 |
 | 14. 配置到运行时能力契约 | 未开始 |  | 每个已接受的 MQ/集群/传输字段都有运行时消费方和行为测试，否则必须拒绝 |
 | 15. 公共 API 兼容性与发布治理 | 未开始 |  | 类型化错误、路由/API 快照、废弃策略、changelog 和消费方兼容性检查通过 |
@@ -946,7 +946,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **优先级：** 请求隔离与竞态为 P0；更广泛的生命周期合并为 P1
 
-**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`；任务 12.1 请求隔离已在 `60b6e3a` 完成，任务 12.2 注册表同步已在 `fc42ae7` 完成，任务 12.3 WebServer 状态隔离已在 `52ac181` 完成，任务 12.4 WebSocket 测试同步已在 `87cc800` 完成，任务 12.5 跨节点转发隔离已在 `b816515` 完成。下一节为任务 12.6 幂等、可等待的服务生命周期。
+**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`；任务 12.1 请求隔离已在 `60b6e3a` 完成，任务 12.2 注册表同步已在 `fc42ae7` 完成，任务 12.3 WebServer 状态隔离已在 `52ac181` 完成，任务 12.4 WebSocket 测试同步已在 `87cc800` 完成，任务 12.5 跨节点转发隔离已在 `b816515` 完成，任务 12.6a MembershipManager 与 ServiceContext 幂等生命周期已在 `ffe27c8` 完成。下一节为任务 12.6b REST、HTMLServer 与 WebServer 的可等待关闭。
 
 **文件：**
 - 创建：`docs/codex/plans/12-request-lifecycle-concurrency.md`
@@ -961,7 +961,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 将每个 global/map/goroutine 分类为不可变注册表、已同步注册表、请求本地值或生命周期 owner 持有的 worker。包含 `ManageService.Req`、service/全局类型 map、订阅者 map、etcd lease 状态、空 Fiber 关闭、WebSocket limiter 清理和子系统关闭路径。
 
-- [ ] **步骤 2：证明请求隔离和注册表安全**
+- [x] **步骤 2：证明请求隔离和注册表安全**
 
 添加并发测试，证明请求 ID 和身份不会跨服务调用泄漏。使用显式参数或请求作用域上下文替换共享请求存储。从注册表返回不可变快照，并以一致方式保护所有可变 map。
 
