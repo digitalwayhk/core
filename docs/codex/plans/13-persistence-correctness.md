@@ -94,7 +94,7 @@ go test ./pkg/persistence/database/oltp -run 'Test.*(ResultError|Rollback|Contex
 
 只有真正写入远程并通过 CAS 的 key 才计入成功并从 pending 减少；并发 Set 生成的新版本必须保持未同步。
 
-- [ ] **13.3c 修正 fatal-break 与重试边界**
+- [x] **13.3c 修正 fatal-break 与重试边界**
 
 连接不可用、事务已回滚和 context 取消等致命错误不得继续对后续项执行 Insert/Update/Delete。重试必须可被关闭 context 取消。
 
@@ -102,7 +102,9 @@ go test ./pkg/persistence/database/oltp -run 'Test.*(ResultError|Rollback|Contex
 
 当 `successCount==0` 时记录失败/未同步，部分成功记录部分结果，只有全部成功才记录同步成功。
 
-**阶段记录（2026-07-11）：** 默认延迟已由正确配置构造器测试锁定为 100ms。同步状态更新现在返回真正通过 CAS 或完成远程删除的确认 key；pending、后置删除与上报成功数均仅使用确认结果。零确认、部分完成和全部成功已分离日志语义。同时修正 `ConnectionManager.GetConnection` 在读锁下写 `LastUsed` 的竞态；相关用例连续 20 次通过，nosql 全包 race 在 30 秒硬超时下 7.5 秒通过。13.3c 与六个 MySQL 包装回退用例的纯 fake 迁移仍待完成。
+**完成记录（2026-07-11）：** 默认延迟已由正确配置构造器测试锁定为 100ms。同步状态更新现在返回真正通过 CAS 或完成远程删除的确认 key；pending、后置删除与上报成功数均仅使用确认结果。零确认、部分完成和全部成功已分离日志语义。同时修正 `ConnectionManager.GetConnection` 在读锁下写 `LastUsed` 的竞态。
+
+13.3c 已将六个批量/逐条回退用例从真实 MySQL 迁移到线程安全的深拷贝内存 action，恢复默认单元覆盖。事务开启、提交、主操作、冲突后二次操作和 `Exists` 六条路径都会在 context 取消、事务失效或连接级错误后立即回滚并停止，不再降级重试后续 item；实例关闭对 Insert/Update/Delete 逐条路径均有断言。`IDataAction` 暂无 `context.Context` 参数，因此无法强制中断已经进入 adapter 内部的永久阻塞调用；本任务未为此破坏公共接口兼容性。聚焦测试、nosql 全包 race 与完整持久化套件均通过。
 
 **验收：**
 ```bash

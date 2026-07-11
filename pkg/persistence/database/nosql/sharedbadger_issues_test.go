@@ -2,10 +2,13 @@ package nosql
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,109 +247,82 @@ func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
 // 但 batchInsertWithErrorHandling 没有这些检查。
 // ============================================================
 
-type fatalErrorOnNthInsertAction struct {
-	base  types.IDataAction
-	state *fatalInsertState
-}
-
-type fatalInsertState struct {
-	insertCount int32
-	failAfterN  int32
-}
-
-func newFatalErrorOnNthInsertAction(failAfterN int32) *fatalErrorOnNthInsertAction {
-	return &fatalErrorOnNthInsertAction{
-		base: oltp.NewMySQL(&oltp.Config{
-			Host:     "127.0.0.1",
-			Port:     3306,
-			Username: "root",
-			Password: "your_password",
-		}),
-		state: &fatalInsertState{failAfterN: failAfterN},
-	}
-}
-
-func (a *fatalErrorOnNthInsertAction) Clone() types.IDataAction {
-	clonedBase := a.base
-	if cloner, ok := a.base.(IActionCloner); ok {
-		clonedBase = cloner.Clone()
-	}
-	return &fatalErrorOnNthInsertAction{base: clonedBase, state: a.state}
-}
-func (a *fatalErrorOnNthInsertAction) GetMaxOpenConns() int {
-	if h, ok := a.base.(IMaxConcurrencyHint); ok {
-		return h.GetMaxOpenConns()
-	}
-	return 0
-}
-func (a *fatalErrorOnNthInsertAction) GetSyncPoolKey(data interface{}) string {
-	if p, ok := a.base.(ISyncPoolKeyProvider); ok {
-		return p.GetSyncPoolKey(data)
-	}
-	return ""
-}
-func (a *fatalErrorOnNthInsertAction) Exists(data interface{}) (bool, error) {
-	if ec, ok := a.base.(interface {
-		Exists(data interface{}) (bool, error)
-	}); ok {
-		return ec.Exists(data)
-	}
-	return false, nil
-}
-func (a *fatalErrorOnNthInsertAction) Transaction() error { return a.base.Transaction() }
-func (a *fatalErrorOnNthInsertAction) Load(item *types.SearchItem, result interface{}) error {
-	return a.base.Load(item, result)
-}
-func (a *fatalErrorOnNthInsertAction) Insert(data interface{}) error {
-	a.state.insertCount++
-	if a.state.insertCount > a.state.failAfterN {
-		return fatalTxError{}
-	}
-	return a.base.Insert(data)
-}
-func (a *fatalErrorOnNthInsertAction) Update(data interface{}) error { return a.base.Update(data) }
-func (a *fatalErrorOnNthInsertAction) Delete(data interface{}) error { return a.base.Delete(data) }
-func (a *fatalErrorOnNthInsertAction) Raw(s string, d interface{}) error {
-	return a.base.Raw(s, d)
-}
-func (a *fatalErrorOnNthInsertAction) Exec(s string, d interface{}) error {
-	return a.base.Exec(s, d)
-}
-func (a *fatalErrorOnNthInsertAction) GetModelDB(m interface{}) (interface{}, error) {
-	return a.base.GetModelDB(m)
-}
-func (a *fatalErrorOnNthInsertAction) Commit() error         { return a.base.Commit() }
-func (a *fatalErrorOnNthInsertAction) GetRunDB() interface{} { return a.base.GetRunDB() }
-func (a *fatalErrorOnNthInsertAction) Rollback() error       { return a.base.Rollback() }
-
-type fatalTxError struct{}
-
-func (fatalTxError) Error() string { return "transaction has already been rolled back" }
-
 func TestIssue_BatchInsertMissingFatalErrorBreak(t *testing.T) {
-	requireMySQLIntegration(t)
-	dir := t.TempDir()
-	config := newTestConfig(dir)
-	dbName := "test_issue_fatal_ins"
-
-	fatalAction := newFatalErrorOnNthInsertAction(2)
-	list := entity.NewModelList[testLedger](fatalAction)
-	db := newManualSyncDBWithConfig(t, config, list)
-	t.Cleanup(func() { cleanupNamedMySQLDB(dbName) })
-
-	for i := 0; i < 10; i++ {
-		ledger := newLedger("user_fatal", "C_"+string(rune('A'+i)), float64(i*100), dbName)
-		require.NoError(t, db.Set(ledger, 0))
+	fatalErrors := []struct {
+		name string
+		err  error
+	}{
+		{name: "连接不可用", err: errors.New("driver: bad connection")},
+		{name: "无效连接", err: errors.New("invalid connection")},
+		{name: "协议失步", err: errors.New("commands out of sync")},
+		{name: "管道断开", err: errors.New("write: broken pipe")},
+		{name: "连接重置", err: errors.New("read: connection reset by peer")},
+		{name: "数据库已关闭", err: errors.New("sql: database is closed")},
+		{name: "事务已回滚", err: errors.New("transaction has already been rolled back")},
+		{name: "context 已取消", err: context.Canceled},
 	}
 
-	db.processSyncQueue()
+	for _, operation := range []string{"insert", "update", "delete"} {
+		for _, fatal := range fatalErrors {
+			t.Run(operation+"/"+fatal.name, func(t *testing.T) {
+				var calls atomic.Int32
+				action := newMemoryAction().withFatal(operation, 2, fatal.err, &calls)
+				db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+				items := make([]*SyncQueueItem[testLedger], 0, 5)
+				for i := 0; i < 5; i++ {
+					ledger := newLedger("fatal_user", fmt.Sprintf("C_%d", i), float64(i), "memory")
+					if operation != "insert" {
+						require.NoError(t, action.store(ledger))
+					}
+					items = append(items, &SyncQueueItem[testLedger]{Key: ledger.GetHash(), Item: ledger})
+				}
 
-	t.Logf("Insert 计数: %d (理想 ≤ 3, 若为 10 则未中断)", fatalAction.state.insertCount)
+				switch operation {
+				case "insert":
+					db.batchInsertWithErrorHandling(items, action)
+				case "update":
+					db.batchUpdateWithErrorHandling(items, action)
+				case "delete":
+					db.batchDeleteWithErrorHandling(items, action)
+				}
 
-	if fatalAction.state.insertCount > 5 {
-		t.Errorf("【问题复现】batchInsertWithErrorHandling 未在致命错误后中断循环，"+
-			"继续执行了 %d 次 Insert (期望 ≤ 3 次)", fatalAction.state.insertCount)
+				require.Equal(t, int32(2), calls.Load(), "致命错误后不得继续调用后续数据操作")
+			})
+		}
 	}
+}
+
+func TestIssue_OneByOneFallbackStopsOnCancellation(t *testing.T) {
+	t.Run("实例关闭后不再执行逐条回退", func(t *testing.T) {
+		config := newTestConfig(t.TempDir())
+		db, err := NewSharedBadgerDB[testLedger](config.Path, config)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+
+		var calls atomic.Int32
+		action := newMemoryAction().withFatal("insert", 100, errors.New("不应触发"), &calls)
+		db.syncDB = true
+		db.syncList = entity.NewModelList[testLedger](action)
+		items := []*SyncQueueItem[testLedger]{{Key: "closed", Item: newLedger("closed", "BTC", 1, "memory")}}
+
+		db.insertItemsOneByOne(items)
+		require.Zero(t, calls.Load())
+	})
+
+	t.Run("逐条回退收到 context 取消后立即停止", func(t *testing.T) {
+		var calls atomic.Int32
+		action := newMemoryAction().withFatal("insert", 2, context.Canceled, &calls)
+		action.setFailTransaction(true)
+		db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+		items := make([]*SyncQueueItem[testLedger], 0, 5)
+		for i := 0; i < 5; i++ {
+			ledger := newLedger("cancel_user", fmt.Sprintf("C_%d", i), float64(i), "memory")
+			items = append(items, &SyncQueueItem[testLedger]{Key: ledger.GetHash(), Item: ledger})
+		}
+
+		db.batchInsertWithErrorHandling(items, action)
+		require.Equal(t, int32(2), calls.Load())
+	})
 }
 
 // ============================================================
@@ -560,7 +536,7 @@ func (a *existsFailAction) GetSyncPoolKey(data interface{}) string {
 	return ""
 }
 func (a *existsFailAction) Exists(data interface{}) (bool, error) {
-	return false, fatalTxError{}
+	return false, errors.New("注入的非致命 Exists 查询失败")
 }
 func (a *existsFailAction) Transaction() error { return a.base.Transaction() }
 func (a *existsFailAction) Load(item *types.SearchItem, result interface{}) error {
