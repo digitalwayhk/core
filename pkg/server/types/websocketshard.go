@@ -73,7 +73,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	own.recordWebSocketConnect(hash)
 
 	// Notify cross-node forwarder about new local subscription.
-	if f := GetCrossNodeForwarder(); f != nil {
+	if f := GetCrossNodeForwarderForService(own.ServiceName); f != nil {
 		go f.OnSubscriptionChange(own.Path, hash, true)
 	}
 	return hash
@@ -139,7 +139,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 
 	// Notify cross-node forwarder that local subscription may be gone.
 	if needUnregister {
-		if f := GetCrossNodeForwarder(); f != nil {
+		if f := GetCrossNodeForwarderForService(own.ServiceName); f != nil {
 			go f.OnSubscriptionChange(own.Path, hash, false)
 		}
 	}
@@ -231,7 +231,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		}
 
 		// Forward notice to peer nodes for the same subscriptions.
-		if f := GetCrossNodeForwarder(); f != nil {
+		if f := GetCrossNodeForwarderForService(own.ServiceName); f != nil {
 			ctx := context.Background()
 			for _, hash := range hashes {
 				f.ForwardNotice(ctx, own.Path, hash, message)

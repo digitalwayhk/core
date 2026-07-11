@@ -446,7 +446,8 @@ func TestNewServiceContext_ReadConfigInitializesRuntimeSubsystems(t *testing.T) 
 		sc.SetRunState(false)
 	})
 	require.NotNil(t, sc.CrossNodeBroker, "SetRunState(true) should start CrossNodeNoticeBroker when ClusterProvider exists")
-	assert.NotNil(t, types.GetCrossNodeForwarder(), "cross-node forwarder should be globally registered while running")
+	assert.NotNil(t, types.GetCrossNodeForwarderForService(svcName),
+		"cross-node forwarder should be registered for the running service")
 }
 
 func mustMarshalConfigForReadConfig(t *testing.T, con *config.ServerConfig) []byte {

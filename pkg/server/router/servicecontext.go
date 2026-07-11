@@ -534,13 +534,15 @@ func (own *ServiceContext) SetRunState(state bool) {
 			if own.TransportSelector != nil {
 				own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
 			}
-			types.SetCrossNodeForwarder(own.CrossNodeBroker)
+			types.SetCrossNodeForwarderForService(own.Service.Name, own.CrossNodeBroker)
 		}
 	} else {
 		if own.CrossNodeBroker != nil {
+			broker := own.CrossNodeBroker
+			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			own.CrossNodeBroker.DrainAndStop(ctx)
+			broker.DrainAndStop(ctx)
 			own.CrossNodeBroker = nil
 		}
 		if own.membership != nil {
@@ -611,8 +613,10 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	}
 
 	if own.CrossNodeBroker != nil {
+		broker := own.CrossNodeBroker
+		types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 		drainCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		own.CrossNodeBroker.DrainAndStop(drainCtx)
+		broker.DrainAndStop(drainCtx)
 		cancel()
 		own.CrossNodeBroker = nil
 	}
@@ -623,9 +627,7 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 		if own.TransportSelector != nil {
 			own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
 		}
-		types.SetCrossNodeForwarder(own.CrossNodeBroker)
-	} else {
-		types.SetCrossNodeForwarder(nil)
+		types.SetCrossNodeForwarderForService(own.Service.Name, own.CrossNodeBroker)
 	}
 
 	return nil

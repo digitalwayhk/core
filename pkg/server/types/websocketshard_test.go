@@ -58,10 +58,14 @@ func (s *shardTestRouter) UnRegisterWebSocket(IWebSocket, IRequest) {
 	atomic.AddInt32(&s.unregs, 1)
 }
 func (s *shardTestRouter) GetHashKey() uint64 { return s.hash }
+func (s *shardTestRouter) NoticeFiltersRouter(message interface{}, _ IRouter) (bool, interface{}) {
+	return true, message
+}
 
 type shardCapture struct {
-	mu   sync.Mutex
-	subs []shardSubscription
+	mu      sync.Mutex
+	subs    []shardSubscription
+	notices []uint64
 }
 
 type shardSubscription struct {
@@ -69,7 +73,11 @@ type shardSubscription struct {
 	active bool
 }
 
-func (c *shardCapture) ForwardNotice(context.Context, string, uint64, interface{}) {}
+func (c *shardCapture) ForwardNotice(_ context.Context, _ string, hash uint64, _ interface{}) {
+	c.mu.Lock()
+	c.notices = append(c.notices, hash)
+	c.mu.Unlock()
+}
 func (c *shardCapture) OnSubscriptionChange(_ string, hash uint64, active bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -95,6 +103,18 @@ func (c *shardCapture) inactiveCount(hash uint64) int {
 	return count
 }
 
+func (c *shardCapture) noticeCount(hash uint64) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	for _, noticeHash := range c.notices {
+		if noticeHash == hash {
+			count++
+		}
+	}
+	return count
+}
+
 func waitForShard(t *testing.T, check func() bool) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -108,6 +128,10 @@ func waitForShard(t *testing.T, check func() bool) {
 
 func newShardRouterInfo(path string) *RouterInfo {
 	return &RouterInfo{Path: path, ServiceName: "svc", PathType: PublicType}
+}
+
+func newShardRouterInfoForService(serviceName, path string) *RouterInfo {
+	return &RouterInfo{Path: path, ServiceName: serviceName, PathType: PublicType}
 }
 
 func newShardRouter(info *RouterInfo, hash uint64) *shardTestRouter {
@@ -169,5 +193,40 @@ func TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount(t *testing.T) {
 	}
 	if capture.inactiveCount(hash) != 0 {
 		t.Fatalf("expected no inactive events, got %d", capture.inactiveCount(hash))
+	}
+}
+
+func TestWebSocketForwardersAreIsolatedByService(t *testing.T) {
+	serviceA := "ws-service-a"
+	serviceB := "ws-service-b"
+	forwarderA := &shardCapture{}
+	forwarderB := &shardCapture{}
+	SetCrossNodeForwarderForService(serviceA, forwarderA)
+	SetCrossNodeForwarderForService(serviceB, forwarderB)
+	t.Cleanup(func() {
+		ClearCrossNodeForwarderForService(serviceA, forwarderA)
+		ClearCrossNodeForwarderForService(serviceB, forwarderB)
+	})
+
+	infoA := newShardRouterInfoForService(serviceA, "/ws/service-a")
+	routerA := newShardRouter(infoA, 101)
+	hashA := infoA.RegisterWebSocketClient(routerA, &shardTestWebSocket{id: 101}, &shardTestRequest{})
+	infoB := newShardRouterInfoForService(serviceB, "/ws/service-b")
+	routerB := newShardRouter(infoB, 202)
+	hashB := infoB.RegisterWebSocketClient(routerB, &shardTestWebSocket{id: 202}, &shardTestRequest{})
+
+	waitForShard(t, func() bool {
+		return forwarderA.subscriptionCount() == 1 && forwarderB.subscriptionCount() == 1
+	})
+	infoA.NoticeWebSocket("service-a")
+	waitForShard(t, func() bool { return forwarderA.noticeCount(hashA) == 1 })
+	if got := forwarderB.noticeCount(hashA); got != 0 {
+		t.Fatalf("服务 A 的通知被转发到服务 B：%d", got)
+	}
+
+	infoB.NoticeWebSocket("service-b")
+	waitForShard(t, func() bool { return forwarderB.noticeCount(hashB) == 1 })
+	if got := forwarderA.noticeCount(hashB); got != 0 {
+		t.Fatalf("服务 B 的通知被转发到服务 A：%d", got)
 	}
 }

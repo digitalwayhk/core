@@ -74,7 +74,7 @@ func (s *SyncSubscription) Do(req types.IRequest) (interface{}, error) {
 		UpdatePeerSubscription(routePath string, hash uint64, nodeID string, active bool)
 	}); ok {
 		broker.UpdatePeerSubscription(s.RoutePath, s.Hash, s.NodeID, s.Active)
-	} else if cn := types.GetCrossNodeForwarder(); cn != nil {
+	} else if cn := types.GetCrossNodeForwarderForService(req.ServiceName()); cn != nil {
 		if cnb, ok := cn.(*cluster.CrossNodeNoticeBroker); ok {
 			cnb.UpdatePeerSubscription(s.RoutePath, s.Hash, s.NodeID, s.Active)
 		}
