@@ -31,17 +31,21 @@
 - 审查：`pkg/persistence/database/olap/*_test.go`
 - 修改：`scripts/test.sh`
 
-- [ ] **13.1a 盘点并拆分混合测试**
+- [x] **13.1a 盘点并拆分混合测试**
 
 将真实 MySQL/MongoDB/ClickHouse 用例移到 `*_integration_test.go`，添加 `//go:build integration`。纯 Badger、SQLite、fake 和配置测试保留在默认文件。
 
-- [ ] **13.1b 添加双重外部门禁**
+- [x] **13.1b 添加双重外部门禁**
 
 MySQL 套件还必须显式设置 `CORE_TEST_MYSQL=1`，MongoDB 与 ClickHouse 对应 `CORE_TEST_MONGODB=1` 和 `CORE_TEST_CLICKHOUSE=1`。未设置时输出清晰 skip 原因。
 
-- [ ] **13.1c 增加脚本入口**
+- [x] **13.1c 增加脚本入口**
 
 `./scripts/test.sh persistence-unit` 运行无外部依赖持久化套件；`integration-persistence` 使用 integration tag 和显式环境变量。
+
+**完成记录（2026-07-11）：** 独立 MySQL 测试文件已使用 `integration` build tag；由于 SharedBadger 文件混合了 Badger、SQLite、fake 和 MySQL 用例，未将整个文件排除，而是通过编译期 `persistenceIntegrationBuild` 开关与 `CORE_TEST_MYSQL=1` 双重门禁约束真实 MySQL 入口。已新增两个脚本模式；`integration-persistence` 当前只负责编译与运行显式开启的集成测试，Docker 编排在 13.4 完成。
+
+**验收结果：** `go test ./pkg/persistence/... -count=1 -timeout=5m` 与 `./scripts/test.sh persistence-unit` 均通过，默认套件不再连接本地 MySQL。原先包装真实 MySQL 的六个回退行为测试暂纳入双门禁，13.3 将其改为纯 fake 后恢复默认覆盖。
 
 **验收：**
 ```bash

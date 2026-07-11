@@ -423,7 +423,7 @@ func TestHighConcurrency_ConsistentRead(t *testing.T) {
 
 // TestSyncConfig_DefaultBatchDelay 验证默认积累窗口为 100ms
 func TestSyncConfig_DefaultBatchDelay(t *testing.T) {
-	db := newTestDBLocal(t)
+	db := newTestDBLocalWithConfig(t, DefaultSharedConfig(t.TempDir()))
 	want := 100 * time.Millisecond
 	got := db.manager.config.SyncBatchDelay
 	if got != want {

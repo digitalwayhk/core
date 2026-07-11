@@ -37,6 +37,15 @@ case "${1:-quick}" in
       -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown|Test.*Close|Test.*Cleanup' \
       -count=20
     ;;
+  persistence-unit)
+    go test ./pkg/persistence/... -count=1 -timeout=5m
+    ;;
+  integration-persistence)
+    CORE_TEST_MYSQL="${CORE_TEST_MYSQL:-0}" \
+    CORE_TEST_MONGODB="${CORE_TEST_MONGODB:-0}" \
+    CORE_TEST_CLICKHOUSE="${CORE_TEST_CLICKHOUSE:-0}" \
+    go test -tags=integration ./pkg/persistence/... -count=1 -timeout=10m
+    ;;
   integration-local)
     CORE_TEST_CLUSTER_LOCAL=1 go test -tags=integration ./tests/integration -run TestClusterLocal -count=1
     ;;
@@ -59,7 +68,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|concurrency|integration-local|integration-external|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|concurrency|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

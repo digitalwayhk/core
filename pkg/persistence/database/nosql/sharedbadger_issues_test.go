@@ -126,6 +126,7 @@ func TestIssue_BatchUpdateSyncedStatus_SkipsCASOnFirstAttempt(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_cas_e2e"
@@ -323,6 +324,7 @@ type fatalTxError struct{}
 func (fatalTxError) Error() string { return "transaction has already been rolled back" }
 
 func TestIssue_BatchInsertMissingFatalErrorBreak(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_fatal_ins"
@@ -415,6 +417,7 @@ func (a *panicOnInsertAction) GetRunDB() interface{} { return a.base.GetRunDB() 
 func (a *panicOnInsertAction) Rollback() error       { return a.base.Rollback() }
 
 func TestIssue_SyncBatchSemaphoreLeakOnPanic(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_sema"
@@ -476,6 +479,7 @@ func TestIssue_SyncBatchSemaphoreLeakOnPanic(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConnectionManagerOverridesPoolConfig(t *testing.T) {
+	requireMySQLIntegration(t)
 	cfg := &oltp.Config{
 		Host:         "127.0.0.1",
 		Port:         3306,
@@ -579,6 +583,7 @@ func (a *existsFailAction) GetRunDB() interface{} { return a.base.GetRunDB() }
 func (a *existsFailAction) Rollback() error       { return a.base.Rollback() }
 
 func TestIssue_BatchUpdateInsertDuplicateNotHandled(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_dup_upd"
@@ -654,6 +659,7 @@ func TestIssue_BatchUpdateInsertDuplicateNotHandled(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConcurrentSetAndSync_EventualConsistency(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_eventual"
@@ -873,8 +879,8 @@ func TestIssue_SmallValueThreshold_VlogGrowsUnboundedly(t *testing.T) {
 		return
 	}
 
-	// ─── Red：ValueThreshold=64，values(512B) > 64 → 写 vlog → GC 无效 ───
-	t.Run("Red_SmallThreshold_VlogBloats", func(t *testing.T) {
+	// 对照组：旧的小阈值应能稳定复现 vlog 膨胀，用于证明修复参数有效。
+	t.Run("Baseline_SmallThreshold_VlogBloats", func(t *testing.T) {
 		dir := t.TempDir()
 		sizeBefore, sizeAfter, gcRounds := runScenario(t, dir, 64)
 
@@ -884,15 +890,8 @@ func TestIssue_SmallValueThreshold_VlogGrowsUnboundedly(t *testing.T) {
 		const liveDataSize = int64(2500 * 512) // 1.25MB live 数据
 
 		// vlog 远超 live 数据（说明大量历史数据未被 GC 清理）
-		if sizeAfter > liveDataSize*3 {
-			t.Errorf("[问题复现] vlog=%dKB 远超 live 数据 %dKB (>3倍)\n"+
-				"  根因: ValueThreshold=64B，SyncQueueItem(512B)被写入 vlog，\n"+
-				"        BadgerDB GC 因 pickLog 缺陷无法回收废弃的 vlog 空间。\n"+
-				"  线上: fu_funds 1.6GB vlog, positions 2.4GB, CPU 110%%",
-				sizeAfter/1024, liveDataSize/1024)
-		} else {
-			t.Logf("(GC 有效，可能 compaction 自动清理了 discard stats，调整参数重试)")
-		}
+		require.Greater(t, sizeAfter, liveDataSize*3,
+			"小 ValueThreshold 对照组未复现 vlog 膨胀，需重新校准测试参数")
 	})
 
 	// ─── Green：ValueThreshold=64KB，values(512B) < 64KB → inline LSM → vlog 不增长 ───

@@ -167,6 +167,7 @@ func newTestConfig(path string) BadgerDBConfig {
 
 func newTestDBWithConfig(t *testing.T, config BadgerDBConfig) *PrefixedBadgerDB[testFund] {
 	t.Helper()
+	requireMySQLIntegration(t)
 	db, err := NewSharedBadgerDB[testFund](config.Path, config)
 	if err != nil {
 		t.Fatalf("NewSharedBadgerDB 失败: %v", err)
@@ -2000,6 +2001,7 @@ func TestConcurrent_MultiUser_DataIsolation(t *testing.T) {
 // 两个不同前缀的 PrefixedBadgerDB 共享同一个 MySQL action，并发同步到同一远端库。
 // 重点验证 clone + pool semaphore 下不会因为共享 action 而串事务或丢数据。
 func TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := oltp.NewMySQL(&oltp.Config{
@@ -2087,6 +2089,7 @@ func TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB(t *testing.T) {
 // 两个不同前缀共享同一个 MySQL action，并发同步到不同远端库。
 // 重点验证动态路由和 clone 不会把一侧写入串到另一侧数据库。
 func TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := oltp.NewMySQL(&oltp.Config{
@@ -2196,6 +2199,7 @@ func TestGetDataAction_ClonesStatefulSqliteAdapter(t *testing.T) {
 }
 
 func TestConcurrent_BatchInsertFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
@@ -2237,6 +2241,7 @@ func TestConcurrent_BatchInsertFallbackToOneByOneAcrossPrefixes(t *testing.T) {
 }
 
 func TestConcurrent_BatchUpdateFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
@@ -2294,6 +2299,7 @@ func TestConcurrent_BatchUpdateFallbackToOneByOneAcrossPrefixes(t *testing.T) {
 }
 
 func TestConcurrent_BatchDeleteFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
@@ -2353,6 +2359,7 @@ func TestConcurrent_BatchDeleteFallbackToOneByOneAcrossPrefixes(t *testing.T) {
 }
 
 func TestConcurrent_BatchInsertTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
@@ -2394,6 +2401,7 @@ func TestConcurrent_BatchInsertTransactionFallbackToOneByOneAcrossPrefixes(t *te
 }
 
 func TestConcurrent_BatchUpdateTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
@@ -2451,6 +2459,7 @@ func TestConcurrent_BatchUpdateTransactionFallbackToOneByOneAcrossPrefixes(t *te
 }
 
 func TestConcurrent_BatchDeleteTransactionFallbackToOneByOneAcrossPrefixes(t *testing.T) {
+	requireMySQLIntegration(t)
 	configA := newTestConfig(t.TempDir())
 	configB := newTestConfig(t.TempDir())
 	sharedAction := newInjectedFailureMySQLAction()
