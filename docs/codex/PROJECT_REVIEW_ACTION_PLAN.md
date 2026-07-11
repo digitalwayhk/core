@@ -946,7 +946,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **优先级：** 请求隔离与竞态为 P0；更广泛的生命周期合并为 P1
 
-**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`，完成代码风险盘点与测试基线，正在实施任务 12.1 请求隔离。
+**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/12-request-lifecycle-concurrency.md`；任务 12.1 请求隔离已在 `60b6e3a` 完成，任务 12.4 WebSocket 测试同步已在 `87cc800` 完成，正在进入注册表同步阶段。
 
 **文件：**
 - 创建：`docs/codex/plans/12-request-lifecycle-concurrency.md`

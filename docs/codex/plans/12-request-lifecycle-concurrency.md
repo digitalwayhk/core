@@ -37,13 +37,15 @@
 
 **优先级：** P0
 
+**状态：** 已在 `60b6e3a` 完成。定向 `-race`、服务端全量回归、API 兼容审查和正确性审查均通过。
+
 **文件：**
 - 修改：`service/manage/manageservice.go`
 - 修改：`service/manage/view.go` 及 CRUD 路由文件
 - 修改：`pkg/server/api/manage/menumanage.go`
 - 创建或修改：对应测试文件
 
-- [ ] **步骤 1：编写请求隔离失败测试**
+- [x] **步骤 1：编写请求隔离失败测试**
 
 并发执行两个带不同 `NewID()` 结果的请求，断言默认菜单项只使用各自请求的 ID，且一个请求不能覆盖另一个。新增请求感知接口，同时证明旧接口仍能兼容回退：
 
@@ -53,19 +55,19 @@ type IGetDefaultItemsWithRequest[T pt.IModel] interface {
 }
 ```
 
-- [ ] **步骤 2：验证 RED**
+- [x] **步骤 2：验证 RED**
 
 ```bash
 go test -race ./service/manage ./pkg/server/api/manage -run 'Test.*RequestIsolation|Test.*DefaultItems' -count=1
 ```
 
-- [ ] **步骤 3：用显式参数替换共享存储**
+- [x] **步骤 3：用显式参数替换共享存储**
 
 `SearchAfter` 优先调用请求感知接口，再回退旧 `IGetDefaultItems`。`MenuManage` 将 `req` 显式传入默认项生成和递归更新逻辑。删除框架内部所有 `SetReq` 调用，使生产请求不再写共享字段。
 
 兼容规则：`ManageService.Req`、`SetReq` 和 `IRequestSet` 均为导出 API，本任务保留它们并添加中文 `Deprecated` 注释，以维持源码兼容；框架不再调用 `SetReq`。依赖该副作用的业务属于行为迁移，必须改用 hook 的 `req` 参数或 `GetDefaultItemsWithRequest`。真正删除放到任务 15 或下一个主版本。
 
-- [ ] **步骤 4：验证 GREEN 并提交**
+- [x] **步骤 4：验证 GREEN 并提交**
 
 ```bash
 go test -race ./service/manage ./pkg/server/api/manage -count=1
@@ -133,10 +135,12 @@ git commit -m "fix: isolate web server state"
 
 **优先级：** P0 测试门禁
 
+**状态：** 已在 `87cc800` 完成。删除不安全读取和固定等待，`go test -race ./pkg/server/types -count=20` 通过。
+
 **文件：**
 - 修改：`pkg/server/types/websocketshard_test.go`
 
-- [ ] **步骤 1：保留当前竞态证据**
+- [x] **步骤 1：保留当前竞态证据**
 
 ```bash
 go test -race ./pkg/server/types -run 'TestUnRegisterWebSocketHash_DoubleUnregisterFiresOnce|TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount' -count=1
@@ -144,11 +148,11 @@ go test -race ./pkg/server/types -run 'TestUnRegisterWebSocketHash_DoubleUnregis
 
 当前测试在异步回调写 slice 时直接执行 `len(capture.subs)`，race detector 报警。
 
-- [ ] **步骤 2：仅修正同步方式**
+- [x] **步骤 2：仅修正同步方式**
 
 为 capture 添加持锁的 `subscriptionCount()`，或由回调关闭 channel。保留生产异步契约，不为迎合测试改成同步通知。
 
-- [ ] **步骤 3：验证并提交**
+- [x] **步骤 3：验证并提交**
 
 ```bash
 go test -race ./pkg/server/types -count=1
@@ -279,11 +283,11 @@ go vet ./pkg/server/... ./service/manage/...
 
 ## 最终验收清单
 
-- [ ] `ManageService` 及业务管理服务不再保存请求对象。
+- [x] 框架生产路径不再向 `ManageService` 或业务管理服务写入请求对象；旧导出字段仅保留源码兼容。
 - [ ] 所有可变进程级 map 都有唯一 owner 和一致同步策略，getter 不返回内部 map。
 - [ ] 两个服务的 CrossNode forwarder 不会互相覆盖或误清理。
 - [ ] `ServiceContext`、membership 和服务器关闭可重复调用，并在 deadline 内完成。
 - [ ] Provider 迁移窗口内新增、删除和离线节点都能对账到 pending。
-- [ ] WebSocket 异步回调测试不直接读取未同步状态。
+- [x] WebSocket 异步回调测试不直接读取未同步状态。
 - [ ] 定向 `-race`、服务端回归和 `go vet` 全部通过。
 - [ ] 每个小节均有独立开发提交、测试证据和审查结论。
