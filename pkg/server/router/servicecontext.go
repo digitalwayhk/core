@@ -41,7 +41,10 @@ type ServiceContext struct {
 	Service           *types.Service
 	snow              idgen.ISnowWorker
 	Router            *ServiceRouter
-	isStart           atomic.Bool // 仅同步运行标志；子系统生命周期串行化由任务 12.6 处理。
+	isStart           atomic.Bool
+	lifecycleMu       sync.Mutex
+	lifecycleOpOnce   sync.Once
+	lifecycleOp       chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
 	Pid               int
 	Hub               interface{} `json:"-"`
 	StateChan         chan bool   `json:"-"`
@@ -56,6 +59,18 @@ type ServiceContext struct {
 	membership        *cluster.MembershipManager     `json:"-"`
 	CrossNodeBroker   *cluster.CrossNodeNoticeBroker `json:"-"`
 	nodeID            string
+}
+
+func (own *ServiceContext) beginLifecycleOperation() {
+	own.lifecycleOpOnce.Do(func() {
+		own.lifecycleOp = make(chan struct{}, 1)
+		own.lifecycleOp <- struct{}{}
+	})
+	<-own.lifecycleOp
+}
+
+func (own *ServiceContext) endLifecycleOperation() {
+	own.lifecycleOp <- struct{}{}
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -495,61 +510,52 @@ func (own *ServiceContext) SetPid(pid int) {
 	own.Pid = pid
 }
 func (own *ServiceContext) SetRunState(state bool) {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	if own.isStart.Load() == state {
+		own.lifecycleMu.Unlock()
+		return
+	}
 	own.isStart.Store(state)
+	provider := own.ClusterProvider
+	membership := own.membership
+	broker := own.CrossNodeBroker
+	if !state {
+		own.membership = nil
+		own.CrossNodeBroker = nil
+	}
+	own.lifecycleMu.Unlock()
 
 	if state {
-		if own.ClusterProvider != nil && own.membership == nil {
-			nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
-				own.Config.DataCenterID, own.Config.MachineID)
-			own.nodeID = nodeID
-			node := &cluster.NodeInfo{
-				ID:           nodeID,
-				ServiceName:  own.Service.Name,
-				DataCenterID: int64(own.Config.DataCenterID),
-				MachineID:    int64(own.Config.MachineID),
-				Address:      own.Config.RunIp,
-				Port:         own.Config.Port,
-				SocketPort:   own.Config.SocketPort,
-				Weight:       1,
-			}
-			if regErr := own.ClusterProvider.Register(context.Background(), node); regErr != nil {
-				logx.Errorf("cluster: register node %s: %v", nodeID, regErr)
-			} else {
-				interval := own.Config.Cluster.HeartbeatInterval
-				if interval == 0 {
-					interval = 3 * time.Second
-				}
-				own.membership = cluster.NewMembershipManager(own.ClusterProvider, nodeID, interval)
-				own.membership.Start(context.Background())
-			}
+		nodeID, node, interval := own.clusterMembershipConfig()
+		if provider != nil && membership == nil {
+			membership = own.startMembership(provider, node, interval)
 		}
-		if own.ClusterProvider != nil && own.CrossNodeBroker == nil {
-			if own.nodeID == "" {
-				own.nodeID = fmt.Sprintf("%s-%d-%d", own.Service.Name,
-					own.Config.DataCenterID, own.Config.MachineID)
-			}
-			own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
-				own.ClusterProvider, own.Service.Name, own.nodeID,
-			)
+		if provider != nil && broker == nil {
+			broker = cluster.NewCrossNodeNoticeBroker(provider, own.Service.Name, nodeID)
 			if own.TransportSelector != nil {
-				own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
+				broker.SetSender(own.makeCrossNodeSender())
 			}
-			types.SetCrossNodeForwarderForService(own.Service.Name, own.CrossNodeBroker)
+			types.SetCrossNodeForwarderForService(own.Service.Name, broker)
 		}
+		own.lifecycleMu.Lock()
+		own.nodeID = nodeID
+		own.membership = membership
+		own.CrossNodeBroker = broker
+		own.lifecycleMu.Unlock()
 	} else {
-		if own.CrossNodeBroker != nil {
-			broker := own.CrossNodeBroker
+		if broker != nil {
 			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
 			broker.DrainAndStop(ctx)
-			own.CrossNodeBroker = nil
+			cancel()
 		}
-		if own.membership != nil {
+		if membership != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			own.membership.Stop(ctx)
-			own.membership = nil
+			membership.Stop(ctx)
+			cancel()
 		}
 	}
 
@@ -567,70 +573,99 @@ func (own *ServiceContext) SetRunState(state bool) {
 // current provider and, if the service is already running, restarts membership
 // and the CrossNode broker with the new provider.
 func (own *ServiceContext) SyncProviderAfterSwitch() error {
-	if own.ClusterSwitcher == nil {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	switcher := own.ClusterSwitcher
+	oldProvider := own.ClusterProvider
+	own.lifecycleMu.Unlock()
+	if switcher == nil {
 		return nil
 	}
-	newProvider := own.ClusterSwitcher.Current()
-	if newProvider == own.ClusterProvider {
+	newProvider := switcher.Current()
+	if newProvider == oldProvider {
 		return nil
 	}
+
+	own.lifecycleMu.Lock()
 	own.ClusterProvider = newProvider
-
-	if !own.isStart.Load() {
+	running := own.isStart.Load()
+	membership := own.membership
+	broker := own.CrossNodeBroker
+	if running {
+		own.membership = nil
+		own.CrossNodeBroker = nil
+	}
+	own.lifecycleMu.Unlock()
+	if !running {
 		return nil
 	}
 
-	if own.membership != nil {
+	if membership != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		own.membership.Stop(stopCtx)
+		membership.Stop(stopCtx)
 		cancel()
-		own.membership = nil
 	}
-	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
-		own.Config.DataCenterID, own.Config.MachineID)
-	own.nodeID = nodeID
-	if newProvider != nil {
-		node := &cluster.NodeInfo{
-			ID:           nodeID,
-			ServiceName:  own.Service.Name,
-			DataCenterID: int64(own.Config.DataCenterID),
-			MachineID:    int64(own.Config.MachineID),
-			Address:      own.Config.RunIp,
-			Port:         own.Config.Port,
-			SocketPort:   own.Config.SocketPort,
-			Weight:       1,
-		}
-		if regErr := newProvider.Register(context.Background(), node); regErr != nil {
-			logx.Errorf("cluster: re-register node %s after switch: %v", nodeID, regErr)
-		} else {
-			interval := own.Config.Cluster.HeartbeatInterval
-			if interval == 0 {
-				interval = 3 * time.Second
-			}
-			own.membership = cluster.NewMembershipManager(newProvider, nodeID, interval)
-			own.membership.Start(context.Background())
-		}
-	}
-
-	if own.CrossNodeBroker != nil {
-		broker := own.CrossNodeBroker
+	if broker != nil {
 		types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 		drainCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		broker.DrainAndStop(drainCtx)
 		cancel()
-		own.CrossNodeBroker = nil
-	}
-	if newProvider != nil {
-		own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
-			newProvider, own.Service.Name, nodeID,
-		)
-		if own.TransportSelector != nil {
-			own.CrossNodeBroker.SetSender(own.makeCrossNodeSender())
-		}
-		types.SetCrossNodeForwarderForService(own.Service.Name, own.CrossNodeBroker)
 	}
 
+	nodeID, node, interval := own.clusterMembershipConfig()
+	var newMembership *cluster.MembershipManager
+	var newBroker *cluster.CrossNodeNoticeBroker
+	if newProvider != nil {
+		newMembership = own.startMembership(newProvider, node, interval)
+		newBroker = cluster.NewCrossNodeNoticeBroker(newProvider, own.Service.Name, nodeID)
+		if own.TransportSelector != nil {
+			newBroker.SetSender(own.makeCrossNodeSender())
+		}
+		types.SetCrossNodeForwarderForService(own.Service.Name, newBroker)
+	}
+
+	own.lifecycleMu.Lock()
+	own.nodeID = nodeID
+	own.membership = newMembership
+	own.CrossNodeBroker = newBroker
+	own.lifecycleMu.Unlock()
 	return nil
+}
+
+func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
+	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
+		own.Config.DataCenterID, own.Config.MachineID)
+	node := &cluster.NodeInfo{
+		ID:           nodeID,
+		ServiceName:  own.Service.Name,
+		DataCenterID: int64(own.Config.DataCenterID),
+		MachineID:    int64(own.Config.MachineID),
+		Address:      own.Config.RunIp,
+		Port:         own.Config.Port,
+		SocketPort:   own.Config.SocketPort,
+		Weight:       1,
+	}
+	interval := own.Config.Cluster.HeartbeatInterval
+	if interval == 0 {
+		interval = 3 * time.Second
+	}
+	return nodeID, node, interval
+}
+
+func (own *ServiceContext) startMembership(
+	provider cluster.DiscoveryProvider,
+	node *cluster.NodeInfo,
+	interval time.Duration,
+) *cluster.MembershipManager {
+	if err := provider.Register(context.Background(), node); err != nil {
+		logx.Errorf("cluster: register node %s: %v", node.ID, err)
+		return nil
+	}
+	membership := cluster.NewMembershipManager(provider, node.ID, interval)
+	membership.Start(context.Background())
+	return membership
 }
 
 func (own *ServiceContext) IsRun() bool {
