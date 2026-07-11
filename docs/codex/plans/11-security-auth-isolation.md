@@ -1,34 +1,34 @@
-# Security and Authentication Isolation Implementation Plan
+# 安全与认证隔离实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **面向智能体开发者：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 子技能，按任务逐项实施本计划。步骤使用复选框（`- [ ]`）语法跟踪。
 
-**Goal:** Make configuration storage, CORS, Logto authentication, client IP resolution, and public error responses secure by default without replacing go-zero's existing HTTP limits and resilience middleware.
+**目标：** 在不替换 go-zero 现有 HTTP 限制和弹性中间件的前提下，使配置存储、CORS、Logto 认证、客户端 IP 解析和公共错误响应默认安全。
 
-**Architecture:** Keep go-zero `rest.RestConf` as the owner of `MaxBytes`, `MaxConns`, breaker, shedding, timeout, and recovery. Add only Digitalway-specific policy: immutable per-handler Logto configuration, explicit CORS origins, trusted-proxy-aware client IP resolution, least-permission config files, generic public authentication errors, and stable security headers. Preserve existing exported entrypoints where feasible and route new startup errors through the existing WebServer startup boundary.
+**架构：** 保持 go-zero `rest.RestConf` 作为 `MaxBytes`、`MaxConns`、breaker、shedding、timeout 和 recovery 的 owner。仅添加 Digitalway 特定策略：每 handler 不可变 Logto 配置、显式 CORS origin、感知受信代理的客户端 IP 解析、最小权限配置文件、通用公共认证错误和稳定安全响应头。在可行时保留现有导出入口，并通过现有 WebServer 启动边界传递新启动错误。
 
-**Tech Stack:** Go 1.26, go-zero v1.10.2 `rest`/`logx`, `net/http`, `net/netip`, `httptest`, `keyfunc/v2`, JWT v5.
+**技术栈：** Go 1.26、go-zero v1.10.2 `rest`/`logx`、`net/http`、`net/netip`、`httptest`、`keyfunc/v2`、JWT v5。
 
 ---
 
-## Ownership and Non-Goals
+## 归属与非目标
 
-- Task 11 owns security behavior and focused tests.
-- Task 8 later normalizes all remaining runtime logs; Task 11 removes only authentication secrets, fatal process exits, and unsafe client details needed for this boundary.
-- Task 15 later defines the complete typed public error contract; Task 11 preserves current status codes while removing internal causes.
-- Do not add a second body limiter, connection limiter, circuit breaker, or load shedder. Verify go-zero `RestConf.MaxBytes`, `MaxConns`, and middleware defaults instead.
-- Do not add Redis solely for rate limiting. Distributed rate limiting is conditional on an approved go-zero `core/limit` provider in Task 14; until then existing max-connections, max-body, breaker, shedding, and authentication rejection controls remain the supported baseline.
+- 任务 11 负责安全行为和定向测试。
+- 任务 8 后续统一所有剩余运行时日志；任务 11 仅删除该边界所需的认证密钥、fatal 进程退出和不安全客户端细节。
+- 任务 15 后续定义完整的类型化公共错误契约；任务 11 在删除内部原因的同时保留当前状态码。
+- 不添加第二个 body limiter、连接 limiter、circuit breaker 或 load shedder。应验证 go-zero `RestConf.MaxBytes`、`MaxConns` 和中间件默认值。
+- 不仅为限速而添加 Redis。分布式限速取决于任务 14 中经批准的 go-zero `core/limit` Provider；在此之前，现有最大连接数、最大 body、breaker、shedding 和认证拒绝控制仍是受支持基线。
 
-## Task 11.1: Least-Permission Configuration Files
+## 任务 11.1：最小权限配置文件
 
-**Status:** Completed in `804a2de`.
+**状态：** 已在 `804a2de` 完成。
 
-**Files:**
-- Create: `pkg/server/config/serverconfig_security_test.go`
-- Modify: `pkg/server/config/serverconfig.go`
+**文件：**
+- 创建：`pkg/server/config/serverconfig_security_test.go`
+- 修改：`pkg/server/config/serverconfig.go`
 
-- [x] **Step 1: Write failing permission tests**
+- [x] **步骤 1：编写失败的权限测试**
 
-Add tests in package `config` for a package-private `writeConfigFile` helper and for `migrateConfig`. `ServerConfig.Save` deliberately returns early under `go test`, so testing the shared write boundary avoids disabling that existing isolation. Assert a new file and an existing `0666` file both end with `mode.Perm() == 0o600`.
+在 `config` 包中为包内 `writeConfigFile` 辅助程序和 `migrateConfig` 添加测试。`ServerConfig.Save` 在 `go test` 下刻意提前返回，因此测试共享写入边界可避免禁用现有隔离。断言新文件和现有 `0666` 文件最终均为 `mode.Perm() == 0o600`。
 
 ```go
 func TestWriteConfigFileUsesPrivateMode(t *testing.T) {
@@ -40,86 +40,86 @@ func TestWriteConfigFileUsesPrivateMode(t *testing.T) {
 }
 ```
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test ./pkg/server/config -run 'TestWriteConfigFileUsesPrivateMode|TestWriteConfigFileTightensExistingMode|TestMigrateConfigTightensFileMode' -count=1`
+运行：`go test ./pkg/server/config -run 'TestWriteConfigFileUsesPrivateMode|TestWriteConfigFileTightensExistingMode|TestMigrateConfigTightensFileMode' -count=1`
 
-Expected: FAIL because current writes use `0o777` and `0o666`.
+预期：失败，因为当前写入使用 `0o777` 和 `0o666`。
 
-- [x] **Step 3: Implement minimal permission handling**
+- [x] **步骤 3：实现最小权限处理**
 
-Implement `writeConfigFile(file string, data []byte) error` with `os.WriteFile(..., 0o600)` followed by `os.Chmod(file, 0o600)`. Use it from both `Save` and `migrateConfig`, so an existing permissive file is tightened even though `os.WriteFile` alone does not change its mode.
+使用 `os.WriteFile(..., 0o600)` 后跟 `os.Chmod(file, 0o600)` 实现 `writeConfigFile(file string, data []byte) error`。`Save` 和 `migrateConfig` 均使用它，使现有过宽文件也会收紧，即使单独 `os.WriteFile` 不会改变其模式。
 
-- [x] **Step 4: Verify GREEN and regression**
+- [x] **步骤 4：验证 GREEN 与回归**
 
-Run:
+运行：
 
 ```bash
 go test ./pkg/server/config -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [x] **Step 5: Commit**
+- [x] **步骤 5：提交**
 
 ```bash
 git add pkg/server/config/serverconfig.go pkg/server/config/serverconfig_security_test.go
 git commit -m "fix: protect server configuration files"
 ```
 
-## Task 11.2: Explicit CORS Origins
+## 任务 11.2：显式 CORS Origin
 
-**Status:** Completed in `937d381`.
+**状态：** 已在 `937d381` 完成。
 
-**Files:**
-- Create: `pkg/server/trans/rest/server_security_test.go`
-- Modify: `pkg/server/trans/rest/server.go`
+**文件：**
+- 创建：`pkg/server/trans/rest/server_security_test.go`
+- 修改：`pkg/server/trans/rest/server.go`
 
-- [x] **Step 1: Write failing option tests**
+- [x] **步骤 1：编写失败的选项测试**
 
-Extract a package-private helper that validates CORS input and returns go-zero run options. Test that disabled CORS returns no option, enabled CORS with no origin returns an error, and explicit origins are retained. Include `"*"` only as an explicit caller choice.
+抽取一个校验 CORS 输入并返回 go-zero run option 的包内辅助程序。测试禁用 CORS 时不返回 option，启用 CORS 但无 origin 时返回错误，显式 origin 被保留。仅当调用方显式选择时包含 `"*"`。
 
 ```go
 func restRunOptions(isCors bool, origins []string) ([]rest.RunOption, error)
 ```
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test ./pkg/server/trans/rest -run TestRestRunOptions -count=1`
+运行：`go test ./pkg/server/trans/rest -run TestRestRunOptions -count=1`
 
-Expected: FAIL because no helper exists and `origin` is ignored.
+预期：失败，因为辅助程序尚不存在，且 `origin` 被忽略。
 
-- [x] **Step 3: Implement fail-closed CORS construction**
+- [x] **步骤 3：实现 fail-closed CORS 构造**
 
-Call `rest.WithCors(origins...)` only when `isCors` is true and at least one non-empty origin is supplied. Make `NewServer` return `(*Server, error)`, propagate the error through `run.(*WebServer).newWebServer`, and let `initServer` stop startup with the existing boundary error handling.
+仅当 `isCors` 为 true 且提供至少一个非空 origin 时调用 `rest.WithCors(origins...)`。使 `NewServer` 返回 `(*Server, error)`，通过 `run.(*WebServer).newWebServer` 传播错误，并让 `initServer` 通过现有边界错误处理停止启动。
 
-- [x] **Step 4: Verify GREEN**
+- [x] **步骤 4：验证 GREEN**
 
-Run:
+运行：
 
 ```bash
 go test ./pkg/server/trans/rest ./pkg/server/run -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [x] **Step 5: Commit**
+- [x] **步骤 5：提交**
 
 ```bash
 git add pkg/server/trans/rest/server.go pkg/server/trans/rest/server_security_test.go pkg/server/run/server.go
 git commit -m "fix: require explicit CORS origins"
 ```
 
-## Task 11.3: Immutable Per-Handler Logto Policy
+## 任务 11.3：每 Handler 不可变 Logto 策略
 
-**Status:** Completed in `daa2c57`.
+**状态：** 已在 `daa2c57` 完成。
 
-**Files:**
-- Create: `pkg/server/safe/logto/authmiddleware_test.go`
-- Modify: `pkg/server/safe/logto/authmiddleware.go`
-- Modify: `pkg/server/trans/rest/server.go`
+**文件：**
+- 创建：`pkg/server/safe/logto/authmiddleware_test.go`
+- 修改：`pkg/server/safe/logto/authmiddleware.go`
+- 修改：`pkg/server/trans/rest/server.go`
 
-- [x] **Step 1: Write failing concurrent policy tests**
+- [x] **步骤 1：编写失败的并发策略测试**
 
-Introduce an immutable policy type and make middleware validation use it rather than package globals:
+引入不可变策略类型，并使中间件校验使用它，而非包全局变量：
 
 ```go
 type AuthConfig struct {
@@ -131,149 +131,149 @@ func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.
 func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error)
 ```
 
-Use two local JWKS test servers and run handlers concurrently with distinct issuer/audience pairs. Each matching token must succeed only against its own handler under `go test -race`.
+使用两个本地 JWKS 测试 Server，并以不同 issuer/audience 组合并发运行 handler。在 `go test -race` 下，每个匹配 token 必须仅能在自己的 handler 上成功。
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test -race ./pkg/server/safe/logto -run TestAuthHandlersKeepIndependentPolicy -count=1`
+运行：`go test -race ./pkg/server/safe/logto -run TestAuthHandlersKeepIndependentPolicy -count=1`
 
-Expected: FAIL because policy currently lives in mutable package globals.
+预期：失败，因为当前策略存在于可变包全局变量中。
 
-- [x] **Step 3: Implement local policy and startup errors**
+- [x] **步骤 3：实现本地策略与启动错误**
 
-Normalize issuer trailing slashes once, derive `jwksURL` and accepted issuer from the local config, and return JWKS initialization errors instead of calling `log.Fatal`. Update REST route registration to construct each Logto handler once and propagate construction errors to `NewServer`.
+只规范化一次 issuer 尾部斜杠，从本地配置派生 `jwksURL` 和可接受 issuer，并返回 JWKS 初始化错误，而非调用 `log.Fatal`。更新 REST 路由注册，使每个 Logto handler 只构造一次，并将构造错误传播给 `NewServer`。
 
-- [x] **Step 4: Preserve compatibility deliberately**
+- [x] **步骤 4：有意保留兼容性**
 
-Keep the old exported `AuthHandler(next, issuer, audience) http.Handler` only as a deprecated wrapper if repository consumers require it. The wrapper must never terminate the process; internal startup code must use `NewAuthHandler` and handle its error.
+仅当仓库消费方需要时，将旧导出 `AuthHandler(next, issuer, audience) http.Handler` 保留为已废弃封装。该封装绝不得终止进程；内部启动代码必须使用 `NewAuthHandler` 并处理其错误。
 
-- [x] **Step 5: Verify GREEN**
+- [x] **步骤 5：验证 GREEN**
 
-Run:
+运行：
 
 ```bash
 go test -race ./pkg/server/safe/logto ./pkg/server/trans/rest -count=1
 go test ./pkg/server/... -count=1
 ```
 
-- [x] **Step 6: Commit**
+- [x] **步骤 6：提交**
 
 ```bash
 git add pkg/server/safe/logto pkg/server/trans/rest/server.go
 git commit -m "fix: isolate Logto authentication policy"
 ```
 
-## Task 11.4: Generic Authentication and Framework Error Responses
+## 任务 11.4：通用认证与框架错误响应
 
-**Status:** Completed in `5e4bcd8`.
+**状态：** 已在 `5e4bcd8` 完成。
 
-**Files:**
-- Modify: `pkg/server/safe/logto/authmiddleware_test.go`
-- Create: `pkg/server/trans/rest/error_security_test.go`
-- Modify: `pkg/server/safe/logto/authmiddleware.go`
-- Modify: `pkg/server/trans/rest/error.go`
+**文件：**
+- 修改：`pkg/server/safe/logto/authmiddleware_test.go`
+- 创建：`pkg/server/trans/rest/error_security_test.go`
+- 修改：`pkg/server/safe/logto/authmiddleware.go`
+- 修改：`pkg/server/trans/rest/error.go`
 
-- [x] **Step 1: Write failing disclosure tests**
+- [x] **步骤 1：编写失败的信息泄漏测试**
 
-Assert malformed, expired, wrong-audience, wrong-issuer, JWKS-refresh, whitelist, and internal errors preserve their intended HTTP status but do not include token parser text, expected claims, issuer URLs, stack/error strings, or supplied secret fixtures in the response body.
+断言格式错误、过期、audience 错误、issuer 错误、JWKS refresh、白名单和内部错误保留预期 HTTP 状态，但响应体不包含 token parser 文本、预期 claim、issuer URL、堆栈/错误字符串或提供的密钥 fixture。
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test ./pkg/server/safe/logto ./pkg/server/trans/rest -run 'TestAuthResponseDoesNotDiscloseCause|TestWriteErrorResponseDoesNotDiscloseCause' -count=1`
+运行：`go test ./pkg/server/safe/logto ./pkg/server/trans/rest -run 'TestAuthResponseDoesNotDiscloseCause|TestWriteErrorResponseDoesNotDiscloseCause' -count=1`
 
-Expected: FAIL because current handlers return `err.Error()` and expected claim values.
+预期：失败，因为当前 handler 返回 `err.Error()` 和预期 claim 值。
 
-- [x] **Step 3: Implement safe public messages**
+- [x] **步骤 3：实现安全公共消息**
 
-Return stable generic messages such as `authentication failed` and omit `ErrorDetail.Details["error"]` from framework-generated responses. Wrap and return internal causes to the owning boundary; use structured `logx` only where Task 11 owns a terminal authentication decision, without tokens or claims.
+返回 `authentication failed` 等稳定通用消息，并从框架生成响应中省略 `ErrorDetail.Details["error"]`。封装并将内部原因返回给 owner 边界；仅在任务 11 拥有终止认证决策时使用结构化 `logx`，且不包含 token 或 claim。
 
-- [x] **Step 4: Verify GREEN**
+- [x] **步骤 4：验证 GREEN**
 
-Run: `go test ./pkg/server/safe/logto ./pkg/server/trans/rest -count=1`
+运行：`go test ./pkg/server/safe/logto ./pkg/server/trans/rest -count=1`
 
-- [x] **Step 5: Commit**
+- [x] **步骤 5：提交**
 
 ```bash
 git add pkg/server/safe/logto pkg/server/trans/rest/error.go pkg/server/trans/rest/error_security_test.go
 git commit -m "fix: hide authentication error details"
 ```
 
-## Task 11.5: Trusted Proxy Client IP Resolution
+## 任务 11.5：受信代理客户端 IP 解析
 
-**Status:** Completed in `503a01d`.
+**状态：** 已在 `503a01d` 完成。
 
-**Files:**
-- Create: `pkg/utils/ip_test.go`
-- Modify: `pkg/utils/ip.go`
-- Modify: `pkg/server/config/serverconfig.go`
-- Modify: `pkg/server/router/request.go`
-- Modify: `pkg/server/trans/rest/server.go`
-- Modify: `pkg/server/run/htmlserver.go`
+**文件：**
+- 创建：`pkg/utils/ip_test.go`
+- 修改：`pkg/utils/ip.go`
+- 修改：`pkg/server/config/serverconfig.go`
+- 修改：`pkg/server/router/request.go`
+- 修改：`pkg/server/trans/rest/server.go`
+- 修改：`pkg/server/run/htmlserver.go`
 
-- [x] **Step 1: Write failing trust tests**
+- [x] **步骤 1：编写失败的信任测试**
 
-Define `ClientPublicIP(r *http.Request, trustedProxies ...string) string`. Test that forwarding headers are ignored for an untrusted `RemoteAddr`, honored for a trusted exact IP or CIDR, malformed entries are skipped, and direct IPv4/IPv6 addresses are returned correctly. For a forwarded chain, walk right-to-left, remove trusted proxy hops, and return the first untrusted address so a client-controlled leftmost value cannot override the address appended by a trusted proxy.
+定义 `ClientPublicIP(r *http.Request, trustedProxies ...string) string`。测试对不受信 `RemoteAddr` 忽略转发头，对受信精确 IP 或 CIDR 采纳转发头，跳过格式错误项，并正确返回直连 IPv4/IPv6 地址。对转发链从右向左遍历，移除受信代理跳，并返回第一个不受信地址，使客户端可控的最左值无法覆盖受信代理追加的地址。
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test ./pkg/utils -run TestClientPublicIP -count=1`
+运行：`go test ./pkg/utils -run TestClientPublicIP -count=1`
 
-Expected: FAIL because forwarding headers are currently trusted unconditionally.
+预期：失败，因为当前无条件信任转发头。
 
-- [x] **Step 3: Implement netip-based trust evaluation**
+- [x] **步骤 3：实现基于 netip 的信任评估**
 
-Parse `RemoteAddr` with `net.SplitHostPort` and `netip.ParseAddr`; parse each configured proxy as an address or prefix. Only inspect `X-Forwarded-For` and `X-Real-IP` when the direct peer matches a configured trusted proxy. Walk `X-Forwarded-For` from right to left and return the first address outside the trusted set. With no trusted proxy configuration, return the direct peer.
+使用 `net.SplitHostPort` 和 `netip.ParseAddr` 解析 `RemoteAddr`；将每个已配置代理解析为地址或 prefix。仅当直连 peer 匹配已配置受信代理时，才检查 `X-Forwarded-For` 和 `X-Real-IP`。从右向左遍历 `X-Forwarded-For`，返回第一个不在受信集合内的地址。未配置受信代理时，返回直连 peer。
 
-- [x] **Step 4: Add and validate configuration**
+- [x] **步骤 4：添加并校验配置**
 
-Add `TrustedProxies []string` to `ServerConfig`, default it to an empty slice, validate every value as an IP or CIDR, and pass it at each request/whitelist boundary. Invalid proxy configuration must fail before serving traffic.
+向 `ServerConfig` 添加 `TrustedProxies []string`，默认为空切片，将每个值校验为 IP 或 CIDR，并在每个请求/白名单边界传递它。无效代理配置必须在提供流量前失败。
 
-- [x] **Step 5: Verify GREEN and race safety**
+- [x] **步骤 5：验证 GREEN 与竞态安全**
 
-Run:
+运行：
 
 ```bash
 go test ./pkg/utils ./pkg/server/config ./pkg/server/router ./pkg/server/trans/rest ./pkg/server/run -count=1
 go test -race ./pkg/utils ./pkg/server/router -count=1
 ```
 
-- [x] **Step 6: Commit**
+- [x] **步骤 6：提交**
 
 ```bash
 git add pkg/utils/ip.go pkg/utils/ip_test.go pkg/server/config/serverconfig.go pkg/server/router/request.go pkg/server/trans/rest/server.go pkg/server/run/htmlserver.go
 git commit -m "fix: trust forwarding headers only from configured proxies"
 ```
 
-## Task 11.6: Security Headers and Existing go-zero Limits
+## 任务 11.6：安全响应头与现有 go-zero 限制
 
-**Status:** Completed in `0bc1a14`.
+**状态：** 已在 `0bc1a14` 完成。
 
-**Files:**
-- Modify: `pkg/server/trans/rest/server_security_test.go`
-- Modify: `pkg/server/trans/rest/server.go`
-- Modify: `docs/codex/plans/11-security-auth-isolation.md` to record final capability evidence for Task 14
+**文件：**
+- 修改：`pkg/server/trans/rest/server_security_test.go`
+- 修改：`pkg/server/trans/rest/server.go`
+- 修改：`docs/codex/plans/11-security-auth-isolation.md`，记录任务 14 所需的最终能力证据
 
-- [x] **Step 1: Write failing header and limit tests**
+- [x] **步骤 1：编写失败的响应头与限制测试**
 
-Test a package-private middleware that adds `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY` without overwriting stricter caller values. Add a configuration test proving go-zero `RestConf.MaxBytes`, `MaxConns`, and their middleware flags remain enabled after `ServerConfig.ApplyDefaults`.
+测试一个包内中间件：添加 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 和 `X-Frame-Options: DENY`，但不覆盖调用方更严格的值。添加配置测试，证明调用 `ServerConfig.ApplyDefaults` 后，go-zero `RestConf.MaxBytes`、`MaxConns` 和它们的中间件 flag 仍已启用。
 
-- [x] **Step 2: Verify RED**
+- [x] **步骤 2：验证 RED**
 
-Run: `go test ./pkg/server/trans/rest ./pkg/server/config -run 'TestSecurityHeaders|TestServerConfigPreservesGoZeroLimits' -count=1`
+运行：`go test ./pkg/server/trans/rest ./pkg/server/config -run 'TestSecurityHeaders|TestServerConfigPreservesGoZeroLimits' -count=1`
 
-Expected: header test FAILS because the middleware does not exist; limit test records the current go-zero behavior.
+预期：因中间件不存在，header 测试失败；limit 测试记录当前 go-zero 行为。
 
-- [x] **Step 3: Add the narrow header middleware**
+- [x] **步骤 3：添加范围受限的响应头中间件**
 
-Wrap registered HTTP routes with the security-header middleware. Do not add HSTS until TLS termination ownership is explicit, and do not duplicate go-zero body/connection limits.
+使用安全响应头中间件封装已注册 HTTP 路由。在 TLS 终止归属明确前不添加 HSTS，也不重复 go-zero body/连接限制。
 
-- [x] **Step 4: Record rate-limit support honestly**
+- [x] **步骤 4：如实记录限速支持**
 
-Record service-global max connections, body limits, breaker, and shedding as `Stable` in this plan's completion evidence. Record distributed auth/API rate limiting as `Unsupported` until Task 14 approves a go-zero `core/limit` Redis-backed configuration and behavior test; reject any future rate-limit config that lacks a runtime provider. Task 14 must copy this evidence into its capability matrix.
+在本计划的完成证据中，将服务全局最大连接数、body 限制、breaker 和 shedding 记录为 `Stable`。在任务 14 批准 go-zero `core/limit` Redis 支撑配置和行为测试前，将分布式 auth/API 限速记录为 `Unsupported`；拒绝任何缺少运行时 Provider 的未来限速配置。任务 14 必须将此证据复制到能力矩阵。
 
-- [x] **Step 5: Verify Task 11 as a whole**
+- [x] **步骤 5：整体验证任务 11**
 
-Run:
+运行：
 
 ```bash
 go vet ./pkg/server/... ./pkg/utils
@@ -281,34 +281,34 @@ go test ./pkg/server/... ./pkg/utils -count=1
 go test -race ./pkg/server/safe/logto ./pkg/server/router ./pkg/utils -count=1
 ```
 
-- [x] **Step 6: Commit**
+- [x] **步骤 6：提交**
 
 ```bash
 git add pkg/server/trans/rest pkg/server/config docs/codex/plans/11-security-auth-isolation.md
 git commit -m "fix: establish HTTP security baseline"
 ```
 
-## Completion Evidence
+## 完成证据
 
-| Capability | Status | Evidence |
+| 能力 | 状态 | 证据 |
 | --- | --- | --- |
-| Config file permissions | Stable | New and migrated files are tested as `0600` in `serverconfig_security_test.go` |
-| Explicit CORS allowlist | Stable | Enabled CORS rejects empty origins and passes explicit values to go-zero `WithCors` |
-| Logto policy isolation | Stable | Concurrent per-handler issuer/audience tests pass under `-race` |
-| Safe auth/framework responses | Stable | Secret-bearing error fixtures are absent from captured response bodies |
-| Trusted forwarding proxies | Stable | Direct, exact IP, CIDR, IPv6, malformed, and right-to-left chain tests pass |
-| Body and connection limits | Stable | go-zero 1 MiB `MaxBytes`, 10000 `MaxConns`, breaker, and shedding defaults are asserted |
-| HTTP security headers | Stable | REST routes and WebSocket handshakes set tested non-overwriting headers |
-| Distributed auth/API rate limiting | Unsupported | No configuration is accepted; Task 14 must approve a go-zero `core/limit` provider and behavior contract before adding one |
+| 配置文件权限 | 稳定 | `serverconfig_security_test.go` 验证新文件和已迁移文件均为 `0600` |
+| 显式 CORS 允许列表 | 稳定 | 启用 CORS 时拒绝空 origin，并将显式值传给 go-zero `WithCors` |
+| Logto 策略隔离 | 稳定 | 每 handler issuer/audience 并发测试在 `-race` 下通过 |
+| 安全认证/框架响应 | 稳定 | 捕获的响应体中不包含带密钥的错误 fixture |
+| 受信转发代理 | 稳定 | 直连、精确 IP、CIDR、IPv6、格式错误和从右向左链测试通过 |
+| Body 与连接限制 | 稳定 | 已断言 go-zero 1 MiB `MaxBytes`、10000 `MaxConns`、breaker 和 shedding 默认值 |
+| HTTP 安全响应头 | 稳定 | REST 路由和 WebSocket 握手设置经测试不覆盖的响应头 |
+| 分布式 auth/API 限速 | 不支持 | 不接受任何配置；添加前，任务 14 必须批准 go-zero `core/limit` Provider 和行为契约 |
 
-Task 11 completed with implementation commits `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, and `0bc1a14`. Final verification passed for server/utils vet, Logto/Router/Utils race tests, the full server/utils test suite, and static security assertions. No authentication policy globals or `log.Fatal` remain, CORS cannot silently become wildcard, forwarded headers require trusted proxies, config files are `0600`, and public authentication/framework error bodies contain no internal causes.
+任务 11 已通过实施提交 `804a2de`、`937d381`、`daa2c57`、`5e4bcd8`、`503a01d` 和 `0bc1a14` 完成。最终验证已通过 server/utils vet、Logto/Router/Utils 竞态测试、完整 server/utils 测试套件和静态安全断言。不再存在认证策略全局变量或 `log.Fatal`，CORS 无法静默变为通配符，转发头需要受信代理，配置文件为 `0600`，且公共认证/框架错误体不包含内部原因。
 
-## Post-Review Remediation
+## 审查后修复
 
-| Item | Status | Commit / evidence |
+| 项目 | 状态 | 提交 / 证据 |
 | --- | --- | --- |
-| A. Local forwarding addresses fail closed | Completed | `3f4f506`; Utils vet and race tests pass for unconfigured local peers, trusted unsafe candidates, direct loopback, and RFC1918 clients |
-| B. Logto identity binding and nil Request protection | Completed | `e320017`; uid/sub and username fallback context tests, missing-identity rejection, RouteHandler nil guard, vet, and race pass |
-| C. CORS examples and documentation | Completed | `6dd5f89`; all documented and executable `IsCors: true` examples declare a local origin, changed main packages compile, and runtime fail-closed behavior is unchanged |
-| D. Shared JWKS lifecycle | Completed | `307f44e`; each REST Server reuses one JWKS per AuthConfig, applies a five-minute unknown-KID refresh limit, closes background refresh on stop/registration failure, and passes reuse plus race tests |
-| E. TrustedProxies docs and security test mode | Completed | `219da16`; both skill references, server/config example docs, and tracked JSON sample define proxy trust; `./scripts/test.sh security` passes all four security packages |
+| A. 本地转发地址 fail closed | 已完成 | `3f4f506`；未配置本地 peer、受信不安全候选、直连 loopback 和 RFC1918 客户端的 Utils vet 与竞态测试通过 |
+| B. Logto 身份绑定与 nil Request 保护 | 已完成 | `e320017`；uid/sub 和 username 回退上下文测试、缺少身份拒绝、RouteHandler nil 守卫、vet 与竞态测试通过 |
+| C. CORS 示例与文档 | 已完成 | `6dd5f89`；所有已记录且可执行的 `IsCors: true` 示例均声明本地 origin，已变更 main 包可编译，运行时 fail-closed 行为不变 |
+| D. 共享 JWKS 生命周期 | 已完成 | `307f44e`；每个 REST Server 按 AuthConfig 复用一个 JWKS，应用五分钟 unknown-KID refresh 限制，停止/注册失败时关闭后台 refresh，且复用与竞态测试通过 |
+| E. TrustedProxies 文档与 security 测试模式 | 已完成 | `219da16`；两份 skill 参考、server/配置示例文档和已跟踪 JSON 示例定义代理信任；`./scripts/test.sh security` 通过全部四个安全包 |
