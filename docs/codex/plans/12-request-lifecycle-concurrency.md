@@ -248,28 +248,34 @@ git commit -m "fix: make service lifecycle deterministic"
 
 **优先级：** P1
 
+**状态：** 已在 `8aeed28` 完成。首次 List/Watch 失败会回滚 Begin 且允许重试；迁移窗口内由单一 worker 对账最新 running 节点快照，临时失败按有界退避重试；Complete/Rollback 会取消 Watch 并等待在途 Provider 调用退出。
+
 **文件：**
 - 修改：`pkg/server/cluster/switcher.go`
 - 修改：`pkg/server/cluster/switcher_test.go`
 - 按需修改：`pkg/server/router/servicecontext.go`
 
-- [ ] **步骤 1：编写迁移窗口失败测试**
+- [x] **步骤 1：编写迁移窗口失败测试**
 
 覆盖 `Begin` 后新增节点进入 pending、running 转 offline、offline 仍在快照、节点删除、乱序 Watch 回调、取消时正在 Register、`Complete` 和 `Rollback` 等待 watcher 退出、重复快照幂等，以及没有新 Watch 事件时 pending 暂时失败后仍可恢复。
 
-- [ ] **步骤 2：实现 Watch 驱动的全量对账**
+- [x] **步骤 2：实现 Watch 驱动的全量对账**
 
 `Begin` 首次复制后订阅 current provider。只镜像 `NodeStatusRunning`，suspect/offline/删除节点均从 pending 注销；首次 List 与 Watch 使用同一过滤规则。Watch callback 只把最新快照提交给单一有界 reconciliation worker，由 worker 串行处理并以 migration generation 丢弃旧事件。失败时对最新快照做有界指数退避，直到成功、被新快照替代或迁移 context 取消。
 
 `Complete`/`Rollback` 的固定顺序为：停止接收快照、取消 Watch、等待 worker 和在途 Provider 调用结束、再切换或关闭 Provider。`Begin` 的首次 List 或 Watch 失败必须返回错误并保持未迁移状态。锁只保护指针、状态和镜像元数据，Provider 调用全部在锁外。
 
-- [ ] **步骤 3：验证并提交**
+实现中 Watch callback 不直接采信可能乱序的 payload，只向容量为 1 的通道提交“需要刷新”信号；worker 收到信号后从 current Provider 重新 List 最新 running 全量快照，再串行 Register/Deregister pending Provider。
+
+- [x] **步骤 3：验证并提交**
 
 ```bash
 go test -race ./pkg/server/cluster ./pkg/server/router -count=1
 git add pkg/server/cluster/switcher.go pkg/server/cluster/switcher_test.go pkg/server/router/servicecontext.go
 git commit -m "fix: reconcile cluster provider migration"
 ```
+
+验收记录：Switcher 定向竞态测试连续 10 次通过，`cluster/router/api/manage` 全量 `-race` 通过，`go test ./pkg/server/... -count=1` 与 `go vet ./pkg/server/...` 通过。
 
 ## 任务 12.8：竞态、泄漏与能力验收
 
