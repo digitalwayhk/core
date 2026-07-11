@@ -332,12 +332,15 @@ Optional lifecycle hooks include `Start()`, `Stop()`, and `IsCloseServerManage()
 func main() {
     server := run.NewWebServer()
     server.AddIService(&demo.DemoService{}, &types.ServerOption{
-        IsCors: true,
+        IsCors:      true,
+        OriginCors:  []string{"http://localhost:8000"},
         IsWebSocket: true,
     })
     server.Start()
 }
 ```
+
+CORS is fail-closed: `IsCors: true` requires at least one explicit `OriginCors`. Use `"*"` only when the caller deliberately accepts every origin.
 
 Configuration is generated on first start under `etc/{serviceName}.json` in current versions.
 

@@ -14,7 +14,8 @@ func main() {
 	//添加DemoService业务服务
 	server.AddIService(&demo.DemoService{}, &types.ServerOption{
 		//开启跨域，如果不开启，不同ip或端口上运行的前端无法访问api
-		IsCors: true,
+		IsCors:     true,
+		OriginCors: []string{"http://localhost:8000"},
 		//开启websocket,所有public和private的api都可以被websocke订阅，消息格式如下
 		// {"channel":"/api/demo/getorder","event":"sub"} 订阅路由
 		// {"channel":"/api/demo/getorder","event":"unsub"} 退订路由

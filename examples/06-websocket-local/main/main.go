@@ -10,6 +10,7 @@ func main() {
 	server := run.NewWebServer()
 	server.AddIService(&wslocal.MarketService{}, &types.ServerOption{
 		IsCors:      true,
+		OriginCors:  []string{"http://localhost:8000"},
 		IsWebSocket: true,
 	})
 	server.Start()

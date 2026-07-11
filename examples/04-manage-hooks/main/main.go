@@ -8,6 +8,9 @@ import (
 
 func main() {
 	server := run.NewWebServer()
-	server.AddIService(&hooks.HookService{}, &types.ServerOption{IsCors: true})
+	server.AddIService(&hooks.HookService{}, &types.ServerOption{
+		IsCors:     true,
+		OriginCors: []string{"http://localhost:8000"},
+	})
 	server.Start()
 }

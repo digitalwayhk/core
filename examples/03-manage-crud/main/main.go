@@ -10,7 +10,8 @@ func main() {
 	// 管理端示例服务。前端 WayPlus 可以读取 View schema 自动生成页面。
 	server := run.NewWebServer()
 	server.AddIService(&managecrud.CatalogService{}, &types.ServerOption{
-		IsCors: true,
+		IsCors:     true,
+		OriginCors: []string{"http://localhost:8000"},
 	})
 	server.Start()
 }

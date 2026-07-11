@@ -8,6 +8,9 @@ import (
 
 func main() {
 	server := run.NewWebServer()
-	server.AddIService(&openapi.InvoiceService{}, &types.ServerOption{IsCors: true})
+	server.AddIService(&openapi.InvoiceService{}, &types.ServerOption{
+		IsCors:     true,
+		OriginCors: []string{"http://localhost:8000"},
+	})
 	server.Start()
 }

@@ -112,11 +112,14 @@ type IService interface {
 ```go
 server := run.NewWebServer()
 server.AddIService(&demo.DemoService{}, &types.ServerOption{
-    IsCors: true,
+    IsCors:      true,
+    OriginCors:  []string{"http://localhost:8000"},
     IsWebSocket: true,
 })
 server.Start()
 ```
+
+CORS 启用时必须显式配置至少一个 `OriginCors`。通配符 `"*"` 只有在调用方明确接受任意来源时才可显式使用。
 
 `run.NewWebServer()` 会自动加入 `SystemManage` 服务。`SystemManage` 提供服务管理、配置、菜单、路由查询、日志、OpenAPI、健康检查、测试 token 等内置 API。
 

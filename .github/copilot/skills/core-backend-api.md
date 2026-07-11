@@ -770,11 +770,14 @@ func main() {
     server := run.NewWebServer()
     server.AddIService(&yourmodule.MyService{}, &types.ServerOption{
         IsCors:      true,  // 允许跨域
+        OriginCors:  []string{"http://localhost:8000"},
         IsWebSocket: true,  // 启用 WebSocket（public + private 路由均可被订阅）
     })
     server.Start()
 }
 ```
+
+CORS 必须显式配置至少一个 `OriginCors`；只有调用方明确接受任意来源时才显式使用 `"*"`。
 
 默认配置文件：`etc/{serviceName}.json`（框架首次启动时自动生成）。
 

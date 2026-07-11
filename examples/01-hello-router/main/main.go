@@ -12,7 +12,8 @@ func main() {
 
 	// 注册最小服务。开启 CORS 方便浏览器或前端页面直接调用。
 	server.AddIService(&hello.HelloService{}, &types.ServerOption{
-		IsCors: true,
+		IsCors:     true,
+		OriginCors: []string{"http://localhost:8000"},
 	})
 
 	// 启动服务，默认会监听 8080；本示例 README 建议使用 -p 18081。
