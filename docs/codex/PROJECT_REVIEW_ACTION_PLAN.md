@@ -80,7 +80,7 @@ Update this table after each task. A task is complete only when the command in `
 | 8. Global logging and exception audit | Not started |  | Runtime logs use `logx` structured events, carry trace context at request/cross-service boundaries, pass sensitive-data scans, and contain no unapproved console/fatal output |
 | 9. Architecture hardening backlog | Not started |  | Issues are either fixed or converted to tracked docs with file paths and test commands |
 | 10. README/docs and scenario usage guide | Not started |  | README, skill reference, and scenario guide agree on routes, models, maturity, logging, and reuse policy |
-| 11. Security baseline and authentication isolation | Completed | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14` | Config/CORS/auth/error/proxy/header tests pass; go-zero limits are verified and distributed rate limiting is explicitly unsupported pending Task 14 |
+| 11. Security baseline and authentication isolation | In progress (post-review A complete) | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506` | Original 33 steps pass; local forwarding spoofing is closed. Identity binding, docs/examples, test mode, and JWKS lifecycle decision remain |
 | 12. Request isolation, global state, and lifecycle | Not started |  | Request/race/lifecycle tests pass with idempotent shutdown and no known leaked workers |
 | 13. Persistence correctness and external-test separation | Not started |  | Persistence unit tests pass without external services; Docker-backed database suites pass when enabled |
 | 14. Configuration-to-runtime capability contract | Not started |  | Every accepted MQ/cluster/transport field has a runtime consumer and behavior test or is rejected |

@@ -302,3 +302,13 @@ git commit -m "fix: establish HTTP security baseline"
 | Distributed auth/API rate limiting | Unsupported | No configuration is accepted; Task 14 must approve a go-zero `core/limit` provider and behavior contract before adding one |
 
 Task 11 completed with implementation commits `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, and `0bc1a14`. Final verification passed for server/utils vet, Logto/Router/Utils race tests, the full server/utils test suite, and static security assertions. No authentication policy globals or `log.Fatal` remain, CORS cannot silently become wildcard, forwarded headers require trusted proxies, config files are `0600`, and public authentication/framework error bodies contain no internal causes.
+
+## Post-Review Remediation
+
+| Item | Status | Commit / evidence |
+| --- | --- | --- |
+| A. Local forwarding addresses fail closed | Completed | `3f4f506`; Utils vet and race tests pass for unconfigured local peers, trusted unsafe candidates, direct loopback, and RFC1918 clients |
+| B. Logto identity binding and nil Request protection | In progress | Requires identity context and RouteHandler regression tests |
+| C. CORS examples and documentation | Planned | Must add explicit local origins without changing fail-closed runtime logic |
+| D. Shared JWKS lifecycle | Under evaluation | Must be owned with cache invalidation and shutdown; no global unbounded cache |
+| E. TrustedProxies docs and security test mode | Planned | Must align skill/docs/examples and executable script modes |
