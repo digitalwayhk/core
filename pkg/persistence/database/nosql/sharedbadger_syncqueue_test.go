@@ -344,6 +344,68 @@ func TestSyncQueue_CASMismatchKeepsQueueEntry(t *testing.T) {
 	require.False(t, wrapper2.IsSynced)
 }
 
+func TestSyncQueue_CASMismatchReportsNoConfirmedSuccess(t *testing.T) {
+	dir := t.TempDir()
+	config := newTestConfig(dir)
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newTestFundItem("sq_cas_count", "BTC", 100)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+
+	time.Sleep(2 * time.Millisecond)
+	require.NoError(t, db.Set(newTestFundItem("sq_cas_count", "BTC", 200), 0))
+
+	confirmed, err := db.batchUpdateSyncedStatusCount(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+	)
+	require.NoError(t, err)
+	require.Zero(t, confirmed, "CAS 不匹配时不得计入确认同步数")
+
+	pending, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, pending)
+}
+
+func TestSyncQueue_RemotelyDeletedMissingKeyCountsAsConfirmed(t *testing.T) {
+	dir := t.TempDir()
+	config := newTestConfig(dir)
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newTestFundItem("sq_delete_count", "BTC", 100)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(key))
+	}))
+
+	confirmed, err := db.batchUpdateSyncedStatusCount(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, confirmed)
+
+	pending, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, pending)
+}
+
 // TestSyncQueue_OrphanCleanup 验证 getUnsyncedBatch 自动清理孤儿队列条目
 func TestSyncQueue_OrphanCleanup(t *testing.T) {
 	dir := t.TempDir()

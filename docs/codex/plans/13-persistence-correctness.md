@@ -86,11 +86,11 @@ go test ./pkg/persistence/database/oltp -run 'Test.*(ResultError|Rollback|Contex
 - 修改：`pkg/persistence/database/nosql/sharedbadgermanager.go`
 - 修改：已有 bench/issues/syncqueue 测试
 
-- [ ] **13.3a 修正默认批处理延迟**
+- [x] **13.3a 修正默认批处理延迟**
 
 新建 manager 在未配置时应将 `SyncBatchDelay` 设为 100ms，显式零值语义必须在配置构造器中明确。
 
-- [ ] **13.3b 修正成功数、pending 与 CAS**
+- [x] **13.3b 修正成功数、pending 与 CAS**
 
 只有真正写入远程并通过 CAS 的 key 才计入成功并从 pending 减少；并发 Set 生成的新版本必须保持未同步。
 
@@ -98,9 +98,11 @@ go test ./pkg/persistence/database/oltp -run 'Test.*(ResultError|Rollback|Contex
 
 连接不可用、事务已回滚和 context 取消等致命错误不得继续对后续项执行 Insert/Update/Delete。重试必须可被关闭 context 取消。
 
-- [ ] **13.3d 修正同步日志语义**
+- [x] **13.3d 修正同步日志语义**
 
 当 `successCount==0` 时记录失败/未同步，部分成功记录部分结果，只有全部成功才记录同步成功。
+
+**阶段记录（2026-07-11）：** 默认延迟已由正确配置构造器测试锁定为 100ms。同步状态更新现在返回真正通过 CAS 或完成远程删除的确认 key；pending、后置删除与上报成功数均仅使用确认结果。零确认、部分完成和全部成功已分离日志语义。同时修正 `ConnectionManager.GetConnection` 在读锁下写 `LastUsed` 的竞态；相关用例连续 20 次通过，nosql 全包 race 在 30 秒硬超时下 7.5 秒通过。13.3c 与六个 MySQL 包装回退用例的纯 fake 迁移仍待完成。
 
 **验收：**
 ```bash

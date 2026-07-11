@@ -56,8 +56,8 @@ func (cm *ConnectionManager) GetAllConnections() map[string]*ConnectionInfo {
 	return copy
 }
 func (cm *ConnectionManager) GetConnection(key string) (*gorm.DB, bool) {
-	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
 
 	if info, exists := cm.connections[key]; exists {
 		// 🔧 更新最后使用时间

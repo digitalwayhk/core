@@ -1367,16 +1367,19 @@ func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
 
 	logx.Infof("开始同步 [prefix=%s, 数量: %d]", p.prefix, len(unsyncedItems))
 
-	_, err = p.syncBatch(unsyncedItems)
+	confirmedKeys, err := p.syncBatch(unsyncedItems)
 	if err != nil {
 		logx.Errorf("批量同步失败 [prefix=%s]: %v", p.prefix, err)
 		return 0, err
 	}
-	successCount := 0
-	for _, item := range unsyncedItems {
-		if item.IsSynced {
-			successCount++
-		}
+	successCount := len(confirmedKeys)
+	if successCount == 0 {
+		logx.Errorf("同步未确认任何数据 [prefix=%s, 待同步: %d]", p.prefix, len(unsyncedItems))
+		return 0, nil
+	}
+	if successCount < len(unsyncedItems) {
+		logx.Infof("同步部分完成 [prefix=%s, 成功: %d/%d]", p.prefix, successCount, len(unsyncedItems))
+		return successCount, nil
 	}
 	logx.Infof("同步成功 [prefix=%s, 成功: %d/%d]", p.prefix, successCount, len(unsyncedItems))
 	return successCount, nil
@@ -1582,14 +1585,30 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 
 	// 批量更新同步状态
 	if len(successKeys) > 0 {
-		if err := p.batchUpdateSyncedStatus(successKeys, snapshotTimes); err != nil {
+		confirmedKeys, err := p.batchUpdateSyncedStatusKeys(successKeys, snapshotTimes)
+		if err != nil {
 			logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
-		} else {
-			p.incrementPendingCount(-len(successKeys))
-			p.scheduleSyncAfterDelete(asyncDeleteCandidates)
+			return nil, err
 		}
+		p.incrementPendingCount(-len(confirmedKeys))
+		p.scheduleSyncAfterDelete(p.collectConfirmedDeleteCandidates(asyncDeleteCandidates, confirmedKeys))
+		successKeys = confirmedKeys
 	}
 	return successKeys, nil
+}
+
+func (p *PrefixedBadgerDB[T]) collectConfirmedDeleteCandidates(candidates []syncAfterDeleteCandidate[T], confirmedKeys []string) []syncAfterDeleteCandidate[T] {
+	confirmed := make(map[string]struct{}, len(confirmedKeys))
+	for _, key := range confirmedKeys {
+		confirmed[key] = struct{}{}
+	}
+	result := make([]syncAfterDeleteCandidate[T], 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := confirmed[candidate.Key]; ok {
+			result = append(result, candidate)
+		}
+	}
+	return result
 }
 
 func (p *PrefixedBadgerDB[T]) collectSyncAfterDeleteCandidates(items []*SyncQueueItem[T], successKeys []string) []syncAfterDeleteCandidate[T] {
@@ -2440,8 +2459,18 @@ func (p *PrefixedBadgerDB[T]) deleteItemsOneByOne(items []*SyncQueueItem[T], syn
 
 // 🆕 批量更新同步状态（CAS 模式，避免覆盖）
 func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string, snapshotTimes map[string]time.Time) error {
+	_, err := p.batchUpdateSyncedStatusKeys(keys, snapshotTimes)
+	return err
+}
+
+func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusCount(keys []string, snapshotTimes map[string]time.Time) (int, error) {
+	confirmedKeys, err := p.batchUpdateSyncedStatusKeys(keys, snapshotTimes)
+	return len(confirmedKeys), err
+}
+
+func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapshotTimes map[string]time.Time) ([]string, error) {
 	if len(keys) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	now := time.Now()
@@ -2449,13 +2478,17 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string, snapshotTim
 	// ErrConflict 时最多重试 3 次（业务层并发写同一 key 时需要重试）
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		confirmedKeys := make([]string, 0, len(keys))
 		err := p.manager.db.Update(func(txn *badger.Txn) error {
 			for _, key := range keys {
 				item, err := txn.Get([]byte(key))
 				if err != nil {
 					if err == badger.ErrKeyNotFound {
-						// 数据已删除，清理孤儿队列条目
-						_ = txn.Delete([]byte(p.syncQueueKey(key)))
+						// 远程删除成功后本地数据已物理移除，清理队列并计为确认。
+						if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
+							return err
+						}
+						confirmedKeys = append(confirmedKeys, key)
 						continue
 					}
 					logx.Errorf("获取key失败 [%s]: %v", key, err)
@@ -2498,12 +2531,13 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string, snapshotTim
 				if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
 					return err
 				}
+				confirmedKeys = append(confirmedKeys, key)
 			}
 			return nil
 		})
 
 		if err == nil {
-			return nil
+			return confirmedKeys, nil
 		}
 
 		// 并发冲突：重试
@@ -2513,9 +2547,9 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatus(keys []string, snapshotTim
 			continue
 		}
 
-		return err
+		return nil, err
 	}
-	return nil
+	return nil, nil
 }
 
 func (p *PrefixedBadgerDB[T]) Count() (int, error) {
