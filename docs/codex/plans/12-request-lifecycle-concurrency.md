@@ -171,6 +171,8 @@ git commit -m "test: synchronize websocket callbacks"
 
 **优先级：** P1
 
+**状态：** 已在 `b816515` 完成。服务作用域注册、兼容回退、实例安全清理、WebSocket 通知和 NoticeRelay 均已迁移并通过竞态与全量服务端回归。
+
 **文件：**
 - 修改：`pkg/server/types/crossnode.go`
 - 修改：`pkg/server/types/websocketshard.go`
@@ -178,15 +180,15 @@ git commit -m "test: synchronize websocket callbacks"
 - 修改：`pkg/server/router/servicecontext.go`
 - 修改：相关测试
 
-- [ ] **步骤 1：编写多服务隔离失败测试**
+- [x] **步骤 1：编写多服务隔离失败测试**
 
 注册两个服务的 forwarder，断言各自路由的订阅和通知只到达同名服务；停止其中一个不会清空另一个。覆盖旧全局 API 的兼容回退。
 
-- [ ] **步骤 2：实现服务作用域注册表**
+- [x] **步骤 2：实现服务作用域注册表**
 
 新增 `SetCrossNodeForwarderForService`、`GetCrossNodeForwarderForService` 和 `ClearCrossNodeForwarderForService`。`RouterInfo` 使用自身 `ServiceName` 查询；旧全局 API 保留为废弃兼容入口。清理必须比较实例，防止旧 owner 删除新 owner。
 
-- [ ] **步骤 3：验证并提交**
+- [x] **步骤 3：验证并提交**
 
 ```bash
 go test -race ./pkg/server/types ./pkg/server/router ./pkg/server/api/manage -count=1
@@ -263,6 +265,8 @@ git commit -m "fix: reconcile cluster provider migration"
 - 修改：`scripts/test.sh`
 - 修改：`docs/codex/PROJECT_REVIEW_ACTION_PLAN.md`
 - 修改：本文件
+
+**已知测试债务：** `pkg/server/api/manage` 的 ClusterSwitcher 测试使用固定服务名并保留迁移状态，`-count=2` 第二轮会命中缓存并报 `provider migration already in progress`；单次测试通过。任务 12.8 必须改为每轮唯一服务名或显式清理迁移状态。
 
 - [ ] **步骤 1：增加稳定测试入口**
 
