@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -143,8 +144,39 @@ const CONFIGDIR = "/etc/"
 
 var CONFIGDIRPATH = utils.Getpath() + CONFIGDIR
 
-// 初始化SERVER,true表示系统加载中，未运行，false表示系统已运行
-var INITSERVER = false
+var (
+	serverInitializationMu   sync.RWMutex
+	activeServerInitializers int
+
+	// INITSERVER 仅为保持源码兼容而保留。
+	// Deprecated: 请使用 IsServerInitializing；外部并发直接写入 INITSERVER 不受锁保护。
+	INITSERVER = false
+)
+
+// BeginServerInitialization 登记一个进入初始化阶段的服务器实例。
+func BeginServerInitialization() {
+	serverInitializationMu.Lock()
+	activeServerInitializers++
+	INITSERVER = true
+	serverInitializationMu.Unlock()
+}
+
+// EndServerInitialization 结束一个服务器实例的初始化阶段。
+func EndServerInitialization() {
+	serverInitializationMu.Lock()
+	if activeServerInitializers > 0 {
+		activeServerInitializers--
+	}
+	INITSERVER = activeServerInitializers > 0
+	serverInitializationMu.Unlock()
+}
+
+// IsServerInitializing 返回当前进程是否仍有服务器实例处于初始化阶段。
+func IsServerInitializing() bool {
+	serverInitializationMu.RLock()
+	defer serverInitializationMu.RUnlock()
+	return INITSERVER
+}
 
 func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	var con ServerConfig

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
@@ -40,11 +41,12 @@ type ServiceContext struct {
 	Service           *types.Service
 	snow              idgen.ISnowWorker
 	Router            *ServiceRouter
-	isStart           bool
+	isStart           atomic.Bool // 仅同步运行标志；子系统生命周期串行化由任务 12.6 处理。
 	Pid               int
 	Hub               interface{} `json:"-"`
 	StateChan         chan bool   `json:"-"`
 	serverOption      *types.ServerOption
+	serverOptionMu    sync.RWMutex
 	TransportSelector transport.TransportSelector    `json:"-"`
 	MQManager         *mq.MQManager                  `json:"-"`
 	EventStream       *event.Stream                  `json:"-"`
@@ -57,13 +59,21 @@ type ServiceContext struct {
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
-	if own != nil && own.serverOption != nil && own.Config != nil {
-		own.serverOption.RemoteAccessManageAPI = own.Config.RemoteAccessManageAPI
+	if own == nil {
+		return nil
 	}
-	return own.serverOption
+	own.serverOptionMu.RLock()
+	option := own.serverOption.Clone()
+	own.serverOptionMu.RUnlock()
+	if option != nil && own.Config != nil {
+		option.RemoteAccessManageAPI = own.Config.RemoteAccessManageAPI
+	}
+	return option
 }
 func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
-	own.serverOption = so
+	own.serverOptionMu.Lock()
+	own.serverOption = so.Clone()
+	own.serverOptionMu.Unlock()
 }
 
 // EnableEventBridge wires an in-process event.Stream to the MQManager so that
@@ -485,7 +495,7 @@ func (own *ServiceContext) SetPid(pid int) {
 	own.Pid = pid
 }
 func (own *ServiceContext) SetRunState(state bool) {
-	own.isStart = state
+	own.isStart.Store(state)
 
 	if state {
 		if own.ClusterProvider != nil && own.membership == nil {
@@ -564,7 +574,7 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	}
 	own.ClusterProvider = newProvider
 
-	if !own.isStart {
+	if !own.isStart.Load() {
 		return nil
 	}
 
@@ -622,7 +632,7 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 }
 
 func (own *ServiceContext) IsRun() bool {
-	return own.isStart
+	return own.isStart.Load()
 }
 func (own *ServiceContext) SetHttpServer(server types.IRunServer) {
 	own.Service.HttpServer = server

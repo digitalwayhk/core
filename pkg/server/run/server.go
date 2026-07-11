@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/digitalwayhk/core/pkg/server"
 	"github.com/digitalwayhk/core/pkg/server/api/public"
@@ -22,6 +24,7 @@ import (
 )
 
 type WebServer struct {
+	sync.RWMutex
 	serviceContexts map[string]*router.ServiceContext
 	serverOption    map[string]*types.ServerOption
 	childServer     map[int]*WebServer
@@ -31,62 +34,101 @@ type WebServer struct {
 	Port            int
 	SocketPort      int
 	isRun           bool
-	sync.Mutex
+	registryVersion uint64
+	optionApplyMu   sync.Mutex
+	initOnce        sync.Once
+	endOnce         sync.Once
+	initializing    atomic.Bool
+	startOnce       sync.Once
 }
 
+var _ sync.Locker = (*WebServer)(nil)
+
 func (own *WebServer) GetServerOptions() map[string]*types.ServerOption {
-	return own.serverOption
+	own.RLock()
+	defer own.RUnlock()
+
+	options := make(map[string]*types.ServerOption, len(own.serverOption))
+	for name, option := range own.serverOption {
+		options[name] = option.Clone()
+	}
+	return options
 }
 func (own *WebServer) GetServerOption(name string) *types.ServerOption {
-	if _, ok := own.serverOption[name]; ok {
-		return own.serverOption[name]
-	}
-	return nil
+	own.RLock()
+	defer own.RUnlock()
+	return own.serverOption[strings.ToLower(name)].Clone()
 }
+
 func NewWebServer() *WebServer {
-	config.INITSERVER = true
 	ws := &WebServer{
 		childServer:     make(map[int]*WebServer),
 		serviceContexts: make(map[string]*router.ServiceContext),
 		serverOption:    make(map[string]*types.ServerOption),
 	}
+	ws.beginInitialization()
 	ws.AddIService(&server.SystemManage{})
 	return ws
 }
 func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 	sc.Router.AddServerRouters(release.Routers()...)
-	own.serviceContexts[sc.Service.Name] = sc
-	go own.stateCallback(sc)
+	name := strings.ToLower(sc.Service.Name)
+	own.Lock()
+	if own.serviceContexts == nil {
+		own.serviceContexts = make(map[string]*router.ServiceContext)
+	}
+	own.serviceContexts[name] = sc
+	own.registryVersion++
+	alreadyRunning := own.isRun
+	own.Unlock()
+	if !alreadyRunning {
+		go own.stateCallback(sc)
+	}
 }
-
-var once sync.Once
 
 func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
-	if own.isRun {
-		return
-	}
 	<-nsc.StateChan
-	defer own.Unlock()
-	own.Lock()
-	for _, ctx := range own.serviceContexts {
-		if !ctx.IsRun() {
+
+	for {
+		contexts, version := own.serviceContextSnapshotWithVersion()
+		allRunning := true
+		for _, ctx := range contexts {
+			if !ctx.IsRun() {
+				allRunning = false
+				break
+			}
+		}
+		if !allRunning {
 			return
 		}
-	}
-	own.isRun = true
-	once.Do(func() {
-		if own.htmls != nil && own.ViewPort > 0 {
-			own.htmls.Isstart <- true
-		} else {
-			own.htmls.Isstart <- false
+
+		own.Lock()
+		if own.isRun {
+			own.Unlock()
+			return
 		}
-		own.linkService()
-		own.serviceStart()
-	})
+		if own.registryVersion != version {
+			own.Unlock()
+			continue
+		}
+		own.isRun = true
+		htmls := own.htmls
+		viewPort := own.ViewPort
+		own.Unlock()
+
+		own.startOnce.Do(func() {
+			if htmls != nil {
+				htmls.Isstart <- viewPort > 0
+			}
+			own.linkServiceContexts(contexts)
+			own.serviceStartContexts(contexts)
+		})
+		return
+	}
 }
 
-func (own *WebServer) serviceStart() {
-	for _, ctx := range own.serviceContexts {
+func (own *WebServer) serviceStartContexts(contexts []*router.ServiceContext) {
+	for _, ctx := range contexts {
 		if start, ok := ctx.Service.Instance.(types.IStartService); ok {
 			fmt.Println("===========================================================")
 			fmt.Println("服务" + ctx.Service.Name + "的IStartService接口开始执行")
@@ -95,12 +137,14 @@ func (own *WebServer) serviceStart() {
 		}
 	}
 }
-func (own *WebServer) linkService() {
-	defer func() {
-		config.INITSERVER = false
-	}()
+func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
+	defer own.endInitialization()
+	contextsByName := make(map[string]*router.ServiceContext, len(contexts))
+	for _, ctx := range contexts {
+		contextsByName[strings.ToLower(ctx.Service.Name)] = ctx
+	}
 	islink := false
-	for _, ctx := range own.serviceContexts {
+	for _, ctx := range contexts {
 		if len(ctx.Config.AttachServices) > 0 {
 			islink = true
 			break
@@ -111,10 +155,10 @@ func (own *WebServer) linkService() {
 	}
 	fmt.Println("===========================================================")
 	fmt.Println("全部服务启动成功，开始连接依赖服务。。。")
-	for _, ctx := range own.serviceContexts {
+	for _, ctx := range contexts {
 		for _, cfg := range ctx.Config.AttachServices {
 			if cfg.Address == "" && cfg.Port == 0 {
-				context := own.serviceContexts[cfg.Name]
+				context := contextsByName[strings.ToLower(cfg.Name)]
 				if context != nil {
 					cfg.Address = context.Config.RunIp
 					cfg.Port = context.Config.Port
@@ -145,27 +189,84 @@ func (own *WebServer) AddIService(service types.IService, option ...*types.Serve
 	sc := router.NewServiceContext(service)
 	own.AddServiceContext(sc)
 	if len(option) > 0 {
-		own.serverOption[service.ServiceName()] = option[0]
-		sc.SetServerOption(option[0])
+		own.setOption(strings.ToLower(service.ServiceName()), option[0])
 	}
 }
 func (own *WebServer) SetOption(service types.IService, option *types.ServerOption) {
-	own.serverOption[service.ServiceName()] = option
-	own.serviceContexts[service.ServiceName()].SetServerOption(option)
+	own.setOption(strings.ToLower(service.ServiceName()), option)
 }
+
+func (own *WebServer) setOption(name string, option *types.ServerOption) {
+	name = strings.ToLower(name)
+	stored := option.Clone()
+	own.optionApplyMu.Lock()
+	defer own.optionApplyMu.Unlock()
+
+	own.Lock()
+	if own.serverOption == nil {
+		own.serverOption = make(map[string]*types.ServerOption)
+	}
+	own.serverOption[name] = stored
+	ctx := own.serviceContexts[name]
+	own.Unlock()
+
+	if ctx != nil {
+		ctx.SetServerOption(stored)
+	}
+}
+
+func (own *WebServer) beginInitialization() {
+	own.initOnce.Do(func() {
+		config.BeginServerInitialization()
+		own.initializing.Store(true)
+	})
+}
+
+func (own *WebServer) endInitialization() {
+	if !own.initializing.Load() {
+		return
+	}
+	own.endOnce.Do(func() {
+		config.EndServerInitialization()
+		own.initializing.Store(false)
+	})
+}
+
+func (own *WebServer) serviceContextSnapshot() []*router.ServiceContext {
+	contexts, _ := own.serviceContextSnapshotWithVersion()
+	return contexts
+}
+
+func (own *WebServer) serviceContextSnapshotWithVersion() ([]*router.ServiceContext, uint64) {
+	own.RLock()
+	defer own.RUnlock()
+
+	contexts := make([]*router.ServiceContext, 0, len(own.serviceContexts))
+	for _, ctx := range own.serviceContexts {
+		contexts = append(contexts, ctx)
+	}
+	return contexts, own.registryVersion
+}
+
+func (own *WebServer) htmlServerSnapshot() *HTMLServer {
+	own.RLock()
+	defer own.RUnlock()
+	return own.htmls
+}
+
 func (own *WebServer) Start() {
-	config.INITSERVER = true
+	own.beginInitialization()
 	own.initServer()
 	group := service.NewServiceGroup()
 	defer func() {
 		group.Stop()
-		for _, ctx := range own.serviceContexts {
+		for _, ctx := range own.serviceContextSnapshot() {
 			if stop, ok := ctx.Service.Instance.(types.IStopService); ok {
 				go stop.Stop()
 			}
 		}
 	}()
-	for _, ctx := range own.serviceContexts {
+	for _, ctx := range own.serviceContextSnapshot() {
 		for _, server := range ctx.GetServers() {
 			if server != nil {
 				group.Add(server)
@@ -176,15 +277,18 @@ func (own *WebServer) Start() {
 	// for _, ctx := range own.serviceContexts {
 	// 	group.Add(quic.NewServer(ctx))
 	// }
-	group.Add(own.htmls)
+	group.Add(own.htmlServerSnapshot())
 	group.Start()
 }
 
 func (own *WebServer) initServer() {
 	own.serverArgs()
-	own.htmls = NewHTMLServer(own.ViewPort)
-	own.htmls.Parent = own
-	for _, ctx := range own.serviceContexts {
+	htmls := NewHTMLServer(own.ViewPort)
+	htmls.Parent = own
+	own.Lock()
+	own.htmls = htmls
+	own.Unlock()
+	for _, ctx := range own.serviceContextSnapshot() {
 		if ctx.Config.ParentServerIP != own.serverip {
 			ctx.Config.ParentServerIP = own.serverip
 		}
@@ -203,7 +307,7 @@ func (own *WebServer) initServer() {
 			panic(fmt.Sprintf("初始化 HTTP 服务失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
 		}
 		own.newInternalServer(ctx)
-		own.htmls.AddServiceRouter(ctx.Router)
+		htmls.AddServiceRouter(ctx.Router)
 	}
 }
 func (own *WebServer) serverArgs() {
@@ -226,7 +330,7 @@ func (own *WebServer) serverArgs() {
 func (own *WebServer) newWebServer(ctx *router.ServiceContext) error {
 	var rs *rest.Server
 	var err error
-	if opt, ok := own.serverOption[ctx.Service.Name]; ok {
+	if opt := own.GetServerOption(ctx.Service.Name); opt != nil {
 		rs, err = rest.NewServer(ctx, opt.IsWebSocket, opt.IsCors, opt.OriginCors...)
 	} else {
 		rs, err = rest.NewServer(ctx, false, false)
@@ -244,13 +348,18 @@ func (own *WebServer) newInternalServer(ctx *router.ServiceContext) {
 	}
 }
 
-var typemap map[string]map[string]interface{} = make(map[string]map[string]interface{})
+var (
+	typemap   = make(map[string]map[string]interface{})
+	typemapMu sync.RWMutex
+)
 
 func SetInternalService[T any](key string, service *T) error {
 	if service == nil {
 		return errors.New("service is nil")
 	}
 	name := utils.GetTypeName(service)
+	typemapMu.Lock()
+	defer typemapMu.Unlock()
 	if _, ok := typemap[name]; !ok {
 		typemap[name] = make(map[string]interface{})
 	}
@@ -259,9 +368,15 @@ func SetInternalService[T any](key string, service *T) error {
 }
 func GetInternalService[T any](key string) *T {
 	name := utils.GetTypeName(new(T))
+	typemapMu.RLock()
+	defer typemapMu.RUnlock()
 	if _, ok := typemap[name]; ok {
 		if v, ok := typemap[name][key]; ok {
-			return v.(*T)
+			service, ok := v.(*T)
+			if !ok {
+				return nil
+			}
+			return service
 		}
 	}
 	return nil

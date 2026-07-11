@@ -115,7 +115,7 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 
 	// 🔧 只在第一次时检查表
 	if _, exists := own.localdbs[name]; !exists {
-		if !config.INITSERVER {
+		if !config.IsServerInitializing() {
 			err = instance.HasTable(model)
 			if err != nil {
 				return nil, err

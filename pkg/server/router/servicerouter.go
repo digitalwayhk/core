@@ -175,7 +175,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 	if item, ok := item.(GetRouterPath); ok {
 		Path = item.GetRouterPathPrefixes() + "/" + strings.ToLower(name)
 	}
-	if !config.INITSERVER {
+	if !config.IsServerInitializing() {
 		sc := GetContext(servername)
 		if sc != nil {
 			info := sc.Router.GetRouter(Path)

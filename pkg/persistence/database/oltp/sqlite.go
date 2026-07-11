@@ -181,7 +181,7 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if !config.INITSERVER {
+	if !config.IsServerInitializing() {
 		connManager.SetConnection(dns, own.db)
 	}
 	return own.db, nil
@@ -244,7 +244,7 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 
 // HasTable 检查表是否存在（只创建主表，不递归处理嵌套表）
 func (own *Sqlite) HasTable(model interface{}) error {
-	if config.INITSERVER || (own.db != nil && own.db.DryRun) {
+	if config.IsServerInitializing() || (own.db != nil && own.db.DryRun) {
 		return nil
 	}
 

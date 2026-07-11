@@ -148,7 +148,7 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	api := own.New()
 	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
 	defer func() {
-		if config.INITSERVER {
+		if config.IsServerInitializing() {
 			return
 		}
 
@@ -181,7 +181,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	startTime := time.Now()
 
 	defer func() {
-		if config.INITSERVER {
+		if config.IsServerInitializing() {
 			return
 		}
 		if err := recover(); err != nil {
