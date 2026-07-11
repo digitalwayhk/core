@@ -310,5 +310,5 @@ Task 11 completed with implementation commits `804a2de`, `937d381`, `daa2c57`, `
 | A. Local forwarding addresses fail closed | Completed | `3f4f506`; Utils vet and race tests pass for unconfigured local peers, trusted unsafe candidates, direct loopback, and RFC1918 clients |
 | B. Logto identity binding and nil Request protection | Completed | `e320017`; uid/sub and username fallback context tests, missing-identity rejection, RouteHandler nil guard, vet, and race pass |
 | C. CORS examples and documentation | Completed | `6dd5f89`; all documented and executable `IsCors: true` examples declare a local origin, changed main packages compile, and runtime fail-closed behavior is unchanged |
-| D. Shared JWKS lifecycle | Under evaluation | Must be owned with cache invalidation and shutdown; no global unbounded cache |
-| E. TrustedProxies docs and security test mode | Planned | Must align skill/docs/examples and executable script modes |
+| D. Shared JWKS lifecycle | Completed | `307f44e`; each REST Server reuses one JWKS per AuthConfig, applies a five-minute unknown-KID refresh limit, closes background refresh on stop/registration failure, and passes reuse plus race tests |
+| E. TrustedProxies docs and security test mode | Completed | `219da16`; both skill references, server/config example docs, and tracked JSON sample define proxy trust; `./scripts/test.sh security` passes all four security packages |
