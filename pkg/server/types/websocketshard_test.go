@@ -77,6 +77,12 @@ func (c *shardCapture) OnSubscriptionChange(_ string, hash uint64, active bool) 
 }
 func (c *shardCapture) DrainAndStop(context.Context) {}
 
+func (c *shardCapture) subscriptionCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.subs)
+}
+
 func (c *shardCapture) inactiveCount(hash uint64) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -121,13 +127,12 @@ func TestUnRegisterWebSocketHash_DoubleUnregisterFiresOnce(t *testing.T) {
 	req := &shardTestRequest{}
 
 	hash := info.RegisterWebSocketClient(router, ws, req)
-	waitForShard(t, func() bool { return len(capture.subs) >= 1 })
+	waitForShard(t, func() bool { return capture.subscriptionCount() >= 1 })
 
 	info.UnRegisterWebSocketHash(hash, ws)
 	waitForShard(t, func() bool { return capture.inactiveCount(hash) == 1 })
 
 	info.UnRegisterWebSocketHash(hash, ws)
-	time.Sleep(50 * time.Millisecond)
 
 	if got := atomic.LoadInt32(&router.unregs); got != 1 {
 		t.Fatalf("expected unregister hook once, got %d", got)
@@ -152,10 +157,9 @@ func TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount(t *testing.T) {
 	req := &shardTestRequest{}
 
 	hash := info.RegisterWebSocketClient(router, registered, req)
-	waitForShard(t, func() bool { return len(capture.subs) >= 1 })
+	waitForShard(t, func() bool { return capture.subscriptionCount() >= 1 })
 
 	info.UnRegisterWebSocketHash(hash, unknown)
-	time.Sleep(50 * time.Millisecond)
 
 	if got := info.rHashClients[hash]; got != 1 {
 		t.Fatalf("expected hash count to remain 1, got %d", got)
