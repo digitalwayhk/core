@@ -25,8 +25,8 @@ func TestAuthHandlersKeepIndependentPolicy(t *testing.T) {
 		Issuer:           "https://tenant-b.example/",
 		ExpectedAudience: "api-b",
 	})
-	tokenA := signToken(t, secret, "https://tenant-a.example/oidc", "api-a")
-	tokenB := signToken(t, secret, "https://tenant-b.example/oidc", "api-b")
+	tokenA := signIdentityToken(t, secret, "https://tenant-a.example/oidc", "api-a")
+	tokenB := signIdentityToken(t, secret, "https://tenant-b.example/oidc", "api-b")
 
 	type authCase struct {
 		handler http.Handler
@@ -71,7 +71,7 @@ func TestAuthResponseDoesNotDiscloseCause(t *testing.T) {
 		Issuer:           "https://tenant.example",
 		ExpectedAudience: "expected-api",
 	})
-	wrongAudience := signToken(t, secret, "https://tenant.example/oidc", "private-api-name")
+	wrongAudience := signIdentityToken(t, secret, "https://tenant.example/oidc", "private-api-name")
 
 	tests := []struct {
 		name          string
@@ -99,6 +99,47 @@ func TestAuthResponseDoesNotDiscloseCause(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareInjectsIdentityContext(t *testing.T) {
+	secret := []byte("auth-test-secret-with-enough-entropy")
+	identity := make(chan [2]string, 1)
+	handler := AuthMiddleware(testJWKS(secret), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid, _ := r.Context().Value("uid").(string)
+		uname, _ := r.Context().Value("uname").(string)
+		identity <- [2]string{uid, uname}
+		w.WriteHeader(http.StatusNoContent)
+	}), AuthConfig{
+		Issuer:           "https://tenant.example",
+		ExpectedAudience: "expected-api",
+	})
+	token := signTokenWithClaims(t, secret, jwt.MapClaims{
+		"iss":      "https://tenant.example/oidc",
+		"aud":      "expected-api",
+		"uid":      "explicit-uid",
+		"sub":      "subject-fallback",
+		"username": "alice",
+	})
+
+	require.Equal(t, http.StatusNoContent, requestStatus(handler, token))
+	require.Equal(t, [2]string{"explicit-uid", "alice"}, <-identity)
+}
+
+func TestAuthMiddlewareRejectsTokenWithoutIdentity(t *testing.T) {
+	secret := []byte("auth-test-secret-with-enough-entropy")
+	handler := AuthMiddleware(testJWKS(secret), successHandler(), AuthConfig{
+		Issuer:           "https://tenant.example",
+		ExpectedAudience: "expected-api",
+	})
+	token := signToken(t, secret, "https://tenant.example/oidc", "expected-api")
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Equal(t, "authentication failed\n", recorder.Body.String())
+}
+
 func testJWKS(secret []byte) *keyfunc.JWKS {
 	return keyfunc.NewGiven(map[string]keyfunc.GivenKey{
 		testKeyID: keyfunc.NewGivenHMAC(secret, keyfunc.GivenKeyOptions{Algorithm: jwt.SigningMethodHS256.Alg()}),
@@ -113,10 +154,24 @@ func successHandler() http.Handler {
 
 func signToken(t *testing.T, secret []byte, issuer, audience string) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	return signTokenWithClaims(t, secret, jwt.MapClaims{
 		"iss": issuer,
 		"aud": audience,
 	})
+}
+
+func signIdentityToken(t *testing.T, secret []byte, issuer, audience string) string {
+	t.Helper()
+	return signTokenWithClaims(t, secret, jwt.MapClaims{
+		"iss": issuer,
+		"aud": audience,
+		"sub": "test-user",
+	})
+}
+
+func signTokenWithClaims(t *testing.T, secret []byte, claims jwt.MapClaims) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	token.Header["kid"] = testKeyID
 	signed, err := token.SignedString(secret)
 	require.NoError(t, err)

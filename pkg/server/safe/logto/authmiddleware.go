@@ -1,6 +1,7 @@
 package logto
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -85,8 +86,33 @@ func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			writeAuthenticationFailed(w)
+			return
+		}
+		uid := firstStringClaim(claims, "uid", "sub")
+		if uid == "" {
+			writeAuthenticationFailed(w)
+			return
+		}
+		ctx := context.WithValue(r.Context(), "uid", uid)
+		if uname := firstStringClaim(claims, "uname", "username", "name"); uname != "" {
+			ctx = context.WithValue(ctx, "uname", uname)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func firstStringClaim(claims jwt.MapClaims, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := claims[key].(string); ok {
+			if value = strings.TrimSpace(value); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func writeAuthenticationFailed(w http.ResponseWriter) {

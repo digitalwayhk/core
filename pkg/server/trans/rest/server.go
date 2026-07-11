@@ -202,6 +202,10 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
+		if req == nil {
+			writeErrorResponse(w, StatusUnauthorized, "authentication failed", nil)
+			return
+		}
 		ip := utils.ClientPublicIP(r, rou.Service.Config.TrustedProxies...)
 
 		// IP 白名单验证
