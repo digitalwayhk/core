@@ -43,6 +43,36 @@ func TestClientPublicIPReturnsDirectIPv6(t *testing.T) {
 	require.Equal(t, "2001:db8::1", ClientPublicIP(req))
 }
 
+func TestClientPublicIPRejectsForwardingHeadersFromUnconfiguredLocalPeer(t *testing.T) {
+	req := ipRequest("127.0.0.1:4321", "203.0.113.5", "")
+
+	require.Empty(t, ClientPublicIP(req))
+}
+
+func TestClientPublicIPKeepsDirectLoopbackWithoutForwardingHeaders(t *testing.T) {
+	req := ipRequest("127.0.0.1:4321", "", "")
+
+	require.Equal(t, "127.0.0.1", ClientPublicIP(req))
+}
+
+func TestClientPublicIPRejectsUnsafeCandidateFromTrustedProxy(t *testing.T) {
+	req := ipRequest("10.0.0.5:4321", "127.0.0.1", "")
+
+	require.Empty(t, ClientPublicIP(req, "10.0.0.0/8"))
+}
+
+func TestClientPublicIPSkipsUnsafeCandidateInForwardedChain(t *testing.T) {
+	req := ipRequest("10.0.0.5:4321", "203.0.113.7, 169.254.10.5", "")
+
+	require.Equal(t, "203.0.113.7", ClientPublicIP(req, "10.0.0.0/8"))
+}
+
+func TestClientPublicIPAllowsPrivateClientFromTrustedProxy(t *testing.T) {
+	req := ipRequest("10.0.0.5:4321", "192.168.20.7", "")
+
+	require.Equal(t, "192.168.20.7", ClientPublicIP(req, "10.0.0.0/8"))
+}
+
 func ipRequest(remoteAddr, forwardedFor, realIP string) *http.Request {
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = remoteAddr

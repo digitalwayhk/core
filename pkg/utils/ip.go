@@ -77,6 +77,12 @@ func ClientPublicIP(r *http.Request, trustedProxies ...string) string {
 		return ""
 	}
 	trusted := proxyPrefixes(trustedProxies)
+	if len(trusted) == 0 {
+		if isLocalPeer(direct) && hasForwardingHeaders(r) {
+			return ""
+		}
+		return direct.String()
+	}
 	if !containsIP(trusted, direct) {
 		return direct.String()
 	}
@@ -84,15 +90,37 @@ func ClientPublicIP(r *http.Request, trustedProxies ...string) string {
 	forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 	for i := len(forwarded) - 1; i >= 0; i-- {
 		candidate, err := netip.ParseAddr(strings.TrimSpace(forwarded[i]))
-		if err == nil && !containsIP(trusted, candidate.Unmap()) {
-			return candidate.Unmap().String()
+		if err != nil {
+			continue
+		}
+		candidate = candidate.Unmap()
+		if !isUnsafeForwardedClient(candidate) && !containsIP(trusted, candidate) {
+			return candidate.String()
 		}
 	}
 
 	if candidate, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("X-Real-IP"))); err == nil {
-		return candidate.Unmap().String()
+		candidate = candidate.Unmap()
+		if !isUnsafeForwardedClient(candidate) && !containsIP(trusted, candidate) {
+			return candidate.String()
+		}
 	}
-	return direct.String()
+	return ""
+}
+
+func hasForwardingHeaders(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get("X-Forwarded-For")) != "" ||
+		strings.TrimSpace(r.Header.Get("X-Real-IP")) != ""
+}
+
+func isLocalPeer(addr netip.Addr) bool {
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast()
+}
+
+func isUnsafeForwardedClient(addr netip.Addr) bool {
+	return addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+		addr.IsUnspecified()
 }
 
 func remoteIP(remoteAddr string) (netip.Addr, bool) {
