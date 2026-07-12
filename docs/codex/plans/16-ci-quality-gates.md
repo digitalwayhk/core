@@ -72,12 +72,16 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **Owner：** persistence。
 
+**状态：** 开发完成，待外部审查。
+
 **文件：** `pkg/persistence/database/test/oltp_sqlite_test.go`、SQLite 路径/清理 owner 及聚焦测试。
 
 - 在隔离临时目录和独立数据库名下重复运行，复现并分类 `disk I/O`、目录不存在、锁等待与清理竞态。
 - 测试不得依赖仓库相对目录、共享固定文件、执行顺序或残留 WAL/SHM。
 - 修复路径 ownership 和关闭/删除顺序；不得用重试、sleep、跳过测试掩盖。
 - 稳定标准：目标包 `-count=20`、并发分片和完整 `persistence-unit` 在干净临时目录通过后，才允许从 observational 提升 required。
+
+**开发验收记录（2026-07-13）：** 已移除跨工作区绝对路径，为每个测试建立独立临时目录并在包退出时清理；修正 `IsFile` 把不存在路径误判为文件造成的 SQLite 路径/连接错配；测试清理使用真实 GORM 表名，并按 `GetMaxOpenConns()` 调度事务并发。SQLite 直接测试（排除重复聚合入口）`-count=20`、聚焦 race、完整 `database/test` 和 `./pkg/persistence/...` 均通过，待外部审查后决定是否提升门禁。
 
 ### 16.2b 默认 Response 脱敏副作用
 

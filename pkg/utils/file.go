@@ -8,7 +8,7 @@ import (
 
 var TESTPATH string = ""
 
-//Getpath 获取当前路径,当为测试运行时，使用TESTPATH
+// Getpath 获取当前路径,当为测试运行时，使用TESTPATH
 func Getpath() string {
 	if IsTest() {
 		return TESTPATH
@@ -20,13 +20,13 @@ func Getpath() string {
 	return filepath.Dir(ex)
 }
 
-//IsExista 判断文件是否存在
+// IsExista 判断文件是否存在
 func IsExista(file string) bool {
 	_, err := os.Lstat(file)
 	return !os.IsNotExist(err)
 }
 
-//IsDir 判断是否为目录
+// IsDir 判断是否为目录
 func IsDir(path string) bool {
 	s, err := os.Stat(path)
 	if err != nil {
@@ -35,12 +35,13 @@ func IsDir(path string) bool {
 	return s.IsDir()
 }
 
-//IsFile 判断是否为文件
+// IsFile 判断是否为文件
 func IsFile(path string) bool {
-	return !IsDir(path)
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
-//CreateDir 在当前运行路径创建指定名称目录，当测试时，目录的创建路径为TESTPATH
+// CreateDir 在当前运行路径创建指定名称目录，当测试时，目录的创建路径为TESTPATH
 func CreateDir(name string) (string, error) {
 	path := Getpath()
 	folderPath := filepath.Join(path, name)
@@ -85,4 +86,3 @@ func ReadFile(file string) (string, error) {
 func DeleteFile(file string) error {
 	return os.Remove(file)
 }
-

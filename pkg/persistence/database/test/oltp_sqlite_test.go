@@ -2,6 +2,8 @@ package test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,10 +15,32 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
-func init() {
-	utils.TESTPATH = "/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core/pkg/persistence/database/test"
+func TestMain(m *testing.M) {
+	testRoot, err := os.MkdirTemp("", "digitalway-core-sqlite-test-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "创建 SQLite 测试目录失败: %v\n", err)
+		os.Exit(1)
+	}
+	utils.TESTPATH = testRoot
+	config.INITSERVER = false
+	status := m.Run()
+	if err := os.RemoveAll(testRoot); err != nil && status == 0 {
+		fmt.Fprintf(os.Stderr, "清理 SQLite 测试目录失败: %v\n", err)
+		status = 1
+	}
+	os.Exit(status)
+}
+
+func TestSQLitePackagePathUsesSystemTemporaryDirectory(t *testing.T) {
+	relative, err := filepath.Rel(os.TempDir(), utils.TESTPATH)
+	require.NoError(t, err)
+	require.NotEqual(t, "..", relative)
+	require.NotEqual(t, ".", relative)
+	require.False(t, filepath.IsAbs(relative) || len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator),
+		"SQLite 测试目录必须位于系统临时目录内，实际为 %q", utils.TESTPATH)
 }
 
 // SQLite 测试模型
@@ -63,6 +87,18 @@ type SQLiteTestOrderItem struct {
 	Quantity int     `gorm:"default:1"`
 }
 
+type SQLiteTestUserDB2 SQLiteTestUser
+
+func (SQLiteTestUserDB2) GetLocalDBName() string {
+	return "sqlite_test_db2"
+}
+
+func (SQLiteTestUserDB2) GetRemoteDBName() string {
+	return "sqlite_test_db2"
+}
+
+var sqliteTestPaths sync.Map
+
 func (SQLiteTestOrderItem) GetLocalDBName() string {
 	return "sqlite_test_db"
 }
@@ -73,8 +109,18 @@ func (SQLiteTestOrderItem) GetRemoteDBName() string {
 
 // 测试辅助函数
 func setupTestSQLite(t *testing.T) *oltp.Sqlite {
-	config.INITSERVER = false
+	t.Helper()
+	testPath, loaded := sqliteTestPaths.Load(t)
+	if !loaded {
+		testPath = t.TempDir()
+		sqliteTestPaths.Store(t, testPath)
+		utils.TESTPATH = testPath.(string)
+		t.Cleanup(func() {
+			sqliteTestPaths.Delete(t)
+		})
+	}
 	sqlite := oltp.NewSqlite()
+	sqlite.Name = SQLiteTestUser{}.GetLocalDBName()
 	sqlite.IsLog = false
 
 	// 确保测试数据库可用
@@ -90,9 +136,9 @@ func cleanupTestDataSQLite(t *testing.T, sqlite *oltp.Sqlite) {
 	db, _ := sqlite.GetDB()
 	if db != nil {
 		// 只删除表,不关闭连接
-		db.Exec("DROP TABLE IF EXISTS SQLiteTestOrderItem")
-		db.Exec("DROP TABLE IF EXISTS SQLiteTestOrder")
-		db.Exec("DROP TABLE IF EXISTS SQLiteTestUser")
+		db.Exec("DROP TABLE IF EXISTS sq_lite_test_order_item")
+		db.Exec("DROP TABLE IF EXISTS sq_lite_test_order")
+		db.Exec("DROP TABLE IF EXISTS sq_lite_test_user")
 	}
 	err := sqlite.DeleteDB()
 	assert.NoError(t, err)
@@ -105,7 +151,8 @@ func cleanupTestDataSQLite(t *testing.T, sqlite *oltp.Sqlite) {
 // ========================================
 
 func TestNewSqlite(t *testing.T) {
-	sqlite := oltp.NewSqlite()
+	sqlite := setupTestSQLite(t)
+	defer cleanupTestDataSQLite(t, sqlite)
 
 	assert.NotNil(t, sqlite)
 	assert.NotEmpty(t, sqlite.Path)
@@ -173,7 +220,7 @@ func TestSqlite_HasTable(t *testing.T) {
 
 	var count int64
 	db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-		"SQLiteTestUser").Scan(&count)
+		"sq_lite_test_user").Scan(&count)
 	assert.Equal(t, int64(1), count)
 }
 
@@ -201,12 +248,12 @@ func TestSqlite_HasTable_NestedTables(t *testing.T) {
 	db, _ := sqlite.GetDB()
 	var countOrder, countItem int64
 	db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-		"SQLiteTestOrder").Scan(&countOrder)
+		"sq_lite_test_order").Scan(&countOrder)
 	db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-		"SQLiteTestOrderItem").Scan(&countItem)
+		"sq_lite_test_order_item").Scan(&countItem)
 
 	assert.Equal(t, int64(1), countOrder)
-	assert.Equal(t, int64(1), countItem)
+	assert.Equal(t, int64(0), countItem, "嵌套表按延迟创建契约不应随主表自动创建")
 }
 
 // ========================================
@@ -627,7 +674,7 @@ func TestSqlite_Raw(t *testing.T) {
 	require.NoError(t, sqlite.Insert(user))
 
 	var results []SQLiteTestUser
-	err = sqlite.Raw("SELECT * FROM SQLiteTestUser WHERE Age > 25", &results)
+	err = sqlite.Raw("SELECT * FROM sq_lite_test_user WHERE age > 25", &results)
 	assert.NoError(t, err)
 	assert.Greater(t, len(results), 0)
 }
@@ -642,9 +689,10 @@ func TestSqlite_Exec(t *testing.T) {
 	user := &SQLiteTestUser{Name: "Leo", Email: "leo@example.com", Age: 33}
 	require.NoError(t, sqlite.Insert(user))
 
-	// 直接使用GORM的Exec方法
-	db, _ := sqlite.GetDB()
-	result := db.Exec(fmt.Sprintf("UPDATE SQLiteTestUser SET Age = 34 WHERE ID = %d", user.ID))
+	dbValue, err := sqlite.GetModelDB(&SQLiteTestUser{})
+	require.NoError(t, err)
+	db := dbValue.(*gorm.DB)
+	result := db.Exec(fmt.Sprintf("UPDATE sq_lite_test_user SET age = 34 WHERE id = %d", user.ID))
 	assert.NoError(t, result.Error)
 
 	// 验证更新
@@ -742,11 +790,14 @@ func TestSqlite_ConcurrentTransactions(t *testing.T) {
 	var wg sync.WaitGroup
 	successCount := int32(0)
 	count := 5
+	transactionSlots := make(chan struct{}, sqlite.GetMaxOpenConns())
 
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			transactionSlots <- struct{}{}
+			defer func() { <-transactionSlots }()
 
 			instance := setupTestSQLite(t)
 
@@ -774,11 +825,7 @@ func TestSqlite_ConcurrentTransactions(t *testing.T) {
 
 	wg.Wait()
 
-	// 等待所有事务完成
-	time.Sleep(200 * time.Millisecond)
-
-	// SQLite 并发事务限制更严格
-	assert.GreaterOrEqual(t, int(successCount), 1, "至少应有1个事务成功")
+	assert.Equal(t, count, int(successCount), "按 SQLite 并发上限调度后事务应全部成功")
 
 	// 使用新实例查询
 	sqliteQuery := setupTestSQLite(t)
@@ -810,14 +857,13 @@ func TestSqlite_AttachDatabase(t *testing.T) {
 
 	// 创建第二个数据库
 	sqlite2 := oltp.NewSqlite()
-	sqlite2.Name = "sqlite_test_db2"
 	defer sqlite2.DeleteDB()
 
-	err := sqlite2.HasTable(&SQLiteTestUser{})
+	err := sqlite2.HasTable(&SQLiteTestUserDB2{})
 	require.NoError(t, err)
 
 	// 在第二个数据库插入数据
-	user := &SQLiteTestUser{Name: "Attach", Email: "attach@example.com", Age: 40}
+	user := &SQLiteTestUserDB2{Name: "Attach", Email: "attach@example.com", Age: 40}
 	err = sqlite2.Insert(user)
 	require.NoError(t, err)
 
@@ -827,7 +873,8 @@ func TestSqlite_AttachDatabase(t *testing.T) {
 
 	// 查询附加的数据库
 	var results []SQLiteTestUser
-	err = sqlite1.Raw("SELECT * FROM db2.SQLiteTestUser", &results)
+	db := sqlite1.GetRunDB().(*gorm.DB)
+	err = db.Raw("SELECT * FROM db2.sq_lite_test_user_db2").Scan(&results).Error
 	assert.NoError(t, err)
 	assert.Greater(t, len(results), 0)
 
