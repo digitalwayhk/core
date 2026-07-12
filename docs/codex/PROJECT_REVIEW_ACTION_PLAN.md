@@ -71,10 +71,10 @@
 | 任务 | 状态 | 提交 | 完成证据 |
 | --- | --- | --- | --- |
 | 1. 依赖升级隔离 | 已完成 | `f72447f` | `go mod verify`、`go mod tidy -diff`、server vet 和定向兼容性测试通过；依赖文件已单独提交 |
-| 2. Docker Compose 集成环境 | 未开始 |  | 默认 profile 中 etcd/consul/redis/nats 健康；显式请求 `--profile kafka` 时 Kafka 健康 |
+| 2. Docker Compose 集成环境 | 实现完成，镜像冷拉取待通过 |  | etcd/consul/redis/nats 默认服务、persistence/kafka profile、固定 tag、回环端口和环境样例已通过静态契约；本机 registry 拉取无进展，有界失败且无残留 |
 | 3. 测试命令脚本 | 已完成 | `0d29df1` | `bash -n`、`quick` 和 `server` 通过；未知模式输出用法并代码 2 退出，脚本不依赖 `rtk` |
-| 4. 通过 Docker 运行外部集成测试 | 未开始 |  | `./scripts/test.sh integration-external` 通过 etcd/consul/redis/nats 测试套件 |
-| 5. Kafka Provider 缺口决策 | 未开始 |  | 实现 Provider 测试，或在文档中明确将 Kafka 标记为仅配置 |
+| 4. 通过 Docker 运行外部集成测试 | wrapper 已完成，镜像冷拉取待通过 |  | `integration-external-docker` 已具备唯一 project、锁、10 分钟 watchdog、诊断和清理；真实测试等待 registry 可用 |
+| 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
 | 6. go-zero 能力与复用审计 | 未开始 |  | `docs/codex/GO_ZERO_REUSE_AUDIT.md` 记录每个已审查子系统的证据和 keep/replace/remove 决策 |
 | 7. 无用与未完成代码清理 | 未开始 |  | 已启用的运行时路径不包含已知占位实现；每个删除/替换都有定向测试 |
 | 8. 全局日志与异常审计 | 未开始 |  | 运行时日志使用 `logx` 结构化事件，在请求/跨服务边界携带跟踪上下文，通过敏感数据扫描，且不包含未批准的控制台/fatal 输出 |
@@ -135,7 +135,7 @@ go test ./pkg/server/... ./pkg/utils ./service/manage ./pkg/persistence/types -c
 - 创建：`.env.integration.example`
 - 修改：如果需要忽略本地 Docker volume 或环境文件，修改 `.gitignore`
 
-- [ ] **步骤 1：添加 Compose 服务**
+- [x] **步骤 1：添加 Compose 服务**
 
 使用以下内容创建 `docker-compose.integration.yml`。其中使用已审查的固定版本，而非 `latest`；实施任务时应验证官方镜像 manifest，并记录不可变 digest。所有未认证的集成端口只绑定主机回环地址。
 
@@ -222,7 +222,7 @@ services:
       retries: 30
 ```
 
-- [ ] **步骤 2：添加环境变量示例**
+- [x] **步骤 2：添加环境变量示例**
 
 创建 `.env.integration.example`：
 
@@ -388,7 +388,7 @@ docker compose -f docker-compose.integration.yml down
 - 如实施则创建：`tests/integration/kafka_provider_test.go`
 - 如推迟则修改：`docs/codex/AUTOMATED_VERIFICATION_PLAN.md`
 
-- [ ] **步骤 1：确认当前 Kafka 行为**
+- [x] **步骤 1：确认当前 Kafka 行为**
 
 运行：
 
@@ -436,7 +436,7 @@ CORE_TEST_KAFKA=1 CORE_TEST_KAFKA_BROKERS=127.0.0.1:9092 go test -tags=integrati
 
 实现前预期：因 `mq.NewKafkaProvider` 未定义而编译失败。
 
-- [ ] **步骤 2B：如推迟 Kafka Provider，将其记录为仅配置**
+- [x] **步骤 2B：如推迟 Kafka Provider，将其记录为仅配置**
 
 将以下说明添加到 `docs/codex/AUTOMATED_VERIFICATION_PLAN.md`：
 
