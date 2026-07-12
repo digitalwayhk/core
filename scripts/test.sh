@@ -38,7 +38,7 @@ case "${1:-quick}" in
   release-contract)
     "$ROOT/scripts/release-check.sh" --candidate
     ;;
-  concurrency)
+  concurrency-race)
     go test -race \
       ./service/manage \
       ./pkg/server/api/manage \
@@ -49,6 +49,8 @@ case "${1:-quick}" in
       ./pkg/server/types \
       ./pkg/server/cluster \
       -count=1
+    ;;
+  concurrency-stress)
     go test -race \
       ./pkg/server/run \
       ./pkg/server/router \
@@ -58,6 +60,13 @@ case "${1:-quick}" in
       ./pkg/server/types \
       -run 'Test.*Lifecycle|Test.*Concurrent.*Start.*Stop|Test.*Shutdown|Test.*Close|Test.*Cleanup' \
       -count=20
+    ;;
+  concurrency)
+    "$0" concurrency-race
+    "$0" concurrency-stress
+    ;;
+  ci-contract)
+    "$ROOT/scripts/test-ci-contract.sh"
     ;;
   persistence-unit)
     go test ./pkg/persistence/... -count=1 -timeout=5m
@@ -366,7 +375,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|concurrency|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac
