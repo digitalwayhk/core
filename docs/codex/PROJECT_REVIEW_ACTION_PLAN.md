@@ -1046,11 +1046,12 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **文件：**
 - 创建：`docs/codex/plans/15-api-release-governance.md`
+- 创建：`docs/codex/API_COMPATIBILITY_SURFACE.md`
 - 修改：`pkg/server/trans/rest/error.go`
-- 审查：`docs/codex/CORE_RELEASE_READINESS_PLAN.md`
-- 审查：`docs/codex/DEPENDENT_SERVICES_RISK_PLAN.md`
-- 审查：`docs/codex/PERSISTENCE_MANAGE_COMPAT_PLAN.md`
-- 创建或更新：发布、changelog、贡献和兼容性文档
+- 创建：路由、OpenAPI 与导出 Go API 兼容基线及检查脚本
+- 创建或更新：`CHANGELOG.md`、发布策略、废弃登记和消费方兼容性矩阵
+
+已删除的 `CORE_RELEASE_READINESS_PLAN.md`、`DEPENDENT_SERVICES_RISK_PLAN.md` 和 `PERSISTENCE_MANAGE_COMPAT_PLAN.md` 仅作为 Git 历史输入，不恢复为执行状态文档；仍有效的要求统一收敛到任务 15 中文聚焦计划及其兼容性产物。
 
 - [ ] **步骤 1：定义公共兼容性表面**
 
