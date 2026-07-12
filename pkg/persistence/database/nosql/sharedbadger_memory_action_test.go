@@ -20,10 +20,13 @@ type memoryActionState struct {
 	commitFailures   atomic.Int32
 	transactionErr   error
 	commitErr        error
+	rollbackErr      error
 	operationErrors  map[string][]error
 	operationCalls   map[string]int
 	existsResults    []memoryExistsResult
 	existsCalls      int
+	getModelDBErrors []error
+	getModelDBCalls  int
 }
 
 type memoryExistsResult struct {
@@ -80,6 +83,12 @@ func (a *memoryAction) setCommitError(err error) {
 	a.state.mu.Unlock()
 }
 
+func (a *memoryAction) setRollbackError(err error) {
+	a.state.mu.Lock()
+	a.state.rollbackErr = err
+	a.state.mu.Unlock()
+}
+
 func (a *memoryAction) scriptOperation(operation string, errs ...error) {
 	a.state.mu.Lock()
 	a.state.operationErrors[operation] = append([]error(nil), errs...)
@@ -97,6 +106,13 @@ func (a *memoryAction) scriptExists(results ...memoryExistsResult) {
 	a.state.mu.Lock()
 	a.state.existsResults = append([]memoryExistsResult(nil), results...)
 	a.state.existsCalls = 0
+	a.state.mu.Unlock()
+}
+
+func (a *memoryAction) scriptGetModelDB(errs ...error) {
+	a.state.mu.Lock()
+	a.state.getModelDBErrors = append([]error(nil), errs...)
+	a.state.getModelDBCalls = 0
 	a.state.mu.Unlock()
 }
 
@@ -264,6 +280,13 @@ func (a *memoryAction) Delete(data interface{}) error {
 func (a *memoryAction) Raw(string, interface{}) error  { return nil }
 func (a *memoryAction) Exec(string, interface{}) error { return nil }
 func (a *memoryAction) GetModelDB(interface{}) (interface{}, error) {
+	a.state.mu.Lock()
+	defer a.state.mu.Unlock()
+	callIndex := a.state.getModelDBCalls
+	a.state.getModelDBCalls++
+	if callIndex < len(a.state.getModelDBErrors) {
+		return nil, a.state.getModelDBErrors[callIndex]
+	}
 	return nil, nil
 }
 
@@ -293,10 +316,13 @@ func (a *memoryAction) Commit() error {
 func (a *memoryAction) GetRunDB() interface{} { return nil }
 
 func (a *memoryAction) Rollback() error {
+	a.state.mu.RLock()
+	rollbackErr := a.state.rollbackErr
+	a.state.mu.RUnlock()
 	a.inTx = false
 	a.stagedRows = nil
 	a.stagedDrops = nil
-	return nil
+	return rollbackErr
 }
 
 func (a *memoryAction) value(data interface{}) (interface{}, bool) {

@@ -106,6 +106,8 @@ go test ./pkg/persistence/database/oltp -run 'Test.*(ResultError|Rollback|Contex
 
 13.3c 已将六个批量/逐条回退用例从真实 MySQL 迁移到线程安全的深拷贝内存 action，恢复默认单元覆盖。事务开启、提交、主操作、冲突后二次操作和 `Exists` 六条路径都会在 context 取消、事务失效或连接级错误后立即回滚并停止，不再降级重试后续 item；实例关闭对 Insert/Update/Delete 逐条路径均有断言。`IDataAction` 暂无 `context.Context` 参数，因此无法强制中断已经进入 adapter 内部的永久阻塞调用；本任务未为此破坏公共接口兼容性。聚焦测试、nosql 全包 race 与完整持久化套件均通过。
 
+最终跨小节审查进一步补齐了 `syncBatch` 编排层：路由、批量 helper、逐条降级和 rollback 路径遇到 fatal 后都会停止后续操作类型与数据库分组，不触发失败分组的 `OnSyncAfter`；fatal 前已经完成的 key 仍经过 CAS 确认并正确更新 pending。多操作、多数据库和降级路径已有回归覆盖。
+
 **验收：**
 ```bash
 go test -race ./pkg/persistence/database/nosql -run 'TestSyncConfig_DefaultBatchDelay|TestIssue_|TestSyncBatchDelay_' -count=1
@@ -120,17 +122,23 @@ go test -race ./pkg/persistence/database/nosql -run 'TestSyncConfig_DefaultBatch
 - 修改：`scripts/test.sh`
 - 修改：外部集成测试配置
 
-- [ ] **13.4a 锁定容器与健康检查**
+- [x] **13.4a 锁定容器与健康检查**
 
 加入 MySQL、MongoDB 和 ClickHouse，使用 `persistence` profile、持久化测试专用用户/密码/数据库，主机端口只绑定 `127.0.0.1`。
 
-- [ ] **13.4b 验证 driver 契约**
+- [x] **13.4b 验证 driver 契约**
 
 分别验证连接池配置、迁移、CRUD、context 取消、事务回滚和清理。
 
-- [ ] **13.4c 增加有界脚本**
+- [x] **13.4c 增加有界脚本**
 
 脚本先等待健康状态，测试设置明确 timeout，结束时关闭容器；任一步失败都必须返回非零状态。
+
+**完成记录（2026-07-12）：** 新增 `persistence` Compose profile，锁定 MySQL 8.4.4、MongoDB 7.0.16 和 ClickHouse 24.8.14.39，使用专用测试账号、密码与数据库，所有主机端口仅绑定 `127.0.0.1`，并为三个服务配置健康检查。外部测试继续同时要求 `integration` build tag 与对应 `CORE_TEST_*` 环境变量。
+
+真实 driver 契约测试覆盖 MySQL 连接池、迁移、CRUD、事务回滚与清理，MongoDB CRUD、取消 context 与清理，以及 ClickHouse 建表、同步写入、查询与清理。MongoDB 适配器当前没有事务能力，本任务不虚构该契约；事务回滚由 MySQL 真实 driver 套件验证。ClickHouse `InsertSync` 会在单次写入 context 中关闭异步插入并等待服务端确认，不改变普通批量写入的异步 DSN。
+
+`integration-persistence` 使用互斥锁避免并发套件争用固定端口，对 Compose 启动、Go 测试与 Compose 清理分别管理进程组。INT/TERM 会先停止并等待子进程，再清理容器和锁；清理默认以 30 秒为界，超时后依次发送 TERM/KILL。生命周期脚本覆盖成功、失败、信号、孤儿子进程、锁竞争、陈旧锁和清理卡死，真实 Docker 套件通过后无残留容器。
 
 **验收：**
 ```bash
@@ -139,9 +147,9 @@ go test -race ./pkg/persistence/database/nosql -run 'TestSyncConfig_DefaultBatch
 
 ## 最终门禁
 
-- [ ] `go test ./pkg/persistence/... -count=1 -timeout=5m` 在没有 Docker/本地 MySQL 时通过。
-- [ ] `./scripts/test.sh persistence-unit` 通过。
-- [ ] `./scripts/test.sh integration-persistence` 在 Docker 环境通过。
-- [ ] Raw/Scan/Exec 错误、context 取消和事务回滚有回归覆盖。
-- [ ] 零成功不再记录“同步成功”，pending/CAS/fatal-break 语义通过。
-- [ ] 失败路径测试结束时无残留重试或 worker。
+- [x] `go test ./pkg/persistence/... -count=1 -timeout=5m` 在没有 Docker/本地 MySQL 时通过。
+- [x] `./scripts/test.sh persistence-unit` 通过。
+- [x] `./scripts/test.sh integration-persistence` 在 Docker 环境通过。
+- [x] Raw/Scan/Exec 错误、context 取消和事务回滚有回归覆盖。
+- [x] 零成功不再记录“同步成功”，pending/CAS/fatal-break 语义通过。
+- [x] 失败路径测试结束时无残留重试、worker、集成容器或测试锁。

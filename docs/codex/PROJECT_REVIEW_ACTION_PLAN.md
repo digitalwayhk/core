@@ -82,7 +82,7 @@
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
-| 13. 持久化正确性与外部测试分离 | 进行中 |  | 13.1-13.3 已完成：默认/外部套件已分层，GORM result 错误已传播，SharedBadger 仅按 CAS 确认 key 计数，fatal 事务/连接/二次操作/Exists 路径已统一停止并由纯 fake 默认测试覆盖；下一步完成 Docker 持久化集成套件 |
+| 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 未开始 |  | 每个已接受的 MQ/集群/传输字段都有运行时消费方和行为测试，否则必须拒绝 |
 | 15. 公共 API 兼容性与发布治理 | 未开始 |  | 类型化错误、路由/API 快照、废弃策略、changelog 和消费方兼容性检查通过 |
 | 16. CI 质量门禁与消费方兼容性矩阵 | 未开始 |  | 必需 CI 层级在干净检出上通过，并发布可操作的失败产物 |
@@ -983,7 +983,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **优先级：** P0
 
-**状态：** 进行中。已创建中文聚焦计划 `docs/codex/plans/13-persistence-correctness.md`。13.1 已完成：`go test ./pkg/persistence/... -count=1 -timeout=5m` 与 `./scripts/test.sh persistence-unit` 在无 MySQL/Docker 环境下通过，外部 MySQL 测试需同时使用 `-tags=integration` 和 `CORE_TEST_MYSQL=1`。下一步执行 13.2 GORM 结果错误传播。
+**状态：** 已完成。中文聚焦计划见 `docs/codex/plans/13-persistence-correctness.md`。默认持久化套件不依赖 MySQL、MongoDB、ClickHouse 或 Docker；外部套件同时受 `integration` build tag 和对应 `CORE_TEST_*` 环境变量控制。GORM 本次操作错误、SharedBadger 同步确认语义以及 MySQL/MongoDB/ClickHouse 真实 driver 契约均已有回归覆盖。
 
 **文件：**
 - 创建：`docs/codex/plans/13-persistence-correctness.md`
@@ -992,19 +992,19 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - 修改：持久化同步/配置测试和外部数据库测试
 - 修改：`docker-compose.integration.yml`
 
-- [ ] **步骤 1：分离单元与外部数据库契约**
+- [x] **步骤 1：分离单元与外部数据库契约**
 
 识别隐式连接 `127.0.0.1:3306` 或其他服务的测试。单元测试使用 SQLite/fake，MySQL、MongoDB 和 ClickHouse 套件必须同时受 integration build tag 和显式环境变量控制。添加专用 Compose profile 和健康检查；未认证主机端口仅绑定 `127.0.0.1`。
 
-- [ ] **步骤 2：添加失败的结果传播测试**
+- [x] **步骤 2：添加失败的结果传播测试**
 
 验证 `Raw`、`Scan` 和 `Exec` 返回操作结果的 `.Error`，而非过时数据库 handle 错误。覆盖 MySQL 兼容与 SQLite 路径的查询失败、scan 失败、上下文取消和事务回滚。
 
-- [ ] **步骤 3：修正同步语义**
+- [x] **步骤 3：修正同步语义**
 
 修复并测试默认批处理延迟、成功/失败计数、pending 状态、CAS/冲突处理、重试边界和 fatal-break 行为。当请求的完成记录数为零时，日志绝不得报告同步成功。
 
-- [ ] **步骤 4：验证两个层级**
+- [x] **步骤 4：验证两个层级**
 
 默认持久化命令必须在没有 Docker 或隐藏本地服务时通过。为每个层级设置显式超时，并验证测试失败会及时取消重试和 worker。Docker 支撑的套件必须针对锁定的 MySQL、MongoDB 和 ClickHouse 镜像证明 driver 配置、迁移、CRUD、取消和清理。
 

@@ -1,0 +1,58 @@
+name: core-integration
+
+services:
+  mysql:
+    image: mysql:8.4.4
+    profiles: ["persistence"]
+    environment:
+      MYSQL_DATABASE: core_test
+      MYSQL_USER: core_test
+      MYSQL_PASSWORD: core_test_password
+      MYSQL_ROOT_PASSWORD: core_test_root_password
+    ports:
+      - "127.0.0.1:13306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u core_test -pcore_test_password --silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  mongodb:
+    image: mongo:7.0.16
+    profiles: ["persistence"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: core_test_admin
+      MONGO_INITDB_ROOT_PASSWORD: core_test_root_password
+    ports:
+      - "127.0.0.1:27018:27017"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --host 127.0.0.1
+          -u core_test_admin -p core_test_root_password
+          --authenticationDatabase admin
+          --eval 'const a=db.getSiblingDB("admin"); if (!a.getUser("core_test")) { a.createUser({user:"core_test",pwd:"core_test_password",roles:[{role:"readWrite",db:"core_test"}]}); } a.runCommand({ping:1}).ok' | grep 1
+      interval: 3s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.14.39
+    profiles: ["persistence"]
+    environment:
+      CLICKHOUSE_DB: core_test
+      CLICKHOUSE_USER: core_test
+      CLICKHOUSE_PASSWORD: core_test_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:19000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --user core_test --password core_test_password --query 'SELECT 1' | grep 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 10s

@@ -3,12 +3,145 @@ package nosql
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/stretchr/testify/require"
 )
+
+type fatalSyncLedger struct {
+	*entity.Model
+	Owner      string        `json:"owner"`
+	Code       string        `json:"code"`
+	DBName     string        `json:"db_name" gorm:"-"`
+	afterCalls *atomic.Int32 `json:"-" gorm:"-"`
+}
+
+func (l *fatalSyncLedger) NewModel() {
+	if l.Model == nil {
+		l.Model = entity.NewModel()
+	}
+}
+
+func (l *fatalSyncLedger) GetHash() string         { return l.Owner + ":" + l.Code }
+func (l *fatalSyncLedger) GetLocalDBName() string  { return l.DBName }
+func (l *fatalSyncLedger) GetRemoteDBName() string { return l.DBName }
+func (l *fatalSyncLedger) OnSyncAfter([]*SyncQueueItem[fatalSyncLedger]) error {
+	l.afterCalls.Add(1)
+	return nil
+}
+
+func newFatalSyncItem(op OpType, dbName, code string, afterCalls *atomic.Int32) *SyncQueueItem[fatalSyncLedger] {
+	item := &fatalSyncLedger{
+		Model:      entity.NewModel(),
+		Owner:      "fatal_sync_batch",
+		Code:       code,
+		DBName:     dbName,
+		afterCalls: afterCalls,
+	}
+	return &SyncQueueItem[fatalSyncLedger]{Key: item.GetHash(), Item: item, Op: op}
+}
+
+func TestSyncBatchGetModelDBFatalStopsAllGroups(t *testing.T) {
+	action := newMemoryAction()
+	action.scriptGetModelDB(context.Canceled)
+	var afterCalls atomic.Int32
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[fatalSyncLedger](action))
+	items := []*SyncQueueItem[fatalSyncLedger]{
+		newFatalSyncItem(OpInsert, "db-a", "insert", &afterCalls),
+		newFatalSyncItem(OpUpdate, "db-b", "update", &afterCalls),
+		newFatalSyncItem(OpDelete, "db-c", "delete", &afterCalls),
+	}
+
+	confirmed, err := db.syncBatch(items)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, confirmed)
+	require.Zero(t, action.operationCallCount("insert"))
+	require.Zero(t, action.operationCallCount("update"))
+	require.Zero(t, action.operationCallCount("delete"))
+	require.Zero(t, afterCalls.Load())
+}
+
+func TestSyncBatchHelperFatalPropagatesAndStopsLaterGroups(t *testing.T) {
+	action := newMemoryAction()
+	action.scriptOperation("insert", errors.New("driver: bad connection"))
+	var afterCalls atomic.Int32
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[fatalSyncLedger](action))
+	items := []*SyncQueueItem[fatalSyncLedger]{
+		newFatalSyncItem(OpInsert, "db-a", "insert", &afterCalls),
+		newFatalSyncItem(OpUpdate, "db-b", "update", &afterCalls),
+		newFatalSyncItem(OpDelete, "db-c", "delete", &afterCalls),
+	}
+
+	confirmed, err := db.syncBatch(items)
+
+	require.ErrorContains(t, err, "bad connection")
+	require.Empty(t, confirmed)
+	require.Equal(t, 1, action.operationCallCount("insert"))
+	require.Zero(t, action.operationCallCount("update"))
+	require.Zero(t, action.operationCallCount("delete"))
+	require.Zero(t, afterCalls.Load())
+}
+
+func TestSyncBatchFallbackFatalPropagatesAndStopsLaterGroups(t *testing.T) {
+	for _, operation := range []string{"insert", "update", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			action := newMemoryAction()
+			action.setTransactionError(errors.New("临时事务开启失败"))
+			action.scriptOperation(operation, context.Canceled)
+			var afterCalls atomic.Int32
+			db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[fatalSyncLedger](action))
+			first := newFatalSyncItem(map[string]OpType{
+				"insert": OpInsert,
+				"update": OpUpdate,
+				"delete": OpDelete,
+			}[operation], "db-a", operation, &afterCalls)
+			if operation != "insert" {
+				require.NoError(t, action.store(first.Item))
+			}
+			items := []*SyncQueueItem[fatalSyncLedger]{
+				first,
+				newFatalSyncItem(OpInsert, "db-b", "later-insert", &afterCalls),
+				newFatalSyncItem(OpDelete, "db-c", "later-delete", &afterCalls),
+			}
+
+			confirmed, err := db.syncBatch(items)
+
+			require.ErrorIs(t, err, context.Canceled)
+			require.Empty(t, confirmed)
+			require.Equal(t, 1, action.operationCallCount(operation))
+			for _, other := range []string{"insert", "update", "delete"} {
+				if other != operation {
+					require.Zero(t, action.operationCallCount(other), "fatal 后不得执行后续分组")
+				}
+			}
+			require.Zero(t, afterCalls.Load())
+		})
+	}
+}
+
+func TestSyncBatchRollbackFatalStopsBeforeCommitFallback(t *testing.T) {
+	action := newMemoryAction()
+	action.setCommitError(errors.New("临时提交失败"))
+	action.setRollbackError(errors.New("driver: bad connection"))
+	var afterCalls atomic.Int32
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[fatalSyncLedger](action))
+	items := []*SyncQueueItem[fatalSyncLedger]{
+		newFatalSyncItem(OpInsert, "db-a", "insert", &afterCalls),
+		newFatalSyncItem(OpDelete, "db-b", "later-delete", &afterCalls),
+	}
+
+	confirmed, err := db.syncBatch(items)
+
+	require.ErrorContains(t, err, "bad connection")
+	require.Empty(t, confirmed)
+	require.Equal(t, 1, action.operationCallCount("insert"), "rollback fatal 后不得逐条重试")
+	require.Zero(t, action.operationCallCount("delete"))
+	require.Zero(t, afterCalls.Load())
+}
 
 func fatalTestItems() []*SyncQueueItem[testLedger] {
 	items := make([]*SyncQueueItem[testLedger], 0, 3)

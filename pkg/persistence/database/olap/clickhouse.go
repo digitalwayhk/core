@@ -1,6 +1,7 @@
 package olap
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql/driver"
 	"fmt"
@@ -10,9 +11,10 @@ import (
 	"time"
 	"unicode"
 
+	driverClickHouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/shopspring/decimal"
 	"github.com/zeromicro/go-zero/core/logx"
-	"gorm.io/driver/clickhouse"
+	gormClickHouse "gorm.io/driver/clickhouse"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
@@ -56,7 +58,6 @@ func (c *Config) ClickHouseDSN() string {
 		c.MaxExecutionTime = 60
 	}
 
-	// 🔧 添加异步插入参数
 	return fmt.Sprintf("clickhouse://%s:%s@%s:%d/%s?dial_timeout=%ds&max_execution_time=%d&async_insert=1&wait_for_async_insert=0&async_insert_max_data_size=10485760&async_insert_busy_timeout_ms=1000",
 		c.Username,
 		c.Password,
@@ -393,7 +394,7 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 			cfg.Port,
 		)
 
-		defaultDB, err := gorm.Open(clickhouse.Open(defaultDSN), &gorm.Config{
+		defaultDB, err := gorm.Open(gormClickHouse.Open(defaultDSN), &gorm.Config{
 			NamingStrategy: schema.NamingStrategy{
 				SingularTable: true,
 			},
@@ -420,7 +421,7 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 
 	// 第二步:连接到目标数据库
 	dsn := cfg.ClickHouseDSN()
-	db, err := gorm.Open(clickhouse.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(gormClickHouse.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},
@@ -877,7 +878,15 @@ func (ch *ClickHouse) InsertSync(data interface{}) error {
 	if v.Kind() == reflect.Ptr && v.IsNil() {
 		return fmt.Errorf("插入数据不能为空指针")
 	}
-	return ch.db.Create(data).Error
+	ctx := driverClickHouse.Context(context.Background(), driverClickHouse.WithSettings(clickHouseSyncInsertSettings()))
+	return ch.db.WithContext(ctx).Create(data).Error
+}
+
+func clickHouseSyncInsertSettings() driverClickHouse.Settings {
+	return driverClickHouse.Settings{
+		"async_insert":          0,
+		"wait_for_async_insert": 1,
+	}
 }
 
 // BatchInsert 批量插入。

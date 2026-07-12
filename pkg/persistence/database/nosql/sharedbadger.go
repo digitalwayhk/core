@@ -1539,6 +1539,13 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 			continue
 		}
 		if _, err := groupAction.GetModelDB(groupItems[0].Item); err != nil {
+			if isFatalSyncError(err) {
+				confirmedKeys, confirmErr := p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+				if confirmErr != nil {
+					return confirmedKeys, errors.Join(err, confirmErr)
+				}
+				return confirmedKeys, err
+			}
 			logx.Errorf("路由目标 DB 失败 [db=%s, op=%s]: %v，降级为逐条处理", key.dbName, key.op, err)
 			func() {
 				sema := getSyncSema(groupAction, groupItems[0].Item)
@@ -1559,6 +1566,7 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 			continue
 		}
 
+		fatalObserver := newFatalSyncActionObserver(groupAction)
 		func() {
 			sema := getSyncSema(groupAction, groupItems[0].Item)
 			if sema != nil {
@@ -1568,35 +1576,43 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 
 			switch key.op {
 			case OpInsert:
-				keys := p.batchInsertWithErrorHandling(groupItems, groupAction)
+				keys := p.batchInsertWithErrorHandling(groupItems, fatalObserver.action())
 				successKeys = append(successKeys, keys...)
 				asyncDeleteCandidates = append(asyncDeleteCandidates, p.collectSyncAfterDeleteCandidates(groupItems, keys)...)
-				p.onSyncAfter(groupItems)
 			case OpUpdate:
-				keys := p.batchUpdateWithErrorHandling(groupItems, groupAction)
+				keys := p.batchUpdateWithErrorHandling(groupItems, fatalObserver.action())
 				successKeys = append(successKeys, keys...)
 				asyncDeleteCandidates = append(asyncDeleteCandidates, p.collectSyncAfterDeleteCandidates(groupItems, keys)...)
-				p.onSyncAfter(groupItems)
 			case OpDelete:
-				keys := p.batchDeleteWithErrorHandling(groupItems, groupAction)
+				keys := p.batchDeleteWithErrorHandling(groupItems, fatalObserver.action())
 				successKeys = append(successKeys, keys...)
-				p.onSyncAfter(groupItems)
 			}
 		}()
+		if fatalErr := fatalObserver.err(); fatalErr != nil {
+			confirmedKeys, confirmErr := p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+			if confirmErr != nil {
+				return confirmedKeys, errors.Join(fatalErr, confirmErr)
+			}
+			return confirmedKeys, fatalErr
+		}
+		p.onSyncAfter(groupItems)
 	}
 
-	// 批量更新同步状态
-	if len(successKeys) > 0 {
-		confirmedKeys, err := p.batchUpdateSyncedStatusKeys(successKeys, snapshotTimes)
-		if err != nil {
-			logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
-			return nil, err
-		}
-		p.incrementPendingCount(-len(confirmedKeys))
-		p.scheduleSyncAfterDelete(p.collectConfirmedDeleteCandidates(asyncDeleteCandidates, confirmedKeys))
-		successKeys = confirmedKeys
+	return p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+}
+
+func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotTimes map[string]time.Time, candidates []syncAfterDeleteCandidate[T]) ([]string, error) {
+	if len(successKeys) == 0 {
+		return successKeys, nil
 	}
-	return successKeys, nil
+	confirmedKeys, err := p.batchUpdateSyncedStatusKeys(successKeys, snapshotTimes)
+	if err != nil {
+		logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
+		return nil, err
+	}
+	p.incrementPendingCount(-len(confirmedKeys))
+	p.scheduleSyncAfterDelete(p.collectConfirmedDeleteCandidates(candidates, confirmedKeys))
+	return confirmedKeys, nil
 }
 
 func (p *PrefixedBadgerDB[T]) collectConfirmedDeleteCandidates(candidates []syncAfterDeleteCandidate[T], confirmedKeys []string) []syncAfterDeleteCandidate[T] {
@@ -1926,6 +1942,54 @@ func isFatalSyncError(err error) bool {
 	return false
 }
 
+type fatalSyncActionObserver struct {
+	types.IDataAction
+	fatalErr error
+}
+
+type fatalSyncExistsActionObserver struct {
+	*fatalSyncActionObserver
+	exists func(interface{}) (bool, error)
+}
+
+func newFatalSyncActionObserver(action types.IDataAction) *fatalSyncActionObserver {
+	return &fatalSyncActionObserver{IDataAction: action}
+}
+
+func (o *fatalSyncActionObserver) capture(err error) error {
+	if o.fatalErr == nil && isFatalSyncError(err) {
+		o.fatalErr = err
+	}
+	return err
+}
+
+func (o *fatalSyncActionObserver) action() types.IDataAction {
+	if existsAction, ok := o.IDataAction.(interface {
+		Exists(interface{}) (bool, error)
+	}); ok {
+		return &fatalSyncExistsActionObserver{fatalSyncActionObserver: o, exists: existsAction.Exists}
+	}
+	return o
+}
+
+func (o *fatalSyncActionObserver) err() error         { return o.fatalErr }
+func (o *fatalSyncActionObserver) Transaction() error { return o.capture(o.IDataAction.Transaction()) }
+func (o *fatalSyncActionObserver) Insert(data interface{}) error {
+	return o.capture(o.IDataAction.Insert(data))
+}
+func (o *fatalSyncActionObserver) Update(data interface{}) error {
+	return o.capture(o.IDataAction.Update(data))
+}
+func (o *fatalSyncActionObserver) Delete(data interface{}) error {
+	return o.capture(o.IDataAction.Delete(data))
+}
+func (o *fatalSyncActionObserver) Commit() error   { return o.capture(o.IDataAction.Commit()) }
+func (o *fatalSyncActionObserver) Rollback() error { return o.capture(o.IDataAction.Rollback()) }
+func (o *fatalSyncExistsActionObserver) Exists(data interface{}) (bool, error) {
+	exists, err := o.exists(data)
+	return exists, o.capture(err)
+}
+
 func (p *PrefixedBadgerDB[T]) syncStopped() bool {
 	select {
 	case <-p.closeCh:
@@ -1953,7 +2017,7 @@ func (p *PrefixedBadgerDB[T]) batchInsertWithErrorHandling(items []*SyncQueueIte
 			return nil
 		}
 		logx.Errorf("开启事务失败: %v，降级为逐条插入", err)
-		return p.insertItemsOneByOne(items)
+		return p.insertItemsOneByOneWithAction(items, syncAction)
 	}
 
 	// 在事务中逐条插入
@@ -2053,13 +2117,16 @@ insertLoop:
 
 		if rollbackErr := syncAction.Rollback(); rollbackErr != nil {
 			logx.Errorf("回滚失败: %v", rollbackErr)
+			if isFatalSyncError(rollbackErr) {
+				return nil
+			}
 		}
 		if isFatalSyncError(err) {
 			return nil
 		}
 
 		// 🆕 降级为逐条处理（会重试插入->更新）
-		successKeys = p.insertItemsOneByOne(items)
+		successKeys = p.insertItemsOneByOneWithAction(items, syncAction)
 	}
 
 	if hasError {
@@ -2091,7 +2158,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateWithErrorHandling(items []*SyncQueueIte
 			return nil
 		}
 		logx.Errorf("开启事务失败: %v，降级为逐条更新", err)
-		return p.updateItemsOneByOne(items)
+		return p.updateItemsOneByOneWithAction(items, syncAction)
 	}
 
 	// 🆕 确保事务一定被提交或回滚
@@ -2217,12 +2284,16 @@ updateLoop:
 		logx.Errorf("批量更新遇到错误，回滚事务")
 		if rollbackErr := syncAction.Rollback(); rollbackErr != nil {
 			logx.Errorf("回滚失败: %v", rollbackErr)
+			if isFatalSyncError(rollbackErr) {
+				committed = true
+				return nil
+			}
 		}
 		committed = true
 		if fatalError {
 			return nil
 		}
-		return p.updateItemsOneByOne(items)
+		return p.updateItemsOneByOneWithAction(items, syncAction)
 	}
 
 	if err := syncAction.Commit(); err != nil {
@@ -2231,12 +2302,15 @@ updateLoop:
 
 		if rollbackErr := syncAction.Rollback(); rollbackErr != nil {
 			logx.Errorf("回滚失败: %v", rollbackErr)
+			if isFatalSyncError(rollbackErr) {
+				return nil
+			}
 		}
 		if isFatalSyncError(err) {
 			return nil
 		}
 
-		return p.updateItemsOneByOne(items)
+		return p.updateItemsOneByOneWithAction(items, syncAction)
 	}
 
 	committed = true
@@ -2269,8 +2343,7 @@ func (p *PrefixedBadgerDB[T]) batchDeleteWithErrorHandling(items []*SyncQueueIte
 			return nil
 		}
 		logx.Errorf("开启事务失败: %v，降级为逐条删除", err)
-		newSyncAction := p.getDataAction(items[0].Item)
-		return p.deleteItemsOneByOne(items, newSyncAction)
+		return p.deleteItemsOneByOne(items, syncAction)
 	}
 
 	// 在事务中逐条删除
@@ -2345,19 +2418,15 @@ deleteLoop:
 
 		if rollbackErr := syncAction.Rollback(); rollbackErr != nil {
 			logx.Errorf("回滚失败: %v", rollbackErr)
+			if isFatalSyncError(rollbackErr) {
+				return nil
+			}
 		}
 		if isFatalSyncError(err) {
 			return nil
 		}
 
-		// 🆕 重新获取新的 syncAction
-		newSyncAction := p.getDataAction(items[0].Item)
-		if newSyncAction == nil {
-			logx.Errorf("重新获取 syncAction 失败")
-			return nil
-		}
-
-		successKeys = p.deleteItemsOneByOne(items, newSyncAction)
+		successKeys = p.deleteItemsOneByOne(items, syncAction)
 	}
 	// 注意：不在 Commit 后再做 Exists 复核。
 	// Commit 后事务已结束，Exists 能看到最终状态；但存在两种死循环场景：
@@ -2385,6 +2454,10 @@ deleteLoop:
 
 // 🆕 逐条插入（无事务）- 增强错误处理
 func (p *PrefixedBadgerDB[T]) insertItemsOneByOne(items []*SyncQueueItem[T]) []string {
+	return p.insertItemsOneByOneWithAction(items, nil)
+}
+
+func (p *PrefixedBadgerDB[T]) insertItemsOneByOneWithAction(items []*SyncQueueItem[T], fallbackAction types.IDataAction) []string {
 	successKeys := make([]string, 0, len(items))
 	// 🆕 检查是否支持 Exists 方法
 	type IExists interface {
@@ -2401,7 +2474,10 @@ insertOneByOneLoop:
 		}
 
 		wrapper.IsSynced = false
-		syncAction := p.getDataAction(wrapper.Item)
+		syncAction := fallbackAction
+		if syncAction == nil {
+			syncAction = p.getDataAction(wrapper.Item)
+		}
 
 		// 🆕 先检查数据是否存在（如果支持）
 		shouldUpdate := false
@@ -2469,6 +2545,10 @@ insertOneByOneLoop:
 
 // 🆕 逐条更新（无事务）
 func (p *PrefixedBadgerDB[T]) updateItemsOneByOne(items []*SyncQueueItem[T]) []string {
+	return p.updateItemsOneByOneWithAction(items, nil)
+}
+
+func (p *PrefixedBadgerDB[T]) updateItemsOneByOneWithAction(items []*SyncQueueItem[T], fallbackAction types.IDataAction) []string {
 	successKeys := make([]string, 0, len(items))
 	// 🆕 检查是否支持 Exists 方法
 	type IExists interface {
@@ -2484,7 +2564,10 @@ updateOneByOneLoop:
 			continue
 		}
 		wrapper.IsSynced = false
-		syncAction := p.getDataAction(wrapper.Item)
+		syncAction := fallbackAction
+		if syncAction == nil {
+			syncAction = p.getDataAction(wrapper.Item)
+		}
 
 		// 🆕 先检查数据是否存在（如果支持）
 		shouldUpdate := false
