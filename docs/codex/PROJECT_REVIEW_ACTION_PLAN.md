@@ -79,7 +79,7 @@
 | 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
 | 8. 全局日志与异常审计 | 已完成 | 本批提交 | `check-logging` 已接入 quick；stdout/标准 logger、装饰图标、payload/SQL/参数 dump 已清零；服务/Provider/WebSocket 关键事件结构化，trace_id 与脱敏日志契约、vet、race 均通过 |
 | 9. 架构加固待办 | 已完成 | 本批提交 | 注册表/forwarder 隔离已由任务 12 关闭；跨节点 IPv6/非 2xx 与配置迁移错误传播已测试修复；SharedBadger 拆分形成独立、无行为变更的执行台账 |
-| 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
+| 10. README/文档与场景使用指南 | 已完成（skill 最终统一重建） | 本批提交 | README 与中文场景指南已按当前路由、模型、认证、日志、外部依赖和能力矩阵重写；skill 按既定约束在全部任务完成后基于最终契约重建 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
@@ -828,7 +828,7 @@ go test -race ./pkg/server/router ./pkg/server/cluster ./pkg/server/mq ./pkg/ser
 - 审查：`examples/03-manage-crud`
 - 审查：`examples/12-mq-event-stream`
 
-- [ ] **步骤 1：替换过时 README 片段**
+- [x] **步骤 1：替换过时 README 片段**
 
 更新 README 示例，使其符合以下当前规则：
 
@@ -839,7 +839,7 @@ manage CRUD 路径: /api/manage/{service}/{manageStructLower}/{operationLower}
 ModelList 初始化：每个嵌入 entity.Model 或 entity.BaseModel 的模型都必须实现 NewModel()
 ```
 
-- [ ] **步骤 2：将示例链接到验证命令**
+- [x] **步骤 2：将示例链接到验证命令**
 
 添加以下 README 章节：
 
@@ -866,7 +866,7 @@ docker compose -f docker-compose.integration.yml up -d
 ```
 ````
 
-- [ ] **步骤 3：记录框架复用边界**
+- [x] **步骤 3：记录框架复用边界**
 
 向 `README.md` 和 core skill 参考添加简短架构章节，说明：
 
@@ -892,7 +892,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - 重试和单项细节使用 debug，生命周期或成功回退使用 info，终止失败使用 error，测量延迟超阈值使用 slow 日志。
 ```
 
-- [ ] **步骤 5：发布基于场景的框架使用指南**
+- [x] **步骤 5：发布基于场景的框架使用指南**
 
 创建 `docs/codex/FRAMEWORK_USAGE_GUIDE.md` 作为框架消费方的决策入口。覆盖 public/private API、Manage CRUD 与 hook、模型选择与分页、WebSocket 通知、跨节点通知、EventBridge/MQ、集群 Provider、传输选择、cache/Redis、配置、测试和扩展边界。
 
