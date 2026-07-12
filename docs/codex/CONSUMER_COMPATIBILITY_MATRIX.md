@@ -11,3 +11,13 @@
 | ai-ops-platform（脏工作树旁注） | 同上 HEAD，但 `go.mod`/`go.sum` 等未提交 | Go 1.26.0 | 工作树曾出现未提交 `v0.0.248-0.20260611104225-b17bfabcd8af`；**不可**与上列 commit 同时当作已提交锁定 | 非生产证据；仅说明本地漂移，不得作为发布锁定 | 不作为 core 发布门禁通过条件 |
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
+
+## 任务 15.5 消费方验证
+
+2026-07-13 使用 `/private/tmp` 临时 `go.work` 将 futures 指向当前 Core 工作树，未修改 futures 的 `go.mod/go.sum`。Go 因 futures 的 `go 1.26.1` 要求自动选择 1.26.5；以下 smoke 退出码为 0：
+
+```bash
+go test ./gateway/api/... ./internal/pkg/services/... -count=1 -timeout=10m
+```
+
+omni-flow/grok 与当前 ops-ai 已按上表证据判定 not-applicable，不伪造 Core 消费测试结果。

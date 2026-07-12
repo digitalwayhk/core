@@ -167,7 +167,7 @@ git diff --exit-code -- api/public-api.txt
 
 ## 15.4 建立废弃、变更说明与发布流程
 
-**状态：** 开发完成，待外部审查；依赖的 15.1-15.3 已 APPROVED。
+**状态：** 已完成并通过外部复审（`eef81e6`, `093fc1d`, `0022588`）；依赖的 15.1-15.3 已 APPROVED。
 
 **文件：**
 
@@ -208,11 +208,13 @@ git diff --exit-code -- api/public-api.txt
 
 **外部审查修复（2026-07-13）：** P1-1 通过删除旧 Copilot skill 关闭，skill 重建延后到 15.5 最终审查后。P1-2：ai-ops-platform 拆成可复现两行——提交态 `a64a3bb` 锁定 `v0.0.247`（`git show a64a3bb:go.mod`）；脏工作树未提交伪版本仅作旁注，不得与 commit 同时当作已提交锁定。
 
+**复审结论（2026-07-13）：** APPROVED。`release-contract` 通过且未 tag/push；旧 Copilot skill 已删除；ai-ops-platform 提交态与脏工作树证据已分离。允许进入 15.5。
+
 **外部审查重点：** 发布流程是否可复现；是否存在自动推送/tag 的危险副作用；废弃窗口是否可执行；消费方证据是否来自真实仓库和精确版本。
 
 ## 15.5 总验收与任务 16 交接
 
-**状态：** 未开始，依赖 15.1-15.4 全部通过外部审查。
+**状态：** 总验收完成，待任务 15 最终外部审查；15.1-15.4 均已 APPROVED。
 
 - 将 `api-compat`、`public-api`、`release-contract` 模式接入总验收，但保持任务 16 才负责 CI workflow、required checks 和失败产物上传。
 - 更新 `docs/codex/PROJECT_REVIEW_ACTION_PLAN.md`：记录每小节提交、外部审查结论、命令与耗时。
@@ -229,6 +231,8 @@ git diff --exit-code -- api/public-api.txt
 ./scripts/test.sh config-contract
 go test ./pkg/server/... ./pkg/persistence/... ./service/manage/... -count=1 -timeout=10m
 ```
+
+**总验收记录（2026-07-13）：** `release-contract` 全绿；server/persistence/manage 全量回归退出码 0。使用临时 `go.work` 将 futures 指向当前 Core 工作树，`gateway/api/...` 与 `internal/pkg/services/...` smoke 在 Go 1.26.5 下退出码 0，消费方文件未修改。omni-flow/grok、ops-ai 依据真实仓库保持 not-applicable。正式发布模式的缺版本、非法版本和脏树负向测试均失败且 tag 数不变。等待任务 15 全范围外部审查，通过后才统一重建最终 skill。
 
 ## 每小节外部审查反馈格式
 
