@@ -126,7 +126,7 @@ go test -race ./pkg/server/types ./pkg/server/router ./pkg/server/trans/rest -co
 
 ## 15.3 建立导出 Go API 漂移门禁
 
-**状态：** 开发完成，待外部审查；依赖的 15.1 公共包清单已 APPROVED。
+**状态：** 已完成并通过外部审查（`d8e0d4c`）；P2 收尾已落实。
 
 **文件：**
 
@@ -160,6 +160,8 @@ git diff --exit-code -- api/public-api.txt
 ```
 
 **开发记录（2026-07-13）：** 采用 Go 官方维护的 `golang.org/x/exp/cmd/apidiff`，固定为 `v0.0.0-20260410095643-746e56fc9e2f` 并隔离在 `tools/go.mod`。`api/public-packages.txt` 登记 12 个公共包，确定性 export data 与 manifest 位于 `api/public-api*`。检查与更新脚本严格分离：检查拒绝工具/manifest/基线缺失、陈旧文件和不兼容变化，兼容新增仅报告；更新必须显式执行。fixture 已证明新增导出 API 通过，而删除函数、接口增加方法和函数签名变化失败。基线重复生成哈希一致，根 `go.mod/go.sum` 未变化，等待外部只读审查。
+
+**外部审查结论（2026-07-13）：** APPROVED，无 P0/P1，允许进入 15.4。审查额外验证了缺失/多余基线失败、重复 update 哈希一致和根依赖不变。非阻断 P2 已收尾：兼容清单单列 `service/manage/view`，明确 Experimental proto 不纳入 apidiff，并对普通报告与 `-incompatible` 两次工具调用显式检查退出码。
 
 **外部审查重点：** 工具是否成熟并锁定；公共包范围是否合理；生成和检查是否严格分离；是否存在绕过破坏性变更的排除规则。
 

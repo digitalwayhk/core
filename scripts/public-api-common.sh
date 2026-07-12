@@ -31,8 +31,12 @@ compare_public_api() {
   local old="$1"
   local new="$2"
   local report incompatible
-  report="$(run_apidiff "$old" "$new")"
-  incompatible="$(run_apidiff -incompatible "$old" "$new")"
+  if ! report="$(run_apidiff "$old" "$new")"; then
+    return 1
+  fi
+  if ! incompatible="$(run_apidiff -incompatible "$old" "$new")"; then
+    return 1
+  fi
   if [[ -n "${incompatible//[[:space:]]/}" ]]; then
     printf '%s\n' "$incompatible" >&2
     return 1
