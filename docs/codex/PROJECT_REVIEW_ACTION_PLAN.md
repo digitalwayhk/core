@@ -85,7 +85,7 @@
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
 | 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 当前工作树 smoke 通过；SQLite 环境稳定性转任务 16，skill 待全部计划完成后创建 |
-| 16. CI 质量门禁与消费方兼容性矩阵 | 未开始 |  | 必需 CI 层级在干净检出上通过，并发布可操作的失败产物 |
+| 16. CI 质量门禁与消费方兼容性矩阵 | 计划已建立，待 16.1 开发 |  | 中文聚焦计划已定义 required/observational/scheduled 分层、三项 P2 owner、最小权限 CI、失败产物和消费方 smoke 契约 |
 | 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
 
 ## 任务 1：依赖升级隔离
