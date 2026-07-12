@@ -23,7 +23,7 @@
 
 ## 16.1 建立本地 CI 命令与机器可读矩阵
 
-**状态：** 开发完成，待外部审查。
+**状态：** 已完成，外部审查 APPROVED。
 
 **文件：**
 
@@ -61,6 +61,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 **外部审查重点：** 文档/脚本闭集、退出码、日志脱敏、required 外部依赖、重复测试和跨平台 shell。
 
 **开发验收记录（2026-07-13）：** 已建立七个可执行 gate、中文机器可读矩阵和 shell 契约测试；`required/race` 与 `scheduled/stress` 已拆分，原 `concurrency` 入口保持兼容。`bash -n`、`./scripts/test-ci-contract.sh`、`required/quick` 和 `required/contracts` 均通过；后者包含需要回环端口权限的 Logto/REST 测试。
+
+**审查关闭记录：** 实现提交 `a3b5b97` 外部审查结论为 APPROVED，无 P0/P1。提交 `b863d3d` 同步关闭审查建议：required 禁令展开检查 `test.sh` 下游模式、END 日志路径加引号、验证默认临时目录清理、`tee` 失败升级 gate 状态，并记录 quick/server-manage 的预算内重叠。
 
 ## 16.2 关闭任务 15 移交的门禁前问题
 
