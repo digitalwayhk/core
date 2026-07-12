@@ -69,6 +69,16 @@ expect_failure() {
 valid="$(create_fixture valid)"
 (cd "$valid" && ./scripts/release-check.sh --candidate >/dev/null) || fail "有效 fixture 应通过"
 
+valid_chinese="$(create_fixture valid-chinese)"
+sed 's/| core | futures | `migration_test.go` |/| 发布工具 | 多服务进程、跨节点通知扩展 | `迁移测试.go` |/' \
+  "$valid_chinese/docs/codex/DEPRECATION_REGISTER.md" >"$valid_chinese/register.tmp"
+mv "$valid_chinese/register.tmp" "$valid_chinese/docs/codex/DEPRECATION_REGISTER.md"
+(cd "$valid_chinese" && ./scripts/release-check.sh --candidate >/dev/null) || fail "合法中文废弃登记应通过"
+
+real_register="$(create_fixture real-register)"
+cp "$ROOT/docs/codex/DEPRECATION_REGISTER.md" "$real_register/docs/codex/DEPRECATION_REGISTER.md"
+(cd "$real_register" && ./scripts/release-check.sh --candidate >/dev/null) || fail "当前仓库废弃登记 smoke 应通过"
+
 wrong_section="$(create_fixture wrong-section)"
 awk '
   /^## \[Unreleased\]/ { print; skip=1; next }
@@ -83,10 +93,14 @@ sed 's/| core | futures |/|  | futures |/' "$missing_field/docs/codex/DEPRECATIO
 mv "$missing_field/register.tmp" "$missing_field/docs/codex/DEPRECATION_REGISTER.md"
 expect_failure "$missing_field" "废弃登记缺 Owner"
 
-placeholder="$(create_fixture placeholder)"
-sed 's/| `migration_test.go` |/| - |/' "$placeholder/docs/codex/DEPRECATION_REGISTER.md" >"$placeholder/register.tmp"
-mv "$placeholder/register.tmp" "$placeholder/docs/codex/DEPRECATION_REGISTER.md"
-expect_failure "$placeholder" "废弃登记迁移证据为占位符"
+for placeholder_value in '-' 'N/A' 'TODO' '暂无' '—'; do
+  fixture_name="placeholder-$(printf '%s' "$placeholder_value" | cksum | awk '{print $1}')"
+  placeholder="$(create_fixture "$fixture_name")"
+  sed "s#| \`migration_test.go\` |#| $placeholder_value |#" \
+    "$placeholder/docs/codex/DEPRECATION_REGISTER.md" >"$placeholder/register.tmp"
+  mv "$placeholder/register.tmp" "$placeholder/docs/codex/DEPRECATION_REGISTER.md"
+  expect_failure "$placeholder" "废弃登记迁移证据占位符 $placeholder_value"
+done
 
 breaking="$(create_fixture breaking)"
 sed 's/- 兼容调整。/- BREAKING: 删除旧接口。/' "$breaking/CHANGELOG.md" >"$breaking/changelog.tmp"

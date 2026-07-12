@@ -106,7 +106,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **Owner：** release tooling。
 
-**状态：** 开发完成，待外部审查。
+**状态：** 外部审查 P1 已修复，待复审。
 
 **文件：** `scripts/release-check.sh` 及 shell fixture。
 
@@ -116,6 +116,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 - fixture 必须证明错误位置标题、缺字段、占位值和破坏无迁移均失败。
 
 **开发验收记录（2026-07-13）：** `release-check.sh` 仅抽取 `## [Unreleased]` 到下一版本标题的内容并要求六个标题各出现一次；废弃登记逐行检查七个字段、占位符与两个 SemVer 字段；Unreleased 标记 BREAKING/破坏性时要求同段迁移说明或非空批准文件。独立 shell fixture 覆盖四类拒绝场景及迁移说明/批准文件两类接受场景，新增 `release-check-contract` 本地入口。
+
+**首轮审查修复：** 首轮结论为 CHANGES_REQUIRED，macOS BSD awk 对 UTF-8 字面量 `==` 可能误判合法中文字段。修复后 AWK 仅执行 ASCII 整格比较，中文占位符、破坏性标记和迁移说明改用 grep 字节匹配；fixture 新增合法中文行、当前真实登记表 smoke，以及 `-`、`N/A`、`TODO`、`暂无`、`—` 参数化拒绝。shell contract 与真实 `release-contract` 均通过，等待复审。
 
 **验收：** 三项各自定向测试与 race/shell contract 通过；CI 矩阵记录 owner、证据和是否已提升 required。
 

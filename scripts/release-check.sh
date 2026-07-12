@@ -39,8 +39,8 @@ awk '
   }
   function placeholder(value, lower) {
     lower=tolower(value)
-    return value == "" || value == "-" || value == "—" || value == "暂无" ||
-      lower == "n/a" || lower == "none" || lower ~ /todo|tbd|待确认/
+    return value == "" || value == "-" || lower == "n/a" || lower == "none" ||
+      lower == "todo" || lower == "tbd"
   }
   /^\|[[:space:]]*API[[:space:]]*\|/ { header=1; next }
   header && /^\|[[:space:]-]+\|/ { next }
@@ -73,13 +73,18 @@ awk '
   }
 ' docs/codex/DEPRECATION_REGISTER.md || exit 1
 
+if grep -Eq '\|[[:space:]]*(—|暂无|待确认)[[:space:]]*\|' docs/codex/DEPRECATION_REGISTER.md; then
+  echo "废弃登记含中文占位符" >&2
+  exit 1
+fi
+
 if grep -En '待确认|TODO|TBD' docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md; then
   echo "发布契约仍含未确认占位" >&2
   exit 1
 fi
 
-if grep -Eiq 'BREAKING([ :]|$)|破坏性([变更：:]|$)' "$unreleased_file"; then
-  if ! grep -Eiq 'Migration:|迁移说明[：:]' "$unreleased_file" &&
+if grep -Eiq 'BREAKING([ :]|$)' "$unreleased_file" || grep -Fq '破坏性' "$unreleased_file"; then
+  if ! grep -Eiq 'Migration:' "$unreleased_file" && ! grep -Fq '迁移说明' "$unreleased_file" &&
     ! test -s docs/codex/BREAKING_CHANGE_APPROVAL.md; then
     echo "Unreleased 含破坏性变化，但缺少迁移说明或批准文件" >&2
     exit 1
