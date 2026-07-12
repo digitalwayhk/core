@@ -2,7 +2,10 @@ package mq
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/nats-io/nats.go"
@@ -95,8 +98,8 @@ func (n *NATSJetStreamProvider) Subscribe(ctx context.Context, subject string, h
 	if js == nil {
 		return nil, ErrNotConnected
 	}
-	streamName := n.streamPrefix + "-" + subject
-	durableName := n.durablePrefix + "-" + subject
+	streamName := natsResourceName(n.streamPrefix, subject)
+	durableName := natsResourceName(n.durablePrefix, subject)
 
 	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:     streamName,
@@ -143,4 +146,33 @@ func (n *NATSJetStreamProvider) Health(_ context.Context) error {
 
 func (n *NATSJetStreamProvider) subjectKey(subject string) string {
 	return n.streamPrefix + "." + subject
+}
+
+func natsResourceName(prefix, subject string) string {
+	raw := prefix + "-" + subject
+	var name strings.Builder
+	name.Grow(len(raw))
+	lastSeparator := false
+	for _, char := range raw {
+		valid := char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' || char == '-' || char == '_'
+		if valid {
+			name.WriteRune(char)
+			lastSeparator = false
+			continue
+		}
+		if !lastSeparator {
+			name.WriteByte('_')
+			lastSeparator = true
+		}
+	}
+	base := strings.Trim(name.String(), "-_")
+	if base == "" {
+		base = "core"
+	}
+	if len(base) > 180 {
+		base = base[:180]
+	}
+	hash := sha256.Sum256([]byte(raw))
+	return base + "-" + hex.EncodeToString(hash[:6])
 }

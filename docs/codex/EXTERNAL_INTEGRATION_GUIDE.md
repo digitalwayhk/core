@@ -20,6 +20,10 @@ docker compose -f docker-compose.integration.yml down -v --remove-orphans
 ./scripts/test.sh integration-persistence
 ```
 
+## Docker credential helper 排障
+
+若公开镜像拉取长期无 layer 进度，且中断后出现 `error getting credentials`，先检查本机 Docker credential helper。不要修改仓库脚本或把镜像改为浮动 tag。可使用不含认证信息的临时 `DOCKER_CONFIG` 验证公开镜像；Docker Desktop 用户还需让临时 config 能发现 `docker-compose` CLI plugin。该临时配置只用于公开镜像，不得用于需要私有 registry 凭据的任务。
+
 ## Kafka 状态
 
 Kafka 仅提供显式基础设施 profile：

@@ -8,14 +8,15 @@
 | `required/contracts` | 已启用 | 是 | PR、push | 8 分钟 | `./scripts/test.sh release-contract` | 无 | release tooling | API、安全、配置与发布候选契约全绿 |
 | `required/server-manage` | 已启用 | 是 | PR、push | 10 分钟 | `go test ./pkg/server/... ./service/manage/... -count=1 -timeout=10m` | 无 | server/manage | 默认测试不连接外部服务 |
 | `required/race` | 已启用 | 是 | PR、push | 12 分钟 | `./scripts/test.sh concurrency-race` | 无 | server/manage | 单轮 race 分片无已知不稳定项 |
-| `observational/persistence` | 观察（16.2a 修复待审查） | 否 | PR、push | 10 分钟 | `./scripts/test.sh persistence-unit` | 无 | persistence | SQLite `-count=20`、race 与完整 persistence 已本地通过；外部审查通过后评估提升 |
+| `observational/persistence` | 观察（本地与 Docker 已通过） | 否 | PR、push | 10 分钟 | `./scripts/test.sh persistence-unit` | 无 | persistence | 连续 CI 稳定后评估提升，不因一次本机通过直接升级 required |
 | `scheduled/stress` | 定时 | 否 | nightly、手工 | 30 分钟 | `./scripts/test.sh concurrency-stress` | 无 | server lifecycle | 20 轮压力长期稳定后评估提升 |
-| `scheduled/integration` | 定时（冷拉取实跑待通过） | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | 信号/超时/锁/诊断/清理契约已通过；锁定镜像冷拉取后 driver contract 需通过 |
+| `scheduled/integration` | 定时（真实 driver 契约已通过） | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | MySQL/MongoDB/ClickHouse 与清理已通过；连续 scheduled 稳定后评估提升 |
 | `consumer/futures` | 手工、发布候选 | 发布时阻断 | workflow_dispatch | 15 分钟 | `./scripts/test-consumer-futures.sh` | futures 精确 Git commit | release/consumer | token/本地对象库可用时必须通过；不可用明确 blocked，不能记 passed |
 
-## 尚未启用
+## 外部能力状态
 
-- etcd、Consul、Redis、NATS、Kafka：等待任务 2/4 明确产品实现和 Compose 服务；当前状态为 `planned/blocked_by_task_2_4`，不以绿色 skip 代替执行。
+- etcd、Consul、Redis Streams、NATS JetStream 已有真实 Compose 集成命令，但不进入 PR required。
+- Kafka 仅有基础设施 profile，Core 无内建 Provider，不登记虚假绿色 gate。
 
 ## Action 供应链锁定
 

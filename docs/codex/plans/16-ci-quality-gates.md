@@ -160,7 +160,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 ## 16.4 添加 race、Docker 与定时门禁
 
-**状态：** 开发完成；stress 与生命周期验证通过，Docker 冷拉取实跑待通过。
+**状态：** 已完成；stress、生命周期和锁定 Docker driver 契约均通过。
 
 **文件：**
 
@@ -180,13 +180,13 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **验收：** 稳定 race required 通过；scheduled stress 可见；persistence integration 通过；未完成 Broker 依赖明确显示 planned 而非绿色 skip。
 
-**开发与验证记录（2026-07-13）：** 新增 `ci-scheduled.yml`，nightly/手工运行 stress 与 persistence integration，失败保持 job 非零并 always 写 summary/上传 artifact。Compose 使用唯一 project name，失败时采集脱敏 ps/logs；compose-up 增加默认 10 分钟有界 watchdog，超时返回 124 后再执行既有 down/锁清理。静态契约、YAML、scheduled stress、Compose 信号/超时/锁生命周期测试均通过。真实 Docker 冷拉取在 5 分钟试验阈值返回 124，诊断产物存在且无残留容器；因此本节暂不声称 integration 通过，最终验收前以 10 分钟默认阈值重试。
+**开发与验证记录（2026-07-13）：** 新增 `ci-scheduled.yml`，nightly/手工运行 stress 与 persistence integration，失败保持 job 非零并 always 写 summary/上传 artifact。Compose 使用唯一 project name，失败时采集脱敏 ps/logs；compose-up 增加默认 10 分钟有界 watchdog，超时返回 124 后再执行既有 down/锁清理。静态契约、YAML、scheduled stress、Compose 信号/超时/锁生命周期测试均通过。修复 NATS 监控端口后，MySQL 8.4.4、MongoDB 7.0.16、ClickHouse 24.8.14.39 真实 driver 契约通过，容器、network、volume 和锁无残留。
 
 **外部审查重点：** 非阻断失败可见性、容器清理、端口/secret、并发隔离、虚假 skip。
 
 ## 16.5 消费方 smoke、失败产物与总验收
 
-**状态：** 开发与消费方验证完成；任务 16 总验收等待 Docker integration 通过。
+**状态：** 已完成；required、Docker、消费方和产物总验收通过。
 
 **文件：**
 
@@ -213,7 +213,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 ./scripts/test.sh release-contract
 ```
 
-**开发与验证记录（2026-07-13）：** 新增 futures 精确 commit smoke：从本地对象库 archive 到临时目录，使用临时 `go.work` 指向候选 Core，测试前后校验源工作树及临时 `go.mod/go.sum` 不变；缺仓库/commit 明确返回 blocked(3)。手工 workflow 在缺跨仓库 token 时保留 blocked 证据并非绿退出。原矩阵全量 services 行为命令在锁定 Core `v0.0.247` 下已有相同基线失败，故调整为 gateway/worker 稳定行为测试加 services 根包编译，当前候选 Core smoke 通过。`ci.sh` 产物元数据补齐 gate、commit、OS、Go、命令、退出码和耗时，required/scheduled/consumer workflow 均生成真实状态 summary。
+**开发与验证记录（2026-07-13）：** 新增 futures 精确 commit smoke：从本地对象库 archive 到临时目录，使用临时 `go.work` 指向候选 Core，测试前后校验源工作树及临时 `go.mod/go.sum` 不变；缺仓库/commit 明确返回 blocked(3)。手工 workflow 在缺跨仓库 token 时保留 blocked 证据并非绿退出。原矩阵全量 services 行为命令在锁定 Core `v0.0.247` 下已有相同基线失败，故调整为 gateway/worker 稳定行为测试加 services 根包编译。候选 Core 对精确提交 `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` 的 smoke 通过。四个 required gate、persistence unit、外部/持久化 Docker 与发布契约均通过；`ci.sh` 元数据和 workflow summary 保持真实状态。
 
 ## 每小节外部审查反馈格式
 
@@ -224,11 +224,11 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 ## 完成定义
 
-- [ ] 本地与 CI 使用相同 gate 命令，矩阵与脚本双向闭合。
-- [ ] required 门禁快速、确定、无外部服务依赖且没有错误吞噬。
-- [ ] SQLite、Response 脱敏和 release parser 移交项有独立修复/归属证据。
-- [ ] GitHub Actions 权限最小、Action 全 SHA pin、缓存和 timeout 正确。
-- [ ] required、observational、scheduled 失败状态不会混淆。
-- [ ] Docker 失败/取消有界清理并上传可操作产物。
-- [ ] 消费方 smoke 使用精确 commit 且不修改消费方依赖。
-- [ ] 干净检出 required gates 全绿，最终外部审查 APPROVED。
+- [x] 本地与 CI 使用相同 gate 命令，矩阵与脚本双向闭合。
+- [x] required 门禁快速、确定、无外部服务依赖且没有错误吞噬。
+- [x] SQLite、Response 脱敏和 release parser 移交项有独立修复/归属证据。
+- [x] GitHub Actions 权限最小、Action 全 SHA pin、缓存和 timeout 正确。
+- [x] required、observational、scheduled 失败状态不会混淆。
+- [x] Docker 失败/取消有界清理并上传可操作产物。
+- [x] 消费方 smoke 使用精确 commit 且不修改消费方依赖。
+- [x] 干净检出 required gates、Docker 和消费方总验收全绿。

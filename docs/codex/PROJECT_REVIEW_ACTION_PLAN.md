@@ -71,9 +71,9 @@
 | 任务 | 状态 | 提交 | 完成证据 |
 | --- | --- | --- | --- |
 | 1. 依赖升级隔离 | 已完成 | `f72447f` | `go mod verify`、`go mod tidy -diff`、server vet 和定向兼容性测试通过；依赖文件已单独提交 |
-| 2. Docker Compose 集成环境 | 实现完成，镜像冷拉取待通过 |  | etcd/consul/redis/nats 默认服务、persistence/kafka profile、固定 tag、回环端口和环境样例已通过静态契约；本机 registry 拉取无进展，有界失败且无残留 |
+| 2. Docker Compose 集成环境 | 已完成 | `ccd1e22` 及本批修复 | etcd/consul/redis/nats 默认服务与 persistence/kafka profile 使用固定 tag、回环端口和健康检查；NATS 显式启用 8222 监控；静态与真实 Compose 均通过 |
 | 3. 测试命令脚本 | 已完成 | `0d29df1` | `bash -n`、`quick` 和 `server` 通过；未知模式输出用法并代码 2 退出，脚本不依赖 `rtk` |
-| 4. 通过 Docker 运行外部集成测试 | wrapper 已完成，镜像冷拉取待通过 |  | `integration-external-docker` 已具备唯一 project、锁、10 分钟 watchdog、诊断和清理；真实测试等待 registry 可用 |
+| 4. 通过 Docker 运行外部集成测试 | 已完成 | `ccd1e22` 及本批修复 | etcd、Consul、Redis Streams、NATS JetStream/EventBridge 和 MySQL/MongoDB/ClickHouse driver 契约真实通过；唯一 project、锁、watchdog、诊断与资源清理均验证 |
 | 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
 | 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
 | 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
@@ -84,8 +84,8 @@
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
-| 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 当前工作树 smoke 通过；SQLite 环境稳定性转任务 16，skill 待全部计划完成后创建 |
-| 16. CI 质量门禁与消费方兼容性矩阵 | 16.5 已完成，任务 16 等待 Docker 实跑 | `a3b5b97`、`b863d3d`、`c030c7f`、`34af55c`、`703228e`、`1a4d66f` | futures 精确 commit smoke、手工 blocked 语义、artifact 元数据和全 workflow summary 已验证；仅 persistence Docker 冷拉取/driver contract 尚待通过 |
+| 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975`, `8087530` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 精确提交 smoke 通过；最终中文 skill 已基于完成后契约重建 |
+| 16. CI 质量门禁与消费方兼容性矩阵 | 已完成 | `1a4d66f`, `b54d6f2`, `fd9bf5c`, `75f8bfa` 及本批修复 | 四个 required gate、persistence observation、scheduled stress、外部/持久化 Docker、futures 精确 commit smoke、artifact/summary/清理契约均通过 |
 | 17. 性能、容量与运维 SLO 基线 | 已完成 | 本批提交 | Server/Provider/Event/WebSocket/SharedBadger/SQLite 三次基线、资源预算、RED/USE、trace、SLO/告警 owner 均已记录；SQLite mmap 从 30GB 改为默认 256MiB 可配置契约 |
 
 ## 任务 1：依赖升级隔离
@@ -241,7 +241,7 @@ CORE_TEST_NATS_URL=nats://127.0.0.1:4222
 CORE_TEST_KAFKA_BROKERS=127.0.0.1:9092
 ```
 
-- [ ] **步骤 3：验证环境启动**
+- [x] **步骤 3：验证环境启动**
 
 运行：
 
@@ -333,7 +333,7 @@ scripts/test.sh server
 - 读取：`tests/integration/consul_provider_test.go`
 - 读取：`tests/integration/mq_provider_test.go`
 
-- [ ] **步骤 1：启动依赖**
+- [x] **步骤 1：启动依赖**
 
 运行：
 
@@ -343,7 +343,7 @@ docker compose -f docker-compose.integration.yml up -d
 
 预期：Compose 创建或复用所有服务。
 
-- [ ] **步骤 2：运行现有外部集成测试**
+- [x] **步骤 2：运行现有外部集成测试**
 
 运行：
 
@@ -353,9 +353,9 @@ docker compose -f docker-compose.integration.yml up -d
 
 预期：名为 `TestClusterEtcd*`、`TestClusterConsul*`、`TestMQRedisStream`、`TestMQNATSJetStream`、`TestMQEventStreamRedis` 和 `TestMQEventStreamNATS` 的测试通过。
 
-- [ ] **步骤 3：记录精确的本地命令**
+- [x] **步骤 3：记录精确的本地命令**
 
-将以下章节追加到 `docs/codex/AUTOMATED_VERIFICATION_PLAN.md`：
+将以下章节收敛到 `docs/codex/EXTERNAL_INTEGRATION_GUIDE.md`：
 
 ```markdown
 ## Docker 支撑的外部依赖
@@ -398,7 +398,7 @@ rg -n 'case "kafka"|provider=kafka|CORE_TEST_KAFKA|NewKafka' pkg/server tests
 
 当前预期：配置可通过 `kafka` 校验，factory 返回 Provider 未实现错误，且没有 Kafka 集成测试。
 
-- [ ] **步骤 2A：如实现 Kafka Provider，先编写失败的集成测试**
+- [x] **步骤 2A：不适用，决策为拒绝内建 Kafka Provider**
 
 创建 `tests/integration/kafka_provider_test.go`：
 
@@ -806,11 +806,11 @@ go test -race ./pkg/server/router ./pkg/server/cluster ./pkg/server/mq ./pkg/ser
 ```markdown
 ## 架构加固待办
 
-- [ ] 使用互斥锁保护 `pkg/server/router/servicecontext.go` 的全局 `scontext` map，或将其替换为注册表类型。
-- [ ] 决定 `types.SetCrossNodeForwarder` 应为进程全局，还是按服务名键控。
-- [ ] 在 `pkg/server/cluster/event.go` 中使用 `net.JoinHostPort`，并将非 2xx HTTP 响应视为转发错误。
-- [ ] 在 `pkg/server/config/serverconfig.go` 中记录配置迁移写入失败，携带配置路径和字段上下文。
-- [ ] 按同步队列、批量写入、自愈和查询/缓存责任拆分 `pkg/persistence/database/nosql/sharedbadger.go`。
+- [x] 使用互斥锁保护 `pkg/server/router/servicecontext.go` 的全局 `scontext` map，或将其替换为注册表类型。
+- [x] 决定 `types.SetCrossNodeForwarder` 应为进程全局，还是按服务名键控。
+- [x] 在 `pkg/server/cluster/event.go` 中使用 `net.JoinHostPort`，并将非 2xx HTTP 响应视为转发错误。
+- [x] 在 `pkg/server/config/serverconfig.go` 中记录配置迁移写入失败，携带配置路径和字段上下文。
+- [x] 已按同步队列、批量写入、自愈和生命周期责任登记 `sharedbadger.go` 的分阶段无行为变更拆分计划。
 ```
 
 - [x] **步骤 2：将每个选中项转换为独立实施分支**
@@ -1053,19 +1053,19 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 已删除的 `CORE_RELEASE_READINESS_PLAN.md`、`DEPENDENT_SERVICES_RISK_PLAN.md` 和 `PERSISTENCE_MANAGE_COMPAT_PLAN.md` 仅作为 Git 历史输入，不恢复为执行状态文档；仍有效的要求统一收敛到任务 15 中文聚焦计划及其兼容性产物。
 
-- [ ] **步骤 1：定义公共兼容性表面**
+- [x] **步骤 1：定义公共兼容性表面**
 
 列出下游服务使用的导出 Go API、路由、payload、状态码、错误码、配置键/默认值、数据库兼容性和可观测生命周期行为。
 
-- [ ] **步骤 2：替换字符串匹配的 HTTP 错误映射**
+- [x] **步骤 2：替换字符串匹配的 HTTP 错误映射**
 
 定义类型化公共错误码、HTTP 状态、安全消息和已封装内部原因。添加表驱动测试，证明本地化或内部文本变更不能改变状态，且不暴露内部细节。
 
-- [ ] **步骤 3：添加兼容性产物**
+- [x] **步骤 3：添加兼容性产物**
 
 生成确定性 OpenAPI/路由快照和导出 Go API 基线。采用前评估并锁定受维护的兼容性检查器；有意的破坏性变更必须提供显式批准文件。
 
-- [ ] **步骤 4：建立发布治理**
+- [x] **步骤 4：建立发布治理**
 
 记录语义化版本、废弃期限、迁移说明、changelog 格式、tag/发布所有权、回滚，以及消费方仓库的精确 commit/tag 锁定。在本地可用时，添加 futures、omni-flow 和 ai-ops 兼容性冒烟检查。
 
@@ -1081,21 +1081,21 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - 修改：`scripts/test.sh`
 - 创建：经批准的锁定工具/版本配置
 
-- [ ] **步骤 1：定义必需层级和时间预算**
+- [x] **步骤 1：定义必需层级和时间预算**
 
 为格式化与完整 `go vet`、快速单元测试、按包划分的竞态测试、Docker Broker/发现集成、Docker 持久化集成、配置-运行时契约和下游冒烟测试创建门禁。记录必需/可选状态和预期时长。
 
-- [ ] **步骤 2：启用门禁前要求归属任务修复阻塞项**
+- [x] **步骤 2：启用门禁前要求归属任务修复阻塞项**
 
 任务 7 负责清理 Mongo 未键控 `bson.E`，任务 13 负责持久化单元测试失败，任务 12 负责异步回调竞态契约。任务 16 将它们通过的命令接入 CI；不得重复修复产品代码。没有已记录的 owner 和到期时间时，不得抑制警告或排除包。
 
 任务 15 最终审查移交三个非阻断项：SQLite 全量测试在部分环境出现 `disk I/O`/timeout，需由 persistence owner 固化路径与并发清理后再设 required；`Response.GetError` 在非 REST 路径仍可能写回原始 TypeError 文本，交安全/响应 owner 消除副作用并补测试；`release-check` 需在 CI 前加强 Unreleased 段解析、迁移说明和废弃字段完整性检查。三项必须有独立修复证据，不得通过排除测试伪装绿色。
 
-- [ ] **步骤 3：实现可重现 CI**
+- [x] **步骤 3：实现可重现 CI**
 
 锁定 Go、服务镜像和可选工具；缓存 module/构建输出；使用显式 build tag 和环境变量；失败时上传日志和测试产物；取消已被新运行取代的任务；设置每个 job 的超时。
 
-- [ ] **步骤 4：谨慎添加安全与兼容性门禁**
+- [x] **步骤 4：谨慎添加安全与兼容性门禁**
 
 评估 `govulncheck`、静态/安全分析、导出 API 对比、生成文件偏移和消费方冒烟测试。锁定已批准工具并定义分类/豁免所有权，不引入无 owner 警告。
 

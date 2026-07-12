@@ -9,6 +9,10 @@ for service in etcd consul redis nats kafka mysql mongodb clickhouse; do
   grep -Eq "^  ${service}:" "$compose" || { echo "Compose 缺少服务: $service" >&2; exit 1; }
 done
 grep -A2 '^  kafka:' "$compose" | grep -Fq 'profiles: ["kafka"]'
+grep -A3 '^  nats:' "$compose" | grep -Fq 'command: ["-js", "-sd", "/data", "-m", "8222"]' || {
+  echo "NATS 必须启用 8222 监控端口供 healthcheck 使用" >&2
+  exit 1
+}
 for service in mysql mongodb clickhouse; do
   grep -A3 "^  ${service}:" "$compose" | grep -Fq 'profiles: ["persistence"]'
 done
