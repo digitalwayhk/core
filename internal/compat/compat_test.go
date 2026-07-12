@@ -1,11 +1,14 @@
 package compat
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
+	privateapi "github.com/digitalwayhk/core/internal/compat/fixture/api/private"
+	publicapi "github.com/digitalwayhk/core/internal/compat/fixture/api/public"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/run"
@@ -63,11 +66,21 @@ func newFixtureServiceRouter(name string, port int, specs ...RouteEntry) *router
 	return ctx.Router
 }
 
+func newProductionFixtureRouter(port int) *router.ServiceRouter {
+	routers := []types.IRouter{&publicapi.GetThing{}, &privateapi.CreateThing{}}
+	service := &fixtureService{name: "fixture", routers: routers}
+	ctx := &router.ServiceContext{
+		Config:  &config.ServerConfig{RestConf: config.NewServiceDefaultConfig("fixture", port).RestConf},
+		Service: &types.Service{Name: "fixture", Routers: routers, Instance: service},
+	}
+	ctx.Config.Name = "fixture"
+	ctx.Config.Port = port
+	ctx.Router = router.NewServiceRouter(ctx, service)
+	return ctx.Router
+}
+
 func TestRouteSnapshotIsSortedAndMatchesGolden(t *testing.T) {
-	sr := newFixtureServiceRouter("compat", 18080,
-		RouteEntry{Service: "compat", Method: http.MethodPost, Path: "/api/compat/private", PathType: string(types.PrivateType), Auth: true},
-		RouteEntry{Service: "compat", Method: http.MethodGet, Path: "/api/compat/public", PathType: string(types.PublicType)},
-	)
+	sr := newProductionFixtureRouter(18080)
 
 	got, err := SnapshotRoutes(sr)
 	require.NoError(t, err)
@@ -87,12 +100,8 @@ func TestRouteSnapshotRejectsMethodPathConflictAcrossServices(t *testing.T) {
 }
 
 func TestOpenAPISnapshotIgnoresRuntimeHostAndPort(t *testing.T) {
-	first := newFixtureServiceRouter("compat", 18080,
-		RouteEntry{Service: "compat", Method: http.MethodGet, Path: "/api/compat/public", PathType: string(types.PublicType)},
-	)
-	second := newFixtureServiceRouter("compat", 28080,
-		RouteEntry{Service: "compat", Method: http.MethodGet, Path: "/api/compat/public", PathType: string(types.PublicType)},
-	)
+	first := newProductionFixtureRouter(18080)
+	second := newProductionFixtureRouter(28080)
 
 	one, err := SnapshotOpenAPI(requestWithHost("first.example:18080"), first)
 	require.NoError(t, err)
@@ -100,6 +109,42 @@ func TestOpenAPISnapshotIgnoresRuntimeHostAndPort(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, one, two)
 	requireGolden(t, "openapi.golden.json", one)
+
+	var doc map[string]interface{}
+	require.NoError(t, json.Unmarshal(one, &doc))
+	paths := doc["paths"].(map[string]interface{})
+	privateOperation := paths["/api/fixture/creatething"].(map[string]interface{})["post"].(map[string]interface{})
+	require.NotEmpty(t, privateOperation["security"])
+	require.NotEmpty(t, privateOperation["requestBody"])
+}
+
+func TestOpenAPISnapshotRejectsMethodPathConflict(t *testing.T) {
+	first := newFixtureServiceRouter("first", 18081,
+		RouteEntry{Service: "first", Method: http.MethodGet, Path: "/api/shared/path", PathType: string(types.PublicType)},
+	)
+	second := newFixtureServiceRouter("second", 18082,
+		RouteEntry{Service: "second", Method: http.MethodGet, Path: "/api/shared/path", PathType: string(types.PublicType)},
+	)
+
+	_, err := SnapshotOpenAPI(requestWithHost("compat.example"), first, second)
+	require.ErrorContains(t, err, "duplicate route GET /api/shared/path")
+}
+
+func TestOpenAPISnapshotRejectsDuplicateOperationID(t *testing.T) {
+	first := newFixtureServiceRouter("first", 18081,
+		RouteEntry{Service: "first", Method: http.MethodGet, Path: "/api/shared/path", PathType: string(types.PublicType)},
+	)
+	second := newFixtureServiceRouter("second", 18082,
+		RouteEntry{Service: "second", Method: http.MethodPost, Path: "/api/shared/path", PathType: string(types.PublicType)},
+	)
+
+	_, err := SnapshotOpenAPI(requestWithHost("compat.example"), first, second)
+	require.ErrorContains(t, err, "duplicate operationId /api/shared/path")
+}
+
+func TestOpenAPISnapshotRejectsNilServiceRouter(t *testing.T) {
+	_, err := SnapshotOpenAPI(requestWithHost("compat.example"), nil)
+	require.ErrorContains(t, err, "nil service router")
 }
 
 func TestOpenAPISnapshotAllowsEmptyServices(t *testing.T) {

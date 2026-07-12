@@ -16,15 +16,20 @@
 | 包或入口 | 级别 | Owner | 消费场景 | 当前证据 |
 | --- | --- | --- | --- | --- |
 | `pkg/server/types.IRouter`、`IRequest`、`IResponse`、`RouterInfo` | Stable | server/router | public/private/manage 路由、服务间调用 | `pkg/server/types/router.go`、`interface.go`、examples |
+| `pkg/server/config.ServerConfig` 及项目自有子配置 | Stable（按能力矩阵） | server/config | 服务配置、默认化和启动校验 | 任务 14 配置矩阵与 `config-contract` |
+| `pkg/server/event` 的 EventBus、EventStream 与 Bridge 入口 | Stable（按能力矩阵） | server/event | 进程内事件与受支持 MQ 事件流 | event 单元测试与任务 14 生命周期测试 |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、examples/demo |
+| `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
 | `service/manage.ManageService`、标准 CRUD、hook、`Operation` | Stable | service/manage | 管理后台 CRUD 与自定义操作 | `service/manage/crud_test.go`、examples/03/04/demo |
 | Cluster、Transport、MQ 的已登记 factory/provider 入口 | Stable（按能力矩阵） | server runtime | 可插拔基础设施组装 | 任务 14 config-contract 与六包 race |
 | `ManageService.Req`、`SetReq`、`IRequestSet` | Deprecated | service/manage | 旧代码读取共享请求状态 | `service/manage/manageservice.go`、请求隔离回归测试 |
 | 进程级 `SetCrossNodeForwarder`、`GetCrossNodeForwarder` | Deprecated | server/types | 旧单服务跨节点转发 | `pkg/server/types/crossnode.go`；替代为 service-scoped API |
 | `router.TestResult` 变量 | Deprecated | server/router | 旧 OpenAPI 测试结果注入 | `SetTestResult/GetTestResult` 为并发安全替代入口 |
+| `pkg/utils` 导出辅助函数 | Experimental | utils | examples 和框架内部通用辅助 | 尚未完成逐符号稳定性登记；不得由包级存在推导全部 Stable |
+| `pkg/server/transport/grpc/proto` 生成类型 | Experimental | server/transport | 内部 gRPC payload | 生成器与 wire 兼容基线待 15.3 登记 |
 | 未导出符号、测试 helper、`internal/compat` | Internal | 对应包 | 实现与门禁 | 不允许下游直接依赖 |
 
 ## HTTP 与响应
@@ -39,6 +44,8 @@
 | 默认成功/失败 JSON | Stable baseline | `traceid/errorCode/errorMessage/success/duration/data/host/showType` | `pkg/server/router.Response`；15.2 改造前不得改字段名或含义 |
 | 自定义 `INewResponse` | Stable | 响应实例与 JSON 由服务拥有，框架只依赖 `IResponse` | `pkg/server/router.Request.NewResponse` |
 | HTTP 错误文字匹配 | Internal defect | 当前实现不是稳定契约；15.2 将迁移到类型化映射 | `pkg/server/trans/rest/error.go` |
+
+当前 `run.GetOpenApi` 只输出 Public 与 Private 路由，因此 OpenAPI golden 的稳定范围也仅限这两类。Manage 与 ServerManage 仍属于稳定 HTTP 路由，但本阶段由路由元数据、Manage CRUD 测试和 server API 测试保护；是否纳入 OpenAPI 由后续兼容变更单独评估，不能从当前 golden 推导其已被覆盖。
 
 ## 配置
 

@@ -16,9 +16,80 @@
   },
   "openapi": "3.0.1",
   "paths": {
-    "/api/compat/public": {
+    "/api/fixture/creatething": {
+      "post": {
+        "operationId": "/api/fixture/creatething",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "name:名称",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {},
+                    "duration": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "errorCode": {
+                      "type": "integer"
+                    },
+                    "errorMessage": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "showType": {
+                      "type": "integer"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "traceid": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful operation"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "servers": [
+          {
+            "url": "https://compat.invalid/"
+          }
+        ],
+        "tags": [
+          "fixture"
+        ]
+      }
+    },
+    "/api/fixture/getthing": {
       "get": {
-        "operationId": "/api/compat/public",
+        "operationId": "/api/fixture/getthing",
         "parameters": [
           {
             "description": "name:名称",
@@ -72,14 +143,14 @@
           }
         ],
         "tags": [
-          "compat"
+          "fixture"
         ]
       }
     }
   },
   "tags": [
     {
-      "name": "compat"
+      "name": "fixture"
     }
   ]
 }

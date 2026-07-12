@@ -28,6 +28,7 @@ case "${1:-quick}" in
       -count=1 -timeout=3m
     ;;
   api-compat)
+    test -s docs/codex/API_COMPATIBILITY_SURFACE.md
     go test ./internal/compat ./pkg/server/run -run 'Test.*(Route|OpenAPI)' -count=1 -timeout=3m
     ;;
   concurrency)
@@ -358,7 +359,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|concurrency|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|concurrency|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

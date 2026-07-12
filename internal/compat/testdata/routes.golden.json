@@ -1,15 +1,15 @@
 [
   {
-    "service": "compat",
+    "service": "fixture",
     "method": "POST",
-    "path": "/api/compat/private",
+    "path": "/api/fixture/creatething",
     "pathType": "private",
     "auth": true
   },
   {
-    "service": "compat",
+    "service": "fixture",
     "method": "GET",
-    "path": "/api/compat/public",
+    "path": "/api/fixture/getthing",
     "pathType": "public",
     "auth": false
   }

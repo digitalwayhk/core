@@ -84,7 +84,7 @@
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
-| 15. 公共 API 兼容性与发布治理 | 进行中（15.1 待外部审查） |  | 15.1 已建立兼容性清单、确定性路由/OpenAPI golden 和 `api-compat` 门禁；其余小节未开始 |
+| 15. 公共 API 兼容性与发布治理 | 进行中（15.1 修复待复审） |  | 15.1 已建立兼容性清单、真实路由/OpenAPI golden、冲突门禁和 `api-compat`；首轮审查问题已修复，其余小节未开始 |
 | 16. CI 质量门禁与消费方兼容性矩阵 | 未开始 |  | 必需 CI 层级在干净检出上通过，并发布可操作的失败产物 |
 | 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
 
