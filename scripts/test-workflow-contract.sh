@@ -30,6 +30,7 @@ done
 [[ "$(grep -c 'timeout-minutes:' "$workflow")" -ge 4 ]] || fail "required job 缺少 timeout"
 [[ "$(grep -c 'if:.*always()' "$workflow")" -ge 4 ]] || fail "required job 缺少 always artifact"
 [[ "$(grep -c 'actions/upload-artifact@' "$workflow")" -ge 4 ]] || fail "required job 缺少 artifact 上传"
+[[ "$(grep -c 'GITHUB_STEP_SUMMARY' "$workflow")" -ge 4 ]] || fail "required job 缺少执行摘要"
 grep -Fq 'tools/go.sum' "$workflow" || fail "Go cache 未覆盖 tools/go.sum"
 grep -Fq 'go.sum' "$workflow" || fail "Go cache 未覆盖根 go.sum"
 grep -Eq 'cancel-in-progress:[[:space:]]+true' "$workflow" || fail "未取消同 ref 旧运行"

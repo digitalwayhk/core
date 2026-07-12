@@ -11,10 +11,10 @@
 | `observational/persistence` | 观察（16.2a 修复待审查） | 否 | PR、push | 10 分钟 | `./scripts/test.sh persistence-unit` | 无 | persistence | SQLite `-count=20`、race 与完整 persistence 已本地通过；外部审查通过后评估提升 |
 | `scheduled/stress` | 定时 | 否 | nightly、手工 | 30 分钟 | `./scripts/test.sh concurrency-stress` | 无 | server lifecycle | 20 轮压力长期稳定后评估提升 |
 | `scheduled/integration` | 定时（冷拉取实跑待通过） | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | 信号/超时/锁/诊断/清理契约已通过；锁定镜像冷拉取后 driver contract 需通过 |
+| `consumer/futures` | 手工、发布候选 | 发布时阻断 | workflow_dispatch | 15 分钟 | `./scripts/test-consumer-futures.sh` | futures 精确 Git commit | release/consumer | token/本地对象库可用时必须通过；不可用明确 blocked，不能记 passed |
 
 ## 尚未启用
 
-- `consumer/futures`：任务 16.5 创建精确 commit checkout 与临时 `go.work` 脚本后登记，当前不得报告为通过。
 - etcd、Consul、Redis、NATS、Kafka：等待任务 2/4 明确产品实现和 Compose 服务；当前状态为 `planned/blocked_by_task_2_4`，不以绿色 skip 代替执行。
 
 ## Action 供应链锁定

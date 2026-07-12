@@ -35,7 +35,11 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - run: ./scripts/ci.sh required/quick
+      - id: gate
+        run: ./scripts/ci.sh required/quick
+      - name: 写入执行摘要
+        if: ${{ always() }}
+        run: printf '### required/quick\n\n- 状态：`%s`\n- 复现：`./scripts/ci.sh required/quick`\n' '${{ steps.gate.outcome }}' >>"$GITHUB_STEP_SUMMARY"
       - name: 上传门禁日志
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -62,7 +66,11 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - run: ./scripts/ci.sh required/contracts
+      - id: gate
+        run: ./scripts/ci.sh required/contracts
+      - name: 写入执行摘要
+        if: ${{ always() }}
+        run: printf '### required/contracts\n\n- 状态：`%s`\n- 复现：`./scripts/ci.sh required/contracts`\n' '${{ steps.gate.outcome }}' >>"$GITHUB_STEP_SUMMARY"
       - name: 上传门禁日志
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -89,7 +97,11 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - run: ./scripts/ci.sh required/server-manage
+      - id: gate
+        run: ./scripts/ci.sh required/server-manage
+      - name: 写入执行摘要
+        if: ${{ always() }}
+        run: printf '### required/server-manage\n\n- 状态：`%s`\n- 复现：`./scripts/ci.sh required/server-manage`\n' '${{ steps.gate.outcome }}' >>"$GITHUB_STEP_SUMMARY"
       - name: 上传门禁日志
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -116,7 +128,11 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/go.sum
-      - run: ./scripts/ci.sh required/race
+      - id: gate
+        run: ./scripts/ci.sh required/race
+      - name: 写入执行摘要
+        if: ${{ always() }}
+        run: printf '### required/race\n\n- 状态：`%s`\n- 复现：`./scripts/ci.sh required/race`\n' '${{ steps.gate.outcome }}' >>"$GITHUB_STEP_SUMMARY"
       - name: 上传门禁日志
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

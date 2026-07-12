@@ -32,6 +32,9 @@ case "$GATE" in
   scheduled/integration)
     command=("$ROOT/scripts/test.sh" integration-persistence)
     ;;
+  consumer/futures)
+    command=("$ROOT/scripts/test-consumer-futures.sh")
+    ;;
   *)
     usage
     exit 2
@@ -54,9 +57,12 @@ safe_gate="${GATE//\//-}"
 log_file="$artifact_dir/${safe_gate}.log"
 start_epoch="$(date +%s)"
 go_version="$(go version 2>/dev/null || printf 'go unavailable')"
+os_version="$(uname -s)/$(uname -m)"
 commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf 'unknown')"
+command_display="$(printf '%q ' "${command[@]}")"
 
-printf 'CI_GATE_START gate=%s commit=%s go=%s\n' "$GATE" "$commit" "$go_version"
+printf 'CI_GATE_START gate=%s commit=%s os=%s go=%s command="%s"\n' \
+  "$GATE" "$commit" "$os_version" "$go_version" "${command_display% }"
 set +e
 (
   cd "$ROOT"

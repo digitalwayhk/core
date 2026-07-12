@@ -85,7 +85,7 @@
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
 | 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 当前工作树 smoke 通过；SQLite 环境稳定性转任务 16，skill 待全部计划完成后创建 |
-| 16. CI 质量门禁与消费方兼容性矩阵 | 16.4 开发完成，Docker 实跑待通过 | `a3b5b97`、`b863d3d`、`c030c7f`、`34af55c`、`703228e`、`1a4d66f` | scheduled workflow、stress、Compose watchdog/诊断/清理已验证；冷拉取 5 分钟有界失败且无残留，最终验收前重试 |
+| 16. CI 质量门禁与消费方兼容性矩阵 | 16.5 已完成，任务 16 等待 Docker 实跑 | `a3b5b97`、`b863d3d`、`c030c7f`、`34af55c`、`703228e`、`1a4d66f` | futures 精确 commit smoke、手工 blocked 语义、artifact 元数据和全 workflow summary 已验证；仅 persistence Docker 冷拉取/driver contract 尚待通过 |
 | 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
 
 ## 任务 1：依赖升级隔离

@@ -4,7 +4,7 @@
 
 | 消费方 | 本地 commit | 工具链 | Core 锁定 | 状态 | Smoke |
 | --- | --- | --- | --- | --- | --- |
-| futures | `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` | Go 1.26.1 | `v0.0.247` | 直接消费 | `go test ./gateway/api/... ./internal/pkg/services/... -count=1` |
+| futures | `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` | Go 1.26.1 | `v0.0.247` | 直接消费 | gateway/worker 行为测试 + services 根包仅编译，均通过临时 `go.work` 指向候选 Core |
 | omni-flow-ai/grok | `6865e7c497b76ffd883d56998f2db4669f9c02be` | backend Go 1.24.1 | not-applicable | backend `go.mod` 不依赖 core | 在 core 发布门禁中不运行；由该项目自身构建验证 |
 | ops-ai | `78499df57832577ac0358b7137f0ee39cf9db135` | Node/TypeScript | not-applicable | 当前仓库无 Go module/core 依赖 | 在 core 发布门禁中不运行；执行其自身 agent/build 流程 |
 | ai-ops-platform（提交态） | `a64a3bbf03a014dd0b520f1bf55ab1caa20aaecd` | Go 1.26.0 | `v0.0.247`（`git show a64a3bb:go.mod`） | 可选兼容参考，非当前 ops-ai；可从该 commit 复现 | 仅在仓库恢复为活动消费方后运行其 Go smoke |
@@ -21,3 +21,14 @@ go test ./gateway/api/... ./internal/pkg/services/... -count=1 -timeout=10m
 ```
 
 omni-flow/grok 与当前 ops-ai 已按上表证据判定 not-applicable，不伪造 Core 消费测试结果。
+
+## 任务 16.5 门禁收敛
+
+矩阵原命令包含 `./internal/pkg/services/...` 的全部行为测试，但同一精确 futures commit 在其锁定 Core `v0.0.247` 下已有服务注册、心跳和 Redis mock 失败，不能作为候选 Core 的有效通过基线。任务 16.5 将可复现 smoke 收敛为：
+
+```bash
+go test ./gateway/api/... ./internal/pkg/services/worker/... -count=1 -timeout=10m
+go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
+```
+
+第一条运行基线稳定行为，第二条仍编译 services 根包以捕获 Go API 破坏。已知红行为测试不计为候选通过，也不伪装成已验证；其修复属于 futures owner。

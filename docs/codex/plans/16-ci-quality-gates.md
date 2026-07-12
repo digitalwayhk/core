@@ -186,7 +186,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 ## 16.5 消费方 smoke、失败产物与总验收
 
-**状态：** 未开始，依赖 16.1-16.4 审查通过。
+**状态：** 开发与消费方验证完成；任务 16 总验收等待 Docker integration 通过。
 
 **文件：**
 
@@ -212,6 +212,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 ./scripts/ci.sh observational/persistence
 ./scripts/test.sh release-contract
 ```
+
+**开发与验证记录（2026-07-13）：** 新增 futures 精确 commit smoke：从本地对象库 archive 到临时目录，使用临时 `go.work` 指向候选 Core，测试前后校验源工作树及临时 `go.mod/go.sum` 不变；缺仓库/commit 明确返回 blocked(3)。手工 workflow 在缺跨仓库 token 时保留 blocked 证据并非绿退出。原矩阵全量 services 行为命令在锁定 Core `v0.0.247` 下已有相同基线失败，故调整为 gateway/worker 稳定行为测试加 services 根包编译，当前候选 Core smoke 通过。`ci.sh` 产物元数据补齐 gate、commit、OS、Go、命令、退出码和耗时，required/scheduled/consumer workflow 均生成真实状态 summary。
 
 ## 每小节外部审查反馈格式
 
