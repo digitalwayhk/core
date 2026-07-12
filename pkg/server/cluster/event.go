@@ -258,11 +258,15 @@ func (b *CrossNodeNoticeBroker) post(node *NodeInfo, path string, payload interf
 	if b.sender != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if _, err := b.sender(ctx, target, data, path); err == nil {
+		if _, senderErr := b.sender(ctx, target, data, path); senderErr == nil {
 			return nil
+		} else {
+			logx.Infow("cross_node_transport_fallback",
+				logx.Field("node_id", node.ID),
+				logx.Field("fallback_transport", "http"),
+				logx.Field("error", senderErr),
+			)
 		}
-		// Fall through to direct HTTP on sender failure.
-		logx.Errorf("CrossNodeBroker: sender failed for %s, falling back to direct HTTP: %v", node.ID, err)
 	}
 
 	url := fmt.Sprintf("http://%s:%d%s", node.Address, node.Port, path)

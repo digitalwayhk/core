@@ -3,12 +3,12 @@
 package quic
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type Server struct {
@@ -27,10 +27,12 @@ func NewServer(context *router.ServiceContext) *Server {
 }
 
 func (own *Server) Start() {
-	s1 := fmt.Sprintf("Starting %s server QUIC at %s:%d success\n", own.context.Config.Name, own.context.Config.RunIp, own.context.Config.Port+100)
-	fmt.Print(s1)
+	logx.Infow("quic_compat_server_starting",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("port", own.context.Config.Port+100),
+	)
 	if err := own.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		panic(err)
+		logx.Errorw("quic_compat_server_failed", logx.Field("error", err))
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +19,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/digitalwayhk/core/pkg/server/trans/socket"
 
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/proc"
 	"github.com/zeromicro/go-zero/core/service"
 )
@@ -145,10 +145,8 @@ func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 func (own *WebServer) serviceStartContexts(contexts []*router.ServiceContext) {
 	for _, ctx := range contexts {
 		if start, ok := ctx.Service.Instance.(types.IStartService); ok {
-			fmt.Println("===========================================================")
-			fmt.Println("服务" + ctx.Service.Name + "的IStartService接口开始执行")
+			logx.Infow("service_hook_starting", logx.Field("service", ctx.Service.Name))
 			go start.Start()
-			fmt.Println("===========================================================")
 		}
 	}
 }
@@ -168,8 +166,7 @@ func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
 	if !islink {
 		return
 	}
-	fmt.Println("===========================================================")
-	fmt.Println("全部服务启动成功，开始连接依赖服务。。。")
+	logx.Infow("service_dependencies_linking", logx.Field("service_count", len(contexts)))
 	for _, ctx := range contexts {
 		for _, cfg := range ctx.Config.AttachServices {
 			if cfg.Address == "" && cfg.Port == 0 {
@@ -185,19 +182,25 @@ func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
 				ctx.SetAttachServiceAddress(cfg.Name)
 				err := ctx.RegisterObserve(&public.Observe{})
 				if err != nil {
-					msg := ctx.Service.Name + "服务中连接" + cfg.Name + "服务,地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "异常，异常信息：" + err.Error()
-					fmt.Println(msg)
+					logx.Errorw("service_dependency_link_failed",
+						logx.Field("service", ctx.Service.Name),
+						logx.Field("dependency", cfg.Name),
+						logx.Field("error", err),
+					)
 				} else {
-					msg := ctx.Service.Name + "服务中连接" + cfg.Name + "服务,地址:" + cfg.Address + ":" + strconv.Itoa(cfg.Port) + "成功"
-					fmt.Println(msg)
+					logx.Infow("service_dependency_linked",
+						logx.Field("service", ctx.Service.Name),
+						logx.Field("dependency", cfg.Name),
+					)
 				}
 			} else {
-				msg := cfg.Name + "服务待连接,但未设置地址和端口，请设置地址的端口号"
-				fmt.Println(msg)
+				logx.Errorw("service_dependency_address_missing",
+					logx.Field("service", ctx.Service.Name),
+					logx.Field("dependency", cfg.Name),
+				)
 			}
 		}
 	}
-	fmt.Println("===========================================================")
 }
 
 func (own *WebServer) AddIService(service types.IService, option ...*types.ServerOption) {

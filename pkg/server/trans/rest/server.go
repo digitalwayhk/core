@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,17 +92,20 @@ func (own *Server) Start() {
 
 	pid := utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port)
 	if pid {
-		panic(fmt.Sprintf("%s 服务的端口%d被占用,不能启动服务", own.context.Service.Name, own.context.Config.Port))
+		logx.Errorw("service_start_failed",
+			logx.Field("service", own.context.Service.Name),
+			logx.Field("port", own.context.Config.Port),
+			logx.Field("error", "port already in use"),
+		)
+		return
 	}
 	go own.checkRun()
-	s1 := fmt.Sprintf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
-	if own.IsWebSocket {
-		s2 := fmt.Sprintf("Starting %s websocket at %s:%d success,path:%s:%d/ws \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		//s3 := fmt.Sprintf("Starting %s websocket auth at %s:%d success,path:%s:%d/wsauth \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		fmt.Print(s1, s2)
-	} else {
-		fmt.Print(s1)
-	}
+	logx.Infow("service_starting",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("host", own.context.Config.Host),
+		logx.Field("port", own.context.Config.Port),
+		logx.Field("websocket", own.IsWebSocket),
+	)
 	own.Server.StartWithOpts(func(server *http.Server) {
 		own.lifecycleMu.Lock()
 		own.httpServer = server
@@ -162,9 +164,10 @@ func (own *Server) Stop() {
 func (own *Server) register() error {
 	routers := own.context.Router.GetRouters()
 	count := len(routers)
-	fmt.Println("===========================================================")
-	fmt.Printf("%s Register Service Routes Start. \n", own.context.Config.Name)
-	fmt.Println("Routes Count : " + strconv.Itoa(count))
+	logx.Debugw("routes_registering",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route_count", count),
+	)
 	for _, api := range routers {
 		if err := handers(own, api); err != nil {
 			return err
@@ -174,8 +177,10 @@ func (own *Server) register() error {
 		own.websocket()
 		//own.websocketauth()
 	}
-	fmt.Printf("%s Register Service Routes End. \n", own.context.Config.Name)
-	fmt.Println("===========================================================")
+	logx.Debugw("routes_registered",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route_count", count),
+	)
 	return nil
 }
 
@@ -220,7 +225,12 @@ func handers(own *Server, api *types.RouterInfo) error {
 			Handler: handler,
 		},
 	}, opts...)
-	fmt.Printf("register auth: %t ,method: %s ,route: %s \n", api.Auth, api.Method, path)
+	logx.Debugw("route_registered",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route", path),
+		logx.Field("method", api.Method),
+		logx.Field("auth", api.Auth),
+	)
 	return nil
 }
 

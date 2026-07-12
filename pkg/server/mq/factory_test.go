@@ -1,8 +1,10 @@
 package mq_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type factoryTestProvider struct{ name string }
@@ -43,6 +46,16 @@ func TestBuildManager_ModeOnReturnsError(t *testing.T) {
 }
 
 func TestBuildManager_AutoDegradesOnProviderError(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() {
+		logx.Reset()
+		if previous != nil {
+			logx.SetWriter(previous)
+		}
+	})
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -56,6 +69,9 @@ func TestBuildManager_AutoDegradesOnProviderError(t *testing.T) {
 	mgr, err := mq.BuildManager(ctx, cfg)
 	require.NoError(t, err)
 	assert.Nil(t, mgr)
+	assert.Contains(t, output.String(), "mq_degraded")
+	assert.Contains(t, output.String(), "redis-stream")
+	assert.True(t, strings.Contains(output.String(), `"level":"info"`) || strings.Contains(output.String(), `"level": "info"`))
 }
 
 func TestBuildManager_RegisteredCustomProviderBuilds(t *testing.T) {

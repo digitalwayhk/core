@@ -117,10 +117,12 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	api := info.New()
 	defer func() {
 		if err := recover(); err != nil {
-			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
-			// 获取调用栈字符串并打印
-			stack := debug.Stack()
-			fmt.Printf("\nStack trace:\n%s\n", stack)
+			logx.Errorw("openapi_router_panicked",
+				logx.Field("service", info.ServiceName),
+				logx.Field("route", info.Path),
+				logx.Field("error", err),
+				logx.Field("stack", string(debug.Stack())),
+			)
 		}
 	}()
 	if method == "GET" {

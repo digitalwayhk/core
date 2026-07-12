@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type GetRouterPath interface {
@@ -147,7 +148,11 @@ func GetRouterPackAndTypeName(item interface{}) (string, string) {
 func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Printf("创建路由发生异常，Pack:%s,Name:%s,Error:%v,Item:%s", pack, name, err, utils.PrintObj(item))
+			logx.Errorw("router_creation_panicked",
+				logx.Field("package", pack),
+				logx.Field("router", name),
+				logx.Field("error", err),
+			)
 		}
 	}()
 	index := strings.Index(pack, "api")

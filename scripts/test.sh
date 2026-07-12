@@ -6,6 +6,7 @@ cd "$ROOT"
 
 case "${1:-quick}" in
   quick)
+	"$ROOT/scripts/check-logging.sh"
     go vet ./pkg/server/...
     go test ./pkg/utils ./service/manage ./pkg/persistence/types -count=1
     ;;

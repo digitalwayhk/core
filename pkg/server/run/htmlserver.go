@@ -4,7 +4,6 @@ import (
 	"context"
 	"embed"
 	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -84,11 +83,6 @@ func (own *HTMLServer) Start() {
 		data, _ := qs.Do(nil)
 		httpx.OkJson(w, data)
 	})
-	pts := ""
-	if own.Port != 80 {
-		pts = ":" + strconv.Itoa(own.Port)
-	}
-	fmt.Println("===========================================================")
 	var isview = true
 	if own.Parent != nil {
 		ops := own.Parent.GetServerOptions()
@@ -100,7 +94,11 @@ func (own *HTMLServer) Start() {
 					mux.Handle("/", http.FileServer(http.FS(op.Demo.File)))
 					isview = false
 				}
-				fmt.Printf("%s的Demo服务已经启动,请访问 http://localhost%s/%s 查看\n", n, pts, op.Demo.Pattern)
+				logx.Infow("demo_server_ready",
+					logx.Field("service", n),
+					logx.Field("port", own.Port),
+					logx.Field("pattern", op.Demo.Pattern),
+				)
 			}
 		}
 	}
@@ -111,9 +109,8 @@ func (own *HTMLServer) Start() {
 		// http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 	http.ServeFile(w, r, "dist/index.html")
 		// })
-		fmt.Printf("开发视图服务已经启动,请访问 http://localhost%s 查看\n", pts)
+		logx.Infow("development_view_ready", logx.Field("port", own.Port))
 	}
-	fmt.Println("===========================================================")
 	server := &http.Server{
 		Addr:    ":" + strconv.Itoa(own.Port),
 		Handler: mux,

@@ -10,7 +10,7 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-// 🆕 分片管理 WebSocket 连接
+// 分片管理 WebSocket 连接
 const shardCount = 128 // 分片数量（支持 10 万连接）
 
 type websocketShard struct {
@@ -18,7 +18,7 @@ type websocketShard struct {
 	mu      sync.RWMutex
 }
 
-// 🔧 优化注册（使用分片）
+// 优化注册（使用分片）
 func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) uint64 {
 	if router == nil || client == nil || req == nil {
 		return 0
@@ -26,7 +26,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 
 	own.ensureWebSocketInit()
 
-	// 🔧 处理私有类型
+	//  处理私有类型
 	if own.PathType == PrivateType {
 		id, _ := req.GetUser()
 		utils.SetPropertyValue(router, "userid", id)
@@ -34,7 +34,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 
 	hash := getApiHash(router)
 
-	// 🔧 注册路由参数（全局锁，但很快）
+	//  注册路由参数（全局锁，但很快）
 	own.Lock()
 	if own.rArgs == nil {
 		own.rArgs = make(map[uint64]IRouter)
@@ -50,13 +50,13 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	}
 	own.Unlock()
 
-	// 🔧 注册客户端（只锁单个分片）
+	//  注册客户端（只锁单个分片）
 	shard := own.getShard(hash)
 	shard.mu.Lock()
 	shard.clients[client] = req
 	shard.mu.Unlock()
 
-	// 🔧 在锁外调用接口
+	//  在锁外调用接口
 	if needRegister {
 		if iwsr, ok := router.(IWebSocketRouter); ok {
 			func() {
@@ -79,13 +79,13 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 	return hash
 }
 
-// 🔧 优化注销
+// 优化注销
 func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	if client == nil {
 		return
 	}
 
-	// 🔧 只锁单个分片
+	//  只锁单个分片
 	shard := own.getShard(hash)
 	shard.mu.Lock()
 	req, existed := shard.clients[client]
@@ -99,7 +99,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 		return
 	}
 
-	// 🔧 检查是否需要清理路由
+	//  检查是否需要清理路由
 	var needUnregister bool
 	var api IRouter
 
@@ -121,7 +121,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	}
 	own.Unlock()
 
-	// 🔧 在锁外调用接口
+	//  在锁外调用接口
 	if needUnregister && api != nil {
 		if iwsr, ok := api.(IWebSocketRouter); ok {
 			func() {
@@ -145,7 +145,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	}
 }
 
-// 🔧 优化广播（使用单例）
+// 优化广播（使用单例）
 func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	if own == nil {
 		logx.Errorf("NoticeWebSocket: RouterInfo is nil")
@@ -157,17 +157,20 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		return
 	}
 
-	// 🔧 获取并启动全局系统（单例）
+	//  获取并启动全局系统（单例）
 	notifySys := getGlobalNotificationSystem()
 	notifySys.Start()
 
-	// 🆕 健康检查
+	//  健康检查
 	if !notifySys.IsHealthy() {
-		logx.Errorf("通知系统不健康，跳过广播")
+		logx.Errorw("websocket_broadcast_skipped",
+			logx.Field("route", own.Path),
+			logx.Field("error", "notification system unhealthy"),
+		)
 		return
 	}
 
-	// 🆕 确保分片已初始化
+	//  确保分片已初始化
 	if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
 		own.ensureWebSocketInit()
 
@@ -177,7 +180,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		}
 	}
 
-	// 🔧 快速收集 hash 列表（只读锁）
+	//  快速收集 hash 列表（只读锁）
 	own.RLock()
 	if len(own.rArgs) == 0 {
 		own.RUnlock()
@@ -190,7 +193,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	}
 	own.RUnlock()
 
-	// 🔧 异步提交任务
+	//  异步提交任务
 	go func() {
 		submitted := 0
 		dropped := 0
@@ -224,7 +227,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 			}
 		}
 
-		// 🆕 只在有丢弃时才打印
+		//  只在有丢弃时才打印
 		if dropped > 0 {
 			logx.Errorf("%s 提交任务: 成功:%d, 丢弃:%d",
 				own.Path, submitted, dropped)
@@ -240,7 +243,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	}()
 }
 
-// 🔧 批量发送
+// 批量发送
 func (own *RouterInfo) sendBatch(clients []IWebSocket, hashStr string, data interface{}) {
 	for _, ws := range clients {
 		func() {
@@ -266,7 +269,7 @@ func (own *RouterInfo) sendBatch(clients []IWebSocket, hashStr string, data inte
 	}
 }
 
-// 🔧 优化清理（并发清理分片）
+// 优化清理（并发清理分片）
 func (own *RouterInfo) CleanupDeadConnections() {
 	var wg sync.WaitGroup
 	totalDead := 0
@@ -305,7 +308,7 @@ func (own *RouterInfo) CleanupDeadConnections() {
 	}
 }
 
-// 🔧 统计活跃连接
+// 统计活跃连接
 func (own *RouterInfo) GetActiveClientCount() int {
 	count := 0
 	for i := 0; i < shardCount; i++ {
@@ -321,15 +324,15 @@ func (own *RouterInfo) GetActiveClientCount() int {
 	return count
 }
 
-// 🔧 发送到分片客户端（添加完整的防御性检查）
+// 发送到分片客户端（添加完整的防御性检查）
 func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}) {
-	// 🆕 第一层防御：检查 RouterInfo 本身
+	//  第一层防御：检查 RouterInfo 本身
 	if own == nil {
 		logx.Error("sendToHashClients: RouterInfo is nil")
 		return
 	}
 
-	// 🆕 第二层防御：检查分片数组是否初始化
+	//  第二层防御：检查分片数组是否初始化
 	if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
 		logx.Errorf("sendToHashClients: 分片未初始化 for %s, 尝试初始化", own.Path)
 		own.ensureWebSocketInit()
@@ -343,13 +346,13 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 
 	shard := own.getShard(hash)
 
-	// 🆕 第三层防御：检查分片本身
+	//  第三层防御：检查分片本身
 	if shard == nil {
 		logx.Errorf("sendToHashClients: 分片 %d 为 nil for %s", hash%shardCount, own.Path)
 		return
 	}
 
-	// 🔧 快速收集客户端
+	//  快速收集客户端
 	shard.mu.RLock()
 	clientCount := len(shard.clients)
 	if clientCount == 0 {
@@ -374,7 +377,7 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 	// 	logx.Field("path", own.Path),
 	// 	logx.Field("data", utils.PrintObj(message)),
 	// )
-	// 🔧 批量发送
+	//  批量发送
 	own.recordWebSocketBroadcast(len(clients))
 	hashStr := strconv.FormatUint(hash, 10)
 
@@ -391,7 +394,7 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 	logx.Infof("已启动 %d 个批次发送任务 for %s", (len(clients)+batchSize-1)/batchSize, own.Path)
 }
 
-// 🔧 优化 getShard（添加边界检查）
+// 优化 getShard（添加边界检查）
 func (own *RouterInfo) getShard(hash uint64) *websocketShard {
 	if own == nil || len(own.rWebSocketShards) == 0 {
 		return nil
@@ -407,22 +410,22 @@ func (own *RouterInfo) getShard(hash uint64) *websocketShard {
 	return own.rWebSocketShards[index]
 }
 
-// 🔧 确保分片初始化是线程安全的
+// 确保分片初始化是线程安全的
 func (own *RouterInfo) ensureWebSocketInit() {
 	own.once.Do(func() {
-		// 🔧 1. 先初始化分片
+		//  1. 先初始化分片
 		if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
 			own.initShards()
 		}
 
-		// 🔧 2. 再初始化统计（依赖分片）
+		//  2. 再初始化统计（依赖分片）
 		if own.stats == nil {
 			own.initStats()
 		}
 
-		// 🔧 3. 注册到全局清理
+		//  3. 注册到全局清理
 		websocketcleanupOnce.Do(func() {
-			logx.Info("🚀 启动全局WebSocket清理任务")
+			logx.Info(" 启动全局WebSocket清理任务")
 			StartPeriodicCleanup()
 		})
 
@@ -438,7 +441,7 @@ func (own *RouterInfo) ensureWebSocketInit() {
 	})
 }
 
-// 🔧 修复 initShards，添加日志
+// 修复 initShards，添加日志
 func (own *RouterInfo) initShards() {
 	if len(own.rWebSocketShards) > 0 && own.rWebSocketShards[0] != nil {
 		// 已经初始化过
@@ -454,7 +457,7 @@ func (own *RouterInfo) initShards() {
 	}
 	own.rHashClients = make(map[uint64]int)
 
-	logx.Infof("✅ 分片初始化完成 for %s", own.Path)
+	logx.Infof(" 分片初始化完成 for %s", own.Path)
 }
 
 // ExecuteLocalNotice delivers a forwarded cross-node notice to local subscribers

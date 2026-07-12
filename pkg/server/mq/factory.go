@@ -52,7 +52,10 @@ func BuildManager(ctx context.Context, cfg *config.MQConfig) (*MQManager, error)
 	provider, err := buildProvider(ctx, cfg)
 	if err != nil {
 		if cfg.Mode == "auto" && errors.Is(err, ErrProviderUnavailable) {
-			logx.Errorf("mq: provider %q unavailable: %v", cfg.Provider, err)
+			logx.Infow("mq_degraded",
+				logx.Field("provider", cfg.Provider),
+				logx.Field("error", err),
+			)
 			return nil, nil
 		}
 		return nil, err

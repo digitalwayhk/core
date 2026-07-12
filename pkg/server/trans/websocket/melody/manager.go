@@ -461,7 +461,11 @@ func (mm *MelodyManager) cleanupSession(s *melody.Session) {
 }
 func (mm *MelodyManager) sendToSession(s *melody.Session, event, channel string, data interface{}) {
 	if s == nil || s.IsClosed() {
-		logx.Errorf("跳过向已关闭连接发送消息: event=%s, channel=%s", event, channel)
+		logx.Debugw("websocket_send_skipped",
+			logx.Field("event", event),
+			logx.Field("channel", channel),
+			logx.Field("reason", "session_closed"),
+		)
 		return
 	}
 	msg := &Message{

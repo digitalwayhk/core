@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/mail"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -26,23 +25,8 @@ import (
 )
 
 func PrintObj(o interface{}) string {
-	ot := reflect.TypeOf(o)
-	ntype := ot.Kind()
-	if ntype == reflect.Array || ntype == reflect.Slice {
-		s := reflect.ValueOf(o)
-		var ss string
-		for i := 0; i < s.Len(); i++ {
-			oo := s.Index(i).Interface()
-			b, _ := json.Marshal(oo)
-			ss := string(b)
-			fmt.Println(ss)
-		}
-		return ss
-	} else {
-		b, _ := json.Marshal(o)
-		s := string(b)
-		return s
-	}
+	b, _ := json.Marshal(o)
+	return string(b)
 }
 
 func GetRandNum(n int) int {

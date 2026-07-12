@@ -24,7 +24,11 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 			if cfg.Mode == "on" {
 				return nil, fmt.Errorf("cluster: etcd required but unavailable: %w", err)
 			}
-			logx.Errorf("cluster: etcd unavailable, falling back to local: %v", err)
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "etcd"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
 			return sharedLocal, nil
 		}
 		return p, nil
@@ -34,7 +38,11 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 			if cfg.Mode == "on" {
 				return nil, fmt.Errorf("cluster: consul required but unavailable: %w", err)
 			}
-			logx.Errorf("cluster: consul unavailable, falling back to local: %v", err)
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "consul"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
 			return sharedLocal, nil
 		}
 		return p, nil

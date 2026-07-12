@@ -412,7 +412,10 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		if con.Cluster.Mode == "on" {
 			panic(fmt.Sprintf("cluster: required provider init failed (mode=on): %v", err))
 		}
-		logx.Errorf("cluster: init failed (degraded): %v", err)
+		logx.Infow("cluster_degraded",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("error", err),
+		)
 	}
 	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
 		// Any error from BuildSelector means the user explicitly configured a
@@ -821,14 +824,34 @@ func runobservemap() {
 			}
 			values, err := own.Service.CallService(v)
 			if err != nil {
-				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), err.Error())
+				logx.Errorw("observe_call_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+					logx.Field("error", err),
+				)
 			}
 			res := &Response{}
-			json.Unmarshal(values, res)
+			if err := json.Unmarshal(values, res); err != nil {
+				logx.Errorw("observe_response_decode_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("error", err),
+				)
+				continue
+			}
 			if !res.Success {
-				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), res.ErrorMessage)
+				logx.Errorw("observe_response_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+				)
 			} else {
-				logx.Infof("%s Observe TargetAddress:%s, TargetService:%s, TargetPath:%s Success", own.Service.Name, v.TargetAddress, v.TargetService, v.TargetPath)
+				logx.Debugw("observe_call_completed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+				)
 			}
 		}
 		obseLock.Unlock()
@@ -836,11 +859,9 @@ func runobservemap() {
 }
 func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
 	if oa.ServiceName == "" || oa.Topic == "" {
-		logx.Error(utils.PrintObj(info))
 		return false, errors.New("observeCall ServiceName or Topic is empty")
 	}
 	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
-		logx.Error(utils.PrintObj(info))
 		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
 	}
 	oa.OwnAddress = own.Config.RunIp
@@ -981,12 +1002,25 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	} else {
 		values, err := own.sendPayload(context.Background(), payload)
 		if err != nil {
-			logx.Errorf("CallService 网络错误 Payload:%s ,Error:%s", utils.PrintObj(payload), err.Error())
+			logx.Errorw("service_call_failed",
+				logx.Field("service", own.Service.Name),
+				logx.Field("target_service", payload.TargetService),
+				logx.Field("target_route", payload.TargetPath),
+				logx.Field("trace_id", payload.TraceID),
+				logx.Field("error", err),
+			)
 			return nil, err
 		}
 		err = json.Unmarshal(values, res)
 		if err != nil {
-			logx.Errorf("CallService 数据错误 Payload:%s, Values:%s ,Error:%s", utils.PrintObj(payload), string(values), err.Error())
+			logx.Errorw("service_response_decode_failed",
+				logx.Field("service", own.Service.Name),
+				logx.Field("target_service", payload.TargetService),
+				logx.Field("target_route", payload.TargetPath),
+				logx.Field("trace_id", payload.TraceID),
+				logx.Field("response_bytes", len(values)),
+				logx.Field("error", err),
+			)
 			return nil, err
 		}
 	}
@@ -1017,7 +1051,13 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 				return result, nil
 			}
 			lastErr = err
-			logx.Errorf("transport selector failed: %v (attempt %d/%d)", err, attempt+1, maxRetries)
+			logx.Debugw("transport_retry",
+				logx.Field("service", own.Service.Name),
+				logx.Field("target_service", payload.TargetService),
+				logx.Field("attempt", attempt+1),
+				logx.Field("max_attempts", maxRetries),
+				logx.Field("error", err),
+			)
 
 			if attempt < maxRetries-1 && retryDelay > 0 {
 				sleepDuration := retryDelay * time.Duration(1<<attempt)
@@ -1034,7 +1074,13 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 			}
 		}
 		// All transport retries exhausted; one-shot legacy HTTP fallback.
-		logx.Errorf("transport selector exhausted after %d attempts (last: %v), falling back to legacy HTTP", maxRetries, lastErr)
+		logx.Infow("transport_fallback",
+			logx.Field("service", own.Service.Name),
+			logx.Field("target_service", payload.TargetService),
+			logx.Field("attempts", maxRetries),
+			logx.Field("fallback_transport", "legacy_http"),
+			logx.Field("error", lastErr),
+		)
 		return own.Service.CallService(payload)
 	}
 	// No TransportSelector: one-shot legacy path, no retry.

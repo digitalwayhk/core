@@ -100,7 +100,11 @@ func (s *clusterSwitcher) Begin(ctx context.Context, to DiscoveryProvider) error
 	s.mu.Unlock()
 	go s.runReconciler(migration)
 	if initialErr != nil {
-		logx.Errorf("cluster switcher: 首次对账到 %s 失败，将自动重试: %v", to.Name(), initialErr)
+		logx.Debugw("cluster_reconcile_retry",
+			logx.Field("provider", to.Name()),
+			logx.Field("attempt", 1),
+			logx.Field("error", initialErr),
+		)
 		signalMigrationRefresh(migration)
 	}
 	return nil
@@ -207,7 +211,10 @@ func (s *clusterSwitcher) runReconciler(migration *providerMigration) {
 			if err == nil {
 				break
 			}
-			logx.Errorf("cluster switcher: 对账到 %s 失败，正在重试: %v", migration.pending.Name(), err)
+			logx.Debugw("cluster_reconcile_retry",
+				logx.Field("provider", migration.pending.Name()),
+				logx.Field("error", err),
+			)
 
 			timer := time.NewTimer(backoff)
 			select {

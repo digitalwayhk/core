@@ -11,7 +11,6 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -77,7 +76,11 @@ func (own *Server) Start() {
 	own.register()
 	err := own.tcpLisen()
 	if err != nil {
-		panic(err)
+		logx.Errorw("socket_server_start_failed",
+			logx.Field("service", own.Name),
+			logx.Field("port", own.Port),
+			logx.Field("error", err),
+		)
 	}
 }
 func (own *Server) Stop() {
@@ -97,10 +100,11 @@ func (own *Server) tcpLisen() error {
 	listen, err := net.Listen("tcp", net.JoinHostPort(own.IP, fmt.Sprint(own.Port)))
 	if err != nil {
 		return fmt.Errorf("listen failed, err:%v", err)
-	} else {
-		//fmt.Println("===========================================================")
-		fmt.Printf("Starting %s socket listen %s:%d success\n", own.Name, own.IP, own.Port)
 	}
+	logx.Infow("socket_server_started",
+		logx.Field("service", own.Name),
+		logx.Field("port", own.Port),
+	)
 	own.listen = listen
 	for {
 		if own.listen != nil {
@@ -141,8 +145,6 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 
 }
 func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
-	logx.Info("socket Send :" + utils.PrintObj(payload))
-	//defer own.Unlock()
 	values, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

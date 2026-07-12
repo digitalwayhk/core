@@ -3,7 +3,6 @@ package socket
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"net"
 	"time"
 
@@ -16,15 +15,16 @@ type Client struct {
 }
 
 func echo(conn *net.TCPConn) {
-	tick := time.Tick(5 * time.Second) // 五秒的心跳间隔
-	for now := range tick {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for now := range ticker.C {
 		n, err := conn.Write([]byte(now.String()))
 		if err != nil {
-			log.Println(err)
-			conn.Close()
+			logx.Errorw("socket_heartbeat_failed", logx.Field("error", err))
+			_ = conn.Close()
 			return
 		}
-		fmt.Printf("send %d bytes to %s\n", n, conn.RemoteAddr())
+		logx.Debugw("socket_heartbeat_sent", logx.Field("bytes", n))
 	}
 }
 

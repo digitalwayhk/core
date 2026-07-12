@@ -156,7 +156,12 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 		own.putRouter(api)
 
 		if err := recover(); err != nil {
-			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
+			logx.Errorw("router_execution_panicked",
+				logx.Field("service", own.ServiceName),
+				logx.Field("route", own.Path),
+				logx.Field("trace_id", req.GetTraceId()),
+				logx.Field("error", err),
+			)
 			if resp == nil {
 				cause := fmt.Errorf("%v", err)
 				panicErr := NewTypeErrorWithCause(own.ServiceName, own.Path, "panic", cause.Error(), 500, cause)
@@ -168,8 +173,6 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	if err != nil {
 		msg := fmt.Sprintf("参数解析异常:%s", err)
 		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "parse", msg, 600, err)
-		logx.Error(err)
-		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
 	}
 	return own.ExecDo(api, req)
@@ -186,10 +189,13 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 			return
 		}
 		if err := recover(); err != nil {
-			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
-			// 获取调用栈字符串并打印
-			stack := debug.Stack()
-			fmt.Printf("\nStack trace:\n%s\n", stack)
+			logx.Errorw("router_do_panicked",
+				logx.Field("service", own.ServiceName),
+				logx.Field("route", own.Path),
+				logx.Field("trace_id", req.GetTraceId()),
+				logx.Field("error", err),
+				logx.Field("stack", string(debug.Stack())),
+			)
 
 			// 🆕 记录异常
 			own.recordRequestEnd(startTime, fmt.Errorf("%v", err))
@@ -203,8 +209,6 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	if err != nil {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
 		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "validation", msg, 700, err)
-		logx.Error(err)
-		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
 	}
 
@@ -227,8 +231,6 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	if err != nil {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
 		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "do", msg, 800, err)
-		logx.Error(err)
-		fmt.Println(err.Error())
 	} else {
 		if own.useCache && data != nil {
 			own.setCache(api, data)
