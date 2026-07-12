@@ -218,7 +218,7 @@ git diff --exit-code -- api/public-api.txt
 
 - 将 `api-compat`、`public-api`、`release-contract` 模式接入总验收，但保持任务 16 才负责 CI workflow、required checks 和失败产物上传。
 - 更新 `docs/codex/PROJECT_REVIEW_ACTION_PLAN.md`：记录每小节提交、外部审查结论、命令与耗时。
-- 任务 15.5 完成并通过最终外部审查后，再基于最终 API、发布策略和场景指南统一重建 Copilot/Codex skill，禁止从已删除旧文件恢复陈旧内容。
+- 任务 15.5 完成后仍不立即重建 skill；待任务 16、17 及总计划其余工作全部完成，再基于最终 API、发布策略和场景指南统一创建 Copilot/Codex skill，禁止从已删除旧文件恢复陈旧内容。
 - 任务 15 的最终外部审查范围必须从任务 14 完成提交之后的基线到任务 15 最终提交，检查跨小节兼容性，而不只看最后一个 diff。
 
 **最终验收：**
@@ -232,7 +232,7 @@ git diff --exit-code -- api/public-api.txt
 go test ./pkg/server/... ./pkg/persistence/... ./service/manage/... -count=1 -timeout=10m
 ```
 
-**总验收记录（2026-07-13）：** `release-contract` 全绿；server/persistence/manage 全量回归退出码 0。使用临时 `go.work` 将 futures 指向当前 Core 工作树，`gateway/api/...` 与 `internal/pkg/services/...` smoke 在 Go 1.26.5 下退出码 0，消费方文件未修改。omni-flow/grok、ops-ai 依据真实仓库保持 not-applicable。正式发布模式的缺版本、非法版本和脏树负向测试均失败且 tag 数不变。等待任务 15 全范围外部审查，通过后才统一重建最终 skill。
+**总验收记录（2026-07-13）：** `release-contract`、server/manage 回归和错误路径 race 全绿；本地一次 server/persistence/manage 合并回归退出码 0，但最终外部审查在其环境中复现 SQLite `disk I/O`/timeout，确认未由任务 15 diff 引入并作为任务 16 的环境稳定性 P2。使用临时 `go.work` 将 futures 指向当前 Core 工作树，`gateway/api/...` 与 `internal/pkg/services/...` smoke 在 Go 1.26.5 下退出码 0，消费方文件未修改。omni-flow/grok、ops-ai 依据真实仓库保持 not-applicable。正式发布模式的缺版本、非法版本和脏树负向测试均失败且 tag 数不变。任务 15 最终外部审查结论为 APPROVED，无 P0/P1，可以关闭并进入任务 16；skill 等全部计划完成后再创建。
 
 ## 每小节外部审查反馈格式
 
@@ -252,11 +252,11 @@ go test ./pkg/server/... ./pkg/persistence/... ./service/manage/... -count=1 -ti
 
 ## 完成定义
 
-- [ ] 公共兼容性清单来自当前代码和真实消费方证据。
-- [ ] HTTP 状态不再由错误文字决定，客户端不暴露内部原因。
-- [ ] 路由、OpenAPI 和导出 Go API 均有确定性、可审查、默认不覆盖的基线。
-- [ ] 配置契约继续由任务 14 矩阵唯一维护，不产生重复字段清单。
-- [ ] 现有废弃 API 有版本、替代方案、迁移测试和最早删除窗口。
-- [ ] changelog、发布检查、回滚和消费方锁定可复现。
-- [ ] 每个小节均有独立提交、定向测试和外部审查结论。
-- [ ] 总计划已记录任务 15 的提交哈希与最终门禁证据。
+- [x] 公共兼容性清单来自当前代码和真实消费方证据。
+- [x] HTTP 状态不再由错误文字决定，客户端不暴露内部原因。
+- [x] 路由、OpenAPI 和导出 Go API 均有确定性、可审查、默认不覆盖的基线。
+- [x] 配置契约继续由任务 14 矩阵唯一维护，不产生重复字段清单。
+- [x] 现有废弃 API 有版本、替代方案、迁移测试和最早删除窗口。
+- [x] changelog、发布检查、回滚和消费方锁定可复现。
+- [x] 每个小节均有独立提交、定向测试和外部审查结论。
+- [x] 总计划已记录任务 15 的提交哈希与最终门禁证据。
