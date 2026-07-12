@@ -1,0 +1,16 @@
+[
+  {
+    "service": "compat",
+    "method": "POST",
+    "path": "/api/compat/private",
+    "pathType": "private",
+    "auth": true
+  },
+  {
+    "service": "compat",
+    "method": "GET",
+    "path": "/api/compat/public",
+    "pathType": "public",
+    "auth": false
+  }
+]

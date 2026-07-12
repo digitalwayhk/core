@@ -27,6 +27,9 @@ case "${1:-quick}" in
       -run 'Test.*(Config|Contract|ApplyDefaults|Validate|Factory|Provider|Selector|Manager|Lifecycle|Close|Bridge|Stream)' \
       -count=1 -timeout=3m
     ;;
+  api-compat)
+    go test ./internal/compat ./pkg/server/run -run 'Test.*(Route|OpenAPI)' -count=1 -timeout=3m
+    ;;
   concurrency)
     go test -race \
       ./service/manage \

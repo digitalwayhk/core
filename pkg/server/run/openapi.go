@@ -44,6 +44,7 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 	doc.Servers = make(openapi3.Servers, 0)
 	doc.Components = openapi3.NewComponents()
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
+	doc.Paths = make(openapi3.Paths)
 
 	host := req.Host
 	if strings.Index(host, ":") > 0 {
@@ -78,12 +79,16 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)
 	}
 	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
+	bearerDescription := "Bearer token authentication"
+	if len(doc.Servers) > 0 {
+		bearerDescription = "Get TestToken from " + doc.Servers[0].URL + "api/servermanage/testtoken?userid=12345"
+	}
 	doc.Components.SecuritySchemes["Bearer"] = &openapi3.SecuritySchemeRef{
 		Value: &openapi3.SecurityScheme{
 			Type:         "http",
 			Scheme:       "bearer",
 			BearerFormat: "JWT",
-			Description:  "Get TestToken from " + doc.Servers[0].URL + "api/servermanage/testtoken?userid=12345",
+			Description:  bearerDescription,
 		},
 	}
 	return doc

@@ -37,7 +37,7 @@
 
 ## 15.1 建立公共兼容性清单与基线
 
-**状态：** 未开始。
+**状态：** 开发完成，待外部审查。
 
 **文件：**
 
@@ -70,6 +70,8 @@
 ./scripts/test.sh api-compat
 go test ./internal/compat -count=20
 ```
+
+**开发记录（2026-07-12）：** 已建立当前公共 Go/HTTP/配置/数据与生命周期表面清单；新增从生产 `ServiceRouter` 和 `run.GetOpenApi` 生成的确定性路由/OpenAPI golden。快照拒绝跨服务 method+path 冲突，规范化 Host、端口和响应运行时 example，普通测试不自动覆盖 golden；生产 OpenAPI 零服务场景不再访问空 `Servers[0]`。`api-compat`、20 次重复、竞态测试及 `pkg/server/run` 全包均通过，等待外部只读审查。
 
 **外部审查重点：** 清单是否遗漏实际导入面；快照是否来自生产元数据；规范化是否掩盖真正的破坏性变化；是否误把运行时噪声纳入契约。
 
