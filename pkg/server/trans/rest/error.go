@@ -2,7 +2,6 @@ package rest
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/zeromicro/go-zero/rest/httpx"
@@ -60,53 +59,20 @@ func HandleResponse(w http.ResponseWriter, res types.IResponse) {
 	}
 
 	// 失败响应 - 根据错误类型返回不同状态码
-	statusCode := determineStatusCode(res)
-	httpx.WriteJson(w, statusCode, res)
+	err := res.GetError()
+	contract := types.ResolvePublicError(err)
+	if setter, ok := res.(types.ISetPublicError); ok {
+		setter.SetPublicError(contract.Code, contract.Message)
+	}
+	httpx.WriteJson(w, contract.HTTPStatus, res)
 }
 
 // 根据错误类型确定状态码
 func determineStatusCode(res types.IResponse) int {
-	err := res.GetError()
-	if err == nil {
+	if res == nil {
 		return StatusInternalServerError
 	}
-
-	errMsg := err.Error()
-
-	// 🔧 根据错误信息判断类型
-	switch {
-	case contains(errMsg, "validation", "invalid", "required", "format"):
-		return StatusBadRequest // 400 - 验证错误
-
-	case contains(errMsg, "not found", "does not exist"):
-		return StatusNotFound // 404 - 资源不存在
-
-	case contains(errMsg, "conflict", "duplicate", "already exists"):
-		return StatusConflict // 409 - 冲突
-
-	case contains(errMsg, "insufficient", "not enough", "exceed", "业务"):
-		return StatusUnprocessableEntity // 422 - 业务逻辑错误 ⭐
-
-	case contains(errMsg, "unauthorized", "token", "authentication"):
-		return StatusUnauthorized // 401 - 未认证
-
-	case contains(errMsg, "forbidden", "permission", "access denied"):
-		return StatusForbidden // 403 - 无权限
-
-	default:
-		return StatusUnprocessableEntity // 422 - 默认业务错误 ⭐
-	}
-}
-
-// 辅助函数：检查字符串是否包含关键词
-func contains(str string, keywords ...string) bool {
-	lowerStr := strings.ToLower(str)
-	for _, keyword := range keywords {
-		if strings.Contains(lowerStr, strings.ToLower(keyword)) {
-			return true
-		}
-	}
-	return false
+	return types.ResolvePublicError(res.GetError()).HTTPStatus
 }
 
 // 写入错误响应

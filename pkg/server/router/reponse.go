@@ -90,6 +90,10 @@ func (own *Response) GetError() error {
 func (own *Response) SetCode(code int) {
 	own.ErrorCode = code
 }
+func (own *Response) SetPublicError(code int, message string) {
+	own.ErrorCode = code
+	own.ErrorMessage = message
+}
 func (own *Response) SetTraceId(traceId string) {
 	own.TraceID = traceId
 }

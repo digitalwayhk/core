@@ -158,7 +158,8 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 		if err := recover(); err != nil {
 			logx.Error(fmt.Sprintf("服务%s的路由%s发生异常:", own.ServiceName, own.Path), err)
 			if resp == nil {
-				panicErr := NewTypeError(own.ServiceName, own.Path, "panic", fmt.Sprintf("%v", err), 500)
+				cause := fmt.Errorf("%v", err)
+				panicErr := NewTypeErrorWithCause(own.ServiceName, own.Path, "panic", cause.Error(), 500, cause)
 				resp = req.NewResponse(nil, panicErr)
 			}
 		}
@@ -166,7 +167,7 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	err := api.Parse(req)
 	if err != nil {
 		msg := fmt.Sprintf("参数解析异常:%s", err)
-		err = NewTypeError(own.ServiceName, own.Path, "parse", msg, 600)
+		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "parse", msg, 600, err)
 		logx.Error(err)
 		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
@@ -201,7 +202,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	err := api.Validation(req)
 	if err != nil {
 		msg := fmt.Sprintf("业务验证异常:%s", err)
-		err = NewTypeError(own.ServiceName, own.Path, "validation", msg, 700)
+		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "validation", msg, 700, err)
 		logx.Error(err)
 		fmt.Println(err.Error())
 		return req.NewResponse(nil, err)
@@ -225,7 +226,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 	data, err := api.Do(req)
 	if err != nil {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
-		err = NewTypeError(own.ServiceName, own.Path, "do", msg, 800)
+		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "do", msg, 800, err)
 		logx.Error(err)
 		fmt.Println(err.Error())
 	} else {

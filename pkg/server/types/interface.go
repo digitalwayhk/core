@@ -50,6 +50,10 @@ type ISetResponseData interface {
 	SetHost(host string)                //设置主机
 }
 
+type ISetPublicError interface {
+	SetPublicError(code int, message string)
+}
+
 // IWebSocket 客户端WebSocket接口
 type IWebSocket interface {
 	Send(event, channel string, data interface{})

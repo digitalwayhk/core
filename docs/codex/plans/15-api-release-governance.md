@@ -81,7 +81,7 @@ go test ./internal/compat -count=20
 
 ## 15.2 建立类型化公共错误契约
 
-**状态：** 未开始，依赖 15.1 的响应基线。
+**状态：** 开发完成，待外部审查；依赖的 15.1 响应基线已 APPROVED。
 
 **文件：**
 
@@ -117,6 +117,8 @@ go test ./pkg/server/types ./pkg/server/router ./pkg/server/trans/rest -count=20
 go test -race ./pkg/server/types ./pkg/server/router ./pkg/server/trans/rest -count=1
 ./scripts/test.sh security
 ```
+
+**开发记录（2026-07-12）：** 新增稳定 `ErrorKind`、公共码、HTTP 状态和安全默认消息，`PublicError` 支持 `%w`、`errors.Join` 与 `errors.Is/As`；未分类错误固定 fail closed 为 500。保留 `TypeError/NewTypeError` 和 600/700/800 阶段码，新增 `NewTypeErrorWithCause` 让 RouterInfo 保留原始错误链。REST 不再按字符串分类，默认 `router.Response` 通过加性的 `ISetPublicError` 写回安全码/消息，自定义响应所有权不变。types/router/rest 定向重复、完整 race、security 与 api-compat 均通过，等待外部只读审查。
 
 **外部审查重点：** 是否存在源码/JSON 破坏；未分类错误是否 fail closed；内部 cause 是否泄露；HTTP 映射是否仍依赖字符串；自定义响应实现是否被误伤。
 

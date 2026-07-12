@@ -43,9 +43,13 @@
 | OpenAPI 结构 | Stable baseline | paths、method、schema、security；Host、端口和运行时 example 不属于契约 | `internal/compat/testdata/openapi.golden.json` |
 | 默认成功/失败 JSON | Stable baseline | `traceid/errorCode/errorMessage/success/duration/data/host/showType` | `pkg/server/router.Response`；15.2 改造前不得改字段名或含义 |
 | 自定义 `INewResponse` | Stable | 响应实例与 JSON 由服务拥有，框架只依赖 `IResponse` | `pkg/server/router.Request.NewResponse` |
-| HTTP 错误文字匹配 | Internal defect | 当前实现不是稳定契约；15.2 将迁移到类型化映射 | `pkg/server/trans/rest/error.go` |
+| 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
+| 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和 600/700/800 保留；parse/validation→400，do→422，panic/未知→500 | `pkg/server/types/typeerror.go`、兼容测试 |
+| 未分类普通错误 | Stable security | 固定返回 HTTP 500、`50000` 和 `internal server error`，不得按错误文字猜状态 | `pkg/server/trans/rest/error.go`、安全测试 |
 
 当前 `run.GetOpenApi` 只输出 Public 与 Private 路由，因此 OpenAPI golden 的稳定范围也仅限这两类。Manage 与 ServerManage 仍属于稳定 HTTP 路由，但本阶段由路由元数据、Manage CRUD 测试和 server API 测试保护；是否纳入 OpenAPI 由后续兼容变更单独评估，不能从当前 golden 推导其已被覆盖。
+
+默认 `router.Response` 在 HTTP 边界通过 `ISetPublicError` 写入稳定公共码和安全消息，响应字段名保持不变。服务自定义 `INewResponse` 仍由服务拥有；若希望框架写入标准安全错误，应同时实现 `ISetPublicError`，否则其序列化与脱敏责任由该服务承担。
 
 ## 配置
 
