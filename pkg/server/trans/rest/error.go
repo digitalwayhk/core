@@ -67,14 +67,6 @@ func HandleResponse(w http.ResponseWriter, res types.IResponse) {
 	httpx.WriteJson(w, contract.HTTPStatus, res)
 }
 
-// 根据错误类型确定状态码
-func determineStatusCode(res types.IResponse) int {
-	if res == nil {
-		return StatusInternalServerError
-	}
-	return types.ResolvePublicError(res.GetError()).HTTPStatus
-}
-
 // 写入错误响应
 func writeErrorResponse(w http.ResponseWriter, statusCode int, message string, err error) {
 	response := &ErrorResponse{

@@ -46,12 +46,9 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 	}
 	if err != nil {
 		res.Success = false
-		if terr, ok := err.(*types.TypeError); ok {
-			if terr != nil {
-				res.ErrorCode = terr.Code
-			}
-		}
-		res.ErrorMessage = err.Error()
+		contract := types.ResolvePublicError(err)
+		res.ErrorCode = contract.Code
+		res.ErrorMessage = contract.Message
 	}
 	if own.service != nil {
 		res.Host = own.service.Config.RunIp
@@ -80,10 +77,6 @@ func (own *Response) GetSuccess() bool {
 func (own *Response) GetError() error {
 	if own.err == nil {
 		return errors.New(own.ErrorMessage)
-	}
-	if te, ok := own.err.(*types.TypeError); ok {
-		own.ErrorCode = te.Code
-		own.ErrorMessage = te.Message + te.Suggest
 	}
 	return own.err
 }

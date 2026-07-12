@@ -72,7 +72,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **Owner：** persistence。
 
-**状态：** 开发完成，待外部审查。
+**状态：** 已完成，外部审查 APPROVED。
 
 **文件：** `pkg/persistence/database/test/oltp_sqlite_test.go`、SQLite 路径/清理 owner 及聚焦测试。
 
@@ -83,9 +83,13 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **开发验收记录（2026-07-13）：** 已移除跨工作区绝对路径，为每个测试建立独立临时目录并在包退出时清理；修正 `IsFile` 把不存在路径误判为文件造成的 SQLite 路径/连接错配；测试清理使用真实 GORM 表名，并按 `GetMaxOpenConns()` 调度事务并发。SQLite 直接测试（排除重复聚合入口）`-count=20`、聚焦 race、完整 `database/test` 和 `./pkg/persistence/...` 均通过，待外部审查后决定是否提升门禁。
 
+**审查关闭记录：** 提交 `c030c7f` 外部审查结论为 APPROVED，无 P0/P1；允许进入 16.2b。persistence 继续保持 observational，待 GitHub Actions 连续稳定后再评估提升。测试辅助函数原子初始化、剩余 sleep/short skip、Exec API 双重参数语义和 WAL/SHM 显式清理登记为后续 P2，不在本节扩大生产改动。
+
 ### 16.2b 默认 Response 脱敏副作用
 
 **Owner：** server/router + security。
+
+**状态：** 开发完成，待外部审查。
 
 **文件：** `pkg/server/router/reponse.go`、`pkg/server/trans/rest/error.go` 及测试。
 
@@ -93,6 +97,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 - 非 REST 调用 `GetError` 后直接 JSON 序列化也不得出现内部 cause。
 - 删除或纯化死代码 `determineStatusCode`，确保没有绕过 `ResolvePublicError` 的副作用路径。
 - 保持 600/700/800、IResponse 和自定义 INewResponse 兼容。
+
+**开发验收记录（2026-07-13）：** 默认 `NewResponse` 在进入 REST 前即通过 `ResolvePublicError` 写入安全 code/message，原始 error 只保留在非 JSON 字段中；`GetError` 已改为纯读取，并删除未使用的 `determineStatusCode` 分支。新增直接序列化与字段不变性回归测试，router/rest 聚焦测试通过。
 
 ### 16.2c 发布契约解析加固
 

@@ -85,7 +85,7 @@
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
 | 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 当前工作树 smoke 通过；SQLite 环境稳定性转任务 16，skill 待全部计划完成后创建 |
-| 16. CI 质量门禁与消费方兼容性矩阵 | 16.2a 开发完成，待外部审查 | `a3b5b97`、`b863d3d` | 16.1 已关闭；SQLite 临时目录、路径判定、清理与并发测试已修复并通过稳定性门禁 |
+| 16. CI 质量门禁与消费方兼容性矩阵 | 16.2b 开发完成，待外部审查 | `a3b5b97`、`b863d3d`、`c030c7f` | 16.2a 已 APPROVED；默认 Response 脱敏与纯 GetError 已完成，等待外部审查 |
 | 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
 
 ## 任务 1：依赖升级隔离
