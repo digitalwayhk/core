@@ -1,46 +1,46 @@
 ---
 name: use-digitalway-core
-description: Build, modify, review, or explain services that use github.com/digitalwayhk/core. Use when working with digitalway.hk core services, IRouter APIs, entity.Model/BaseModel/ModelList, ManageService CRUD, api/public, api/private, api/manage, TestToken, WebSocket observes, EventBridge/MQ, cluster, transport, or examples under this repository.
+description: 当任务涉及 github.com/digitalwayhk/core 的服务、IRouter、ModelList、Manage CRUD、认证、WebSocket、Cluster、Transport、MQ/EventBridge、配置、测试或框架消费方兼容性时使用。
 ---
 
-# Use Digitalway Core
+# 使用 Digitalway Core
 
-## Start Here
+## 开始前
 
-Treat `github.com/digitalwayhk/core` as a Go service framework. Before changing or generating code, inspect the closest existing example or sibling service and prefer the repository's current behavior over older Copilot notes.
+Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。先读当前仓库的 `README.md`、最近示例和目标包；不要从已删除的 Copilot skill、旧文档或记忆恢复行为。
 
-For full API and implementation rules, read `references/core-backend-api.md`.
+按任务读取：
 
-## Verified Core Rules
+- API、模型、Manage、启动与版本引用：`references/core-backend-api.md`
+- 场景与成熟度：`docs/codex/FRAMEWORK_USAGE_GUIDE.md`
+- 配置能力：`docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`
+- 日志与错误：`docs/codex/LOGGING_AUDIT_AND_STANDARD.md`
 
-- Define API handlers as `types.IRouter`: `Parse(req)`, `Validation(req)`, `Do(req)`, and `RouterInfo()`.
-- Use `router.DefaultRouterInfo(own)` for ordinary service routes under `api/public` and `api/private`.
-- Ordinary public/private paths are `/api/{service}/{structnameLower}`. The package path controls auth type, but `public` and `private` are not included in the URL.
-- Standard manage CRUD paths use `manage.RouterInfo`: `/api/manage/{service}/{manageStructLower}/{operationLower}`.
-- Server management routes use `api.ServerRouterInfo`: `/api/servermanage/{structnameLower}`, then the framework rewrites the service segment when registering per service.
-- In private handlers, get the current user with `req.GetUser()`.
-- Use `entity.NewModelList[T](nil)` for persistence. `SearchWhere` defaults to a 500-row cap unless the caller changes `SearchItem.Size`; use `SearchAll(page, size)` for explicit pagination.
-- Every model that embeds `*entity.Model` or `*entity.BaseModel` must initialize it in `NewModel()`, so `ModelList.NewItem()` can create usable records.
-- `entity.BaseModel.GetHash()` hashes `Code`; if a model has no stable `Code`, use `entity.Model` or override hash behavior deliberately to avoid collisions and validation failures.
-- Register all public/private/manage routers from `Service.Routers()`. Register post-route notifications in `SubscribeRouters()`.
-- Do not depend on WayPage, JWT/Umi route generation, or unstable frontend integration helpers unless the user explicitly asks and the current code supports it.
+## 核心决策
 
-## Workflow
+1. 普通路由实现 `types.IRouter`；public/private 路径为 `/api/{service}/{structLower}`，目录决定认证但不进入 URL。
+2. private 身份只读 `req.GetUser()`/claims，不信任请求字段。
+3. Manage 使用 `NewManageService[T](owner)`，路径为 `/api/manage/{service}/{manage}/{operation}`。
+4. 模型通过 `entity.NewModelList[T](nil)` 操作；嵌入 `*Model`/`*BaseModel` 必须在 `NewModel()` 初始化。没有稳定 `Code` 时不用 `BaseModel`。
+5. 先复用 go-zero/成熟客户端；Digitalway 抽象只保留路由、模型、MachineID、Provider 切换、事件和跨节点通知等领域契约。
+6. 配置字段不等于支持。`Unsupported` 值必须 fail closed；QUIC/MQ transport 和内建 Kafka/RabbitMQ/RocketMQ 不得伪装可用。
+7. CORS origin、TrustedProxies 和外部依赖必须显式配置。默认单元测试不依赖 Docker。
+8. 日志使用 `logx` 稳定事件和字段；不记录 token、TOTP、payload/body/response、SQL、参数或对象 dump。
+9. 修改公共 Go API、路由、JSON、配置或错误前，运行兼容性/发布契约并登记迁移。
 
-1. Read the local target files first: `README.md`, `examples/*`, and the matching package under `pkg/`, `service/`, or `internal/core/{service}`.
-2. If implementing a backend API, mirror the closest existing model, router, manage, and service registration pattern.
-3. Keep one model file focused on one table and keep table operations near that model or its service layer.
-4. Put parameter binding in `Parse`, validation/defaults in `Validation`, and side effects in `Do`.
-5. Prefer service/model-list wrappers when a project provides them; do not bypass local DB routing, market/user parsing, or parent validation.
-6. Verify with targeted `go test` or `go test ./...` when feasible, then run `gofmt` on edited Go files.
+## 工作流
 
-## Review Checklist
+1. 找到最接近的 `examples/*` 或兄弟服务，核对当前构造器和测试。
+2. 先写失败测试，再做最小实现；不绕过 ServiceContext、ModelList 或 Manage hook。
+3. 对外部能力同时检查 config Validate、factory、真实启动链、lifecycle owner 和 integration gate。
+4. 运行 `gofmt`、定向测试、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 race/CI gate。
 
-- Wrong URL assumptions, especially adding `/public` or `/private` to ordinary route calls.
-- Missing `NewModel()` initialization on models.
-- `BaseModel` without `Code` or hash override.
-- `ManageService[T]` created with the wrong instance, causing hooks/view customization not to fire.
-- Custom manage operation embedding `*manage.Operation[T]` instead of value `manage.Operation[T]`.
-- Private route using request fields instead of `req.GetUser()` for authenticated identity.
-- Skipped parent `Parse`, `Validation`, or hook methods in local base APIs.
-- Unregistered routers, stale observe subscriptions, or websocket channels that use outdated paths.
+## 审查重点
+
+- URL 中错误加入 `/public` 或 `/private`。
+- 请求身份/trace 存入共享单例。
+- 模型嵌入指针未初始化，或无 Code 模型误用 BaseModel。
+- ManageService 传错 owner，导致 hook 不执行。
+- 静默接受不支持配置、重复制造连接池/重试/日志/队列。
+- 外部测试默认连接本机服务，或失败后残留 goroutine、容器和锁。
+- 日志/响应泄露内部错误和业务数据。

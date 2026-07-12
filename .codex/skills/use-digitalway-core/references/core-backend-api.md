@@ -1,434 +1,182 @@
-# Digitalway Core Backend API Reference
+# Digitalway Core 后端开发参考
 
-This reference is based on the current repository implementation, especially:
+本参考以当前代码和发布契约为准。完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。
 
-- `pkg/server/router/servicerouter.go`
-- `service/manage/types.go`
-- `pkg/persistence/entity/model.go`
-- `pkg/persistence/entity/basemodel.go`
-- `pkg/persistence/entity/modellist.go`
-- `examples/01-hello-router`
-- `examples/demo`
+## 路由
 
-## Router Shape
-
-All API endpoints implement:
+所有 API 实现：
 
 ```go
 type IRouter interface {
-    Parse(req types.IRequest) error
-    Validation(req types.IRequest) error
-    Do(req types.IRequest) (interface{}, error)
-    RouterInfo() *types.RouterInfo
+	Parse(req types.IRequest) error
+	Validation(req types.IRequest) error
+	Do(req types.IRequest) (interface{}, error)
+	RouterInfo() *types.RouterInfo
 }
 ```
 
-Common request methods:
+职责：
 
-- `req.Bind(v)` binds request JSON/query values into a struct.
-- `req.GetValue("key")` reads query/form values.
-- `req.GetUser()` returns the authenticated user id and name.
-- `req.GetClaims("key")` reads JWT claims.
-- `req.CallService(router, cb...)` calls another route.
-- `req.ServiceName()` returns the current service.
+- `Parse`：绑定 JSON/query。
+- `Validation`：校验和默认值，不做副作用。
+- `Do`：业务副作用。
+- `RouterInfo`：普通路由返回 `router.DefaultRouterInfo(own)`。
 
-## Route Path Rules
-
-`router.DefaultRouterInfo(own)` derives service name, API type, auth, and path from the package and struct name.
-
-Current ordinary service route paths are:
+路径：
 
 ```text
-/api/{serviceName}/{structNameLower}
+public/private: /api/{service}/{structLower}
+manage:         /api/manage/{service}/{manageLower}/{operationLower}
+server manage:  /api/servermanage/{structLower}
 ```
 
-Examples:
-
-- `examples/01-hello-router/api/public.Ping` -> `/api/hello/ping`
-- `examples/demo/api/public.GetOrder` -> `/api/demo/getorder`
-- `examples/demo/api/private.AddOrder` -> `/api/demo/addorder`
-
-The package path still matters:
-
-- `api/public` sets `PathType = types.PublicType` and no route auth.
-- `api/private` sets `PathType = types.PrivateType` and `Auth = true`.
-- `api/manage` ordinary routes should usually use `manage.RouterInfo`, not `router.DefaultRouterInfo`.
-
-Standard manage route paths are:
-
-```text
-/api/manage/{serviceName}/{manageStructLower}/{operationLower}
-```
-
-For `TokenManage`, examples include:
-
-- `/api/manage/demo/tokenmanage/view`
-- `/api/manage/demo/tokenmanage/search`
-- `/api/manage/demo/tokenmanage/add`
-- `/api/manage/demo/tokenmanage/edit`
-- `/api/manage/demo/tokenmanage/remove`
-- `/api/manage/demo/tokenmanage/submit`
-- `/api/manage/demo/tokenmanage/release`
-
-Server management routes use:
-
-```text
-/api/servermanage/{structNameLower}
-```
-
-`pkg/server/api/public/TestToken` uses this server-router mechanism and sets `GET`. Use:
-
-```text
-GET /api/servermanage/testtoken?userid={id}&type=0
-```
-
-Token type values:
-
-- `0`: normal user token
-- `1`: manage token
-- `2`: server manage token
-
-## Public API Template
+`api/private` 自动认证。用户身份使用：
 
 ```go
-package public
+userID, userName := req.GetUser()
+```
 
-import (
-    "github.com/digitalwayhk/core/pkg/server/router"
-    "github.com/digitalwayhk/core/pkg/server/types"
-)
+禁止从 body/query 的 user id 推断认证身份。
 
-type Ping struct {
-    Name string `json:"name" desc:"caller name"`
+## 模型与 ModelList
+
+普通记录：
+
+```go
+type Order struct {
+	*entity.Model
+	UserID string
 }
 
-func (own *Ping) Parse(req types.IRequest) error {
-    return req.Bind(own)
-}
-
-func (own *Ping) Validation(req types.IRequest) error {
-    if own.Name == "" {
-        own.Name = "guest"
-    }
-    return nil
-}
-
-func (own *Ping) Do(req types.IRequest) (interface{}, error) {
-    return map[string]string{"message": "hello " + own.Name}, nil
-}
-
-func (own *Ping) RouterInfo() *types.RouterInfo {
-    return router.DefaultRouterInfo(own)
+func (own *Order) NewModel() {
+	if own.Model == nil {
+		own.Model = entity.NewModel()
+	}
 }
 ```
 
-For GET routes:
+只有具有稳定唯一 `Code`、`Name` 和资料状态语义时才使用 `BaseModel`。`BaseModel.GetHash()` 基于 Code；没有 Code 时使用 `Model`。
 
 ```go
-func (own *GetOrder) RouterInfo() *types.RouterInfo {
-    info := router.DefaultRouterInfo(own)
-    info.Method = "GET"
-    return info
-}
-```
-
-## Private API Template
-
-Private routes live under `api/private`, use the same handler shape, and automatically require auth.
-
-```go
-func (own *AddOrder) Validation(req types.IRequest) error {
-    if userID, _ := req.GetUser(); userID == "" {
-        return errors.New("userid is empty")
-    }
-    return nil
-}
-
-func (own *AddOrder) Do(req types.IRequest) (interface{}, error) {
-    userID, _ := req.GetUser()
-    list := entity.NewModelList[models.OrderModel](nil)
-    order := list.NewItem()
-    order.UserID = userID
-    if err := list.Add(order); err != nil {
-        return nil, err
-    }
-    return order, list.Save()
-}
-```
-
-Do not trust a client-supplied user id for authenticated identity.
-
-## Models and ModelList
-
-Use `entity.Model` for records that do not need `Code`/state semantics:
-
-```go
-type OrderModel struct {
-    *entity.Model
-    UserID string
-}
-
-func NewOrderModel() *OrderModel {
-    return &OrderModel{Model: entity.NewModel()}
-}
-
-func (own *OrderModel) NewModel() {
-    if own.Model == nil {
-        own.Model = entity.NewModel()
-    }
-}
-```
-
-Use `entity.BaseModel` when the record has `Code`, `Name`, and lifecycle state:
-
-```go
-type TokenModel struct {
-    *entity.BaseModel
-    Price decimal.Decimal
-}
-
-func (own *TokenModel) NewModel() {
-    if own.BaseModel == nil {
-        own.BaseModel = entity.NewBaseModel()
-    }
-}
-```
-
-Important `BaseModel` behavior:
-
-- `AddValid()` requires non-zero `ID` and non-empty `Code`.
-- `UpdateValid()` requires non-empty `Code`.
-- `RemoveValid()` rejects records with `State > 0`.
-- `GetHash()` returns a hash of `Code`.
-
-If the entity does not naturally have a unique `Code`, prefer `entity.Model`. If compatibility requires `BaseModel`, ensure code/hash semantics are intentionally handled.
-
-Common persistence methods:
-
-```go
-list := entity.NewModelList[models.OrderModel](nil)
-
+list := entity.NewModelList[models.Order](nil)
 item := list.NewItem()
-err := list.Add(item)
-err = list.Save()
+_ = list.Add(item)
+_ = list.Save()
 
 rows, total, err := list.SearchAll(page, size)
-rows, err = list.SearchWhere("UserID", userID)
 one, err := list.SearchId(id)
-err = list.Update(item)
-err = list.Remove(item)
-err = list.Save()
+rows, err = list.SearchWhere("UserID", userID)
 ```
 
-`SearchWhere` defaults to size `500` if the caller does not change `SearchItem.Size`. Use `SearchAll` for paginated APIs or pass a callback that sets search size/sort/preload.
+`SearchWhere` 未显式改 size 时最多 500 条；分页接口使用 `SearchAll`。
+
+SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖；负值关闭。不得恢复机器级 30GB 默认。
 
 ## Manage CRUD
 
-Standard manage service:
-
 ```go
-package manage
-
-import (
-    managepkg "github.com/digitalwayhk/core/service/manage"
-    "github.com/digitalwayhk/core/service/manage/view"
-    "yourmodule/models"
-)
-
-type TokenManage struct {
-    *managepkg.ManageService[models.TokenModel]
+type ProductManage struct {
+	*manage.ManageService[models.Product]
 }
 
-func NewTokenManage() *TokenManage {
-    own := &TokenManage{}
-    own.ManageService = managepkg.NewManageService[models.TokenModel](own)
-    return own
-}
-
-func (own *TokenManage) ViewModel(v *view.ViewModel) {
-    v.AutoLoad = true
+func NewProductManage() *ProductManage {
+	own := &ProductManage{}
+	own.ManageService = manage.NewManageService[models.Product](own)
+	return own
 }
 ```
 
-Register it:
+必须把真实 owner 传给 `NewManageService`，否则 `ViewModel`、Parse/Validation/Do 和 Search hooks 不会落到自定义类型。
+
+自定义操作以值嵌入 `manage.Operation[T]`，不要嵌入指针。
+
+## 服务与启动
 
 ```go
-routers = append(routers, manage.NewTokenManage().Routers()...)
+type OrderService struct{}
+
+func (*OrderService) ServiceName() string { return "orders" }
+func (*OrderService) Routers() []types.IRouter {
+	return []types.IRouter{&public.Ping{}, &private.AddOrder{}}
+}
+func (*OrderService) SubscribeRouters() []*types.ObserveArgs { return nil }
 ```
-
-Generated operations: `View`, `Search`, `Add`, `Edit`, `Remove`, `Submit`, `Release`.
-
-Hooks:
-
-- `ParseBefore`, `ParseAfter`
-- `ValidationBefore`, `ValidationAfter`
-- `DoBefore`, `DoAfter`
-- `SearchBefore`, `SearchAfter`
-- `ForeignSearchBefore`, `ForeignSearchAfter`
-- `ChildSearchBefore`, `ChildSearchAfter`
-- `ViewModel`, `ViewFieldModel`, `ViewCommandModel`, `ViewChildModel`
-
-`DoBefore` and search hooks return `(result, error, stop)`. If `stop` is true, the framework returns the hook result and skips default processing.
-
-## Custom Manage Operation
-
-Embed `manage.Operation[T]` as a value:
 
 ```go
-type ExportData[T pt.IModel] struct {
-    manage.Operation[T]
-}
-
-func NewExportData[T pt.IModel](instance interface{}) *ExportData[T] {
-    return &ExportData[T]{Operation: manage.NewOperation[T](instance)}
-}
-
-func (own *ExportData[T]) Parse(req st.IRequest) error {
-    return nil
-}
-
-func (own *ExportData[T]) Validation(req st.IRequest) error {
-    return own.Operation.Validation(req)
-}
-
-func (own *ExportData[T]) Do(req st.IRequest) (interface{}, error) {
-    return "https://example.com/export.csv", nil
-}
-
-func (own *ExportData[T]) RouterInfo() *st.RouterInfo {
-    return manage.RouterInfo(own)
-}
+server := run.NewWebServer()
+server.AddIService(&OrderService{}, &types.ServerOption{
+	IsCors:     true,
+	OriginCors: []string{"http://localhost:8000"},
+})
+server.Start()
 ```
 
-Append it from the manage `Routers()` method and customize the command in `ViewCommandModel` using the lowercase operation struct name.
+CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主动选择。
 
-## Service Registration
+反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
 
-```go
-type DemoService struct{}
+## Cluster、Transport、MQ 与事件
 
-func (own *DemoService) ServiceName() string {
-    return "demo"
-}
+- Local cluster：`Stable`。
+- etcd/Consul：`Conditional`，需要显式配置和外部依赖。
+- 内部传输：http/grpc/socket 按能力矩阵使用。
+- QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
+- MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
+- Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 
-func (own *DemoService) Routers() []types.IRouter {
-    routers := make([]types.IRouter, 0)
-    routers = append(routers, &public.GetOrder{})
-    routers = append(routers, &private.AddOrder{})
-    routers = append(routers, manage.NewTokenManage().Routers()...)
-    return routers
-}
+go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 
-func (own *DemoService) SubscribeRouters() []*types.ObserveArgs {
-    return []*types.ObserveArgs{}
-}
+## WebSocket 与跨节点通知
+
+订阅使用真实 `RouterInfo().Path`。跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；IPv6 地址通过 `net.JoinHostPort`，非 2xx 转发视为错误。
+
+worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
+
+## 日志与错误
+
+- `logx.Infow`：生命周期、切换、成功降级。
+- `logx.Debugw`：重试、路由注册、worker 和高频细节。
+- `logx.Errorw`：最终失败、数据风险、panic、关闭失败。
+- `logx.Sloww`：测量超阈值。
+
+请求/跨服务失败携带 `trace_id`、service、route/target、operation 和 error。错误由拥有重试、降级、响应或终止决策的边界记录一次。
+
+禁止记录凭据、token、cookie、TOTP、完整 payload/body/response、DSN、SQL、参数和对象 dump。
+
+## 测试与发布
+
+```bash
+./scripts/test.sh quick
+./scripts/test.sh security
+./scripts/test.sh config-contract
+./scripts/test.sh persistence-unit
+./scripts/test.sh performance-contract
+./scripts/test.sh release-contract
 ```
 
-Optional lifecycle hooks include `Start()`, `Stop()`, and `IsCloseServerManage() bool`.
+外部依赖默认 skip：
 
-## Server Startup
-
-```go
-func main() {
-    server := run.NewWebServer()
-    server.AddIService(&demo.DemoService{}, &types.ServerOption{
-        IsCors:      true,
-        OriginCors:  []string{"http://localhost:8000"},
-        IsWebSocket: true,
-    })
-    server.Start()
-}
+```bash
+./scripts/test.sh integration-external-docker
+./scripts/test.sh integration-persistence
 ```
 
-CORS is fail-closed: `IsCors: true` requires at least one explicit `OriginCors`. Use `"*"` only when the caller deliberately accepts every origin.
+发布前不得自动创建 tag。开发消费方可临时引用分支或精确 commit：
 
-Configuration is generated on first start under `etc/{serviceName}.json` in current versions.
-
-Set `ServerConfig.TrustedProxies` to the IP addresses or CIDRs of reverse proxies that actually connect to the service, for example `[]string{"127.0.0.1/32", "10.0.0.0/8"}`. The default empty list ignores `X-Forwarded-For` and `X-Real-IP`; reverse-proxy deployments must configure this field explicitly. If an unconfigured local or private peer sends forwarding headers, client-IP resolution fails closed instead of treating the request as local.
-
-## WebSocket and Observe
-
-Use `SubscribeRouters()` for route-success notifications:
-
-```go
-return []*types.ObserveArgs{
-    types.NewObserveArgs(
-        &private.AddOrder{},
-        types.ObserveResponse,
-        func(args *types.NotifyArgs) error {
-            api := &public.GetOrder{}
-            info := api.RouterInfo()
-            order := router.GetResponseData[models.OrderModel](args.Response)
-            info.NoticeWebSocket(order)
-            return nil
-        },
-    ),
-}
-```
-
-WebSocket subscriptions should use the actual `RouterInfo().Path`, for example `/api/demo/getorder` for ordinary routes.
-
-For targeted websocket push, implement hash/filter behavior on the subscribed router and call `NoticeWebSocket` on the same route info used for subscription.
-
-## EventBridge, Cluster, and Transport
-
-Use current implementations under:
-
-- `pkg/server/event`
-- `pkg/server/mq`
-- `pkg/server/cluster`
-- `pkg/server/transport`
-- `examples/09-transport-selector`
-- `examples/10-cluster-local`
-- `examples/11-cluster-etcd-consul`
-- `examples/12-mq-event-stream`
-
-MQ is configured through EventBridge and MQ providers; it is not a direct transport selector value. Direct internal transport uses `grpc`, `http`, or `socket` plus fallback configuration.
-
-## Frontend/API Notes
-
-- Ordinary public/private HTTP calls use `/api/{service}/{router}`.
-- Manage CRUD calls use `/api/manage/{service}/{manage}/{operation}`.
-- Use `/api/servermanage/testtoken?userid={id}&type=0` for private API test tokens and `type=1` for manage API test tokens.
-- The response is framework wrapped by server code; when writing clients, inspect actual responses or generated OpenAPI for field names.
-- WayPage/JWT/Umi route integration is marked unstable in project instructions and should not be generated by default.
-
-## Version References
-
-Other systems can reference a pushed branch directly during development or testing:
-
-```sh
+```bash
 go get github.com/digitalwayhk/core@codex/optimize-code-cleanup
+go get github.com/digitalwayhk/core@<commit>
 ```
 
-Go resolves branch names to pseudo-versions in `go.mod`. Branch references move when new commits are pushed, so production systems should prefer a tag or exact commit:
+分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
 
-```sh
-go get github.com/digitalwayhk/core@b17bfab
-go get github.com/digitalwayhk/core@v0.0.247
-```
+## 常见错误
 
-生产依赖必须使用 tag 或精确 commit。发布前运行 `./scripts/test.sh release-contract`，并遵循 `docs/RELEASE_POLICY.md`；不要由自动化脚本隐式创建或重写 tag。
-
-For scripts or CI that need the source tree directly, checkout the branch:
-
-```sh
-git clone -b codex/optimize-code-cleanup git@github.com:digitalwayhk/core.git
-```
-
-## Validation Commands
-
-Prefer targeted checks:
-
-```sh
-go test ./service/manage/...
-go test ./pkg/server/router/...
-go test ./examples/01-hello-router/...
-```
-
-For broader changes:
-
-```sh
-gofmt -w <edited-go-files>
-go test ./...
-```
+- URL 加入 `/public`、`/private`。
+- private API 使用客户端 user id。
+- `NewModel()` 未初始化嵌入指针。
+- 无稳定 Code 的模型使用 BaseModel。
+- ManageService 传入内嵌实例而非真实 owner。
+- 绕过 ModelList/ServiceContext 或自行实现成熟基础设施能力。
+- 仅因配置字段存在就声明能力稳定。
+- 单元测试隐式依赖 Docker/本机数据库。
