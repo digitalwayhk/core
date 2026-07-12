@@ -36,6 +36,7 @@ var (
 type Sqlite struct {
 	Name         string
 	Size         float64
+	MmapSize     int64
 	UpdateTime   int32
 	Path         string
 	db           *gorm.DB
@@ -50,6 +51,18 @@ func NewSqlite() *Sqlite {
 	return &Sqlite{
 		tables: make(map[string]*TableMaster),
 	}
+}
+
+const defaultSqliteMmapSize int64 = 256 << 20
+
+func (own *Sqlite) effectiveMmapSize() int64 {
+	if own.MmapSize < 0 {
+		return 0
+	}
+	if own.MmapSize == 0 {
+		return defaultSqliteMmapSize
+	}
+	return own.MmapSize
 }
 
 // ============================================================
@@ -223,8 +236,10 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 	db.Exec("PRAGMA busy_timeout=30000;") //  5秒
 	db.Exec("PRAGMA synchronous=NORMAL;")
 	db.Exec("PRAGMA cache_size=2000;")
-	db.Exec("PRAGMA temp_store=MEMORY;")     //  临时表存储在内存
-	db.Exec("PRAGMA mmap_size=30000000000;") //  启用内存映射（30GB）
+	db.Exec("PRAGMA temp_store=MEMORY;") //  临时表存储在内存
+	if tx := db.Exec(fmt.Sprintf("PRAGMA mmap_size=%d;", own.effectiveMmapSize())); tx.Error != nil {
+		return nil, fmt.Errorf("configure sqlite mmap_size: %w", tx.Error)
+	}
 
 	//  验证 WAL 模式是否生效
 	var journalMode string

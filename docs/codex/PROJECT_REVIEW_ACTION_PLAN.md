@@ -86,7 +86,7 @@
 | 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
 | 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 当前工作树 smoke 通过；SQLite 环境稳定性转任务 16，skill 待全部计划完成后创建 |
 | 16. CI 质量门禁与消费方兼容性矩阵 | 16.5 已完成，任务 16 等待 Docker 实跑 | `a3b5b97`、`b863d3d`、`c030c7f`、`34af55c`、`703228e`、`1a4d66f` | futures 精确 commit smoke、手工 blocked 语义、artifact 元数据和全 workflow summary 已验证；仅 persistence Docker 冷拉取/driver contract 尚待通过 |
-| 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
+| 17. 性能、容量与运维 SLO 基线 | 已完成 | 本批提交 | Server/Provider/Event/WebSocket/SharedBadger/SQLite 三次基线、资源预算、RED/USE、trace、SLO/告警 owner 均已记录；SQLite mmap 从 30GB 改为默认 256MiB 可配置契约 |
 
 ## 任务 1：依赖升级隔离
 
@@ -1110,19 +1110,19 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - 创建：聚焦的 benchmark 和可观测性测试
 - 审查：大型持久化、ServiceContext、router 和 WebSocket 模块
 
-- [ ] **步骤 1：重构前先测量**
+- [x] **步骤 1：重构前先测量**
 
 对具代表性的路由分发、持久化操作、Provider Watch/切换、event/MQ 流和 WebSocket 扇出进行 benchmark。在拆分大文件或改变并发前，捕获 CPU、分配、goroutine、队列深度和关闭延迟。
 
-- [ ] **步骤 2：定义容量与资源预算**
+- [x] **步骤 2：定义容量与资源预算**
 
 为 goroutine、队列、数据库连接池、重试、缓存大小、消息/请求体和本地存储映射设置有 owner 的限制。审查接近 30 GB 的 SQLite `mmap_size`，并用测量支撑的有界、可配置值替换机器级默认值。
 
-- [ ] **步骤 3：添加运维信号**
+- [x] **步骤 3：添加运维信号**
 
 暴露 HTTP/Provider 操作的 RED 指标、pool/queue/worker 的 USE 风格信号、依赖健康、Provider 切换状态和关闭失败。在 HTTP、event、MQ 和跨节点边界保持 trace 连续性；避免高基数 label 和敏感字段。
 
-- [ ] **步骤 4：建立 SLO 与回归门禁**
+- [x] **步骤 4：建立 SLO 与回归门禁**
 
 定义可用性、延迟、错误率、事件投递和恢复目标，且它们具有 owner 和告警阈值。只有在控制方差后才添加稳定 benchmark 对比；使用 profile 和契约边界指导任何大文件拆分。
 

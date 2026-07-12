@@ -85,6 +85,10 @@ case "${1:-quick}" in
   persistence-unit)
     go test ./pkg/persistence/... -count=1 -timeout=5m
     ;;
+  performance-contract)
+    go test ./pkg/persistence/database/oltp -run TestSqliteMmapSize -count=1
+    go test ./pkg/server/router ./pkg/server/cluster ./pkg/server/event ./pkg/server/types -run '^$' -bench '^$'
+    ;;
   integration-persistence)
     compose_file="$ROOT/docker-compose.integration.yml"
     compose_project_name="${CORE_TEST_PERSISTENCE_PROJECT_NAME:-digitalway-core-persistence-$$}"
