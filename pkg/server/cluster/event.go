@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -252,7 +253,7 @@ func (b *CrossNodeNoticeBroker) post(node *NodeInfo, path string, payload interf
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	target := node.Address + ":" + strconv.Itoa(node.Port)
+	target := net.JoinHostPort(node.Address, strconv.Itoa(node.Port))
 
 	// Try the transport-level sender first (e.g. configured gRPC/socket transport).
 	if b.sender != nil {
@@ -269,11 +270,14 @@ func (b *CrossNodeNoticeBroker) post(node *NodeInfo, path string, payload interf
 		}
 	}
 
-	url := fmt.Sprintf("http://%s:%d%s", node.Address, node.Port, path)
+	url := "http://" + target + path
 	resp, err := b.httpClient.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("cross-node HTTP POST returned %s", resp.Status)
+	}
 	return nil
 }
