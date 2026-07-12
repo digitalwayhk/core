@@ -62,10 +62,16 @@ set +e
   cd "$ROOT"
   "${command[@]}"
 ) 2>&1 | tee "$log_file"
-status=${PIPESTATUS[0]}
+pipeline_status=("${PIPESTATUS[@]}")
+command_status="${pipeline_status[0]}"
+tee_status="${pipeline_status[1]}"
+status="$command_status"
+if [[ "$status" == "0" && "$tee_status" != "0" ]]; then
+  status="$tee_status"
+fi
 set -e
 end_epoch="$(date +%s)"
 duration=$((end_epoch - start_epoch))
-printf 'CI_GATE_END gate=%s exit_code=%d duration_seconds=%d log=%s\n' \
-  "$GATE" "$status" "$duration" "$log_file"
+printf 'CI_GATE_END gate=%s exit_code=%d command_exit=%d tee_exit=%d duration_seconds=%d log="%s"\n' \
+  "$GATE" "$status" "$command_status" "$tee_status" "$duration" "$log_file"
 exit "$status"

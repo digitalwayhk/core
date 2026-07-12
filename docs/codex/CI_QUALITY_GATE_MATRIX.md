@@ -24,3 +24,4 @@
 - 调用方通过 `CI_ARTIFACT_DIR` 指定持久化日志目录；未指定时脚本使用并清理临时目录。
 - 每次执行输出 gate、commit、Go 版本、耗时和退出码，不输出环境变量或凭据。
 - 未知 gate 返回 2；测试子命令失败时保留原退出码，不吞错。
+- `required/quick` 与 `required/server-manage` 有意重叠少量 manage 快速测试：前者提供开发反馈，后者验证完整 server/manage 边界；当前耗时预算允许该重叠。
