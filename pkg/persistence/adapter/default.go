@@ -83,10 +83,10 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	}
 	name := idb.GetLocalDBName()
 
-	// 🔧 使用全局实例而不是创建新的
+	//  使用全局实例而不是创建新的
 	instance := GetGlobalSqliteInstance(name)
 
-	// 🔧 只在第一次时检查表
+	//  只在第一次时检查表
 	if _, exists := own.localdbs[name]; !exists {
 		if !config.IsServerInitializing() {
 			err = instance.HasTable(model)
@@ -95,7 +95,7 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 			}
 		}
 		own.localdbs[name] = instance
-		logx.Infof("🔗 绑定全局Sqlite实例到适配器: %s", name)
+		logx.Infof(" 绑定全局Sqlite实例到适配器: %s", name)
 	}
 
 	return instance, err

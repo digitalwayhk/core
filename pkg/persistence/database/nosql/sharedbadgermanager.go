@@ -151,7 +151,10 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 		if isLockError(err) {
 			diagnosis := diagnoseLockError(basePath)
 			if i < maxRetries-1 {
-				logx.Errorf("共享DB锁定，重试 (%d/%d): %s", i+1, maxRetries, diagnosis)
+				logx.Debugw("badger_lock_retry",
+					logx.Field("attempt", i+1),
+					logx.Field("max_attempts", maxRetries),
+				)
 				time.Sleep(time.Second * time.Duration(i+1))
 				continue
 			}

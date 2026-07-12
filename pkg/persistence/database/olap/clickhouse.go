@@ -144,8 +144,8 @@ type TableEngineConfig struct {
 	PartitionBy      string        // 分区键，如 "toYYYYMM(created_at)"
 	OrderBy          []string      // 排序键
 	TTL              time.Duration // 数据保留时间
-	TTLMode          string        // 🆕 TTL 模式: "DELETE" | "TO VOLUME" | "TO DISK"
-	TTLVolume        string        // 🆕 冷存储卷名（当 TTLMode = "TO VOLUME" 时使用）
+	TTLMode          string        //  TTL 模式: "DELETE" | "TO VOLUME" | "TO DISK"
+	TTLVolume        string        //  冷存储卷名（当 TTLMode = "TO VOLUME" 时使用）
 	IndexGranularity int           // 索引粒度
 }
 
@@ -156,7 +156,7 @@ func DefaultTableEngineConfig() *TableEngineConfig {
 		PartitionBy:      "toYYYYMM(created_at)",
 		OrderBy:          []string{"created_at"},
 		TTL:              365 * 24 * time.Hour, // 365天
-		TTLMode:          "DELETE",             // 🆕 默认删除模式
+		TTLMode:          "DELETE",             //  默认删除模式
 		IndexGranularity: 8192,
 	}
 }
@@ -288,7 +288,7 @@ func (ch *ClickHouse) Flush() {
 	})
 }
 
-// 🆕 DecimalValue - 自定义 Decimal 类型包装器,用于 ClickHouse 的 Scan 和 Value 实现
+//  DecimalValue - 自定义 Decimal 类型包装器,用于 ClickHouse 的 Scan 和 Value 实现
 type DecimalValue struct {
 	decimal.Decimal
 }
@@ -302,7 +302,7 @@ func (d *DecimalValue) Scan(value interface{}) error {
 
 	switch v := value.(type) {
 	case string:
-		// ✅ 从 ClickHouse 读取的 Decimal 是 string 类型
+		//  从 ClickHouse 读取的 Decimal 是 string 类型
 		dec, err := decimal.NewFromString(v)
 		if err != nil {
 			return err
@@ -329,7 +329,7 @@ func (d *DecimalValue) Scan(value interface{}) error {
 
 // Value 实现 driver.Valuer 接口,写入数据库时自动转换
 func (d DecimalValue) Value() (driver.Value, error) {
-	// ✅ 写入 ClickHouse 时转换为 string
+	//  写入 ClickHouse 时转换为 string
 	return d.Decimal.String(), nil
 }
 
@@ -346,23 +346,23 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 	if instance, ok := instances.Load(key); ok {
 		existingCH := instance.(*ClickHouse)
 
-		// 🔧 验证连接是否有效且数据库存在
+		//  验证连接是否有效且数据库存在
 		if sqlDB, err := existingCH.db.DB(); err == nil {
 			if err := sqlDB.Ping(); err == nil {
-				// 🔧 验证数据库是否存在
+				//  验证数据库是否存在
 				var exists uint8
 				query := fmt.Sprintf("SELECT 1 FROM system.databases WHERE name = '%s'", cfg.Database)
 				if err := existingCH.db.Raw(query).Scan(&exists).Error; err == nil && exists == 1 {
-					logx.Infof("♻️ 复用现有 ClickHouse 连接 [%s]", key)
+					logx.Infof(" 复用现有 ClickHouse 连接 [%s]", key)
 					return existingCH, nil
 				}
 				// 数据库不存在,删除此连接并重建
-				logx.Infof("🔄 数据库 %s 不存在,重建连接 [%s]", cfg.Database, key)
+				logx.Infof(" 数据库 %s 不存在,重建连接 [%s]", cfg.Database, key)
 			}
 		}
 		// 连接无效,删除并重建
 		instances.Delete(key)
-		// 🔧 关闭旧连接
+		//  关闭旧连接
 		if sqlDB, err := existingCH.db.DB(); err == nil {
 			sqlDB.Close()
 		}
@@ -384,7 +384,7 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 		cfg.MaxIdleConns = 5
 	}
 
-	// 🔧 修复:自动创建数据库逻辑
+	//  修复:自动创建数据库逻辑
 	if cfg.AutoCreateDB {
 		// 第一步:连接到 default 数据库并创建目标数据库
 		defaultDSN := fmt.Sprintf("clickhouse://%s:%s@%s:%d/default?dial_timeout=10s&max_execution_time=60",
@@ -411,9 +411,9 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 			return nil, fmt.Errorf("创建数据库 %s 失败: %w", cfg.Database, err)
 		}
 
-		logx.Infof("📊 已创建/验证数据库: %s", cfg.Database)
+		logx.Infof(" 已创建/验证数据库: %s", cfg.Database)
 
-		// 🔧 关闭 default 数据库连接
+		//  关闭 default 数据库连接
 		if sqlDB, err := defaultDB.DB(); err == nil {
 			sqlDB.Close()
 		}
@@ -451,7 +451,7 @@ func NewClickHouse(cfg *Config) (*ClickHouse, error) {
 	}
 
 	instances.Store(key, instance)
-	logx.Infof("✅ ClickHouse 连接成功 [%s]", key)
+	logx.Infof(" ClickHouse 连接成功 [%s]", key)
 
 	return instance, nil
 }
@@ -484,7 +484,7 @@ func (ch *ClickHouse) CreateTable(model interface{}, engineCfg ...*TableEngineCo
 		return err
 	}
 
-	logx.Infof("✅ 创建业务表成功 [%s]", tableName)
+	logx.Infof(" 创建业务表成功 [%s]", tableName)
 
 	// 自动创建时间维度统计视图
 	// if err := ch.createTimeBasedViews(model, tableName); err != nil {
@@ -526,11 +526,11 @@ func (ch *ClickHouse) generateCreateTableSQL(model interface{}, tableName string
 		sql.WriteString(fmt.Sprintf("\nORDER BY (%s)", strings.Join(cfg.OrderBy, ", ")))
 	}
 
-	// 🔧 修复: TTL 策略（添加删除模式）
+	//  修复: TTL 策略（添加删除模式）
 	if cfg.TTL > 0 {
 		days := int(cfg.TTL.Hours() / 24)
 
-		// 🆕 根据 TTLMode 生成不同的 TTL 子句
+		//  根据 TTLMode 生成不同的 TTL 子句
 		switch cfg.TTLMode {
 		case "DELETE", "": // 默认删除模式
 			sql.WriteString(fmt.Sprintf("\nTTL created_at + INTERVAL %d DAY DELETE", days))
@@ -565,7 +565,7 @@ func (ch *ClickHouse) generateCreateTableSQL(model interface{}, tableName string
 	return sql.String()
 }
 
-// 🆕 递归解析结构体字段(包括嵌入字段)
+//  递归解析结构体字段(包括嵌入字段)
 func (ch *ClickHouse) parseStructFields(structType reflect.Type, prefix string) []string {
 	var columns []string
 
@@ -577,7 +577,7 @@ func (ch *ClickHouse) parseStructFields(structType reflect.Type, prefix string) 
 			continue
 		}
 
-		// 🔧 处理嵌入结构体(Anonymous field)
+		//  处理嵌入结构体(Anonymous field)
 		if field.Anonymous {
 			fieldType := field.Type
 			if fieldType.Kind() == reflect.Ptr {
@@ -612,7 +612,7 @@ func (ch *ClickHouse) createTimeBasedViews(model interface{}, tableName string) 
 	numericFields := ch.getNumericFields(model)
 	decimalFields := ch.getDecimalFields(model)
 
-	// 🆕 1. 创建分钟统计视图
+	//  1. 创建分钟统计视图
 	if err := ch.createMinuteView(tableName, numericFields, decimalFields); err != nil {
 		return err
 	}
@@ -648,11 +648,11 @@ func (ch *ClickHouse) getAggregations(numericFields, decimalFields []string) []s
 		)
 	}
 
-	// ✅ Decimal 字段 - 使用 toString() 保持精度
+	//  Decimal 字段 - 使用 toString() 保持精度
 	for _, field := range decimalFields {
 		aggregations = append(aggregations,
 			fmt.Sprintf("sum(%s) as total_%s", field, field),
-			// 🔧 修复: avg() 需要显式转换回 Decimal
+			//  修复: avg() 需要显式转换回 Decimal
 			fmt.Sprintf("CAST(avg(%s) AS Decimal(20, 8)) as avg_%s", field, field),
 			fmt.Sprintf("max(%s) as max_%s", field, field),
 			fmt.Sprintf("min(%s) as min_%s", field, field),
@@ -672,12 +672,12 @@ func (ch *ClickHouse) DeleteDB(databaseName ...string) error {
 		if err := ch.db.Exec(sql).Error; err != nil {
 			return fmt.Errorf("删除数据库 %s 失败: %w", dbname, err)
 		}
-		logx.Infof("🗑️ 删除数据库成功: %s", dbname)
+		logx.Infof(" 删除数据库成功: %s", dbname)
 	}
 	return nil
 }
 
-// 🆕 创建分钟统计视图 (支持 Decimal)
+//  创建分钟统计视图 (支持 Decimal)
 func (ch *ClickHouse) createMinuteView(tableName string, numericFields, decimalFields []string) error {
 	viewName := fmt.Sprintf("%s_stats_minute", tableName)
 
@@ -701,11 +701,11 @@ func (ch *ClickHouse) createMinuteView(tableName string, numericFields, decimalF
 		return fmt.Errorf("创建分钟视图失败: %w", err)
 	}
 
-	logx.Infof("✅ 创建分钟统计视图成功 [%s]", viewName)
+	logx.Infof(" 创建分钟统计视图成功 [%s]", viewName)
 	return nil
 }
 
-// 🆕 创建小时统计视图 (支持 Decimal)
+//  创建小时统计视图 (支持 Decimal)
 func (ch *ClickHouse) createHourlyView(tableName string, numericFields, decimalFields []string) error {
 	viewName := fmt.Sprintf("%s_stats_hourly", tableName)
 
@@ -728,11 +728,11 @@ func (ch *ClickHouse) createHourlyView(tableName string, numericFields, decimalF
 		return fmt.Errorf("创建小时视图失败: %w", err)
 	}
 
-	logx.Infof("✅ 创建小时统计视图成功 [%s]", viewName)
+	logx.Infof(" 创建小时统计视图成功 [%s]", viewName)
 	return nil
 }
 
-// 🆕 查询分钟统计数据
+//  查询分钟统计数据
 func (ch *ClickHouse) QueryMinuteStats(tableName string, startTime, endTime time.Time) ([]map[string]interface{}, error) {
 	viewName := fmt.Sprintf("%s_stats_minute", tableName)
 
@@ -745,7 +745,7 @@ func (ch *ClickHouse) QueryMinuteStats(tableName string, startTime, endTime time
 	return results, err
 }
 
-// 🆕 创建日统计视图 (支持 Decimal)
+//  创建日统计视图 (支持 Decimal)
 func (ch *ClickHouse) createDailyView(tableName string, numericFields, decimalFields []string) error {
 	viewName := fmt.Sprintf("%s_stats_daily", tableName)
 
@@ -768,11 +768,11 @@ func (ch *ClickHouse) createDailyView(tableName string, numericFields, decimalFi
 		return fmt.Errorf("创建日视图失败: %w", err)
 	}
 
-	logx.Infof("✅ 创建日统计视图成功 [%s]", viewName)
+	logx.Infof(" 创建日统计视图成功 [%s]", viewName)
 	return nil
 }
 
-// 🆕 创建月统计视图 (支持 Decimal)
+//  创建月统计视图 (支持 Decimal)
 func (ch *ClickHouse) createMonthlyView(tableName string, numericFields, decimalFields []string) error {
 	viewName := fmt.Sprintf("%s_stats_monthly", tableName)
 
@@ -795,7 +795,7 @@ func (ch *ClickHouse) createMonthlyView(tableName string, numericFields, decimal
 		return fmt.Errorf("创建月视图失败: %w", err)
 	}
 
-	logx.Infof("✅ 创建月统计视图成功 [%s]", viewName)
+	logx.Infof(" 创建月统计视图成功 [%s]", viewName)
 	return nil
 }
 
@@ -824,7 +824,7 @@ func (ch *ClickHouse) QueryDailyStats(tableName string, startDate, endDate time.
 	return results, err
 }
 
-// 🆕 通用查询方法 - 支持所有粒度
+//  通用查询方法 - 支持所有粒度
 func (ch *ClickHouse) QueryStats(tableName string, granularity string, startTime, endTime time.Time) ([]map[string]interface{}, error) {
 	var viewName string
 	var timeField string
@@ -968,12 +968,12 @@ func (ch *ClickHouse) getColumnName(field reflect.StructField) string {
 func (ch *ClickHouse) getClickHouseType(field reflect.StructField) string {
 	fieldType := field.Type
 
-	// 🔧 处理指针类型
+	//  处理指针类型
 	if fieldType.Kind() == reflect.Ptr {
 		fieldType = fieldType.Elem()
 	}
 
-	// 🔧 新增: 处理 decimal.Decimal 类型
+	//  新增: 处理 decimal.Decimal 类型
 	if fieldType.PkgPath() == "github.com/shopspring/decimal" && fieldType.Name() == "Decimal" {
 		return "Decimal(20, 8)" // 20位总长度, 8位小数
 	}
@@ -1014,7 +1014,7 @@ func (ch *ClickHouse) getClickHouseType(field reflect.StructField) string {
 	}
 }
 
-// 🆕 获取数值型字段(排除 Decimal)
+//  获取数值型字段(排除 Decimal)
 func (ch *ClickHouse) getNumericFields(model interface{}) []string {
 	var fields []string
 
@@ -1031,7 +1031,7 @@ func (ch *ClickHouse) getNumericFields(model interface{}) []string {
 			continue
 		}
 
-		// 🔧 处理嵌入结构体
+		//  处理嵌入结构体
 		if field.Anonymous {
 			fieldType := field.Type
 			if fieldType.Kind() == reflect.Ptr {
@@ -1047,7 +1047,7 @@ func (ch *ClickHouse) getNumericFields(model interface{}) []string {
 			fieldType = fieldType.Elem()
 		}
 
-		// ✅ 跳过 Decimal 类型(单独处理)
+		//  跳过 Decimal 类型(单独处理)
 		isDecimal := fieldType.PkgPath() == "github.com/shopspring/decimal" &&
 			fieldType.Name() == "Decimal"
 		if isDecimal {
@@ -1071,7 +1071,7 @@ func (ch *ClickHouse) getNumericFields(model interface{}) []string {
 	return fields
 }
 
-// 🆕 获取 Decimal 类型字段
+//  获取 Decimal 类型字段
 func (ch *ClickHouse) getDecimalFields(model interface{}) []string {
 	var fields []string
 
@@ -1088,7 +1088,7 @@ func (ch *ClickHouse) getDecimalFields(model interface{}) []string {
 			continue
 		}
 
-		// 🔧 处理嵌入结构体
+		//  处理嵌入结构体
 		if field.Anonymous {
 			fieldType := field.Type
 			if fieldType.Kind() == reflect.Ptr {
@@ -1104,7 +1104,7 @@ func (ch *ClickHouse) getDecimalFields(model interface{}) []string {
 			fieldType = fieldType.Elem()
 		}
 
-		// ✅ 检查是否为 decimal.Decimal 类型
+		//  检查是否为 decimal.Decimal 类型
 		isDecimal := fieldType.PkgPath() == "github.com/shopspring/decimal" &&
 			fieldType.Name() == "Decimal"
 
@@ -1208,7 +1208,7 @@ func (ch *ClickHouse) QueryMonthlyStats(tableName string, startTime, endTime tim
 		return nil, err
 	}
 
-	// 🆕 添加数据状态标识
+	//  添加数据状态标识
 	now := time.Now()
 	sourceTTLDays := 365 // 源表 TTL
 
@@ -1216,7 +1216,7 @@ func (ch *ClickHouse) QueryMonthlyStats(tableName string, startTime, endTime tim
 		if statMonth, ok := result["stat_month"].(time.Time); ok {
 			daysOld := int(now.Sub(statMonth).Hours() / 24)
 
-			// 🔧 判断源数据是否还存在
+			//  判断源数据是否还存在
 			if daysOld > sourceTTLDays {
 				result["data_status"] = "archived" // 已归档（源数据已删除）
 				result["has_detail"] = false       // 无法查看明细

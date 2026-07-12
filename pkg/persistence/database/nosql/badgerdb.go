@@ -190,7 +190,10 @@ func NewBadgerDBWithConfig[T any](config BadgerDBConfig) (*BadgerDB[T], error) {
 			diagnosis := diagnoseLockError(config.Path)
 
 			if i < maxRetries-1 {
-				logx.Errorf("数据库被锁定，等待重试... (%d/%d)\n详情: %s", i+1, maxRetries, diagnosis)
+				logx.Debugw("badger_lock_retry",
+					logx.Field("attempt", i+1),
+					logx.Field("max_attempts", maxRetries),
+				)
 				time.Sleep(time.Second * time.Duration(i+1))
 				continue
 			} else {

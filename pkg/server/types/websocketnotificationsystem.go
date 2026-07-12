@@ -11,7 +11,7 @@ import (
 	"github.com/zeromicro/go-zero/core/proc"
 )
 
-// 🔧 全局 WebSocket 通知系统（所有 RouterInfo 共享）
+// 全局 WebSocket 通知系统（所有 RouterInfo 共享）
 type WebSocketNotificationSystem struct {
 	jobChan   chan *noticeJob
 	workers   int
@@ -19,11 +19,11 @@ type WebSocketNotificationSystem struct {
 	statsDone chan struct{}
 	wg        sync.WaitGroup
 	once      sync.Once
-	isStarted atomic.Bool // 🆕 使用原子操作
+	isStarted atomic.Bool //  使用原子操作
 	isStopped atomic.Bool
 	mu        sync.RWMutex
 
-	// 🆕 统计信息
+	//  统计信息
 	totalJobs     atomic.Int64
 	droppedJobs   atomic.Int64
 	processedJobs atomic.Int64
@@ -31,17 +31,17 @@ type WebSocketNotificationSystem struct {
 
 var (
 	globalNotificationSystem *WebSocketNotificationSystem
-	globalSystemOnce         sync.Once // 🆕 确保只创建一次
+	globalSystemOnce         sync.Once //  确保只创建一次
 	globalSystemMu           sync.RWMutex
 	websocketShutdownOnce    sync.Once
 )
 
-// 🆕 获取全局通知系统（单例）
+// 获取全局通知系统（单例）
 func getGlobalNotificationSystem() *WebSocketNotificationSystem {
 	globalSystemOnce.Do(func() {
 		system := &WebSocketNotificationSystem{
-			jobChan: make(chan *noticeJob, 10000), // 🔧 减少缓冲区（10K 足够）
-			workers: 20,                           // 🔧 减少 worker 数量
+			jobChan: make(chan *noticeJob, 10000), //  减少缓冲区（10K 足够）
+			workers: 20,                           //  减少 worker 数量
 			closeCh: make(chan struct{}),
 		}
 		globalSystemMu.Lock()
@@ -67,13 +67,13 @@ func registerWebSocketProcessShutdown() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := StopPeriodicCleanup(ctx); err != nil {
-				logx.Errorf("WebSocket 周期清理停止失败: %v", err)
+				logx.Errorw("websocket_cleanup_stop_failed", logx.Field("error", err))
 			}
 		})
 	})
 }
 
-// 🔧 启动全局通知系统（只启动一次）
+// 启动全局通知系统（只启动一次）
 func (wns *WebSocketNotificationSystem) Start() {
 	wns.mu.Lock()
 	defer wns.mu.Unlock()
@@ -81,8 +81,10 @@ func (wns *WebSocketNotificationSystem) Start() {
 		return
 	}
 	wns.once.Do(func() {
-		logx.Infof("🚀 启动全局 WebSocket 通知系统 (%d workers, 缓冲:%d)",
-			wns.workers, cap(wns.jobChan))
+		logx.Infow("websocket_notification_started",
+			logx.Field("workers", wns.workers),
+			logx.Field("queue_capacity", cap(wns.jobChan)),
+		)
 
 		for i := 0; i < wns.workers; i++ {
 			wns.wg.Add(1)
@@ -90,9 +92,8 @@ func (wns *WebSocketNotificationSystem) Start() {
 		}
 
 		wns.isStarted.Store(true)
-		logx.Info("✅ 全局 WebSocket 通知系统启动完成")
 
-		// 🔧 每 5 分钟重置统计，防止历史 droppedJobs 累积导致 IsHealthy 永久返回 false
+		//  每 5 分钟重置统计，防止历史 droppedJobs 累积导致 IsHealthy 永久返回 false
 		wns.wg.Add(1)
 		wns.statsDone = make(chan struct{})
 		go func() {
@@ -112,24 +113,27 @@ func (wns *WebSocketNotificationSystem) Start() {
 	})
 }
 
-// 🔧 worker 协程（优化性能）
+// worker 协程（优化性能）
 func (wns *WebSocketNotificationSystem) worker(workerID int) {
 	defer wns.wg.Done()
 
-	logx.Infof("Worker %d 已启动", workerID)
+	logx.Debugw("websocket_worker_started", logx.Field("worker_id", workerID))
 
 	for {
 		select {
 		case job, ok := <-wns.jobChan:
 			if !ok {
 				// 通道已关闭
-				logx.Infof("Worker %d: 通道已关闭", workerID)
+				logx.Debugw("websocket_worker_stopped",
+					logx.Field("worker_id", workerID),
+					logx.Field("reason", "queue_closed"),
+				)
 				return
 			}
 			wns.processJob(workerID, job)
 
 		case <-wns.closeCh:
-			// 🔧 清空剩余任务
+			//  清空剩余任务
 			remaining := 0
 			for {
 				select {
@@ -137,10 +141,11 @@ func (wns *WebSocketNotificationSystem) worker(workerID int) {
 					wns.processJob(workerID, job)
 					remaining++
 				default:
-					if remaining > 0 {
-						logx.Infof("Worker %d 处理了 %d 个剩余任务", workerID, remaining)
-					}
-					logx.Infof("Worker %d 已停止", workerID)
+					logx.Debugw("websocket_worker_stopped",
+						logx.Field("worker_id", workerID),
+						logx.Field("drained_jobs", remaining),
+						logx.Field("reason", "shutdown"),
+					)
 					return
 				}
 			}
@@ -148,34 +153,48 @@ func (wns *WebSocketNotificationSystem) worker(workerID int) {
 	}
 }
 
-// 🔧 处理任务（添加统计）
+// 处理任务（添加统计）
 func (wns *WebSocketNotificationSystem) processJob(workerID int, job *noticeJob) {
 	defer func() {
 		if err := recover(); err != nil {
-			logx.Errorf("Worker %d panic: %v\nStack: %s",
-				workerID, err, debug.Stack())
+			logx.Errorw("websocket_worker_panicked",
+				logx.Field("worker_id", workerID),
+				logx.Field("error", err),
+				logx.Field("stack", string(debug.Stack())),
+			)
 		}
-		// 🆕 无论成功失败都计数
+		//  无论成功失败都计数
 		wns.processedJobs.Add(1)
 	}()
 
-	// 🆕 检查 job 的有效性
+	//  检查 job 的有效性
 	if job == nil {
-		logx.Errorf("Worker %d: job is nil", workerID)
+		logx.Errorw("websocket_job_invalid",
+			logx.Field("worker_id", workerID),
+			logx.Field("reason", "job_nil"),
+		)
 		return
 	}
 
 	if job.router == nil {
-		logx.Errorf("Worker %d: job.router is nil for hash:%d", workerID, job.hash)
+		logx.Errorw("websocket_job_invalid",
+			logx.Field("worker_id", workerID),
+			logx.Field("hash", job.hash),
+			logx.Field("reason", "router_nil"),
+		)
 		return
 	}
 
 	if job.iwsr == nil {
-		logx.Errorf("Worker %d: job.iwsr is nil for hash:%d", workerID, job.hash)
+		logx.Errorw("websocket_job_invalid",
+			logx.Field("worker_id", workerID),
+			logx.Field("hash", job.hash),
+			logx.Field("reason", "notice_router_nil"),
+		)
 		return
 	}
 
-	// 🔧 带超时的过滤（减少超时时间）
+	//  带超时的过滤（减少超时时间）
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -188,9 +207,12 @@ func (wns *WebSocketNotificationSystem) processJob(workerID int, job *noticeJob)
 		defer func() {
 			if err := recover(); err != nil {
 				path := job.router.GetPath()
-				data := job.message
-				logx.Errorf("Worker %d NoticeFiltersRouter panic: %v, path: %s, data: %v\nStack: %s",
-					workerID, err, path, data, debug.Stack())
+				logx.Errorw("websocket_filter_panicked",
+					logx.Field("worker_id", workerID),
+					logx.Field("route", path),
+					logx.Field("error", err),
+					logx.Field("stack", string(debug.Stack())),
+				)
 				done <- struct {
 					ok   bool
 					data interface{}
@@ -211,16 +233,20 @@ func (wns *WebSocketNotificationSystem) processJob(workerID int, job *noticeJob)
 			job.router.sendToHashClients(job.hash, job.message, result.data)
 		}
 	case <-ctx.Done():
-		logx.Errorf("Worker %d: 过滤超时 hash:%d (1s)", workerID, job.hash)
+		logx.Errorw("websocket_filter_timeout",
+			logx.Field("worker_id", workerID),
+			logx.Field("hash", job.hash),
+			logx.Field("timeout_ms", 1000),
+		)
 	}
 }
 
-// 🔧 提交任务（非阻塞，带统计）
+// 提交任务（非阻塞，带统计）
 func (wns *WebSocketNotificationSystem) Submit(job *noticeJob) bool {
 	wns.mu.RLock()
 	defer wns.mu.RUnlock()
 	if !wns.isStarted.Load() {
-		logx.Errorf("通知系统未启动，丢弃任务")
+		logx.Errorw("websocket_job_dropped", logx.Field("reason", "system_not_started"))
 		wns.droppedJobs.Add(1)
 		return false
 	}
@@ -234,16 +260,19 @@ func (wns *WebSocketNotificationSystem) Submit(job *noticeJob) bool {
 		// 队列满，记录并丢弃
 		wns.droppedJobs.Add(1)
 
-		// 🆕 每 100 个丢弃任务才打印一次
+		//  每 100 个丢弃任务才打印一次
 		dropped := wns.droppedJobs.Load()
 		if dropped%100 == 0 {
-			logx.Errorf("⚠️ 通知队列已满，已丢弃 %d 个任务", dropped)
+			logx.Errorw("websocket_job_dropped",
+				logx.Field("reason", "queue_full"),
+				logx.Field("dropped_total", dropped),
+			)
 		}
 		return false
 	}
 }
 
-// 🔧 优雅关闭
+// 优雅关闭
 func (wns *WebSocketNotificationSystem) Shutdown() {
 	wns.mu.Lock()
 	if wns.isStopped.Load() {
@@ -256,9 +285,9 @@ func (wns *WebSocketNotificationSystem) Shutdown() {
 		return
 	}
 
-	logx.Info("🛑 关闭全局 WebSocket 通知系统...")
+	logx.Infow("websocket_notification_stopping")
 
-	// 🆕 先标记为未启动，拒绝新任务
+	//  先标记为未启动，拒绝新任务
 	wns.isStarted.Store(false)
 
 	// 关闭信号
@@ -274,19 +303,17 @@ func (wns *WebSocketNotificationSystem) Shutdown() {
 
 	select {
 	case <-done:
-		logx.Info("✅ 所有 worker 已停止")
+		logx.Infow("websocket_notification_stopped",
+			logx.Field("total_jobs", wns.totalJobs.Load()),
+			logx.Field("processed_jobs", wns.processedJobs.Load()),
+			logx.Field("dropped_jobs", wns.droppedJobs.Load()),
+		)
 	case <-time.After(5 * time.Second):
-		logx.Error("⚠️ 等待 worker 停止超时（5秒）")
+		logx.Errorw("websocket_shutdown_timeout", logx.Field("timeout_ms", 5000))
 	}
-
-	// 🆕 打印最终统计
-	logx.Infof("📊 通知系统统计: 总任务:%d, 已处理:%d, 已丢弃:%d",
-		wns.totalJobs.Load(),
-		wns.processedJobs.Load(),
-		wns.droppedJobs.Load())
 }
 
-// 🔧 获取统计信息
+// 获取统计信息
 func (wns *WebSocketNotificationSystem) GetStats() map[string]interface{} {
 	pending := len(wns.jobChan)
 	capacity := cap(wns.jobChan)
@@ -299,7 +326,7 @@ func (wns *WebSocketNotificationSystem) GetStats() map[string]interface{} {
 		"is_queue_full":   pending >= capacity-100,
 		"is_started":      wns.isStarted.Load(),
 
-		// 🆕 新增统计
+		//  新增统计
 		"total_jobs":     wns.totalJobs.Load(),
 		"processed_jobs": wns.processedJobs.Load(),
 		"dropped_jobs":   wns.droppedJobs.Load(),
@@ -307,34 +334,42 @@ func (wns *WebSocketNotificationSystem) GetStats() map[string]interface{} {
 	}
 }
 
-// 🆕 重置统计（用于监控）
+// 重置统计（用于监控）
 func (wns *WebSocketNotificationSystem) ResetStats() {
 	wns.totalJobs.Store(0)
 	wns.processedJobs.Store(0)
 	wns.droppedJobs.Store(0)
 }
 
-// 🆕 健康检查
+// 健康检查
 func (wns *WebSocketNotificationSystem) IsHealthy() bool {
 	if !wns.isStarted.Load() {
 		return false
 	}
 
-	// 🔧 检查队列是否接近满
+	//  检查队列是否接近满
 	pending := len(wns.jobChan)
 	capacity := cap(wns.jobChan)
 
 	if float64(pending)/float64(capacity) > 0.9 {
-		logx.Error("⚠️ 通知队列使用率超过 90%")
+		logx.Errorw("websocket_notification_unhealthy",
+			logx.Field("reason", "queue_usage"),
+			logx.Field("pending_jobs", pending),
+			logx.Field("queue_capacity", capacity),
+		)
 		return false
 	}
 
-	// 🔧 检查丢弃率
+	//  检查丢弃率
 	total := wns.totalJobs.Load()
 	dropped := wns.droppedJobs.Load()
 
 	if total > 0 && float64(dropped)/float64(total) > 0.1 {
-		logx.Errorf("⚠️ 任务丢弃率超过 10%% (%d/%d)", dropped, total)
+		logx.Errorw("websocket_notification_unhealthy",
+			logx.Field("reason", "drop_rate"),
+			logx.Field("dropped_jobs", dropped),
+			logx.Field("total_jobs", total),
+		)
 		return false
 	}
 

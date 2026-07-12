@@ -9,9 +9,9 @@
 - [x] 8.1 建立静态守卫、日志规范和当前清单，并接入 `quick`。
 - [x] 8.2 服务边界：`router`、`run`、`trans/rest`、`trans/socket`、`safe`、`utils`。
 - [x] 8.3 基础设施：`cluster`、`mq`、`event`、`transport`，校正 retry/fallback/final failure 级别。
-- [ ] 8.4 持久化：移除原始 SQL、对象、配置和记录值，保留连接/恢复/迁移/最终失败事件。
-- [ ] 8.5 WebSocket/通知：worker 生命周期降为 debug，丢弃、panic、关闭超时保留 error。
-- [ ] 8.6 总验收：静态守卫、vet、定向测试、race 和 JSON 日志契约测试。
+- [x] 8.4 持久化：移除原始 SQL、对象、配置和记录值，保留连接/恢复/迁移/最终失败事件。
+- [x] 8.5 WebSocket/通知：worker 生命周期降为 debug，丢弃、panic、关闭超时保留 error。
+- [x] 8.6 总验收：静态守卫、vet、定向测试、race 和 JSON 日志契约测试。
 
 ## 规范
 

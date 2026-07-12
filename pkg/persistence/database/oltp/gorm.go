@@ -206,8 +206,10 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 	runsql := "select count(*) from (" + sqlwhere + ") a"
 	tx := db.Raw(runsql).Count(&item.Total)
 	if tx.Error != nil {
-		runsql = strings.ReplaceAll(runsql, "\n", " ")
-		logx.Errorf("sqlload count error: %v,sql:%s", tx.Error, runsql)
+		logx.Errorw("database_query_failed",
+			logx.Field("operation", "raw_count"),
+			logx.Field("error", tx.Error),
+		)
 		return tx.Error
 	}
 	if item.Total > 0 {
@@ -224,8 +226,10 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
 		tx = db.Raw(sqlwhere).Find(result)
 		if tx.Error != nil {
-			sqlwhere = strings.ReplaceAll(sqlwhere, "\n", " ")
-			logx.Errorf("sqlload find error: %v,sql:%s", tx.Error, sqlwhere)
+			logx.Errorw("database_query_failed",
+				logx.Field("operation", "raw_find"),
+				logx.Field("error", tx.Error),
+			)
 			return tx.Error
 		}
 	}
@@ -243,7 +247,10 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 			return sdb.Where(query, args...)
 		}).Model(item.Model).Count(&item.Total)
 		if tx.Error != nil {
-			logx.Errorf("load count error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
+			logx.Errorw("database_query_failed",
+				logx.Field("operation", "scoped_count"),
+				logx.Field("error", tx.Error),
+			)
 			return tx.Error
 		}
 		if item.Total > 0 {
@@ -256,7 +263,10 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 				return sdb.Where(query, args...)
 			}).Model(item.Model).Order(item.Order()).Find(result)
 			if tx.Error != nil {
-				logx.Errorf("load find error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
+				logx.Errorw("database_query_failed",
+					logx.Field("operation", "scoped_find"),
+					logx.Field("error", tx.Error),
+				)
 				return tx.Error
 			}
 		}

@@ -1,7 +1,6 @@
 package types
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -9,11 +8,11 @@ import (
 )
 
 const (
-	// 🆕 统计开关（调试时可设为 false）
+	//  统计开关（调试时可设为 false）
 	enableStats = false
 )
 
-// 🆕 RouterStats 路由统计信息
+// RouterStats 路由统计信息
 type RouterStats struct {
 	Path        string
 	ServiceName string
@@ -32,7 +31,7 @@ type RouterStats struct {
 	mu sync.RWMutex
 }
 
-// 🆕 RequestStats QPS统计
+// RequestStats QPS统计
 type RequestStats struct {
 	CurrentSecond   int64            // 当前秒数（Unix时间戳）
 	CurrentReqCount int64            // 当前秒的请求数
@@ -54,14 +53,14 @@ type RequestHistory struct {
 	AvgTime   time.Duration
 }
 
-// 🆕 CacheStats 缓存统计
+// CacheStats 缓存统计
 type CacheStats struct {
 	Hits   int64 // 缓存命中次数
 	Misses int64 // 缓存未命中次数
 	Size   int64 // 缓存项数量
 }
 
-// 🆕 WebSocketStats WebSocket统计
+// WebSocketStats WebSocket统计
 type WebSocketStats struct {
 	// 连接统计
 	CurrentConnections  int64 `json:"current_connections"`
@@ -95,15 +94,15 @@ type WebSocketStats struct {
 	mu sync.RWMutex
 }
 
-// 🆕 初始化统计
+// 初始化统计
 func (own *RouterInfo) initStats() {
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	own.statsLock.Lock()
 	defer own.statsLock.Unlock()
 
-	// 🆕 防止重复初始化
+	//  防止重复初始化
 	if own.stats != nil {
 		return
 	}
@@ -127,21 +126,21 @@ func (own *RouterInfo) initStats() {
 		},
 	}
 
-	// 🔧 确保分片已初始化
+	//  确保分片已初始化
 	if own.rWebSocketShards[0] == nil {
 		own.initShards()
 	}
 
-	// 🔧 启动统计协程
+	//  启动统计协程
 	go own.updateStatsPerSecond()
 
-	logx.Infof("📊 统计系统已启动: %s", own.Path)
+	logx.Infof(" 统计系统已启动: %s", own.Path)
 }
 
-// 🆕 关闭统计系统
+// 关闭统计系统
 func (own *RouterInfo) closeStats() {
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	own.statsLock.Lock()
 	defer own.statsLock.Unlock()
@@ -150,7 +149,7 @@ func (own *RouterInfo) closeStats() {
 		return
 	}
 
-	// 🔧 安全地关闭通道
+	//  安全地关闭通道
 	select {
 	case <-own.stats.closeChan:
 		// 已经关闭
@@ -158,10 +157,10 @@ func (own *RouterInfo) closeStats() {
 		close(own.stats.closeChan)
 	}
 
-	logx.Infof("📊 统计系统已关闭: %s", own.Path)
+	logx.Infof(" 统计系统已关闭: %s", own.Path)
 }
 
-// 🆕 获取关闭通道（防止 panic）
+// 获取关闭通道（防止 panic）
 func (own *RouterInfo) getStatsCloseChan() chan struct{} {
 	own.statsLock.RLock()
 	defer own.statsLock.RUnlock()
@@ -174,10 +173,10 @@ func (own *RouterInfo) getStatsCloseChan() chan struct{} {
 	return own.stats.closeChan
 }
 
-// 🆕 每秒更新统计
+// 每秒更新统计
 func (own *RouterInfo) updateStatsPerSecond() {
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -204,7 +203,7 @@ func (own *RouterInfo) updateStatsPerSecond() {
 	}
 }
 
-// 🔧 更新请求统计
+// 更新请求统计
 func (own *RouterInfo) updateRequestStats() {
 	own.statsLock.RLock()
 	if own.stats == nil || own.stats.Request == nil {
@@ -250,7 +249,7 @@ func (own *RouterInfo) updateRequestStats() {
 	}
 }
 
-// 🔧 更新缓存统计
+// 更新缓存统计
 func (own *RouterInfo) updateCacheStats() {
 	own.statsLock.RLock()
 	if own.stats == nil || own.stats.Cache == nil {
@@ -270,7 +269,7 @@ func (own *RouterInfo) updateCacheStats() {
 	own.stats.mu.Unlock()
 }
 
-// 🔧 更新WebSocket统计
+// 更新WebSocket统计
 func (own *RouterInfo) updateWebSocketStats() {
 	own.statsLock.RLock()
 	if own.stats == nil || own.stats.WebSocket == nil {
@@ -279,7 +278,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 	}
 	own.statsLock.RUnlock()
 
-	// 🆕 防御性检查分片
+	//  防御性检查分片
 	if own.rWebSocketShards[0] == nil {
 		return
 	}
@@ -287,7 +286,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 	var totalClients int64
 	var activeClients int64
 
-	// 🔧 安全地统计所有分片
+	//  安全地统计所有分片
 	for i := 0; i < shardCount; i++ {
 		shard := own.rWebSocketShards[i]
 		if shard == nil {
@@ -313,7 +312,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 		}()
 	}
 
-	// 🔧 更新统计
+	//  更新统计
 	own.stats.WebSocket.mu.Lock()
 	defer own.stats.WebSocket.mu.Unlock()
 
@@ -337,7 +336,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 
 // ==================== 记录方法 ====================
 
-// 🆕 记录请求开始
+// 记录请求开始
 func (own *RouterInfo) recordRequestStart() func() {
 	if !enableStats || own.stats == nil {
 		return func() {}
@@ -355,7 +354,7 @@ func (own *RouterInfo) recordRequestStart() func() {
 	}
 }
 
-// 🆕 记录请求结束
+// 记录请求结束
 func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
 	if !enableStats || own.stats == nil {
 		return
@@ -383,33 +382,33 @@ func (own *RouterInfo) recordRequestEnd(startTime time.Time, err error) {
 	}
 }
 
-// 🆕 记录缓存命中
+// 记录缓存命中
 func (own *RouterInfo) recordCacheHit() {
 	if !enableStats || own.stats == nil {
 		return
 	}
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	own.stats.mu.Lock()
 	own.stats.Cache.Hits++
 	own.stats.mu.Unlock()
 }
 
-// 🆕 记录缓存未命中
+// 记录缓存未命中
 func (own *RouterInfo) recordCacheMiss() {
 	if !enableStats || own.stats == nil {
 		return
 	}
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	own.stats.mu.Lock()
 	own.stats.Cache.Misses++
 	own.stats.mu.Unlock()
 }
 
-// 🆕 记录 WebSocket 连接建立
+// 记录 WebSocket 连接建立
 func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
 	if !enableStats || own.stats == nil {
 		return
@@ -428,7 +427,7 @@ func (own *RouterInfo) recordWebSocketConnect(hash uint64) {
 	own.stats.WebSocket.ConnectionsByHash[hash]++
 }
 
-// 🆕 记录 WebSocket 断开连接
+// 记录 WebSocket 断开连接
 func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
 	if !enableStats || own.stats == nil {
 		return
@@ -451,7 +450,7 @@ func (own *RouterInfo) recordWebSocketDisconnect(hash uint64) {
 	}
 }
 
-// 🆕 记录 WebSocket 消息发送
+// 记录 WebSocket 消息发送
 func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
 	if !enableStats || own.stats == nil {
 		return
@@ -469,7 +468,7 @@ func (own *RouterInfo) recordWebSocketMessage(messageSize int) {
 	}
 }
 
-// 🆕 记录 WebSocket 广播
+// 记录 WebSocket 广播
 func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
 	if !enableStats || own.stats == nil {
 		return
@@ -483,7 +482,7 @@ func (own *RouterInfo) recordWebSocketBroadcast(recipientCount int) {
 	own.stats.WebSocket.CurrentMPS += int64(recipientCount)
 }
 
-// 🆕 记录 WebSocket 错误
+// 记录 WebSocket 错误
 func (own *RouterInfo) recordWebSocketError() {
 	if !enableStats || own.stats == nil {
 		return
@@ -495,7 +494,7 @@ func (own *RouterInfo) recordWebSocketError() {
 	own.stats.WebSocket.TotalErrors++
 }
 
-// 🆕 记录清理的死连接
+// 记录清理的死连接
 func (own *RouterInfo) recordDeadConnectionsCleaned(count int) {
 	if !enableStats || own.stats == nil {
 		return
@@ -509,7 +508,7 @@ func (own *RouterInfo) recordDeadConnectionsCleaned(count int) {
 
 // ==================== 获取统计快照 ====================
 
-// 🆕 RouterStatsSnapshot 统计快照
+// RouterStatsSnapshot 统计快照
 type RouterStatsSnapshot struct {
 	// 基本信息
 	ServiceName string `json:"service_name"`
@@ -560,7 +559,7 @@ type WebSocketStatsSnapshot struct {
 	DeadConnectionsCleaned int64   `json:"dead_connections_cleaned"`
 }
 
-// 🆕 GetStats 获取统计快照
+// GetStats 获取统计快照
 func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
 	if own.stats == nil || !enableStats {
 		return nil
@@ -660,90 +659,41 @@ func (own *RouterInfo) GetStats() *RouterStatsSnapshot {
 	return snapshot
 }
 
-// 🆕 PrintStats 打印统计信息
+// PrintStats 打印统计信息
 func (own *RouterInfo) PrintStats() {
 	if !enableStats {
-		return // 🔧 直接返回，不初始化
+		return //  直接返回，不初始化
 	}
 	snapshot := own.GetStats()
-	wsInfo := ""
+	websocketConnections := int64(0)
+	websocketMessages := int64(0)
+	websocketErrors := int64(0)
 	if snapshot.WebSocket != nil {
 		ws := snapshot.WebSocket
-		wsInfo = fmt.Sprintf(`╠───────────────────────────────────────────────────────────────
-║ WebSocket 统计:
-║   当前连接:  %d
-║   最大连接:  %d
-║   总连接数:  %d
-║   当前 MPS:  %d msg/s
-║   最大 MPS:  %d msg/s
-║   平均 MPS:  %.2f msg/s
-║   总消息数:  %d
-║   总广播数:  %d
-║   平均消息:  %d bytes
-║   总错误数:  %d
-║   错误率:    %.2f%%
-║   清理连接:  %d`,
-			ws.CurrentConnections,
-			ws.MaxConnections,
-			ws.TotalConnections,
-			ws.CurrentMPS,
-			ws.MaxMPS,
-			ws.AvgMPS,
-			ws.TotalMessages,
-			ws.TotalBroadcasts,
-			ws.AvgMessageSize,
-			ws.TotalErrors,
-			ws.ErrorRate,
-			ws.DeadConnectionsCleaned,
-		)
+		websocketConnections = ws.CurrentConnections
+		websocketMessages = ws.TotalMessages
+		websocketErrors = ws.TotalErrors
 	}
 
-	logx.Infof(`
-╔═══════════════════════════════════════════════════════════════
-║ 路由统计: %s %s
-╠═══════════════════════════════════════════════════════════════
-║ 运行时长: %s
-║ 开始时间: %s
-╠───────────────────────────────────────────────────────────────
-║ QPS 统计:
-║   当前 QPS:  %d req/s
-║   最大 QPS:  %d req/s
-║   平均 QPS:  %.2f req/s
-╠───────────────────────────────────────────────────────────────
-║ 请求统计:
-║   总请求数:  %d
-║   总错误数:  %d
-║   错误率:    %.2f%%
-╠───────────────────────────────────────────────────────────────
-║ 响应时间:
-║   最小:      %s
-║   最大:      %s
-║   平均:      %s
-╠───────────────────────────────────────────────────────────────
-║ 缓存统计:
-║   命中次数:  %d
-║   未命中:    %d
-║   命中率:    %.2f%%
-║   缓存大小:  %d 项%s
-╚═══════════════════════════════════════════════════════════════
-`,
-		snapshot.ServiceName,
-		snapshot.Path,
-		snapshot.Uptime,
-		snapshot.StartTime.Format("2006-01-02 15:04:05"),
-		snapshot.CurrentQPS,
-		snapshot.MaxQPS,
-		snapshot.AvgQPS,
-		snapshot.TotalRequests,
-		snapshot.TotalErrors,
-		snapshot.ErrorRate,
-		snapshot.MinResponseTime,
-		snapshot.MaxResponseTime,
-		snapshot.AvgResponseTime,
-		snapshot.CacheHits,
-		snapshot.CacheMisses,
-		snapshot.CacheHitRate,
-		snapshot.CacheSize,
-		wsInfo,
+	logx.Infow("router_stats",
+		logx.Field("service", snapshot.ServiceName),
+		logx.Field("route", snapshot.Path),
+		logx.Field("uptime", snapshot.Uptime),
+		logx.Field("current_qps", snapshot.CurrentQPS),
+		logx.Field("max_qps", snapshot.MaxQPS),
+		logx.Field("average_qps", snapshot.AvgQPS),
+		logx.Field("total_requests", snapshot.TotalRequests),
+		logx.Field("total_errors", snapshot.TotalErrors),
+		logx.Field("error_rate", snapshot.ErrorRate),
+		logx.Field("min_response_time", snapshot.MinResponseTime),
+		logx.Field("max_response_time", snapshot.MaxResponseTime),
+		logx.Field("average_response_time", snapshot.AvgResponseTime),
+		logx.Field("cache_hits", snapshot.CacheHits),
+		logx.Field("cache_misses", snapshot.CacheMisses),
+		logx.Field("cache_hit_rate", snapshot.CacheHitRate),
+		logx.Field("cache_size", snapshot.CacheSize),
+		logx.Field("websocket_connections", websocketConnections),
+		logx.Field("websocket_messages", websocketMessages),
+		logx.Field("websocket_errors", websocketErrors),
 	)
 }

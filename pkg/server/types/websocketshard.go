@@ -62,7 +62,7 @@ func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket
 			func() {
 				defer func() {
 					if err := recover(); err != nil {
-						logx.Error("RegisterWebSocket panic:", err)
+						logx.Errorw("websocket_register_panicked", logx.Field("error", err))
 					}
 				}()
 				iwsr.RegisterWebSocket(client, req)
@@ -107,7 +107,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 	if own.rHashClients != nil {
 		own.rHashClients[hash]--
 		if own.rHashClients[hash] < 0 {
-			logx.Errorf("rHashClients[%d] underflow detected, resetting to 0", hash)
+			logx.Errorw("websocket_client_count_underflow", logx.Field("hash", hash))
 			own.rHashClients[hash] = 0
 		}
 		if own.rHashClients[hash] == 0 {
@@ -127,7 +127,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 			func() {
 				defer func() {
 					if err := recover(); err != nil {
-						logx.Error("UnRegisterWebSocket panic:", err)
+						logx.Errorw("websocket_unregister_panicked", logx.Field("error", err))
 					}
 				}()
 				iwsr.UnRegisterWebSocket(client, req)
@@ -148,7 +148,7 @@ func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
 // 优化广播（使用单例）
 func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 	if own == nil {
-		logx.Errorf("NoticeWebSocket: RouterInfo is nil")
+		logx.Errorw("websocket_broadcast_failed", logx.Field("reason", "router_nil"))
 		return
 	}
 
@@ -175,7 +175,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 		own.ensureWebSocketInit()
 
 		if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
-			logx.Errorf("NoticeWebSocket: 分片初始化失败 for %s", own.Path)
+			logx.Errorw("websocket_shard_initialization_failed", logx.Field("route", own.Path))
 			return
 		}
 	}
@@ -216,7 +216,7 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 			}
 
 			if job.router == nil || job.iwsr == nil || job.api == nil {
-				logx.Errorf("NoticeWebSocket: job 不完整 hash:%d", hash)
+				logx.Errorw("websocket_job_invalid", logx.Field("route", own.Path), logx.Field("hash", hash))
 				continue
 			}
 
@@ -229,8 +229,11 @@ func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 
 		//  只在有丢弃时才打印
 		if dropped > 0 {
-			logx.Errorf("%s 提交任务: 成功:%d, 丢弃:%d",
-				own.Path, submitted, dropped)
+			logx.Errorw("websocket_jobs_dropped",
+				logx.Field("route", own.Path),
+				logx.Field("submitted", submitted),
+				logx.Field("dropped", dropped),
+			)
 		}
 
 		// Forward notice to peer nodes for the same subscriptions.
@@ -304,7 +307,10 @@ func (own *RouterInfo) CleanupDeadConnections() {
 
 	if totalDead > 0 {
 		own.recordDeadConnectionsCleaned(totalDead)
-		logx.Infof("清理 %d 个死连接 for %s", totalDead, own.Path)
+		logx.Infow("websocket_dead_connections_cleaned",
+			logx.Field("route", own.Path),
+			logx.Field("connection_count", totalDead),
+		)
 	}
 }
 
@@ -328,18 +334,18 @@ func (own *RouterInfo) GetActiveClientCount() int {
 func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}) {
 	//  第一层防御：检查 RouterInfo 本身
 	if own == nil {
-		logx.Error("sendToHashClients: RouterInfo is nil")
+		logx.Errorw("websocket_send_failed", logx.Field("reason", "router_nil"))
 		return
 	}
 
 	//  第二层防御：检查分片数组是否初始化
 	if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
-		logx.Errorf("sendToHashClients: 分片未初始化 for %s, 尝试初始化", own.Path)
+		logx.Debugw("websocket_shard_initializing", logx.Field("route", own.Path))
 		own.ensureWebSocketInit()
 
 		// 再次检查
 		if len(own.rWebSocketShards) == 0 || own.rWebSocketShards[0] == nil {
-			logx.Errorf("sendToHashClients: 分片初始化失败 for %s", own.Path)
+			logx.Errorw("websocket_shard_initialization_failed", logx.Field("route", own.Path))
 			return
 		}
 	}
@@ -348,7 +354,11 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 
 	//  第三层防御：检查分片本身
 	if shard == nil {
-		logx.Errorf("sendToHashClients: 分片 %d 为 nil for %s", hash%shardCount, own.Path)
+		logx.Errorw("websocket_send_failed",
+			logx.Field("route", own.Path),
+			logx.Field("shard", hash%shardCount),
+			logx.Field("reason", "shard_nil"),
+		)
 		return
 	}
 
@@ -371,12 +381,6 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 	if len(clients) == 0 {
 		return
 	}
-	// logx.Infow("发送WebSocket消息",
-	// 	logx.Field("clients", len(clients)),
-	// 	logx.Field("hash", hash),
-	// 	logx.Field("path", own.Path),
-	// 	logx.Field("data", utils.PrintObj(message)),
-	// )
 	//  批量发送
 	own.recordWebSocketBroadcast(len(clients))
 	hashStr := strconv.FormatUint(hash, 10)
@@ -391,7 +395,10 @@ func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}
 		batch := clients[i:end]
 		go own.sendBatch(batch, hashStr, ndata)
 	}
-	logx.Infof("已启动 %d 个批次发送任务 for %s", (len(clients)+batchSize-1)/batchSize, own.Path)
+	logx.Debugw("websocket_send_batches_started",
+		logx.Field("route", own.Path),
+		logx.Field("batch_count", (len(clients)+batchSize-1)/batchSize),
+	)
 }
 
 // 优化 getShard（添加边界检查）
@@ -402,8 +409,11 @@ func (own *RouterInfo) getShard(hash uint64) *websocketShard {
 
 	index := hash % shardCount
 	if int(index) >= len(own.rWebSocketShards) {
-		logx.Errorf("getShard: 索引越界 hash:%d, index:%d, len:%d",
-			hash, index, len(own.rWebSocketShards))
+		logx.Errorw("websocket_shard_index_invalid",
+			logx.Field("hash", hash),
+			logx.Field("shard", index),
+			logx.Field("shard_count", len(own.rWebSocketShards)),
+		)
 		return nil
 	}
 
@@ -425,7 +435,7 @@ func (own *RouterInfo) ensureWebSocketInit() {
 
 		//  3. 注册到全局清理
 		websocketcleanupOnce.Do(func() {
-			logx.Info(" 启动全局WebSocket清理任务")
+			logx.Infow("websocket_cleanup_started")
 			StartPeriodicCleanup()
 		})
 
@@ -436,7 +446,7 @@ func (own *RouterInfo) ensureWebSocketInit() {
 		}
 
 		if _, loaded := clearMap.LoadOrStore(key, own); !loaded {
-			logx.Infof("📝 注册WebSocket路由: %s", key)
+			logx.Debugw("websocket_route_registered", logx.Field("route", key))
 		}
 	})
 }
@@ -448,7 +458,10 @@ func (own *RouterInfo) initShards() {
 		return
 	}
 
-	logx.Infof("初始化 %d 个分片 for %s", shardCount, own.Path)
+	logx.Debugw("websocket_shards_initializing",
+		logx.Field("route", own.Path),
+		logx.Field("shard_count", shardCount),
+	)
 
 	for i := 0; i < shardCount; i++ {
 		own.rWebSocketShards[i] = &websocketShard{
@@ -457,7 +470,10 @@ func (own *RouterInfo) initShards() {
 	}
 	own.rHashClients = make(map[uint64]int)
 
-	logx.Infof(" 分片初始化完成 for %s", own.Path)
+	logx.Debugw("websocket_shards_initialized",
+		logx.Field("route", own.Path),
+		logx.Field("shard_count", shardCount),
+	)
 }
 
 // ExecuteLocalNotice delivers a forwarded cross-node notice to local subscribers

@@ -19,7 +19,7 @@ type BusinessDimensionConfig struct {
 	Dimensions      string    `gorm:"column:dimensions;type:text" json:"dimensions"`           // 业务维度字段 JSON 数组，如 ["user_id", "symbol"]
 	TimeGranularity string    `gorm:"column:time_granularity" json:"time_granularity"`         // 时间粒度: "minute", "hour", "day", "month"
 	NumericFields   string    `gorm:"column:numeric_fields;type:text" json:"numeric_fields"`   // 要聚合的数值字段 JSON 数组
-	DecimalFields   string    `gorm:"column:decimal_fields;type:text" json:"decimal_fields"`   // 🆕 Decimal 字段 JSON 数组
+	DecimalFields   string    `gorm:"column:decimal_fields;type:text" json:"decimal_fields"`   //  Decimal 字段 JSON 数组
 	Filters         string    `gorm:"column:filters" json:"filters"`                           // WHERE 条件，如 "status = 'completed'"
 	PartitionBy     string    `gorm:"column:partition_by" json:"partition_by"`                 // 自定义分区（为空则使用默认）
 	TTLDays         int       `gorm:"column:ttl_days" json:"ttl_days"`                         // 数据保留天数（0表示永久保留）
@@ -59,7 +59,7 @@ func (c *BusinessDimensionConfig) GetNumericFields() []string {
 	return fields
 }
 
-// 🆕 获取 Decimal 字段数组
+// 获取 Decimal 字段数组
 func (c *BusinessDimensionConfig) GetDecimalFields() []string {
 	if c.DecimalFields == "" {
 		return []string{}
@@ -91,11 +91,11 @@ func (ch *ClickHouse) getConfigDB() *gorm.DB {
 		return ch.configDB
 	}
 	// 如果没有设置配置数据库，使用 ClickHouse 连接（不推荐）
-	logx.Errorf("⚠️ 未设置配置数据库，使用 ClickHouse 连接存储配置（不推荐）")
+	logx.Errorf(" 未设置配置数据库，使用 ClickHouse 连接存储配置（不推荐）")
 	return ch.db
 }
 
-// 🆕 初始化配置表
+// 初始化配置表
 func (ch *ClickHouse) InitConfigTable() error {
 	configDB := ch.getConfigDB()
 
@@ -103,11 +103,11 @@ func (ch *ClickHouse) InitConfigTable() error {
 		return fmt.Errorf("创建配置表失败: %w", err)
 	}
 
-	logx.Info("✅ 初始化业务视图配置表成功")
+	logx.Info(" 初始化业务视图配置表成功")
 	return nil
 }
 
-// 🆕 保存业务视图配置
+// 保存业务视图配置
 func (ch *ClickHouse) SaveBusinessViewConfig(config *BusinessDimensionConfig) error {
 	// 验证配置
 	if config.ViewName == "" {
@@ -132,7 +132,7 @@ func (ch *ClickHouse) SaveBusinessViewConfig(config *BusinessDimensionConfig) er
 		return fmt.Errorf("数值字段格式错误，必须是 JSON 数组")
 	}
 
-	// 🆕 验证 Decimal 字段格式
+	//  验证 Decimal 字段格式
 	if config.DecimalFields != "" && !isValidJSON(config.DecimalFields) {
 		return fmt.Errorf("Decimal 字段格式错误，必须是 JSON 数组")
 	}
@@ -155,11 +155,11 @@ func (ch *ClickHouse) SaveBusinessViewConfig(config *BusinessDimensionConfig) er
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
 
-	logx.Infof("✅ 保存业务视图配置成功 [%s]", config.ViewName)
+	logx.Infof(" 保存业务视图配置成功 [%s]", config.ViewName)
 	return nil
 }
 
-// 🆕 创建业务维度统计视图（从配置）- 支持 Decimal
+// 创建业务维度统计视图（从配置）- 支持 Decimal
 func (ch *ClickHouse) CreateBusinessViewFromConfig(config *BusinessDimensionConfig) error {
 	dims := config.GetDimensions()
 	if len(dims) == 0 {
@@ -171,10 +171,10 @@ func (ch *ClickHouse) CreateBusinessViewFromConfig(config *BusinessDimensionConf
 	decimalFields := config.GetDecimalFields()
 
 	if len(numericFields) == 0 && len(decimalFields) == 0 {
-		logx.Errorf("⚠️ 未指定数值字段和 Decimal 字段，视图将只包含 record_count")
+		logx.Errorf(" 未指定数值字段和 Decimal 字段，视图将只包含 record_count")
 	}
 
-	// 🔧 关键修复: 获取时间函数和字段（用于聚合）
+	//  关键修复: 获取时间函数和字段（用于聚合）
 	timeFunc, timeField := ch.getTimeFunctionAndField(config.TimeGranularity)
 	if timeFunc == "" {
 		return fmt.Errorf("不支持的时间粒度: %s", config.TimeGranularity)
@@ -183,7 +183,7 @@ func (ch *ClickHouse) CreateBusinessViewFromConfig(config *BusinessDimensionConf
 	// 保存时间字段到配置
 	config.TimeField = timeField
 
-	// 🆕 获取所有时间维度级别配置
+	//  获取所有时间维度级别配置
 	timeAggLevels := ch.getTimeAggregationLevels(config.TimeGranularity, timeField)
 
 	// 构建 SELECT 字段（包含所有时间维度）
@@ -192,9 +192,9 @@ func (ch *ClickHouse) CreateBusinessViewFromConfig(config *BusinessDimensionConf
 	// 添加主时间字段
 	selectFields = append(selectFields, fmt.Sprintf("%s as %s", timeFunc, timeField))
 
-	// 🆕 添加所有时间维度列（从 created_at 计算，因为是从原始表创建）
+	//  添加所有时间维度列（从 created_at 计算，因为是从原始表创建）
 	for _, level := range timeAggLevels {
-		// 🔧 替换 timeField 为 created_at（因为从原始表创建）
+		//  替换 timeField 为 created_at（因为从原始表创建）
 		timeFuncActual := strings.ReplaceAll(level.TimeFunc, timeField, "created_at")
 		numberFuncActual := strings.ReplaceAll(level.NumberFunc, timeField, "created_at")
 
@@ -230,10 +230,10 @@ func (ch *ClickHouse) CreateBusinessViewFromConfig(config *BusinessDimensionConf
 		)
 	}
 
-	// 🔧 修复: 构建 GROUP BY - 必须包含所有时间函数表达式
+	//  修复: 构建 GROUP BY - 必须包含所有时间函数表达式
 	groupByFields := []string{timeFunc} // 主时间函数
 
-	// 🆕 添加所有时间维度列的函数表达式到 GROUP BY
+	//  添加所有时间维度列的函数表达式到 GROUP BY
 	for _, level := range timeAggLevels {
 		timeFuncActual := strings.ReplaceAll(level.TimeFunc, timeField, "created_at")
 		numberFuncActual := strings.ReplaceAll(level.NumberFunc, timeField, "created_at")
@@ -289,7 +289,7 @@ GROUP BY %s`,
 		strings.Join(orderBy, ", "),
 		ttlClause,
 		strings.Join(selectFields, ",\n    "),
-		config.SourceTableName, // 🔧 直接使用原始表名
+		config.SourceTableName, //  直接使用原始表名
 		whereClause,
 		strings.Join(groupByFields, ", "),
 	)
@@ -300,13 +300,13 @@ GROUP BY %s`,
 		return fmt.Errorf("创建业务视图失败 [%s]: %w", config.ViewName, err)
 	}
 
-	logx.Infof("✅ 创建业务统计视图成功 [%s]（基于原始表 %s，包含 %d 个时间维度）",
+	logx.Infof(" 创建业务统计视图成功 [%s]（基于原始表 %s，包含 %d 个时间维度）",
 		config.ViewName, config.SourceTableName, len(timeAggLevels))
 
 	return nil
 }
 
-// 🆕 通过视图名称创建业务视图
+// 通过视图名称创建业务视图
 func (ch *ClickHouse) CreateBusinessViewByName(viewName string) error {
 	var config BusinessDimensionConfig
 	configDB := ch.getConfigDB()
@@ -318,7 +318,7 @@ func (ch *ClickHouse) CreateBusinessViewByName(viewName string) error {
 	return ch.CreateBusinessViewFromConfig(&config)
 }
 
-// 🆕 获取业务视图配置
+// 获取业务视图配置
 func (ch *ClickHouse) GetBusinessViewConfig(viewName string) (*BusinessDimensionConfig, error) {
 	var config BusinessDimensionConfig
 	configDB := ch.getConfigDB()
@@ -329,7 +329,7 @@ func (ch *ClickHouse) GetBusinessViewConfig(viewName string) (*BusinessDimension
 	return &config, nil
 }
 
-// 🆕 列出所有业务视图配置
+// 列出所有业务视图配置
 func (ch *ClickHouse) ListBusinessViewConfigs(sourceTableName string) ([]*BusinessDimensionConfig, error) {
 	var configs []*BusinessDimensionConfig
 	configDB := ch.getConfigDB()
@@ -345,7 +345,7 @@ func (ch *ClickHouse) ListBusinessViewConfigs(sourceTableName string) ([]*Busine
 	return configs, nil
 }
 
-// 🆕 删除业务视图配置
+// 删除业务视图配置
 func (ch *ClickHouse) DeleteBusinessViewConfig(viewName string) error {
 	// 先删除物化视图（ClickHouse）
 	dropSQL := fmt.Sprintf("DROP VIEW IF EXISTS %s", viewName)
@@ -360,11 +360,11 @@ func (ch *ClickHouse) DeleteBusinessViewConfig(viewName string) error {
 		return fmt.Errorf("删除配置失败: %w", err)
 	}
 
-	logx.Infof("✅ 删除业务视图配置成功 [%s]", viewName)
+	logx.Infof(" 删除业务视图配置成功 [%s]", viewName)
 	return nil
 }
 
-// 🆕 更新业务视图配置
+// 更新业务视图配置
 func (ch *ClickHouse) UpdateBusinessViewConfig(config *BusinessDimensionConfig) error {
 	// 先删除旧视图
 	dropSQL := fmt.Sprintf("DROP VIEW IF EXISTS %s", config.ViewName)
@@ -383,7 +383,7 @@ func (ch *ClickHouse) UpdateBusinessViewConfig(config *BusinessDimensionConfig) 
 	return ch.CreateBusinessViewFromConfig(config)
 }
 
-// 🆕 批量创建业务视图（从配置列表）
+// 批量创建业务视图（从配置列表）
 func (ch *ClickHouse) CreateBusinessViewsFromConfigs(configs []*BusinessDimensionConfig) error {
 	for _, config := range configs {
 		config.CreatedAt = time.Now()
@@ -402,7 +402,7 @@ func (ch *ClickHouse) CreateBusinessViewsFromConfigs(configs []*BusinessDimensio
 	return nil
 }
 
-// 🆕 从模型自动创建业务视图配置
+// 从模型自动创建业务视图配置
 func (ch *ClickHouse) CreateBusinessViewConfigFromModel(
 	viewName string,
 	model interface{},
@@ -427,7 +427,7 @@ func (ch *ClickHouse) CreateBusinessViewConfigFromModel(
 		Dimensions:      string(dimensionsJSON),
 		TimeGranularity: granularity,
 		NumericFields:   string(numericFieldsJSON),
-		DecimalFields:   string(decimalFieldsJSON), // 🆕
+		DecimalFields:   string(decimalFieldsJSON), //
 		Filters:         filters,
 		Description:     fmt.Sprintf("自动生成的业务视图: %s", viewName),
 	}
@@ -460,22 +460,22 @@ func (ch *ClickHouse) getTimeFunctionAndField(granularity string) (string, strin
 	}
 }
 
-// 🆕 验证 JSON 格式
+// 验证 JSON 格式
 func isValidJSON(s string) bool {
 	var js interface{}
 	return json.Unmarshal([]byte(s), &js) == nil
 }
 
-// 🆕 时间汇总粒度配置（包含时间戳和编号）
+// 时间汇总粒度配置（包含时间戳和编号）
 type TimeAggregationLevel struct {
-	Granularity   string // 🆕 粒度标识: "1m", "10m", "1h" 等
+	Granularity   string //  粒度标识: "1m", "10m", "1h" 等
 	TimestampName string // 时间戳列名: time_1m, time_10m 等
 	TimeFunc      string // ClickHouse 时间函数
 	NumberName    string // 时间编号列名: num_10m, num_1h 等
 	NumberFunc    string // ClickHouse 编号函数
 }
 
-// 🆕 获取向上汇总的时间列配置（根据视图基础粒度）
+// 获取向上汇总的时间列配置（根据视图基础粒度）
 func (ch *ClickHouse) getTimeAggregationLevels(baseGranularity string, timeField string) []TimeAggregationLevel {
 	levels := []TimeAggregationLevel{}
 
@@ -693,7 +693,7 @@ func (ch *ClickHouse) getTimeAggregationLevels(baseGranularity string, timeField
 	return levels
 }
 
-// 🆕 时间粒度类型定义
+// 时间粒度类型定义
 type GranularityTimeType string
 
 const (
@@ -711,7 +711,8 @@ const (
 	GranularityNone    GranularityTimeType = "none" // 不聚合，返回所有时间粒度列
 )
 
-// 🆕 查询业务统计数据(带多时间粒度汇总列 + 时间编号)
+//	查询业务统计数据(带多时间粒度汇总列 + 时间编号)
+//
 // granularity: 可选参数,指定查询粒度
 //   - GranularityMinute (1m): 查询1分钟级聚合 + 向上汇总
 //   - Granularity10Min (10m): 查询10分钟级聚合 + 向上汇总
@@ -729,7 +730,7 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 	viewName string,
 	dimensions map[string]interface{},
 	startTime, endTime time.Time,
-	granularity ...GranularityTimeType, // 🔧 改为 GranularityTimeType 枚举类型
+	granularity ...GranularityTimeType, //  改为 GranularityTimeType 枚举类型
 ) ([]map[string]interface{}, error) {
 	// 获取配置
 	config, err := ch.GetBusinessViewConfig(viewName)
@@ -741,14 +742,14 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 	decimalFields := config.GetDecimalFields()
 	numericFields := config.GetNumericFields()
 
-	// 🔧 修复: 根据 granularity 参数决定查询哪些时间列
+	//  修复: 根据 granularity 参数决定查询哪些时间列
 	var timeAggLevels []TimeAggregationLevel
 	var shouldAggregate bool
 	var requestedGranularity string
 
 	if len(granularity) > 0 && granularity[0] != GranularityNone {
 		// 指定了粒度，返回该粒度及以上的所有时间列
-		requestedGranularity = string(granularity[0]) // 🔧 转换为字符串
+		requestedGranularity = string(granularity[0]) //  转换为字符串
 		allLevels := ch.getTimeAggregationLevels(config.TimeGranularity, config.TimeField)
 
 		foundStart := false
@@ -780,7 +781,7 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 	// 构建 SELECT 字段
 	var selectFields []string
 
-	// 🔧 关键修复: 直接 SELECT 视图中预计算的列名，不使用函数表达式
+	//  关键修复: 直接 SELECT 视图中预计算的列名，不使用函数表达式
 	if shouldAggregate {
 		// 聚合模式: 第一个粒度不包装，其他粒度用 any() 包装
 		for i, level := range timeAggLevels {
@@ -845,7 +846,7 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 		whereParams = append(whereParams, value)
 	}
 
-	// 🔧 关键修复: GROUP BY 直接使用预计算的列名
+	//  关键修复: GROUP BY 直接使用预计算的列名
 	var groupByFields []string
 	var orderByField string
 
@@ -858,10 +859,10 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 		groupByFields = append(groupByFields, dims...)
 		orderByField = requestedLevel.TimestampName
 	} else {
-		// 🔧 修复：不聚合模式 - 按原始时间字段 + 所有时间列 + 业务维度分组
+		//  修复：不聚合模式 - 按原始时间字段 + 所有时间列 + 业务维度分组
 		groupByFields = []string{config.TimeField} // stat_time
 
-		// 🆕 添加所有时间列到 GROUP BY
+		//  添加所有时间列到 GROUP BY
 		for _, level := range timeAggLevels {
 			groupByFields = append(groupByFields,
 				level.TimestampName, // time_1m, time_10m, ...
@@ -888,12 +889,12 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 		orderByField,
 	)
 
-	logx.Infof("🔍 查询 SQL:\n%s", sql)
-	logx.Infof("🔍 查询参数: %v", whereParams)
-	logx.Infof("🔍 聚合模式: shouldAggregate=%v, 请求粒度=%s, 时间列数=%d",
-		shouldAggregate,
-		requestedGranularity,
-		len(timeAggLevels)*2, // 每个粒度2列（时间戳+编号）
+	logx.Debugw("clickhouse_query_prepared",
+		logx.Field("view", viewName),
+		logx.Field("aggregate", shouldAggregate),
+		logx.Field("granularity", requestedGranularity),
+		logx.Field("time_column_count", len(timeAggLevels)*2),
+		logx.Field("argument_count", len(whereParams)),
 	)
 
 	// 执行查询
@@ -913,11 +914,11 @@ func (ch *ClickHouse) QueryBusinessStatsWithTimeAggregations(
 		}
 	}
 
-	logx.Infof("✅ 查询成功,返回 %d 条记录", len(results))
+	logx.Debugw("clickhouse_query_completed", logx.Field("result_count", len(results)))
 	return results, nil
 }
 
-// 🆕 辅助方法：将 map 中的字符串转换为 Decimal
+// 辅助方法：将 map 中的字符串转换为 Decimal
 func (ch *ClickHouse) convertToDecimal(result map[string]interface{}, key string) {
 	if val, ok := result[key]; ok {
 		switch v := val.(type) {

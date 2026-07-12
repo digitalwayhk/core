@@ -77,7 +77,7 @@
 | 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
 | 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
 | 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
-| 8. 全局日志与异常审计 | 未开始 |  | 运行时日志使用 `logx` 结构化事件，在请求/跨服务边界携带跟踪上下文，通过敏感数据扫描，且不包含未批准的控制台/fatal 输出 |
+| 8. 全局日志与异常审计 | 已完成 | 本批提交 | `check-logging` 已接入 quick；stdout/标准 logger、装饰图标、payload/SQL/参数 dump 已清零；服务/Provider/WebSocket 关键事件结构化，trace_id 与脱敏日志契约、vet、race 均通过 |
 | 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
@@ -613,7 +613,7 @@ rg -n 'panic\("implement me"\)|mongo implement|TODO implement me' pkg/persistenc
 - 分批审查并修改：`pkg/server/cluster`、`pkg/server/mq`、`pkg/server/event`、`pkg/server/transport`、`pkg/server/trans`、`pkg/persistence`、`pkg/utils`、`service/manage`
 - 测试：在每个已修改包旁添加定向测试
 
-- [ ] **步骤 1：生成完整的运行时日志清单**
+- [x] **步骤 1：生成完整的运行时日志清单**
 
 运行以下扫描，并将每个活跃运行时发现复制到 `docs/codex/LOGGING_AUDIT_AND_STANDARD.md`。将示例、测试、注释和生成文件分开分类；仅 `pkg` 和 `service` 属于生产库范围。
 
@@ -627,7 +627,7 @@ rg -n 'request.?id|trace.?id|span.?id|x-request-id|TraceID|RequestID' pkg servic
 
 预期：台账记录文件、行号、当前级别、事件用途、敏感数据风险、重复错误风险、目标操作和验证命令。已确认的初始发现包括标准控制台输出、库构造器中的 `log.Fatalf`、完整 payload/response/SQL 日志、将可恢复回退记为错误、装饰性横幅/图标，以及 TraceID 已传播但未一致绑定日志。
 
-- [ ] **步骤 2：建立基于 go-zero `logx` 的唯一日志契约**
+- [x] **步骤 2：建立基于 go-zero `logx` 的唯一日志契约**
 
 在 `docs/codex/LOGGING_AUDIT_AND_STANDARD.md` 中创建以下规范性章节：
 
@@ -668,7 +668,7 @@ rg -n 'request.?id|trace.?id|span.?id|x-request-id|TraceID|RequestID' pkg servic
 - 当要回答的问题是聚合速率、延迟、队列深度、内存或连接数时，用指标代替重复状态日志。
 ```
 
-- [ ] **步骤 3：添加静态日志守卫**
+- [x] **步骤 3：添加静态日志守卫**
 
 创建 `scripts/check-logging.sh`：
 
@@ -696,7 +696,7 @@ exit "$failed"
 
 将 `./scripts/check-logging.sh` 加入 `quick` 测试层级。迁移期间，在审计文档中记录范围严格的临时例外、owner 和删除任务；不得在全局放宽模式。
 
-- [ ] **步骤 4：完成归属任务 11 的 P0 日志工作**
+- [x] **步骤 4：完成归属任务 11 的 P0 日志工作**
 
 任务 11 负责认证状态、构造器签名、客户端响应、CORS/代理策略和密钥删除。任务 8 负责日志契约，并在同一 P0 安全分支中验证以下变更：
 
@@ -724,7 +724,7 @@ rg -n 'fmt\.(Print|Printf|Println)|log\.(Print|Printf|Println|Fatal|Fatalf)' pkg
 
 预期：测试通过；`pkg/server/safe` 中不再存在包含密钥或终止进程的运行时日志。
 
-- [ ] **步骤 5：在请求和跨服务边界绑定 TraceID 与稳定字段**
+- [x] **步骤 5：在请求和跨服务边界绑定 TraceID 与稳定字段**
 
 使用现有 `Request.traceID`、`PayLoad.TraceID`、OpenTelemetry context 和 go-zero 上下文字段。不创建自定义 logger 类型。
 
@@ -745,7 +745,7 @@ logger.Errorw("request_failed",
 
 测试必须证明传入的 `X-Trace-Id` 出现在捕获的结构化错误事件中，且出站传输保持同一值。
 
-- [ ] **步骤 6：分四个可审查批次统一级别和异常归属**
+- [x] **步骤 6：分四个可审查批次统一级别和异常归属**
 
 应用以下映射：
 
@@ -758,7 +758,7 @@ logger.Errorw("request_failed",
 
 每个批次独立提交并验证。不得将持久化日志变更与传输或认证变更混合。
 
-- [ ] **步骤 7：添加缺失的高价值事件并删除低价值事件**
+- [x] **步骤 7：添加缺失的高价值事件并删除低价值事件**
 
 必需事件：
 
@@ -774,7 +774,7 @@ logger.Errorw("request_failed",
 
 删除无法回答运维问题的日志：分隔符、装饰性状态图案、每记录常规成功、完整对象 dump、重复堆栈跟踪，以及缺少 service/operation 上下文的消息。
 
-- [ ] **步骤 8：验证实际日志输出并防止回归**
+- [x] **步骤 8：验证实际日志输出并防止回归**
 
 使用临时 go-zero writer 添加定向测试。解析发出的 JSON，并断言稳定事件名、级别、`trace_id`、service/route/provider 字段和密钥 fixture 缺失。触发一次最终失败和一次成功回退；验证失败只记录一次，回退记为 info 而非 error。
 

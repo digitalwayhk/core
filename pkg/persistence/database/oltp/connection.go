@@ -60,7 +60,7 @@ func (cm *ConnectionManager) GetConnection(key string) (*gorm.DB, bool) {
 	defer cm.mutex.Unlock()
 
 	if info, exists := cm.connections[key]; exists {
-		// 🔧 更新最后使用时间
+		//  更新最后使用时间
 		info.LastUsed = time.Now()
 		return info.DB, true
 	}
@@ -167,7 +167,7 @@ func startGlobalCleanup() {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// 🔧 为整个清理过程设置超时
+			//  为整个清理过程设置超时
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
 			cleanupTasks := []struct {
@@ -209,7 +209,7 @@ func startGlobalCleanup() {
 				}},
 			}
 
-			// 🔧 串行执行清理任务，每个都有超时保护
+			//  串行执行清理任务，每个都有超时保护
 		cleanupLoop:
 			for _, task := range cleanupTasks {
 				select {
@@ -236,7 +236,7 @@ func startGlobalCleanup() {
 	}()
 }
 
-// 🔧 新增：带上下文的连接健康检查
+//  新增：带上下文的连接健康检查
 func checkConnectionHealthWithContext(ctx context.Context) {
 	done := make(chan struct{}, 1)
 	go func() {
@@ -254,7 +254,7 @@ func checkConnectionHealthWithContext(ctx context.Context) {
 
 var lastMemStats runtime.MemStats
 
-// 🔧 新增：清理过期表缓存
+//  新增：清理过期表缓存
 func cleanExpiredTableCache() {
 	count := 0
 	tableCache.Range(func(key, value interface{}) bool {
@@ -276,9 +276,9 @@ func cleanExpiredTableCache() {
 	}
 }
 
-// 🔧 修复：带超时的连接健康检查
+//  修复：带超时的连接健康检查
 func checkConnectionHealth() {
-	// 🔧 使用带超时的上下文
+	//  使用带超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -291,7 +291,7 @@ func checkConnectionHealth() {
 	}
 	connManager.mutex.RUnlock()
 
-	// 🔧 并发检查连接健康状态，但限制并发数
+	//  并发检查连接健康状态，但限制并发数
 	semaphore := make(chan struct{}, 5) // 最多5个并发检查
 	var wg sync.WaitGroup
 
@@ -308,7 +308,7 @@ func checkConnectionHealth() {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
 
-				// 🔧 带超时的ping检查
+				//  带超时的ping检查
 				done := make(chan error, 1)
 				go func() {
 					if sqlDB, err := info.DB.DB(); err == nil {
@@ -337,7 +337,7 @@ func checkConnectionHealth() {
 		}(key, infos[i])
 	}
 
-	// 🔧 等待所有检查完成，但有超时
+	//  等待所有检查完成，但有超时
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -352,7 +352,7 @@ func checkConnectionHealth() {
 	}
 }
 func performSmartGC() {
-	// 🔧 使用超时防止阻塞
+	//  使用超时防止阻塞
 	done := make(chan struct{}, 1)
 	go func() {
 		defer func() {
@@ -390,7 +390,7 @@ func performSmartGC() {
 		lastMemStats = current
 	}()
 
-	// 🔧 如果GC执行超时，直接返回
+	//  如果GC执行超时，直接返回
 	select {
 	case <-done:
 		// GC完成
@@ -423,19 +423,19 @@ func logCleanupStats() {
 	heapMB := m.HeapInuse / 1024 / 1024
 	sysMB := m.Sys / 1024 / 1024
 
-	logx.Infof("📊 系统统计 - 堆内存(GC后): %dMB, 进程内存(Sys): %dMB, Goroutines: %d, 表缓存: %d, DB连接: %d",
+	logx.Infof(" 系统统计 - 堆内存(GC后): %dMB, 进程内存(Sys): %dMB, Goroutines: %d, 表缓存: %d, DB连接: %d",
 		heapMB, sysMB, goroutineCount, tableCount, connCount)
 
 	if goroutineCount > 10000 {
-		logx.Errorf("⚠️  Goroutine数量过多: %d", goroutineCount)
+		logx.Errorf("  Goroutine数量过多: %d", goroutineCount)
 	}
 	// 用 HeapInuse （GC后实际占用）判断内存压力，阈值 800MB
 	// （原来用 Alloc 含待回收对象，500MB 阈值导致大量误报）
 	if heapMB > 800 {
-		logx.Errorf("⚠️  堆内存过高(GC后仍): HeapInuse=%dMB, Sys=%dMB, NumGC=%d, NextGC=%dMB",
+		logx.Errorf("  堆内存过高(GC后仍): HeapInuse=%dMB, Sys=%dMB, NumGC=%d, NextGC=%dMB",
 			heapMB, sysMB, m.NumGC, m.NextGC/1024/1024)
 	}
 	if connCount > 50 {
-		logx.Errorf("⚠️  数据库连接过多: %d", connCount)
+		logx.Errorf("  数据库连接过多: %d", connCount)
 	}
 }

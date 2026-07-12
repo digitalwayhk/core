@@ -248,32 +248,32 @@ func (m *MySQL) ensureValidConnection() error {
 	}
 
 	if err := sqlDB.Ping(); err != nil {
-		logx.Infof("🔧 检测到连接异常，尝试重新连接: %v", err)
+		logx.Infof(" 检测到连接异常，尝试重新连接: %v", err)
 		return m.recreateConnection()
 	}
 
 	return nil
 }
 
-// 🔧 重建连接的方法（增强版）
+//  重建连接的方法（增强版）
 func (m *MySQL) recreateConnection() error {
 	// 清理当前连接
 	m.cleanupCurrentConnection()
 
-	// 🔧 添加重试机制
+	//  添加重试机制
 	maxRetries := 3
 	for i := 0; i < maxRetries; i++ {
 		// 延迟重试
 		if i > 0 {
 			waitTime := time.Duration(i) * time.Second
-			logx.Infof("⏳ 等待 %v 后重试连接...", waitTime)
+			logx.Infof(" 等待 %v 后重试连接...", waitTime)
 			time.Sleep(waitTime)
 		}
 
 		// 重新获取连接
 		db, err := m.GetDB()
 		if err != nil {
-			logx.Errorf("❌ 第 %d 次重建连接失败: %v", i+1, err)
+			logx.Errorf(" 第 %d 次重建连接失败: %v", i+1, err)
 			if i == maxRetries-1 {
 				return fmt.Errorf("重建连接失败（已重试 %d 次）: %v", maxRetries, err)
 			}
@@ -284,7 +284,7 @@ func (m *MySQL) recreateConnection() error {
 		if m.isClone {
 			m.db = db.Session(&gorm.Session{NewDB: true})
 		}
-		logx.Info("✅ 数据库连接重建成功")
+		logx.Info(" 数据库连接重建成功")
 		return nil
 	}
 
@@ -318,12 +318,12 @@ func (m *MySQL) GetDBName(data interface{}) error {
 }
 
 func (m *MySQL) resolveDBName(data interface{}) (string, error) {
-	// 1️⃣ config 中硬编码的数据库名优先级最高（静态配置场景）
+	// 1⃣ config 中硬编码的数据库名优先级最高（静态配置场景）
 	if m.config.Database != "" {
 		return m.config.Database, nil
 	}
 
-	// 2️⃣ 从模型动态获取数据库名（多库路由场景：每次调用都取，不缓存）
+	// 2⃣ 从模型动态获取数据库名（多库路由场景：每次调用都取，不缓存）
 	// 先于静态缓存 m.Name 检查，确保 TradeRecordModel/OrderDoneRecordModel
 	// 等多交易对模型能按各自的 GetRemoteDBName() 路由到正确的库，
 	// 而不会被第一次调用时的结果固化。
@@ -337,7 +337,7 @@ func (m *MySQL) resolveDBName(data interface{}) (string, error) {
 		}
 	}
 
-	// 3️⃣ 使用缓存的 m.Name（模型未提供 GetRemoteDBName 时的兜底）
+	// 3⃣ 使用缓存的 m.Name（模型未提供 GetRemoteDBName 时的兜底）
 	if m.Name != "" {
 		return m.Name, nil
 	}
@@ -413,7 +413,7 @@ func (m *MySQL) GetDB() (*gorm.DB, error) {
 	return db, nil
 }
 
-// 🔧 修复 init 方法 - 确保调用顺序正确
+//  修复 init 方法 - 确保调用顺序正确
 func (m *MySQL) init(data interface{}) error {
 	resolvedDBName, err := m.resolveDBName(data)
 	if err != nil {
@@ -424,7 +424,7 @@ func (m *MySQL) init(data interface{}) error {
 		return err
 	}
 
-	// 🔧 确保有效连接（此时 m.Name 已设置）
+	//  确保有效连接（此时 m.Name 已设置）
 	if err := m.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -451,7 +451,7 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
 
-	// 🔧 根据数据库名情况选择连接策略
+	//  根据数据库名情况选择连接策略
 	if m.Name != "" {
 		// 有数据库名：先检查数据库是否存在
 		tempDB, err := m.createTempConnection()
@@ -463,7 +463,7 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 		m.closeTempConnection(tempDB)
 
 		if !dbExists {
-			// 🔧 数据库不存在，先连接到 MySQL 服务器创建数据库
+			//  数据库不存在，先连接到 MySQL 服务器创建数据库
 			dsn = m.buildDSN()
 			db, err = gorm.Open(mysql.Open(dsn), m.getGormConfig())
 			if err != nil {
@@ -478,13 +478,13 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 				return nil, err
 			}
 
-			// 🔧 关键修复：创建数据库后，关闭连接，重新使用带数据库名的 DSN 连接
+			//  关键修复：创建数据库后，关闭连接，重新使用带数据库名的 DSN 连接
 			if sqlDB, e := db.DB(); e == nil {
 				sqlDB.Close()
 			}
 		}
 
-		// 🔧 使用带数据库名的 DSN 连接（无论数据库是否已存在）
+		//  使用带数据库名的 DSN 连接（无论数据库是否已存在）
 		dsn = m.buildDSNWithDB(m.Name)
 		db, err = gorm.Open(mysql.Open(dsn), m.getGormConfig())
 		if err != nil {
@@ -619,7 +619,7 @@ func (m *MySQL) getConnectionKey() string {
 
 // ensureDatabase 确保数据库存在
 func (m *MySQL) ensureDatabase(db *gorm.DB) error {
-	// 🔧 验证数据库名不为空
+	//  验证数据库名不为空
 	if m.Name == "" {
 		return errors.New("database name is empty, cannot create database")
 	}
@@ -639,7 +639,7 @@ func (m *MySQL) ensureDatabase(db *gorm.DB) error {
 		if err := db.Exec(createSQL).Error; err != nil {
 			return fmt.Errorf("创建数据库失败: %v", err)
 		}
-		logx.Infof("✅ 创建数据库成功: %s", m.Name)
+		logx.Infof(" 创建数据库成功: %s", m.Name)
 	}
 
 	// 切换到目标数据库
@@ -660,7 +660,7 @@ func (m *MySQL) getLogger() logger.Interface {
 
 // HasTable 检查并创建表（增强版）
 func (m *MySQL) HasTable(model interface{}) error {
-	// 🔧 先获取数据库名
+	//  先获取数据库名
 	err := m.GetDBName(model)
 	if err != nil {
 		return err
@@ -742,7 +742,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 	}
 
 	// 表不存在，创建表
-	logx.Infof("🔧 表不存在，开始创建: %s.%s", m.Name, tableName)
+	logx.Infof(" 表不存在，开始创建: %s.%s", m.Name, tableName)
 
 	modelForMigration := reflect.New(finalType).Interface()
 	migrator := m.db.Migrator()
@@ -752,7 +752,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 
 		// 并发场景：其他进程/goroutine 已建好了
 		if strings.Contains(errStr, "already exists") || strings.Contains(errStr, "Error 1050") {
-			logx.Infof("⚠️ 表已被其他进程创建: %s", tableName)
+			logx.Infof(" 表已被其他进程创建: %s", tableName)
 			tableCache.Store(cacheKey, true)
 			return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
 		}
@@ -764,7 +764,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 		return err
 	}
 
-	// 🔧 再次验证表是否创建成功
+	//  再次验证表是否创建成功
 	var verifyCount int64
 	err = m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
 		m.Name, tableName).Scan(&verifyCount).Error
@@ -774,7 +774,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 		return fmt.Errorf("表创建失败或验证失败: %s.%s", m.Name, tableName)
 	}
 
-	logx.Infof("✅ 表创建成功: %s.%s", m.Name, tableName)
+	logx.Infof(" 表创建成功: %s.%s", m.Name, tableName)
 	tableCache.Store(cacheKey, true)
 
 	return m.processNestedTablesOptimized(modelForMigration, make(map[string]bool), 0, 2)
@@ -818,15 +818,15 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 			obj := reflect.New(t).Interface()
 
 			if tableExists == 0 {
-				// 🔧 表不存在，使用 CreateTable 创建
+				//  表不存在，使用 CreateTable 创建
 				migrator := m.db.Migrator()
 				if err := migrator.CreateTable(obj); err != nil {
 					logx.Errorf("创建嵌套表失败: %s -> %s, 错误: %v", pname, name1, err)
 					return
 				}
-				logx.Infof("✅ 创建嵌套表成功: %s", nestedTableName)
+				logx.Infof(" 创建嵌套表成功: %s", nestedTableName)
 			} else {
-				// 🔧 表已存在，使用安全的迁移方式
+				//  表已存在，使用安全的迁移方式
 				if err := m.safeAutoMigrate(obj, nestedTableName); err != nil {
 					logx.Errorf("迁移嵌套表失败: %s, 错误: %v", nestedTableName, err)
 					return
@@ -845,13 +845,13 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 func (m *MySQL) safeAutoMigrate(model interface{}, tableName string) error {
 	migrator := m.db.Migrator()
 
-	// 🔧 获取模型的 schema 信息
+	//  获取模型的 schema 信息
 	stmt := &gorm.Statement{DB: m.db}
 	if err := stmt.Parse(model); err != nil {
 		return err
 	}
 
-	// 🔧 手动添加缺失的列（不使用 AutoMigrate）
+	//  手动添加缺失的列（不使用 AutoMigrate）
 	for _, field := range stmt.Schema.Fields {
 		if field.DBName == "" {
 			continue
@@ -869,12 +869,12 @@ func (m *MySQL) safeAutoMigrate(model interface{}, tableName string) error {
 					logx.Errorf("添加列失败: %s.%s - %v", tableName, field.DBName, err)
 				}
 			} else {
-				logx.Infof("✅ 添加新列: %s.%s", tableName, field.DBName)
+				logx.Infof(" 添加新列: %s.%s", tableName, field.DBName)
 			}
 		}
 	}
 
-	// 🔧 手动创建索引（跳过已存在的）
+	//  手动创建索引（跳过已存在的）
 	for _, idx := range stmt.Schema.ParseIndexes() {
 		if !migrator.HasIndex(model, idx.Name) {
 			if err := migrator.CreateIndex(model, idx.Name); err != nil {
@@ -885,15 +885,15 @@ func (m *MySQL) safeAutoMigrate(model interface{}, tableName string) error {
 					!strings.Contains(errStr, "already exists") &&
 					!strings.Contains(errStr, "Error 1062") &&
 					!strings.Contains(errStr, "Duplicate entry") {
-					logx.Infof("⚠️ 创建索引失败（忽略）: %s.%s - %v", tableName, idx.Name, err)
+					logx.Infof(" 创建索引失败（忽略）: %s.%s - %v", tableName, idx.Name, err)
 				}
 			} else {
-				logx.Infof("✅ 创建索引: %s.%s", tableName, idx.Name)
+				logx.Infof(" 创建索引: %s.%s", tableName, idx.Name)
 			}
 		}
 	}
 
-	logx.Infof("✅ 表迁移完成: %s", tableName)
+	logx.Infof(" 表迁移完成: %s", tableName)
 	return nil
 }
 
@@ -923,7 +923,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 	if loadErr != nil && m.isTableNotExistsError(loadErr) {
 		// ensureTable 建表后仍收到 Error 1146（极罕见，如并发 DROP 或路由切库）
 		// 清除缓存强制重建，然后重试一次
-		logx.Infof("🔧 Load 检测到表不存在，尝试重建: %v", loadErr)
+		logx.Infof(" Load 检测到表不存在，尝试重建: %v", loadErr)
 		tableName := m.db.NamingStrategy.TableName(reflect.TypeOf(item.Model).Elem().Name())
 		tableCache.Delete(TableCacheKey{DBPath: m.Name, TableName: tableName})
 		if rebuildErr := m.ensureTable(item.Model); rebuildErr != nil {
@@ -996,9 +996,9 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 	// MySQL 特定的错误检查
 	errStr := err.Error()
 
-	// 🔧 表不存在错误
+	//  表不存在错误
 	if strings.Contains(errStr, "doesn't exist") || strings.Contains(errStr, "Error 1146") {
-		logx.Infof("🔧 检测到表不存在错误，尝试创建表: %v", err)
+		logx.Infof(" 检测到表不存在错误，尝试创建表: %v", err)
 
 		// 清除表缓存
 		if m.Name != "" {
@@ -1012,24 +1012,24 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 				TableName: tableName,
 			}
 			tableCache.Delete(cacheKey)
-			logx.Infof("🔧 清除表缓存: %s.%s", m.Name, tableName)
+			logx.Infof(" 清除表缓存: %s.%s", m.Name, tableName)
 		}
 
 		// 强制创建表
 		if err := m.HasTable(data); err != nil {
-			logx.Errorf("❌ 自动创建表失败: %v", err)
+			logx.Errorf(" 自动创建表失败: %v", err)
 			return err
 		}
 
 		// 重试操作
-		logx.Infof("🔄 表创建成功，重试操作...")
+		logx.Infof(" 表创建成功，重试操作...")
 		return fn(m.db, data)
 	}
 
-	// 🔧 字段不存在或其他结构问题
+	//  字段不存在或其他结构问题
 	if strings.Contains(errStr, "Unknown column") ||
 		strings.Contains(errStr, "Column") && strings.Contains(errStr, "cannot be null") {
-		logx.Infof("🔧 检测到字段错误，尝试更新表结构: %v", err)
+		logx.Infof(" 检测到字段错误，尝试更新表结构: %v", err)
 
 		if err := m.HasTable(data); err != nil {
 			return err
@@ -1038,12 +1038,12 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		return fn(m.db, data)
 	}
 
-	// 🔧 数据库不存在错误（Error 1049: Unknown database）。
+	//  数据库不存在错误（Error 1049: Unknown database）。
 	// 场景：DB 被运行时删除（如 APP_ENV=test 清库操作）。
 	// Ping() 仍然成功（连接的是 MySQL server，不是某个具体库），所以
 	// ensureValidConnection() 无法感知，需在此处主动重建库 + 重连。
 	if !m.isTansaction && (strings.Contains(errStr, "Unknown database") || strings.Contains(errStr, "Error 1049")) {
-		logx.Infof("🔧 检测到数据库不存在，尝试重建数据库并重连: %v", err)
+		logx.Infof(" 检测到数据库不存在，尝试重建数据库并重连: %v", err)
 
 		// 清除连接缓存，让 newDB() 重新走 checkDatabaseExists → ensureDatabase 流程
 		connKey := m.getConnectionKey()
@@ -1051,25 +1051,25 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		m.cleanupCurrentConnection()
 
 		if rebuildErr := m.recreateConnection(); rebuildErr != nil {
-			logx.Errorf("❌ 数据库重建失败: %v", rebuildErr)
+			logx.Errorf(" 数据库重建失败: %v", rebuildErr)
 			return rebuildErr
 		}
 
 		// 确保表存在
 		if tableErr := m.ensureTable(data); tableErr != nil {
-			logx.Errorf("❌ 重建数据库后建表失败: %v", tableErr)
+			logx.Errorf(" 重建数据库后建表失败: %v", tableErr)
 			return tableErr
 		}
 
-		logx.Infof("🔄 数据库重建成功，重试操作...")
+		logx.Infof(" 数据库重建成功，重试操作...")
 		return fn(m.db, data)
 	}
 
-	// 🔧 连接级错误（bad connection / commands out of sync）：刷新连接池空闲连接
+	//  连接级错误（bad connection / commands out of sync）：刷新连接池空闲连接
 	// （SetMaxIdleConns(0) 立即关闭全部空闲连接，清除协议失步的坏连接），然后重试一次。
 	// 仅在非事务场景下重试；事务场景由调用方的 Rollback+逐条降级处理。
 	if !m.isTansaction && isConnectionError(err) {
-		logx.Infof("🔧 检测到连接错误，刷新连接池后重试: %v", err)
+		logx.Infof(" 检测到连接错误，刷新连接池后重试: %v", err)
 		if sqlDB, e := m.db.DB(); e == nil {
 			sqlDB.SetMaxIdleConns(0)                     // 驱逐全部空闲坏连接
 			sqlDB.SetMaxIdleConns(m.config.MaxIdleConns) // 恢复连接池大小
@@ -1094,7 +1094,7 @@ func (m *MySQL) Insert(data interface{}) error {
 		return err
 	}
 
-	// 🔧 优化：先尝试插入，失败时再检查表
+	//  优化：先尝试插入，失败时再检查表
 	if rowcode, ok := data.(types.IRowCode); ok {
 		rowcode.SetHashcode(rowcode.GetHash())
 	}
@@ -1106,7 +1106,7 @@ func (m *MySQL) Insert(data interface{}) error {
 		insertErr = createData(m.db, data)
 	}
 
-	// 🔧 只有在插入失败时才检查表
+	//  只有在插入失败时才检查表
 	if insertErr != nil {
 		// 检查是否是"表不存在"错误
 		if m.isTableNotExistsError(insertErr) {
@@ -1283,7 +1283,7 @@ func (m *MySQL) DeleteDB() error {
 	// 清除表缓存
 	m.clearTableCache()
 
-	logx.Infof("✅ 成功删除数据库: %s", m.Name)
+	logx.Infof(" 成功删除数据库: %s", m.Name)
 	return nil
 }
 
@@ -1352,7 +1352,7 @@ func (m *MySQL) Exists(data interface{}) (bool, error) {
 		db = m.db
 	}
 
-	// 🔧 调用通用方法
+	//  调用通用方法
 	return existsData(db, data)
 }
 
@@ -1375,7 +1375,7 @@ func (m *MySQL) ExistsByCondition(model interface{}, condition string, args ...i
 		db = m.db
 	}
 
-	// 🔧 调用通用方法
+	//  调用通用方法
 	return existsByCondition(db, model, condition, args...)
 }
 
@@ -1398,7 +1398,7 @@ func (m *MySQL) ExistsByHashcode(model interface{}, hashcode string) (bool, erro
 		db = m.db
 	}
 
-	// 🔧 调用通用方法
+	//  调用通用方法
 	return existsByHashcode(db, model, hashcode)
 }
 
@@ -1421,6 +1421,6 @@ func (m *MySQL) ExistsByID(model interface{}, id int64) (bool, error) {
 		db = m.db
 	}
 
-	// 🔧 调用通用方法
+	//  调用通用方法
 	return existsByID(db, model, id)
 }
