@@ -15,6 +15,7 @@ import (
 
 	"github.com/gofrs/uuid"
 	"github.com/zeromicro/go-zero/core/conf"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 )
 
@@ -242,7 +243,12 @@ func ReadConfig(servicename string) *ServerConfig {
 
 	// Auto-migrate old config files whose time.Duration fields were serialized
 	// as int64 nanoseconds (e.g. 3000000000) instead of strings (e.g. "3s").
-	migrateConfig(file)
+	if err := migrateConfig(file); err != nil {
+		logx.Errorw("config_migration_failed",
+			logx.Field("config_path", file),
+			logx.Field("error", err),
+		)
+	}
 
 	con := &ServerConfig{}
 	conf.MustLoad(file, con)
@@ -257,25 +263,28 @@ func ReadConfig(servicename string) *ServerConfig {
 // migrateConfig rewrites the config file in-place to fix known format issues
 // from older core versions: numeric time.Duration fields, null slices that
 // should be empty arrays, etc. Migration errors are logged but non-fatal.
-func migrateConfig(file string) {
+func migrateConfig(file string) error {
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		return
+		return fmt.Errorf("read config migration source: %w", err)
 	}
 	var m map[string]interface{}
-	if json.Unmarshal(raw, &m) != nil {
-		return
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("decode config migration source: %w", err)
 	}
 
 	changed := migrateDurations(m) || migrateNullSlices(m)
 	if !changed {
-		return
+		return nil
 	}
 	out, err := json.Marshal(m)
 	if err != nil {
-		return
+		return fmt.Errorf("encode migrated config: %w", err)
 	}
-	_ = writeConfigFile(file, out)
+	if err := writeConfigFile(file, out); err != nil {
+		return fmt.Errorf("write migrated config: %w", err)
+	}
+	return nil
 }
 
 func writeConfigFile(file string, data []byte) error {
