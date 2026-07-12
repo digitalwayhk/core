@@ -78,7 +78,7 @@
 | 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
 | 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
 | 8. 全局日志与异常审计 | 已完成 | 本批提交 | `check-logging` 已接入 quick；stdout/标准 logger、装饰图标、payload/SQL/参数 dump 已清零；服务/Provider/WebSocket 关键事件结构化，trace_id 与脱敏日志契约、vet、race 均通过 |
-| 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
+| 9. 架构加固待办 | 已完成 | 本批提交 | 注册表/forwarder 隔离已由任务 12 关闭；跨节点 IPv6/非 2xx 与配置迁移错误传播已测试修复；SharedBadger 拆分形成独立、无行为变更的执行台账 |
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
@@ -799,7 +799,7 @@ go test -race ./pkg/server/router ./pkg/server/cluster ./pkg/server/mq ./pkg/ser
 - 审查：`pkg/persistence/entity/modellist.go`
 - 审查：`pkg/persistence/adapter/default.go`
 
-- [ ] **步骤 1：添加加固检查清单**
+- [x] **步骤 1：添加加固检查清单**
 
 追加到 `docs/codex/CORE_RELEASE_READINESS_PLAN.md`：
 
@@ -813,7 +813,7 @@ go test -race ./pkg/server/router ./pkg/server/cluster ./pkg/server/mq ./pkg/ser
 - [ ] 按同步队列、批量写入、自愈和查询/缓存责任拆分 `pkg/persistence/database/nosql/sharedbadger.go`。
 ```
 
-- [ ] **步骤 2：将每个选中项转换为独立实施分支**
+- [x] **步骤 2：将每个选中项转换为独立实施分支**
 
 每个项目创建一个小分支并包含定向测试。不得将 sharedbadger 拆分与运行时集群变更合并。
 
