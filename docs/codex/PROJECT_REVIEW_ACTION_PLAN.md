@@ -76,7 +76,7 @@
 | 4. 通过 Docker 运行外部集成测试 | wrapper 已完成，镜像冷拉取待通过 |  | `integration-external-docker` 已具备唯一 project、锁、10 分钟 watchdog、诊断和清理；真实测试等待 registry 可用 |
 | 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
 | 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
-| 7. 无用与未完成代码清理 | 未开始 |  | 已启用的运行时路径不包含已知占位实现；每个删除/替换都有定向测试 |
+| 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
 | 8. 全局日志与异常审计 | 未开始 |  | 运行时日志使用 `logx` 结构化事件，在请求/跨服务边界携带跟踪上下文，通过敏感数据扫描，且不包含未批准的控制台/fatal 输出 |
 | 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
 | 10. README/文档与场景使用指南 | 未开始 |  | README、skill 参考和场景指南对路由、模型、成熟度、日志和复用策略的描述一致 |
@@ -525,7 +525,7 @@ go test -race ./pkg/utils ./pkg/server/cluster ./pkg/server/mq -count=1
 - 审查：`pkg/server/trans/quic`
 - 审查：`pkg/server` 和 `pkg/utils` 下的运行时 `fmt.Print*` 调用
 
-- [ ] **步骤 1：创建分类清理台账**
+- [x] **步骤 1：创建分类清理台账**
 
 使用以下已确认候选项创建 `docs/codex/DEAD_CODE_AUDIT.md`：
 
@@ -543,7 +543,7 @@ go test -race ./pkg/utils ./pkg/server/cluster ./pkg/server/mq -count=1
 | QUIC stub/旧传输代码 | 可能不可达、未完成，或仅由 build tag 选中 | 删除前验证 | build-tag 矩阵和 factory 引用证明保留/删除决策 |
 ```
 
-- [ ] **步骤 2：删除已导出代码前验证可达性**
+- [x] **步骤 2：删除已导出代码前验证可达性**
 
 运行：
 
@@ -555,7 +555,7 @@ go list ./...
 
 预期：每个候选项都已记录调用方、build tag 和公共暴露面。测试、示例、生成文件和运行时文件分开分类。
 
-- [ ] **步骤 3：在清理台账中验证任务 11 的密钥输出修复**
+- [x] **步骤 3：在清理台账中验证任务 11 的密钥输出修复**
 
 任务 11 负责从 `pkg/server/safe/twosteps/google.go` 中删除 TOTP 密钥/验证码输出及其行为测试。任务 7 记录结果，并验证无用或占位路径不会重新引入该输出：
 
@@ -566,7 +566,7 @@ rg -n 'fmt\.(Print|Printf|Println).*secret|fmt\.(Print|Printf|Println).*code' pk
 
 预期：测试通过，第二条命令不返回任何运行时密钥/验证码打印。
 
-- [ ] **步骤 4：测试先行替换或删除损坏的缓存路径**
+- [x] **步骤 4：测试先行替换或删除损坏的缓存路径**
 
 添加 `ICache` 契约测试，覆盖 get、set、delete、TTL、scan/search 行为、Redis 不可用和客户端复用。使用 go-zero `core/stores/redis` 实现；仅对需要抑制未命中的 cache-aside 行为使用 `core/stores/cache`。如果全仓库调用方清单为空，删除 `CacheAdapter`。
 
@@ -579,7 +579,7 @@ CORE_TEST_REDIS_STREAM=1 CORE_TEST_REDIS_ADDR=127.0.0.1:6379 go test -tags=integ
 
 预期：单元测试在无 Docker 时通过；Compose 运行时，显式启用的 Redis 契约测试通过。
 
-- [ ] **步骤 5：独立合并 SQLite 所有权**
+- [x] **步骤 5：独立合并 SQLite 所有权**
 
 将实例创建移到一个由 ModelList 和 adapter 共用的并发安全注册表。添加并行测试，断言相同逻辑数据库名返回同一实例，并使用 `-race` 运行。
 
@@ -589,7 +589,7 @@ go test -race ./pkg/persistence/entity ./pkg/persistence/adapter -count=1
 
 预期：测试通过，无竞态报告，且仅保留一个 `globalSqliteInstances` owner。
 
-- [ ] **步骤 6：解决未完成的 Mongo 和旧 NoSQL 代码**
+- [x] **步骤 6：解决未完成的 Mongo 和旧 NoSQL 代码**
 
 对每个可通过受支持配置达到的方法，在完整实现和集成测试存在前返回明确的类型化错误；不得留下运行时占位 panic。排除活跃引用后，删除已注释实现。
 

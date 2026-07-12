@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -25,6 +24,12 @@ var ReadType = map[string]string{
 }
 
 var mongoUri = "mongodb://%s:%s@%s:%d"
+
+var (
+	ErrMongoTransactionsUnsupported = errors.New("mongo transactions are unsupported")
+	ErrMongoRawUnsupported          = errors.New("mongo raw operations are unsupported")
+	ErrMongoStatisticsUnsupported   = errors.New("mongo statistical queries are unsupported")
+)
 
 type Mongo struct {
 	Name    string
@@ -52,8 +57,8 @@ func (own *Mongo) init(data interface{}) error {
 	return nil
 }
 
-func (own *Mongo) Transaction() {
-	log.Println("implement Mongo Transaction")
+func (own *Mongo) Transaction() error {
+	return ErrMongoTransactionsUnsupported
 }
 
 func (own *Mongo) Load(item *types.SearchItem, result interface{}) error {
@@ -67,27 +72,16 @@ func (own *Mongo) Load(item *types.SearchItem, result interface{}) error {
 	return loadMongo(own.db, item, result)
 }
 func (own *Mongo) Raw(sql string, data interface{}) error {
-	// err := own.init(data)
-	// if err != nil {
-	// 	return err
-	// }
-	// own.db.Raw(sql).Scan(data)
-	return nil
+	return ErrMongoRawUnsupported
 }
 func (own *Mongo) Exec(sql string, data interface{}) error {
-	// err := own.init(data)
-	// if err != nil {
-	// 	return err
-	// }
-	// own.db.Raw(sql).Scan(data)
-	return nil
+	return ErrMongoRawUnsupported
 }
 func (own *Mongo) GetModelDB(model interface{}) (interface{}, error) {
 	err := own.init(model)
 	return own.db, err
 }
 func (own *Mongo) Insert(data interface{}) error {
-	//TODO implement me
 	err := own.init(data)
 	if err != nil {
 		return err
@@ -96,7 +90,6 @@ func (own *Mongo) Insert(data interface{}) error {
 }
 
 func (own *Mongo) Update(data interface{}) error {
-	//TODO implement me
 	err := own.init(data)
 	if err != nil {
 		return err
@@ -105,7 +98,6 @@ func (own *Mongo) Update(data interface{}) error {
 }
 
 func (own *Mongo) Delete(data interface{}) error {
-	//TODO implement me
 	err := own.init(data)
 	if err != nil {
 		return err
@@ -114,8 +106,11 @@ func (own *Mongo) Delete(data interface{}) error {
 }
 
 func (own *Mongo) Commit() error {
-	//TODO implement me
-	panic("implement me")
+	return ErrMongoTransactionsUnsupported
+}
+
+func (own *Mongo) Rollback() error {
+	return ErrMongoTransactionsUnsupported
 }
 
 func (own *Mongo) GetDBName(data interface{}) error {
@@ -130,8 +125,7 @@ func (own *Mongo) GetDBName(data interface{}) error {
 }
 
 func (own *Mongo) HasTable(model interface{}) error {
-	//TODO implement me
-	fmt.Println("mongo implement hasTable")
+	// MongoDB collections are schema-less and created on first write.
 	return nil
 }
 
@@ -141,7 +135,7 @@ func NewMongo(host, user, pass string, port uint) *Mongo {
 		Port:    port,
 		User:    user,
 		Pass:    pass,
-		TimeOut: 10,
+		TimeOut: 10 * time.Second,
 	}
 }
 func (own *Mongo) GetRunDB() interface{} {
@@ -150,16 +144,19 @@ func (own *Mongo) GetRunDB() interface{} {
 func (own *Mongo) GetMongo() (*mongo.Database, error) {
 	if own.db == nil {
 		dsn := fmt.Sprintf(mongoUri, own.User, own.Pass, own.Host, own.Port)
-		// Connect to MongoDB
-		client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(dsn))
+		timeout := own.TimeOut
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		client, err := mongo.Connect(ctx, options.Client().ApplyURI(dsn))
 		if err != nil {
 			return nil, err
 		}
-		err = client.Ping(context.TODO(), nil)
-
-		// Check connection
-		if err != nil {
-			log.Println("Mongo Connection Failed:", err)
+		if err = client.Ping(ctx, nil); err != nil {
+			_ = client.Disconnect(context.Background())
+			return nil, fmt.Errorf("ping mongo: %w", err)
 		}
 		own.db = client.Database(own.Name)
 	}
@@ -182,7 +179,7 @@ func insertMongoData(db *mongo.Database, data interface{}) error {
 }
 
 func sum(db *mongo.Database, item *types.SearchItem, result interface{}) error {
-	return nil
+	return ErrMongoStatisticsUnsupported
 }
 
 func loadMongo(db *mongo.Database, item *types.SearchItem, result interface{}) error {
@@ -219,10 +216,7 @@ func loadMongo(db *mongo.Database, item *types.SearchItem, result interface{}) e
 		return err
 	}
 
-	if err = cursor.All(context.TODO(), result); err != nil {
-		log.Println("Mongo decode err: ", err)
-	}
-	return nil
+	return cursor.All(context.TODO(), result)
 }
 
 func updateMongoData(db *mongo.Database, data interface{}) error {
@@ -231,7 +225,7 @@ func updateMongoData(db *mongo.Database, data interface{}) error {
 	// TODO: Filter setup
 	val := reflect.ValueOf(data).Elem()
 	id := val.FieldByName("ID").Interface()
-	if _, err := collection.ReplaceOne(context.TODO(), bson.D{{"_id", id}}, data); err != nil {
+	if _, err := collection.ReplaceOne(context.TODO(), bson.D{{Key: "_id", Value: id}}, data); err != nil {
 		return err
 	}
 
@@ -243,7 +237,7 @@ func deleteMongoData(db *mongo.Database, data interface{}) error {
 
 	val := reflect.ValueOf(data).Elem()
 	id := val.FieldByName("ID").Interface()
-	if _, err := collection.DeleteOne(context.TODO(), bson.D{{"_id", id}}); err != nil {
+	if _, err := collection.DeleteOne(context.TODO(), bson.D{{Key: "_id", Value: id}}); err != nil {
 		return err
 	}
 	return nil
