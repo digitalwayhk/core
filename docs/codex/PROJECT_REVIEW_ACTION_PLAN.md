@@ -83,7 +83,7 @@
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
 | 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
-| 14. 配置到运行时能力契约 | 已完成 | 本次任务14提交 | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁；已接受字段有运行时行为测试，未实现能力明确拒绝 |
+| 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
 | 15. 公共 API 兼容性与发布治理 | 未开始 |  | 类型化错误、路由/API 快照、废弃策略、changelog 和消费方兼容性检查通过 |
 | 16. CI 质量门禁与消费方兼容性矩阵 | 未开始 |  | 必需 CI 层级在干净检出上通过，并发布可操作的失败产物 |
 | 17. 性能、容量与运维 SLO 基线 | 未开始 |  | 基准、预算、RED/USE 指标、跟踪和 SLO 检查均有已记录基线与责任人 |
@@ -1038,7 +1038,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **验收：** 每个已接受字段都有经测试的运行时效果；不支持的值在提供流量前失败；矩阵与默认值、factory、启动和关闭行为一致。
 
-**完成记录（2026-07-12）：** 14.1-14.4 已完成。结构化闭集门禁锁定项目自有配置字段、状态、owner 和运行时证据；Transport/MQ/Cluster 未实现能力为 rejected，自定义 MQ provider 可通过已注册 factory 使用；Etcd Prefix 已实际接入 provider；ServiceContext 对运行时资源执行终止型关闭；MQManager Close 会等待在途 Manager 操作。`./scripts/test.sh config-contract` 和六包 race 通过。外部审查发现已完成修复，等待修复提交复审。
+**完成记录（2026-07-12）：** 14.1-14.4 已完成。结构化闭集门禁锁定项目自有配置字段、状态、owner 和运行时证据；Transport/MQ/Cluster 未实现能力为 rejected，自定义 MQ provider 可通过已注册 factory 使用；Etcd Prefix 已实际接入 provider；ServiceContext 对运行时资源执行终止型关闭；MQManager Close 会等待在途 Manager 操作。`./scripts/test.sh config-contract` 和 config/router/cluster/transport/mq/event 六包 race 均通过。提交 `f91c79b` 的外部审查问题已由 `c52e32e` 修复，复审结论为 APPROVED，无 P0/P1/P2 返工项。两项可选维护备注为默认 Etcd Prefix 双处常量和 Transport 布尔拒绝文案一致性，均不阻碍任务完成。
 
 ## 任务 15：公共 API 兼容性与发布治理
 
