@@ -7,7 +7,6 @@ import (
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 	httptransport "github.com/digitalwayhk/core/pkg/server/transport/http"
 	sockettransport "github.com/digitalwayhk/core/pkg/server/transport/socket"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // BuildSelector constructs a TransportSelector from the given configuration,
@@ -15,10 +14,8 @@ import (
 //
 // Return values:
 //   - (nil, nil)   — no transport configured (empty cfg); caller uses legacy HTTP path.
-//   - (sel, nil)   — selector built successfully; unimplemented fallback entries were
-//     warned and skipped.
-//   - (nil, error) — Internal names an unimplemented protocol, or no implemented
-//     transports could be built at all.
+//   - (sel, nil)   — selector built successfully.
+//   - (nil, error) — Internal or Fallback names an unimplemented protocol.
 //
 // Supported protocols: grpc, http, socket.
 // Protocols "quic" and "mq" are recognised as valid config values but adapters are
@@ -56,12 +53,11 @@ func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
 			continue
 		}
 		seen[name] = true
-		if build, ok := builders[name]; ok {
-			transports = append(transports, build())
-		} else {
-			// Fallback entry is unimplemented — warn but continue with the rest.
-			logx.Errorf("transport: fallback protocol %q not implemented, skipping", name)
+		build, ok := builders[name]
+		if !ok {
+			return nil, fmt.Errorf("transport: protocol %q not implemented; supported protocols: grpc, http, socket", name)
 		}
+		transports = append(transports, build())
 	}
 
 	if len(transports) == 0 {

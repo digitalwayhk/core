@@ -65,10 +65,10 @@ func TestMQConfigValidate_InvalidMode(t *testing.T) {
 	assert.Error(t, m.Validate())
 }
 
-// TestMQConfigValidate_InvalidProvider 非法 provider 返回 error。
-func TestMQConfigValidate_InvalidProvider(t *testing.T) {
+// TestMQConfigValidate_CustomProvider 自定义 provider 留给已注册 factory 解析。
+func TestMQConfigValidate_CustomProvider(t *testing.T) {
 	m := MQConfig{Mode: "auto", Provider: "pulsar"}
-	assert.Error(t, m.Validate())
+	assert.NoError(t, m.Validate())
 }
 
 // TestMQConfigValidate_NATSRequiresURL Mode=on + Provider=nats-jetstream 但无 URL 时报错。
@@ -80,30 +80,58 @@ func TestMQConfigValidate_NATSRequiresURL(t *testing.T) {
 	assert.NoError(t, m.Validate())
 }
 
-// TestMQConfigValidate_KafkaRequiresBrokers Mode=on + Provider=kafka 但无 Brokers 时报错。
-func TestMQConfigValidate_KafkaRequiresBrokers(t *testing.T) {
-	m := MQConfig{Mode: "on", Provider: "kafka", Usage: []string{"event-stream"}}
-	assert.Error(t, m.Validate())
-
-	m.Kafka.Brokers = []string{"127.0.0.1:9092"}
-	assert.NoError(t, m.Validate())
+func TestMQConfigValidate_UnimplementedProviders(t *testing.T) {
+	for _, provider := range []string{"kafka", "rabbitmq", "rocketmq"} {
+		t.Run(provider, func(t *testing.T) {
+			err := (&MQConfig{Mode: "auto", Provider: provider, Usage: []string{"event-stream"}}).Validate()
+			assert.NoError(t, err, "provider 是否可构建应由已注册 factory 或 BuildManager 决定")
+		})
+	}
 }
 
-// TestMQConfigValidate_RabbitMQRequiresURL Mode=on + Provider=rabbitmq 但无 URL 时报错。
-func TestMQConfigValidate_RabbitMQRequiresURL(t *testing.T) {
-	m := MQConfig{Mode: "on", Provider: "rabbitmq", Usage: []string{"event-stream"}}
-	assert.Error(t, m.Validate())
-
-	m.RabbitMQ.URL = "amqp://guest:guest@127.0.0.1:5672/"
-	assert.NoError(t, m.Validate())
+func TestMQConfigValidate_UnsupportedUsage(t *testing.T) {
+	for _, usage := range []string{"unknown", "transport", "websocket", "delayed-task"} {
+		t.Run(usage, func(t *testing.T) {
+			err := (&MQConfig{Mode: "auto", Provider: "redis-stream", Usage: []string{usage}}).Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "mq.usage")
+		})
+	}
 }
 
-// TestMQConfigValidate_RocketMQRequiresNameServers Mode=on + Provider=rocketmq 但无 NameServers 时报错。
-func TestMQConfigValidate_RocketMQRequiresNameServers(t *testing.T) {
-	m := MQConfig{Mode: "on", Provider: "rocketmq", Usage: []string{"event-stream"}}
-	assert.Error(t, m.Validate())
+func TestMQConfigValidate_UnimplementedCapabilities(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*MQConfig)
+		fieldPath string
+	}{
+		{name: "request reply", configure: func(m *MQConfig) { m.RequestReply.Enable = true }, fieldPath: "mq.requestReply.enable"},
+		{name: "retry", configure: func(m *MQConfig) { m.Retry.Enable = true }, fieldPath: "mq.retry.enable"},
+		{name: "dead letter", configure: func(m *MQConfig) { m.DeadLetter.Enable = true }, fieldPath: "mq.deadLetter.enable"},
+		{name: "dynamic switch", configure: func(m *MQConfig) { m.Switch.AllowDynamicSwitch = true }, fieldPath: "mq.switch.allowDynamicSwitch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := MQConfig{Mode: "auto", Provider: "redis-stream", Usage: []string{"event-stream"}}
+			tt.configure(&m)
+			err := m.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.fieldPath)
+			assert.Contains(t, err.Error(), "not implemented")
+		})
+	}
+}
 
-	m.RocketMQ.NameServers = []string{"127.0.0.1:9876"}
+func TestMQConfigValidate_ModeOffAllowsLegacyFields(t *testing.T) {
+	m := MQConfig{
+		Mode:         "off",
+		Provider:     "kafka",
+		Usage:        []string{"transport", "websocket", "delayed-task"},
+		RequestReply: MQRequestReplyConfig{Enable: true},
+		Retry:        MQRetryConfig{Enable: true},
+		DeadLetter:   MQDeadLetterConfig{Enable: true},
+		Switch:       MQSwitchConfig{AllowDynamicSwitch: true, Strategy: "legacy"},
+	}
 	assert.NoError(t, m.Validate())
 }
 
@@ -151,4 +179,3 @@ func TestMQConfigValidate_SwitchValidStrategies(t *testing.T) {
 		assert.NoError(t, m.Validate(), "strategy=%s", strategy)
 	}
 }
-

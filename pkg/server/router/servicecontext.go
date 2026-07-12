@@ -27,9 +27,9 @@ import (
 // processLocalRegistry is a shared in-memory cluster registry for all ServiceContexts
 // within the same process. This enables intra-process MachineID conflict detection.
 var processLocalRegistry = cluster.NewLocalProvider(
-	10*time.Second,
-	10*time.Second,
-	30*time.Second,
+	config.DefaultClusterHeartbeatTimeout,
+	config.DefaultClusterSuspectTimeout,
+	config.DefaultClusterInstanceReuseCooldown,
 )
 
 func init() {
@@ -42,6 +42,7 @@ type ServiceContext struct {
 	snow              idgen.ISnowWorker
 	Router            *ServiceRouter
 	isStart           atomic.Bool
+	terminated        bool
 	lifecycleMu       sync.Mutex
 	lifecycleOpOnce   sync.Once
 	lifecycleOp       chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
@@ -375,6 +376,13 @@ func NewServiceContext(service types.IService) *ServiceContext {
 func NewServiceContextWithConfig(service types.IService, con *config.ServerConfig) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
 	return contextRegistry.getOrInitialize(name, false, func(_ int) *ServiceContext {
+		if con == nil {
+			panic("config validation failed: config is nil")
+		}
+		con.ApplyDefaults()
+		if err := con.Validate(); err != nil {
+			panic(fmt.Sprintf("config validation failed: %v", err))
+		}
 		sc := &ServiceContext{}
 		sc.StateChan = make(chan bool, 1)
 		sc.Service = initService(service, sc)
@@ -419,10 +427,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		mgr, mqErr := mq.BuildManager(ctx, &con.MQ)
 		cancel()
 		if mqErr != nil {
-			if con.MQ.Mode == "on" {
-				panic(fmt.Sprintf("mq: required provider init failed (mode=on): %v", mqErr))
-			}
-			logx.Errorf("mq: init failed (degraded): %v", mqErr)
+			panic(fmt.Sprintf("mq: provider init failed (mode=%s): %v", con.MQ.Mode, mqErr))
 		} else {
 			sc.MQManager = mgr
 			// Wire MQ-backed event stream when usage includes "event-stream".
@@ -514,17 +519,31 @@ func (own *ServiceContext) SetRunState(state bool) {
 	defer own.endLifecycleOperation()
 
 	own.lifecycleMu.Lock()
-	if own.isStart.Load() == state {
+	if own.terminated {
 		own.lifecycleMu.Unlock()
 		return
 	}
-	own.isStart.Store(state)
+	if own.isStart.Load() == state {
+		if state || own.MQManager == nil {
+			own.lifecycleMu.Unlock()
+			return
+		}
+	} else {
+		own.isStart.Store(state)
+	}
+	if !state {
+		own.terminated = true
+	}
 	provider := own.ClusterProvider
 	membership := own.membership
 	broker := own.CrossNodeBroker
+	mqManager := own.MQManager
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
+		own.MQManager = nil
+		own.EventBridge = nil
+		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
 
@@ -556,6 +575,11 @@ func (own *ServiceContext) SetRunState(state bool) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			membership.Stop(ctx)
 			cancel()
+		}
+		if mqManager != nil {
+			if err := mqManager.Close(); err != nil {
+				logx.Errorf("mq: close failed: %v", err)
+			}
 		}
 	}
 

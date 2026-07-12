@@ -150,14 +150,14 @@ func TestClusterConfig_ModeOnEmptyEndpoints_ValidateFails(t *testing.T) {
 	require.Error(t, err, "ClusterConfig.Validate should fail with Mode=on, Provider=etcd and no endpoints")
 }
 
-// TestTransportConfig_QuicInternal_ValidatePasses verifies that TransportConfig.Validate
-// accepts "quic" as an Internal value (the panic would occur later in BuildSelector,
-// not at validation time).
-func TestTransportConfig_QuicInternal_ValidatePasses(t *testing.T) {
+// TestTransportConfig_QuicInternal_ValidateFails verifies that unsupported
+// transports fail during config validation, before runtime construction.
+func TestTransportConfig_QuicInternal_ValidateFails(t *testing.T) {
 	cfg := config.TransportConfig{Internal: "quic"}
 	cfg.ApplyDefaults()
 	err := cfg.Validate()
-	require.NoError(t, err, "TransportConfig.Validate should accept 'quic' (BuildSelector handles the panic)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not implemented")
 }
 
 // TestNewServiceContextWithConfig_TransportMQ_Panics verifies that when
