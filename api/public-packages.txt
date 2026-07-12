@@ -1,0 +1,12 @@
+github.com/digitalwayhk/core/pkg/server/types
+github.com/digitalwayhk/core/pkg/server/router
+github.com/digitalwayhk/core/pkg/server/config
+github.com/digitalwayhk/core/pkg/server/run
+github.com/digitalwayhk/core/pkg/server/cluster
+github.com/digitalwayhk/core/pkg/server/transport
+github.com/digitalwayhk/core/pkg/server/mq
+github.com/digitalwayhk/core/pkg/server/event
+github.com/digitalwayhk/core/pkg/persistence/entity
+github.com/digitalwayhk/core/pkg/persistence/types
+github.com/digitalwayhk/core/service/manage
+github.com/digitalwayhk/core/service/manage/view

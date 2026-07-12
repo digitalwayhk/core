@@ -75,11 +75,20 @@
 - 更新 golden 必须与对应公共变化、迁移说明和外部审查放在同一小节提交中。
 - 规范化仅删除 Host、端口、trace ID、duration 等运行时噪声；method、path、auth/security、请求/响应 schema 变化必须保留为 diff。
 
+## 导出 Go API 门禁
+
+- `api/public-packages.txt` 是当前受保护公共包的唯一清单；`api/public-api.txt` 记录工具版本和包到基线文件的确定映射。
+- `api/public-api/*.apidiff` 由 Go 官方维护的 `golang.org/x/exp/cmd/apidiff` 生成，版本固定在独立 `tools/go.mod`，不进入根运行时依赖。
+- `scripts/check-public-api.sh` 只读比较当前工作树：兼容新增会报告但允许通过；删除导出符号、改变签名、收紧接口等不兼容变化返回非零。
+- `scripts/update-public-api.sh` 是唯一更新入口。普通测试不会覆盖基线；更新必须与 changelog、迁移说明和审查一起提交。
+- `apidiff` 保护编译期 Go API 兼容性，但官方文档明确它是近似判断，不能发现行为变化。HTTP/JSON/路由由 `api-compat` 保护，配置由 `config-contract` 保护，生命周期和安全仍需对应行为测试。
+
 ## 验证
 
 ```bash
 ./scripts/test.sh api-compat
+./scripts/test.sh public-api
 ./scripts/test.sh config-contract
 ```
 
-导出 Go API 的工具化基线、废弃版本和消费方精确版本将在任务 15.3、15.4 完成；在对应小节完成前不提前声明这些门禁已生效。
+废弃版本和消费方精确版本将在任务 15.4 完成；在对应小节完成前不提前声明发布门禁已生效。
