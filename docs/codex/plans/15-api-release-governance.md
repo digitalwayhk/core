@@ -179,7 +179,7 @@ git diff --exit-code -- api/public-api.txt
 - 修改：`scripts/test.sh`
 - 修改：`README.md`
 - 修改：`.codex/skills/use-digitalway-core/references/core-backend-api.md`
-- 修改：`.github/copilot/skills/core-backend-api.md`
+- 删除：`.github/copilot/skills/core-backend-api.md`（全部计划完成后统一重建 skill）
 
 **决策：**
 
@@ -204,7 +204,7 @@ git diff --exit-code -- api/public-api.txt
 ./scripts/release-check.sh
 ```
 
-**开发记录（2026-07-13）：** 新增 Keep a Changelog 风格 `CHANGELOG.md`、SemVer/废弃窗口/tag/回滚策略、废弃登记和真实消费方矩阵。futures 精确记录 Go 1.26.1、`v0.0.247` 与本地 commit；omni-flow/grok、ops-ai 以证据标记 not-applicable；旧 ai-ops-platform 单独记录伪版本与 commit。`release-check.sh` 区分 candidate/release，只读运行 api-compat/public-api/config-contract/security；正式模式拒绝缺失/非法版本、脏工作区和已存在 tag，绝不自动 tag/push。README 与两份 core skill 已同步并修正损坏版本示例。候选全门禁通过，等待外部只读审查。
+**开发记录（2026-07-13）：** 新增 Keep a Changelog 风格 `CHANGELOG.md`、SemVer/废弃窗口/tag/回滚策略、废弃登记和真实消费方矩阵。futures 精确记录 Go 1.26.1、`v0.0.247` 与本地 commit；omni-flow/grok、ops-ai 以证据标记 not-applicable；旧 ai-ops-platform 单独记录伪版本与 commit。`release-check.sh` 区分 candidate/release，只读运行 api-compat/public-api/config-contract/security；正式模式拒绝缺失/非法版本、脏工作区和已存在 tag，绝不自动 tag/push。README 与 Codex core skill 已同步；旧 `.github/copilot` skill 删除，待全部计划完成后基于最终契约统一重建。候选全门禁通过，等待外部只读审查。
 
 **外部审查重点：** 发布流程是否可复现；是否存在自动推送/tag 的危险副作用；废弃窗口是否可执行；消费方证据是否来自真实仓库和精确版本。
 
@@ -214,6 +214,7 @@ git diff --exit-code -- api/public-api.txt
 
 - 将 `api-compat`、`public-api`、`release-contract` 模式接入总验收，但保持任务 16 才负责 CI workflow、required checks 和失败产物上传。
 - 更新 `docs/codex/PROJECT_REVIEW_ACTION_PLAN.md`：记录每小节提交、外部审查结论、命令与耗时。
+- 任务 15.5 完成并通过最终外部审查后，再基于最终 API、发布策略和场景指南统一重建 Copilot/Codex skill，禁止从已删除旧文件恢复陈旧内容。
 - 任务 15 的最终外部审查范围必须从任务 14 完成提交之后的基线到任务 15 最终提交，检查跨小节兼容性，而不只看最后一个 diff。
 
 **最终验收：**
