@@ -75,7 +75,7 @@
 | 3. 测试命令脚本 | 已完成 | `0d29df1` | `bash -n`、`quick` 和 `server` 通过；未知模式输出用法并代码 2 退出，脚本不依赖 `rtk` |
 | 4. 通过 Docker 运行外部集成测试 | wrapper 已完成，镜像冷拉取待通过 |  | `integration-external-docker` 已具备唯一 project、锁、10 分钟 watchdog、诊断和清理；真实测试等待 registry 可用 |
 | 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
-| 6. go-zero 能力与复用审计 | 未开始 |  | `docs/codex/GO_ZERO_REUSE_AUDIT.md` 记录每个已审查子系统的证据和 keep/replace/remove 决策 |
+| 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
 | 7. 无用与未完成代码清理 | 未开始 |  | 已启用的运行时路径不包含已知占位实现；每个删除/替换都有定向测试 |
 | 8. 全局日志与异常审计 | 未开始 |  | 运行时日志使用 `logx` 结构化事件，在请求/跨服务边界携带跟踪上下文，通过敏感数据扫描，且不包含未批准的控制台/fatal 输出 |
 | 9. 架构加固待办 | 未开始 |  | 问题均已修复，或已转换为包含文件路径和测试命令的跟踪文档 |
@@ -460,7 +460,7 @@ CORE_TEST_KAFKA=1 CORE_TEST_KAFKA_BROKERS=127.0.0.1:9092 go test -tags=integrati
 - 审查：`pkg/utils/concurrency.go`
 - 只读：`${GOMODCACHE}/github.com/zeromicro/go-zero@v1.10.2`
 
-- [ ] **步骤 1：记录本仓库实际使用的 go-zero 能力面**
+- [x] **步骤 1：记录本仓库实际使用的 go-zero 能力面**
 
 运行：
 
@@ -472,7 +472,7 @@ go list -deps ./pkg/server/...
 
 预期：审计可以区分“实际使用”和“go-zero v1.10.2 仅提供但未使用”的包。当前证据表明实际使用了 `logx`、`httpx`、`conf` 和 `rest`；尚未使用 `stores/cache`、`stores/redis`、`discov`、`mr`、`fx`、`threading` 或 `zrpc`。
 
-- [ ] **步骤 2：创建复用决策矩阵**
+- [x] **步骤 2：创建复用决策矩阵**
 
 使用以下初始矩阵创建 `docs/codex/GO_ZERO_REUSE_AUDIT.md`，随后为每个变更的决策添加源码链接和测试证据：
 
@@ -497,11 +497,11 @@ go list -deps ./pkg/server/...
 | 重试/超时/生命周期 | Provider 和持久化中的临时循环 | `core/fx`、`core/service`、`core/proc`、breaker 辅助程序 | 新代码优先使用 go-zero 原语；每次只迁移一个子系统 | 确定性重试/关闭测试 |
 ```
 
-- [ ] **步骤 3：将每个 `replace` 决策转换为独立迁移计划**
+- [x] **步骤 3：将每个 `replace` 决策转换为独立迁移计划**
 
 每个已接受的替换都创建一个实施分支。首个建议切片是 Redis KV/cache，因为当前适配器尚未完成，且本地 Redis 封装每次操作都会重新连接。不得将其与集群、MQ 或 HTTP 迁移合并。
 
-- [ ] **步骤 4：验证复用不会削弱 Digitalway 契约**
+- [x] **步骤 4：验证复用不会削弱 Digitalway 契约**
 
 每次迁移后运行：
 
