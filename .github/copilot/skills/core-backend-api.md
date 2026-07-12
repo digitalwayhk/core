@@ -46,7 +46,7 @@ Go 会把分支名解析成 `go.mod` 中的伪版本。分支会随后续 push �
 
 ```sh
 go get github.com/digitalwayhk/core@b17bfab
-go get github.com/digitalwayhk/core@b17bfabv0.0.247
+go get github.com/digitalwayhk/core@v0.0.247
 ```
 
 CI 或脚本需要直接拉源码时可 checkout 分支：

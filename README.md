@@ -454,3 +454,14 @@ websocket 订阅getorder,获取order信息
           灰度发布（范围限定）
           正式发布
 
+## 版本与发布
+
+生产项目应使用 tag 或精确 commit 引用 Core，不要锁定会移动的开发分支。当前兼容性与发布门禁：
+
+```bash
+./scripts/test.sh api-compat
+./scripts/test.sh public-api
+./scripts/test.sh release-contract
+```
+
+版本、废弃窗口、changelog、tag 和回滚规则见 `docs/RELEASE_POLICY.md`；消费方锁定证据见 `docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md`。发布检查只读，不会自动创建 tag、push 或发布。
