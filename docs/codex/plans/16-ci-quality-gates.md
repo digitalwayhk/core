@@ -66,7 +66,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 ## 16.2 关闭任务 15 移交的门禁前问题
 
-**状态：** 未开始，三项必须独立 TDD 和独立提交。
+**状态：** 已完成。SQLite 稳定性、公共错误脱敏和发布检查解析均已独立完成并通过回归。
 
 ### 16.2a SQLite 环境稳定性
 

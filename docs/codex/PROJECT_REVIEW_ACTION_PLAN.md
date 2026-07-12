@@ -1172,15 +1172,15 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 | `go vet ./...` | 全项目编译/vet 基线 | 否 | 否 |
 | `./scripts/test.sh quick` | 格式化/vet + 环境无关快速单元测试 | 否 | 否 |
 | `./scripts/test.sh server` | Server 包单元/集成风格测试 | 否，但必须允许本地端口绑定 | 否 |
-| 计划中：`./scripts/test.sh persistence-unit` | 使用 SQLite/fake 的持久化正确性 | 否 | 否 |
+| `./scripts/test.sh persistence-unit` | 使用 SQLite/fake 的持久化正确性 | 否 | 否 |
 | `./scripts/test.sh concurrency` | 按包划分的请求、注册表、生命周期和回调竞态测试，含 20 次重复关闭门禁 | 否，但必须允许本地端口绑定 | 否 |
-| 计划中：`./scripts/test.sh config-contract` | 通过真实启动/关闭验证配置 | 本地 Provider 不需要 | 否 |
+| `./scripts/test.sh config-contract` | 通过真实启动/关闭验证配置 | 本地 Provider 不需要 | 否 |
 | `./scripts/test.sh integration-local` | 本地 Provider 集成测试 | 否 | 脚本设置 `CORE_TEST_CLUSTER_LOCAL=1` |
 | `./scripts/test.sh integration-external` | etcd/consul/redis/nats 测试 | 是 | 由脚本默认值设置 |
-| 计划中：`./scripts/test.sh integration-persistence` | MySQL/MongoDB/ClickHouse driver 和生命周期测试 | 是 | 脚本显式设置 `CORE_TEST_*` 变量 |
-| 计划中：`./scripts/check-logging.sh` | 运行时日志策略和敏感输出守卫 | 否 | 否 |
+| `./scripts/test.sh integration-persistence` | MySQL/MongoDB/ClickHouse driver 和生命周期测试 | 是 | 脚本显式设置 `CORE_TEST_*` 变量 |
+| `./scripts/check-logging.sh` | 运行时日志策略和敏感输出守卫 | 否 | 否 |
 | `./scripts/test.sh security` | 认证隔离、CORS/代理、文件模式、body、响应头和安全错误测试 | 否 | 否 |
-| 计划中：`./scripts/test.sh compatibility` | 路由/OpenAPI/导出 API 和已配置消费方冒烟检查 | 取决于消费方 | 显式配置消费方路径或修订版 |
+| `./scripts/test.sh api-compat`、`./scripts/test.sh public-api`、`./scripts/ci.sh consumer/futures` | 路由/OpenAPI/导出 API 和锁定消费方冒烟检查 | 消费方检查不需要 Docker | 消费方路径和修订版由契约显式锁定 |
 | `CORE_TEST_KAFKA=1 ... TestMQKafka` | Kafka Provider 契约 | 是 | 仅在 Kafka Provider 存在后 |
 
 ## 完成定义
@@ -1217,3 +1217,16 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - README、`scripts/test.sh` 与 CI 质量门禁矩阵显示相同命令。
 - README 和 `use-digitalway-core` 参考声明相同 go-zero 复用与日志边界。
 - `docs/codex/FRAMEWORK_USAGE_GUIDE.md` 提供由真实构造器、示例、配置和测试支撑的场景决策与成熟度标签。
+
+## 最终验收记录（2026-07-13）
+
+本计划全部实施完成，最终验收基于提交 `547b57e9555611f60f22a937b46b377ae54ae27c` 执行：
+
+- `go vet ./...`、`required/quick`、`required/contracts`、`required/server-manage`、`required/race`、`server`、`persistence-unit`、日志与性能契约均通过。
+- `integration-external-docker` 通过 etcd、Consul、Redis Streams、NATS JetStream/EventBridge 契约；Consul Watch 使用可观测事件同步，NATS 资源名满足服务端约束。
+- `integration-persistence` 通过锁定的 MySQL 8.4.4、MongoDB 7.0.16、ClickHouse 24.8.14.39 driver 与生命周期契约；测试结束后无 Compose 容器残留。
+- futures 消费方在锁定提交 `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` 上使用 Go 1.26.5 和当前 Core 工作区通过 smoke。
+- README、框架使用指南、CI 矩阵和 `.codex/skills/use-digitalway-core` 已按最终代码契约统一；已删除的旧 Copilot skill 未恢复。
+- macOS Docker Desktop 全局 credential helper 的本机阻塞通过临时、无认证的 `DOCKER_CONFIG` 隔离验证，未修改用户全局 Docker 配置。
+
+工作区中用户已有的历史计划删除和 `COMPLETED_TASKS_IMPLEMENTATION_REVIEW.md` 未纳入本计划提交，保留给用户独立处理。
