@@ -71,6 +71,9 @@ case "${1:-quick}" in
   ci-contract)
     "$ROOT/scripts/test-ci-contract.sh"
     ;;
+  workflow-contract)
+    "$ROOT/scripts/test-workflow-contract.sh"
+    ;;
   persistence-unit)
     go test ./pkg/persistence/... -count=1 -timeout=5m
     ;;
@@ -378,7 +381,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

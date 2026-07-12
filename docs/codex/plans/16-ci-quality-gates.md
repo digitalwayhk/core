@@ -106,7 +106,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **Owner：** release tooling。
 
-**状态：** 外部审查 P1 已修复，待复审。
+**状态：** 已完成，外部复审 APPROVED。
 
 **文件：** `scripts/release-check.sh` 及 shell fixture。
 
@@ -119,13 +119,15 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **首轮审查修复：** 首轮结论为 CHANGES_REQUIRED，macOS BSD awk 对 UTF-8 字面量 `==` 可能误判合法中文字段。修复后 AWK 仅执行 ASCII 整格比较，中文占位符、破坏性标记和迁移说明改用 grep 字节匹配；fixture 新增合法中文行、当前真实登记表 smoke，以及 `-`、`N/A`、`TODO`、`暂无`、`—` 参数化拒绝。shell contract 与真实 `release-contract` 均通过，等待复审。
 
+**复审关闭记录：** 修复提交 `1a4d66f` 复审结论为 APPROVED，首轮 P1-1/P1-2 已关闭，允许关闭整个 16.2 并进入 16.3。破坏性否定句误报、消费方矩阵 TODO/TBD 子串和批准文件结构继续登记为 P2。
+
 **验收：** 三项各自定向测试与 race/shell contract 通过；CI 矩阵记录 owner、证据和是否已提升 required。
 
 **外部审查重点：** 是否真正修根因、是否改变公共兼容、是否通过 sleep/retry/skip/排除包伪装稳定。
 
 ## 16.3 实现 PR 必需 GitHub Actions
 
-**状态：** 未开始，依赖 16.1 和可设 required 的 16.2 证据。
+**状态：** 已完成，独立验证通过。
 
 **文件：**
 
@@ -151,6 +153,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 5. 干净检出执行 required jobs 的底层命令全部通过。
 
 **验收：** workflow 静态 contract、`actionlint`（若采用则锁定版本）和所有本地 required gate 通过。
+
+**开发与验证记录（2026-07-13）：** 新增 `.github/workflows/ci.yml`，四个 required job 仅调用同名 `scripts/ci.sh` gate，权限为 `contents: read`，同 workflow/ref 取消旧运行，checkout/setup-go/upload-artifact 均锁定官方 tag 对应完整 SHA。每个 job 有独立 timeout、Go 缓存和 always artifact。独立验证执行 YAML 解析、workflow 静态契约及 quick/contracts/server-manage/race 四个 gate，均在矩阵预算内通过；本机未安装 actionlint，未将其列为通过证据。
 
 **外部审查重点：** 权限、供应链 pin、缓存污染、错误吞噬、artifact 泄密、YAML 与本地脚本偏移。
 

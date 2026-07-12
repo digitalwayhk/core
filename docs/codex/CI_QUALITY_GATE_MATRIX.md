@@ -17,6 +17,16 @@
 - `consumer/futures`：任务 16.5 创建精确 commit checkout 与临时 `go.work` 脚本后登记，当前不得报告为通过。
 - etcd、Consul、Redis、NATS、Kafka：等待任务 2/4 明确产品实现和 Compose 服务；当前状态为 `planned/blocked_by_task_2_4`，不以绿色 skip 代替执行。
 
+## Action 供应链锁定
+
+| Action | 上游版本 | 完整提交 SHA | 用途 |
+| --- | --- | --- | --- |
+| `actions/checkout` | v4.2.2 | `11bd71901bbe5b1630ceea73d27597364c9af683` | 只读检出，禁用凭据持久化 |
+| `actions/setup-go` | v5.5.0 | `d35c59abb061a4a6fb18e82ac0862c26744d6ab5` | 按根 `go.mod` 安装 Go 并缓存依赖 |
+| `actions/upload-artifact` | v4.6.2 | `ea165f8d65b6e75b540449e92b4886f43607fa02` | 无论成功失败上传 gate 日志 |
+
+升级 Action 时必须从官方仓库验证 tag 对应 SHA，并同时更新 workflow、本表和静态契约；不得只改注释版本或使用浮动 tag。
+
 ## 运行约束
 
 - CI 与本地统一调用 `./scripts/ci.sh <gate>`，YAML 不复制测试包清单。
