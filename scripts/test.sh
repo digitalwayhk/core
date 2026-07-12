@@ -38,6 +38,9 @@ case "${1:-quick}" in
   release-contract)
     "$ROOT/scripts/release-check.sh" --candidate
     ;;
+  release-check-contract)
+    "$ROOT/scripts/test-release-check.sh"
+    ;;
   concurrency-race)
     go test -race \
       ./service/manage \
@@ -375,7 +378,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

@@ -89,7 +89,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **Owner：** server/router + security。
 
-**状态：** 开发完成，待外部审查。
+**状态：** 已完成，外部审查 APPROVED。
 
 **文件：** `pkg/server/router/reponse.go`、`pkg/server/trans/rest/error.go` 及测试。
 
@@ -100,9 +100,13 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 **开发验收记录（2026-07-13）：** 默认 `NewResponse` 在进入 REST 前即通过 `ResolvePublicError` 写入安全 code/message，原始 error 只保留在非 JSON 字段中；`GetError` 已改为纯读取，并删除未使用的 `determineStatusCode` 分支。新增直接序列化与字段不变性回归测试，router/rest 聚焦测试通过。
 
+**审查关闭记录：** 提交 `34af55c` 外部审查结论为 APPROVED，无 P0/P1；允许进入 16.2c。`InitRequest.NewResponse`、自定义 `INewResponse` 正反 fixture、plain/600/800 直接序列化覆盖和非 REST `OkJson` 状态语义登记为后续安全 P2；`GetError` 的空消息旧行为暂不做无证据兼容变更。
+
 ### 16.2c 发布契约解析加固
 
 **Owner：** release tooling。
+
+**状态：** 开发完成，待外部审查。
 
 **文件：** `scripts/release-check.sh` 及 shell fixture。
 
@@ -110,6 +114,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 - 废弃登记逐行验证 API、替代入口、首次/最早版本、owner、消费方、迁移证据非空且非占位。
 - 标记破坏性变化时必须存在迁移说明或批准文件；消费方 smoke 保持人工/发布候选证据，不伪造自动结果。
 - fixture 必须证明错误位置标题、缺字段、占位值和破坏无迁移均失败。
+
+**开发验收记录（2026-07-13）：** `release-check.sh` 仅抽取 `## [Unreleased]` 到下一版本标题的内容并要求六个标题各出现一次；废弃登记逐行检查七个字段、占位符与两个 SemVer 字段；Unreleased 标记 BREAKING/破坏性时要求同段迁移说明或非空批准文件。独立 shell fixture 覆盖四类拒绝场景及迁移说明/批准文件两类接受场景，新增 `release-check-contract` 本地入口。
 
 **验收：** 三项各自定向测试与 race/shell contract 通过；CI 矩阵记录 owner、证据和是否已提升 required。
 

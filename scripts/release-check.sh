@@ -15,12 +15,75 @@ for file in "${required[@]}"; do
   test -s "$file" || { echo "发布契约文件缺失: $file" >&2; exit 1; }
 done
 
+unreleased_file="$(mktemp "${TMPDIR:-/tmp}/digitalway-unreleased.XXXXXX")"
+trap 'rm -f "$unreleased_file"' EXIT
+awk '
+  /^## \[Unreleased\][[:space:]]*$/ { found=1; active=1; next }
+  active && /^## \[/ { active=0; exit }
+  active { print }
+  END { if (!found) exit 2 }
+' CHANGELOG.md >"$unreleased_file" || {
+  echo "CHANGELOG 缺少 ## [Unreleased] 段" >&2
+  exit 1
+}
+
 for heading in Added Changed Deprecated Removed Fixed Security; do
-  grep -Fq "### $heading" CHANGELOG.md || { echo "CHANGELOG Unreleased 缺少 $heading" >&2; exit 1; }
+  count="$(grep -Ec "^### ${heading}[[:space:]]*$" "$unreleased_file" || true)"
+  [[ "$count" == "1" ]] || { echo "CHANGELOG Unreleased 必须且只能包含一个 $heading 标题" >&2; exit 1; }
 done
-if grep -En '待确认|TODO|TBD' docs/codex/DEPRECATION_REGISTER.md docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md; then
+
+awk '
+  function trim(value) {
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    return value
+  }
+  function placeholder(value, lower) {
+    lower=tolower(value)
+    return value == "" || value == "-" || value == "—" || value == "暂无" ||
+      lower == "n/a" || lower == "none" || lower ~ /todo|tbd|待确认/
+  }
+  /^\|[[:space:]]*API[[:space:]]*\|/ { header=1; next }
+  header && /^\|[[:space:]-]+\|/ { next }
+  header && /^\|/ {
+    count=split($0, fields, "|")
+    if (count < 9) {
+      print "废弃登记列数不足: " $0 > "/dev/stderr"
+      failed=1
+      next
+    }
+    for (i=2; i<=8; i++) {
+      fields[i]=trim(fields[i])
+      if (placeholder(fields[i])) {
+        print "废弃登记字段为空或为占位符（第 " (i-1) " 列）: " $0 > "/dev/stderr"
+        failed=1
+      }
+    }
+    if (fields[4] !~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ || fields[5] !~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) {
+      print "废弃登记版本格式无效: " $0 > "/dev/stderr"
+      failed=1
+    }
+    rows++
+  }
+  END {
+    if (!header || rows == 0) {
+      print "废弃登记缺少表头或数据行" > "/dev/stderr"
+      failed=1
+    }
+    exit failed
+  }
+' docs/codex/DEPRECATION_REGISTER.md || exit 1
+
+if grep -En '待确认|TODO|TBD' docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md; then
   echo "发布契约仍含未确认占位" >&2
   exit 1
+fi
+
+if grep -Eiq 'BREAKING([ :]|$)|破坏性([变更：:]|$)' "$unreleased_file"; then
+  if ! grep -Eiq 'Migration:|迁移说明[：:]' "$unreleased_file" &&
+    ! test -s docs/codex/BREAKING_CHANGE_APPROVAL.md; then
+    echo "Unreleased 含破坏性变化，但缺少迁移说明或批准文件" >&2
+    exit 1
+  fi
 fi
 
 if [[ "$mode" == "--release" ]]; then
