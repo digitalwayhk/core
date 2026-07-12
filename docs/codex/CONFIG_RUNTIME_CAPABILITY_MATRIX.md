@@ -1,6 +1,6 @@
 # 配置到运行时能力矩阵
 
-状态只有三种：`supported` 表示已有运行时消费方和行为测试；`rejected` 表示非默认启用或自定义值会在校验/构造阶段明确失败；`upstream` 表示由 go-zero 直接拥有。`Mode=off` 保留旧配置、以及未启用能力的零值/固定默认值可以继续解析，只是兼容 inactive 配置，不代表该能力已实现。
+状态只有三种：`supported` 表示已有运行时消费方和行为测试；`rejected` 表示非默认启用或自定义值会在校验/构造阶段明确失败；`upstream` 表示由 go-zero 直接拥有。`Cluster.Mode=off` 和 `MQ.Mode=off` 只校验 Mode 本身，其余字段不做语义校验且不会进入运行时；这用于旧 JSON 禁用后迁移。未启用能力的零值或固定默认值可继续解析，但不代表该能力已实现。
 
 ## Server 与认证
 
@@ -15,9 +15,9 @@
 
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
-| Mode、Provider、HeartbeatInterval、MachineIDMax、Etcd Endpoints/TTL、Consul Address | 由 Validate、factory、claim 和 membership 消费 | ServiceContext 创建并终止 membership、broker 和 provider | supported |
+| Mode、Provider、HeartbeatInterval、MachineIDMax、Etcd Endpoints/Prefix/TTL、Consul Address | 由 Validate、factory、claim 和 membership 消费；Etcd Prefix 为空时默认 `/core/cluster`，支持自定义 keyspace；未知 provider 是构造错误，仅已知外部 provider 在 `Mode=auto` 连接失败时回退 local | ServiceContext 创建并终止 membership、broker 和 provider | supported |
 | NodeName、AdvertiseAddress、自动 claim、额外 conflict policy、discovery、shard、services | 非零/非默认配置明确返回 not implemented | 无 | rejected |
-| HeartbeatTimeout、SuspectTimeout、InstanceReuseCooldown、DataCenterIDMax、provider Prefix/Consul TTL | 仅固定默认值可通过；自定义值返回 not configurable。固定值用于兼容现有配置，当前 LocalProvider 仍按固定构造值工作 | 固定 LocalProvider 行为 | rejected |
+| HeartbeatTimeout、SuspectTimeout、InstanceReuseCooldown、DataCenterIDMax、Consul Prefix/TTL | 仅固定默认值可通过；自定义值返回 not configurable。固定值用于兼容现有配置，当前 LocalProvider 仍按固定构造值工作 | 固定 LocalProvider 行为 | rejected |
 | `Mode=off` 下的旧字段 | 不创建 cluster runtime，保留旧配置解析兼容 | inactive，无生命周期对象 | rejected |
 
 ## Transport
@@ -32,8 +32,8 @@
 
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
-| Mode、event-stream Usage、Redis Stream、NATS JetStream | factory 创建 provider，ServiceContext 创建 EventStream/EventBridge | ServiceContext 终止型关闭 MQManager；MQManager 关闭其拥有的 provider，不支持关闭后复用 | supported |
-| 自定义 Provider | 通过 `RegisterProviderFactory` 注册后由 factory 创建；未注册名称是硬配置错误 | MQManager/已注册 factory | supported |
+| Mode、event-stream Usage、Redis Stream、NATS JetStream | factory 创建 provider，ServiceContext 创建 EventStream/EventBridge | ServiceContext 终止型关闭 MQManager；Health/Publish/Subscribe 的 provider 调用受 Manager 读写门禁保护，Close 等待已进入调用并阻止新调用后再按稳定 registry key/name 顺序关闭去重实例；不支持关闭后复用 | supported |
+| 自定义 Provider | 通过 `RegisterProviderFactory` 注册后由 factory 创建；未注册名称是硬配置错误；测试注册必须用 `t.Cleanup` 调用 `UnregisterProviderFactory` 隔离全局状态 | MQManager/已注册 factory | supported |
 | kafka、rabbitmq、rocketmq 内建 provider | 未注册同名自定义 factory 时 BuildManager 返回 not implemented | 无内建 owner | rejected |
 | transport/websocket/delayed-task Usage、request/reply、retry、dead-letter、dynamic switch | 启用时 Validate 明确失败；Enable=false 和预填默认参数只是 inactive/旧配置兼容 | 无 | rejected |
 | `Mode=off` 下的旧 MQ 字段 | 不创建 manager/provider/event bridge，保留旧配置解析兼容 | inactive，无生命周期对象 | rejected |
@@ -44,139 +44,139 @@
 
 ## 机器检查字段清单
 
-以下每项与反射枚举的导出 Go 字段路径精确对应。map、slice、interface 和 pointer 是叶子；`ServerConfig.RestConf` 保留嵌入点但不递归枚举 go-zero 内部字段。
-
-`ServerConfig.RestConf`
-`ServerConfig.DataCenterID`
-`ServerConfig.MachineID`
-`ServerConfig.Auth`
-`ServerConfig.Auth.AccessSecret`
-`ServerConfig.Auth.AccessExpire`
-`ServerConfig.Auth.Logto`
-`ServerConfig.Auth.Logto.ExpectedAudience`
-`ServerConfig.Auth.Logto.Issuer`
-`ServerConfig.Auth.Logto.Enable`
-`ServerConfig.Auth.CasDoor`
-`ServerConfig.Auth.CasDoor.Enable`
-`ServerConfig.Auth.CasDoor.YamlFilePath`
-`ServerConfig.ManageAuth`
-`ServerConfig.ManageAuth.AccessSecret`
-`ServerConfig.ManageAuth.AccessExpire`
-`ServerConfig.ManageAuth.Logto`
-`ServerConfig.ManageAuth.Logto.ExpectedAudience`
-`ServerConfig.ManageAuth.Logto.Issuer`
-`ServerConfig.ManageAuth.Logto.Enable`
-`ServerConfig.ManageAuth.CasDoor`
-`ServerConfig.ManageAuth.CasDoor.Enable`
-`ServerConfig.ManageAuth.CasDoor.YamlFilePath`
-`ServerConfig.ServerManageAuth`
-`ServerConfig.ServerManageAuth.AccessSecret`
-`ServerConfig.ServerManageAuth.AccessExpire`
-`ServerConfig.ServerManageAuth.Logto`
-`ServerConfig.ServerManageAuth.Logto.ExpectedAudience`
-`ServerConfig.ServerManageAuth.Logto.Issuer`
-`ServerConfig.ServerManageAuth.Logto.Enable`
-`ServerConfig.ServerManageAuth.CasDoor`
-`ServerConfig.ServerManageAuth.CasDoor.Enable`
-`ServerConfig.ServerManageAuth.CasDoor.YamlFilePath`
-`ServerConfig.RunIp`
-`ServerConfig.ParentServerIP`
-`ServerConfig.SocketPort`
-`ServerConfig.AttachServices`
-`ServerConfig.Debug`
-`ServerConfig.IsWhiteList`
-`ServerConfig.WhiteList`
-`ServerConfig.TrustedProxies`
-`ServerConfig.CustomerDataList`
-`ServerConfig.IsLoaclVisit`
-`ServerConfig.RemoteAccessManageAPI`
-`ServerConfig.MelodyConfigPath`
-`ServerConfig.Cluster`
-`ServerConfig.Cluster.Mode`
-`ServerConfig.Cluster.Provider`
-`ServerConfig.Cluster.NodeName`
-`ServerConfig.Cluster.AdvertiseAddress`
-`ServerConfig.Cluster.HeartbeatInterval`
-`ServerConfig.Cluster.HeartbeatTimeout`
-`ServerConfig.Cluster.SuspectTimeout`
-`ServerConfig.Cluster.InstanceReuseCooldown`
-`ServerConfig.Cluster.Claim`
-`ServerConfig.Cluster.Claim.AutoMachineID`
-`ServerConfig.Cluster.Claim.AutoDataCenterID`
-`ServerConfig.Cluster.Claim.MachineIDMax`
-`ServerConfig.Cluster.Claim.DataCenterIDMax`
-`ServerConfig.Cluster.Claim.ConflictPolicy`
-`ServerConfig.Cluster.Discovery`
-`ServerConfig.Cluster.Discovery.Seeds`
-`ServerConfig.Cluster.Discovery.Multicast`
-`ServerConfig.Cluster.Discovery.MDNS`
-`ServerConfig.Cluster.Shard`
-`ServerConfig.Cluster.Shard.MissingKeyPolicy`
-`ServerConfig.Cluster.Shard.EmptyCandidatePolicy`
-`ServerConfig.Cluster.Shard.KeyPriority`
-`ServerConfig.Cluster.Services`
-`ServerConfig.Cluster.Providers`
-`ServerConfig.Cluster.Providers.Etcd`
-`ServerConfig.Cluster.Providers.Etcd.Endpoints`
-`ServerConfig.Cluster.Providers.Etcd.Prefix`
-`ServerConfig.Cluster.Providers.Etcd.TTL`
-`ServerConfig.Cluster.Providers.Consul`
-`ServerConfig.Cluster.Providers.Consul.Address`
-`ServerConfig.Cluster.Providers.Consul.Prefix`
-`ServerConfig.Cluster.Providers.Consul.TTL`
-`ServerConfig.Transport`
-`ServerConfig.Transport.Internal`
-`ServerConfig.Transport.Fallback`
-`ServerConfig.Transport.MaxRetries`
-`ServerConfig.Transport.RetryDelay`
-`ServerConfig.Transport.HTTP`
-`ServerConfig.Transport.HTTP.Enable`
-`ServerConfig.Transport.Socket`
-`ServerConfig.Transport.Socket.Enable`
-`ServerConfig.Transport.QUIC`
-`ServerConfig.Transport.QUIC.Enable`
-`ServerConfig.Transport.QUIC.CertFile`
-`ServerConfig.Transport.QUIC.KeyFile`
-`ServerConfig.Transport.GRPC`
-`ServerConfig.Transport.GRPC.Enable`
-`ServerConfig.Transport.GRPC.Port`
-`ServerConfig.Transport.GRPC.MaxRecvMsgSize`
-`ServerConfig.Transport.GRPC.MaxSendMsgSize`
-`ServerConfig.MQ`
-`ServerConfig.MQ.Mode`
-`ServerConfig.MQ.Provider`
-`ServerConfig.MQ.Usage`
-`ServerConfig.MQ.RequestReply`
-`ServerConfig.MQ.RequestReply.Enable`
-`ServerConfig.MQ.RequestReply.Timeout`
-`ServerConfig.MQ.Retry`
-`ServerConfig.MQ.Retry.Enable`
-`ServerConfig.MQ.Retry.RetryCount`
-`ServerConfig.MQ.Retry.InitialDelay`
-`ServerConfig.MQ.Retry.MaxDelay`
-`ServerConfig.MQ.DeadLetter`
-`ServerConfig.MQ.DeadLetter.Enable`
-`ServerConfig.MQ.DeadLetter.Topic`
-`ServerConfig.MQ.Switch`
-`ServerConfig.MQ.Switch.AllowDynamicSwitch`
-`ServerConfig.MQ.Switch.Strategy`
-`ServerConfig.MQ.Switch.TargetProvider`
-`ServerConfig.MQ.Switch.DualWriteDuration`
-`ServerConfig.MQ.Switch.RollbackOnFailure`
-`ServerConfig.MQ.RedisStream`
-`ServerConfig.MQ.RedisStream.Addr`
-`ServerConfig.MQ.RedisStream.DB`
-`ServerConfig.MQ.RedisStream.Prefix`
-`ServerConfig.MQ.NATSJetStream`
-`ServerConfig.MQ.NATSJetStream.URL`
-`ServerConfig.MQ.NATSJetStream.StreamPrefix`
-`ServerConfig.MQ.NATSJetStream.DurablePrefix`
-`ServerConfig.MQ.Kafka`
-`ServerConfig.MQ.Kafka.Brokers`
-`ServerConfig.MQ.Kafka.Prefix`
-`ServerConfig.MQ.RabbitMQ`
-`ServerConfig.MQ.RabbitMQ.URL`
-`ServerConfig.MQ.RabbitMQ.Exchange`
-`ServerConfig.MQ.RocketMQ`
-`ServerConfig.MQ.RocketMQ.NameServers`
-`ServerConfig.MQ.RocketMQ.Group`
+| 字段路径 | 状态 | 生命周期 owner | 运行时/拒绝证据 |
+| --- | --- | --- | --- |
+| `ServerConfig.RestConf` | upstream | go-zero rest server | rest.MustNewServer 消费嵌入配置；门禁只跟踪嵌入点 |
+| `ServerConfig.DataCenterID` | supported | ServiceContext | 服务初始化和 ID 生成消费 |
+| `ServerConfig.MachineID` | supported | ServiceContext | 服务初始化和 ID 生成消费 |
+| `ServerConfig.Auth` | supported | auth middleware | 认证容器由 router 装配并按子字段启用 |
+| `ServerConfig.Auth.AccessSecret` | supported | JWT auth middleware | JWT 签名校验消费 |
+| `ServerConfig.Auth.AccessExpire` | supported | JWT auth middleware | JWT 过期时间消费 |
+| `ServerConfig.Auth.Logto` | supported | Logto auth middleware | Enable 控制外部认证生命周期 |
+| `ServerConfig.Auth.Logto.ExpectedAudience` | supported | Logto auth middleware | token audience 校验消费 |
+| `ServerConfig.Auth.Logto.Issuer` | supported | Logto auth middleware | token issuer 校验消费 |
+| `ServerConfig.Auth.Logto.Enable` | supported | Logto auth middleware | 显式控制 middleware 启用 |
+| `ServerConfig.Auth.CasDoor` | supported | CasDoor auth middleware | Enable 控制外部配置生命周期 |
+| `ServerConfig.Auth.CasDoor.Enable` | supported | CasDoor auth middleware | ReloadExternalConfigs 和 middleware 装配消费 |
+| `ServerConfig.Auth.CasDoor.YamlFilePath` | supported | CasDoor auth middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.ManageAuth` | supported | manage auth middleware | 管理路由认证容器装配 |
+| `ServerConfig.ManageAuth.AccessSecret` | supported | manage JWT middleware | JWT 签名校验消费 |
+| `ServerConfig.ManageAuth.AccessExpire` | supported | manage JWT middleware | JWT 过期时间消费 |
+| `ServerConfig.ManageAuth.Logto` | supported | manage Logto middleware | Enable 控制外部认证生命周期 |
+| `ServerConfig.ManageAuth.Logto.ExpectedAudience` | supported | manage Logto middleware | token audience 校验消费 |
+| `ServerConfig.ManageAuth.Logto.Issuer` | supported | manage Logto middleware | token issuer 校验消费 |
+| `ServerConfig.ManageAuth.Logto.Enable` | supported | manage Logto middleware | 显式控制 middleware 启用 |
+| `ServerConfig.ManageAuth.CasDoor` | supported | manage CasDoor middleware | Enable 控制外部配置生命周期 |
+| `ServerConfig.ManageAuth.CasDoor.Enable` | supported | manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
+| `ServerConfig.ManageAuth.CasDoor.YamlFilePath` | supported | manage CasDoor middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.ServerManageAuth` | supported | server-manage auth middleware | 服务管理路由认证容器装配 |
+| `ServerConfig.ServerManageAuth.AccessSecret` | supported | server-manage JWT middleware | JWT 签名校验消费 |
+| `ServerConfig.ServerManageAuth.AccessExpire` | supported | server-manage JWT middleware | JWT 过期时间消费 |
+| `ServerConfig.ServerManageAuth.Logto` | supported | server-manage Logto middleware | Enable 控制外部认证生命周期 |
+| `ServerConfig.ServerManageAuth.Logto.ExpectedAudience` | supported | server-manage Logto middleware | token audience 校验消费 |
+| `ServerConfig.ServerManageAuth.Logto.Issuer` | supported | server-manage Logto middleware | token issuer 校验消费 |
+| `ServerConfig.ServerManageAuth.Logto.Enable` | supported | server-manage Logto middleware | 显式控制 middleware 启用 |
+| `ServerConfig.ServerManageAuth.CasDoor` | supported | server-manage CasDoor middleware | Enable 控制外部配置生命周期 |
+| `ServerConfig.ServerManageAuth.CasDoor.Enable` | supported | server-manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
+| `ServerConfig.ServerManageAuth.CasDoor.YamlFilePath` | supported | server-manage CasDoor middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.RunIp` | supported | ServiceContext | 服务地址与节点信息组装消费 |
+| `ServerConfig.ParentServerIP` | supported | server routing | 父服务连接路由消费 |
+| `ServerConfig.SocketPort` | supported | socket server | socket listener 构造消费 |
+| `ServerConfig.AttachServices` | supported | ServiceContext | attach 服务地址表被路由消费 |
+| `ServerConfig.Debug` | supported | server runtime | debug 运行模式分支消费 |
+| `ServerConfig.IsWhiteList` | supported | access-control middleware | 白名单开关消费 |
+| `ServerConfig.WhiteList` | supported | access-control middleware | 白名单匹配消费 |
+| `ServerConfig.TrustedProxies` | supported | REST request handling | Validate 校验 IP/CIDR，请求来源解析消费 |
+| `ServerConfig.CustomerDataList` | supported | ServerConfig caller | ApplyDefaults 和 GetCustomerData 消费 |
+| `ServerConfig.IsLoaclVisit` | supported | access-control middleware | 本地访问控制分支消费 |
+| `ServerConfig.RemoteAccessManageAPI` | supported | manage access control | 远程管理 API 访问控制消费 |
+| `ServerConfig.MelodyConfigPath` | supported | Melody global config | 非空时 ReloadExternalConfigs 加载 |
+| `ServerConfig.Cluster` | supported | ServiceContext | ApplyDefaults/Validate 并构造 cluster runtime |
+| `ServerConfig.Cluster.Mode` | supported | ServiceContext | 决定不创建、自动或强制 cluster runtime |
+| `ServerConfig.Cluster.Provider` | supported | cluster factory | 选择 local/etcd/consul provider，未知值拒绝 |
+| `ServerConfig.Cluster.NodeName` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Cluster.AdvertiseAddress` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Cluster.HeartbeatInterval` | supported | membership runtime | heartbeat ticker 构造消费 |
+| `ServerConfig.Cluster.HeartbeatTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.SuspectTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.InstanceReuseCooldown` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.Claim` | rejected | ClusterConfig.Validate | 容器的未接线自动 claim/策略值在启动前拒绝 |
+| `ServerConfig.Cluster.Claim.AutoMachineID` | rejected | ClusterConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Cluster.Claim.AutoDataCenterID` | rejected | ClusterConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Cluster.Claim.MachineIDMax` | supported | machine ID claim | claim 范围构造消费 |
+| `ServerConfig.Cluster.Claim.DataCenterIDMax` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.Claim.ConflictPolicy` | rejected | ClusterConfig.Validate | 非固定兼容策略返回 not implemented |
+| `ServerConfig.Cluster.Discovery` | rejected | ClusterConfig.Validate | 任一 discovery 能力启用都在启动前拒绝 |
+| `ServerConfig.Cluster.Discovery.Seeds` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Cluster.Discovery.Multicast` | rejected | ClusterConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Cluster.Discovery.MDNS` | rejected | ClusterConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Cluster.Shard` | rejected | ClusterConfig.Validate | 任一 shard 策略配置都在启动前拒绝 |
+| `ServerConfig.Cluster.Shard.MissingKeyPolicy` | rejected | ClusterConfig.Validate | 非默认值返回 not implemented |
+| `ServerConfig.Cluster.Shard.EmptyCandidatePolicy` | rejected | ClusterConfig.Validate | 非默认值返回 not implemented |
+| `ServerConfig.Cluster.Shard.KeyPriority` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Cluster.Services` | rejected | ClusterConfig.Validate | 非空 service shard map 返回 not implemented |
+| `ServerConfig.Cluster.Providers` | supported | cluster factory | provider 容器按 Provider 选择并验证子配置 |
+| `ServerConfig.Cluster.Providers.Etcd` | supported | EtcdProvider | factory 透传 endpoints/prefix/TTL 并关闭 client |
+| `ServerConfig.Cluster.Providers.Etcd.Endpoints` | supported | EtcdProvider | clientv3 客户端构造消费，强制模式缺失时拒绝 |
+| `ServerConfig.Cluster.Providers.Etcd.Prefix` | supported | EtcdProvider | factory 透传至 node/service/claim key 构造 |
+| `ServerConfig.Cluster.Providers.Etcd.TTL` | supported | EtcdProvider | lease grant 和 keepalive 消费 |
+| `ServerConfig.Cluster.Providers.Consul` | supported | ConsulProvider | factory 依 Provider 构造并关闭 client |
+| `ServerConfig.Cluster.Providers.Consul.Address` | supported | ConsulProvider | Consul client 构造消费 |
+| `ServerConfig.Cluster.Providers.Consul.Prefix` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.Providers.Consul.TTL` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Transport` | supported | ServiceContext | ApplyDefaults/Validate 并构造 TransportSelector |
+| `ServerConfig.Transport.Internal` | supported | TransportSelector | grpc/http/socket 主协议选择，未实现值拒绝 |
+| `ServerConfig.Transport.Fallback` | supported | TransportSelector | grpc/http/socket 降级顺序，未实现值拒绝 |
+| `ServerConfig.Transport.MaxRetries` | supported | ServiceContext transport retry | 请求重试计数消费 |
+| `ServerConfig.Transport.RetryDelay` | supported | ServiceContext transport retry | 请求重试间隔消费 |
+| `ServerConfig.Transport.HTTP` | rejected | TransportConfig.Validate | Enable 容器不是协议选择入口，启用时拒绝 |
+| `ServerConfig.Transport.HTTP.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
+| `ServerConfig.Transport.Socket` | rejected | TransportConfig.Validate | Enable 容器不是协议选择入口，启用时拒绝 |
+| `ServerConfig.Transport.Socket.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
+| `ServerConfig.Transport.QUIC` | rejected | TransportConfig.Validate | 任一 QUIC 启用或文件配置都拒绝 |
+| `ServerConfig.Transport.QUIC.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Transport.QUIC.CertFile` | rejected | TransportConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Transport.QUIC.KeyFile` | rejected | TransportConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Transport.GRPC` | supported | gRPC transport | message size 由 client/server 构造消费，Enable/Port 自定义拒绝 |
+| `ServerConfig.Transport.GRPC.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
+| `ServerConfig.Transport.GRPC.Port` | rejected | TransportConfig.Validate | 仅允许 0/固定 19090 兼容值，自定义值拒绝 |
+| `ServerConfig.Transport.GRPC.MaxRecvMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
+| `ServerConfig.Transport.GRPC.MaxSendMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
+| `ServerConfig.MQ` | supported | ServiceContext | ApplyDefaults/Validate 并按 Mode 创建和关闭 MQManager |
+| `ServerConfig.MQ.Mode` | supported | ServiceContext | 决定不创建、自动或强制 MQ runtime |
+| `ServerConfig.MQ.Provider` | supported | MQ factory | 选择内建或注册 factory，未实现 provider 拒绝 |
+| `ServerConfig.MQ.Usage` | supported | MQManager/EventBridge | event-stream 装配消费，其他 usage 启用时拒绝 |
+| `ServerConfig.MQ.RequestReply` | rejected | MQConfig.Validate | 容器仅保留 inactive 默认，Enable 时拒绝 |
+| `ServerConfig.MQ.RequestReply.Enable` | rejected | MQConfig.Validate | true 返回 not implemented |
+| `ServerConfig.MQ.RequestReply.Timeout` | rejected | MQConfig.Validate | 仅固定 inactive 兼容值，自定义值拒绝 |
+| `ServerConfig.MQ.Retry` | rejected | MQConfig.Validate | 容器仅保留 inactive 默认，Enable 时拒绝 |
+| `ServerConfig.MQ.Retry.Enable` | rejected | MQConfig.Validate | true 返回 not implemented |
+| `ServerConfig.MQ.Retry.RetryCount` | rejected | MQConfig.Validate | 仅固定 inactive 兼容值，自定义值拒绝 |
+| `ServerConfig.MQ.Retry.InitialDelay` | rejected | MQConfig.Validate | 仅固定 inactive 兼容值，自定义值拒绝 |
+| `ServerConfig.MQ.Retry.MaxDelay` | rejected | MQConfig.Validate | 仅固定 inactive 兼容值，自定义值拒绝 |
+| `ServerConfig.MQ.DeadLetter` | rejected | MQConfig.Validate | 容器仅保留 inactive 默认，Enable 时拒绝 |
+| `ServerConfig.MQ.DeadLetter.Enable` | rejected | MQConfig.Validate | true 返回 not implemented |
+| `ServerConfig.MQ.DeadLetter.Topic` | rejected | MQConfig.Validate | 仅固定 inactive 兼容值，自定义值拒绝 |
+| `ServerConfig.MQ.Switch` | rejected | MQConfig.Validate | 容器仅保留 inactive 默认，动态切换配置拒绝 |
+| `ServerConfig.MQ.Switch.AllowDynamicSwitch` | rejected | MQConfig.Validate | true 返回 not implemented |
+| `ServerConfig.MQ.Switch.Strategy` | rejected | MQConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.MQ.Switch.TargetProvider` | rejected | MQConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.MQ.Switch.DualWriteDuration` | rejected | MQConfig.Validate | 非零值返回 not implemented |
+| `ServerConfig.MQ.Switch.RollbackOnFailure` | rejected | MQConfig.Validate | 显式配置指针值作为动态切换能力拒绝 |
+| `ServerConfig.MQ.RedisStream` | supported | RedisStream provider | factory 透传连接参数并由 MQManager 关闭 |
+| `ServerConfig.MQ.RedisStream.Addr` | supported | RedisStream provider | Redis client 构造消费 |
+| `ServerConfig.MQ.RedisStream.DB` | supported | RedisStream provider | Redis DB 选择消费 |
+| `ServerConfig.MQ.RedisStream.Prefix` | supported | RedisStream provider | stream key/subject 构造消费 |
+| `ServerConfig.MQ.NATSJetStream` | supported | NATS JetStream provider | factory 透传连接参数并由 MQManager 关闭 |
+| `ServerConfig.MQ.NATSJetStream.URL` | supported | NATS JetStream provider | NATS 连接构造消费 |
+| `ServerConfig.MQ.NATSJetStream.StreamPrefix` | supported | NATS JetStream provider | stream/subject 命名消费 |
+| `ServerConfig.MQ.NATSJetStream.DurablePrefix` | supported | NATS JetStream provider | durable consumer 命名消费 |
+| `ServerConfig.MQ.Kafka` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
+| `ServerConfig.MQ.Kafka.Brokers` | rejected | MQ factory | 内建 Kafka provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.Kafka.Prefix` | rejected | MQ factory | 内建 Kafka provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.RabbitMQ` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
+| `ServerConfig.MQ.RabbitMQ.URL` | rejected | MQ factory | 内建 RabbitMQ provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.RabbitMQ.Exchange` | rejected | MQ factory | 内建 RabbitMQ provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.RocketMQ` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
+| `ServerConfig.MQ.RocketMQ.NameServers` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.RocketMQ.Group` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |

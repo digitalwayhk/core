@@ -27,6 +27,7 @@ func TestClusterConfigApplyDefaults_EmptyStruct(t *testing.T) {
 	assert.Equal(t, "error", c.Shard.MissingKeyPolicy)
 	assert.Equal(t, "error", c.Shard.EmptyCandidatePolicy)
 	assert.NotNil(t, c.Services)
+	assert.Equal(t, "/core/cluster", c.Providers.Etcd.Prefix)
 }
 
 // TestClusterConfigApplyDefaults_PreserveExistingValues 验证已设置的值不被覆盖。
@@ -131,6 +132,33 @@ func TestClusterConfigValidate_ModeOffPreservesLegacyFields(t *testing.T) {
 	assert.NoError(t, c.Validate())
 }
 
+func TestClusterConfigValidate_RejectedErrorsIncludeValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*ClusterConfig)
+		want      string
+	}{
+		{name: "mode", configure: func(c *ClusterConfig) { c.Mode = "legacy" }, want: `"legacy"`},
+		{name: "provider", configure: func(c *ClusterConfig) { c.Provider = "zookeeper" }, want: `"zookeeper"`},
+		{name: "node name", configure: func(c *ClusterConfig) { c.NodeName = "node-a" }, want: `"node-a"`},
+		{name: "advertise address", configure: func(c *ClusterConfig) { c.AdvertiseAddress = "10.0.0.8" }, want: `"10.0.0.8"`},
+		{name: "auto machine id", configure: func(c *ClusterConfig) { c.Claim.AutoMachineID = true }, want: "true"},
+		{name: "discovery seeds", configure: func(c *ClusterConfig) { c.Discovery.Seeds = []string{"node-a:9000"} }, want: "node-a:9000"},
+		{name: "shard policy", configure: func(c *ClusterConfig) { c.Shard.MissingKeyPolicy = "average" }, want: `"average"`},
+		{name: "consul prefix", configure: func(c *ClusterConfig) { c.Providers.Consul.Prefix = "custom" }, want: `"custom"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg ClusterConfig
+			cfg.ApplyDefaults()
+			tt.configure(&cfg)
+			err := cfg.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 func TestClusterConfigValidate_ModeIsCheckedBeforeOffShortCircuit(t *testing.T) {
 	err := (&ClusterConfig{Mode: "invalid", Provider: "legacy-provider"}).Validate()
 	require.Error(t, err)
@@ -180,7 +208,6 @@ func TestClusterConfigValidate_NonConfigurableFields(t *testing.T) {
 		{name: "suspect timeout", configure: func(c *ClusterConfig) { c.SuspectTimeout = 16 * time.Second }, fieldPath: "cluster.suspectTimeout"},
 		{name: "reuse cooldown", configure: func(c *ClusterConfig) { c.InstanceReuseCooldown = 31 * time.Second }, fieldPath: "cluster.instanceReuseCooldown"},
 		{name: "data center max", configure: func(c *ClusterConfig) { c.Claim.DataCenterIDMax = 63 }, fieldPath: "cluster.claim.dataCenterIDMax"},
-		{name: "etcd prefix", configure: func(c *ClusterConfig) { c.Providers.Etcd.Prefix = "/custom" }, fieldPath: "cluster.providers.etcd.prefix"},
 		{name: "consul prefix", configure: func(c *ClusterConfig) { c.Providers.Consul.Prefix = "custom" }, fieldPath: "cluster.providers.consul.prefix"},
 		{name: "consul ttl", configure: func(c *ClusterConfig) { c.Providers.Consul.TTL = 11 * time.Second }, fieldPath: "cluster.providers.consul.ttl"},
 	}
@@ -195,6 +222,13 @@ func TestClusterConfigValidate_NonConfigurableFields(t *testing.T) {
 			assert.Contains(t, err.Error(), "not configurable")
 		})
 	}
+}
+
+func TestClusterConfigValidate_CustomEtcdPrefix(t *testing.T) {
+	c := ClusterConfig{Mode: "auto", Provider: "etcd"}
+	c.Providers.Etcd.Prefix = "/tenant-a/discovery"
+
+	assert.NoError(t, c.Validate())
 }
 
 func TestClusterConfigValidate_ImplementedConfigurationRemainsSupported(t *testing.T) {

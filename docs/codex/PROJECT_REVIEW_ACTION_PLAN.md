@@ -1038,7 +1038,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 **验收：** 每个已接受字段都有经测试的运行时效果；不支持的值在提供流量前失败；矩阵与默认值、factory、启动和关闭行为一致。
 
-**完成记录（2026-07-12）：** 14.1-14.4 已完成。反射测试锁定项目自有配置字段与机器清单；Transport/MQ/Cluster 未实现能力为 rejected，自定义 MQ provider 可通过已注册 factory 使用；ServiceContext 对运行时资源执行终止型关闭；Cluster 不可配置参数仅接受固定兼容默认值。最终本地门禁为 `./scripts/test.sh config-contract` 和六包 race 测试；外部审查尚未执行或声明通过。
+**完成记录（2026-07-12）：** 14.1-14.4 已完成。结构化闭集门禁锁定项目自有配置字段、状态、owner 和运行时证据；Transport/MQ/Cluster 未实现能力为 rejected，自定义 MQ provider 可通过已注册 factory 使用；Etcd Prefix 已实际接入 provider；ServiceContext 对运行时资源执行终止型关闭；MQManager Close 会等待在途 Manager 操作。`./scripts/test.sh config-contract` 和六包 race 通过。外部审查发现已完成修复，等待修复提交复审。
 
 ## 任务 15：公共 API 兼容性与发布治理
 

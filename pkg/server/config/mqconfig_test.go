@@ -135,6 +135,32 @@ func TestMQConfigValidate_ModeOffAllowsLegacyFields(t *testing.T) {
 	assert.NoError(t, m.Validate())
 }
 
+func TestMQConfigValidate_RejectedErrorsIncludeValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*MQConfig)
+		want      string
+	}{
+		{name: "mode", configure: func(m *MQConfig) { m.Mode = "legacy" }, want: `"legacy"`},
+		{name: "usage", configure: func(m *MQConfig) { m.Usage = []string{"transport"} }, want: `"transport"`},
+		{name: "request reply", configure: func(m *MQConfig) { m.RequestReply.Enable = true }, want: "true"},
+		{name: "retry", configure: func(m *MQConfig) { m.Retry.Enable = true }, want: "true"},
+		{name: "dead letter", configure: func(m *MQConfig) { m.DeadLetter.Enable = true }, want: "true"},
+		{name: "dynamic switch", configure: func(m *MQConfig) { m.Switch.AllowDynamicSwitch = true }, want: "true"},
+		{name: "strategy", configure: func(m *MQConfig) { m.Switch.Strategy = "legacy" }, want: `"legacy"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg MQConfig
+			cfg.ApplyDefaults()
+			tt.configure(&cfg)
+			err := cfg.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 // TestMQConfigSwitchConfig_RollbackOnFailure_WhenDynamicSwitchEnabled
 // 验证 AllowDynamicSwitch=true 时 RollbackOnFailure 默认为 true 指针。
 func TestMQConfigSwitchConfig_RollbackOnFailure_WhenDynamicSwitchEnabled(t *testing.T) {

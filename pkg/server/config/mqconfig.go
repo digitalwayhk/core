@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -136,7 +137,7 @@ func (m *MQConfig) Validate() error {
 	switch m.Mode {
 	case "off", "auto", "on":
 	default:
-		return errors.New("mq.mode must be off, auto, or on")
+		return fmt.Errorf("mq.mode=%q is invalid; use off, auto, or on", m.Mode)
 	}
 	if m.Mode == "off" {
 		return nil
@@ -146,7 +147,7 @@ func (m *MQConfig) Validate() error {
 	}
 	for _, usage := range m.Usage {
 		if usage != "event-stream" {
-			return errors.New("mq.usage contains unsupported value " + usage + "; only event-stream is implemented")
+			return fmt.Errorf("mq.usage contains unsupported value %q; only event-stream is implemented", usage)
 		}
 	}
 	if m.Mode == "on" {
@@ -158,22 +159,22 @@ func (m *MQConfig) Validate() error {
 		}
 	}
 	if m.RequestReply.Enable {
-		return errors.New("mq.requestReply.enable is not implemented; remove it or set it to false")
+		return fmt.Errorf("mq.requestReply.enable=%t is not implemented; remove it or set it to false", m.RequestReply.Enable)
 	}
 	if m.Retry.Enable {
-		return errors.New("mq.retry.enable is not implemented; remove it or set it to false")
+		return fmt.Errorf("mq.retry.enable=%t is not implemented; remove it or set it to false", m.Retry.Enable)
 	}
 	if m.DeadLetter.Enable {
-		return errors.New("mq.deadLetter.enable is not implemented; remove it or set it to false")
+		return fmt.Errorf("mq.deadLetter.enable=%t is not implemented; remove it or set it to false", m.DeadLetter.Enable)
 	}
 	if m.Switch.AllowDynamicSwitch {
-		return errors.New("mq.switch.allowDynamicSwitch is not implemented; remove it or set it to false")
+		return fmt.Errorf("mq.switch.allowDynamicSwitch=%t is not implemented; remove it or set it to false", m.Switch.AllowDynamicSwitch)
 	}
 	// 空字符串表示"未配置，使用 ApplyDefaults 后的默认值"
 	switch m.Switch.Strategy {
 	case "", "drain", "dual-write", "maintenance":
 	default:
-		return errors.New("mq.switch.strategy must be drain, dual-write, or maintenance")
+		return fmt.Errorf("mq.switch.strategy=%q is invalid; use drain, dual-write, or maintenance", m.Switch.Strategy)
 	}
 	return nil
 }

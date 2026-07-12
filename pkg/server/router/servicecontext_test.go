@@ -361,6 +361,7 @@ func TestNewServiceContextWithConfig_EventBridgeAutoInit(t *testing.T) {
 	mqpkg.RegisterProviderFactory(providerName, func(_ context.Context, _ *config.MQConfig) (mqpkg.MQProvider, error) {
 		return &syncMQProvider{}, nil
 	})
+	t.Cleanup(func() { mqpkg.UnregisterProviderFactory(providerName) })
 
 	con := config.NewServiceDefaultConfig(svcName, 29984)
 	con.MQ.Mode = "on"
@@ -411,6 +412,7 @@ func TestNewServiceContext_ReadConfigInitializesRuntimeSubsystems(t *testing.T) 
 	mqpkg.RegisterProviderFactory("kafka", func(_ context.Context, _ *config.MQConfig) (mqpkg.MQProvider, error) {
 		return &syncMQProvider{}, nil
 	})
+	t.Cleanup(func() { mqpkg.UnregisterProviderFactory("kafka") })
 
 	oldConfigDir := config.CONFIGDIRPATH
 	config.CONFIGDIRPATH = t.TempDir() + string(os.PathSeparator)

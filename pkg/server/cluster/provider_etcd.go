@@ -10,28 +10,43 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// DefaultEtcdTTL is the default lease TTL when no TTL is configured.
-const DefaultEtcdTTL = 10 * time.Second
+const (
+	// DefaultEtcdTTL is the default lease TTL when no TTL is configured.
+	DefaultEtcdTTL = 10 * time.Second
+	// DefaultEtcdPrefix preserves the existing runtime etcd keyspace.
+	DefaultEtcdPrefix = "/core/cluster"
+)
 
 // EtcdProvider implements DiscoveryProvider using etcd v3.
 // Nodes are stored as JSON values under the key prefix:
 //
 //	/core/cluster/<serviceName>/<nodeID>
 type EtcdProvider struct {
-	client  *clientv3.Client
-	prefix  string
-	leases  map[string]clientv3.LeaseID
-	ttl     time.Duration // lease TTL from config
+	client *clientv3.Client
+	prefix string
+	leases map[string]clientv3.LeaseID
+	ttl    time.Duration // lease TTL from config
+	get    func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error)
+	watch  func(context.Context, string, ...clientv3.OpOption) clientv3.WatchChan
 }
 
 // NewEtcdProvider creates a provider connected to the given etcd endpoints.
 // ttl is the lease TTL; if zero, DefaultEtcdTTL is used.
 func NewEtcdProvider(endpoints []string, ttl time.Duration) (*EtcdProvider, error) {
+	return NewEtcdProviderWithPrefix(endpoints, ttl, DefaultEtcdPrefix)
+}
+
+// NewEtcdProviderWithPrefix creates a provider using the configured etcd key prefix.
+// An empty prefix preserves the existing runtime keyspace.
+func NewEtcdProviderWithPrefix(endpoints []string, ttl time.Duration, prefix string) (*EtcdProvider, error) {
 	if len(endpoints) == 0 {
 		return nil, errors.New("etcd: no endpoints provided")
 	}
 	if ttl <= 0 {
 		ttl = DefaultEtcdTTL
+	}
+	if prefix == "" {
+		prefix = DefaultEtcdPrefix
 	}
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -42,9 +57,11 @@ func NewEtcdProvider(endpoints []string, ttl time.Duration) (*EtcdProvider, erro
 	}
 	return &EtcdProvider{
 		client: cli,
-		prefix: "/core/cluster",
+		prefix: prefix,
 		leases: make(map[string]clientv3.LeaseID),
 		ttl:    ttl,
+		get:    cli.Get,
+		watch:  cli.Watch,
 	}, nil
 }
 
@@ -151,8 +168,8 @@ func (e *EtcdProvider) Get(ctx context.Context, nodeID string) (*NodeInfo, error
 
 // List returns all nodes for the given service, optionally filtered by status.
 func (e *EtcdProvider) List(ctx context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
-	prefix := fmt.Sprintf("%s/%s/", e.prefix, serviceName)
-	resp, err := e.client.Get(ctx, prefix, clientv3.WithPrefix())
+	prefix := e.servicePrefix(serviceName)
+	resp, err := e.get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("etcd: list nodes: %w", err)
 	}
@@ -178,9 +195,9 @@ func (e *EtcdProvider) List(ctx context.Context, serviceName string, statuses ..
 
 // Watch calls onChange whenever the node list for serviceName changes.
 func (e *EtcdProvider) Watch(ctx context.Context, serviceName string, onChange func([]*NodeInfo)) (func(), error) {
-	prefix := fmt.Sprintf("%s/%s/", e.prefix, serviceName)
-	watchCh := e.client.Watch(ctx, prefix, clientv3.WithPrefix())
+	prefix := e.servicePrefix(serviceName)
 	watchCtx, cancel := context.WithCancel(ctx)
+	watchCh := e.watch(watchCtx, prefix, clientv3.WithPrefix())
 	go func() {
 		for {
 			select {
@@ -226,6 +243,10 @@ func (e *EtcdProvider) AllocateMachineID(ctx context.Context, serviceName string
 
 func (e *EtcdProvider) nodeKey(serviceName, nodeID string) string {
 	return fmt.Sprintf("%s/%s/%s", e.prefix, serviceName, nodeID)
+}
+
+func (e *EtcdProvider) servicePrefix(serviceName string) string {
+	return fmt.Sprintf("%s/%s/", e.prefix, serviceName)
 }
 
 func (e *EtcdProvider) nodeKeyByID(nodeID string) string {

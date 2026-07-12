@@ -63,6 +63,7 @@ func TestBuildManager_RegisteredCustomProviderBuilds(t *testing.T) {
 	mq.RegisterProviderFactory(providerName, func(context.Context, *config.MQConfig) (mq.MQProvider, error) {
 		return &factoryTestProvider{name: providerName}, nil
 	})
+	t.Cleanup(func() { mq.UnregisterProviderFactory(providerName) })
 	cfg := &config.MQConfig{Mode: "on", Provider: providerName, Usage: []string{"event-stream"}}
 	require.NoError(t, cfg.Validate())
 
@@ -103,8 +104,23 @@ func TestBuildManager_AutoOnlyDegradesTypedUnavailableError(t *testing.T) {
 	mq.RegisterProviderFactory(providerName, func(context.Context, *config.MQConfig) (mq.MQProvider, error) {
 		return nil, factoryErr
 	})
+	t.Cleanup(func() { mq.UnregisterProviderFactory(providerName) })
 
 	mgr, err := mq.BuildManager(context.Background(), &config.MQConfig{Mode: "auto", Provider: providerName})
 	require.ErrorIs(t, err, factoryErr)
+	assert.Nil(t, mgr)
+}
+
+func TestUnregisterProviderFactory_RemovesFactory(t *testing.T) {
+	const providerName = "factory-test-unregister"
+	mq.RegisterProviderFactory(providerName, func(context.Context, *config.MQConfig) (mq.MQProvider, error) {
+		return &factoryTestProvider{name: providerName}, nil
+	})
+	t.Cleanup(func() { mq.UnregisterProviderFactory(providerName) })
+	mq.UnregisterProviderFactory(providerName)
+
+	mgr, err := mq.BuildManager(context.Background(), &config.MQConfig{Mode: "on", Provider: providerName})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, mq.ErrProviderConfiguration)
 	assert.Nil(t, mgr)
 }

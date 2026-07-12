@@ -12,7 +12,7 @@ const (
 	DefaultClusterSuspectTimeout        = 15 * time.Second
 	DefaultClusterInstanceReuseCooldown = 30 * time.Second
 	DefaultClusterProviderTTL           = 10 * time.Second
-	DefaultClusterEtcdPrefix            = "/digitalway/core"
+	DefaultClusterEtcdPrefix            = "/core/cluster"
 	DefaultClusterConsulPrefix          = "digitalway-core"
 )
 
@@ -151,7 +151,7 @@ func (c *ClusterConfig) Validate() error {
 	switch c.Mode {
 	case "off", "auto", "on":
 	default:
-		return errors.New("cluster.mode must be off, auto, or on")
+		return fmt.Errorf("cluster.mode=%q is invalid; use off, auto, or on", c.Mode)
 	}
 	if c.Mode == "off" {
 		return nil
@@ -159,7 +159,7 @@ func (c *ClusterConfig) Validate() error {
 	switch c.Provider {
 	case "local", "etcd", "consul":
 	default:
-		return errors.New("cluster.provider must be local, etcd, or consul")
+		return fmt.Errorf("cluster.provider=%q is invalid; use local, etcd, or consul", c.Provider)
 	}
 	if c.Mode == "on" && c.Provider == "etcd" && len(c.Providers.Etcd.Endpoints) == 0 {
 		return errors.New("cluster.providers.etcd.endpoints is required when provider=etcd and mode=on")
@@ -169,10 +169,10 @@ func (c *ClusterConfig) Validate() error {
 	}
 
 	if c.NodeName != "" {
-		return errors.New("cluster.nodeName is not implemented; remove this field")
+		return fmt.Errorf("cluster.nodeName=%q is not implemented; remove this field", c.NodeName)
 	}
 	if c.AdvertiseAddress != "" {
-		return errors.New("cluster.advertiseAddress is not implemented; remove this field")
+		return fmt.Errorf("cluster.advertiseAddress=%q is not implemented; remove this field", c.AdvertiseAddress)
 	}
 	if err := requireZeroOrDefaultDuration("cluster.heartbeatTimeout", c.HeartbeatTimeout, DefaultClusterHeartbeatTimeout); err != nil {
 		return err
@@ -185,10 +185,10 @@ func (c *ClusterConfig) Validate() error {
 	}
 
 	if c.Claim.AutoMachineID {
-		return errors.New("cluster.claim.autoMachineID is not implemented; set it to false")
+		return fmt.Errorf("cluster.claim.autoMachineID=%t is not implemented; set it to false", c.Claim.AutoMachineID)
 	}
 	if c.Claim.AutoDataCenterID {
-		return errors.New("cluster.claim.autoDataCenterID is not implemented; set it to false")
+		return fmt.Errorf("cluster.claim.autoDataCenterID=%t is not implemented; set it to false", c.Claim.AutoDataCenterID)
 	}
 	switch c.Claim.ConflictPolicy {
 	case "", "expand-machine-id":
@@ -202,32 +202,29 @@ func (c *ClusterConfig) Validate() error {
 	}
 
 	if len(c.Discovery.Seeds) != 0 {
-		return errors.New("cluster.discovery.seeds is not implemented; remove this field")
+		return fmt.Errorf("cluster.discovery.seeds=%q is not implemented; remove this field", c.Discovery.Seeds)
 	}
 	if c.Discovery.Multicast {
-		return errors.New("cluster.discovery.multicast is not implemented; set it to false")
+		return fmt.Errorf("cluster.discovery.multicast=%t is not implemented; set it to false", c.Discovery.Multicast)
 	}
 	if c.Discovery.MDNS {
-		return errors.New("cluster.discovery.mdns is not implemented; set it to false")
+		return fmt.Errorf("cluster.discovery.mdns=%t is not implemented; set it to false", c.Discovery.MDNS)
 	}
 	if len(c.Shard.KeyPriority) != 0 {
-		return errors.New("cluster.shard.keyPriority is not implemented; remove this field")
+		return fmt.Errorf("cluster.shard.keyPriority=%q is not implemented; remove this field", c.Shard.KeyPriority)
 	}
 	if c.Shard.MissingKeyPolicy != "" && c.Shard.MissingKeyPolicy != "error" {
-		return errors.New("cluster.shard.missingKeyPolicy is not implemented for values other than error; use error")
+		return fmt.Errorf("cluster.shard.missingKeyPolicy=%q is not implemented; use error", c.Shard.MissingKeyPolicy)
 	}
 	if c.Shard.EmptyCandidatePolicy != "" && c.Shard.EmptyCandidatePolicy != "error" {
-		return errors.New("cluster.shard.emptyCandidatePolicy is not implemented for values other than error; use error")
+		return fmt.Errorf("cluster.shard.emptyCandidatePolicy=%q is not implemented; use error", c.Shard.EmptyCandidatePolicy)
 	}
 	if len(c.Services) != 0 {
-		return errors.New("cluster.services is not implemented; remove all service entries")
+		return fmt.Errorf("cluster.services has %d entries but is not implemented; remove all service entries", len(c.Services))
 	}
 
-	if c.Providers.Etcd.Prefix != "" && c.Providers.Etcd.Prefix != DefaultClusterEtcdPrefix {
-		return fmt.Errorf("cluster.providers.etcd.prefix is not configurable; use %q", DefaultClusterEtcdPrefix)
-	}
 	if c.Providers.Consul.Prefix != "" && c.Providers.Consul.Prefix != DefaultClusterConsulPrefix {
-		return fmt.Errorf("cluster.providers.consul.prefix is not configurable; use %q", DefaultClusterConsulPrefix)
+		return fmt.Errorf("cluster.providers.consul.prefix=%q is not configurable; use %q", c.Providers.Consul.Prefix, DefaultClusterConsulPrefix)
 	}
 	if err := requireZeroOrDefaultDuration("cluster.providers.consul.ttl", c.Providers.Consul.TTL, DefaultClusterProviderTTL); err != nil {
 		return err

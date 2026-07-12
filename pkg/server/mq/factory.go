@@ -36,6 +36,13 @@ func RegisterProviderFactory(name string, factory ProviderFactory) {
 	providerFactories[name] = factory
 }
 
+// UnregisterProviderFactory removes a custom provider factory.
+func UnregisterProviderFactory(name string) {
+	providerFactoriesMu.Lock()
+	defer providerFactoriesMu.Unlock()
+	delete(providerFactories, name)
+}
+
 // BuildManager creates and connects an MQManager from configuration.
 func BuildManager(ctx context.Context, cfg *config.MQConfig) (*MQManager, error) {
 	if cfg == nil || cfg.Mode == "off" {

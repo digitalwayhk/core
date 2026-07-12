@@ -65,10 +65,6 @@ func (t *TransportConfig) ApplyDefaults() {
 	if t.RetryDelay <= 0 {
 		t.RetryDelay = 100 * time.Millisecond
 	}
-	// 默认启用 HTTP（兼容现有调用路径）
-	if !t.HTTP.Enable && t.Internal == "" {
-		t.HTTP.Enable = true
-	}
 }
 
 // Validate 校验 TransportConfig 中的字段合法性。

@@ -3,7 +3,6 @@ package router_test
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -16,7 +15,6 @@ import (
 )
 
 var (
-	runtimeFactoryOnce  sync.Once
 	runtimeFactoryCalls atomic.Int32
 	runtimeServiceID    atomic.Uint64
 )
@@ -39,20 +37,20 @@ func (*runtimeMQProvider) Subscribe(context.Context, string, func(*mq.Message)) 
 }
 func (*runtimeMQProvider) Health(context.Context) error { return nil }
 
-func installRuntimeMQFactory() {
-	runtimeFactoryOnce.Do(func() {
-		mq.RegisterProviderFactory("redis-stream", func(ctx context.Context, cfg *config.MQConfig) (mq.MQProvider, error) {
-			if cfg.RedisStream.Addr == "task-14.2-fake" {
-				runtimeFactoryCalls.Add(1)
-				return &runtimeMQProvider{}, nil
-			}
-			provider := mq.NewRedisStreamProvider(cfg.RedisStream.Addr, cfg.RedisStream.Prefix, cfg.RedisStream.DB)
-			if err := provider.Connect(ctx); err != nil {
-				return nil, fmt.Errorf("%w: connect redis-stream: %v", mq.ErrProviderUnavailable, err)
-			}
-			return provider, nil
-		})
+func installRuntimeMQFactory(t *testing.T) {
+	t.Helper()
+	mq.RegisterProviderFactory("redis-stream", func(ctx context.Context, cfg *config.MQConfig) (mq.MQProvider, error) {
+		if cfg.RedisStream.Addr == "task-14.2-fake" {
+			runtimeFactoryCalls.Add(1)
+			return &runtimeMQProvider{}, nil
+		}
+		provider := mq.NewRedisStreamProvider(cfg.RedisStream.Addr, cfg.RedisStream.Prefix, cfg.RedisStream.DB)
+		if err := provider.Connect(ctx); err != nil {
+			return nil, fmt.Errorf("%w: connect redis-stream: %v", mq.ErrProviderUnavailable, err)
+		}
+		return provider, nil
 	})
+	t.Cleanup(func() { mq.UnregisterProviderFactory("redis-stream") })
 }
 
 func runtimeConfig(name string) *config.ServerConfig {
@@ -78,7 +76,7 @@ func TestServiceContextConfigContract_NilConfigPanicsClearly(t *testing.T) {
 }
 
 func TestServiceContextConfigContract_ValidatesBeforeRuntimeProvider(t *testing.T) {
-	installRuntimeMQFactory()
+	installRuntimeMQFactory(t)
 	name := uniqueRuntimeServiceName("config-contract-invalid")
 	con := runtimeConfig(name)
 	con.TrustedProxies = []string{"not-an-ip"}
@@ -117,7 +115,7 @@ func requirePanicValue(t *testing.T, f func()) (panicValue interface{}) {
 }
 
 func TestServiceContextRuntimeLifecycle_ProductionConstructorOwnsRuntime(t *testing.T) {
-	installRuntimeMQFactory()
+	installRuntimeMQFactory(t)
 	name := uniqueRuntimeServiceName("runtime-lifecycle")
 	con := runtimeConfig(name)
 	sc := router.NewServiceContextWithConfig(&fakeService{name: name}, con)

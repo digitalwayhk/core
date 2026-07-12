@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 )
 
@@ -54,26 +55,41 @@ func (m *MQManager) Close() error {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
 		m.closed = true
-		providers := make([]MQProvider, 0, len(m.registry)+1)
+		type providerEntry struct {
+			key      string
+			provider MQProvider
+		}
+		providers := make([]providerEntry, 0, len(m.registry)+1)
+		for key, provider := range m.registry {
+			providers = append(providers, providerEntry{key: key, provider: provider})
+		}
 		if m.current != nil {
-			providers = append(providers, m.current)
+			providers = append(providers, providerEntry{key: m.current.Name(), provider: m.current})
 		}
-		for _, provider := range m.registry {
-			providers = append(providers, provider)
-		}
+		sort.SliceStable(providers, func(i, j int) bool {
+			if providers[i].key != providers[j].key {
+				return providers[i].key < providers[j].key
+			}
+			return providers[i].provider.Name() < providers[j].provider.Name()
+		})
 		m.current = nil
 		m.registry = make(map[string]MQProvider)
 		m.mu.Unlock()
 
-		seenPointers := make(map[uintptr]struct{}, len(providers))
+		type providerPointer struct {
+			typ     reflect.Type
+			pointer uintptr
+		}
+		seenPointers := make(map[providerPointer]struct{}, len(providers))
 		var closeErrors []error
-		for _, provider := range providers {
+		for _, entry := range providers {
+			provider := entry.provider
 			if provider == nil {
 				continue
 			}
 			value := reflect.ValueOf(provider)
 			if value.Kind() == reflect.Ptr && !value.IsNil() {
-				pointer := value.Pointer()
+				pointer := providerPointer{typ: value.Type(), pointer: value.Pointer()}
 				if _, exists := seenPointers[pointer]; exists {
 					continue
 				}
@@ -89,7 +105,9 @@ func (m *MQManager) Close() error {
 	return m.closeErr
 }
 
-// Current returns the active provider, or nil if none is set.
+// Current returns a snapshot of the active provider, or nil if none is set.
+// Calls made directly on that snapshot are not coordinated by the Manager's
+// lifecycle gate and may overlap with Close.
 func (m *MQManager) Current() MQProvider {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -98,27 +116,30 @@ func (m *MQManager) Current() MQProvider {
 
 // Health returns nil when the active provider is healthy.
 func (m *MQManager) Health(ctx context.Context) error {
-	p := m.Current()
-	if p == nil {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
 		return ErrNotConnected
 	}
-	return p.Health(ctx)
+	return m.current.Health(ctx)
 }
 
 // Publish delegates to the active provider.
 func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, opts *PublishOptions) error {
-	p := m.Current()
-	if p == nil {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
 		return ErrNotConnected
 	}
-	return p.Publish(ctx, subject, data, opts)
+	return m.current.Publish(ctx, subject, data, opts)
 }
 
 // Subscribe delegates to the active provider.
 func (m *MQManager) Subscribe(ctx context.Context, subject string, handler func(*Message)) (func(), error) {
-	p := m.Current()
-	if p == nil {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
 		return nil, ErrNotConnected
 	}
-	return p.Subscribe(ctx, subject, handler)
+	return m.current.Subscribe(ctx, subject, handler)
 }

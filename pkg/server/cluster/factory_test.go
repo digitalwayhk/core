@@ -25,9 +25,23 @@ func TestBuildProvider_Local(t *testing.T) {
 	assert.Same(t, sharedLocal, provider)
 }
 
+func TestBuildProvider_UnknownProviderReturnsError(t *testing.T) {
+	sharedLocal := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	provider, err := cluster.BuildProvider(&config.ClusterConfig{Mode: "auto", Provider: "zookeeper"}, sharedLocal)
+	require.Error(t, err)
+	assert.Nil(t, provider)
+	assert.Contains(t, err.Error(), "unknown provider")
+}
+
 func TestBuildProvider_AutoFallback(t *testing.T) {
 	sharedLocal := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
-	provider, err := cluster.BuildProvider(&config.ClusterConfig{Mode: "auto", Provider: "etcd"}, sharedLocal)
+	provider, err := cluster.BuildProvider(&config.ClusterConfig{
+		Mode:     "auto",
+		Provider: "etcd",
+		Providers: config.ClusterProviderConfig{
+			Etcd: config.EtcdProviderConfig{Endpoints: []string{"%gh"}},
+		},
+	}, sharedLocal)
 	require.NoError(t, err)
 	assert.Same(t, sharedLocal, provider)
 }
