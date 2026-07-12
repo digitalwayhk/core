@@ -204,7 +204,9 @@ git diff --exit-code -- api/public-api.txt
 ./scripts/release-check.sh
 ```
 
-**开发记录（2026-07-13）：** 新增 Keep a Changelog 风格 `CHANGELOG.md`、SemVer/废弃窗口/tag/回滚策略、废弃登记和真实消费方矩阵。futures 精确记录 Go 1.26.1、`v0.0.247` 与本地 commit；omni-flow/grok、ops-ai 以证据标记 not-applicable；旧 ai-ops-platform 单独记录伪版本与 commit。`release-check.sh` 区分 candidate/release，只读运行 api-compat/public-api/config-contract/security；正式模式拒绝缺失/非法版本、脏工作区和已存在 tag，绝不自动 tag/push。README 与 Codex core skill 已同步；旧 `.github/copilot` skill 删除，待全部计划完成后基于最终契约统一重建。候选全门禁通过，等待外部只读审查。
+**开发记录（2026-07-13）：** 新增 Keep a Changelog 风格 `CHANGELOG.md`、SemVer/废弃窗口/tag/回滚策略、废弃登记和真实消费方矩阵。futures 精确记录 Go 1.26.1、`v0.0.247` 与本地 commit；omni-flow/grok、ops-ai 以证据标记 not-applicable。`release-check.sh` 区分 candidate/release，只读运行 api-compat/public-api/config-contract/security；正式模式拒绝缺失/非法版本、脏工作区和已存在 tag，绝不自动 tag/push。README 与 Codex core skill 已同步；旧 `.github/copilot` skill 删除，待全部计划完成后基于最终契约统一重建。候选全门禁通过，等待外部只读审查。
+
+**外部审查修复（2026-07-13）：** P1-1 通过删除旧 Copilot skill 关闭，skill 重建延后到 15.5 最终审查后。P1-2：ai-ops-platform 拆成可复现两行——提交态 `a64a3bb` 锁定 `v0.0.247`（`git show a64a3bb:go.mod`）；脏工作树未提交伪版本仅作旁注，不得与 commit 同时当作已提交锁定。
 
 **外部审查重点：** 发布流程是否可复现；是否存在自动推送/tag 的危险副作用；废弃窗口是否可执行；消费方证据是否来自真实仓库和精确版本。
 
