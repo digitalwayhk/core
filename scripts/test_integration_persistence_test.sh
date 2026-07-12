@@ -443,6 +443,32 @@ run_compose_up_signal_case() {
 run_compose_up_signal_case INT 130
 run_compose_up_signal_case TERM 143
 
+run_compose_up_timeout_case() {
+  local trace="$TMP/compose_up_timeout.log"
+  local lock="$TMP/compose_up_timeout.lock"
+  : >"$trace"
+  set +e
+  env PATH="$TMP/bin:$PATH" TEST_TRACE="$trace" \
+    CORE_TEST_PERSISTENCE_LOCK_DIR="$lock" CORE_TEST_PERSISTENCE_UP_TIMEOUT_SECONDS=1 \
+    FAKE_DOCKER_UP_BLOCK=1 \
+    "$ROOT/scripts/test.sh" integration-persistence
+  local status=$?
+  set -e
+  if [[ "$status" -ne 124 ]]; then
+    echo "compose up 超时退出码错误: got=$status want=124" >&2
+    return 1
+  fi
+  wait_for_trace "$trace" 'docker-up-signal TERM'
+  wait_for_trace "$trace" ' down '
+  assert_order "$trace" 'docker-up-signal TERM' ' down '
+  if [[ -d "$lock" ]]; then
+    echo "compose up 超时后未释放锁" >&2
+    return 1
+  fi
+}
+
+run_compose_up_timeout_case
+
 run_blocked_cleanup_case() {
   local trace="$TMP/blocked_cleanup.log"
   local lock="$TMP/blocked_cleanup.lock"

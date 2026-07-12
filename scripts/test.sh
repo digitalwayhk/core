@@ -74,19 +74,30 @@ case "${1:-quick}" in
   workflow-contract)
     "$ROOT/scripts/test-workflow-contract.sh"
     ;;
+  scheduled-workflow-contract)
+    "$ROOT/scripts/test-scheduled-workflow-contract.sh"
+    ;;
   persistence-unit)
     go test ./pkg/persistence/... -count=1 -timeout=5m
     ;;
   integration-persistence)
     compose_file="$ROOT/docker-compose.integration.yml"
+    compose_project_name="${CORE_TEST_PERSISTENCE_PROJECT_NAME:-digitalway-core-persistence-$$}"
+    [[ "$compose_project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || {
+      echo "持久化 Compose project name 无效: $compose_project_name" >&2
+      exit 2
+    }
     lock_dir="${CORE_TEST_PERSISTENCE_LOCK_DIR:-${TMPDIR:-/tmp}/digitalway-core-persistence-integration.lock}"
     lock_acquired=0
     compose_started=0
     compose_up_pid=""
     compose_up_pgid=""
+    compose_up_watchdog_pid=""
+    compose_up_complete_marker=""
     test_pid=""
     test_pgid=""
     cleanup_timeout_seconds="${CORE_TEST_PERSISTENCE_CLEANUP_TIMEOUT_SECONDS:-30}"
+    compose_up_timeout_seconds="${CORE_TEST_PERSISTENCE_UP_TIMEOUT_SECONDS:-600}"
     if [[ "${KEEP_CONTAINERS+x}" == "x" ]]; then
       keep_containers="$KEEP_CONTAINERS"
     else
@@ -133,7 +144,7 @@ case "${1:-quick}" in
       set -m
       (
         trap - INT TERM
-        exec docker compose -f "$compose_file" --profile persistence down -v --remove-orphans
+        exec docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence down -v --remove-orphans
       ) &
       down_pid=$!
       down_pgid=$down_pid
@@ -183,6 +194,14 @@ case "${1:-quick}" in
       trap - EXIT
       trap '' INT TERM
       set +e
+      if [[ "$status" -ne 0 && -n "${CI_ARTIFACT_DIR:-}" && "$compose_started" == "1" ]]; then
+        mkdir -p "$CI_ARTIFACT_DIR"
+        docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence ps \
+          >"$CI_ARTIFACT_DIR/compose-ps.log" 2>&1 || true
+        docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence logs --no-color \
+          2>&1 | sed -e 's/core_test_password/[REDACTED]/g' -e 's/core_test_root_password/[REDACTED]/g' \
+          >"$CI_ARTIFACT_DIR/compose.log" || true
+      fi
       cleanup_persistence
       cleanup_status=$?
       release_persistence_lock
@@ -269,6 +288,13 @@ case "${1:-quick}" in
       local signal="$1"
       local status="$2"
       trap '' INT TERM
+      if [[ -n "$compose_up_watchdog_pid" ]]; then
+        if [[ -n "$compose_up_complete_marker" ]]; then
+          echo "1" >"$compose_up_complete_marker" 2>/dev/null || true
+        fi
+        wait "$compose_up_watchdog_pid" 2>/dev/null || true
+        compose_up_watchdog_pid=""
+      fi
       if [[ -n "$compose_up_pid" || -n "$compose_up_pgid" ]]; then
         stop_managed_process_group "$signal" "$compose_up_pid" "$compose_up_pgid" "compose-up"
         if [[ "$managed_stop_failed" == "1" ]]; then
@@ -294,22 +320,53 @@ case "${1:-quick}" in
     acquire_persistence_lock
 
     compose_started=1
+    compose_up_timeout_marker="$lock_dir/compose-up-timeout"
+    compose_up_complete_marker="$lock_dir/compose-up-complete"
+    rm -f "$compose_up_timeout_marker" "$compose_up_complete_marker"
     set -m
     (
       trap - INT TERM
-      exec docker compose -f "$compose_file" --profile persistence up -d --wait --wait-timeout 120
+      exec docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence up -d --wait --wait-timeout 120
     ) &
     compose_up_pid=$!
     compose_up_pgid=$compose_up_pid
     set +m
+    perl -e '
+      my ($pgid, $timeout_marker, $complete_marker, $timeout) = @ARGV;
+      my $deadline = time + $timeout;
+      while (!-e $complete_marker && time < $deadline) {
+        select undef, undef, undef, 0.02;
+      }
+      exit 0 if -e $complete_marker;
+      if (kill 0, -$pgid) {
+        open my $fh, ">", $timeout_marker or die "无法写入 compose-up 超时标记: $!";
+        print $fh "1\n";
+        close $fh;
+        print STDERR "compose-up 进程组 $pgid 超时，发送 TERM\n";
+        kill "TERM", -$pgid;
+      }
+      select undef, undef, undef, 1;
+      if (kill 0, -$pgid) {
+        print STDERR "compose-up 进程组 $pgid 在 TERM 后仍存活，发送 KILL\n";
+        kill "KILL", -$pgid;
+      }
+    ' "$compose_up_pgid" "$compose_up_timeout_marker" "$compose_up_complete_marker" "$compose_up_timeout_seconds" &
+    compose_up_watchdog_pid=$!
     if wait "$compose_up_pid"; then
       compose_up_status=0
     else
       compose_up_status=$?
     fi
+    echo "1" >"$compose_up_complete_marker"
+    wait "$compose_up_watchdog_pid" 2>/dev/null || true
+    compose_up_watchdog_pid=""
     if ! ensure_process_group_stopped "$compose_up_pgid"; then
       compose_up_status=1
     fi
+    if [[ -f "$compose_up_timeout_marker" ]]; then
+      compose_up_status=124
+    fi
+    rm -f "$compose_up_timeout_marker" "$compose_up_complete_marker"
     compose_up_pid=""
     compose_up_pgid=""
     if [[ "$compose_up_status" -ne 0 ]]; then
@@ -381,7 +438,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|persistence-unit|integration-local|integration-external|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

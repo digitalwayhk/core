@@ -160,7 +160,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 
 ## 16.4 添加 race、Docker 与定时门禁
 
-**状态：** 未开始，按成熟度逐项启用。
+**状态：** 开发完成；stress 与生命周期验证通过，Docker 冷拉取实跑待通过。
 
 **文件：**
 
@@ -179,6 +179,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 **测试场景：** 正常、测试失败、compose up 失败、timeout、取消和并发锁冲突均有有界清理证据；无残留容器、volume、锁和测试进程。
 
 **验收：** 稳定 race required 通过；scheduled stress 可见；persistence integration 通过；未完成 Broker 依赖明确显示 planned 而非绿色 skip。
+
+**开发与验证记录（2026-07-13）：** 新增 `ci-scheduled.yml`，nightly/手工运行 stress 与 persistence integration，失败保持 job 非零并 always 写 summary/上传 artifact。Compose 使用唯一 project name，失败时采集脱敏 ps/logs；compose-up 增加默认 10 分钟有界 watchdog，超时返回 124 后再执行既有 down/锁清理。静态契约、YAML、scheduled stress、Compose 信号/超时/锁生命周期测试均通过。真实 Docker 冷拉取在 5 分钟试验阈值返回 124，诊断产物存在且无残留容器；因此本节暂不声称 integration 通过，最终验收前以 10 分钟默认阈值重试。
 
 **外部审查重点：** 非阻断失败可见性、容器清理、端口/secret、并发隔离、虚假 skip。
 

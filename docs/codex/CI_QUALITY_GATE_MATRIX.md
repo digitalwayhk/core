@@ -10,7 +10,7 @@
 | `required/race` | 已启用 | 是 | PR、push | 12 分钟 | `./scripts/test.sh concurrency-race` | 无 | server/manage | 单轮 race 分片无已知不稳定项 |
 | `observational/persistence` | 观察（16.2a 修复待审查） | 否 | PR、push | 10 分钟 | `./scripts/test.sh persistence-unit` | 无 | persistence | SQLite `-count=20`、race 与完整 persistence 已本地通过；外部审查通过后评估提升 |
 | `scheduled/stress` | 定时 | 否 | nightly、手工 | 30 分钟 | `./scripts/test.sh concurrency-stress` | 无 | server lifecycle | 20 轮压力长期稳定后评估提升 |
-| `scheduled/integration` | 定时 | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | CI runner 具备 Docker 且清理契约稳定 |
+| `scheduled/integration` | 定时（冷拉取实跑待通过） | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | 信号/超时/锁/诊断/清理契约已通过；锁定镜像冷拉取后 driver contract 需通过 |
 
 ## 尚未启用
 
