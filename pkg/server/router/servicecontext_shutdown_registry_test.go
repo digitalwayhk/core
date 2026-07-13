@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,5 +96,59 @@ func TestServiceContextNotReusedWhileShuttingDown(t *testing.T) {
 		t.Cleanup(func() { second.SetRunState(false) })
 	case <-time.After(2 * time.Second):
 		t.Fatal("关闭完成后未创建同名新 ServiceContext")
+	}
+}
+
+func TestServiceContextRegistryRebuildsOnceForMultipleShutdownWaiters(t *testing.T) {
+	registry := newServiceContextRegistry()
+	const serviceName = "multi-shutdown-waiters"
+	first := &ServiceContext{terminated: true, shutdownDone: make(chan struct{})}
+	registry.contexts[serviceName] = first
+
+	const waiters = 32
+	results := make(chan *ServiceContext, waiters)
+	started := make(chan struct{}, waiters)
+	initializeEntered := make(chan struct{})
+	releaseInitialize := make(chan struct{})
+	var initializations atomic.Int32
+	var group sync.WaitGroup
+	launch := func() {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			started <- struct{}{}
+			results <- registry.getOrInitialize(serviceName, false, "fingerprint", func(int) *ServiceContext {
+				if initializations.Add(1) == 1 {
+					close(initializeEntered)
+				}
+				<-releaseInitialize
+				return &ServiceContext{configFingerprint: "fingerprint"}
+			})
+		}()
+	}
+	launch()
+	<-started
+	require.True(t, registry.remove(serviceName, first))
+	close(first.shutdownDone)
+	<-initializeEntered
+	for range waiters - 1 {
+		launch()
+	}
+	for range waiters - 1 {
+		<-started
+	}
+	close(releaseInitialize)
+	group.Wait()
+	close(results)
+
+	assert.Equal(t, int32(1), initializations.Load())
+	var rebuilt *ServiceContext
+	for result := range results {
+		require.NotSame(t, first, result)
+		if rebuilt == nil {
+			rebuilt = result
+			continue
+		}
+		assert.Same(t, rebuilt, result)
 	}
 }

@@ -20,6 +20,7 @@ type fakeRedisClient struct {
 	mu        sync.Mutex
 	available bool
 	emptyMiss bool
+	setnxMade int
 	values    map[string]string
 }
 
@@ -74,6 +75,7 @@ func (f *fakeRedisClient) SetnxCtx(_ context.Context, key, value string) (bool, 
 		return false, nil
 	}
 	f.values[key] = value
+	f.setnxMade++
 	return true, nil
 }
 
@@ -119,6 +121,45 @@ func (f *fakeRedisClient) setAvailable(available bool) {
 	f.mu.Lock()
 	f.available = available
 	f.mu.Unlock()
+}
+
+func TestConcurrentGenerationInitializesColdKeyOnce(t *testing.T) {
+	client := newFakeRedisClient()
+	client.emptyMiss = true
+	l3 := NewRedisL3(client, config.RouteCacheRedisConfig{Prefix: "test:routecache"})
+
+	const workers = 128
+	start := make(chan struct{})
+	generations := make(chan uint64, workers)
+	errors := make(chan error, workers)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			generation, err := l3.Generation(context.Background(), "service-a", "/items")
+			generations <- generation
+			errors <- err
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(generations)
+	close(errors)
+
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	for generation := range generations {
+		assert.Equal(t, uint64(1), generation)
+	}
+	client.mu.Lock()
+	created := client.setnxMade
+	value := client.values[l3.key(generationKey("service-a", "/items"))]
+	client.mu.Unlock()
+	assert.Equal(t, 1, created)
+	assert.Equal(t, "1", value)
 }
 
 func sharedCacheConfig() config.RouteCacheConfig {
