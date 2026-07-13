@@ -229,3 +229,39 @@ func TestConcurrentEnableRouteDoesNotRollBackGeneration(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ok, "并发 EnableRoute 不得回退本地 generation 并命中失效值: %v", value)
 }
+
+func TestRecoverDoesNotRollBackConcurrentInvalidationGeneration(t *testing.T) {
+	redisClient := newBlockingGenerationRedis()
+	bridge := newFakeInvalidationBridge(newFakeInvalidationBus())
+	manager, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(bridge))
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	manager.MarkInvalidationUnavailable()
+
+	blocked, release := redisClient.blockNextGenerationRead()
+	type recoveryResult struct {
+		recovered bool
+		err       error
+	}
+	recoverDone := make(chan recoveryResult, 1)
+	go func() {
+		recovered, recoverErr := manager.Recover(context.Background())
+		recoverDone <- recoveryResult{recovered: recovered, err: recoverErr}
+	}()
+	<-blocked
+	generation, err := manager.redis.IncrementGeneration(context.Background(), "service-a", "/api/items")
+	require.NoError(t, err)
+	data, err := json.Marshal(invalidationEvent{
+		Service: "service-a", Route: "/api/items", Generation: generation,
+	})
+	require.NoError(t, err)
+	manager.handleInvalidation(event.NewEnvelope("service-a", invalidationEventType("service-a"), data))
+	close(release)
+
+	result := <-recoverDone
+	require.NoError(t, result.err)
+	require.True(t, result.recovered)
+	assert.Equal(t, generation, manager.routeGeneration("/api/items"))
+}

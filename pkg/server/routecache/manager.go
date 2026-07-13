@@ -402,13 +402,7 @@ func (m *Manager) refreshSharedGenerations(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		m.routesMu.Lock()
-		policy, ok := m.routes[route]
-		if ok {
-			policy.generation = generation
-			m.routes[route] = policy
-		}
-		m.routesMu.Unlock()
+		m.storeRoutePolicy(route, 0, generation)
 	}
 	return nil
 }
