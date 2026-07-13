@@ -141,6 +141,19 @@ func TestServiceContextCanRecreateAfterShutdown(t *testing.T) {
 	assert.Same(t, second, router.GetContext(serviceName))
 }
 
+func TestServiceEventBridgeExistsWithoutMQ(t *testing.T) {
+	serviceName := uniqueServiceName("sctest-local-event-bridge")
+	service := &instrumentedService{name: serviceName}
+	con := testServiceConfig(serviceName, 31105)
+	con.MQ.Mode = "off"
+	sc := router.NewServiceContextWithConfig(service, con)
+	sc.SetRunState(true)
+	t.Cleanup(func() { sc.SetRunState(false) })
+
+	assert.NotNil(t, sc.ServiceEventBridge)
+	assert.NotNil(t, sc.EventStream)
+}
+
 func TestServiceContextConcurrentDifferentNamesInitializeInParallel(t *testing.T) {
 	entered := make(chan string, 2)
 	release := make(chan struct{})

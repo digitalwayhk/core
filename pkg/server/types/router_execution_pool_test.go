@@ -1,9 +1,14 @@
 package types
 
 import (
+	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/server/event"
+	"github.com/stretchr/testify/require"
 )
 
 type panicExecutionRouter struct{}
@@ -18,6 +23,80 @@ func TestRouterInfoExecDoPanicReturnsSafeResponse(t *testing.T) {
 	response := info.ExecDo(&panicExecutionRouter{}, &shardTestRequest{})
 	if response == nil {
 		t.Fatal("ExecDo 捕获 panic 后必须返回安全错误响应，不能返回 nil")
+	}
+}
+
+func TestRouterInfoSubscriptionsDelegateToServiceEventBridge(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	info := &RouterInfo{
+		Path:        "/api/test/events",
+		ServiceName: "test",
+		Subscriber:  make(map[ObserveState]map[string]*ObserveArgs, 3),
+	}
+	info.SetEventBridge("test", bridge)
+	received := make(chan *NotifyArgs, 1)
+	observer := &ObserveArgs{
+		State:      ObserveResponse,
+		OwnAddress: "event-bridge-test",
+		CallBack: func(args *NotifyArgs) error {
+			received <- args
+			return nil
+		},
+	}
+	require.NoError(t, info.Subscribe(observer))
+
+	info.responseNotify(json.RawMessage(`{"value":"parsed"}`), "trace-1", json.RawMessage(`{"ok":true}`))
+	select {
+	case got := <-received:
+		if got.TraceID != "trace-1" {
+			t.Fatalf("TraceID = %q, want trace-1", got.TraceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("等待 ServiceEventBridge 观察回调超时")
+	}
+
+	require.NoError(t, info.UnSubscribe(observer))
+	info.responseNotify(nil, "trace-2", nil)
+	select {
+	case <-received:
+		t.Fatal("取消订阅后不应继续收到观察事件")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestRouterInfoEventBridgeRebindsForRecreatedService(t *testing.T) {
+	first := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	info := &RouterInfo{
+		Path:        "/api/test/rebind",
+		ServiceName: "test",
+		Subscriber:  make(map[ObserveState]map[string]*ObserveArgs, 3),
+	}
+	info.SetEventBridge("test", first)
+	info.Freeze("test")
+	received := make(chan string, 1)
+	require.NoError(t, info.Subscribe(&ObserveArgs{
+		State:      ObserveResponse,
+		OwnAddress: "rebind-test",
+		CallBack: func(args *NotifyArgs) error {
+			received <- args.TraceID
+			return nil
+		},
+	}))
+	require.NoError(t, first.Close(context.Background()))
+
+	second := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	t.Cleanup(func() { require.NoError(t, second.Close(context.Background())) })
+	info.SetEventBridge("test", second)
+	info.responseNotify(nil, "trace-recreated", nil)
+
+	select {
+	case traceID := <-received:
+		if traceID != "trace-recreated" {
+			t.Fatalf("TraceID = %q, want trace-recreated", traceID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("服务重建后订阅未迁移到新的 ServiceEventBridge")
 	}
 }
 

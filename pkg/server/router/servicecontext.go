@@ -37,30 +37,31 @@ func init() {
 }
 
 type ServiceContext struct {
-	Config            *config.ServerConfig
-	Service           *types.Service
-	snow              idgen.ISnowWorker
-	Router            *ServiceRouter
-	isStart           atomic.Bool
-	terminated        bool
-	lifecycleMu       sync.Mutex
-	lifecycleOpOnce   sync.Once
-	lifecycleOp       chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
-	Pid               int
-	Hub               interface{} `json:"-"`
-	StateChan         chan bool   `json:"-"`
-	serverOption      *types.ServerOption
-	serverOptionMu    sync.RWMutex
-	TransportSelector transport.TransportSelector    `json:"-"`
-	MQManager         *mq.MQManager                  `json:"-"`
-	EventStream       *event.Stream                  `json:"-"`
-	EventBridge       *event.MQBridge                `json:"-"`
-	ClusterProvider   cluster.DiscoveryProvider      `json:"-"`
-	ClusterSwitcher   cluster.ProviderSwitcher       `json:"-"`
-	membership        *cluster.MembershipManager     `json:"-"`
-	CrossNodeBroker   *cluster.CrossNodeNoticeBroker `json:"-"`
-	nodeID            string
-	configFingerprint string
+	Config             *config.ServerConfig
+	Service            *types.Service
+	snow               idgen.ISnowWorker
+	Router             *ServiceRouter
+	isStart            atomic.Bool
+	terminated         bool
+	lifecycleMu        sync.Mutex
+	lifecycleOpOnce    sync.Once
+	lifecycleOp        chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
+	Pid                int
+	Hub                interface{} `json:"-"`
+	StateChan          chan bool   `json:"-"`
+	serverOption       *types.ServerOption
+	serverOptionMu     sync.RWMutex
+	TransportSelector  transport.TransportSelector    `json:"-"`
+	MQManager          *mq.MQManager                  `json:"-"`
+	EventStream        *event.Stream                  `json:"-"`
+	EventBridge        *event.MQBridge                `json:"-"`
+	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
+	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
+	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
+	membership         *cluster.MembershipManager     `json:"-"`
+	CrossNodeBroker    *cluster.CrossNodeNoticeBroker `json:"-"`
+	nodeID             string
+	configFingerprint  string
 }
 
 func (own *ServiceContext) beginLifecycleOperation() {
@@ -104,7 +105,11 @@ func (own *ServiceContext) EnableEventBridge() {
 	if own.EventStream == nil {
 		own.EventStream = event.NewStream()
 	}
+	if own.ServiceEventBridge == nil {
+		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{})
+	}
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
+	own.ServiceEventBridge.SetExternalPublisher(own.EventBridge)
 }
 
 // containsUsage reports whether usage slice contains the given value.
@@ -435,6 +440,9 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
 func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
+	sc.EventStream = event.NewStream()
+	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
+
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
 	// same process or between hot-reload replicas.
@@ -580,11 +588,13 @@ func (own *ServiceContext) SetRunState(state bool) {
 	membership := own.membership
 	broker := own.CrossNodeBroker
 	mqManager := own.MQManager
+	serviceEventBridge := own.ServiceEventBridge
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
 		own.MQManager = nil
 		own.EventBridge = nil
+		own.ServiceEventBridge = nil
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
@@ -607,6 +617,16 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.CrossNodeBroker = broker
 		own.lifecycleMu.Unlock()
 	} else {
+		if serviceEventBridge != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := serviceEventBridge.Close(ctx); err != nil {
+				logx.Errorw("service_event_bridge_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
 		if broker != nil {
 			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

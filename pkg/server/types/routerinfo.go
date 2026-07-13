@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -88,6 +89,8 @@ type RouterInfo struct {
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
 	channelPool         *ChannelPool
+	eventRuntime        RouteEventRuntime
+	eventCancels        map[ObserveState]map[string]func()
 	owner               string
 	frozen              bool
 	frozenMetadata      routerMetadata
@@ -183,6 +186,32 @@ func (own *RouterInfo) SetInstance(instance IRouter) {
 		panic("router instance cannot change after registration")
 	}
 	own.instance = instance
+}
+
+// SetEventBridge 把路由观察事件绑定到所属服务。同一服务关闭并重建时允许替换运行时，
+// 但不同所有者不能接管已经冻结的 RouterInfo。
+func (own *RouterInfo) SetEventBridge(owner string, runtime RouteEventRuntime) {
+	own.Lock()
+	defer own.Unlock()
+	if own.frozen && own.owner != owner {
+		panic("router event bridge owner conflict")
+	}
+	for _, byAddress := range own.eventCancels {
+		for _, cancel := range byAddress {
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
+	own.eventCancels = nil
+	own.eventRuntime = runtime
+	for _, byAddress := range own.Subscriber {
+		for _, observer := range byAddress {
+			if err := own.subscribeEventLocked(observer); err != nil {
+				panic("router event bridge subscription failed")
+			}
+		}
+	}
 }
 func (own *RouterInfo) GetPath() string {
 	own.RLock()
@@ -333,25 +362,80 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 }
 
 func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {
+	if ob == nil {
+		return errors.New("subscriber is nil")
+	}
 	own.Lock()
 	defer own.Unlock()
+	if own.Subscriber == nil {
+		own.Subscriber = make(map[ObserveState]map[string]*ObserveArgs, 3)
+	}
 	if own.Subscriber[ob.State] == nil {
 		own.Subscriber[ob.State] = make(map[string]*ObserveArgs, 0)
 	}
 	if _, ok := own.Subscriber[ob.State][ob.OwnAddress]; ok {
 		return nil //errors.New("subscriber already exists")
 	}
-	own.Subscriber[ob.State][ob.OwnAddress] = ob
+	copied := *ob
+	copied.ServiceName = own.ServiceName
+	if err := own.subscribeEventLocked(&copied); err != nil {
+		return err
+	}
+	own.Subscriber[ob.State][ob.OwnAddress] = &copied
+	return nil
+}
+
+func (own *RouterInfo) subscribeEventLocked(observer *ObserveArgs) error {
+	if own.eventRuntime == nil || observer == nil {
+		return nil
+	}
+	cancel, err := own.eventRuntime.Subscribe(own.observeEventType(observer.State), func(env *event.Envelope) {
+		args := &NotifyArgs{}
+		if env == nil || json.Unmarshal(env.Data, args) != nil {
+			return
+		}
+		args.ReceiveAddress = observer.OwnAddress
+		args.ReceiveProt = observer.OwnProt
+		args.ReceiveSocketProt = observer.OwnSocketProt
+		args.ReceiveService = observer.ReceiveService
+		_ = observer.Notify(args)
+	})
+	if err != nil {
+		return err
+	}
+	if own.eventCancels == nil {
+		own.eventCancels = make(map[ObserveState]map[string]func(), 3)
+	}
+	if own.eventCancels[observer.State] == nil {
+		own.eventCancels[observer.State] = make(map[string]func())
+	}
+	own.eventCancels[observer.State][observer.OwnAddress] = cancel
 	return nil
 }
 func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
+	if ob == nil {
+		return errors.New("subscriber is nil")
+	}
 	own.Lock()
-	defer own.Unlock()
 	if own.Subscriber[ob.State] == nil {
+		own.Unlock()
 		return errors.New("subscriber not exists")
 	}
 	delete(own.Subscriber[ob.State], ob.OwnAddress)
+	var cancel func()
+	if own.eventCancels[ob.State] != nil {
+		cancel = own.eventCancels[ob.State][ob.OwnAddress]
+		delete(own.eventCancels[ob.State], ob.OwnAddress)
+	}
+	own.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	return nil
+}
+
+func (own *RouterInfo) observeEventType(state ObserveState) string {
+	return "router.observe:" + own.ServiceName + ":" + own.Path + ":" + strconv.Itoa(int(state))
 }
 func snapshotNotifyValue(value interface{}) interface{} {
 	if value == nil {
@@ -381,6 +465,9 @@ func (own *RouterInfo) subscriberSnapshot(state ObserveState) []*ObserveArgs {
 }
 
 func (own *RouterInfo) requestNotify(api interface{}, traceid string) {
+	if own.publishObservation(ObserveRequest, api, traceid, nil) {
+		return
+	}
 	items := own.subscriberSnapshot(ObserveRequest)
 	for _, item := range items {
 		na := item.NewNotifyArgsSnapshot(api, nil)
@@ -392,6 +479,9 @@ func (own *RouterInfo) requestNotify(api interface{}, traceid string) {
 	}
 }
 func (own *RouterInfo) responseNotify(api interface{}, traceid string, resp interface{}) {
+	if own.publishObservation(ObserveResponse, api, traceid, resp) {
+		return
+	}
 	items := own.subscriberSnapshot(ObserveResponse)
 	for _, item := range items {
 		na := item.NewNotifyArgsSnapshot(api, resp)
@@ -403,6 +493,9 @@ func (own *RouterInfo) responseNotify(api interface{}, traceid string, resp inte
 	}
 }
 func (own *RouterInfo) errorNotify(api interface{}, traceid string, resp interface{}) {
+	if own.publishObservation(ObserveError, api, traceid, resp) {
+		return
+	}
 	items := own.subscriberSnapshot(ObserveError)
 	for _, item := range items {
 		na := item.NewNotifyArgsSnapshot(api, resp)
@@ -412,6 +505,43 @@ func (own *RouterInfo) errorNotify(api interface{}, traceid string, resp interfa
 			logx.Error(err, item)
 		}
 	}
+}
+
+func (own *RouterInfo) publishObservation(state ObserveState, api interface{}, traceID string, response interface{}) bool {
+	own.RLock()
+	runtime := own.eventRuntime
+	eventType := own.observeEventType(state)
+	serviceName := own.ServiceName
+	path := own.Path
+	own.RUnlock()
+	if runtime == nil {
+		return false
+	}
+	env := event.NewEnvelope(serviceName, eventType, nil)
+	env.Subject = path
+	err := runtime.Publish(context.Background(), event.PublishRequest{
+		Class:    event.ObserverDelivery,
+		Envelope: env,
+		BuildData: func() ([]byte, error) {
+			return json.Marshal(&NotifyArgs{
+				TraceID:     traceID,
+				SendService: serviceName,
+				Topic:       path,
+				State:       state,
+				Instance:    api,
+				Response:    response,
+			})
+		},
+	})
+	if err != nil && !errors.Is(err, event.ErrServiceEventBridgeClosed) {
+		logx.Errorw("router_observer_publish_failed",
+			logx.Field("service", serviceName),
+			logx.Field("route", path),
+			logx.Field("state", state),
+			logx.Field("error", err),
+		)
+	}
+	return true
 }
 
 type cacheObject struct {
