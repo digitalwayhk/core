@@ -888,6 +888,7 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 	}
 
 	softDeleted := false
+	queueCreated := false
 	err := p.manager.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
@@ -925,10 +926,13 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 		if err := txn.Set([]byte(key), data); err != nil {
 			return err
 		}
-		return txn.Set([]byte(p.syncQueueKey(key)), nil)
+		queueCreated, err = p.ensureSyncQueueEntry(txn, key)
+		return err
 	})
 	if err == nil && softDeleted {
-		p.incrementPendingCount(1)
+		if queueCreated {
+			p.incrementPendingCount(1)
+		}
 		p.triggerSync()
 	}
 	return err

@@ -84,6 +84,8 @@ func (own *Product) NewModel() {
 
 write-behind 模式使用 `EnableWriteBehind`，要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。待同步记录禁止 TTL；关闭时仍有积压会返回可通过 `errors.As` 识别的 `PendingSyncError`。旧 `SetSyncDB` 仅为编译兼容入口，新代码不得使用。
 
+`DefaultSharedConfig` 面向共享缓存，默认 `SyncWrites=false`，不能直接启用 write-behind。可靠写回必须显式设置 `SyncWrites=true` 并通过 `EnableWriteBehind` 校验，不要依赖共享缓存默认值。
+
 write-behind 是 at-least-once：远端成功而本地确认失败时会重试，因此远端 insert/update/delete 必须通过稳定主键、upsert 或操作 ID 保证幂等。同 key 多次更新会合并为最新状态，只适用于账户快照、资料和订单当前状态；资金流水、审计记录等不可合并事件必须使用唯一事件 ID 的 NATS JetStream 或 transactional outbox。
 
 JetStream 数据库写路径的模式选择、当前能力边界和生产化前置条件见 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`。当前 Provider 只应视为基础事件流能力，不能把尚未实现的重试、死信和 pull consumer 当作已生效。

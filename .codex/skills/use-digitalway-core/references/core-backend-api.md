@@ -76,6 +76,7 @@ SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖�
 
 - 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
 - 可靠写回使用 `EnableWriteBehind`，配置必须满足 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。
+- `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写并通过 `EnableWriteBehind` 校验。
 - `SetSyncDB` 已废弃，仅保留编译兼容；其绑定错误会在后续写入和关闭时返回。
 - 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
 - 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。

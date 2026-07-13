@@ -31,6 +31,45 @@ func TestPendingCountUsesUniqueSyncQueueKeys(t *testing.T) {
 	require.Equal(t, persistent, cached)
 }
 
+func TestPendingCountSetThenDeleteDoesNotDoubleCount(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newFund("pending-delete", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	require.NoError(t, db.DeleteByItem(item))
+
+	persistent, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, persistent)
+	db.pendingCountMutex.RLock()
+	cached := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Equal(t, persistent, cached)
+
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	confirmed, err := db.confirmSyncSuccess(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{key}, confirmed)
+
+	persistent, err = db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, persistent)
+	db.pendingCountMutex.RLock()
+	cached = db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Zero(t, cached)
+}
+
 func TestMalformedSyncItemStopsBatchWithoutDeletingEvidence(t *testing.T) {
 	config := newTestConfig(t.TempDir())
 	db := newTestDBLocalWithConfig(t, config)
