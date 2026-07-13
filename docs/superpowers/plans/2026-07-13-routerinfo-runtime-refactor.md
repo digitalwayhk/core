@@ -628,12 +628,13 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 外部复审登记的后续非阻断项：
 
 - [x] 并发 `EnableRoute` 与 `DeleteRoute` 时保证本地 generation 单调不回退（实现 `2715fe6`，外部复审 `APPROVED`）。确定性交错测试在修复前证明本地 generation 从 2 回退到 1 并命中旧 g1 值；修复后使用 `max(local, candidate)` 在同一锁内合并路由策略。
-- [x] `Recover` 加载共享 generation 时不得覆盖并发失效事件推进的本地世代（实现 `3912f06`）。`refreshSharedGenerations` 统一复用单调 `storeRoutePolicy`；确定性交错测试在修复前证明 Recover 将本地从 2 回退到 1。
-- [ ] 本地模式并发 `DeleteRoute` 的 generation 递增应在写锁内完成。
+- [x] `Recover` 加载共享 generation 时不得覆盖并发失效事件推进的本地世代（实现 `3912f06`，外部复审 `APPROVED`）。`refreshSharedGenerations` 统一复用单调 `storeRoutePolicy`；确定性交错测试在修复前证明 Recover 将本地从 2 回退到 1。
+- [x] 本地模式并发 `DeleteRoute` 的 generation 递增在写锁内完成（实现 `a414c0a`）。修复前 256 次并发删除最终仅推进到 35，修复后精确推进到 257。
+- [ ] 未来引入 `DisableRoute` 或删除路由策略时，`storeRoutePolicy` 不得重建已删除的空 TTL 条目；同时补强 Recover 后本地与 Redis 权威 generation 直接对齐的断言。
 - [ ] 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试。
 - [ ] TTL jitter、L1 值类型一致性、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
 
-generation 并发加固内部验收：两个确定性交错测试各 `-count=20`、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。`3912f06` 待独立外部审查确认。
+generation 并发加固内部验收：三个并发/确定性交错测试各 `-count=20`、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。`a414c0a` 待独立外部审查确认。
 
 ## 最终关闭条件
 
