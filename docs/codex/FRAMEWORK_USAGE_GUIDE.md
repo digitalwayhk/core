@@ -18,6 +18,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 普通 public API | `types.IRouter`、`router.DefaultRouterInfo` | `examples/01-hello-router` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/01-hello-router/...` | Stable |
 | 认证 private API | `api/private`、`req.GetUser()` | `examples/demo/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `./scripts/test.sh security` | Stable |
 | 模型持久化 | `entity.NewModelList[T]`、`NewModel()` | `examples/02-model-persistence` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
+| 本地可靠写回 | `NewSharedBadgerDB[T]`、`EnableWriteBehind` | 无独立示例 | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/03-manage-crud` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/03-manage-crud/...` | Stable |
 | 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `examples/04-manage-hooks` | 同管理 CRUD | `go test ./service/manage/...` | Stable |
 | OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | `examples/05-openapi-response` | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
@@ -77,6 +78,16 @@ func (own *Product) NewModel() {
 
 `SearchWhere` 默认最多返回 500 条；分页 API 使用 `SearchAll(page, size)`，不要通过扩大默认上限隐藏无界查询。
 
+## PrefixedBadgerDB 使用边界
+
+纯缓存模式以远端数据库为事实源，可以设置 TTL；只有显式 `CorruptionPolicyResetCache` 才允许在检测到损坏时清空重建。默认策略是 `CorruptionPolicyFail`，会保留目录并返回错误。
+
+write-behind 模式使用 `EnableWriteBehind`，要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。待同步记录禁止 TTL；关闭时仍有积压会返回可通过 `errors.As` 识别的 `PendingSyncError`。旧 `SetSyncDB` 仅为编译兼容入口，新代码不得使用。
+
+write-behind 是 at-least-once：远端成功而本地确认失败时会重试，因此远端 insert/update/delete 必须通过稳定主键、upsert 或操作 ID 保证幂等。同 key 多次更新会合并为最新状态，只适用于账户快照、资料和订单当前状态；资金流水、审计记录等不可合并事件必须使用唯一事件 ID 的 NATS JetStream 或 transactional outbox。
+
+JetStream 数据库写路径的模式选择、当前能力边界和生产化前置条件见 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`。当前 Provider 只应视为基础事件流能力，不能把尚未实现的重试、死信和 pull consumer 当作已生效。
+
 ## 外部依赖
 
 默认单元测试不依赖 Docker。外部能力必须显式运行：
@@ -106,6 +117,7 @@ Compose 默认提供 etcd、Consul、Redis、NATS；Kafka 和持久化数据库�
 - 把请求、身份或 trace 存进共享 Service/Manage 单例。
 - 绕过 ModelList、ServiceContext 或本地 service wrapper 直接访问底层连接。
 - 自行实现 Redis 连接池、发现循环、日志门面、重试或并发原语，而成熟依赖已提供等价能力。
+- 把 write-behind 当作可随时清空的缓存，或让待同步记录使用 TTL/fast 模式。
 - 接受配置字段但不消费，或在不支持时静默回退。
 - 在日志中输出密钥、JWT、TOTP、请求/响应体、SQL 或业务对象。
 - 让默认单元测试隐式依赖本机 Docker、MySQL、MongoDB、ClickHouse、etcd、Consul、Redis 或 NATS。

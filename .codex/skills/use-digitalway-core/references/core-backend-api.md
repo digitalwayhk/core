@@ -72,6 +72,14 @@ rows, err = list.SearchWhere("UserID", userID)
 
 SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖；负值关闭。不得恢复机器级 30GB 默认。
 
+### PrefixedBadgerDB
+
+- 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
+- 可靠写回使用 `EnableWriteBehind`，配置必须满足 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。
+- `SetSyncDB` 已废弃，仅保留编译兼容；其绑定错误会在后续写入和关闭时返回。
+- 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
+- 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
+
 ## Manage CRUD
 
 ```go
@@ -122,6 +130,7 @@ CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主
 - 内部传输：http/grpc/socket 按能力矩阵使用。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
+- JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已有 publish ACK、消息 ID 去重和显式 ACK，但重试、死信、pull consumer 与生产 stream 参数尚未实现。
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 
 go-zero `core/queue` 只用于进程内队列，不能替代 Broker。

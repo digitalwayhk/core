@@ -1,6 +1,6 @@
 # Core 项目审查行动计划
 
-> **完成态台账：** 任务 1-17 已实施完毕。本文件不再是执行入口；现行状态以“完成跟踪”“验证矩阵”“残余风险”和“最终验收记录”为准。下方折叠的实施规格仅保留作历史审计，不得据此重新实施已完成任务。
+> **完成态台账：** 任务 1-18 已实施完毕。本文件不再是执行入口；现行状态以“完成跟踪”“验证矩阵”“残余风险”和“最终验收记录”为准。下方折叠的实施规格仅保留作历史审计，不得据此重新实施已完成任务。
 
 **目标：** 将项目审查建议转化为可执行、可验证的工作：优先复用成熟的 go-zero 能力，删除无用或重复的框架代码，统一生产日志和异常归属，保护请求与配置边界，隔离依赖变更，提供可重复的集成依赖环境，建立兼容性与 CI 门禁，并对齐测试和文档。
 
@@ -65,6 +65,7 @@
 | 15 | `docs/codex/plans/15-api-release-governance.md` |
 | 16 | `docs/codex/plans/16-ci-quality-gates.md` |
 | 17 | `docs/codex/plans/17-performance-slo-baseline.md` |
+| 18 | `docs/codex/plans/18-prefixed-badger-write-behind.md` |
 
 任务 8/9 的聚焦计划保存在 `docs/codex/plans/08-logging-error-governance.md` 和 `docs/codex/plans/09-architecture-hardening.md`。完整实施步骤已折叠为历史审计记录；不得将其中将来时措辞解释为当前待办。
 
@@ -91,6 +92,7 @@
 | 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975`, `c71690c`, `8087530` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 精确提交 smoke 通过；最终中文 skill 已基于完成后契约重建 |
 | 16. CI 质量门禁与消费方兼容性矩阵 | 已完成（内部总验收；整任务外部终审未执行） | `a3b5b97`, `b863d3d`, `8975229`, `c030c7f`, `34af55c`, `703228e`, `1a4d66f`, `b54d6f2`, `fd9bf5c`, `75f8bfa`, `ccd1e22`, `547b57e` | 四个 required gate、persistence observation、scheduled stress、外部/持久化 Docker、futures 精确 commit smoke、artifact/summary/清理契约均通过；后续用户指令取消继续输出/等待外部审查，不伪造 APPROVED |
 | 17. 性能、容量与运维 SLO 基线 | 已完成 | `51b7072` | Server/Provider/Event/WebSocket/SharedBadger/SQLite 三次基线、资源预算、RED/USE、trace、SLO/告警 owner 均已记录；SQLite mmap 从 30GB 改为默认 256MiB 可配置契约 |
+| 18. PrefixedBadgerDB 可靠写回 | 已完成 | `ef8f0cd`, `a3b7b3d`, `c514662`, `cd11919` | 损坏默认 fail closed、可靠配置绑定、pending TTL 拒绝、唯一索引计数、损坏项保留和关闭积压错误均有单元/race 契约 |
 
 <details>
 <summary>历史实施规格（任务已完成，仅供审计，不是执行指令）</summary>
@@ -1229,7 +1231,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 
 ## 残余风险
 
-以下项目不影响 required 门禁或任务 1-17 的实现完成状态，但尚未升级为已关闭能力：
+以下项目不影响 required 门禁或任务 1-18 的实现完成状态，但尚未升级为已关闭能力：
 
 | 风险 | 当前状态 | Owner / 后续条件 |
 | --- | --- | --- |

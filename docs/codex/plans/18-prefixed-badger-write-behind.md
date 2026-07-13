@@ -139,9 +139,9 @@ go test -race ./pkg/persistence/database/nosql -run 'Test.*Close' -count=1
 - 修改：`docs/codex/FRAMEWORK_USAGE_GUIDE.md`
 - 修改：`.codex/skills/use-digitalway-core/references/core-backend-api.md`
 
-- [ ] 记录 cache 与 write-behind 的边界、at-least-once 和远端幂等要求。
-- [ ] 明确 write-behind 不适用于资金流水、审计事件等不可合并事件；这些场景使用唯一事件 ID 的 JetStream/outbox。
-- [ ] 运行完整门禁：
+- [x] 记录 cache 与 write-behind 的边界、at-least-once 和远端幂等要求。
+- [x] 明确 write-behind 不适用于资金流水、审计事件等不可合并事件；这些场景使用唯一事件 ID 的 JetStream/outbox。
+- [x] 运行完整门禁：
 
 ```bash
 gofmt -w pkg/persistence/database/nosql/*.go
@@ -152,9 +152,11 @@ go vet ./pkg/persistence/database/nosql/...
 ./scripts/test.sh release-contract
 ```
 
+**完成记录：** nosql 全包、race、`persistence-unit`、vet 与 `release-contract` 均通过；框架指南、skill 引用、CHANGELOG、废弃登记和项目总台账已同步。JetStream 接入说明已单独写入 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，未修改 NATS 业务实现。
+
 ## 完成后输出的 NATS JetStream 指南
 
-本任务不实现 NATS。代码验收完成后另行说明：
+本任务不实现 NATS。代码验收完成后已在 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md` 说明：
 
 1. 服务端默认模式：API 等待 JetStream publish ACK，durable pull consumer 批量写远端数据库，成功后 ACK。
 2. 离线节点模式：本地 write-behind 只负责断网暂存，恢复后发布 JetStream，不直接写远端数据库。

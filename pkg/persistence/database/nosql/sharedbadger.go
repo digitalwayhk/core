@@ -311,7 +311,8 @@ func (p *PrefixedBadgerDB[T]) writeBehindBindError() error {
 	return p.syncBindErr
 }
 
-// SetSyncDB 保留旧签名以兼容下游；新代码应使用 EnableWriteBehind 获取绑定错误。
+// SetSyncDB 保留旧签名以兼容下游。
+// Deprecated: 使用 EnableWriteBehind 获取绑定错误。
 func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
 	if list == nil {
 		p.syncLock.Lock()

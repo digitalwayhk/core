@@ -9,5 +9,6 @@
 | `types.SetCrossNodeForwarder`、`GetCrossNodeForwarder` | `Set/GetCrossNodeForwarderForService` | v0.0.248 | v0.1.0 | server/types | 多服务进程、跨节点通知扩展 | `pkg/server/types/crossnode_test.go` |
 | `router.TestResult` 直接变量 | `SetTestResult`、`GetTestResult` | v0.0.248 | v0.1.0 | server/router | OpenAPI/路由测试扩展 | `pkg/server/router/servicecontext_registry_test.go` |
 | `config.INITSERVER` 直接并发读写 | `IsServerInitializing` 及受同步初始化入口 | v0.0.248 | v0.1.0 | server/config | 框架启动扩展 | config/router 并发测试 |
+| `PrefixedBadgerDB.SetSyncDB` | `EnableWriteBehind` | v0.0.248 | v0.1.0 | persistence/nosql | 下游本地写回扩展 | `pkg/persistence/database/nosql/sharedbadger_writebehind_test.go` |
 
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。
