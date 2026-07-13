@@ -174,12 +174,7 @@ func (m *Manager) EnableRoute(route string, ttl time.Duration) error {
 			return err
 		}
 	}
-	m.routesMu.Lock()
-	policy := m.routes[route]
-	policy.generation = generation
-	policy.ttl = ttl
-	m.routes[route] = policy
-	m.routesMu.Unlock()
+	m.storeRoutePolicy(route, ttl, generation)
 	return nil
 }
 
@@ -312,9 +307,7 @@ func (m *Manager) DeleteRoute(route string) error {
 	} else {
 		policy.generation++
 	}
-	m.routesMu.Lock()
-	m.routes[route] = policy
-	m.routesMu.Unlock()
+	policy = m.storeRoutePolicy(route, 0, policy.generation)
 	if m.redis != nil {
 		if err := m.publishInvalidation(route, "", policy.generation); err != nil {
 			m.degrade()
@@ -322,6 +315,20 @@ func (m *Manager) DeleteRoute(route string) error {
 		}
 	}
 	return m.clearRouteLocal(route)
+}
+
+func (m *Manager) storeRoutePolicy(route string, ttl time.Duration, generation uint64) routePolicy {
+	m.routesMu.Lock()
+	defer m.routesMu.Unlock()
+	policy := m.routes[route]
+	if generation > policy.generation {
+		policy.generation = generation
+	}
+	if ttl > 0 {
+		policy.ttl = ttl
+	}
+	m.routes[route] = policy
+	return policy
 }
 
 func (m *Manager) Take(route string, source interface{}, ttl time.Duration, loader func() (interface{}, error)) (interface{}, error) {

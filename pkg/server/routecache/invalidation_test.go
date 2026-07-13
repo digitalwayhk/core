@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,43 @@ type fakeInvalidationBridge struct {
 	mu       sync.RWMutex
 	handlers map[string][]event.Handler
 	ready    bool
+}
+
+type blockingGenerationRedis struct {
+	*fakeRedisClient
+	mu      sync.Mutex
+	armed   bool
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func newBlockingGenerationRedis() *blockingGenerationRedis {
+	return &blockingGenerationRedis{fakeRedisClient: newFakeRedisClient()}
+}
+
+func (r *blockingGenerationRedis) blockNextGenerationRead() (<-chan struct{}, chan<- struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.armed = true
+	r.blocked = make(chan struct{})
+	r.release = make(chan struct{})
+	return r.blocked, r.release
+}
+
+func (r *blockingGenerationRedis) GetCtx(ctx context.Context, key string) (string, error) {
+	value, err := r.fakeRedisClient.GetCtx(ctx, key)
+	r.mu.Lock()
+	if !r.armed || !strings.Contains(key, "__meta:generation:") {
+		r.mu.Unlock()
+		return value, err
+	}
+	r.armed = false
+	blocked := r.blocked
+	release := r.release
+	r.mu.Unlock()
+	close(blocked)
+	<-release
+	return value, err
 }
 
 func newFakeInvalidationBridge(bus *fakeInvalidationBus) *fakeInvalidationBridge {
@@ -162,4 +200,32 @@ func TestSharedGenerationRestartDoesNotServePreInvalidationKeys(t *testing.T) {
 	value, ok, err := second.Get("/api/items", "same")
 	require.NoError(t, err)
 	assert.False(t, ok, "重启节点不得重新使用 Redis 中失效世代的值: %v", value)
+}
+
+func TestConcurrentEnableRouteDoesNotRollBackGeneration(t *testing.T) {
+	redisClient := newBlockingGenerationRedis()
+	bridge := newFakeInvalidationBridge(newFakeInvalidationBus())
+	manager, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(bridge))
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	require.NoError(t, manager.Set("/api/items", "same", map[string]int{"value": 1}, time.Minute))
+
+	blocked, release := redisClient.blockNextGenerationRead()
+	enableDone := make(chan error, 1)
+	go func() {
+		enableDone <- manager.EnableRoute("/api/items", time.Minute)
+	}()
+	<-blocked
+	require.NoError(t, manager.DeleteRoute("/api/items"))
+	close(release)
+	require.NoError(t, <-enableDone)
+
+	redisGeneration, err := manager.redis.Generation(context.Background(), "service-a", "/api/items")
+	require.NoError(t, err)
+	assert.Equal(t, redisGeneration, manager.routeGeneration("/api/items"))
+	value, ok, err := manager.Get("/api/items", "same")
+	require.NoError(t, err)
+	assert.False(t, ok, "并发 EnableRoute 不得回退本地 generation 并命中失效值: %v", value)
 }
