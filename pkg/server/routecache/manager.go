@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync"
@@ -25,6 +26,7 @@ type Manager struct {
 	service string
 	config  config.RouteCacheConfig
 	l1      *l1Cache
+	l2      *BadgerL2
 	flight  syncx.SingleFlight
 	closed  atomic.Bool
 
@@ -41,13 +43,24 @@ func NewManager(service string, cfg config.RouteCacheConfig) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{
+	manager := &Manager{
 		service: service,
 		config:  cfg,
 		l1:      l1,
 		flight:  syncx.NewSingleFlight(),
 		routes:  make(map[string]routePolicy),
-	}, nil
+	}
+	if cfg.L2.Enable {
+		l2Config := cfg.L2
+		serviceDigest := sha256.Sum256([]byte(service))
+		l2Config.Path = filepath.Join(cfg.L2.Path, hex.EncodeToString(serviceDigest[:8]))
+		manager.l2, err = NewBadgerL2(l2Config)
+		if err != nil {
+			manager.l1.Clear()
+			return nil, err
+		}
+	}
+	return manager, nil
 }
 
 func (m *Manager) EnableRoute(route string, ttl time.Duration) error {
@@ -69,7 +82,15 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 		return nil, false, err
 	}
 	value, ok := m.l1.Get(key)
-	return value, ok, nil
+	if ok || m.l2 == nil {
+		return value, ok, nil
+	}
+	data, ok, err := m.l2.Get(key)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	m.l1.Set(key, data, m.routeTTL(route))
+	return data, true, nil
 }
 
 func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration) error {
@@ -80,6 +101,15 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 	if ttl <= 0 {
 		ttl = m.routeTTL(route)
 	}
+	if m.l2 != nil {
+		data, marshalErr := json.Marshal(value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if err := m.l2.Set(key, data, ttl); err != nil {
+			return err
+		}
+	}
 	m.l1.Set(key, value, ttl)
 	return nil
 }
@@ -88,6 +118,11 @@ func (m *Manager) Delete(route string, source interface{}) error {
 	key, enabled, err := m.cacheKey(route, source)
 	if err != nil || !enabled {
 		return err
+	}
+	if m.l2 != nil {
+		if err := m.l2.Delete(key); err != nil {
+			return err
+		}
 	}
 	m.l1.Delete(key)
 	return nil
@@ -98,6 +133,11 @@ func (m *Manager) DeleteRoute(route string) error {
 		return ErrManagerClosed
 	}
 	prefix := m.service + ":" + route + ":"
+	if m.l2 != nil {
+		if err := m.l2.DeletePrefix(prefix); err != nil {
+			return err
+		}
+	}
 	m.l1.keys.Range(func(key, _ interface{}) bool {
 		text := key.(string)
 		if len(text) >= len(prefix) && text[:len(prefix)] == prefix {
@@ -140,6 +180,9 @@ func (m *Manager) Close() {
 		return
 	}
 	m.l1.Clear()
+	if m.l2 != nil {
+		_ = m.l2.Close()
+	}
 }
 
 func (m *Manager) cacheKey(route string, source interface{}) (string, bool, error) {

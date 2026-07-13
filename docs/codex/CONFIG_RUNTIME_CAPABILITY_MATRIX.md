@@ -147,11 +147,11 @@
 | `ServerConfig.RouteCache.TTL` | supported | RouteCacheManager | 作为路由未显式指定时的默认 TTL |
 | `ServerConfig.RouteCache.L1` | supported | RouteCacheManager | 使用 go-zero collection.Cache 管理本地缓存 |
 | `ServerConfig.RouteCache.L1.Limit` | supported | RouteCacheManager | 传入 collection.WithLimit 限制 L1 条目数 |
-| `ServerConfig.RouteCache.L2` | rejected | RouteCacheConfig.Validate | Task 6 落地前只允许 inactive 默认值 |
-| `ServerConfig.RouteCache.L2.Enable` | rejected | RouteCacheConfig.Validate | true 返回 not implemented |
-| `ServerConfig.RouteCache.L2.Path` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.RouteCache.L2.MaxBytes` | rejected | RouteCacheConfig.Validate | 仅允许 inactive 默认值 |
-| `ServerConfig.RouteCache.L2.CorruptionPolicy` | rejected | RouteCacheConfig.Validate | 仅允许 inactive fail 默认值 |
+| `ServerConfig.RouteCache.L2` | supported | RouteCacheManager | 可选装配服务隔离的纯 Badger TTL 缓存 |
+| `ServerConfig.RouteCache.L2.Enable` | supported | RouteCacheManager | true 时创建并在服务关闭时关闭 Badger L2 |
+| `ServerConfig.RouteCache.L2.Path` | supported | BadgerL2 | 作为服务哈希子目录的根路径 |
+| `ServerConfig.RouteCache.L2.MaxBytes` | supported | BadgerL2 | 写入前根据 Badger LSM/vlog 大小执行容量保护 |
+| `ServerConfig.RouteCache.L2.CorruptionPolicy` | supported | BadgerL2 | fail 保留现场；显式 reset 才清空并重建 |
 | `ServerConfig.RouteCache.Redis` | rejected | RouteCacheConfig.Validate | Task 7 落地前只允许 inactive 默认值 |
 | `ServerConfig.RouteCache.Redis.Addr` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
 | `ServerConfig.RouteCache.Redis.Password` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |

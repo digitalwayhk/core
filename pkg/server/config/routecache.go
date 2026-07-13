@@ -80,8 +80,11 @@ func (c *RouteCacheConfig) Validate() error {
 	if c.Mode == "shared" {
 		return errors.New("routeCache.mode shared is not implemented until Redis L3 is configured")
 	}
-	if c.L2.Enable || c.L2.Path != "" || c.L2.MaxBytes != 512<<20 || c.L2.CorruptionPolicy != "fail" {
-		return errors.New("routeCache.l2 is not implemented; keep the inactive defaults")
+	if c.L2.Enable && c.L2.Path == "" {
+		return errors.New("routeCache.l2.path is required when l2 is enabled")
+	}
+	if !c.L2.Enable && (c.L2.Path != "" || c.L2.MaxBytes != 512<<20 || c.L2.CorruptionPolicy != "fail") {
+		return errors.New("routeCache.l2 settings require l2.enable=true")
 	}
 	if c.Redis.Addr != "" || c.Redis.Password != "" || c.Redis.DB != 0 ||
 		c.Redis.Prefix != "digitalway:routecache" || c.Redis.OnUnavailable != "fail" {
