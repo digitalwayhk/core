@@ -5,10 +5,20 @@ import (
 	"time"
 )
 
+type CorruptionPolicy string
+
+const (
+	CorruptionPolicyFail       CorruptionPolicy = "fail"
+	CorruptionPolicyResetCache CorruptionPolicy = "reset_cache"
+)
+
 // BadgerDBConfig BadgerDB 配置
 type BadgerDBConfig struct {
 	// 基础配置
 	Path string `json:"path" yaml:"path"` // 数据库路径
+	// CorruptionPolicy 控制检测到文件损坏时是否允许删除本地数据。
+	// 默认 fail；只有确认 Badger 仅为可重建缓存时才能显式使用 reset_cache。
+	CorruptionPolicy CorruptionPolicy `json:"corruption_policy" yaml:"corruption_policy"`
 
 	// 性能模式
 	Mode string `json:"mode" yaml:"mode"` // "production" 或 "fast"
@@ -53,8 +63,9 @@ type BadgerDBConfig struct {
 func DefaultProductionConfig(path string) BadgerDBConfig {
 	return BadgerDBConfig{
 		// 基础配置
-		Path: path,
-		Mode: "production",
+		Path:             path,
+		Mode:             "production",
+		CorruptionPolicy: CorruptionPolicyFail,
 
 		// BadgerDB 配置
 		SyncWrites:         true,
@@ -95,8 +106,9 @@ func DefaultProductionConfig(path string) BadgerDBConfig {
 func DefaultFastConfig(path string) BadgerDBConfig {
 	return BadgerDBConfig{
 		// 基础配置
-		Path: path,
-		Mode: "fast",
+		Path:             path,
+		Mode:             "fast",
+		CorruptionPolicy: CorruptionPolicyFail,
 
 		// BadgerDB 配置
 		SyncWrites:         false,
@@ -138,6 +150,12 @@ func (c *BadgerDBConfig) Validate() error {
 	if c.Path == "" {
 		return fmt.Errorf("path 不能为空")
 	}
+	if c.CorruptionPolicy == "" {
+		c.CorruptionPolicy = CorruptionPolicyFail
+	}
+	if c.CorruptionPolicy != CorruptionPolicyFail && c.CorruptionPolicy != CorruptionPolicyResetCache {
+		return fmt.Errorf("corruption_policy=%q 无效，仅支持 %q 或 %q", c.CorruptionPolicy, CorruptionPolicyFail, CorruptionPolicyResetCache)
+	}
 
 	if c.SyncBatchSize <= 0 {
 		c.SyncBatchSize = 1000
@@ -176,4 +194,8 @@ func (c *BadgerDBConfig) Validate() error {
 	}
 
 	return nil
+}
+
+func shouldResetCorruptedCache(config BadgerDBConfig) bool {
+	return config.CorruptionPolicy == CorruptionPolicyResetCache
 }

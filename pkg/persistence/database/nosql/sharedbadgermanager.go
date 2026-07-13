@@ -161,9 +161,11 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 			return nil, fmt.Errorf("打开共享DB失败: %s\n原始错误: %w", diagnosis, err)
 		}
 
-		// 检测 MANIFEST/文件缺失导致的损坏（进程中途 panic 后重启时出现）
-		// 共享 BadgerDB 是本地缓存，数据源在 MySQL，清空重建是安全的
+		// 只有调用方明确声明为可重建缓存时，才允许删除损坏目录。
 		if isCorruptionError(err) && i == 0 {
+			if !shouldResetCorruptedCache(cfg) {
+				return nil, fmt.Errorf("共享DB文件损坏且 corruption_policy=%q，已保留原始目录: %w", cfg.CorruptionPolicy, err)
+			}
 			logx.Errorf("共享DB文件损坏，清空目录重建 [path=%s]: %v", basePath, err)
 			if clearErr := clearBadgerData(basePath); clearErr != nil {
 				logx.Errorf("清空BadgerDB目录失败: %v", clearErr)
