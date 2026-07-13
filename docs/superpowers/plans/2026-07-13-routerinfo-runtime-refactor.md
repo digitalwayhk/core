@@ -599,9 +599,9 @@ git add pkg/server docs/codex docs/superpowers/plans/2026-07-13-routerinfo-runti
 git commit -m "refactor: complete router runtime component isolation"
 ```
 
-## 外部审查修复（实现 `22ba48f`）
+## 外部审查修复与复审（实现 `22ba48f`，复审 `APPROVED`）
 
-首轮外部审查裁定为 `CHANGES_REQUIRED`：无 P0，有两项 P1。本节只记录修复与内部验证，不代表已通过最终外部复审。
+首轮外部审查裁定为 `CHANGES_REQUIRED`：无 P0，有两项 P1。修复提交 `22ba48f` 的外部复审裁定为 `APPROVED`：原 P1-1、P1-2 均已关闭，无新增 P0/P1，允许关闭本计划的外部审查门禁。
 
 - [x] **P1-1：Shared generation 在重启/扩容后可重用失效数据**
 
@@ -623,12 +623,18 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 ./scripts/ci.sh required/contracts
 ```
 
-上述均通过；真实 Redis 测试使用现有 Compose 服务，测试后已停止容器。P2（TTL jitter、L1 值类型一致性、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标）保留为后续非阻断项。
+上述均通过；真实 Redis 测试使用现有 Compose 服务，测试后已停止容器。
+
+外部复审登记的后续非阻断项：
+
+- 并发 `EnableRoute` 与 `DeleteRoute` 时，本地 generation 写回应保证单调不回退，并补最终本地值与 Redis 权威值一致的压测。
+- 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试。
+- TTL jitter、L1 值类型一致性、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
 
 ## 最终关闭条件
 
 - [x] 八个 Task 均有独立提交 SHA。
 - [x] 每节定向测试和 race 验收通过。
 - [x] `pkg/server/...`、日志检查、release-contract、required quick/contracts 全绿。
-- [ ] 外部审查无 P0/P1；P2 明确登记，不伪装关闭。
+- [x] 外部审查无 P0/P1；P2 明确登记，不伪装关闭。
 - [x] 设计规格和使用文档与实际配置、启动和降级行为一致。
