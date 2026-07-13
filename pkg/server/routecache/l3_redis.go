@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 type RedisClient interface {
 	GetCtx(context.Context, string) (string, error)
 	SetexCtx(context.Context, string, string, int) error
+	SetnxCtx(context.Context, string, string) (bool, error)
+	IncrCtx(context.Context, string) (int64, error)
 	DelCtx(context.Context, ...string) (int, error)
 	PingCtx(context.Context) bool
 }
@@ -95,6 +99,52 @@ func (r *RedisL3) Delete(ctx context.Context, key string) error {
 
 func (r *RedisL3) Ping(ctx context.Context) bool {
 	return r != nil && r.client != nil && r.client.PingCtx(ctx)
+}
+
+func (r *RedisL3) Generation(ctx context.Context, service, route string) (uint64, error) {
+	key := r.key(generationKey(service, route))
+	value, err := r.client.GetCtx(ctx, key)
+	// go-zero Redis.GetCtx 将 redis.Nil 转换为空字符串和 nil。
+	if errors.Is(err, redisv9.Nil) || (err == nil && value == "") {
+		created, setErr := r.client.SetnxCtx(ctx, key, "1")
+		if setErr != nil {
+			return 0, setErr
+		}
+		if created {
+			return 1, nil
+		}
+		value, err = r.client.GetCtx(ctx, key)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return parseGeneration(value)
+}
+
+func (r *RedisL3) IncrementGeneration(ctx context.Context, service, route string) (uint64, error) {
+	if _, err := r.Generation(ctx, service, route); err != nil {
+		return 0, err
+	}
+	value, err := r.client.IncrCtx(ctx, r.key(generationKey(service, route)))
+	if err != nil {
+		return 0, err
+	}
+	if value <= 0 {
+		return 0, errors.New("redis route cache generation must be positive")
+	}
+	return uint64(value), nil
+}
+
+func generationKey(service, route string) string {
+	return "__meta:generation:" + service + ":" + route
+}
+
+func parseGeneration(value string) (uint64, error) {
+	generation, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || generation == 0 {
+		return 0, fmt.Errorf("invalid redis route cache generation")
+	}
+	return generation, nil
 }
 
 func (r *RedisL3) key(key string) string {

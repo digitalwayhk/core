@@ -165,11 +165,18 @@ func (m *Manager) EnableRoute(route string, ttl time.Duration) error {
 	if ttl <= 0 {
 		ttl = m.config.TTL
 	}
-	m.routesMu.Lock()
-	policy, exists := m.routes[route]
-	if !exists {
-		policy.generation = 1
+	generation := uint64(1)
+	if m.redis != nil {
+		var err error
+		generation, err = m.redis.Generation(context.Background(), m.service, route)
+		if err != nil {
+			m.degrade()
+			return err
+		}
 	}
+	m.routesMu.Lock()
+	policy := m.routes[route]
+	policy.generation = generation
 	policy.ttl = ttl
 	m.routes[route] = policy
 	m.routesMu.Unlock()
@@ -289,16 +296,25 @@ func (m *Manager) DeleteRoute(route string) error {
 	if m.State() != StateEnabled {
 		return nil
 	}
-	m.routesMu.Lock()
+	m.routesMu.RLock()
 	policy, ok := m.routes[route]
-	if ok {
-		policy.generation++
-		m.routes[route] = policy
-	}
-	m.routesMu.Unlock()
+	m.routesMu.RUnlock()
 	if !ok {
 		return nil
 	}
+	if m.redis != nil {
+		generation, err := m.redis.IncrementGeneration(context.Background(), m.service, route)
+		if err != nil {
+			m.degrade()
+			return err
+		}
+		policy.generation = generation
+	} else {
+		policy.generation++
+	}
+	m.routesMu.Lock()
+	m.routes[route] = policy
+	m.routesMu.Unlock()
 	if m.redis != nil {
 		if err := m.publishInvalidation(route, "", policy.generation); err != nil {
 			m.degrade()
@@ -359,9 +375,35 @@ func (m *Manager) Recover(ctx context.Context) (bool, error) {
 			return false, err
 		}
 	}
+	if err := m.refreshSharedGenerations(ctx); err != nil {
+		return false, err
+	}
 	m.clearLocal()
 	m.state.Store(uint32(StateEnabled))
 	return true, nil
+}
+
+func (m *Manager) refreshSharedGenerations(ctx context.Context) error {
+	m.routesMu.RLock()
+	routes := make([]string, 0, len(m.routes))
+	for route := range m.routes {
+		routes = append(routes, route)
+	}
+	m.routesMu.RUnlock()
+	for _, route := range routes {
+		generation, err := m.redis.Generation(ctx, m.service, route)
+		if err != nil {
+			return err
+		}
+		m.routesMu.Lock()
+		policy, ok := m.routes[route]
+		if ok {
+			policy.generation = generation
+			m.routes[route] = policy
+		}
+		m.routesMu.Unlock()
+	}
+	return nil
 }
 
 func (m *Manager) Close() {

@@ -141,3 +141,25 @@ func TestInvalidationIsIdempotent(t *testing.T) {
 	_, ok := manager.l1.Get(key)
 	assert.False(t, ok)
 }
+
+func TestSharedGenerationRestartDoesNotServePreInvalidationKeys(t *testing.T) {
+	redisClient := newFakeRedisClient()
+	bus := newFakeInvalidationBus()
+	first, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(newFakeInvalidationBridge(bus)))
+	require.NoError(t, err)
+	t.Cleanup(first.Close)
+	require.NoError(t, first.EnableRoute("/api/items", time.Minute))
+	require.NoError(t, first.Set("/api/items", "same", map[string]int{"value": 1}, time.Minute))
+	require.NoError(t, first.DeleteRoute("/api/items"))
+
+	second, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(newFakeInvalidationBridge(bus)))
+	require.NoError(t, err)
+	t.Cleanup(second.Close)
+	require.NoError(t, second.EnableRoute("/api/items", time.Minute))
+
+	value, ok, err := second.Get("/api/items", "same")
+	require.NoError(t, err)
+	assert.False(t, ok, "重启节点不得重新使用 Redis 中失效世代的值: %v", value)
+}

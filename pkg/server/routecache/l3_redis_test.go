@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 type fakeRedisClient struct {
 	mu        sync.Mutex
 	available bool
+	emptyMiss bool
 	values    map[string]string
 }
 
@@ -33,9 +35,23 @@ func (f *fakeRedisClient) GetCtx(_ context.Context, key string) (string, error) 
 	}
 	value, ok := f.values[key]
 	if !ok {
+		if f.emptyMiss {
+			return "", nil
+		}
 		return "", redis.Nil
 	}
 	return value, nil
+}
+
+func TestGenerationSupportsGoZeroEmptyMiss(t *testing.T) {
+	client := newFakeRedisClient()
+	client.emptyMiss = true
+	l3 := NewRedisL3(client, config.RouteCacheRedisConfig{Prefix: "test:routecache"})
+
+	generation, err := l3.Generation(context.Background(), "service-a", "/items")
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), generation)
 }
 
 func (f *fakeRedisClient) SetexCtx(_ context.Context, key, value string, _ int) error {
@@ -46,6 +62,34 @@ func (f *fakeRedisClient) SetexCtx(_ context.Context, key, value string, _ int) 
 	}
 	f.values[key] = value
 	return nil
+}
+
+func (f *fakeRedisClient) SetnxCtx(_ context.Context, key, value string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.available {
+		return false, errors.New("redis unavailable")
+	}
+	if _, exists := f.values[key]; exists {
+		return false, nil
+	}
+	f.values[key] = value
+	return true, nil
+}
+
+func (f *fakeRedisClient) IncrCtx(_ context.Context, key string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.available {
+		return 0, errors.New("redis unavailable")
+	}
+	value, err := strconv.ParseInt(f.values[key], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	value++
+	f.values[key] = strconv.FormatInt(value, 10)
+	return value, nil
 }
 
 func (f *fakeRedisClient) DelCtx(_ context.Context, keys ...string) (int, error) {
@@ -186,4 +230,15 @@ func TestRedisL3Integration(t *testing.T) {
 	require.True(t, ok)
 	assert.JSONEq(t, `{"ok":true}`, string(value))
 	require.NoError(t, l3.Delete(context.Background(), key))
+
+	route := "/integration/" + time.Now().Format("150405.000000000")
+	generation, err := l3.Generation(context.Background(), "integration-service", route)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), generation)
+	generation, err = l3.IncrementGeneration(context.Background(), "integration-service", route)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), generation)
+	generation, err = l3.Generation(context.Background(), "integration-service", route)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), generation)
 }

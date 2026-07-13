@@ -44,6 +44,8 @@ type ServiceContext struct {
 	Router             *ServiceRouter
 	isStart            atomic.Bool
 	terminated         bool
+	shutdownDone       chan struct{}
+	shutdownOnce       sync.Once
 	lifecycleMu        sync.Mutex
 	lifecycleOpOnce    sync.Once
 	lifecycleOp        chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
@@ -77,6 +79,32 @@ func (own *ServiceContext) beginLifecycleOperation() {
 
 func (own *ServiceContext) endLifecycleOperation() {
 	own.lifecycleOp <- struct{}{}
+}
+
+func (own *ServiceContext) shutdownWaiter() (<-chan struct{}, bool) {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if !own.terminated {
+		return nil, false
+	}
+	if own.shutdownDone == nil {
+		own.shutdownDone = make(chan struct{})
+	}
+	return own.shutdownDone, true
+}
+
+func (own *ServiceContext) completeShutdown() {
+	own.lifecycleMu.Lock()
+	if !own.terminated {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	if own.shutdownDone == nil {
+		own.shutdownDone = make(chan struct{})
+	}
+	done := own.shutdownDone
+	own.lifecycleMu.Unlock()
+	own.shutdownOnce.Do(func() { close(done) })
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
@@ -237,8 +265,14 @@ func newServiceContextRegistry() *serviceContextRegistry {
 
 func (r *serviceContextRegistry) get(name string) *ServiceContext {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.contexts[name]
+	sc := r.contexts[name]
+	r.mu.RUnlock()
+	if sc != nil {
+		if _, terminated := sc.shutdownWaiter(); terminated {
+			return nil
+		}
+	}
+	return sc
 }
 
 func (r *serviceContextRegistry) snapshot() map[string]*ServiceContext {
@@ -247,7 +281,9 @@ func (r *serviceContextRegistry) snapshot() map[string]*ServiceContext {
 
 	contexts := make(map[string]*ServiceContext, len(r.contexts))
 	for name, sc := range r.contexts {
-		contexts[name] = sc
+		if _, terminated := sc.shutdownWaiter(); !terminated {
+			contexts[name] = sc
+		}
 	}
 	return contexts
 }
@@ -258,20 +294,27 @@ func (r *serviceContextRegistry) getOrInitialize(
 	requestedFingerprint string,
 	initialize func(sequence int) *ServiceContext,
 ) *ServiceContext {
-	r.mu.Lock()
-	if sc := r.contexts[name]; sc != nil {
-		r.mu.Unlock()
-		assertServiceContextConfig(name, requestedFingerprint, sc)
-		return sc
-	}
-	if entry := r.initializing[name]; entry != nil {
-		r.mu.Unlock()
-		<-entry.ready
-		if entry.panicked {
-			panic(entry.panicValue)
+	for {
+		r.mu.Lock()
+		if sc := r.contexts[name]; sc != nil {
+			if done, terminated := sc.shutdownWaiter(); terminated {
+				r.mu.Unlock()
+				<-done
+				continue
+			}
+			r.mu.Unlock()
+			assertServiceContextConfig(name, requestedFingerprint, sc)
+			return sc
 		}
-		assertServiceContextConfig(name, requestedFingerprint, entry.result)
-		return entry.result
+		if entry := r.initializing[name]; entry != nil {
+			r.mu.Unlock()
+			<-entry.ready
+			if entry.panicked {
+				panic(entry.panicValue)
+			}
+			continue
+		}
+		break
 	}
 
 	sequence := -1
@@ -606,6 +649,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 	}
 	if !state {
 		own.terminated = true
+		if own.shutdownDone == nil {
+			own.shutdownDone = make(chan struct{})
+		}
 	}
 	provider := own.ClusterProvider
 	membership := own.membership
@@ -625,6 +671,12 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
+	if !state {
+		defer func() {
+			contextRegistry.remove(own.Service.Name, own)
+			own.completeShutdown()
+		}()
+	}
 
 	if state {
 		nodeID, node, interval := own.clusterMembershipConfig()
@@ -683,7 +735,6 @@ func (own *ServiceContext) SetRunState(state bool) {
 				logx.Errorf("mq: close failed: %v", err)
 			}
 		}
-		contextRegistry.remove(own.Service.Name, own)
 	}
 
 	// 🔧 非阻塞发送，避免死锁
