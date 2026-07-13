@@ -304,10 +304,19 @@ func (m *Manager) DeleteRoute(route string) error {
 			return err
 		}
 		policy.generation = generation
+		policy = m.storeRoutePolicy(route, 0, policy.generation)
 	} else {
-		policy.generation++
+		m.routesMu.Lock()
+		policy, ok = m.routes[route]
+		if ok {
+			policy.generation++
+			m.routes[route] = policy
+		}
+		m.routesMu.Unlock()
+		if !ok {
+			return nil
+		}
 	}
-	policy = m.storeRoutePolicy(route, 0, policy.generation)
 	if m.redis != nil {
 		if err := m.publishInvalidation(route, "", policy.generation); err != nil {
 			m.degrade()

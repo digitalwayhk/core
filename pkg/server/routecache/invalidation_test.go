@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -264,4 +265,37 @@ func TestRecoverDoesNotRollBackConcurrentInvalidationGeneration(t *testing.T) {
 	require.NoError(t, result.err)
 	require.True(t, result.recovered)
 	assert.Equal(t, generation, manager.routeGeneration("/api/items"))
+}
+
+func TestLocalConcurrentDeleteRouteDoesNotLoseGeneration(t *testing.T) {
+	cfg := config.RouteCacheConfig{
+		Mode: "local",
+		TTL:  time.Minute,
+		L1:   config.RouteCacheL1Config{Limit: 32},
+	}
+	cfg.ApplyDefaults()
+	manager, err := NewManager("service-a", cfg)
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+
+	const deletes = 256
+	start := make(chan struct{})
+	errors := make(chan error, deletes)
+	var group sync.WaitGroup
+	for range deletes {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			errors <- manager.DeleteRoute("/api/items")
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, uint64(deletes+1), manager.routeGeneration("/api/items"))
 }
