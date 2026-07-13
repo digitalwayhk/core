@@ -126,11 +126,6 @@ func (own *RouterInfo) initStats() {
 		},
 	}
 
-	//  确保分片已初始化
-	if own.rWebSocketShards[0] == nil {
-		own.initShards()
-	}
-
 	//  启动统计协程
 	go own.updateStatsPerSecond()
 
@@ -278,38 +273,18 @@ func (own *RouterInfo) updateWebSocketStats() {
 	}
 	own.statsLock.RUnlock()
 
-	//  防御性检查分片
-	if own.rWebSocketShards[0] == nil {
-		return
-	}
-
+	own.RLock()
+	hub := own.webSocketHub
+	counts := make(map[uint64]int, len(own.rHashClients))
 	var totalClients int64
+	for hash, count := range own.rHashClients {
+		counts[hash] = count
+		totalClients += int64(count)
+	}
+	own.RUnlock()
 	var activeClients int64
-
-	//  安全地统计所有分片
-	for i := 0; i < shardCount; i++ {
-		shard := own.rWebSocketShards[i]
-		if shard == nil {
-			continue
-		}
-
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					logx.Errorf("统计分片 %d 时发生错误: %v", i, err)
-				}
-			}()
-
-			shard.mu.RLock()
-			defer shard.mu.RUnlock()
-
-			for ws := range shard.clients {
-				totalClients++
-				if ws != nil && !ws.IsClosed() {
-					activeClients++
-				}
-			}
-		}()
+	if hub != nil {
+		activeClients = int64(hub.ActiveClientCount(own))
 	}
 
 	//  更新统计
@@ -318,6 +293,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 
 	own.stats.WebSocket.CurrentConnections = activeClients
 	own.stats.WebSocket.TotalRegistered = totalClients
+	own.stats.WebSocket.ConnectionsByHash = counts
 
 	// 更新最大连接数
 	if int64(activeClients) > own.stats.WebSocket.MaxConnections {

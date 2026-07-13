@@ -78,19 +78,14 @@ type RouterInfo struct {
 	cacheTime         time.Duration                            //缓存时间
 	rArgs             map[uint64]IRouter                       //路由参数
 	rHashClients      map[uint64]int                           // per-hash client count for accurate unregister detection
-	//rWebSocketClient  map[uint64]map[IWebSocket]IRequest       //websocket客户端
-	// 🔧 使用分片替代单一 map
-	rWebSocketShards [shardCount]*websocketShard // 替代 rWebSocketClient
-	//webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
-	once          sync.Once
-	TempStore     sync.Map
-	websocketlock sync.RWMutex
+	TempStore sync.Map
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
 	channelPool         *ChannelPool
 	eventRuntime        RouteEventRuntime
 	eventCancels        map[ObserveState]map[string]func()
+	webSocketHub        *RouteWebSocketHub
 	owner               string
 	frozen              bool
 	frozenMetadata      routerMetadata
@@ -212,6 +207,17 @@ func (own *RouterInfo) SetEventBridge(owner string, runtime RouteEventRuntime) {
 			}
 		}
 	}
+}
+
+// SetWebSocketHub 绑定所属 ServiceContext 的 WebSocket 运行时。同名服务重建时可以
+// 替换已关闭的 Hub，不允许其他服务接管已经冻结的 RouterInfo。
+func (own *RouterInfo) SetWebSocketHub(owner string, hub *RouteWebSocketHub) {
+	own.Lock()
+	defer own.Unlock()
+	if own.frozen && own.owner != owner {
+		panic("router websocket hub owner conflict")
+	}
+	own.webSocketHub = hub
 }
 func (own *RouterInfo) GetPath() string {
 	own.RLock()
@@ -606,6 +612,12 @@ func getApiHash(api IRouter) uint64 {
 	return utils.HashCode64(key)
 }
 func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
+	own.RLock()
+	hub := own.webSocketHub
+	own.RUnlock()
+	if hub != nil {
+		return hub.Routers(own)
+	}
 	items := make([]IRouter, 0)
 	for _, r := range own.rArgs {
 		items = append(items, r)
@@ -754,11 +766,6 @@ type noticeJob struct {
 	router  *RouterInfo
 }
 
-var (
-	noticeJobChan = make(chan *noticeJob, 1000) // 缓冲通道
-	workerOnce    sync.Once
-)
-
 // func (own *RouterInfo) NoticeWebSocket(message interface{}) {
 // 	if iwsr, ok := own.instance.(IWebSocketRouterNotice); ok {
 // 		// 🔧 确保工作池启动
@@ -796,47 +803,6 @@ var (
 // 	}
 // 	logx.Infof("Started %d notice workers", workerCount)
 // }
-
-// 🔧 工作协程
-func (own *RouterInfo) noticeWorker(workerID int) {
-	for job := range noticeJobChan {
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					logx.Errorf("Worker %d panic processing job for hash:%d, error:%v",
-						workerID, job.hash, err)
-				}
-			}()
-
-			// 🔧 带超时的处理
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-
-			done := make(chan bool, 1)
-			var ok bool
-			var ndata interface{}
-
-			go func() {
-				defer func() {
-					if err := recover(); err != nil {
-						logx.Errorf("NoticeFiltersRouter panic in worker %d: %v", workerID, err)
-					}
-					done <- true
-				}()
-				ok, ndata = job.iwsr.NoticeFiltersRouter(job.message, job.api)
-			}()
-
-			select {
-			case <-done:
-				if ok {
-					job.router.sendToHashClients(job.hash, job.message, ndata)
-				}
-			case <-ctx.Done():
-				logx.Errorf("Worker %d: NoticeFiltersRouter timeout for hash:%d", workerID, job.hash)
-			}
-		}()
-	}
-}
 
 // 🔧 快速收集hash和api映射
 // func (own *RouterInfo) collectHashApis() map[uint64]IRouter {
@@ -1044,32 +1010,22 @@ func (own *RouterInfo) noticeWorker(workerID int) {
 
 // 🔧 新增：RouterInfo销毁时的清理
 func (own *RouterInfo) Destroy() {
+	own.RLock()
+	hub := own.webSocketHub
+	own.RUnlock()
+	if hub != nil {
+		hub.RemoveRoute(own)
+	}
 	// 🆕 先关闭统计系统
 	own.closeStats()
 
 	// 清理WebSocket连接
 	own.CleanupDeadConnections()
 
-	// 从全局清理map中移除
-	key := own.Path
-	if keyhash, ok := own.instance.(IRouterHashKey); ok {
-		hashStr := strconv.FormatUint(keyhash.GetHashKey(), 10)
-		key = key + ":" + hashStr
-	}
-	clearMap.Delete(key)
-
-	logx.Infof("RouterInfo已销毁: %s", key)
-}
-
-var websocketcleanupOnce sync.Once
-var clearMap sync.Map
-
-var periodicWebSocketCleanup struct {
-	sync.Mutex
-	started bool
-	stopped bool
-	cancel  context.CancelFunc
-	done    chan struct{}
+	logx.Debugw("router_info_destroyed",
+		logx.Field("service", own.ServiceName),
+		logx.Field("route", own.Path),
+	)
 }
 
 // func (own *RouterInfo) ensureWebSocketInit() {
@@ -1093,74 +1049,11 @@ var periodicWebSocketCleanup struct {
 // }
 
 func StartPeriodicCleanup() {
-	registerWebSocketProcessShutdown()
-	periodicWebSocketCleanup.Lock()
-	if periodicWebSocketCleanup.started || periodicWebSocketCleanup.stopped {
-		periodicWebSocketCleanup.Unlock()
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	periodicWebSocketCleanup.started = true
-	periodicWebSocketCleanup.cancel = cancel
-	periodicWebSocketCleanup.done = done
-	periodicWebSocketCleanup.Unlock()
-
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				totalCleaned := 0
-				totalRouters := 0
-				totalClients := 0
-
-				clearMap.Range(func(key, value interface{}) bool {
-					if rou, ok := value.(*RouterInfo); ok {
-						totalRouters++
-						beforeCount := rou.GetActiveClientCount()
-						rou.CleanupDeadConnections()
-						afterCount := rou.GetActiveClientCount()
-						totalCleaned += beforeCount - afterCount
-						totalClients += afterCount
-					}
-					return true
-				})
-
-				if totalCleaned > 0 || totalRouters > 0 {
-					logx.Infof("WebSocket清理完成 - 路由数: %d, 活跃客户端: %d, 清理连接: %d",
-						totalRouters, totalClients, totalCleaned)
-				}
-			}
-		}
-	}()
 }
 
-// StopPeriodicCleanup 停止进程级 WebSocket 周期清理；关闭后不允许在同一进程重启。
-func StopPeriodicCleanup(ctx context.Context) error {
-	periodicWebSocketCleanup.Lock()
-	if !periodicWebSocketCleanup.stopped {
-		periodicWebSocketCleanup.stopped = true
-		if periodicWebSocketCleanup.cancel != nil {
-			periodicWebSocketCleanup.cancel()
-		}
-	}
-	done := periodicWebSocketCleanup.done
-	periodicWebSocketCleanup.Unlock()
-	if done == nil {
-		return nil
-	}
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+// StopPeriodicCleanup 为旧调用方保留。周期清理已由每服务 RouteWebSocketHub 接管。
+func StopPeriodicCleanup(_ context.Context) error {
+	return nil
 }
 
 // GetActiveClientCount 返回当前活跃的websocket客户端数量

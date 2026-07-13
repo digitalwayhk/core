@@ -152,6 +152,7 @@ func TestServiceEventBridgeExistsWithoutMQ(t *testing.T) {
 
 	assert.NotNil(t, sc.ServiceEventBridge)
 	assert.NotNil(t, sc.EventStream)
+	assert.NotNil(t, sc.RouteWebSocketHub)
 }
 
 func TestServiceContextConcurrentDifferentNamesInitializeInParallel(t *testing.T) {

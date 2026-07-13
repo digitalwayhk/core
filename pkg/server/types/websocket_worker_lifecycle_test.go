@@ -2,13 +2,9 @@ package types
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/zeromicro/go-zero/core/proc"
 )
 
 func TestWebSocketNotificationSystemShutdownWaitsForAllWorkers(t *testing.T) {
@@ -96,30 +92,5 @@ func TestPeriodicWebSocketCleanupCanStopAndWait(t *testing.T) {
 	}
 	if err := StopPeriodicCleanup(ctx); err != nil {
 		t.Fatalf("重复停止 WebSocket 周期清理失败: %v", err)
-	}
-}
-
-func TestWebSocketProcessShutdownStopsGlobalWorkers(t *testing.T) {
-	if os.Getenv("CORE_TEST_WEBSOCKET_SHUTDOWN_CHILD") == "1" {
-		system := getGlobalNotificationSystem()
-		system.workers = 2
-		StartPeriodicCleanup()
-		system.Start()
-		proc.Shutdown()
-		if system.isStarted.Load() {
-			t.Fatal("进程关闭后全局 WebSocket 通知系统仍在运行")
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := StopPeriodicCleanup(ctx); err != nil {
-			t.Fatalf("进程关闭后周期清理未退出: %v", err)
-		}
-		return
-	}
-
-	command := exec.Command(os.Args[0], "-test.run=^TestWebSocketProcessShutdownStopsGlobalWorkers$")
-	command.Env = append(os.Environ(), "CORE_TEST_WEBSOCKET_SHUTDOWN_CHILD=1")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("子进程 WebSocket 关闭测试失败: %v\n%s", err, output)
 	}
 }

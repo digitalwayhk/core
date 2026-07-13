@@ -59,6 +59,7 @@ func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
 			info.ServiceName = own.Service.Service.Name
 		}
 		info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+		info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
 		info.Freeze(own.Service.Service.Name)
 		if info.PathType == types.PublicType {
 			own.publicAPI[info.Path] = info
@@ -80,6 +81,7 @@ func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
 		info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+		info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
 		info.Freeze(own.Service.Service.Name)
 		own.serverManagerAPI[info.Path] = info
 	}

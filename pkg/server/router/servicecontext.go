@@ -56,6 +56,7 @@ type ServiceContext struct {
 	EventStream        *event.Stream                  `json:"-"`
 	EventBridge        *event.MQBridge                `json:"-"`
 	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
+	RouteWebSocketHub  *types.RouteWebSocketHub       `json:"-"`
 	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
 	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
 	membership         *cluster.MembershipManager     `json:"-"`
@@ -442,6 +443,7 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
+	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
@@ -589,12 +591,14 @@ func (own *ServiceContext) SetRunState(state bool) {
 	broker := own.CrossNodeBroker
 	mqManager := own.MQManager
 	serviceEventBridge := own.ServiceEventBridge
+	routeWebSocketHub := own.RouteWebSocketHub
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
 		own.MQManager = nil
 		own.EventBridge = nil
 		own.ServiceEventBridge = nil
+		own.RouteWebSocketHub = nil
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
@@ -617,6 +621,16 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.CrossNodeBroker = broker
 		own.lifecycleMu.Unlock()
 	} else {
+		if routeWebSocketHub != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := routeWebSocketHub.Close(ctx); err != nil {
+				logx.Errorw("route_websocket_hub_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
 		if serviceEventBridge != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := serviceEventBridge.Close(ctx); err != nil {

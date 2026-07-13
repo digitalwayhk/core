@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
-	"github.com/zeromicro/go-zero/core/proc"
 )
 
-// 全局 WebSocket 通知系统（所有 RouterInfo 共享）
+// WebSocketNotificationSystem 是旧版独立通知池，保留用于兼容已有调用方。
+// 框架运行时不再创建进程级单例，新代码使用 ServiceContext 的 RouteWebSocketHub。
 type WebSocketNotificationSystem struct {
 	jobChan   chan *noticeJob
 	workers   int
@@ -27,50 +27,6 @@ type WebSocketNotificationSystem struct {
 	totalJobs     atomic.Int64
 	droppedJobs   atomic.Int64
 	processedJobs atomic.Int64
-}
-
-var (
-	globalNotificationSystem *WebSocketNotificationSystem
-	globalSystemOnce         sync.Once //  确保只创建一次
-	globalSystemMu           sync.RWMutex
-	websocketShutdownOnce    sync.Once
-)
-
-// 获取全局通知系统（单例）
-func getGlobalNotificationSystem() *WebSocketNotificationSystem {
-	globalSystemOnce.Do(func() {
-		system := &WebSocketNotificationSystem{
-			jobChan: make(chan *noticeJob, 10000), //  减少缓冲区（10K 足够）
-			workers: 20,                           //  减少 worker 数量
-			closeCh: make(chan struct{}),
-		}
-		globalSystemMu.Lock()
-		globalNotificationSystem = system
-		globalSystemMu.Unlock()
-		registerWebSocketProcessShutdown()
-	})
-	globalSystemMu.RLock()
-	system := globalNotificationSystem
-	globalSystemMu.RUnlock()
-	return system
-}
-
-func registerWebSocketProcessShutdown() {
-	websocketShutdownOnce.Do(func() {
-		proc.AddShutdownListener(func() {
-			globalSystemMu.RLock()
-			system := globalNotificationSystem
-			globalSystemMu.RUnlock()
-			if system != nil {
-				system.Shutdown()
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := StopPeriodicCleanup(ctx); err != nil {
-				logx.Errorw("websocket_cleanup_stop_failed", logx.Field("error", err))
-			}
-		})
-	})
 }
 
 // 启动全局通知系统（只启动一次）

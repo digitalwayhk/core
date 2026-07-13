@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/server/event"
 )
 
 type shardTestWebSocket struct{ id int }
@@ -126,12 +128,25 @@ func waitForShard(t *testing.T, check func() bool) {
 	t.Fatal("timed out waiting for condition")
 }
 
-func newShardRouterInfo(path string) *RouterInfo {
-	return &RouterInfo{Path: path, ServiceName: "svc", PathType: PublicType}
+func newShardRouterInfo(t *testing.T, path string) *RouterInfo {
+	return newShardRouterInfoForService(t, "svc", path)
 }
 
-func newShardRouterInfoForService(serviceName, path string) *RouterInfo {
-	return &RouterInfo{Path: path, ServiceName: serviceName, PathType: PublicType}
+func newShardRouterInfoForService(t *testing.T, serviceName, path string) *RouterInfo {
+	t.Helper()
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	hub := NewRouteWebSocketHub(serviceName, bridge)
+	info := &RouterInfo{Path: path, ServiceName: serviceName, PathType: PublicType}
+	info.SetWebSocketHub(serviceName, hub)
+	t.Cleanup(func() {
+		if err := hub.Close(context.Background()); err != nil {
+			t.Errorf("关闭 RouteWebSocketHub: %v", err)
+		}
+		if err := bridge.Close(context.Background()); err != nil {
+			t.Errorf("关闭 ServiceEventBridge: %v", err)
+		}
+	})
+	return info
 }
 
 func newShardRouter(info *RouterInfo, hash uint64) *shardTestRouter {
@@ -145,7 +160,7 @@ func TestUnRegisterWebSocketHash_DoubleUnregisterFiresOnce(t *testing.T) {
 	SetCrossNodeForwarder(capture)
 	defer SetCrossNodeForwarder(nil)
 
-	info := newShardRouterInfo("/ws/order")
+	info := newShardRouterInfo(t, "/ws/order")
 	router := newShardRouter(info, 55)
 	ws := &shardTestWebSocket{id: 1}
 	req := &shardTestRequest{}
@@ -174,7 +189,7 @@ func TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount(t *testing.T) {
 	SetCrossNodeForwarder(capture)
 	defer SetCrossNodeForwarder(nil)
 
-	info := newShardRouterInfo("/ws/price")
+	info := newShardRouterInfo(t, "/ws/price")
 	router := newShardRouter(info, 66)
 	registered := &shardTestWebSocket{id: 1}
 	unknown := &shardTestWebSocket{id: 2}
@@ -208,10 +223,10 @@ func TestWebSocketForwardersAreIsolatedByService(t *testing.T) {
 		ClearCrossNodeForwarderForService(serviceB, forwarderB)
 	})
 
-	infoA := newShardRouterInfoForService(serviceA, "/ws/service-a")
+	infoA := newShardRouterInfoForService(t, serviceA, "/ws/service-a")
 	routerA := newShardRouter(infoA, 101)
 	hashA := infoA.RegisterWebSocketClient(routerA, &shardTestWebSocket{id: 101}, &shardTestRequest{})
-	infoB := newShardRouterInfoForService(serviceB, "/ws/service-b")
+	infoB := newShardRouterInfoForService(t, serviceB, "/ws/service-b")
 	routerB := newShardRouter(infoB, 202)
 	hashB := infoB.RegisterWebSocketClient(routerB, &shardTestWebSocket{id: 202}, &shardTestRequest{})
 
