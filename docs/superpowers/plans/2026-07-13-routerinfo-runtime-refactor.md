@@ -113,7 +113,7 @@ git commit -m "fix: make router execution and pooling lifecycle safe"
 - Create: `pkg/server/types/routerinfo_lifecycle_test.go`
 - Modify: `pkg/server/router/servicecontext_registry_test.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```go
 func TestRouterInfoFreezeRejectsMetadataMutation(t *testing.T) {}
@@ -123,7 +123,7 @@ func TestServiceContextShutdownUnregistersExactInstance(t *testing.T) {}
 func TestServiceContextCanRecreateAfterShutdown(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -133,7 +133,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/types ./pkg/server
 
 Expected: 当前元数据可修改、不同配置静默复用、终止实例仍留在 registry。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 RouterInfo 增加所有者和冻结状态；`ServiceRouter.AddRoutes` 完成归一化后调用 `Freeze(serviceName)`。冻结后的 setter panic 并使用稳定错误文本。
 
@@ -158,7 +158,7 @@ func (r *serviceContextRegistry) remove(name string, expected *ServiceContext) b
 }
 ```
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -170,7 +170,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/router ./pkg
 
 Expected: PASS；配置冲突不打印配置正文。
 
-- [ ] **Step 5: 提交**
+验收证据：`go test ./pkg/server/router ./pkg/server/types -count=1` 与对应 `-race` 均通过；实现提交 `690bb1a`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/types/routerinfo.go pkg/server/types/routerinfo_lifecycle_test.go pkg/server/router
