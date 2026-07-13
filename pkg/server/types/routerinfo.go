@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"runtime/debug"
 	"strconv"
 	"sync"
@@ -87,10 +88,63 @@ type RouterInfo struct {
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
 	channelPool         *ChannelPool
+	owner               string
+	frozen              bool
+	frozenMetadata      routerMetadata
 
 	// 🆕 性能统计字段
 	stats     *RouterStats `json:"-"`
 	statsLock sync.RWMutex
+}
+
+type routerMetadata struct {
+	path         string
+	serviceName  string
+	auth         bool
+	method       string
+	pathType     ApiType
+	structName   string
+	instanceName string
+	instanceType string
+}
+
+// Freeze 在路由完成注册后冻结身份元数据。重复冻结仅在所有者和元数据一致时幂等。
+func (own *RouterInfo) Freeze(owner string) {
+	own.Lock()
+	defer own.Unlock()
+	if own.frozen {
+		own.assertMetadataFrozenLocked()
+		if own.owner != owner {
+			panic("router metadata owner conflict")
+		}
+		return
+	}
+	own.owner = owner
+	own.frozenMetadata = own.currentMetadataLocked()
+	own.frozen = true
+}
+
+func (own *RouterInfo) currentMetadataLocked() routerMetadata {
+	instanceType := ""
+	if own.instance != nil {
+		instanceType = reflect.TypeOf(own.instance).String()
+	}
+	return routerMetadata{
+		path:         own.Path,
+		serviceName:  own.ServiceName,
+		auth:         own.Auth,
+		method:       own.Method,
+		pathType:     own.PathType,
+		structName:   own.StructName,
+		instanceName: own.InstanceName,
+		instanceType: instanceType,
+	}
+}
+
+func (own *RouterInfo) assertMetadataFrozenLocked() {
+	if own.frozen && own.currentMetadataLocked() != own.frozenMetadata {
+		panic("router metadata changed after registration")
+	}
 }
 
 func (own *RouterInfo) New() IRouter {
@@ -123,12 +177,23 @@ func (own *RouterInfo) GetInstance() interface{} {
 	return own.instance
 }
 func (own *RouterInfo) SetInstance(instance IRouter) {
+	own.Lock()
+	defer own.Unlock()
+	if own.frozen {
+		panic("router instance cannot change after registration")
+	}
 	own.instance = instance
 }
 func (own *RouterInfo) GetPath() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
 	return own.Path
 }
 func (own *RouterInfo) GetServiceName() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
 	return own.ServiceName
 }
 

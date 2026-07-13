@@ -99,6 +99,48 @@ func TestServiceContextConcurrentSameNameInitializesOnce(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
+func TestServiceContextSameNameDifferentConfigFailsClosed(t *testing.T) {
+	serviceName := uniqueServiceName("sctest-config-conflict")
+	service := &instrumentedService{name: serviceName}
+	firstConfig := testServiceConfig(serviceName, 31101)
+	secondConfig := testServiceConfig(serviceName, 31102)
+
+	sc := router.NewServiceContextWithConfig(service, firstConfig)
+	sc.SetRunState(true)
+	t.Cleanup(func() { sc.SetRunState(false) })
+
+	assert.Panics(t, func() {
+		router.NewServiceContextWithConfig(service, secondConfig)
+	})
+}
+
+func TestServiceContextShutdownUnregistersExactInstance(t *testing.T) {
+	serviceName := uniqueServiceName("sctest-shutdown-unregister")
+	service := &instrumentedService{name: serviceName}
+	sc := router.NewServiceContextWithConfig(service, testServiceConfig(serviceName, 31103))
+	sc.SetRunState(true)
+
+	sc.SetRunState(false)
+
+	assert.Nil(t, router.GetContext(serviceName))
+}
+
+func TestServiceContextCanRecreateAfterShutdown(t *testing.T) {
+	serviceName := uniqueServiceName("sctest-recreate")
+	service := &instrumentedService{name: serviceName}
+	con := testServiceConfig(serviceName, 31104)
+	first := router.NewServiceContextWithConfig(service, con)
+	first.SetRunState(true)
+	first.SetRunState(false)
+
+	second := router.NewServiceContextWithConfig(service, con)
+	second.SetRunState(true)
+	t.Cleanup(func() { second.SetRunState(false) })
+
+	assert.NotSame(t, first, second)
+	assert.Same(t, second, router.GetContext(serviceName))
+}
+
 func TestServiceContextConcurrentDifferentNamesInitializeInParallel(t *testing.T) {
 	entered := make(chan string, 2)
 	release := make(chan struct{})

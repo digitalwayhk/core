@@ -60,6 +60,7 @@ type ServiceContext struct {
 	membership        *cluster.MembershipManager     `json:"-"`
 	CrossNodeBroker   *cluster.CrossNodeNoticeBroker `json:"-"`
 	nodeID            string
+	configFingerprint string
 }
 
 func (own *ServiceContext) beginLifecycleOperation() {
@@ -246,11 +247,13 @@ func (r *serviceContextRegistry) snapshot() map[string]*ServiceContext {
 func (r *serviceContextRegistry) getOrInitialize(
 	name string,
 	reserveDefaultSequence bool,
+	requestedFingerprint string,
 	initialize func(sequence int) *ServiceContext,
 ) *ServiceContext {
 	r.mu.Lock()
 	if sc := r.contexts[name]; sc != nil {
 		r.mu.Unlock()
+		assertServiceContextConfig(name, requestedFingerprint, sc)
 		return sc
 	}
 	if entry := r.initializing[name]; entry != nil {
@@ -259,6 +262,7 @@ func (r *serviceContextRegistry) getOrInitialize(
 		if entry.panicked {
 			panic(entry.panicValue)
 		}
+		assertServiceContextConfig(name, requestedFingerprint, entry.result)
 		return entry.result
 	}
 
@@ -296,6 +300,25 @@ func (r *serviceContextRegistry) getOrInitialize(
 		panic(entry.panicValue)
 	}
 	return result
+}
+
+func assertServiceContextConfig(name, requestedFingerprint string, sc *ServiceContext) {
+	if sc == nil || requestedFingerprint == "" || sc.configFingerprint == "" {
+		return
+	}
+	if requestedFingerprint != sc.configFingerprint {
+		panic(fmt.Sprintf("service context config conflict: service=%s", name))
+	}
+}
+
+func (r *serviceContextRegistry) remove(name string, expected *ServiceContext) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contexts[name] != expected {
+		return false
+	}
+	delete(r.contexts, name)
+	return true
 }
 
 // reserveDefaultSequence 必须在持有 r.mu 时调用。
@@ -338,11 +361,20 @@ func GetTestResult(path string) interface{} {
 
 func NewServiceContext(service types.IService) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	return contextRegistry.getOrInitialize(name, true, func(sequence int) *ServiceContext {
+	con := config.ReadConfig(name)
+	requestedFingerprint := ""
+	if con != nil {
+		normalized, fingerprint, err := normalizeServerConfig(con)
+		if err != nil {
+			panic(fmt.Sprintf("config validation failed: %v", err))
+		}
+		con = normalized
+		requestedFingerprint = fingerprint
+	}
+	return contextRegistry.getOrInitialize(name, true, requestedFingerprint, func(sequence int) *ServiceContext {
 		sc := &ServiceContext{}
 		sc.StateChan = make(chan bool, 1)
 		sc.Service = initService(service, sc)
-		con := config.ReadConfig(name)
 		if con == nil {
 			port := DEFAULTPORT + sequence
 			con = config.NewServiceDefaultConfig(name, port)
@@ -365,6 +397,11 @@ func NewServiceContext(service types.IService) *ServiceContext {
 			}
 		}
 		sc.Config = con
+		fingerprint, err := serverConfigFingerprint(con)
+		if err != nil {
+			panic(err)
+		}
+		sc.configFingerprint = fingerprint
 		initServiceContextPost(sc, service, con)
 		return sc
 	})
@@ -375,18 +412,20 @@ func NewServiceContext(service types.IService) *ServiceContext {
 // and programmatic service bootstrap where the caller manages configuration.
 func NewServiceContextWithConfig(service types.IService, con *config.ServerConfig) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	return contextRegistry.getOrInitialize(name, false, func(_ int) *ServiceContext {
-		if con == nil {
-			panic("config validation failed: config is nil")
-		}
-		con.ApplyDefaults()
-		if err := con.Validate(); err != nil {
-			panic(fmt.Sprintf("config validation failed: %v", err))
-		}
+	if con == nil {
+		panic("config validation failed: config is nil")
+	}
+	normalized, fingerprint, err := normalizeServerConfig(con)
+	if err != nil {
+		panic(fmt.Sprintf("config validation failed: %v", err))
+	}
+	con = normalized
+	return contextRegistry.getOrInitialize(name, false, fingerprint, func(_ int) *ServiceContext {
 		sc := &ServiceContext{}
 		sc.StateChan = make(chan bool, 1)
 		sc.Service = initService(service, sc)
 		sc.Config = con
+		sc.configFingerprint = fingerprint
 		initServiceContextPost(sc, service, con)
 		return sc
 	})
@@ -584,6 +623,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 				logx.Errorf("mq: close failed: %v", err)
 			}
 		}
+		contextRegistry.remove(own.Service.Name, own)
 	}
 
 	// 🔧 非阻塞发送，避免死锁

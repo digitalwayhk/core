@@ -58,6 +58,7 @@ func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
 			info.Path = strings.Replace(info.Path, tsn, ssn, -1)
 			info.ServiceName = own.Service.Service.Name
 		}
+		info.Freeze(own.Service.Service.Name)
 		if info.PathType == types.PublicType {
 			own.publicAPI[info.Path] = info
 		}
@@ -77,6 +78,7 @@ func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
 func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
+		info.Freeze(own.Service.Service.Name)
 		own.serverManagerAPI[info.Path] = info
 	}
 }
