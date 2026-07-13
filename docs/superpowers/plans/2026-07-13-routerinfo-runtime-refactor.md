@@ -475,7 +475,7 @@ git commit -m "feat: add pure badger route cache l2"
 - Modify: `docker-compose.integration.yml`
 - Modify: `scripts/test.sh`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 使用接口化 fake Redis 完成默认单元测试；Docker 集成测试仅在显式环境变量下运行。
 
@@ -488,7 +488,7 @@ func TestInvalidationClearsPeerL1L2(t *testing.T) {}
 func TestInvalidationIsIdempotent(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -498,7 +498,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/config ./pkg/serve
 
 Expected: shared 模式和 Redis adapter 尚不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 L3 使用 go-zero Redis `GetCtx/SetexCtx/DelCtx/PingCtx`。失效事件通过 ServiceEventBridge 的外部控制通道发布，payload 只含 service、route、key、generation。manager 状态为 enabled/bypass/degraded/closed。
 
@@ -514,7 +514,7 @@ const (
 
 启动时 shared+Redis 不可用默认返回错误；显式 `OnUnavailable=bypass` 时关闭全部层。运行期失败清空并暂停 L1/L2；只有 Ping 和失效订阅都恢复才重新启用。
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -527,7 +527,9 @@ CORE_TEST_REDIS=1 ./scripts/test.sh integration
 
 Expected: 默认单测 PASS；显式 Redis 集成环境 PASS；环境变量未设置时集成测试 skip。
 
-- [ ] **Step 5: 提交**
+验收证据：聚焦 RED 首先因缺少 `SubscribeExternal`、Redis 注入和失效协议而失败；实现后四包全量、`routecache/router` race、`routecache -count=20`、日志检查和 `release-contract` 均通过。`./scripts/test.sh integration` 默认明确 skip；临时启动现有 Compose Redis 后，`CORE_TEST_REDIS=1 ./scripts/test.sh integration` 真实往返通过并已停止容器。Compose 原本已包含 Redis，因此未修改或提交用户现有的 MySQL 镜像变更。实现提交 `8eec8b6`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/routecache pkg/server/config/routecache.go pkg/server/router/servicecontext.go docker-compose.integration.yml scripts/test.sh
