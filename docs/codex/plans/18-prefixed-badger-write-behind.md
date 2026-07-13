@@ -92,7 +92,7 @@ go test ./pkg/persistence/database/nosql -run 'Test.*(WriteBehind|PendingTTL)' -
 - [x] `getUnsyncedBatch` 遇到无法反序列化的数据项时返回带 key 的错误，不删除数据、不删除同步索引、不静默越过。
 - [x] 重启初始化继续以持久同步索引重建内存计数。
 
-**完成记录：** 单条与批量写入均按新建持久索引计数；损坏项保留现场并阻断批次。聚焦测试 `-count=20` 和 nosql 全包通过。
+**完成记录：** 单条、批量写入与软删除均按新建持久索引计数；同一 key 在待同步 Set 后软删除不会重复增加内存计数，确认后内存与持久计数同时归零。损坏项保留现场并阻断批次。聚焦测试 `-count=20`、相关 race 和 nosql 全包通过。外部审查 P1 修复提交为 `cf5eecd`。
 
 **RED/GREEN：**
 
@@ -152,7 +152,7 @@ go vet ./pkg/persistence/database/nosql/...
 ./scripts/test.sh release-contract
 ```
 
-**完成记录：** nosql 全包、race、`persistence-unit`、vet 与 `release-contract` 均通过；框架指南、skill 引用、CHANGELOG、废弃登记和项目总台账已同步。JetStream 接入说明已单独写入 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，未修改 NATS 业务实现。
+**完成记录：** nosql 全包、race、`persistence-unit`、vet 与 `release-contract` 均通过；框架指南、skill 引用、CHANGELOG、废弃登记和项目总台账已同步。外部审查发现的软删除 pending 计数漂移已由 `cf5eecd` 关闭。JetStream 接入说明已单独写入 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，未修改 NATS 业务实现。
 
 ## 完成后输出的 NATS JetStream 指南
 

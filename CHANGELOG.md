@@ -26,7 +26,7 @@
 ### Fixed
 
 - OpenAPI 零服务生成、配置静默接受、生命周期和并发关闭问题。
-- write-behind 同 key 重复写入的 pending 计数漂移，以及损坏同步项被静默跳过的问题。
+- write-behind 同 key 重复写入或待同步 Set 后软删除的 pending 计数漂移，以及损坏同步项被静默跳过的问题。
 
 ### Security
 
