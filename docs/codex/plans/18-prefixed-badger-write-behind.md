@@ -86,11 +86,13 @@ go test ./pkg/persistence/database/nosql -run 'Test.*(WriteBehind|PendingTTL)' -
 - 修改：`pkg/persistence/database/nosql/sharedbadger.go`
 - 修改：`pkg/persistence/database/nosql/sharedbadger_syncqueue_test.go`
 
-- [ ] 在写事务内判断同步索引是否已存在；只有新建索引时增加 `pendingCountCache`。
-- [ ] `BatchInsert` 按实际新建同步索引数增加计数，不按输入项数增加。
-- [ ] 同一 key 在确认前重复更新时，队列长度和内存计数保持 1；确认后均归零。
-- [ ] `getUnsyncedBatch` 遇到无法反序列化的数据项时返回带 key 的错误，不删除数据、不删除同步索引、不静默越过。
-- [ ] 重启初始化继续以持久同步索引重建内存计数。
+- [x] 在写事务内判断同步索引是否已存在；只有新建索引时增加 `pendingCountCache`。
+- [x] `BatchInsert` 按实际新建同步索引数增加计数，不按输入项数增加。
+- [x] 同一 key 在确认前重复更新时，队列长度和内存计数保持 1；确认后均归零。
+- [x] `getUnsyncedBatch` 遇到无法反序列化的数据项时返回带 key 的错误，不删除数据、不删除同步索引、不静默越过。
+- [x] 重启初始化继续以持久同步索引重建内存计数。
+
+**完成记录：** 单条与批量写入均按新建持久索引计数；损坏项保留现场并阻断批次。聚焦测试 `-count=20` 和 nosql 全包通过。
 
 **RED/GREEN：**
 

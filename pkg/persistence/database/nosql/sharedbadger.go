@@ -340,6 +340,7 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 	if err != nil {
 		return err
 	}
+	queueCreated := false
 	err = p.manager.db.Update(func(txn *badger.Txn) error {
 		entry := badger.NewEntry([]byte(key), data)
 		if ttl > 0 {
@@ -349,13 +350,17 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 			return err
 		}
 		if needSync {
-			return txn.Set([]byte(p.syncQueueKey(key)), nil)
+			var err error
+			queueCreated, err = p.ensureSyncQueueEntry(txn, key)
+			return err
 		}
 		return nil
 	})
 
-	if err == nil && needSync {
+	if err == nil && needSync && queueCreated {
 		p.incrementPendingCount(1)
+	}
+	if err == nil && needSync {
 		p.triggerSync()
 	}
 	return err
@@ -387,6 +392,7 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 		}
 		batch := items[start:end]
 
+		newQueueKeys := make(map[string]struct{}, len(batch))
 		err := p.manager.db.Update(func(txn *badger.Txn) error {
 			for _, item := range batch {
 				key := p.generateKey(item)
@@ -404,8 +410,15 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 					return err
 				}
 				if needSync {
-					if err := txn.Set([]byte(p.syncQueueKey(key)), nil); err != nil {
+					if _, seen := newQueueKeys[key]; seen {
+						continue
+					}
+					created, err := p.ensureSyncQueueEntry(txn, key)
+					if err != nil {
 						return err
+					}
+					if created {
+						newQueueKeys[key] = struct{}{}
 					}
 				}
 			}
@@ -416,13 +429,28 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 			return fmt.Errorf("BatchInsert 第 %d-%d 条失败（已成功 %d 条）: %w", start, end, successCount, err)
 		}
 		successCount += len(batch)
+		if needSync {
+			p.incrementPendingCount(len(newQueueKeys))
+		}
 	}
 
 	if needSync {
-		p.incrementPendingCount(successCount)
 		p.triggerSync()
 	}
 	return nil
+}
+
+func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string) (bool, error) {
+	queueKey := []byte(p.syncQueueKey(dataKey))
+	if _, err := txn.Get(queueKey); err == nil {
+		return false, nil
+	} else if err != badger.ErrKeyNotFound {
+		return false, err
+	}
+	if err := txn.Set(queueKey, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // BatchLoad 将远端数据库拉取的数据批量写入本地 BadgerDB，标记为已同步（不会触发反向同步回远端）。
@@ -1488,7 +1516,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 			err = dataItem.Value(func(val []byte) error {
 				var wrapper SyncQueueItem[T]
 				if err := json.Unmarshal(val, &wrapper); err != nil {
-					return err
+					return fmt.Errorf("反序列化待同步数据失败 [key=%s]: %w", dataKey, err)
 				}
 
 				// 防御性检查：数据已标记为已同步但队列条目残留
@@ -1508,7 +1536,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 			})
 
 			if err != nil {
-				continue
+				return err
 			}
 		}
 		return nil

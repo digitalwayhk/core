@@ -10,6 +10,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPendingCountUsesUniqueSyncQueueKeys(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newFund("pending-unique", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	item.Balance = 2
+	require.NoError(t, db.Set(item, 0))
+
+	persistent, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, persistent)
+	db.pendingCountMutex.RLock()
+	cached := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Equal(t, persistent, cached)
+}
+
+func TestMalformedSyncItemStopsBatchWithoutDeletingEvidence(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	dataKey := db.prefix + "malformed"
+	queueKey := db.syncQueueKey(dataKey)
+
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set([]byte(dataKey), []byte("not-json")); err != nil {
+			return err
+		}
+		return txn.Set([]byte(queueKey), nil)
+	}))
+
+	items, err := db.getUnsyncedBatch(10)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), dataKey)
+	require.Empty(t, items)
+	require.NoError(t, db.manager.db.View(func(txn *badger.Txn) error {
+		if _, err := txn.Get([]byte(dataKey)); err != nil {
+			return err
+		}
+		_, err := txn.Get([]byte(queueKey))
+		return err
+	}))
+}
+
 func newTestFundItem(userID, market string, balance float64) *testFund {
 	return &testFund{
 		Model:   entity.NewModel(),
