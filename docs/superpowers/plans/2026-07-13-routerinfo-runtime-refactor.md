@@ -340,7 +340,7 @@ git commit -m "fix: isolate websocket subscriptions by full hash"
 - Modify: `pkg/server/types/routerinfo.go`
 - Modify: `pkg/server/router/servicecontext.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```go
 func TestRouteCacheConfigDefaultsToOff(t *testing.T) {}
@@ -351,7 +351,7 @@ func TestRouteCacheSingleFlightLoadsOnce(t *testing.T) {}
 func TestRouterInfoUseCacheDelegatesToManager(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -361,7 +361,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/config ./pkg/serve
 
 Expected: routecache package、配置和 IRouterCacheKey 尚不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 新增配置，默认 `Mode=off`；local 启用 L1，shared 留给 Task 7 校验。L1 使用 `collection.NewCache(ttl, collection.WithLimit(limit))`，加载用 `syncx.NewSingleFlight()`。
 
@@ -378,7 +378,7 @@ type RouteCacheConfig struct {
 
 键顺序为 `IRouterCacheKey -> IRouterHashKey -> 带字段名/类型/长度的确定性 JSON`。RouterInfo 原有 UseCache/FailureCache 保留并委托 manager。
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -391,7 +391,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/routecache .
 
 Expected: PASS，公共 API 快照只新增接口和配置。
 
-- [ ] **Step 5: 提交**
+验收证据：`go test ./pkg/server/config ./pkg/server/routecache ./pkg/server/types ./pkg/server/router -count=1`、聚焦 `-race`、日志检查和 `release-contract` 均通过；实现提交 `4d16ef3`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/config pkg/server/routecache pkg/server/types pkg/server/router/servicecontext.go
