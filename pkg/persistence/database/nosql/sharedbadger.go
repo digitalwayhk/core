@@ -125,6 +125,11 @@ const (
 	OpDelete OpType = "delete" //  删除操作
 )
 
+var (
+	ErrUnsafeWriteBehindConfig = errors.New("unsafe write-behind config")
+	ErrWriteBehindTTL          = errors.New("write-behind entries cannot use ttl")
+)
+
 // syncQueueKeyPrefix 同步队列索引前缀。
 // 写入 IsSynced=false 的数据时，同时在 \x00sq:{dataKey} 写入一个空值条目；
 // 同步成功后删除该条目。getUnsyncedBatch 仅扫描此前缀，复杂度从 O(N) 降为 O(K)。
@@ -175,6 +180,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 
 	syncDB         bool
 	syncList       *entity.ModelList[T]
+	syncBindErr    error
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
 	syncInProgress bool
@@ -240,39 +246,73 @@ func (p *PrefixedBadgerDB[T]) generateKey(item *T) string {
 	return ""
 }
 
-// SetSyncDB 设置同步数据库
-func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
-	p.syncLock.Lock()
-	defer p.syncLock.Unlock()
-
-	if list != nil {
-		if p.syncDB {
-			return
-		}
-		p.syncDB = true
-	} else {
-		if !p.syncDB {
-			return
-		}
-		p.syncDB = false
+// EnableWriteBehind 使用可持久化、冲突安全且禁止损坏重建的配置启用远端写回。
+func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error {
+	if list == nil {
+		return fmt.Errorf("%w: sync list 不能为空", ErrUnsafeWriteBehindConfig)
+	}
+	config := p.manager.config
+	if !config.SyncWrites {
+		return p.recordWriteBehindBindError(fmt.Errorf("%w: sync_writes 必须为 true", ErrUnsafeWriteBehindConfig))
+	}
+	if !config.DetectConflicts {
+		return p.recordWriteBehindBindError(fmt.Errorf("%w: detect_conflicts 必须为 true", ErrUnsafeWriteBehindConfig))
+	}
+	if config.CorruptionPolicy != CorruptionPolicyFail {
+		return p.recordWriteBehindBindError(fmt.Errorf("%w: corruption_policy 必须为 %q", ErrUnsafeWriteBehindConfig, CorruptionPolicyFail))
 	}
 
+	p.syncLock.Lock()
+	if p.syncDB {
+		p.syncLock.Unlock()
+		return nil
+	}
+	p.syncDB = true
 	p.syncList = list
+	p.syncBindErr = nil
 
 	// 绑定连接池信号量：以 adapter 指针为键，同一连接池的所有 prefix 共用同一信号量。
-	if list != nil {
-		if action := list.GetAction(); action != nil {
-			p.syncSema = getOrCreateAdapterSema(action)
-			logx.Infof("同步信号量已绑定 [prefix=%s, cap=%d]", p.prefix, cap(p.syncSema))
-		}
+	if action := list.GetAction(); action != nil {
+		p.syncSema = getOrCreateAdapterSema(action)
+		logx.Infof("同步信号量已绑定 [prefix=%s, cap=%d]", p.prefix, cap(p.syncSema))
 	}
+	p.syncLock.Unlock()
 
-	if list != nil && p.syncDB {
-		p.syncOnce.Do(func() {
-			p.wg.Add(1)
-			go p.syncToOtherDB()
-			logx.Infof("共享DB自动同步已启动 [prefix=%s]", p.prefix)
-		})
+	p.syncOnce.Do(func() {
+		p.wg.Add(1)
+		go p.syncToOtherDB()
+		logx.Infof("共享DB自动同步已启动 [prefix=%s]", p.prefix)
+	})
+	return nil
+}
+
+func (p *PrefixedBadgerDB[T]) recordWriteBehindBindError(err error) error {
+	p.syncLock.Lock()
+	p.syncDB = false
+	p.syncList = nil
+	p.syncBindErr = err
+	p.syncLock.Unlock()
+	return err
+}
+
+func (p *PrefixedBadgerDB[T]) writeBehindBindError() error {
+	p.syncLock.RLock()
+	defer p.syncLock.RUnlock()
+	return p.syncBindErr
+}
+
+// SetSyncDB 保留旧签名以兼容下游；新代码应使用 EnableWriteBehind 获取绑定错误。
+func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
+	if list == nil {
+		p.syncLock.Lock()
+		p.syncDB = false
+		p.syncList = nil
+		p.syncBindErr = nil
+		p.syncLock.Unlock()
+		return
+	}
+	if err := p.EnableWriteBehind(list); err != nil {
+		logx.Errorw("write_behind_bind_rejected", logx.Field("prefix", p.prefix), logx.Field("error", err))
 	}
 }
 
@@ -280,6 +320,9 @@ func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
 func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper *SyncQueueItem[T])) error {
 	if p.IsClosed() {
 		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
+	if err := p.writeBehindBindError(); err != nil {
+		return err
 	}
 	key := p.generateKey(item)
 	if key == "" {
@@ -289,6 +332,9 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 	p.syncLock.RLock()
 	needSync := p.syncDB
 	p.syncLock.RUnlock()
+	if needSync && ttl > 0 {
+		return fmt.Errorf("%w [prefix=%s]", ErrWriteBehindTTL, p.prefix)
+	}
 
 	data, err := p.setItem(key, needSync, item, fn...)
 	if err != nil {
@@ -317,6 +363,9 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 	if p.IsClosed() {
 		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
+	if err := p.writeBehindBindError(); err != nil {
+		return err
 	}
 	if len(items) == 0 {
 		return nil

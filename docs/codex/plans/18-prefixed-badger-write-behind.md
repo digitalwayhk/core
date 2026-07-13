@@ -56,7 +56,7 @@ go test ./pkg/persistence/database/nosql -run 'Test.*CorruptionPolicy' -count=1
 - 修改：`pkg/persistence/database/nosql/sharedbadger.go`
 - 创建：`pkg/persistence/database/nosql/sharedbadger_writebehind_test.go`
 
-- [ ] 新增稳定错误：
+- [x] 新增稳定错误：
 
 ```go
 var (
@@ -65,11 +65,13 @@ var (
 )
 ```
 
-- [ ] `EnableWriteBehind` 在绑定前要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicy=fail`；不满足时使用 `%w` 返回 `ErrUnsafeWriteBehindConfig`。
-- [ ] 保留 `SetSyncDB`，内部委托安全入口并保存绑定结果；不得在验证失败后启动 goroutine。
-- [ ] `Set` 在 write-behind 已启用时拒绝 `ttl>0`，返回 `ErrWriteBehindTTL`。
-- [ ] `BatchLoad` 仍表示远端数据写入本地，不进入同步队列。
-- [ ] 测试 production 配置可启用、fast/reset-cache 配置被拒绝、旧入口错误可观察、pending TTL 被拒绝、纯缓存 TTL 保持兼容。
+- [x] `EnableWriteBehind` 在绑定前要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicy=fail`；不满足时使用 `%w` 返回 `ErrUnsafeWriteBehindConfig`。
+- [x] 保留 `SetSyncDB`，内部委托安全入口并保存绑定结果；不得在验证失败后启动 goroutine。
+- [x] `Set` 在 write-behind 已启用时拒绝 `ttl>0`，返回 `ErrWriteBehindTTL`。
+- [x] `BatchLoad` 仍表示远端数据写入本地，不进入同步队列。
+- [x] 测试 production 配置可启用、fast/reset-cache 配置被拒绝、旧入口错误可观察、pending TTL 被拒绝、纯缓存 TTL 保持兼容。
+
+**完成记录：** 新增安全绑定入口；旧入口保持编译兼容并让错误在后续写入可见。聚焦测试及 nosql 全包通过。
 
 **RED/GREEN：**
 
