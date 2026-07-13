@@ -88,34 +88,3 @@ func (own *RouterInfo) GetSubscribedHashes() []uint64 {
 	}
 	return hub.SubscribedHashes(own)
 }
-
-// sendToHashClients 仅供旧 WebSocketNotificationSystem 兼容路径使用。
-func (own *RouterInfo) sendToHashClients(hash uint64, _ interface{}, data interface{}) {
-	if own == nil {
-		return
-	}
-	own.RLock()
-	hub := own.webSocketHub
-	own.RUnlock()
-	if hub == nil {
-		return
-	}
-	state := hub.getRouteState(own)
-	if state == nil {
-		return
-	}
-	shard := state.shard(hash)
-	shard.mu.RLock()
-	subscription := shard.subscriptions[hash]
-	clients := make([]IWebSocket, 0)
-	if subscription != nil {
-		clients = make([]IWebSocket, 0, len(subscription.clients))
-		for client := range subscription.clients {
-			if client != nil && !client.IsClosed() {
-				clients = append(clients, client)
-			}
-		}
-	}
-	shard.mu.RUnlock()
-	hub.sendPrepared(own, hash, clients, data)
-}

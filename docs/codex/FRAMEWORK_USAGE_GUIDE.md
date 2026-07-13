@@ -22,6 +22,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/03-manage-crud` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/03-manage-crud/...` | Stable |
 | 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `examples/04-manage-hooks` | 同管理 CRUD | `go test ./service/manage/...` | Stable |
 | OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | `examples/05-openapi-response` | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
+| 路由结果缓存 | `RouterInfo.UseCache`、`IRouterCacheKey` | 无独立示例 | local 可选 Badger；shared 要求 Redis + EventBridge 外部 adapter | `go test ./pkg/server/routecache` | Conditional |
 | 本地 WebSocket 通知 | `RegisterWebSocketClient`、`NoticeWebSocket` | `examples/06-websocket-local` | WebSocket 开启 | `go test -race ./pkg/server/types ./pkg/server/trans/websocket/melody` | Stable |
 | 跨节点 WebSocket | ClusterProvider、CrossNodeNoticeBroker | `examples/07-websocket-notice-hash` | 集群 `on/auto`；节点地址可达 | `go test -race ./pkg/server/cluster ./pkg/server/types` | Conditional |
 | 配置 profile | `ServerConfig.ApplyDefaults/Validate` | `examples/08-config-profiles` | 显式环境/profile | `./scripts/test.sh config-contract` | Stable |
@@ -33,6 +34,8 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | QUIC transport | 无推荐 API | 历史兼容包 | 配置层明确拒绝 | `go test ./pkg/server/config -run QUIC` | Unsupported |
 
 字段级细节见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
+
+RouterInfo 所有权、IRouter 对象池、缓存层级、EventBridge 和 WebSocket 生命周期见 `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`。
 
 ## 路由规则
 

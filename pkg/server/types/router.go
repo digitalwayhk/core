@@ -76,9 +76,9 @@ type IWebSocketRouterNotice interface {
 
 // IRouterHashKey 为路由参数提供稳定 hash。
 //
-// 当前实现将它同时用于路由缓存键和 WebSocket 订阅分组。相同业务参数必须在进程
-// 生命周期内返回相同值，并包含隔离订阅所需的全部业务维度；不得使用随机数、指针
-// 地址或随时间变化的数据。后续缓存组件会增加独立的 IRouterCacheKey 契约。
+// 当前实现将它用于 WebSocket 订阅分组，并在未实现 IRouterCacheKey 时作为缓存键
+// 的兼容回退。相同业务参数必须在进程生命周期内返回相同值，并包含隔离订阅所需的
+// 全部业务维度；不得使用随机数、指针地址或随时间变化的数据。
 type IRouterHashKey interface {
 	GetHashKey() uint64
 }

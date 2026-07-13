@@ -104,7 +104,6 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 	}
 	first := len(subscription.clients) == 0
 	subscription.clients[client] = req
-	count := len(subscription.clients)
 	shard.mu.Unlock()
 
 	if first {
@@ -117,7 +116,6 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 		}
 		callWebSocketRegister(router, client, req)
 	}
-	h.updateCompatibilityView(info, hash, router, count)
 	h.stats.activeClients.Add(1)
 	info.recordWebSocketConnect(hash)
 	return hash
@@ -151,7 +149,6 @@ func (h *RouteWebSocketHub) Unregister(info *RouterInfo, hash uint64, client IWe
 	}
 	shard.mu.Unlock()
 
-	h.updateCompatibilityView(info, hash, router, remaining)
 	h.stats.activeClients.Add(-1)
 	info.recordWebSocketDisconnect(hash)
 	if remaining == 0 {
@@ -208,24 +205,6 @@ func (h *RouteWebSocketHub) getRouteState(info *RouterInfo) *routeWebSocketState
 	state := h.routes[info]
 	h.routesMu.RUnlock()
 	return state
-}
-
-func (h *RouteWebSocketHub) updateCompatibilityView(info *RouterInfo, hash uint64, router IRouter, count int) {
-	info.Lock()
-	if info.rArgs == nil {
-		info.rArgs = make(map[uint64]IRouter)
-	}
-	if info.rHashClients == nil {
-		info.rHashClients = make(map[uint64]int)
-	}
-	if count == 0 {
-		delete(info.rArgs, hash)
-		delete(info.rHashClients, hash)
-	} else {
-		info.rArgs[hash] = router
-		info.rHashClients[hash] = count
-	}
-	info.Unlock()
 }
 
 func callWebSocketRegister(router IRouter, client IWebSocket, req IRequest) {

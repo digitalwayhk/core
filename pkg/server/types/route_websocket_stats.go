@@ -27,3 +27,25 @@ func (h *RouteWebSocketHub) Stats() RouteWebSocketStats {
 		Cleaned:       h.stats.cleaned.Load(),
 	}
 }
+
+func (h *RouteWebSocketHub) hashClientCounts(info *RouterInfo) map[uint64]int {
+	counts := make(map[uint64]int)
+	if h == nil || info == nil {
+		return counts
+	}
+	state := h.getRouteState(info)
+	if state == nil {
+		return counts
+	}
+	for index := range state.shards {
+		shard := state.shards[index]
+		shard.mu.RLock()
+		for hash, subscription := range shard.subscriptions {
+			if subscription != nil && len(subscription.clients) > 0 {
+				counts[hash] = len(subscription.clients)
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	return counts
+}

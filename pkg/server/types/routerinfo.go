@@ -73,11 +73,8 @@ type RouterInfo struct {
 	instance          IRouter
 	WebSocketWaitTime time.Duration                            //websocket默认通知的循环等待时间 默认:10秒
 	Subscriber        map[ObserveState]map[string]*ObserveArgs //订阅者
-	rCache            sync.Map                                 //路由结果缓存,key:api hash,value:result
 	useCache          bool                                     //是否使用缓存
 	cacheTime         time.Duration                            //缓存时间
-	rArgs             map[uint64]IRouter                       //路由参数
-	rHashClients      map[uint64]int                           // per-hash client count for accurate unregister detection
 	sync.RWMutex
 	TempStore sync.Map
 	// 自定义响应处理函数
@@ -567,8 +564,7 @@ func (own *RouterInfo) publishObservation(state ObserveState, api interface{}, t
 }
 
 type cacheObject struct {
-	updateCacheTime time.Time   //更新缓存时间
-	data            interface{} //缓存数据
+	data interface{}
 }
 
 func (own *RouterInfo) UseCache(cacheTime time.Duration) {
@@ -580,7 +576,6 @@ func (own *RouterInfo) UseCache(cacheTime time.Duration) {
 	}
 	runtime := own.cacheRuntime
 	path := own.Path
-	own.rCache = sync.Map{}
 	own.Unlock()
 	if runtime != nil {
 		if err := runtime.EnableRoute(path, own.cacheTime); err != nil {
@@ -602,17 +597,7 @@ func (own *RouterInfo) getCache(api IRouter) *cacheObject {
 		if err != nil || !ok {
 			return nil
 		}
-		return &cacheObject{updateCacheTime: time.Now(), data: value}
-	}
-	key := getApiHash(api)
-	if value, ok := own.rCache.Load(key); ok {
-		obj := value.(*cacheObject)
-		if obj.updateCacheTime.Add(own.cacheTime).After(time.Now()) {
-			return obj
-		}
-		//缓存过期
-		own.rCache.Delete(key)
-		return nil
+		return &cacheObject{data: value}
 	}
 	return nil
 }
@@ -630,20 +615,7 @@ func (own *RouterInfo) setCache(api IRouter, value interface{}) {
 				logx.Field("error", err),
 			)
 		}
-		return
 	}
-	key := getApiHash(api)
-	obj := own.getCache(api)
-	if obj == nil {
-		obj = &cacheObject{
-			updateCacheTime: time.Now(),
-			data:            value,
-		}
-	} else {
-		obj.updateCacheTime = time.Now()
-		obj.data = value
-	}
-	own.rCache.Store(key, obj)
 }
 func (own *RouterInfo) FailureCache(api IRouter) {
 	own.RLock()
@@ -664,17 +636,7 @@ func (own *RouterInfo) FailureCache(api IRouter) {
 				logx.Field("error", err),
 			)
 		}
-		return
 	}
-	if api == nil {
-		own.rCache.Range(func(key, value interface{}) bool {
-			own.rCache.Delete(key)
-			return true
-		})
-		return
-	}
-	key := getApiHash(api)
-	own.rCache.Delete(key)
 }
 func getApiHash(api IRouter) uint64 {
 	if hk, ok := api.(IRouterHashKey); ok {
@@ -693,76 +655,9 @@ func (own *RouterInfo) GetWebSocketIRouter() []IRouter {
 	if hub != nil {
 		return hub.Routers(own)
 	}
-	items := make([]IRouter, 0)
-	for _, r := range own.rArgs {
-		items = append(items, r)
-	}
-	return items
+	return nil
 }
 
-// 注册websocket的订阅，并返回订阅的event号
-// func (own *RouterInfo) RegisterWebSocketClient(router IRouter, client IWebSocket, req IRequest) uint64 {
-// 	if router == nil || client == nil || req == nil {
-// 		return 0
-// 	}
-// 	own.ensureWebSocketInit()
-
-// 	// 🔧 在锁外声明需要的变量
-// 	var needRegister bool
-// 	var hash uint64
-
-// 	// 🔧 在锁内只做数据操作
-// 	func() {
-// 		own.websocketlock.Lock()
-// 		defer own.websocketlock.Unlock()
-
-// 		// 🔧 初始化检查
-// 		if own.rArgs == nil {
-// 			own.rArgs = make(map[uint64]IRouter)
-// 		}
-// 		if own.rWebSocketClient == nil {
-// 			own.rWebSocketClient = make(map[uint64]map[IWebSocket]IRequest)
-// 		}
-
-// 		// 🔧 处理私有类型
-// 		if own.PathType == PrivateType {
-// 			id, _ := req.GetUser()
-// 			utils.SetPropertyValue(router, "userid", id)
-// 		}
-
-// 		hash = getApiHash(router)
-
-// 		// 🔧 安全地注册路由
-// 		if _, ok := own.rArgs[hash]; !ok {
-// 			own.rArgs[hash] = router
-// 		}
-
-// 		// 🔧 安全地注册客户端
-// 		if _, ok := own.rWebSocketClient[hash]; !ok {
-// 			own.rWebSocketClient[hash] = make(map[IWebSocket]IRequest)
-// 			needRegister = true
-// 		}
-// 		own.rWebSocketClient[hash][client] = req
-// 		// 🆕 记录连接建立
-// 		own.recordWebSocketConnect(hash)
-// 	}()
-
-// 	// 🔧 在锁外调用外部方法
-// 	if needRegister {
-// 		if iwsr, ok := router.(IWebSocketRouter); ok {
-// 			func() {
-// 				defer func() {
-// 					if err := recover(); err != nil {
-// 						logx.Error("RegisterWebSocket panic:", err)
-// 					}
-// 				}()
-// 				iwsr.RegisterWebSocket(client, req)
-// 			}()
-// 		}
-// 	}
-
-//		return hash
-//	}
 func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSocket) uint64 {
 	if router == nil || client == nil {
 		return 0
@@ -772,318 +667,6 @@ func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSock
 	return hash
 }
 
-// func (own *RouterInfo) UnRegisterWebSocketHash(hash uint64, client IWebSocket) {
-// 	if client == nil {
-// 		return
-// 	}
-
-// 	// 🔧 在锁外声明需要调用的变量
-// 	var needUnregister bool
-// 	var api IRouter
-// 	var req IRequest
-
-// 	// 🔧 在锁内只做数据操作
-// 	func() {
-// 		own.websocketlock.Lock()
-// 		defer own.websocketlock.Unlock()
-
-// 		// 🔧 安全检查
-// 		if own.rWebSocketClient == nil || own.rArgs == nil {
-// 			return
-// 		}
-
-// 		// 🔧 获取请求对象和API
-// 		if clients, ok := own.rWebSocketClient[hash]; ok {
-// 			req = clients[client]
-
-// 			delete(clients, client)
-
-// 			// 🔧 如果没有客户端了，准备清理资源
-// 			if len(clients) == 0 {
-// 				api = own.rArgs[hash]
-// 				if api != nil {
-// 					needUnregister = true
-// 				}
-// 				delete(own.rWebSocketClient, hash)
-// 				delete(own.rArgs, hash)
-// 			}
-// 		}
-
-// 		// 🔧 检查是否需要关闭处理器
-// 		if len(own.rArgs) == 0 {
-// 			own.webSocketHandler = false
-// 		}
-
-// 		own.recordWebSocketDisconnect(hash)
-// 	}()
-
-// 	// 🔧 在锁外调用外部接口
-// 	if needUnregister && api != nil {
-// 		if iwsr, ok := api.(IWebSocketRouter); ok {
-// 			func() {
-// 				defer func() {
-// 					if err := recover(); err != nil {
-// 						logx.Error("UnRegisterWebSocket panic:", err)
-// 					}
-// 				}()
-// 				iwsr.UnRegisterWebSocket(client, req)
-// 			}()
-// 		}
-// 	}
-// }
-
-// 🔧 添加工作池
-type noticeJob struct {
-	hash    uint64
-	api     IRouter
-	message interface{}
-	iwsr    IWebSocketRouterNotice
-	router  *RouterInfo
-}
-
-// func (own *RouterInfo) NoticeWebSocket(message interface{}) {
-// 	if iwsr, ok := own.instance.(IWebSocketRouterNotice); ok {
-// 		// 🔧 确保工作池启动
-// 		workerOnce.Do(func() {
-// 			own.startNoticeWorkers()
-// 		})
-
-// 		// 🔧 快速收集并提交任务
-// 		hashApis := own.collectHashApis()
-// 		for hash, api := range hashApis {
-// 			job := &noticeJob{
-// 				hash:    hash,
-// 				api:     api,
-// 				message: message,
-// 				iwsr:    iwsr,
-// 				router:  own,
-// 			}
-
-// 			// 🔧 非阻塞提交，如果队列满了就丢弃
-// 			select {
-// 			case noticeJobChan <- job:
-// 			default:
-// 				logx.Errorf("Notice job queue full, dropping job for hash:%d", hash)
-// 			}
-// 		}
-// 	}
-// }
-
-// 🔧 启动工作协程池
-// func (own *RouterInfo) startNoticeWorkers() {
-// 	const workerCount = 10 // 可配置
-
-// 	for i := 0; i < workerCount; i++ {
-// 		go own.noticeWorker(i)
-// 	}
-// 	logx.Infof("Started %d notice workers", workerCount)
-// }
-
-// 🔧 快速收集hash和api映射
-// func (own *RouterInfo) collectHashApis() map[uint64]IRouter {
-// 	own.websocketlock.RLock()
-// 	defer own.websocketlock.RUnlock()
-
-// 	if len(own.rArgs) == 0 {
-// 		return nil
-// 	}
-
-// 	// 复制映射，避免在异步处理中出现并发问题
-// 	hashApis := make(map[uint64]IRouter, len(own.rArgs))
-// 	for hash, api := range own.rArgs {
-// 		hashApis[hash] = api
-// 	}
-// 	return hashApis
-// }
-
-// 🔧 发送消息到特定hash的客户端
-// func (own *RouterInfo) sendToHashClients(hash uint64, message, ndata interface{}) {
-// 	// 快速收集客户端
-// 	var clients []clientToNotify
-
-// 	func() {
-// 		own.websocketlock.RLock()
-// 		defer own.websocketlock.RUnlock()
-
-// 		if wsreq, ok := own.rWebSocketClient[hash]; ok {
-// 			clients = make([]clientToNotify, 0, len(wsreq))
-// 			for ws := range wsreq {
-// 				if ws != nil && !ws.IsClosed() {
-// 					hashStr := strconv.FormatUint(hash, 10)
-// 					clients = append(clients, clientToNotify{
-// 						ws:   ws,
-// 						hash: hashStr,
-// 						data: ndata,
-// 					})
-// 				}
-// 			}
-// 		}
-// 	}()
-
-// 	// 异步发送
-// 	if len(clients) > 0 {
-// 		go own.sendToClients(clients)
-// 	}
-// }
-
-// type clientToNotify struct {
-// 	ws   IWebSocket
-// 	hash string
-// 	data interface{}
-// }
-
-// // 🔧 修改 sendToClients，添加消息统计
-// func (own *RouterInfo) sendToClients(clientsToNotify []clientToNotify) {
-// 	const batchSize = 100
-
-// 	// 🆕 记录广播
-// 	own.recordWebSocketBroadcast(len(clientsToNotify))
-
-// 	for i := 0; i < len(clientsToNotify); i += batchSize {
-// 		end := i + batchSize
-// 		if end > len(clientsToNotify) {
-// 			end = len(clientsToNotify)
-// 		}
-
-// 		batch := clientsToNotify[i:end]
-// 		go func(clients []clientToNotify) {
-// 			for _, client := range clients {
-// 				func() {
-// 					defer func() {
-// 						if err := recover(); err != nil {
-// 							logx.Error("WebSocket发送失败:", err)
-// 							// 🆕 记录错误
-// 							own.recordWebSocketError()
-// 						}
-// 					}()
-
-// 					done := make(chan bool, 1)
-// 					go func() {
-// 						defer func() {
-// 							if err := recover(); err != nil {
-// 								logx.Error("WebSocket Send panic:", err)
-// 								own.recordWebSocketError()
-// 							}
-// 							done <- true
-// 						}()
-
-// 						// 🆕 计算消息大小
-// 						var messageSize int
-// 						if data, err := json.Marshal(client.data); err == nil {
-// 							messageSize = len(data)
-// 						}
-
-// 						client.ws.Send(client.hash, own.Path, client.data)
-
-// 						// 🆕 记录成功发送的消息
-// 						own.recordWebSocketMessage(messageSize)
-// 					}()
-
-// 					select {
-// 					case <-done:
-// 						// 发送成功
-// 					case <-time.After(5 * time.Second):
-// 						logx.Errorf("WebSocket发送超时")
-// 						own.recordWebSocketError()
-// 					}
-// 				}()
-// 			}
-// 		}(batch)
-
-// 		if i+batchSize < len(clientsToNotify) {
-// 			time.Sleep(10 * time.Millisecond)
-// 		}
-// 	}
-// }
-
-// func (own *RouterInfo) NoticeWebSocketClient(router IRouter, message interface{}) {
-// 	own.webSocketHandler = false //关闭websocket代理处理
-
-//		go own.noticeClient(router, message)
-//	}
-// func (own *RouterInfo) noticeClient(router IRouter, message interface{}) {
-// 	// 先收集需要发送的客户端
-// 	var clientsToNotify []struct {
-// 		ws   IWebSocket
-// 		data interface{}
-// 	}
-
-// 	own.websocketlock.Lock()
-// 	hash := getApiHash(router)
-// 	if wsreq, ok := own.rWebSocketClient[hash]; ok {
-// 		for ws := range wsreq {
-// 			if !ws.IsClosed() {
-// 				var data interface{}
-// 				if res, ok := message.(IResponse); ok {
-// 					data = res.GetData()
-// 				} else {
-// 					data = message
-// 				}
-// 				clientsToNotify = append(clientsToNotify, struct {
-// 					ws   IWebSocket
-// 					data interface{}
-// 				}{ws, data})
-// 			}
-// 		}
-// 	}
-// 	own.websocketlock.Unlock() // 只在这里解锁一次
-
-// 	// 在锁外发送消息
-// 	hashStr := strconv.FormatUint(hash, 10)
-// 	for _, client := range clientsToNotify {
-// 		client.ws.Send(hashStr, own.Path, client.data)
-// 	}
-// }
-
-// 🔧 修改 CleanupDeadConnections，添加统计
-// func (own *RouterInfo) CleanupDeadConnections() {
-// 	own.websocketlock.Lock()
-// 	defer own.websocketlock.Unlock()
-
-// 	if own.rWebSocketClient == nil {
-// 		return
-// 	}
-
-// 	var hashesToClean []uint64
-// 	deadCount := 0
-
-// 	for hash, clients := range own.rWebSocketClient {
-// 		var deadClients []IWebSocket
-
-// 		for ws := range clients {
-// 			if ws == nil || ws.IsClosed() {
-// 				deadClients = append(deadClients, ws)
-// 			}
-// 		}
-
-// 		deadCount += len(deadClients)
-
-// 		for _, ws := range deadClients {
-// 			delete(clients, ws)
-// 		}
-
-// 		if len(clients) == 0 {
-// 			hashesToClean = append(hashesToClean, hash)
-// 		}
-// 	}
-
-// 	for _, hash := range hashesToClean {
-// 		delete(own.rWebSocketClient, hash)
-// 		delete(own.rArgs, hash)
-// 	}
-
-// 	if len(own.rArgs) == 0 {
-// 		own.webSocketHandler = false
-// 	}
-
-// 	// 🆕 记录清理的死连接数
-// 	if deadCount > 0 {
-// 		own.recordDeadConnectionsCleaned(deadCount)
-// 		logx.Infof("清理了 %d 个死连接，%d 个空hash", deadCount, len(hashesToClean))
-// 	}
-// }
-
-// 🔧 新增：RouterInfo销毁时的清理
 func (own *RouterInfo) Destroy() {
 	own.RLock()
 	hub := own.webSocketHub
@@ -1103,26 +686,6 @@ func (own *RouterInfo) Destroy() {
 	)
 }
 
-// func (own *RouterInfo) ensureWebSocketInit() {
-// 	// 🔧 确保全局清理任务启动
-// 	websocketcleanupOnce.Do(func() {
-// 		logx.Info("🚀 启动全局WebSocket清理任务")
-// 		StartPeriodicCleanup()
-// 	})
-
-// 	// 🔧 生成唯一的key
-// 	key := own.ServiceName + ":" + own.Path
-// 	if keyhash, ok := own.instance.(IRouterHashKey); ok {
-// 		hashStr := strconv.FormatUint(keyhash.GetHashKey(), 10)
-// 		key = key + ":" + hashStr
-// 	}
-
-// 	// 🔧 注册到全局清理map
-// 	if _, loaded := clearMap.LoadOrStore(key, own); !loaded {
-// 		logx.Infof("📝 注册WebSocket路由: %s", key)
-// 	}
-// }
-
 func StartPeriodicCleanup() {
 }
 
@@ -1130,19 +693,3 @@ func StartPeriodicCleanup() {
 func StopPeriodicCleanup(_ context.Context) error {
 	return nil
 }
-
-// GetActiveClientCount 返回当前活跃的websocket客户端数量
-// func (own *RouterInfo) GetActiveClientCount() int {
-// 	own.RLock()
-// 	defer own.RUnlock()
-
-// 	count := 0
-// 	for _, clients := range own.rWebSocketClient {
-// 		for ws := range clients {
-// 			if !ws.IsClosed() {
-// 				count++
-// 			}
-// 		}
-// 	}
-// 	return count
-// }

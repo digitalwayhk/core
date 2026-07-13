@@ -253,14 +253,8 @@ func (own *RouterInfo) updateCacheStats() {
 	}
 	own.statsLock.RUnlock()
 
-	count := int64(0)
-	own.rCache.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-
 	own.stats.mu.Lock()
-	own.stats.Cache.Size = count
+	own.stats.Cache.Size = 0
 	own.stats.mu.Unlock()
 }
 
@@ -275,16 +269,14 @@ func (own *RouterInfo) updateWebSocketStats() {
 
 	own.RLock()
 	hub := own.webSocketHub
-	counts := make(map[uint64]int, len(own.rHashClients))
-	var totalClients int64
-	for hash, count := range own.rHashClients {
-		counts[hash] = count
-		totalClients += int64(count)
-	}
 	own.RUnlock()
+	counts := make(map[uint64]int)
 	var activeClients int64
 	if hub != nil {
-		activeClients = int64(hub.ActiveClientCount(own))
+		counts = hub.hashClientCounts(own)
+		for _, count := range counts {
+			activeClients += int64(count)
+		}
 	}
 
 	//  更新统计
@@ -292,7 +284,7 @@ func (own *RouterInfo) updateWebSocketStats() {
 	defer own.stats.WebSocket.mu.Unlock()
 
 	own.stats.WebSocket.CurrentConnections = activeClients
-	own.stats.WebSocket.TotalRegistered = totalClients
+	own.stats.WebSocket.TotalRegistered = activeClients
 	own.stats.WebSocket.ConnectionsByHash = counts
 
 	// 更新最大连接数

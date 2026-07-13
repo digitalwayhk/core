@@ -65,14 +65,12 @@ func SetCrossNodeForwarderForService(serviceName string, f ICrossNodeForwarder) 
 	globalCrossNodeForwarderMu.Unlock()
 }
 
-// GetCrossNodeForwarderForService 返回服务转发器；未登记时回退到旧版全局转发器。
+// GetCrossNodeForwarderForService 返回服务转发器。服务级运行时不回退到旧版
+// 全局转发器，避免一个服务的兼容配置被其他服务静默继承。
 func GetCrossNodeForwarderForService(serviceName string) ICrossNodeForwarder {
 	name := normalizeCrossNodeServiceName(serviceName)
 	globalCrossNodeForwarderMu.RLock()
 	f := serviceCrossNodeForwarders[name]
-	if f == nil {
-		f = globalCrossNodeForwarder
-	}
 	globalCrossNodeForwarderMu.RUnlock()
 	return f
 }

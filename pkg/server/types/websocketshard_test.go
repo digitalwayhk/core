@@ -157,8 +157,8 @@ func newShardRouter(info *RouterInfo, hash uint64) *shardTestRouter {
 
 func TestUnRegisterWebSocketHash_DoubleUnregisterFiresOnce(t *testing.T) {
 	capture := &shardCapture{}
-	SetCrossNodeForwarder(capture)
-	defer SetCrossNodeForwarder(nil)
+	SetCrossNodeForwarderForService("svc", capture)
+	defer ClearCrossNodeForwarderForService("svc", capture)
 
 	info := newShardRouterInfo(t, "/ws/order")
 	router := newShardRouter(info, 55)
@@ -179,15 +179,15 @@ func TestUnRegisterWebSocketHash_DoubleUnregisterFiresOnce(t *testing.T) {
 	if capture.inactiveCount(hash) != 1 {
 		t.Fatalf("expected one inactive event, got %d", capture.inactiveCount(hash))
 	}
-	if _, ok := info.rHashClients[hash]; ok {
-		t.Fatalf("expected hash %d to be removed from rHashClients", hash)
+	if _, ok := info.webSocketHub.hashClientCounts(info)[hash]; ok {
+		t.Fatalf("expected hash %d to be removed from RouteWebSocketHub", hash)
 	}
 }
 
 func TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount(t *testing.T) {
 	capture := &shardCapture{}
-	SetCrossNodeForwarder(capture)
-	defer SetCrossNodeForwarder(nil)
+	SetCrossNodeForwarderForService("svc", capture)
+	defer ClearCrossNodeForwarderForService("svc", capture)
 
 	info := newShardRouterInfo(t, "/ws/price")
 	router := newShardRouter(info, 66)
@@ -200,7 +200,7 @@ func TestUnRegisterWebSocketHash_UnknownClientDoesNotChangeCount(t *testing.T) {
 
 	info.UnRegisterWebSocketHash(hash, unknown)
 
-	if got := info.rHashClients[hash]; got != 1 {
+	if got := info.webSocketHub.hashClientCounts(info)[hash]; got != 1 {
 		t.Fatalf("expected hash count to remain 1, got %d", got)
 	}
 	if got := atomic.LoadInt32(&router.unregs); got != 0 {

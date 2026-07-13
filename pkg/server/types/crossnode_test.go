@@ -70,14 +70,14 @@ func TestClearCrossNodeForwarderDoesNotDeleteReplacement(t *testing.T) {
 	}
 }
 
-func TestCrossNodeForwarderRegistryFallsBackToLegacyGlobal(t *testing.T) {
+func TestCrossNodeForwarderRegistryDoesNotFallBackToLegacyGlobal(t *testing.T) {
 	serviceName := fmt.Sprintf("cross-node-fallback-%d", time.Now().UnixNano())
 	legacy := &crossNodeRegistryCapture{}
 	SetCrossNodeForwarder(legacy)
 	t.Cleanup(func() { SetCrossNodeForwarder(nil) })
 
-	if got := GetCrossNodeForwarderForService(serviceName); got != legacy {
-		t.Fatalf("服务作用域查询未回退到兼容转发器：%T", got)
+	if got := GetCrossNodeForwarderForService(serviceName); got != nil {
+		t.Fatalf("服务作用域查询不应回退到进程级兼容转发器：%T", got)
 	}
 
 	scoped := &crossNodeRegistryCapture{}
