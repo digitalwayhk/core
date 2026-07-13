@@ -408,7 +408,7 @@ git commit -m "feat: add service scoped route cache l1"
 - Modify: `pkg/server/routecache/manager.go`
 - Modify: `pkg/server/config/routecache.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```go
 func TestBadgerL2SetGetDeleteWithTTL(t *testing.T) {}
@@ -418,7 +418,7 @@ func TestBadgerL2CorruptionResetRequiresExplicitPolicy(t *testing.T) {}
 func TestRouteCachePromotesL2HitToL1(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -428,7 +428,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/routecache -run 'B
 
 Expected: L2 adapter 尚不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 直接使用 Badger v3 的 `SetEntry(...WithTTL(ttl))`、`View` 和 `Delete`，值为版本化 JSON envelope。不得导入或调用 `PrefixedBadgerDB`、SyncQueue、远程 adapter。
 
@@ -441,7 +441,7 @@ type cacheEnvelope struct {
 
 路径由 ServiceContext 名称隔离；测试使用 `t.TempDir()`。关闭时先停止 manager，再关闭 Badger。
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -453,7 +453,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/routecache -
 
 Expected: PASS，无 sleep 刷绿、无同步队列键。
 
-- [ ] **Step 5: 提交**
+验收证据：`go test ./pkg/server/routecache -count=20`、对应 `-race`、四包回归、日志检查和 `release-contract` 均通过；实现提交 `b6aa0d0`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/routecache pkg/server/config/routecache.go
