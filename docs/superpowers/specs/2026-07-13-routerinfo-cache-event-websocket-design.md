@@ -48,6 +48,8 @@ ServiceContext
 
 组件不得使用进程级可变全局单例承载服务状态。进程级 shutdown hook 可以存在，但只能调用各 `ServiceContext` 的显式关闭方法。
 
+`processLocalRegistry` 是允许保留的进程级协调例外。它只负责同一进程内的 MachineID 冲突检测和实例协调，不拥有 RouterInfo、缓存、事件、WebSocket 或请求状态；业务组件只能通过受限接口访问，不能把它扩展成通用服务状态容器。
+
 ## 3. RouterInfo 职责收敛
 
 ### 3.1 保留职责
@@ -76,6 +78,18 @@ ServiceContext
 简单 Router 默认使用通用反射重置；实现了 `IRouterResettable` 的复杂 Router 必须由 `Reset()` 完整恢复到可供下一次 `Parse` 使用的状态，并跳过通用反射重置。实现了 `IRouterCleanable` 的 Router 在归还前调用 `Clean()` 清除敏感数据或释放请求级引用。`IRouterFactory` 负责自定义实例创建，但最终创建出的请求实例仍由该 RouterInfo 的对象池管理。任何观察事件、WebSocket 订阅或异步任务都不得持有即将归还对象池的 Router；必须先生成不可变快照，完成同步使用后才能归还。
 
 RouterInfo 只允许在 ServiceContext 范围内按路由唯一，不允许成为跨服务共享的进程级可变单例。进程级 ServiceContext registry 仅作为兼容查找入口：同名活动实例可以复用；配置冲突必须明确失败；已终止实例在资源关闭后必须注销，不能在下一次创建时返回失效上下文。
+
+### 3.4 所有权、冻结与注册表生命周期
+
+- `ServiceContext` 是 RouterInfo、RouteCacheManager、ServiceEventBridge 和 RouteWebSocketHub 的唯一所有者。全局 registry 只保存查找索引，不接管组件生命周期。
+- RouterInfo 在加入所属 `ServiceRouter`、完成路径归一化和配置绑定后冻结。冻结后的 Path、ServiceName、Auth、Method、PathType、实例类型和所有者不得修改。
+- 现有元数据修改方法只允许在注册阶段调用。冻结后的修改必须明确拒绝；受既有无 error 返回签名限制的入口应 panic 或使用等价的 fail-closed 行为，禁止静默忽略或继续修改。
+- RouterInfo 不得保存当前 IRequest、用户身份、trace ID、IResponse、请求参数或其他请求级状态。异步工作只接收不可变快照。
+- 同一进程、同一服务名只能有一个活动 ServiceContext。再次创建时先比较应用默认值并规范化后的配置指纹；指纹一致可以返回已有活动实例，指纹不同必须 fail closed，且日志不得包含配置密钥或完整配置内容。
+- ServiceContext 完成 WebSocket、缓存、EventBridge、MQ、Cluster 等资源关闭后，registry 必须按“服务名 + 当前实例身份”原子注销。旧实例不得删除后来注册的新实例。
+- 已终止或正在关闭的 ServiceContext 不得作为新建结果返回。关闭完成并注销后，允许使用同一服务名创建新的 ServiceContext。
+- WebSocket worker、缓存、EventBridge、周期清理表和统计均为 ServiceContext 级资源。进程级 hook 只能遍历并关闭服务级组件，不保存这些组件的业务状态。
+- `processLocalRegistry` 继续作为 MachineID 冲突协调器保持进程级，但其职责和测试必须与 ServiceContext registry、RouterInfo 状态及路由运行组件隔离。
 
 ## 4. ServiceEventBridge
 
@@ -221,12 +235,24 @@ RouterInfo 的现有 WebSocket 方法继续存在，但只委托给 Hub。
 ### 9.1 RouterInfo 与事件
 
 - panic 始终返回非 nil 的安全类型化响应。
+- 同一 ServiceContext、同一路由只有一个 RouterInfo，两个 ServiceContext 的 RouterInfo 不共享可变状态。
+- RouterInfo 注册后元数据被冻结，冻结后修改被明确拒绝。
+- RouterInfo 和事件快照中不存在请求级共享状态。
 - 无观察者时不构造事件快照。
 - 异步回调读取不可变快照，不受路由对象清理影响。
 - 并发订阅、取消和发布通过 race 测试。
 - 观察事件队列满可丢弃；控制事件不静默丢弃且保持同键顺序。
 
-### 9.2 缓存
+### 9.2 ServiceContext 注册表
+
+- 同名且规范化配置一致的并发创建只初始化一次，并返回同一活动实例。
+- 同名但配置指纹不同的创建明确失败，不静默返回旧实例。
+- 关闭中的实例不能被新建调用复用。
+- 资源关闭后只注销 registry 中指向自己的条目；并发重建不会被旧实例误删。
+- 注销后可以创建同名新实例，且不会继承旧 RouterInfo、缓存、事件或 WebSocket 状态。
+- `processLocalRegistry` 仍能检测进程内 MachineID 冲突，但不能访问路由运行状态。
+
+### 9.3 缓存
 
 - L1 TTL、容量淘汰、singleflight 和确定性键测试。
 - L2 过期、容量、重启和损坏隔离测试，不产生远程同步队列。
@@ -234,7 +260,7 @@ RouterInfo 的现有 WebSocket 方法继续存在，但只委托给 Hub。
 - Redis 启动缺失、运行期中断、旁路、订阅恢复后重新启用测试。
 - 多节点测试证明失效后不继续返回旧 L1/L2 数据。
 
-### 9.3 WebSocket
+### 9.4 WebSocket
 
 - 两个满足 `hashA % 128 == hashB % 128` 的不同 hash 不串消息。
 - 同一客户端多 hash 订阅互不覆盖。
@@ -245,7 +271,7 @@ RouterInfo 的现有 WebSocket 方法继续存在，但只委托给 Hub。
 - 两个 ServiceContext 的队列、统计和生命周期相互隔离。
 - 本地模式不要求 Redis/MQ；跨节点显式开启后验证外部控制事件。
 
-### 9.4 门禁
+### 9.5 门禁
 
 每个实施小节先写失败测试，再做最小实现，并至少运行：
 
@@ -263,12 +289,13 @@ go test -race ./pkg/server/types ./pkg/server/event ./pkg/server/router -count=1
 该设计按以下顺序实施，每节单独提交、测试并接受外部审查：
 
 1. P0 回归测试与 RouterInfo panic/事件快照修复。
-2. 每服务 `ServiceEventBridge` 及观察/控制事件语义。
-3. `RouteWebSocketHub` 精确 hash 模型与生命周期抽离。
-4. `RouteCacheManager` L1 与缓存键契约。
-5. L2 Badger 纯缓存适配器。
-6. L3 Redis、可靠失效与严格共享降级。
-7. 兼容门面迁移、对象池和旧代码清理、统计与文档收口。
+2. RouterInfo 所有权与元数据冻结、ServiceContext 配置冲突和终止注销。
+3. 每服务 `ServiceEventBridge` 及观察/控制事件语义。
+4. `RouteWebSocketHub` 精确 hash 模型与生命周期抽离。
+5. `RouteCacheManager` L1 与缓存键契约。
+6. L2 Badger 纯缓存适配器。
+7. L3 Redis、可靠失效与严格共享降级。
+8. 兼容门面迁移、对象池和旧代码清理、统计与文档收口。
 
 任务不得在同一提交同时重写三大组件。每节只有在定向测试、race、日志门禁和外部审查通过后才能进入下一节。
 
@@ -284,7 +311,11 @@ go test -race ./pkg/server/types ./pkg/server/event ./pkg/server/router -count=1
 
 ## 12. 完成定义
 
+- RouterInfo 由 ServiceContext 独占，注册后元数据冻结，且不保存请求级状态。
+- 同名 ServiceContext 配置冲突会 fail closed；关闭完成后按实例身份从 registry 注销并允许安全重建。
 - RouterInfo 不再直接拥有缓存条目、观察者 map、WebSocket 分片或全局通知 worker。
+- WebSocket worker、缓存、EventBridge 和清理表均为 ServiceContext 级，不存在进程级可变业务单例。
+- `processLocalRegistry` 仅保留 MachineID 进程内协调职责，不承载路由运行状态。
 - WebSocket 对完整 hash 精确隔离，重复注册、清理和关闭保持一致。
 - 每个 ServiceContext 默认拥有可工作的本地 EventBridge。
 - 单机缓存无需 Redis；共享严格模式不能静默退化为节点本地缓存。
