@@ -27,7 +27,9 @@
 - `pkg/server/routecache/l3_redis.go`：Redis 共享缓存。
 - `pkg/server/config/routecache.go`：缓存配置、默认值和 fail-closed 校验。
 
-## Task 1：请求执行、事件快照与对象池闭环
+## Task 1：请求执行、事件快照与对象池闭环（已完成：2cb693c）
+
+验收：go test ./pkg/server/types -count=1 与 go test -race ./pkg/server/types -count=1 均通过。
 
 **Files:**
 - Modify: `pkg/server/types/routerinfo.go`
@@ -36,7 +38,7 @@
 - Create: `pkg/server/types/router_execution_test.go`
 - Create: `pkg/server/types/channelpool_contract_test.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 覆盖以下契约：`ExecDo` panic 返回非 nil 安全响应；观察回调看到的是快照；同一 RouterInfo 归还后能再次取到对象；`IRouterFactory` 最终实例进入同一池；`Reset` 在 Parse 前调用、`Clean` 在归还前调用。
 
@@ -48,7 +50,7 @@ func TestChannelPoolUsesResetAndCleanContracts(t *testing.T) {}
 func TestChannelPoolPoolsFactoryResult(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -58,7 +60,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/types -run 'TestRo
 
 Expected: panic 响应为 nil、观察对象被 Clean 修改、池对象未复用等断言失败。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `ExecDo` 改为具名返回或移除内部 recover，让 `Exec` 成为唯一 panic 边界。通知前创建 JSON 安全快照，不再把池化 IRouter 交给 goroutine。
 
@@ -82,7 +84,7 @@ func (own *RouterInfo) putRouter(router IRouter) {
 }
 ```
 
-- [ ] **Step 4: 开发验收**
+- [x] **Step 4: 开发验收**
 
 Run:
 
@@ -94,7 +96,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/types -count
 
 Expected: PASS，race 无报告。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/types
