@@ -627,11 +627,13 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 
 外部复审登记的后续非阻断项：
 
-- [x] 并发 `EnableRoute` 与 `DeleteRoute` 时保证本地 generation 单调不回退（实现 `2715fe6`）。确定性交错测试在修复前证明本地 generation 从 2 回退到 1 并命中旧 g1 值；修复后使用 `max(local, candidate)` 在同一锁内合并路由策略。
+- [x] 并发 `EnableRoute` 与 `DeleteRoute` 时保证本地 generation 单调不回退（实现 `2715fe6`，外部复审 `APPROVED`）。确定性交错测试在修复前证明本地 generation 从 2 回退到 1 并命中旧 g1 值；修复后使用 `max(local, candidate)` 在同一锁内合并路由策略。
+- [x] `Recover` 加载共享 generation 时不得覆盖并发失效事件推进的本地世代（实现 `3912f06`）。`refreshSharedGenerations` 统一复用单调 `storeRoutePolicy`；确定性交错测试在修复前证明 Recover 将本地从 2 回退到 1。
+- [ ] 本地模式并发 `DeleteRoute` 的 generation 递增应在写锁内完成。
 - [ ] 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试。
 - [ ] TTL jitter、L1 值类型一致性、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
 
-P2-1 内部验收：`TestConcurrentEnableRouteDoesNotRollBackGeneration -count=20`、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。待独立外部审查确认后再将该加固项标记为外部验收。
+generation 并发加固内部验收：两个确定性交错测试各 `-count=20`、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。`3912f06` 待独立外部审查确认。
 
 ## 最终关闭条件
 
