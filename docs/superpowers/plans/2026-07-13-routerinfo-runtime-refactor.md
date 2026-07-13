@@ -599,6 +599,32 @@ git add pkg/server docs/codex docs/superpowers/plans/2026-07-13-routerinfo-runti
 git commit -m "refactor: complete router runtime component isolation"
 ```
 
+## 外部审查修复（实现 `22ba48f`）
+
+首轮外部审查裁定为 `CHANGES_REQUIRED`：无 P0，有两项 P1。本节只记录修复与内部验证，不代表已通过最终外部复审。
+
+- [x] **P1-1：Shared generation 在重启/扩容后可重用失效数据**
+
+  Redis 中以 `service + route` 保存权威 generation；首次通过 `SETNX` 初始化，路由级删除通过 `INCR` 原子递增，`EnableRoute` 和 `Recover` 都从 Redis 加载当前世代。新增冷启节点回归测试，并覆盖 go-zero `Redis.GetCtx` 在 key 不存在时返回 `("", nil)` 的真实契约。
+
+- [x] **P1-2：关闭窗口内 registry 复用已 terminated 实例**
+
+  `ServiceContext` 在关闭期间公布 `shutdownDone`；同名创建遇到 terminated 实例时等待关闭、精确注销完成后再重建。`get` 和 `snapshot` 不再对外返回关闭中实例。新增可控阻塞关闭窗口的并发回归测试。
+
+内部验证证据：
+
+```bash
+GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/routecache -count=20
+GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/routecache ./pkg/server/router -count=1
+CORE_TEST_REDIS=1 CORE_TEST_REDIS_ADDR=127.0.0.1:6379 ./scripts/test.sh integration
+GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
+./scripts/check-logging.sh
+./scripts/test.sh release-contract
+./scripts/ci.sh required/contracts
+```
+
+上述均通过；真实 Redis 测试使用现有 Compose 服务，测试后已停止容器。P2（TTL jitter、L1 值类型一致性、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标）保留为后续非阻断项。
+
 ## 最终关闭条件
 
 - [x] 八个 Task 均有独立提交 SHA。
