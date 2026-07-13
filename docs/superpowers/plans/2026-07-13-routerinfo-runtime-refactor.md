@@ -189,7 +189,7 @@ git commit -m "fix: enforce router ownership and context registry lifecycle"
 - Create: `pkg/server/types/route_runtime.go`
 - Modify: `pkg/server/types/routerinfo.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```go
 func TestServiceEventBridgeExistsWithoutMQ(t *testing.T) {}
@@ -200,7 +200,7 @@ func TestServiceEventBridgeControlPublishWithoutExternalProviderFails(t *testing
 func TestServiceEventBridgeCloseIsIdempotent(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -210,7 +210,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/event ./pkg/server
 
 Expected: `ServiceEventBridge` 尚不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 定义明确的事件类别和发布结果。观察事件使用有界队列；控制事件按 ShardKey 进入固定数量串行 worker。外发只有显式 `External=true` 时调用 MQ adapter。
 
@@ -230,7 +230,7 @@ type PublishRequest struct {
 
 `NewServiceContext*` 无条件创建本地 bridge；MQ 可用时只安装外部 adapter。RouterInfo 的兼容 Subscribe/UnSubscribe 委托 bridge。
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -243,7 +243,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/event ./pkg/
 
 Expected: PASS；未注册观察者时 BuildData 调用次数为 0。
 
-- [ ] **Step 5: 提交**
+验收证据：`go test ./pkg/server/event ./pkg/server/router ./pkg/server/types -count=1`、对应 `-race` 与 `./scripts/check-logging.sh` 均通过；实现提交 `6c75625`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/event pkg/server/router/servicecontext.go pkg/server/types
