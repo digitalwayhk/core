@@ -81,7 +81,6 @@ type RouterInfo struct {
 	rWebSocketShards [shardCount]*websocketShard // 替代 rWebSocketClient
 	//webSocketHandler  bool                                     //websocket代理处理是否运行
 	sync.RWMutex
-	pool          sync.Pool
 	once          sync.Once
 	TempStore     sync.Map
 	websocketlock sync.RWMutex
@@ -95,11 +94,7 @@ type RouterInfo struct {
 }
 
 func (own *RouterInfo) New() IRouter {
-	item := own.getNew()
-	if factory, ok := item.(IRouterFactory); ok {
-		return factory.New(own.instance)
-	}
-	return item
+	return own.getNew()
 }
 func (own *RouterInfo) ParseNew(instance interface{}) (IRouter, error) {
 	item := own.New()
@@ -202,7 +197,7 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 }
 
 // 🔧 修改 ExecDo 方法，添加统计
-func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
+func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 	// 🆕 记录请求开始
 	recordEnd := own.recordRequestStart()
 	startTime := time.Now()
@@ -221,7 +216,10 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 			)
 
 			// 🆕 记录异常
-			own.recordRequestEnd(startTime, fmt.Errorf("%v", err))
+			cause := fmt.Errorf("%v", err)
+			own.recordRequestEnd(startTime, cause)
+			panicErr := NewTypeErrorWithCause(own.ServiceName, own.Path, "panic", cause.Error(), 500, cause)
+			resp = req.NewResponse(nil, panicErr)
 		} else {
 			// 🆕 正常结束
 			recordEnd()
@@ -240,8 +238,8 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 			// 🆕 记录缓存命中
 			own.recordCacheHit()
 
-			resp := req.NewResponse(cache.data, nil)
-			go own.responseNotify(api, req.GetTraceId(), resp)
+			resp = req.NewResponse(cache.data, nil)
+			go own.responseNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
 			return resp
 		} else {
 			// 🆕 记录缓存未命中
@@ -249,7 +247,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		}
 	}
 
-	go own.requestNotify(api, req.GetTraceId())
+	go own.requestNotify(snapshotNotifyValue(api), req.GetTraceId())
 	data, err := api.Do(req)
 	if err != nil {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
@@ -260,11 +258,11 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) IResponse {
 		}
 	}
 
-	resp := req.NewResponse(data, err)
+	resp = req.NewResponse(data, err)
 	if err != nil {
-		go own.errorNotify(api, req.GetTraceId(), resp)
+		go own.errorNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
 	} else {
-		go own.responseNotify(api, req.GetTraceId(), resp)
+		go own.responseNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
 	}
 	return resp
 }
@@ -290,11 +288,37 @@ func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
 	delete(own.Subscriber[ob.State], ob.OwnAddress)
 	return nil
 }
-func (own *RouterInfo) requestNotify(api IRouter, traceid string) {
-	items := own.Subscriber[ObserveRequest]
+func snapshotNotifyValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(data)
+}
+
+func (own *RouterInfo) subscriberSnapshot(state ObserveState) []*ObserveArgs {
+	own.RLock()
+	defer own.RUnlock()
+	source := own.Subscriber[state]
+	items := make([]*ObserveArgs, 0, len(source))
+	for _, item := range source {
+		if item == nil {
+			continue
+		}
+		copied := *item
+		copied.ServiceName = own.ServiceName
+		items = append(items, &copied)
+	}
+	return items
+}
+
+func (own *RouterInfo) requestNotify(api interface{}, traceid string) {
+	items := own.subscriberSnapshot(ObserveRequest)
 	for _, item := range items {
-		item.ServiceName = own.ServiceName
-		na := item.NewNotifyArgs(api, nil)
+		na := item.NewNotifyArgsSnapshot(api, nil)
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {
@@ -302,11 +326,10 @@ func (own *RouterInfo) requestNotify(api IRouter, traceid string) {
 		}
 	}
 }
-func (own *RouterInfo) responseNotify(api IRouter, traceid string, resp IResponse) {
-	items := own.Subscriber[ObserveResponse]
+func (own *RouterInfo) responseNotify(api interface{}, traceid string, resp interface{}) {
+	items := own.subscriberSnapshot(ObserveResponse)
 	for _, item := range items {
-		item.ServiceName = own.ServiceName
-		na := item.NewNotifyArgs(api, resp)
+		na := item.NewNotifyArgsSnapshot(api, resp)
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {
@@ -314,11 +337,10 @@ func (own *RouterInfo) responseNotify(api IRouter, traceid string, resp IRespons
 		}
 	}
 }
-func (own *RouterInfo) errorNotify(api IRouter, traceid string, resp IResponse) {
-	items := own.Subscriber[ObserveError]
+func (own *RouterInfo) errorNotify(api interface{}, traceid string, resp interface{}) {
+	items := own.subscriberSnapshot(ObserveError)
 	for _, item := range items {
-		item.ServiceName = own.ServiceName
-		na := item.NewNotifyArgs(api, resp)
+		na := item.NewNotifyArgsSnapshot(api, resp)
 		na.TraceID = traceid
 		err := item.Notify(na)
 		if err != nil {

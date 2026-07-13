@@ -57,6 +57,9 @@ func (own *RouterInfo) initChannelPool() {
 		return
 	}
 	own.channelPool = NewChannelPool(func() IRouter {
+		if factory, ok := own.instance.(IRouterFactory); ok {
+			return factory.New(own.instance)
+		}
 		instance := utils.NewInterface(own.instance)
 		if instance == nil {
 			logx.Errorf("Failed to create new instance for %s", own.Path)
@@ -225,8 +228,10 @@ func (own *RouterInfo) putRouter(router IRouter) {
 	// 🔧 清理敏感数据
 	own.cleanRouter(router)
 
-	// 🔧 放回对象池
-	own.pool.Put(router)
+	// 🔧 放回创建和获取所使用的同一个有界对象池
+	if own.channelPool != nil {
+		own.channelPool.Put(router)
+	}
 }
 
 // 🔧 新增：清理路由对象的敏感数据

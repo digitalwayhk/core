@@ -103,6 +103,12 @@ func (own *ObserveArgs) Notify(args *NotifyArgs) error {
 }
 
 func (own *ObserveArgs) NewNotifyArgs(instance interface{}, resp IResponse) *NotifyArgs {
+	return own.NewNotifyArgsSnapshot(instance, resp)
+}
+
+// NewNotifyArgsSnapshot 使用已经冻结的实例和响应快照创建通知参数。
+// 该方法供异步观察通知使用，避免持有即将归还对象池的 Router。
+func (own *ObserveArgs) NewNotifyArgsSnapshot(instance interface{}, resp interface{}) *NotifyArgs {
 	args := &NotifyArgs{
 		ReceiveAddress:    own.OwnAddress,
 		ReceiveProt:       own.OwnProt,
