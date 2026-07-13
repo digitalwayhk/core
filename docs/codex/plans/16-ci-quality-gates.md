@@ -1,6 +1,6 @@
 # CI 质量门禁与消费方兼容性实施计划
 
-> 面向智能体开发者：按小节执行。每节先建立失败场景或当前基线，再做最小实现；开发完成后停止，由外部审查 Agent 只读验收。未通过审查不得进入下一小节。
+> **完成态记录：** 16.1-16.5 已实施。16.1、16.2 各小节取得外部 APPROVED；16.3-16.5 完成独立/内部验收，但未执行整任务最终外部审查。后续用户指令取消继续输出或等待外部审查，因此本文件如实保留该治理差异，不补写不存在的 APPROVED。
 
 **目标：** 让干净检出在本地与 GitHub Actions 执行同一组可复现命令；PR 必需门禁快速、确定且无外部服务依赖，race、Docker 集成和消费方 smoke 分层运行；失败时保留足以复现的日志与元数据，不通过排除包、吞错误或 `continue-on-error` 制造绿色。
 
@@ -200,7 +200,7 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 - 私有仓库凭据不可用时 job 明确 `blocked/not-run`，不得显示 passed；omni-flow/grok、ops-ai 继续基于证据标 not-applicable。
 - artifact 至少包含 gate、commit、Go/OS、命令、退出码、测试日志；Docker 失败增加 compose ps/logs。禁止上传环境变量、auth、module cache 和数据库数据卷。
 - 生成 Job Summary，列出 required/observational/scheduled 的真实状态、owner 和复现命令。
-- 总验收从干净检出运行 required gates，并核对 workflow 与矩阵闭集；任务 16 通过最终外部审查后才能关闭。
+- 总验收从干净检出运行 required gates，并核对 workflow 与矩阵闭集。原规格要求整任务最终外部审查后关闭；该终审未执行，后续用户指令改为内部完成整体计划，因此实现状态记为完成、审查状态单独记为未执行。
 
 **最终验收：**
 
@@ -214,6 +214,8 @@ bash -n scripts/ci.sh scripts/test-ci-contract.sh scripts/test.sh
 ```
 
 **开发与验证记录（2026-07-13）：** 新增 futures 精确 commit smoke：从本地对象库 archive 到临时目录，使用临时 `go.work` 指向候选 Core，测试前后校验源工作树及临时 `go.mod/go.sum` 不变；缺仓库/commit 明确返回 blocked(3)。手工 workflow 在缺跨仓库 token 时保留 blocked 证据并非绿退出。原矩阵全量 services 行为命令在锁定 Core `v0.0.247` 下已有相同基线失败，故调整为 gateway/worker 稳定行为测试加 services 根包编译。候选 Core 对精确提交 `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` 的 smoke 通过。四个 required gate、persistence unit、外部/持久化 Docker 与发布契约均通过；`ci.sh` 元数据和 workflow summary 保持真实状态。
+
+**整任务审查状态：** 未执行最终外部审查，不声明 APPROVED。实现与内部总验收完成；`observational/persistence` 保持非 required，16.2 登记的 P2 继续由对应 owner 跟踪。
 
 ## 每小节外部审查反馈格式
 

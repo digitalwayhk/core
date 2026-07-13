@@ -1,18 +1,20 @@
 # Core 项目审查行动计划
 
-> **面向智能体开发者：** 必须使用 `superpowers:executing-plans` 子技能，按任务逐项实施本计划。步骤使用复选框（`- [ ]`）语法跟踪。
+> **完成态台账：** 任务 1-17 已实施完毕。本文件不再是执行入口；现行状态以“完成跟踪”“验证矩阵”“残余风险”和“最终验收记录”为准。下方折叠的实施规格仅保留作历史审计，不得据此重新实施已完成任务。
 
 **目标：** 将项目审查建议转化为可执行、可验证的工作：优先复用成熟的 go-zero 能力，删除无用或重复的框架代码，统一生产日志和异常归属，保护请求与配置边界，隔离依赖变更，提供可重复的集成依赖环境，建立兼容性与 CI 门禁，并对齐测试和文档。
 
 **架构：** 将本仓库定位为 go-zero 及其他已选成熟库之上的轻量应用组装层。仅保留 Digitalway 路由/模型约定、MachineID 隔离、Provider 切换和跨节点通知等领域特定契约；通过成熟基础设施上的轻量适配器进行组装，不重复实现客户端、缓存、发现循环、重试、并发原语或日志框架。保持请求状态隔离，使配置声明与运行时行为一致，明确子系统生命周期归属，使用带跟踪上下文的 go-zero 结构化日志，仅在责任边界记录一次错误，并使快速单元测试不依赖 Docker。
 
-**技术栈：** Go 1.26 module、go-zero v1.10.2、`go test`、`go vet`、race detector、Docker Compose、etcd、Consul、Redis Streams、NATS JetStream、Kafka 兼容 Broker 占位、MySQL、MongoDB、ClickHouse，以及现有的 `tests/integration` build tag。
+**技术栈：** Go 1.26 module、go-zero v1.10.2、`go test`、`go vet`、race detector、Docker Compose、etcd、Consul、Redis Streams、NATS JetStream、MySQL、MongoDB、ClickHouse，以及现有的 `tests/integration` build tag。Kafka 仅有可选 Compose 基础设施 profile，Core 明确不提供内建 Kafka Provider。
 
 ---
 
-## 当前基线
+## 审查时基线（历史冻结）
 
-| 领域 | 当前状态 | 证据 / 命令 |
+以下内容冻结于计划启动前，只说明当时为何创建任务，不代表当前仓库状态。当前事实必须查阅[完成跟踪](#完成跟踪)、[验证矩阵](#验证矩阵)、[残余风险](#残余风险)、[最终验收记录](#最终验收记录2026-07-13)及 `docs/codex/CI_QUALITY_GATE_MATRIX.md`。
+
+| 领域 | 审查时状态 | 当时证据 / 命令 |
 | --- | --- | --- |
 | Server vet | 通过 | `go vet ./pkg/server/...` |
 | 全项目 vet | 失败 | `go vet ./...` 报告 `pkg/persistence/database/nosql/mongo.go` 中存在未使用字段名的 `bson.E` 值 |
@@ -48,12 +50,14 @@
 12. **仅使用请求本地状态：** 请求、身份、跟踪和可变操作数据不得存储在共享服务单例上，也不得通过可变全局注册表暴露。
 13. **兼容性是发布契约：** 公共错误、路由、导出的 Go API、配置和消费方行为都需要兼容性证据或有文档的迁移路径。
 
-## 计划拆分
+## 计划与结果索引
 
-本文件是总索引、依赖顺序和完成台账。实施任务 11-17 前，必须在 `docs/codex/plans/` 下创建对应的聚焦计划，并在其中保存代码级步骤、测试用例、发布说明和已接受的权衡：
+本文件是完成索引和证据台账。聚焦计划及任务 6/7 的最终审计产物如下：
 
 | 任务 | 必需的实施计划 |
 | --- | --- |
+| 6 | `docs/codex/GO_ZERO_REUSE_AUDIT.md` |
+| 7 | `docs/codex/DEAD_CODE_AUDIT.md` |
 | 11 | `docs/codex/plans/11-security-auth-isolation.md` |
 | 12 | `docs/codex/plans/12-request-lifecycle-concurrency.md` |
 | 13 | `docs/codex/plans/13-persistence-correctness.md` |
@@ -62,7 +66,7 @@
 | 16 | `docs/codex/plans/16-ci-quality-gates.md` |
 | 17 | `docs/codex/plans/17-performance-slo-baseline.md` |
 
-任务 6-9 也必须在已接受的迁移修改代码前创建聚焦子计划。总计划只记录结果与证据，不应膨胀为第二份实施规格。
+任务 8/9 的聚焦计划保存在 `docs/codex/plans/08-logging-error-governance.md` 和 `docs/codex/plans/09-architecture-hardening.md`。完整实施步骤已折叠为历史审计记录；不得将其中将来时措辞解释为当前待办。
 
 ## 完成跟踪
 
@@ -71,22 +75,25 @@
 | 任务 | 状态 | 提交 | 完成证据 |
 | --- | --- | --- | --- |
 | 1. 依赖升级隔离 | 已完成 | `f72447f` | `go mod verify`、`go mod tidy -diff`、server vet 和定向兼容性测试通过；依赖文件已单独提交 |
-| 2. Docker Compose 集成环境 | 已完成 | `ccd1e22` 及本批修复 | etcd/consul/redis/nats 默认服务与 persistence/kafka profile 使用固定 tag、回环端口和健康检查；NATS 显式启用 8222 监控；静态与真实 Compose 均通过 |
+| 2. Docker Compose 集成环境 | 已完成 | `ccd1e22`, `547b57e` | etcd/consul/redis/nats 默认服务与 persistence/kafka profile 使用固定 tag、回环端口和健康检查；NATS 显式启用 8222 监控；静态与真实 Compose 均通过 |
 | 3. 测试命令脚本 | 已完成 | `0d29df1` | `bash -n`、`quick` 和 `server` 通过；未知模式输出用法并代码 2 退出，脚本不依赖 `rtk` |
-| 4. 通过 Docker 运行外部集成测试 | 已完成 | `ccd1e22` 及本批修复 | etcd、Consul、Redis Streams、NATS JetStream/EventBridge 和 MySQL/MongoDB/ClickHouse driver 契约真实通过；唯一 project、锁、watchdog、诊断与资源清理均验证 |
-| 5. Kafka Provider 缺口决策 | 已完成 | 本批提交 | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
-| 6. go-zero 能力与复用审计 | 已完成 | 本批提交 | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
-| 7. 无用与未完成代码清理 | 已完成 | 本批提交 | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
-| 8. 全局日志与异常审计 | 已完成 | 本批提交 | `check-logging` 已接入 quick；stdout/标准 logger、装饰图标、payload/SQL/参数 dump 已清零；服务/Provider/WebSocket 关键事件结构化，trace_id 与脱敏日志契约、vet、race 均通过 |
-| 9. 架构加固待办 | 已完成 | 本批提交 | 注册表/forwarder 隔离已由任务 12 关闭；跨节点 IPv6/非 2xx 与配置迁移错误传播已测试修复；SharedBadger 拆分形成独立、无行为变更的执行台账 |
-| 10. README/文档与场景使用指南 | 已完成 | 本批提交 | README、中文场景指南和仓库内 `use-digitalway-core` skill 已基于最终路由、模型、认证、日志、能力矩阵、测试与发布契约统一重建；未恢复已删除 Copilot skill |
+| 4. 通过 Docker 运行外部集成测试 | 已完成 | `ccd1e22`, `c22d4e1`, `547b57e` | etcd、Consul、Redis Streams、NATS JetStream/EventBridge 和 MySQL/MongoDB/ClickHouse driver 契约真实通过；唯一 project、锁、watchdog、诊断与资源清理均验证 |
+| 5. Kafka Provider 缺口决策 | 已完成 | `ccd1e22`, `6c4ca96`, `547b57e` | Kafka/RabbitMQ/RocketMQ 内建 provider 保持 rejected；Kafka 仅为显式 Compose profile，应用可注册自定义 ProviderFactory，不设置虚假 CORE_TEST_KAFKA |
+| 6. go-zero 能力与复用审计 | 已完成 | `6c4ca96` | 实际使用面已区分；配置/REST/GORM/Provider/MQ/并发/生命周期均有 keep/replace/remove/keep-domain 决策、证据和独立迁移门禁 |
+| 7. 无用与未完成代码清理 | 已完成 | `7e024be` | CacheAdapter/Mongo fail-closed，TOTP 无敏感 stdout，注释 NoSQL 已删除，SQLite 仅保留一个并发安全 owner；QUIC 作为公共兼容面登记后续废弃 |
+| 8. 全局日志与异常审计 | 已完成 | `557c94d`, `b83d406` | `check-logging` 已接入 quick；stdout/标准 logger、装饰图标、payload/SQL/参数 dump 已清零；服务/Provider/WebSocket 关键事件结构化，trace_id 与脱敏日志契约、vet、race 均通过 |
+| 9. 架构加固待办 | 已完成 | `ef0eb99`, `5c0d691`, `37c61de` | 注册表/forwarder 隔离已由任务 12 关闭；跨节点 IPv6/非 2xx 与配置迁移错误传播已测试修复；SharedBadger 拆分形成独立、无行为变更的执行台账 |
+| 10. README/文档与场景使用指南 | 已完成 | `270671b`, `8087530` | README、中文场景指南和仓库内 `use-digitalway-core` skill 已基于最终路由、模型、认证、日志、能力矩阵、测试与发布契约统一重建；未恢复已删除 Copilot skill |
 | 11. 安全基线与认证隔离 | 已完成（包含审查后 A-E） | `804a2de`, `937d381`, `daa2c57`, `5e4bcd8`, `503a01d`, `0bc1a14`, `3f4f506`, `e320017`, `6dd5f89`, `219da16`, `307f44e` | 代理/本地访问伪造防护、Logto 身份与 JWKS 生命周期、nil Request 处理、显式 CORS 示例、TrustedProxies 指南和可执行 security 测试模式均通过 |
 | 12. 请求隔离、全局状态与生命周期 | 已完成 | `60b6e3a`, `fc42ae7`, `52ac181`, `87cc800`, `b816515`, `ffe27c8`, `f016173`, `8aeed28`, `2f70294`, `f0f70ae` | 请求/注册表隔离、幂等可等待关闭、Provider 持续对账、WebSocket worker 归属和 concurrency 门禁均已通过 |
-| 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`，以及本次 13.4 提交 | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
-| 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
-| 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975`, `8087530` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 精确提交 smoke 通过；最终中文 skill 已基于完成后契约重建 |
-| 16. CI 质量门禁与消费方兼容性矩阵 | 已完成 | `1a4d66f`, `b54d6f2`, `fd9bf5c`, `75f8bfa` 及本批修复 | 四个 required gate、persistence observation、scheduled stress、外部/持久化 Docker、futures 精确 commit smoke、artifact/summary/清理契约均通过 |
-| 17. 性能、容量与运维 SLO 基线 | 已完成 | 本批提交 | Server/Provider/Event/WebSocket/SharedBadger/SQLite 三次基线、资源预算、RED/USE、trace、SLO/告警 owner 均已记录；SQLite mmap 从 30GB 改为默认 256MiB 可配置契约 |
+| 13. 持久化正确性与外部测试分离 | 已完成 | `b144f9a`, `aa6c2ad`, `e8330c0`, `adbd803`, `c22d4e1` | 默认/外部套件分层，GORM result 错误传播、SharedBadger CAS/pending/fatal-break 语义和 Docker 持久化 driver 契约均已通过；容器、测试进程与锁具有有界清理 |
+| 14. 配置到运行时能力契约 | 已完成并通过外部复审 | `f91c79b`, `c52e32e`, `71118b3` | `config-contract`、config/router/cluster/transport/mq/event 全包与 race 门禁通过；外部复审结论为 APPROVED，无 P0/P1/P2 返工项 |
+| 15. 公共 API 兼容性与发布治理 | 已完成并通过最终外部审查 | `1cd1c90`, `eb71276`, `25d3770`, `d8e0d4c`, `eef81e6`, `093fc1d`, `0022588`, `f646975`, `c71690c`, `8087530` | 15.1-15.5 均 APPROVED；release-contract、server/manage、错误 race 和 futures 精确提交 smoke 通过；最终中文 skill 已基于完成后契约重建 |
+| 16. CI 质量门禁与消费方兼容性矩阵 | 已完成（内部总验收；整任务外部终审未执行） | `a3b5b97`, `b863d3d`, `8975229`, `c030c7f`, `34af55c`, `703228e`, `1a4d66f`, `b54d6f2`, `fd9bf5c`, `75f8bfa`, `ccd1e22`, `547b57e` | 四个 required gate、persistence observation、scheduled stress、外部/持久化 Docker、futures 精确 commit smoke、artifact/summary/清理契约均通过；后续用户指令取消继续输出/等待外部审查，不伪造 APPROVED |
+| 17. 性能、容量与运维 SLO 基线 | 已完成 | `51b7072` | Server/Provider/Event/WebSocket/SharedBadger/SQLite 三次基线、资源预算、RED/USE、trace、SLO/告警 owner 均已记录；SQLite mmap 从 30GB 改为默认 256MiB 可配置契约 |
+
+<details>
+<summary>历史实施规格（任务已完成，仅供审计，不是执行指令）</summary>
 
 ## 任务 1：依赖升级隔离
 
@@ -1165,6 +1172,8 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 9. 在下一次公共框架发布前，完成任务 15 类型化错误、兼容性快照、废弃策略和发布治理。
 10. 完成任务 9 剩余加固和任务 10 文档对齐，然后在结构性性能重构前建立任务 17 性能/SLO 基线。
 
+</details>
+
 ## 验证矩阵
 
 | 命令 | 层级 | 需要 Docker | 需要外部环境 |
@@ -1181,7 +1190,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 | `./scripts/check-logging.sh` | 运行时日志策略和敏感输出守卫 | 否 | 否 |
 | `./scripts/test.sh security` | 认证隔离、CORS/代理、文件模式、body、响应头和安全错误测试 | 否 | 否 |
 | `./scripts/test.sh api-compat`、`./scripts/test.sh public-api`、`./scripts/ci.sh consumer/futures` | 路由/OpenAPI/导出 API 和锁定消费方冒烟检查 | 消费方检查不需要 Docker | 消费方路径和修订版由契约显式锁定 |
-| `CORE_TEST_KAFKA=1 ... TestMQKafka` | Kafka Provider 契约 | 是 | 仅在 Kafka Provider 存在后 |
+| `./scripts/test.sh config-contract`（Kafka rejected 用例） | 内建 Kafka Provider 拒绝契约 | 否 | 无；只有应用自行注册 `ProviderFactory` 后才由应用维护集成测试 |
 
 ## 完成定义
 
@@ -1196,7 +1205,7 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - `docker compose -f docker-compose.integration.yml up -d` 启动健康依赖。
 - `./scripts/test.sh integration-external` 通过 etcd、Consul、Redis Streams 和 NATS JetStream。
 - MySQL、MongoDB 和 ClickHouse 的显式 Docker 持久化套件通过并清理其资源。
-- Kafka 已实现且 Provider 契约测试通过，或已记录为仅配置。
+- 内建 Kafka Provider 已明确标记为 rejected，并由配置契约验证；可选 Compose profile 不代表 Core 支持该 Provider。
 - 包含密钥的配置文件使用最小权限模式；CORS、转发 IP 信任、body 限制、认证策略和公共错误通过安全契约。
 - 认证 issuer/audience 策略对每个 handler 不可变，且对并发 manage/user 服务安全。
 - 共享服务对象中不存在请求作用域数据；可变注册表返回快照并使用一致同步。
@@ -1218,11 +1227,23 @@ go-zero `core/queue` 是进程本地队列，不能替代 Redis Streams、NATS J
 - README 和 `use-digitalway-core` 参考声明相同 go-zero 复用与日志边界。
 - `docs/codex/FRAMEWORK_USAGE_GUIDE.md` 提供由真实构造器、示例、配置和测试支撑的场景决策与成熟度标签。
 
+## 残余风险
+
+以下项目不影响 required 门禁或任务 1-17 的实现完成状态，但尚未升级为已关闭能力：
+
+| 风险 | 当前状态 | Owner / 后续条件 |
+| --- | --- | --- |
+| persistence CI 稳定性 | 本地与 Docker 验收通过，但仍为 `observational/persistence`，不宣称 required | persistence；连续 CI 稳定后再评估提升 |
+| SQLite 测试辅助与清理边角 | 原子初始化、剩余 sleep/short skip、Exec 覆盖和 WAL/SHM 显式清理仍为 P2 | persistence；独立稳定性任务 |
+| 非默认响应安全边角 | `InitRequest.NewResponse`、自定义 `INewResponse` fixture、plain/600/800 直接序列化和非 REST `OkJson` 状态语义仍为 P2 | server/router + security；不得扩大默认 Response 已关闭结论 |
+| 发布检查边角 | 破坏性否定句、消费方矩阵 TODO/TBD 子串及批准文件最小结构仍为 P2 | release tooling；required 契约当前通过 |
+| 任务 16 整任务外部终审 | 未执行；16.1、16.2 各小节已有外部 APPROVED，16.3-16.5 仅有独立/内部验收 | 后续用户已要求停止外部审查提示词；本台账不补写不存在的 APPROVED |
+
 ## 最终验收记录（2026-07-13）
 
-本计划全部实施完成，最终验收基于提交 `547b57e9555611f60f22a937b46b377ae54ae27c` 执行：
+本计划代码与运行时验收基于实现提交 `547b57e9555611f60f22a937b46b377ae54ae27c` 执行；完成态文档随后由 `e650bd09871890dd642295fdc45f62f84fa3107a` 初始记录，本次台账纠偏同样只修改文档，不改变受测实现：
 
-- `go vet ./...`、`required/quick`、`required/contracts`、`required/server-manage`、`required/race`、`server`、`persistence-unit`、日志与性能契约均通过。
+- `go vet ./...`、`required/quick`、`required/contracts`、`required/server-manage`、`required/race`、`server`、`persistence-unit`、日志与性能契约均通过；其中 persistence 的 CI 分类仍是 observational，不因本次通过改写为 required。
 - `integration-external-docker` 通过 etcd、Consul、Redis Streams、NATS JetStream/EventBridge 契约；Consul Watch 使用可观测事件同步，NATS 资源名满足服务端约束。
 - `integration-persistence` 通过锁定的 MySQL 8.4.4、MongoDB 7.0.16、ClickHouse 24.8.14.39 driver 与生命周期契约；测试结束后无 Compose 容器残留。
 - futures 消费方在锁定提交 `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` 上使用 Go 1.26.5 和当前 Core 工作区通过 smoke。

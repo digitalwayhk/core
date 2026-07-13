@@ -1,6 +1,6 @@
 # 配置到运行时能力契约实施计划
 
-> 面向智能体开发者：按小节执行 TDD。每节先观察失败测试，再做最小实现和定向验收；代码完成后由外部审查 Agent 统一审查。
+> **完成态记录：** 14.1-14.4 已完成，修复提交 `c52e32e` 的外部复审结论为 APPROVED，关闭提交为 `71118b3`。下文步骤仅保留作历史审计，不是当前执行指令。
 
 **目标：** 让框架接受的每个项目自有配置字段都有明确默认值、校验、运行时消费方、生命周期归属和行为测试；尚未实现的能力必须在启动前返回可操作错误，不能静默跳过。
 
@@ -83,4 +83,4 @@ go test ./pkg/server/config ./pkg/server/cluster ./pkg/server/transport ./pkg/se
 go test -race ./pkg/server/config ./pkg/server/router ./pkg/server/cluster ./pkg/server/transport ./pkg/server/mq ./pkg/server/event -count=1
 ```
 
-**最终门禁记录（2026-07-12）：** `config-contract` 与六包完整 race 均通过。外部只读审查已执行，发现的 Etcd Prefix 接线、矩阵门禁强度和 MQ Close 在途调用问题已按 TDD 修复；当前等待外部 Agent 对修复提交复审，本计划不提前声明 APPROVED。
+**最终门禁记录（2026-07-12）：** `config-contract` 与六包完整 race 均通过。外部只读审查发现的 Etcd Prefix 接线、矩阵门禁强度和 MQ Close 在途调用问题已按 TDD 修复；修复提交 `c52e32e` 复审结论为 APPROVED，关闭记录提交为 `71118b3`，任务 14 已完成。
