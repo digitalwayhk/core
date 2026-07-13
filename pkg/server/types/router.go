@@ -1,12 +1,33 @@
 package types
 
-// IRouter 标准业务路由接口，所有业务功能应通过该接口提供对外调用服务
+// IRouter 是 Digitalway Core 的请求级业务路由契约。
+//
+// RouterInfo 是路由注册期创建、由 ServiceContext 持有的长期元数据；IRouter
+// 实例则只服务于一次请求或一次明确的 WebSocket 订阅。框架通常从 RouterInfo
+// 的有界对象池取得实例，依次调用 Parse、Validation 和 Do，并在所有同步使用
+// 以及事件快照完成后归还对象池。因此实现不得把当前请求、用户、trace 或响应写入
+// 包级变量、RouterInfo 或其他跨请求共享对象。
+//
+// 基础实现只需要实现本接口。按需还可以实现以下可选接口：
+//   - IRouterFactory：自定义请求实例的创建方式，常用于泛型 Manage Router。
+//   - IRouterResettable：覆盖对象池默认反射重置，适合包含复杂内部状态的 Router。
+//   - IRouterCleanable：归还对象池前清理敏感数据或请求级引用。
+//   - IRouterHashKey：提供稳定的参数 hash，供当前缓存和 WebSocket 订阅使用。
+//   - IWebSocketRouter：接收 WebSocket 订阅注册与注销回调。
+//   - IWebSocketRouterNotice：过滤并转换发送给订阅者的 WebSocket 通知。
+//   - IRouterResponse：为 OpenAPI 等描述场景提供响应示例。
+//   - IPackRouterHook：让包装 Router 暴露用于推导包路径和类型的真实实例。
+//
+// router 包还会识别其 GetRouterPath 可选接口，用于覆盖默认路由前缀。
 type IRouter interface {
-	Parse(req IRequest) error             //解析业务参数
-	Validation(req IRequest) error        //验证业务允许调用,该方法返回nil，Do方法将被调用
-	Do(req IRequest) (interface{}, error) //执行业务逻辑
-	RouterInfo() *RouterInfo              //路由注册信息
+	Parse(req IRequest) error             // 将请求绑定到当前请求级实例。
+	Validation(req IRequest) error        // 校验业务调用条件；返回 nil 后才执行 Do。
+	Do(req IRequest) (interface{}, error) // 执行业务逻辑，不负责传输层响应写入。
+	RouterInfo() *RouterInfo              // 返回所属服务内该路由唯一的长期元数据。
 }
+
+// IRouterResponse 为 OpenAPI、管理界面等描述场景提供路由成功响应示例。
+// 它不替代 IRequest.NewResponse，也不参与运行时错误响应构造。
 type IRouterResponse interface {
 	GetResponse() interface{}
 }
@@ -24,25 +45,40 @@ type IRouterInfo interface {
 	GetPathType() ApiType                           //获取路由类型
 }
 
-// IRouterFactory 业务路由工厂接口，用于创建管理路由实例
+// IRouterFactory 覆盖默认反射创建逻辑。
+//
+// 常用于泛型或包装 Router。New 必须返回一个独立、可执行的请求级 IRouter，
+// 不得返回正在被其他请求使用的共享实例。返回实例仍受 RouterInfo 对象池生命周期管理。
 type IRouterFactory interface {
-	New(instance interface{}) IRouter //创建业务路由实例
+	New(instance interface{}) IRouter
 }
 
-// IPackRouterHook 包装路由获取管理路由实例接口
+// IPackRouterHook 让泛型或包装 Router 暴露真实业务实例。
+// 框架使用返回值推导包路径、结构名和默认路由，不会用它替代请求级 Router。
 type IPackRouterHook interface {
 	GetInstance() interface{}
 }
 
+// IWebSocketRouter 接收本节点 WebSocket 订阅组的生命周期回调。
+// RegisterWebSocket 和 UnRegisterWebSocket 可能由并发连接触发，实现必须线程安全，
+// 且不得长期持有可被对象池回收的 IRequest 或 IRouter 引用。
 type IWebSocketRouter interface {
 	RegisterWebSocket(client IWebSocket, req IRequest)
 	UnRegisterWebSocket(client IWebSocket, req IRequest)
 }
 
+// IWebSocketRouterNotice 过滤并转换 WebSocket 广播内容。
+// 返回 false 表示当前订阅不接收该消息；返回数据应视为不可变发送快照。
+// 实现不得修改共享 RouterInfo，也不应执行无界阻塞操作。
 type IWebSocketRouterNotice interface {
 	NoticeFiltersRouter(message interface{}, api IRouter) (bool, interface{})
 }
 
+// IRouterHashKey 为路由参数提供稳定 hash。
+//
+// 当前实现将它同时用于路由缓存键和 WebSocket 订阅分组。相同业务参数必须在进程
+// 生命周期内返回相同值，并包含隔离订阅所需的全部业务维度；不得使用随机数、指针
+// 地址或随时间变化的数据。后续缓存组件会增加独立的 IRouterCacheKey 契约。
 type IRouterHashKey interface {
 	GetHashKey() uint64
 }

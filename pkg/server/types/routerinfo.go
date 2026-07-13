@@ -17,12 +17,20 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-// IRouterResettable 可重置接口（对象池复用前重置状态）
+// IRouterResettable 覆盖对象池默认的通用反射重置。
+//
+// Reset 在 Router 从池中取出、交给下一次 Parse 之前调用。复杂 Router（例如包含
+// 嵌套结构、内部缓存、不可直接清零的指针或自定义资源）应实现本接口，并把所有请求级
+// 状态恢复到新实例等价状态。实现后框架不会再执行通用反射重置。
 type IRouterResettable interface {
 	Reset()
 }
 
-// IRouterCleanable 可清理接口（对象池回收前清理敏感数据）
+// IRouterCleanable 在 Router 归还对象池之前清理请求级状态。
+//
+// Clean 适合尽早移除 token、用户信息、大块缓冲区和外部资源引用。它不能替代 Reset；
+// Clean 负责回收前清理，Reset 负责下一次使用前恢复。实现必须幂等且不能保留异步任务
+// 对当前 Router 的引用。
 type IRouterCleanable interface {
 	Clean()
 }
@@ -35,6 +43,21 @@ var (
 	ServerManagerType ApiType = "servermanager"
 )
 
+// RouterInfo 描述并管理 ServiceContext 内的一条路由。
+//
+// 每个 ServiceContext、每个路由 Path 只应存在一个长期 RouterInfo。它保存稳定的路由
+// 元数据、原型实例和路由级运行组件句柄，可被并发请求共享；它不是请求对象，不能保存
+// 当前用户、请求参数、trace、响应或其他请求级可变状态。服务注册完成后，Path、Auth、
+// Method、ServiceName、PathType 和实例类型等身份字段应视为只读。
+//
+// RouterInfo.New、ParseNew、JsonNew 和 Exec 使用独立的请求级 IRouter。标准 Router
+// 由类型工厂创建，IRouterFactory 可覆盖创建方式；实例从本 RouterInfo 专属的有界池
+// 取得，并通过 IRouterResettable/IRouterCleanable 或默认重置逻辑安全复用。
+//
+// UseCache、Subscribe 和 WebSocket 相关方法是框架公开兼容入口。后续实现应委托给所属
+// ServiceContext 的 RouteCacheManager、ServiceEventBridge 和 RouteWebSocketHub，避免
+// 在 RouterInfo 内继续累积服务级队列、连接和跨节点状态。Destroy 必须幂等，只关闭
+// 本路由持有的资源，不得影响其他服务或其他 RouterInfo。
 type RouterInfo struct {
 	ID                uint64
 	Path              string
