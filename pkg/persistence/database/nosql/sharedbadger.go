@@ -130,6 +130,15 @@ var (
 	ErrWriteBehindTTL          = errors.New("write-behind entries cannot use ttl")
 )
 
+type PendingSyncError struct {
+	Prefix string
+	Count  int
+}
+
+func (e *PendingSyncError) Error() string {
+	return fmt.Sprintf("write-behind 关闭时仍有待同步数据 [prefix=%s, pending=%d]", e.Prefix, e.Count)
+}
+
 // syncQueueKeyPrefix 同步队列索引前缀。
 // 写入 IsSynced=false 的数据时，同时在 \x00sq:{dataKey} 写入一个空值条目；
 // 同步成功后删除该条目。getUnsyncedBatch 仅扫描此前缀，复杂度从 O(N) 降为 O(K)。
@@ -208,6 +217,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	//  关闭状态控制
 	closeOnce sync.Once
 	closed    bool
+	closeErr  error
 	closeMu   sync.RWMutex
 }
 
@@ -3021,13 +3031,34 @@ func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Dur
 			p.syncMutex.Unlock()
 		}
 
+		var closeErrors []error
+		if bindErr := p.writeBehindBindError(); bindErr != nil {
+			closeErrors = append(closeErrors, bindErr)
+		}
+		pending, err := p.GetPendingSyncCount()
+		if err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("读取关闭积压失败 [prefix=%s]: %w", p.prefix, err))
+		} else if pending > 0 {
+			closeErrors = append(closeErrors, &PendingSyncError{Prefix: p.prefix, Count: pending})
+			logx.Errorw("write_behind_close_pending",
+				logx.Field("prefix", p.prefix),
+				logx.Field("pending", pending),
+			)
+		}
+
+		p.closeMu.Lock()
+		p.closeErr = errors.Join(closeErrors...)
+		p.closeMu.Unlock()
+
 		// 移除管理器引用
 		p.manager.RemoveRef(p.prefix)
 
 		logx.Infof("共享BadgerDB实例已关闭 [prefix=%s]", p.prefix)
 	})
 
-	return nil
+	p.closeMu.RLock()
+	defer p.closeMu.RUnlock()
+	return p.closeErr
 }
 
 // IsClosed 检查实例是否已关闭

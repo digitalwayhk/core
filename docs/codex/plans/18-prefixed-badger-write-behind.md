@@ -108,7 +108,7 @@ go test -race ./pkg/persistence/database/nosql -run 'Test.*PendingCount' -count=
 - 修改：`pkg/persistence/database/nosql/sharedbadger.go`
 - 创建：`pkg/persistence/database/nosql/sharedbadger_close_pending_test.go`
 
-- [ ] 新增可供 `errors.As` 使用的错误：
+- [x] 新增可供 `errors.As` 使用的错误：
 
 ```go
 type PendingSyncError struct {
@@ -117,10 +117,12 @@ type PendingSyncError struct {
 }
 ```
 
-- [ ] `CloseWithTimeout` 停止 worker 后读取持久同步索引；存在积压时返回 `PendingSyncError`，重复关闭返回相同结果。
-- [ ] 绑定失败与 pending 错误使用 `errors.Join`，不丢失任一原因。
-- [ ] 关闭日志只记录 prefix、pending、timeout，不记录模型 payload。
-- [ ] 测试无积压关闭、积压关闭、重复关闭、绑定失败关闭和 `errors.As/errors.Is`。
+- [x] `CloseWithTimeout` 停止 worker 后读取持久同步索引；存在积压时返回 `PendingSyncError`，重复关闭返回相同结果。
+- [x] 绑定失败与 pending 错误使用 `errors.Join`，不丢失任一原因。
+- [x] 关闭日志只记录 prefix、pending、timeout，不记录模型 payload。
+- [x] 测试无积压关闭、积压关闭、重复关闭、绑定失败关闭和 `errors.As/errors.Is`。
+
+**完成记录：** 关闭结果持久保存并可重复读取；pending 和绑定失败均可通过标准错误链判断。聚焦测试及 nosql 全包通过。
 
 **RED/GREEN：**
 
