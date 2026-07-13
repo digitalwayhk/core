@@ -143,7 +143,7 @@
 | `ServerConfig.Transport.GRPC.MaxRecvMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.Transport.GRPC.MaxSendMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.RouteCache` | supported | ServiceContext | 规范化配置并创建服务级 RouteCacheManager |
-| `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | off/local 可用；shared 在 Redis L3 落地前明确拒绝 |
+| `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | off/local 可用；shared 要求 Redis 与 EventBridge 外部失效订阅同时就绪 |
 | `ServerConfig.RouteCache.TTL` | supported | RouteCacheManager | 作为路由未显式指定时的默认 TTL |
 | `ServerConfig.RouteCache.L1` | supported | RouteCacheManager | 使用 go-zero collection.Cache 管理本地缓存 |
 | `ServerConfig.RouteCache.L1.Limit` | supported | RouteCacheManager | 传入 collection.WithLimit 限制 L1 条目数 |
@@ -152,12 +152,12 @@
 | `ServerConfig.RouteCache.L2.Path` | supported | BadgerL2 | 作为服务哈希子目录的根路径 |
 | `ServerConfig.RouteCache.L2.MaxBytes` | supported | BadgerL2 | 写入前根据 Badger LSM/vlog 大小执行容量保护 |
 | `ServerConfig.RouteCache.L2.CorruptionPolicy` | supported | BadgerL2 | fail 保留现场；显式 reset 才清空并重建 |
-| `ServerConfig.RouteCache.Redis` | rejected | RouteCacheConfig.Validate | Task 7 落地前只允许 inactive 默认值 |
-| `ServerConfig.RouteCache.Redis.Addr` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.RouteCache.Redis.Password` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.RouteCache.Redis.DB` | rejected | RouteCacheConfig.Validate | 非零值返回 not implemented |
-| `ServerConfig.RouteCache.Redis.Prefix` | rejected | RouteCacheConfig.Validate | 仅允许 inactive 默认值 |
-| `ServerConfig.RouteCache.Redis.OnUnavailable` | rejected | RouteCacheConfig.Validate | Task 7 落地前仅允许 fail 默认值 |
+| `ServerConfig.RouteCache.Redis` | supported | RouteCacheManager/RedisL3 | 仅 shared 模式消费，使用 go-zero Redis 客户端 |
+| `ServerConfig.RouteCache.Redis.Addr` | supported | RedisL3 | shared 默认要求非空并在启动时 Ping；不可用时按 OnUnavailable 处理 |
+| `ServerConfig.RouteCache.Redis.Password` | supported | RedisL3 | 透传 go-zero RedisConf.Pass，不得写入日志 |
+| `ServerConfig.RouteCache.Redis.DB` | rejected | RouteCacheConfig.Validate | go-zero Redis adapter 不消费 DB；仅允许 0，防止配置静默失效 |
+| `ServerConfig.RouteCache.Redis.Prefix` | supported | RedisL3 | 作为所有共享缓存键的显式前缀 |
+| `ServerConfig.RouteCache.Redis.OnUnavailable` | supported | RouteCacheManager | fail 默认阻止启动；显式 bypass 关闭 L1/L2/L3 全部缓存层 |
 | `ServerConfig.MQ` | supported | ServiceContext | ApplyDefaults/Validate 并按 Mode 创建和关闭 MQManager |
 | `ServerConfig.MQ.Mode` | supported | ServiceContext | 决定不创建、自动或强制 MQ runtime |
 | `ServerConfig.MQ.Provider` | supported | MQ factory | 选择内建或注册 factory，未实现 provider 拒绝 |

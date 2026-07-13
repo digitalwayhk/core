@@ -446,11 +446,6 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
-	cacheManager, cacheErr := routecache.NewManager(sc.Service.Name, con.RouteCache)
-	if cacheErr != nil {
-		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
-	}
-	sc.RouteCacheManager = cacheManager
 
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
@@ -495,6 +490,25 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			}
 		}
 	}
+
+	// shared 缓存必须等 MQ/EventBridge 外部适配器装配完成后再初始化，确保
+	// Redis 事实缓存与跨节点失效订阅同时就绪，不允许只启动本地层。
+	cacheManager, cacheErr := routecache.NewManager(
+		sc.Service.Name,
+		con.RouteCache,
+		routecache.WithInvalidationBridge(sc.ServiceEventBridge),
+	)
+	if cacheErr != nil {
+		if sc.MQManager != nil {
+			_ = sc.MQManager.Close()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sc.RouteWebSocketHub.Close(ctx)
+		_ = sc.ServiceEventBridge.Close(ctx)
+		cancel()
+		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
+	}
+	sc.RouteCacheManager = cacheManager
 
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)

@@ -428,6 +428,14 @@ case "${1:-quick}" in
   integration-local)
     CORE_TEST_CLUSTER_LOCAL=1 go test -tags=integration ./tests/integration -run TestClusterLocal -count=1
     ;;
+  integration)
+    if [[ "${CORE_TEST_REDIS:-0}" != "1" ]]; then
+      echo "SKIP: 设置 CORE_TEST_REDIS=1 后运行 RouteCache Redis L3 集成测试"
+      exit 0
+    fi
+    CORE_TEST_REDIS_ADDR="${CORE_TEST_REDIS_ADDR:-127.0.0.1:6379}" \
+      go test ./pkg/server/routecache -run '^TestRedisL3Integration$' -count=1
+    ;;
   integration-external)
     CORE_TEST_ETCD=1 \
     ETCD_ENDPOINTS="${ETCD_ENDPOINTS:-127.0.0.1:2379}" \
@@ -450,7 +458,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration-local|integration-external|integration-external-docker|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|all}" >&2
     exit 2
     ;;
 esac

@@ -77,8 +77,8 @@ func (c *RouteCacheConfig) Validate() error {
 	if c.Redis.OnUnavailable != "fail" && c.Redis.OnUnavailable != "bypass" {
 		return errors.New("routeCache.redis.onUnavailable must be fail or bypass")
 	}
-	if c.Mode == "shared" {
-		return errors.New("routeCache.mode shared is not implemented until Redis L3 is configured")
+	if c.Redis.DB != 0 {
+		return errors.New("routeCache.redis.db is not supported by the go-zero Redis adapter; use database 0")
 	}
 	if c.L2.Enable && c.L2.Path == "" {
 		return errors.New("routeCache.l2.path is required when l2 is enabled")
@@ -86,9 +86,9 @@ func (c *RouteCacheConfig) Validate() error {
 	if !c.L2.Enable && (c.L2.Path != "" || c.L2.MaxBytes != 512<<20 || c.L2.CorruptionPolicy != "fail") {
 		return errors.New("routeCache.l2 settings require l2.enable=true")
 	}
-	if c.Redis.Addr != "" || c.Redis.Password != "" || c.Redis.DB != 0 ||
-		c.Redis.Prefix != "digitalway:routecache" || c.Redis.OnUnavailable != "fail" {
-		return errors.New("routeCache.redis is not implemented; keep the inactive defaults")
+	if c.Mode != "shared" && (c.Redis.Addr != "" || c.Redis.Password != "" ||
+		c.Redis.Prefix != "digitalway:routecache" || c.Redis.OnUnavailable != "fail") {
+		return errors.New("routeCache.redis settings require routeCache.mode=shared")
 	}
 	return nil
 }

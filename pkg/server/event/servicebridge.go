@@ -33,6 +33,10 @@ type ExternalPublisher interface {
 	Publish(ctx context.Context, subject string, env *Envelope) error
 }
 
+type ExternalSubscriber interface {
+	Subscribe(ctx context.Context, subject string) (func(), error)
+}
+
 type ServiceEventBridgeOptions struct {
 	ObserverQueueSize int
 	ControlQueueSize  int
@@ -61,6 +65,7 @@ type ServiceEventBridge struct {
 
 	externalMu sync.RWMutex
 	external   ExternalPublisher
+	subscriber ExternalSubscriber
 	dropped    atomic.Uint64
 }
 
@@ -108,6 +113,7 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	}
 	b.externalMu.Lock()
 	b.external = publisher
+	b.subscriber, _ = publisher.(ExternalSubscriber)
 	b.externalMu.Unlock()
 }
 
@@ -116,6 +122,21 @@ func (b *ServiceEventBridge) Subscribe(eventType string, handler Handler) (func(
 		return nil, ErrServiceEventBridgeClosed
 	}
 	return b.stream.Subscribe(eventType, handler)
+}
+
+// SubscribeExternal 将指定主题交给已装配的外部事件适配器订阅。控制事件依赖
+// 此订阅建立跨节点失效通道；未装配外部适配器时必须明确失败。
+func (b *ServiceEventBridge) SubscribeExternal(ctx context.Context, subject string) (func(), error) {
+	if b == nil || b.closed.Load() {
+		return nil, ErrServiceEventBridgeClosed
+	}
+	b.externalMu.RLock()
+	subscriber := b.subscriber
+	b.externalMu.RUnlock()
+	if subscriber == nil {
+		return nil, ErrExternalProviderUnavailable
+	}
+	return subscriber.Subscribe(ctx, subject)
 }
 
 func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest) error {

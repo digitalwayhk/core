@@ -148,3 +148,24 @@ func TestServiceEventBridgeHandlerPanicDoesNotStopControlWorker(t *testing.T) {
 
 	assert.Equal(t, int32(2), calls.Load())
 }
+
+type fakeExternalEventAdapter struct {
+	subscribeCalls atomic.Int32
+}
+
+func (*fakeExternalEventAdapter) Publish(context.Context, string, *event.Envelope) error { return nil }
+func (a *fakeExternalEventAdapter) Subscribe(context.Context, string) (func(), error) {
+	a.subscribeCalls.Add(1)
+	return func() {}, nil
+}
+
+func TestServiceEventBridgeSubscribesThroughExternalAdapter(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	adapter := &fakeExternalEventAdapter{}
+	bridge.SetExternalPublisher(adapter)
+
+	cancel, err := bridge.SubscribeExternal(context.Background(), "service-a.routecache.invalidate")
+	require.NoError(t, err)
+	cancel()
+	assert.Equal(t, int32(1), adapter.subscribeCalls.Load())
+}
