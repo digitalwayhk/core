@@ -266,7 +266,7 @@ git commit -m "feat: add service scoped event bridge"
 - Modify: `pkg/server/types/routerinfo.go`
 - Modify: `pkg/server/router/servicecontext.go`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```go
 func TestRouteWebSocketHubSeparatesHashesInSameShard(t *testing.T) {}
@@ -278,7 +278,7 @@ func TestRouteWebSocketHubIsIsolatedPerService(t *testing.T) {}
 func TestRouteWebSocketHubCloseWithoutInitializationIsSafe(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -288,7 +288,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/types -run 'RouteW
 
 Expected: 同 shard 不同 hash 串消息或 Hub 尚不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 分片内使用完整 hash 二级 map；订阅组保存稳定 Router 快照和客户端请求元数据。
 
@@ -305,7 +305,7 @@ type routeSubscription struct {
 
 同 client/hash 重复注册不增加计数；0->1 和 1->0 通过 ServiceEventBridge 发布控制事件。发送使用服务级有界队列，不为每个 client 创建 goroutine。旧 RouterInfo WebSocket 方法仅委托 Hub。删除全局 notification system 和 clearMap 的业务状态。
 
-- [ ] **Step 4: 测试工程师验收**
+- [x] **Step 4: 测试工程师验收**
 
 Run:
 
@@ -317,7 +317,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/types ./pkg/
 
 Expected: PASS；碰撞 hash 只收到各自消息；关闭后 goroutine 数回落到测试容差内。
 
-- [ ] **Step 5: 提交**
+验收证据：`go test ./pkg/server/types ./pkg/server/router -count=1`、对应 `-race`、日志检查与 `release-contract` 均通过；实现提交 `ed2c7d5`。
+
+- [x] **Step 5: 提交**
 
 ```bash
 git add pkg/server/types pkg/server/router/servicecontext.go
