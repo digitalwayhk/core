@@ -142,6 +142,22 @@
 | `ServerConfig.Transport.GRPC.Port` | rejected | TransportConfig.Validate | 仅允许 0/固定 19090 兼容值，自定义值拒绝 |
 | `ServerConfig.Transport.GRPC.MaxRecvMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.Transport.GRPC.MaxSendMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
+| `ServerConfig.RouteCache` | supported | ServiceContext | 规范化配置并创建服务级 RouteCacheManager |
+| `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | off/local 可用；shared 在 Redis L3 落地前明确拒绝 |
+| `ServerConfig.RouteCache.TTL` | supported | RouteCacheManager | 作为路由未显式指定时的默认 TTL |
+| `ServerConfig.RouteCache.L1` | supported | RouteCacheManager | 使用 go-zero collection.Cache 管理本地缓存 |
+| `ServerConfig.RouteCache.L1.Limit` | supported | RouteCacheManager | 传入 collection.WithLimit 限制 L1 条目数 |
+| `ServerConfig.RouteCache.L2` | rejected | RouteCacheConfig.Validate | Task 6 落地前只允许 inactive 默认值 |
+| `ServerConfig.RouteCache.L2.Enable` | rejected | RouteCacheConfig.Validate | true 返回 not implemented |
+| `ServerConfig.RouteCache.L2.Path` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.RouteCache.L2.MaxBytes` | rejected | RouteCacheConfig.Validate | 仅允许 inactive 默认值 |
+| `ServerConfig.RouteCache.L2.CorruptionPolicy` | rejected | RouteCacheConfig.Validate | 仅允许 inactive fail 默认值 |
+| `ServerConfig.RouteCache.Redis` | rejected | RouteCacheConfig.Validate | Task 7 落地前只允许 inactive 默认值 |
+| `ServerConfig.RouteCache.Redis.Addr` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.RouteCache.Redis.Password` | rejected | RouteCacheConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.RouteCache.Redis.DB` | rejected | RouteCacheConfig.Validate | 非零值返回 not implemented |
+| `ServerConfig.RouteCache.Redis.Prefix` | rejected | RouteCacheConfig.Validate | 仅允许 inactive 默认值 |
+| `ServerConfig.RouteCache.Redis.OnUnavailable` | rejected | RouteCacheConfig.Validate | Task 7 落地前仅允许 fail 默认值 |
 | `ServerConfig.MQ` | supported | ServiceContext | ApplyDefaults/Validate 并按 Mode 创建和关闭 MQManager |
 | `ServerConfig.MQ.Mode` | supported | ServiceContext | 决定不创建、自动或强制 MQ runtime |
 | `ServerConfig.MQ.Provider` | supported | MQ factory | 选择内建或注册 factory，未实现 provider 拒绝 |

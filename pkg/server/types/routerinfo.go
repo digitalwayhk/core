@@ -86,6 +86,7 @@ type RouterInfo struct {
 	eventRuntime        RouteEventRuntime
 	eventCancels        map[ObserveState]map[string]func()
 	webSocketHub        *RouteWebSocketHub
+	cacheRuntime        RouteCacheRuntime
 	owner               string
 	frozen              bool
 	frozenMetadata      routerMetadata
@@ -218,6 +219,21 @@ func (own *RouterInfo) SetWebSocketHub(owner string, hub *RouteWebSocketHub) {
 		panic("router websocket hub owner conflict")
 	}
 	own.webSocketHub = hub
+}
+
+// SetCacheManager 绑定所属 ServiceContext 的缓存运行时，并恢复注册阶段声明的 UseCache。
+func (own *RouterInfo) SetCacheManager(owner string, runtime RouteCacheRuntime) {
+	own.Lock()
+	defer own.Unlock()
+	if own.frozen && own.owner != owner {
+		panic("router cache manager owner conflict")
+	}
+	own.cacheRuntime = runtime
+	if runtime != nil && own.useCache {
+		if err := runtime.EnableRoute(own.Path, own.cacheTime); err != nil {
+			panic("router cache enable failed")
+		}
+	}
 }
 func (own *RouterInfo) GetPath() string {
 	own.RLock()
@@ -556,14 +572,38 @@ type cacheObject struct {
 }
 
 func (own *RouterInfo) UseCache(cacheTime time.Duration) {
+	own.Lock()
 	own.useCache = true
 	own.cacheTime = cacheTime
 	if cacheTime <= 0 {
 		own.cacheTime = time.Second * 10 //默认缓存10秒
 	}
+	runtime := own.cacheRuntime
+	path := own.Path
 	own.rCache = sync.Map{}
+	own.Unlock()
+	if runtime != nil {
+		if err := runtime.EnableRoute(path, own.cacheTime); err != nil {
+			logx.Errorw("route_cache_enable_failed",
+				logx.Field("service", own.ServiceName),
+				logx.Field("route", path),
+				logx.Field("error", err),
+			)
+		}
+	}
 }
 func (own *RouterInfo) getCache(api IRouter) *cacheObject {
+	own.RLock()
+	runtime := own.cacheRuntime
+	path := own.Path
+	own.RUnlock()
+	if runtime != nil {
+		value, ok, err := runtime.Get(path, api)
+		if err != nil || !ok {
+			return nil
+		}
+		return &cacheObject{updateCacheTime: time.Now(), data: value}
+	}
 	key := getApiHash(api)
 	if value, ok := own.rCache.Load(key); ok {
 		obj := value.(*cacheObject)
@@ -577,6 +617,21 @@ func (own *RouterInfo) getCache(api IRouter) *cacheObject {
 	return nil
 }
 func (own *RouterInfo) setCache(api IRouter, value interface{}) {
+	own.RLock()
+	runtime := own.cacheRuntime
+	path := own.Path
+	ttl := own.cacheTime
+	own.RUnlock()
+	if runtime != nil {
+		if err := runtime.Set(path, api, value, ttl); err != nil {
+			logx.Errorw("route_cache_set_failed",
+				logx.Field("service", own.ServiceName),
+				logx.Field("route", path),
+				logx.Field("error", err),
+			)
+		}
+		return
+	}
 	key := getApiHash(api)
 	obj := own.getCache(api)
 	if obj == nil {
@@ -591,6 +646,26 @@ func (own *RouterInfo) setCache(api IRouter, value interface{}) {
 	own.rCache.Store(key, obj)
 }
 func (own *RouterInfo) FailureCache(api IRouter) {
+	own.RLock()
+	runtime := own.cacheRuntime
+	path := own.Path
+	own.RUnlock()
+	if runtime != nil {
+		var err error
+		if api == nil {
+			err = runtime.DeleteRoute(path)
+		} else {
+			err = runtime.Delete(path, api)
+		}
+		if err != nil {
+			logx.Errorw("route_cache_delete_failed",
+				logx.Field("service", own.ServiceName),
+				logx.Field("route", path),
+				logx.Field("error", err),
+			)
+		}
+		return
+	}
 	if api == nil {
 		own.rCache.Range(func(key, value interface{}) bool {
 			own.rCache.Delete(key)

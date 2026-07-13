@@ -82,3 +82,9 @@ type IWebSocketRouterNotice interface {
 type IRouterHashKey interface {
 	GetHashKey() uint64
 }
+
+// IRouterCacheKey 为路由结果缓存提供稳定、无歧义的业务键。
+// 多租户或用户隔离维度必须由实现显式纳入返回值。
+type IRouterCacheKey interface {
+	GetCacheKey() string
+}

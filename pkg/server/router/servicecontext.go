@@ -16,6 +16,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
+	"github.com/digitalwayhk/core/pkg/server/routecache"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -57,6 +58,7 @@ type ServiceContext struct {
 	EventBridge        *event.MQBridge                `json:"-"`
 	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
 	RouteWebSocketHub  *types.RouteWebSocketHub       `json:"-"`
+	RouteCacheManager  *routecache.Manager            `json:"-"`
 	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
 	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
 	membership         *cluster.MembershipManager     `json:"-"`
@@ -444,6 +446,11 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
+	cacheManager, cacheErr := routecache.NewManager(sc.Service.Name, con.RouteCache)
+	if cacheErr != nil {
+		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
+	}
+	sc.RouteCacheManager = cacheManager
 
 	// Phase 4: claim a unique MachineID in the process-local registry before
 	// initialising Snowflake, preventing ID collisions between services in the
@@ -592,6 +599,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	mqManager := own.MQManager
 	serviceEventBridge := own.ServiceEventBridge
 	routeWebSocketHub := own.RouteWebSocketHub
+	routeCacheManager := own.RouteCacheManager
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -599,6 +607,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.EventBridge = nil
 		own.ServiceEventBridge = nil
 		own.RouteWebSocketHub = nil
+		own.RouteCacheManager = nil
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
@@ -630,6 +639,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 				)
 			}
 			cancel()
+		}
+		if routeCacheManager != nil {
+			routeCacheManager.Close()
 		}
 		if serviceEventBridge != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

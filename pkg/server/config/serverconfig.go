@@ -37,10 +37,11 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string          `json:",optional"`
-	Cluster               ClusterConfig   `json:",optional"`
-	Transport             TransportConfig `json:",optional"`
-	MQ                    MQConfig        `json:",optional"`
+	MelodyConfigPath      string           `json:",optional"`
+	Cluster               ClusterConfig    `json:",optional"`
+	Transport             TransportConfig  `json:",optional"`
+	MQ                    MQConfig         `json:",optional"`
+	RouteCache            RouteCacheConfig `json:",optional"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -61,6 +62,7 @@ func (con *ServerConfig) ApplyDefaults() {
 	con.Cluster.ApplyDefaults()
 	con.Transport.ApplyDefaults()
 	con.MQ.ApplyDefaults()
+	con.RouteCache.ApplyDefaults()
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
@@ -81,6 +83,9 @@ func (con *ServerConfig) Validate() error {
 		return err
 	}
 	if err := con.MQ.Validate(); err != nil {
+		return err
+	}
+	if err := con.RouteCache.Validate(); err != nil {
 		return err
 	}
 	return nil
