@@ -256,7 +256,11 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 			return err
 		}
 	}
-	m.l1.Set(key, value, ttl)
+	l1Value := value
+	if m.l2 != nil || m.redis != nil {
+		l1Value = json.RawMessage(data)
+	}
+	m.l1.Set(key, l1Value, ttl)
 	return nil
 }
 

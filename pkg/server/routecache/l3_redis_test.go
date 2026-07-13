@@ -2,6 +2,7 @@ package routecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -224,6 +225,31 @@ func TestRedisFailureClearsAndPausesL1L2(t *testing.T) {
 	_, local := manager.l1.Get(key)
 	assert.False(t, local)
 	assert.NoError(t, manager.Set("/api/items", "same", "ignored", time.Minute))
+}
+
+func TestSharedCacheL1TypeMatchesRedisRefill(t *testing.T) {
+	redisClient := newFakeRedisClient()
+	manager, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(newFakeInvalidationBridge(newFakeInvalidationBus())))
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	require.NoError(t, manager.Set("/api/items", "same", map[string]int{"value": 1}, time.Minute))
+
+	immediate, ok, err := manager.Get("/api/items", "same")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.IsType(t, json.RawMessage{}, immediate)
+	key, enabled, err := manager.cacheKey("/api/items", "same")
+	require.NoError(t, err)
+	require.True(t, enabled)
+	manager.l1.Delete(key)
+
+	refilled, ok, err := manager.Get("/api/items", "same")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.IsType(t, immediate, refilled)
+	assert.JSONEq(t, string(immediate.(json.RawMessage)), string(refilled.(json.RawMessage)))
 }
 
 func TestRedisRecoveryWaitsForInvalidationSubscription(t *testing.T) {
