@@ -152,7 +152,7 @@ go vet ./pkg/persistence/database/nosql/...
 ./scripts/test.sh release-contract
 ```
 
-**完成记录：** nosql 全包、race、`persistence-unit`、vet 与 `release-contract` 均通过；框架指南、skill 引用、CHANGELOG、废弃登记和项目总台账已同步。外部审查发现的软删除 pending 计数漂移已由 `cf5eecd` 关闭。JetStream 接入说明已单独写入 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，未修改 NATS 业务实现。
+**完成记录：** nosql 全包、race、`persistence-unit`、vet 与 `release-contract` 均通过；框架指南、skill 引用、CHANGELOG、废弃登记和项目总台账已同步。外部审查发现的软删除 pending 计数漂移已由 `cf5eecd` 关闭，复审结论为 APPROVED，无 P0/P1。复审残余 P2-1 假定 Badger `DB.Update` 会自动重试回调；当前 v3.2103.5 实现只调用回调一次并直接返回提交冲突，且 `delete` 没有外层重试，因此不构成可达缺陷，不增加无行为依据的防御代码。JetStream 接入说明已单独写入 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，未修改 NATS 业务实现。
 
 ## 完成后输出的 NATS JetStream 指南
 
