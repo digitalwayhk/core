@@ -27,7 +27,7 @@
 - `pkg/server/routecache/l3_redis.go`：Redis 共享缓存。
 - `pkg/server/config/routecache.go`：缓存配置、默认值和 fail-closed 校验。
 
-## Task 1：请求执行、事件快照与对象池闭环（已完成：2cb693c）
+## Task 1：请求执行、事件快照与对象池闭环（实现 `2cb693c`，验收 `2e2b40f`）
 
 验收：go test ./pkg/server/types -count=1 与 go test -race ./pkg/server/types -count=1 均通过。
 
@@ -103,7 +103,7 @@ git add pkg/server/types
 git commit -m "fix: make router execution and pooling lifecycle safe"
 ```
 
-## Task 2：RouterInfo 冻结与 ServiceContext 注册表生命周期
+## Task 2：RouterInfo 冻结与 ServiceContext 注册表生命周期（实现 `690bb1a`，验收 `ffd42cf`）
 
 **Files:**
 - Modify: `pkg/server/types/routerinfo.go`
@@ -179,7 +179,7 @@ git add pkg/server/types/routerinfo.go pkg/server/types/routerinfo_lifecycle_tes
 git commit -m "fix: enforce router ownership and context registry lifecycle"
 ```
 
-## Task 3：每服务 ServiceEventBridge
+## Task 3：每服务 ServiceEventBridge（实现 `6c75625`，验收 `ab3a346`）
 
 **Files:**
 - Create: `pkg/server/event/servicebridge.go`
@@ -252,7 +252,7 @@ git add pkg/server/event pkg/server/router/servicecontext.go pkg/server/types
 git commit -m "feat: add service scoped event bridge"
 ```
 
-## Task 4：RouteWebSocketHub 精确订阅与生命周期
+## Task 4：RouteWebSocketHub 精确订阅与生命周期（实现 `ed2c7d5`，验收 `a052282`）
 
 **Files:**
 - Create: `pkg/server/types/route_websocket_hub.go`
@@ -326,7 +326,7 @@ git add pkg/server/types pkg/server/router/servicecontext.go
 git commit -m "fix: isolate websocket subscriptions by full hash"
 ```
 
-## Task 5：RouteCacheManager 与 go-zero L1
+## Task 5：RouteCacheManager 与 go-zero L1（实现 `4d16ef3`，验收 `b81d487`）
 
 **Files:**
 - Create: `pkg/server/config/routecache.go`
@@ -400,7 +400,7 @@ git add pkg/server/config pkg/server/routecache pkg/server/types pkg/server/rout
 git commit -m "feat: add service scoped route cache l1"
 ```
 
-## Task 6：纯缓存 Badger L2
+## Task 6：纯缓存 Badger L2（实现 `b6aa0d0`，验收 `58423b9`）
 
 **Files:**
 - Create: `pkg/server/routecache/l2_badger.go`
@@ -462,7 +462,7 @@ git add pkg/server/routecache pkg/server/config/routecache.go
 git commit -m "feat: add pure badger route cache l2"
 ```
 
-## Task 7：Redis L3、严格共享模式与可靠失效
+## Task 7：Redis L3、严格共享模式与可靠失效（实现 `8eec8b6`，验收 `24722c6`）
 
 **Files:**
 - Create: `pkg/server/routecache/l3_redis.go`
@@ -536,7 +536,7 @@ git add pkg/server/routecache pkg/server/config/routecache.go pkg/server/router/
 git commit -m "feat: add shared redis route cache l3"
 ```
 
-## Task 8：兼容门面、全局状态清理与总验收
+## Task 8：兼容门面、全局状态清理与总验收（实现 `eb38719`）
 
 **Files:**
 - Modify: `pkg/server/types/routerinfo.go`
@@ -550,7 +550,7 @@ git commit -m "feat: add shared redis route cache l3"
 - Create: `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`
 - Modify: `docs/superpowers/plans/2026-07-13-routerinfo-runtime-refactor.md`
 
-- [ ] **Step 1: 写失败契约检查**
+- [x] **Step 1: 写失败契约检查**
 
 新增静态测试，禁止 RouterInfo/WebSocket 使用 `globalNotificationSystem`、`clearMap` 和未读取的 `sync.Pool`；确认旧公开门面仍存在。
 
@@ -559,7 +559,7 @@ func TestRouterRuntimeHasNoProcessGlobalMutableComponents(t *testing.T) {}
 func TestRouterInfoCompatibilityMethodsRemain(t *testing.T) {}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -569,11 +569,11 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./internal/compat ./pkg/server/
 
 Expected: 旧全局 WebSocket 系统仍被扫描到。
 
-- [ ] **Step 3: 最小清理与文档**
+- [x] **Step 3: 最小清理与文档**
 
 删除已迁移实现和大段注释代码；cross-node fallback global 标记废弃并由 service scoped bridge 替代。文档写明 RouterInfo/IRouter 生命周期、Reset/Clean、缓存模式、Redis 故障语义和 WebSocket 精确 hash。
 
-- [ ] **Step 4: 测试工程师总验收**
+- [x] **Step 4: 测试工程师总验收**
 
 Run:
 
@@ -588,7 +588,9 @@ GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/types ./pkg/
 
 Expected: 全部 PASS。Redis/Badger 外部集成只在显式环境变量下运行。
 
-- [ ] **Step 5: 更新计划证据并提交**
+验收证据：静态契约首先因 `clearMap`、旧全局 forwarder 回退、旧通知 worker 和 RouterInfo 内缓存/WebSocket 状态而失败；清理后聚焦契约转绿。`go test ./pkg/server/... -count=1`、四运行组件 race、日志守卫、`release-contract`、`required/quick` 与 `required/contracts` 全部通过。端口测试在允许绑定本机临时端口的环境中执行；默认外部集成仍不隐式连接 Docker。实现提交 `eb38719`。
+
+- [x] **Step 5: 更新计划证据并提交**
 
 在本计划每个 Task 标题后记录提交 SHA 和验收结果，禁止使用“本批提交”等占位文本。
 
@@ -599,8 +601,8 @@ git commit -m "refactor: complete router runtime component isolation"
 
 ## 最终关闭条件
 
-- [ ] 八个 Task 均有独立提交 SHA。
-- [ ] 每节定向测试和 race 验收通过。
-- [ ] `pkg/server/...`、日志检查、release-contract、required quick/contracts 全绿。
+- [x] 八个 Task 均有独立提交 SHA。
+- [x] 每节定向测试和 race 验收通过。
+- [x] `pkg/server/...`、日志检查、release-contract、required quick/contracts 全绿。
 - [ ] 外部审查无 P0/P1；P2 明确登记，不伪装关闭。
-- [ ] 设计规格和使用文档与实际配置、启动和降级行为一致。
+- [x] 设计规格和使用文档与实际配置、启动和降级行为一致。
