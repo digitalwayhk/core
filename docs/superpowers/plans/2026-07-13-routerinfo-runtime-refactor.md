@@ -673,6 +673,7 @@ GOCACHE=/private/tmp/core-codex-go-cache ./scripts/ci.sh required/contracts
 终审残余 P2 后续处理：
 
 - [x] WebSocket 生命周期复审登记的三项 P2 已由 `a72844d` 关闭：失败订阅不再记录成功日志；认证订阅必须实现 `IWebSocketUserIdentity`；初始化期 `Exec/ExecDo` 仍保持原有统计和 panic 语义，但请求实例始终归还对象池。
+- [x] Hub 身份边界已由 `37397ec` 与 Melody 对齐：`Auth=true` 或 `PathType=PrivateType` 均强制实现 `IWebSocketUserIdentity`，绕过 Melody 直接注册认证路由也会 fail closed。
 - [x] `Exec/ExecDo` 直接调用与 `HasRouter` 已由 `8c6d332` 接入冻结快照校验。校验发生在创建请求实例前；`ExecDo` 校验失败时仍归还调用方传入的池化实例。
 - **触发式后续：** `storeRoutePolicy` 的创建语义仅在未来引入 `DisableRoute` 时需要拆分。当前没有删除路由能力，Recover 已只更新快照中仍存在的路由；提前增加未使用的创建开关不属于本计划范围。
 - **既定语义：** 已入队控制事件在调用方 context 取消后仍可能完成，这是文档化的 EventBridge 交付语义；取消不表示撤销，不作为缺陷修复。
