@@ -1,13 +1,13 @@
 package private
 
 import (
-	"hash/fnv"
 	"strings"
 
 	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 )
 
 // notifyOrderChange 通过当前 ServiceContext 中已冻结的订单路由发布用户通知。
@@ -23,6 +23,8 @@ func notifyOrderChange(req servertypes.IRequest, response *dto.OrderResponse) {
 }
 
 // GetOrders 查询当前登录用户的订单，并作为该用户的 WebSocket 订阅路由。
+// 框架已默认管理订阅组生命周期；本路由没有额外的启停动作，因此不实现
+// IWebSocketRouter，只实现身份注入、订阅分组和通知过滤。
 type GetOrders struct {
 	subscriptionUserID string
 }
@@ -71,34 +73,22 @@ func (own *GetOrders) resolveUserID(req servertypes.IRequest) string {
 	return strings.TrimSpace(own.subscriptionUserID)
 }
 
-// SetUserID 接收 WebSocket logon 会话解析出的可信用户身份。
+// SetUserID 实现 IWebSocketUserIdentity，接收 WebSocket 会话解析出的可信身份。
 func (own *GetOrders) SetUserID(userID, _ string) {
 	own.subscriptionUserID = strings.TrimSpace(userID)
 }
 
-// GetUserID 返回当前订阅绑定的可信用户 ID。
+// GetUserID 实现 IWebSocketUserIdentity，返回当前订阅绑定的可信用户 ID。
 func (own *GetOrders) GetUserID() string {
 	return own.subscriptionUserID
 }
 
-// GetHashKey 以 UserID 生成稳定订阅哈希，实现不同用户的订阅分组。
+// GetHashKey 实现 IRouterHashKey，以用户 ID 隔离不同用户的订阅组。
 func (own *GetOrders) GetHashKey() uint64 {
-	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(own.subscriptionUserID))
-	return hash.Sum64()
+	return utils.HashCode64(own.subscriptionUserID)
 }
 
-// Reset 在对象池重用前清除 WebSocket 订阅身份。
-func (own *GetOrders) Reset() {
-	own.subscriptionUserID = ""
-}
-
-// Clean 在对象归还路由池前尽早清除 WebSocket 订阅身份。
-func (own *GetOrders) Clean() {
-	own.subscriptionUserID = ""
-}
-
-// NoticeFiltersRouter 只允许订单事件投递给同一用户的订阅实例。
+// NoticeFiltersRouter 实现 IWebSocketRouterNotice，只向订单所属用户投递事件。
 func (own *GetOrders) NoticeFiltersRouter(message interface{}, api servertypes.IRouter) (bool, interface{}) {
 	response, ok := message.(*dto.OrderResponse)
 	if !ok || response == nil {
