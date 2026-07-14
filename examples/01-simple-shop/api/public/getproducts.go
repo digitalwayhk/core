@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
+	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -42,12 +42,12 @@ func (own *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return responsemodel.Products(items), nil
+	return dto.ProductResponses(items), nil
 }
 
 // GetResponse 返回 OpenAPI 用的商品列表成功响应结构。
 func (own *GetProducts) GetResponse() interface{} {
-	return []*responsemodel.Product{}
+	return []*dto.ProductResponse{}
 }
 
 // RouterInfo 将商品查询注册为公开 GET 路由。

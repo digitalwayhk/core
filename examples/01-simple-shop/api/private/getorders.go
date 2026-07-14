@@ -4,7 +4,7 @@ import (
 	"hash/fnv"
 	"strings"
 
-	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
+	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -12,8 +12,8 @@ import (
 
 // OrderEvent 是订单新增或删除后发送给当前用户的通知。
 type OrderEvent struct {
-	Action string               `json:"action"`
-	Order  *responsemodel.Order `json:"order"`
+	Action string             `json:"action"`
+	Order  *dto.OrderResponse `json:"order"`
 }
 
 // notifyOrderChange 通过当前 ServiceContext 中已冻结的订单路由发布用户通知。
@@ -56,12 +56,12 @@ func (own *GetOrders) Do(servertypes.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return responsemodel.Orders(orders), nil
+	return dto.OrderResponses(orders), nil
 }
 
 // GetResponse 返回 OpenAPI 用的本人订单列表成功响应结构。
 func (own *GetOrders) GetResponse() interface{} {
-	return []*responsemodel.Order{}
+	return []*dto.OrderResponse{}
 }
 
 // RouterInfo 将本人订单查询注册为需要认证的 GET 路由。

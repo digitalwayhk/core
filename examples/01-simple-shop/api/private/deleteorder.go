@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
+	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -51,14 +51,14 @@ func (own *DeleteOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	if err := order.Delete(); err != nil {
 		return nil, err
 	}
-	response := responsemodel.NewOrder(order)
+	response := dto.NewOrderResponse(order)
 	notifyOrderChange(req, &OrderEvent{Action: "deleted", Order: response})
 	return response, nil
 }
 
 // GetResponse 返回 OpenAPI 用的删除订单成功响应结构。
 func (own *DeleteOrder) GetResponse() interface{} {
-	return &responsemodel.Order{}
+	return &dto.OrderResponse{}
 }
 
 // RouterInfo 将订单删除注册为需要认证的 POST 路由。

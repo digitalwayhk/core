@@ -15,8 +15,8 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 
 | 场景 | 推荐 API | 最近示例 | 必需配置 | 验证命令 | 成熟度 |
 | --- | --- | --- | --- | --- | --- |
-| 普通 public API | `types.IRouter`、`IRouterResponse`、`responsemodel` | `examples/01-simple-shop/api/public` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/integration/01-simple-shop -run Public` | Stable |
-| 认证 private API | `api/private`、`req.GetUser()`、`responsemodel` | `examples/01-simple-shop/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `go test ./examples/integration/01-simple-shop -run Private` | Stable |
+| 普通 public API | `types.IRouter`、`IRouterResponse`、`api/dto` | `examples/01-simple-shop/api/public` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/integration/01-simple-shop -run Public` | Stable |
+| 认证 private API | `api/private`、`req.GetUser()`、`api/dto` | `examples/01-simple-shop/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `go test ./examples/integration/01-simple-shop -run Private` | Stable |
 | 模型持久化 | Manage `ModelList[T]`、模型 `IDataAction` 方法、`NewModel()` | `examples/01-simple-shop/models` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
 | 本地可靠写回 | `NewSharedBadgerDB[T]`、`EnableWriteBehind` | 无独立示例 | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/01-simple-shop/api/manage` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/integration/01-simple-shop -run Manage` | Stable |

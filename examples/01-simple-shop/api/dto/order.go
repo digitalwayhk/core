@@ -1,4 +1,4 @@
-package responsemodel
+package dto
 
 import (
 	"time"
@@ -6,8 +6,8 @@ import (
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 )
 
-// Order 是 Private API 和 WebSocket 对外暴露的订单响应模型。
-type Order struct {
+// OrderResponse 是 Private API 和 WebSocket 对外暴露的订单 DTO。
+type OrderResponse struct {
 	ID          uint   `json:"id,string" desc:"订单 ID"`
 	ProductID   uint   `json:"productID" desc:"商品 ID"`
 	ProductName string `json:"productName" desc:"商品名称快照"`
@@ -17,8 +17,8 @@ type Order struct {
 	CreatedAt   string `json:"createdAt" desc:"秒级下单时间"`
 }
 
-// NewOrder 从持久化订单创建不含深层基础模型的秒级响应快照。
-func NewOrder(model *models.Order) *Order {
+// NewOrderResponse 从持久化订单创建不含深层基础模型的秒级响应 DTO。
+func NewOrderResponse(model *models.Order) *OrderResponse {
 	if model == nil {
 		return nil
 	}
@@ -26,7 +26,7 @@ func NewOrder(model *models.Order) *Order {
 	if model.CreatedAt != nil {
 		createdAt = model.CreatedAt.UTC().Truncate(time.Second).Format(time.RFC3339)
 	}
-	return &Order{
+	return &OrderResponse{
 		ID:          model.ID,
 		ProductID:   model.ProductID,
 		ProductName: model.ProductName,
@@ -37,11 +37,11 @@ func NewOrder(model *models.Order) *Order {
 	}
 }
 
-// Orders 将订单持久化列表转换为对外响应列表。
-func Orders(modelsList []*models.Order) []*Order {
-	result := make([]*Order, 0, len(modelsList))
+// OrderResponses 将订单持久化列表转换为对外响应 DTO 列表。
+func OrderResponses(modelsList []*models.Order) []*OrderResponse {
+	result := make([]*OrderResponse, 0, len(modelsList))
 	for _, model := range modelsList {
-		if response := NewOrder(model); response != nil {
+		if response := NewOrderResponse(model); response != nil {
 			result = append(result, response)
 		}
 	}

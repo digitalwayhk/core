@@ -3,7 +3,7 @@ package private
 import (
 	"strings"
 
-	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
+	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -54,14 +54,14 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	if err := order.Insert(); err != nil {
 		return nil, err
 	}
-	response := responsemodel.NewOrder(order)
+	response := dto.NewOrderResponse(order)
 	notifyOrderChange(req, &OrderEvent{Action: "created", Order: response})
 	return response, nil
 }
 
 // GetResponse 返回 OpenAPI 用的下单成功响应结构。
 func (own *AddOrder) GetResponse() interface{} {
-	return &responsemodel.Order{}
+	return &dto.OrderResponse{}
 }
 
 // RouterInfo 将下单注册为需要认证的 POST 路由。
