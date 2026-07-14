@@ -632,10 +632,11 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 - [x] 本地模式并发 `DeleteRoute` 的 generation 递增在写锁内完成（实现 `a414c0a`，外部复审 `APPROVED`）。修复前 256 次并发删除最终仅推进到 35，修复后精确推进到 257。
 - [ ] 未来引入 `DisableRoute` 或删除路由策略时，`storeRoutePolicy` 不得重建已删除的空 TTL 条目；同时补强 Recover 后本地与 Redis 权威 generation 直接对齐的断言。
 - [x] 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试（测试加固 `c844aa0`，外部复审 `APPROVED`）。前者验证 128 个并发调用全部得到 generation=1 且仅一次 `SETNX` 创建成功；后者阻塞首个 initializer，验证 32 个调用仅初始化一次并返回同一新实例。
-- [x] 配置 L2 或 L3 时，L1 直接命中与下层回填统一返回 `json.RawMessage`（实现 `9ef4ab3`）；纯 L1 本地模式保留原对象语义。
-- [ ] TTL jitter、`TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
+- [x] 配置 L2 或 L3 时，L1 直接命中与下层回填统一返回 `json.RawMessage`（实现 `9ef4ab3`，独立只读复核 `APPROVED`）；纯 L1 本地模式保留原对象语义。
+- [x] 每次缓存写入在 L3/L2/L1 共用的有效 TTL 上施加 ±10% 有界 jitter（实现 `17ffa77`，独立只读复核无 P0/P1）。
+- [ ] `TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
 
-L1 类型一致性内部验收：L2/L3 直接命中与回填测试、纯 L1 兼容测试各 `-count=20`，`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。`9ef4ab3` 待独立外部审查确认。
+TTL jitter 内部验收：边界与 Manager 实际消费测试、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。
 
 ## 最终关闭条件
 
