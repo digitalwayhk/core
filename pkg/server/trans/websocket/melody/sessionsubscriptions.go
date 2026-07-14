@@ -71,9 +71,12 @@ func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, da
 		return nil, nil, err
 	}
 	if info.Auth {
-		if identity, ok := api.(types.IWebSocketUserIdentity); ok {
-			identity.SetUserID(s.req.userID, s.req.userName)
+		identity, ok := api.(types.IWebSocketUserIdentity)
+		if !ok {
+			info.ReleaseSubscription(api)
+			return nil, nil, errors.New("认证 WebSocket 路由必须实现 IWebSocketUserIdentity")
 		}
+		identity.SetUserID(s.req.userID, s.req.userName)
 	}
 	if err := api.Validation(req); err != nil {
 		info.ReleaseSubscription(api)
@@ -114,26 +117,26 @@ func (s *SessionSubscriptions) isLogonChannel(msg *Message) bool {
 	}
 	return false
 }
-func (s *SessionSubscriptions) HandleSubscribe(msg *Message) {
+func (s *SessionSubscriptions) HandleSubscribe(msg *Message) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isLogonChannel(msg) {
-		return
+		return false
 	}
 	channel := strings.TrimSpace(msg.Channel)
 	info := s.sr.GetRouter(channel)
 	if info == nil {
 		s.client.SendError(channel, "当前服务中未找到对应的路由")
-		return
+		return false
 	}
 	if info.Auth {
 		if s.req == nil {
 			s.client.SendError(channel, "未登陆不能订阅,请先使用logon通道登录!")
-			return
+			return false
 		}
 		if err := s.req.Validate(); err != nil {
 			s.client.SendError(channel, "登陆超时或无效的会话，请重新登录: "+err.Error())
-			return
+			return false
 		}
 	}
 	if _, exists := s.subscriptions[channel]; !exists {
@@ -142,17 +145,18 @@ func (s *SessionSubscriptions) HandleSubscribe(msg *Message) {
 	api, req, err := s.getApi(info, channel, msg.Data)
 	if err != nil {
 		s.client.SendError(channel, "订阅错误: "+err.Error())
-		return
+		return false
 	}
 
 	hash := info.RegisterWebSocketClient(api, s.client, req)
 	if hash == 0 {
 		s.client.SendError(channel, "订阅注册失败")
-		return
+		return false
 	}
 	s.subscriptions[channel][hash] = api
 	s.client.Send("sub", channel, s.subscriptions[channel])
 	s.lastActivity = time.Now() // 更新最后活动时间
+	return true
 }
 
 func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {

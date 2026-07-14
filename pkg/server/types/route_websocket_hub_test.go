@@ -103,11 +103,30 @@ func (r *hubInjectedIdentityRouter) GetHashKey() uint64 {
 }
 
 func (r *hubPrivateIdentityRouter) GetUserID() string { return r.UserID }
+func (r *hubPrivateIdentityRouter) SetUserID(userID, _ string) {
+	r.UserID = userID
+}
 func (r *hubPrivateIdentityRouter) GetHashKey() uint64 {
 	if r.UserID == "trusted-user" {
 		return 41
 	}
 	return 0
+}
+
+func TestRouteWebSocketHubRejectsPrivateRouterWithoutIdentityContract(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/private-without-identity")
+	info.PathType = PrivateType
+	router := &hubTestRouter{info: info, hash: 43}
+	info.SetInstance(router)
+	client := &hubTestWebSocket{}
+	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+
+	hash := hub.Register(info, router, client, req)
+
+	require.Zero(t, hash)
+	require.Equal(t, int32(1), router.cleans.Load())
+	require.Zero(t, hub.ActiveClientCount(info))
 }
 
 func (*hubTestRouter) Parse(IRequest) error             { return nil }

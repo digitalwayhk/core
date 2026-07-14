@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/digitalwayhk/core/pkg/server/event"
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
@@ -92,19 +91,17 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 		return 0
 	}
 	if info.PathType == PrivateType {
+		identity, ok := router.(IWebSocketUserIdentity)
+		if !ok {
+			info.releaseSubscription(router)
+			return 0
+		}
 		id, name := req.GetUser()
 		if strings.TrimSpace(id) != "" {
-			if setter, ok := router.(interface{ SetUserID(string, string) }); ok {
-				setter.SetUserID(id, name)
-			} else {
-				utils.SetPropertyValue(router, "userid", id)
-			}
-		} else {
-			getter, ok := router.(interface{ GetUserID() string })
-			if !ok || strings.TrimSpace(getter.GetUserID()) == "" {
-				info.releaseSubscription(router)
-				return 0
-			}
+			identity.SetUserID(id, name)
+		} else if strings.TrimSpace(identity.GetUserID()) == "" {
+			info.releaseSubscription(router)
+			return 0
 		}
 	}
 	hash := getApiHash(router)

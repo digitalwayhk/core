@@ -3,10 +3,12 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/stretchr/testify/require"
 )
@@ -321,4 +323,52 @@ func TestRouterInfoExecDoReturnsRequestToPool(t *testing.T) {
 	if reused != router {
 		t.Fatal("ExecDo 完成后必须归还短期请求实例")
 	}
+}
+
+func TestRouterInfoExecReturnsRequestToPoolDuringInitialization(t *testing.T) {
+	config.BeginServerInitialization()
+	t.Cleanup(config.EndServerInitialization)
+	factoryCalls.Store(0)
+	info := &RouterInfo{Path: "/api/test/initializing-exec", ServiceName: "test"}
+	info.SetInstance(&factoryPoolRouter{})
+
+	require.NotNil(t, info.Exec(&shardTestRequest{}))
+	require.NotNil(t, info.New())
+
+	require.Equal(t, int32(1), factoryCalls.Load(), "初始化期 Exec 完成后应归还请求实例")
+}
+
+var initializationParseFactoryCalls atomic.Int32
+
+type initializationParseFactoryRouter struct{}
+
+func (*initializationParseFactoryRouter) Parse(IRequest) error             { return nil }
+func (*initializationParseFactoryRouter) Validation(IRequest) error        { return nil }
+func (*initializationParseFactoryRouter) Do(IRequest) (interface{}, error) { return nil, nil }
+func (*initializationParseFactoryRouter) RouterInfo() *RouterInfo          { return nil }
+func (*initializationParseFactoryRouter) New(interface{}) IRouter {
+	initializationParseFactoryCalls.Add(1)
+	return &initializationParseFailureRouter{}
+}
+
+type initializationParseFailureRouter struct{}
+
+func (*initializationParseFailureRouter) Parse(IRequest) error { return errors.New("parse failed") }
+func (*initializationParseFailureRouter) Validation(IRequest) error {
+	return nil
+}
+func (*initializationParseFailureRouter) Do(IRequest) (interface{}, error) { return nil, nil }
+func (*initializationParseFailureRouter) RouterInfo() *RouterInfo          { return nil }
+
+func TestRouterInfoExecParseFailureReturnsRequestToPoolDuringInitialization(t *testing.T) {
+	config.BeginServerInitialization()
+	t.Cleanup(config.EndServerInitialization)
+	initializationParseFactoryCalls.Store(0)
+	info := &RouterInfo{Path: "/api/test/initializing-parse-failure", ServiceName: "test"}
+	info.SetInstance(&initializationParseFactoryRouter{})
+
+	require.NotNil(t, info.Exec(&shardTestRequest{}))
+	require.NotNil(t, info.New())
+
+	require.Equal(t, int32(1), initializationParseFactoryCalls.Load(), "初始化期 Parse 失败后应归还请求实例")
 }

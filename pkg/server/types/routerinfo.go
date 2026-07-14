@@ -320,13 +320,12 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	delegated := false
 	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
 	defer func() {
-		if config.IsServerInitializing() {
-			return
-		}
-
 		// Parse 失败或 panic 时 ExecDo 尚未接管实例，由 Exec 归还。
 		if !delegated {
 			own.putRouter(api)
+		}
+		if config.IsServerInitializing() {
+			return
 		}
 
 		if err := recover(); err != nil {
@@ -356,9 +355,7 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 // 🔧 修改 ExecDo 方法，添加统计
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 	defer func() {
-		if !config.IsServerInitializing() {
-			own.putRouter(api)
-		}
+		own.putRouter(api)
 	}()
 	// 🆕 记录请求开始
 	recordEnd := own.recordRequestStart()

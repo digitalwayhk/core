@@ -1,11 +1,17 @@
 package melody
 
 import (
+	"bytes"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/olahol/melody"
 	"github.com/stretchr/testify/require"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 var subscriptionFactoryCalls atomic.Int32
@@ -44,4 +50,28 @@ func TestParseSubscriptionRequestCreatesDetachedRouter(t *testing.T) {
 
 	require.NotSame(t, subscription, request)
 	require.Equal(t, int32(2), subscriptionFactoryCalls.Load())
+}
+
+func TestHandleSubscribeDoesNotLogSuccessWhenRouteIsMissing(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() {
+		logx.Reset()
+		if previous != nil {
+			logx.SetWriter(previous)
+		}
+	})
+
+	session := &melody.Session{Request: &http.Request{RemoteAddr: "127.0.0.1:10000"}}
+	manager := &MelodyManager{
+		serviceContext: &router.ServiceContext{Router: &router.ServiceRouter{}},
+		subscriptions:  make(map[*melody.Session]*SessionSubscriptions),
+	}
+	client := &MelodyClient{session: session, manager: manager}
+	manager.subscriptions[session] = NewSessionSubscriptions(manager, client, nil)
+
+	manager.handleSubscribe(session, &Message{Event: string(Subscribe), Channel: "/api/test/missing"})
+
+	require.False(t, strings.Contains(output.String(), "客户端订阅成功"), output.String())
 }

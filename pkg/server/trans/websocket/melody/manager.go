@@ -395,9 +395,9 @@ func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
 
 	// 🔧 在锁外设置router
 	subscriptions.setServiceRouter(mm.serviceContext.Router)
-	subscriptions.HandleSubscribe(msg)
-
-	logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
+	if subscriptions.HandleSubscribe(msg) {
+		logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
+	}
 }
 
 func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {

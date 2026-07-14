@@ -74,6 +74,7 @@ type IWebSocketRouter interface {
 
 // IWebSocketUserIdentity 接收已通过认证的 WebSocket 会话身份。
 // 身份只能由传输层注入，Router 不得从订阅 payload 读取用户字段。
+// 所有需要认证的 WebSocket 订阅 Router 都必须实现本接口，否则框架拒绝订阅。
 type IWebSocketUserIdentity interface {
 	GetUserID() string
 	SetUserID(userID, userName string)
