@@ -648,10 +648,24 @@ EventBridge 控制队列内部验收：单分片、容量 1 的确定性满队�
 
 Recover 防御项内部验收：删除路由交错与 generation 回退测试 `-count=20`、`routecache -count=20` 与 race 全部通过。
 
+本轮最终内部验收基于代码终点 `23d1ae0`（后续只更新文档与审查提示词）：
+
+```bash
+GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
+GOCACHE=/private/tmp/core-codex-go-cache go test -race ./pkg/server/types ./pkg/server/event ./pkg/server/router ./pkg/server/routecache -count=1
+GOCACHE=/private/tmp/core-codex-go-cache ./scripts/check-logging.sh
+GOCACHE=/private/tmp/core-codex-go-cache ./scripts/test.sh release-contract
+GOCACHE=/private/tmp/core-codex-go-cache ./scripts/ci.sh required/quick
+GOCACHE=/private/tmp/core-codex-go-cache ./scripts/ci.sh required/contracts
+```
+
+上述全部通过；需要监听临时端口的测试在允许本机 loopback 绑定的环境中执行。验收时工作树同时存在用户未提交的对象池容量调整及其他文档/Compose 变更，本计划未纳入、未回退这些变更；最终外部审查应以已提交范围 `7631d78..HEAD` 为准。
+
 ## 最终关闭条件
 
 - [x] 八个 Task 均有独立提交 SHA。
 - [x] 每节定向测试和 race 验收通过。
 - [x] `pkg/server/...`、日志检查、release-contract、required quick/contracts 全绿。
-- [x] 外部审查无 P0/P1；P2 明确登记，不伪装关闭。
+- [x] 首轮外部审查及两项 P1 修复复审无 P0/P1；P2 明确登记。
+- [ ] 本轮已完成的全部 P2 补强需按 `docs/codex/ROUTERINFO_RUNTIME_FINAL_REVIEW_PROMPT.md` 执行整计划最终外部只读审查，只有获得 `APPROVED` 才能勾选。
 - [x] 设计规格和使用文档与实际配置、启动和降级行为一致。
