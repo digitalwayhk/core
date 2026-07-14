@@ -31,6 +31,17 @@ func TestTypeErrorWithCausePreservesErrorChain(t *testing.T) {
 	require.Equal(t, 600, ResolvePublicError(err).Code)
 }
 
+func TestTypeErrorPreservesSafePublicCauseMessageAndStageCode(t *testing.T) {
+	cause := NewPublicError(ErrorKindValidation, PublicCodeValidation, "订单数量必须大于 0", errors.New("quantity is not positive"))
+	err := NewTypeErrorWithCause("shop", "/api/shop/addorder", "validation", "internal validation detail", 700, cause)
+
+	contract := ResolvePublicError(err)
+	require.Equal(t, ErrorKindValidation, contract.Kind)
+	require.Equal(t, 700, contract.Code)
+	require.Equal(t, 400, contract.HTTPStatus)
+	require.Equal(t, "订单数量必须大于 0", contract.Message)
+}
+
 func TestResolvePublicErrorDoesNotClassifyByMessage(t *testing.T) {
 	for _, message := range []string{"not found", "unauthorized token", "业务失败", "database exploded"} {
 		contract := ResolvePublicError(errors.New(message))

@@ -21,7 +21,7 @@ go get github.com/digitalwayhk/core@latest
 /api/{service}/{structLower}
 ```
 
-`api/public` 无需认证；`api/private` 自动要求认证，并通过 `req.GetUser()` 读取身份。完整代码见 [01-hello-router](./examples/01-hello-router)。
+`api/public` 无需认证；`api/private` 自动要求认证，并通过 `req.GetUser()` 读取身份。完整代码见 [最简商城示例](./examples/01-simple-shop)。
 
 ```go
 func (own *Ping) Parse(req types.IRequest) error { return req.Bind(own) }
@@ -41,7 +41,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo {
 - 只有天然具有稳定 `Code` 语义的资料模型才使用 `BaseModel`。
 - 管理 CRUD 路径为 `/api/manage/{service}/{manageStructLower}/{operationLower}`。
 
-真实示例见 [03-manage-crud](./examples/03-manage-crud)。
+模型、Manage CRUD 和私有订单接口见 [最简商城示例](./examples/01-simple-shop)。
 
 ## 安全与配置
 
@@ -54,7 +54,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo {
 
 ## 集群、传输与 MQ
 
-能力是否可用由配置校验、运行时 factory 和行为测试共同决定，不能仅依据配置字段存在。当前支持范围见 [配置到运行时能力矩阵](./docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md)。MQ/EventBridge 组装示例见 [12-mq-event-stream](./examples/12-mq-event-stream)。
+能力是否可用由配置校验、运行时 factory 和行为测试共同决定，不能仅依据配置字段存在。当前支持范围和外部依赖接入方式见 [配置到运行时能力矩阵](./docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md)。
 
 ## 验证
 

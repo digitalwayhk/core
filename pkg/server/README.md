@@ -75,10 +75,10 @@ func (own *GetOrder) GetResponse() interface{} {
 /api/{serviceName}/{routerStructNameLower}
 ```
 
-例如 `examples/demo/api/private/AddOrder` 会生成：
+例如 `examples/01-simple-shop/api/private/AddOrder` 会生成：
 
 ```text
-/api/demo/addorder
+/api/shop/addorder
 ```
 
 `service/manage` 生成的管理路由会使用特殊路径：
@@ -90,9 +90,9 @@ func (own *GetOrder) GetResponse() interface{} {
 例如：
 
 ```text
-/api/manage/demo/tokenmanage/view
-/api/manage/demo/tokenmanage/search
-/api/manage/demo/tokenmanage/add
+/api/manage/shop/productmanage/view
+/api/manage/shop/productmanage/search
+/api/manage/shop/productmanage/add
 ```
 
 ## 服务注册

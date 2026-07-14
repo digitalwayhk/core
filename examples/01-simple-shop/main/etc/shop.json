@@ -1,0 +1,19 @@
+{
+  "Name": "shop",
+  "Host": "127.0.0.1",
+  "Port": 8081,
+  "RunIp": "127.0.0.1",
+  "SocketPort": 18081,
+  "DataCenterID": 1,
+  "MachineID": 2,
+  "Telemetry": {"Disabled": true},
+  "Log": {"ServiceName": "shop", "Mode": "console", "Level": "info"},
+  "Auth": {"AccessSecret": "simple-shop-user-secret", "AccessExpire": 86400},
+  "ManageAuth": {"AccessSecret": "simple-shop-manage-secret", "AccessExpire": 86400},
+  "ServerManageAuth": {"AccessSecret": "simple-shop-admin-secret", "AccessExpire": 86400},
+  "TrustedProxies": [],
+  "Cluster": {"Mode": "auto", "Provider": "local"},
+  "Transport": {"Internal": "grpc", "GRPC": {"Enable": false}},
+  "MQ": {"Mode": "off"}
+}
+

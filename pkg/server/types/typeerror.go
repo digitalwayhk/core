@@ -1,6 +1,9 @@
 package types
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type TypeError struct {
 	Code        int    `json:"code"`
@@ -42,6 +45,16 @@ func (own *TypeError) Unwrap() error {
 func (own *TypeError) PublicErrorContract() PublicErrorContract {
 	if own == nil {
 		return defaultPublicErrorContract(ErrorKindInternal)
+	}
+	if own.cause != nil {
+		var provider publicErrorProvider
+		if errors.As(own.cause, &provider) {
+			contract := provider.PublicErrorContract()
+			if own.Code != 0 {
+				contract.Code = own.Code
+			}
+			return contract
+		}
 	}
 	var contract PublicErrorContract
 	switch own.Type {

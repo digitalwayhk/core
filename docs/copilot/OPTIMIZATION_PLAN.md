@@ -1627,7 +1627,7 @@ CORE_TEST_REDIS=1 CORE_TEST_NATS=1 go test -tags=integration ./tests/integration
 - 完成目录 README。
 - 补齐 `IRouterResponse`、WebSocket 接口、OpenAPI 文档。
 - 给 `types/router.go`、`types/service.go`、`types/payload.go` 增加注释。
-- 更新 `examples/demo`，增加 `IRouterResponse` 和 WebSocket hash/filter 示例。
+- 更新 `examples/01-simple-shop`，以真实集成测试覆盖 WebSocket hash/filter。
 - 补充测试目录规划和每个核心模块的验收用例。
 
 ### 阶段 2：基础质量修复

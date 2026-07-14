@@ -833,9 +833,9 @@ go test -race ./pkg/server/router ./pkg/server/cluster ./pkg/server/mq ./pkg/ser
 - 修改：`docs/codex/AUTOMATED_VERIFICATION_PLAN.md`
 - 创建：`docs/codex/FRAMEWORK_USAGE_GUIDE.md`
 - 审查：`.codex/skills/use-digitalway-core/references/core-backend-api.md`
-- 审查：`examples/01-hello-router`
-- 审查：`examples/03-manage-crud`
-- 审查：`examples/12-mq-event-stream`
+- 审查：`examples/01-simple-shop` 的完整应用与集成测试
+- 说明：旧分散示例已由单一商城示例替代
+- 外部依赖能力以配置矩阵和 Docker 集成门禁为准
 
 - [x] **步骤 1：替换过时 README 片段**
 

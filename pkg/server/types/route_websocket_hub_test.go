@@ -69,6 +69,19 @@ type hubTestRouter struct {
 	cleans      atomic.Int32
 }
 
+type hubPrivateIdentityRouter struct {
+	*hubTestRouter
+	UserID string
+}
+
+func (r *hubPrivateIdentityRouter) GetUserID() string { return r.UserID }
+func (r *hubPrivateIdentityRouter) GetHashKey() uint64 {
+	if r.UserID == "trusted-user" {
+		return 41
+	}
+	return 0
+}
+
 func (*hubTestRouter) Parse(IRequest) error             { return nil }
 func (*hubTestRouter) Validation(IRequest) error        { return nil }
 func (*hubTestRouter) Do(IRequest) (interface{}, error) { return nil, nil }
@@ -130,6 +143,22 @@ func TestRouteWebSocketHubSeparatesHashesInSameShard(t *testing.T) {
 	hub.ExecuteLocalNotice(info, 129, "second")
 	waitForHub(t, func() bool { return secondClient.eventCount("129") == 1 })
 	assert.Equal(t, 0, firstClient.eventCount("129"))
+}
+
+func TestRouteWebSocketHubPreservesSessionIdentityWhenHandshakeRequestHasNoUser(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/private-orders")
+	info.PathType = PrivateType
+	router := &hubPrivateIdentityRouter{
+		hubTestRouter: &hubTestRouter{info: info},
+		UserID:        "trusted-user",
+	}
+	info.SetInstance(router)
+
+	hash := hub.Register(info, router, &hubTestWebSocket{}, &shardTestRequest{})
+
+	require.Equal(t, uint64(41), hash)
+	require.Equal(t, "trusted-user", router.UserID)
 }
 
 func TestRouteWebSocketHubAllowsClientOnMultipleHashes(t *testing.T) {

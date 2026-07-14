@@ -15,21 +15,21 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 
 | 场景 | 推荐 API | 最近示例 | 必需配置 | 验证命令 | 成熟度 |
 | --- | --- | --- | --- | --- | --- |
-| 普通 public API | `types.IRouter`、`router.DefaultRouterInfo` | `examples/01-hello-router` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/01-hello-router/...` | Stable |
-| 认证 private API | `api/private`、`req.GetUser()` | `examples/demo/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `./scripts/test.sh security` | Stable |
-| 模型持久化 | `entity.NewModelList[T]`、`NewModel()` | `examples/02-model-persistence` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
+| 普通 public API | `types.IRouter`、`router.DefaultRouterInfo` | `examples/01-simple-shop/api/public` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/integration -run Public` | Stable |
+| 认证 private API | `api/private`、`req.GetUser()` | `examples/01-simple-shop/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `go test ./examples/integration -run Private` | Stable |
+| 模型持久化 | `entity.NewModelList[T]`、`NewModel()` | `examples/01-simple-shop/models` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
 | 本地可靠写回 | `NewSharedBadgerDB[T]`、`EnableWriteBehind` | 无独立示例 | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
-| 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/03-manage-crud` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/03-manage-crud/...` | Stable |
-| 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `examples/04-manage-hooks` | 同管理 CRUD | `go test ./service/manage/...` | Stable |
-| OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | `examples/05-openapi-response` | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
+| 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/01-simple-shop/api/manage` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/integration -run Manage` | Stable |
+| 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `service/manage` 测试 | 同管理 CRUD | `go test ./service/manage/...` | Stable |
+| OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | 发布契约文档 | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
 | 路由结果缓存 | `RouterInfo.UseCache`、`IRouterCacheKey` | 无独立示例 | local 可选 Badger；shared 要求 Redis + EventBridge 外部 adapter | `go test ./pkg/server/routecache` | Conditional |
-| 本地 WebSocket 通知 | `RegisterWebSocketClient`、`NoticeWebSocket` | `examples/06-websocket-local` | WebSocket 开启 | `go test -race ./pkg/server/types ./pkg/server/trans/websocket/melody` | Stable |
-| 跨节点 WebSocket | ClusterProvider、CrossNodeNoticeBroker | `examples/07-websocket-notice-hash` | 集群 `on/auto`；节点地址可达 | `go test -race ./pkg/server/cluster ./pkg/server/types` | Conditional |
-| 配置 profile | `ServerConfig.ApplyDefaults/Validate` | `examples/08-config-profiles` | 显式环境/profile | `./scripts/test.sh config-contract` | Stable |
-| 内部传输选择 | `transport.BuildSelector` | `examples/09-transport-selector` | http/grpc/socket；QUIC/MQ transport 被拒绝 | `./scripts/test.sh config-contract` | Conditional |
-| 本地集群 | LocalProvider | `examples/10-cluster-local` | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
-| etcd/Consul 集群 | Etcd/Consul Provider | `examples/11-cluster-etcd-consul` | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
-| MQ/EventBridge | MQManager、EventBridge、ProviderFactory | `examples/12-mq-event-stream` | Redis Streams 或 NATS JetStream；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker` | Conditional |
+| 本地 WebSocket 通知 | `RegisterWebSocketClient`、`NoticeWebSocket` | `examples/01-simple-shop/api/private/getorders.go` | WebSocket 开启 | `go test -race ./examples/integration -run WebSocket` | Stable |
+| 跨节点 WebSocket | ClusterProvider、CrossNodeNoticeBroker | `ROUTERINFO_RUNTIME_GUIDE.md` | 集群 `on/auto`；节点地址可达 | `go test -race ./pkg/server/cluster ./pkg/server/types` | Conditional |
+| 配置 profile | `ServerConfig.ApplyDefaults/Validate` | 配置能力矩阵 | 显式环境/profile | `./scripts/test.sh config-contract` | Stable |
+| 内部传输选择 | `transport.BuildSelector` | 配置能力矩阵 | http/grpc/socket；QUIC/MQ transport 被拒绝 | `./scripts/test.sh config-contract` | Conditional |
+| 本地集群 | LocalProvider | 配置能力矩阵 | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
+| etcd/Consul 集群 | Etcd/Consul Provider | 外部依赖集成文档 | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
+| MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams 或 NATS JetStream；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker` | Conditional |
 | Kafka/RabbitMQ/RocketMQ | 自定义 `ProviderFactory` | 无内建示例 | 应用自行注册成熟客户端适配器 | 配置校验与应用自有集成测试 | Unsupported（内建） |
 | QUIC transport | 无推荐 API | 历史兼容包 | 配置层明确拒绝 | `go test ./pkg/server/config -run QUIC` | Unsupported |
 

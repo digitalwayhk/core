@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -87,7 +88,14 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 	}
 	if info.PathType == PrivateType {
 		id, _ := req.GetUser()
-		utils.SetPropertyValue(router, "userid", id)
+		if strings.TrimSpace(id) != "" {
+			utils.SetPropertyValue(router, "userid", id)
+		} else {
+			identity, ok := router.(interface{ GetUserID() string })
+			if !ok || strings.TrimSpace(identity.GetUserID()) == "" {
+				return 0
+			}
+		}
 	}
 	hash := getApiHash(router)
 	state := h.routeState(info)
