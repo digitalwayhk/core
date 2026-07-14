@@ -91,11 +91,11 @@ func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 func (own *ServiceRouter) GetRouters() []*types.RouterInfo {
 	var routes []*types.RouterInfo
 	for _, v := range own.allAPI {
-		routes = append(routes, v)
+		routes = append(routes, checkedRouterInfo(v))
 	}
 	if !own.IsCloseServerManager {
 		for _, v := range own.serverManagerAPI {
-			routes = append(routes, v)
+			routes = append(routes, checkedRouterInfo(v))
 		}
 	}
 	return routes
@@ -114,18 +114,25 @@ func (own *ServiceRouter) GetTypeRouters(t types.ApiType) []*types.RouterInfo {
 		API = own.serverManagerAPI
 	}
 	for _, v := range API {
-		routes = append(routes, v)
+		routes = append(routes, checkedRouterInfo(v))
 	}
 	return routes
 }
 func (own *ServiceRouter) GetRouter(path string) *types.RouterInfo {
 	if v, ok := own.allAPI[path]; ok {
-		return v
+		return checkedRouterInfo(v)
 	}
 	if v, ok := own.serverManagerAPI[path]; ok {
-		return v
+		return checkedRouterInfo(v)
 	}
 	return nil
+}
+
+func checkedRouterInfo(info *types.RouterInfo) *types.RouterInfo {
+	if info != nil {
+		_ = info.GetPath()
+	}
+	return info
 }
 func (own *ServiceRouter) HasRouter(path string, t types.ApiType) bool {
 	res := false

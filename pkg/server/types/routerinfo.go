@@ -76,6 +76,8 @@ type RouterInfo struct {
 	useCache          bool                                     //是否使用缓存
 	cacheTime         time.Duration                            //缓存时间
 	sync.RWMutex
+	// Deprecated: RouterInfo 不得保存请求、用户、trace 或响应等请求级状态。
+	// 该字段仅为源码兼容保留，框架内部不使用；新代码不得写入。
 	TempStore sync.Map
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
