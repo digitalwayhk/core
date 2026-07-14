@@ -4,9 +4,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
-	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -42,25 +41,24 @@ func (own *DeleteOrder) Validation(req servertypes.IRequest) error {
 // Do 使用 ID 与 UserID 组合条件查询并删除，避免泄露其他用户订单。
 func (own *DeleteOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	userID, _ := req.GetUser()
-	orders := entity.NewModelList[models.Order](nil)
-	order, err := orders.SearchOne(func(search *persistencetypes.SearchItem) {
-		search.AddWhereN("ID", own.ID)
-		search.AddWhereN("UserID", userID)
-	})
+	order, err := models.NewOrder().FindOwned(own.ID, userID)
 	if err != nil {
 		return nil, err
 	}
 	if order == nil {
 		return nil, models.NewBusinessError("订单不存在或无权操作")
 	}
-	if err := orders.Remove(order); err != nil {
+	if err := order.Delete(); err != nil {
 		return nil, err
 	}
-	if err := orders.Save(); err != nil {
-		return nil, err
-	}
-	notifyOrderChange(req, &OrderEvent{Action: "deleted", Order: order})
-	return order, nil
+	response := responsemodel.NewOrder(order)
+	notifyOrderChange(req, &OrderEvent{Action: "deleted", Order: response})
+	return response, nil
+}
+
+// GetResponse 返回 OpenAPI 用的删除订单成功响应结构。
+func (own *DeleteOrder) GetResponse() interface{} {
+	return &responsemodel.Order{}
 }
 
 // RouterInfo 将订单删除注册为需要认证的 POST 路由。

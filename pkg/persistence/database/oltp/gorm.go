@@ -88,8 +88,18 @@ func updateData(db *gorm.DB, data interface{}) error {
 		db = db.Session(iss.GetSession())
 	}
 
-	// 使用 hashcode 或 ID 定位记录，Select("*") 确保零值字段也被更新
+	// 有 ID 时始终用 ID 定位旧记录，避免业务字段变更后的新 hash 无法匹配旧行。
+	// 只有无 ID 模型才回退 hashcode；Select("*") 确保零值字段也被更新。
 	if model, ok := data.(types.IModel); ok {
+		if model.GetID() > 0 {
+			tx := db.Model(data).Where("id = ?", model.GetID()).Select("*").Updates(data)
+			if tx.Error != nil {
+				logx.Errorf("update data error: %v", tx.Error)
+				return tx.Error
+			}
+			return nil
+		}
+
 		hashcode := getHashcode(data)
 		if hashcode != "" {
 			tx := db.Model(data).Where("hashcode = ?", hashcode).Select("*").Updates(data)

@@ -21,7 +21,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。先读�
 1. 普通路由实现 `types.IRouter`；public/private 路径为 `/api/{service}/{structLower}`，目录决定认证但不进入 URL。
 2. private 身份只读 `req.GetUser()`/claims，不信任请求字段。
 3. Manage 使用 `NewManageService[T](owner)`，路径为 `/api/manage/{service}/{manage}/{operation}`。
-4. 模型通过 `entity.NewModelList[T](nil)` 操作；嵌入 `*Model`/`*BaseModel` 必须在 `NewModel()` 初始化。没有稳定 `Code` 时不用 `BaseModel`。
+4. Manage CRUD 通过 `entity.NewModelList[T](nil)` 操作；public/private 通过模型封装的 `IDataAction` 方法查询和写入，不直接依赖 GORM/SQLite。嵌入 `*Model`/`*BaseModel` 必须在 `NewModel()` 初始化。
 5. 先复用 go-zero/成熟客户端；Digitalway 抽象只保留路由、模型、MachineID、Provider 切换、事件和跨节点通知等领域契约。
 6. 配置字段不等于支持。`Unsupported` 值必须 fail closed；QUIC/MQ transport 和内建 Kafka/RabbitMQ/RocketMQ 不得伪装可用。
 7. CORS origin、TrustedProxies 和外部依赖必须显式配置。默认单元测试不依赖 Docker。
@@ -31,7 +31,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。先读�
 ## 工作流
 
 1. 找到最接近的 `examples/*` 或兄弟服务，核对当前构造器和测试。
-2. 先写失败测试，再做最小实现；不绕过 ServiceContext、ModelList 或 Manage hook。
+2. 先写失败测试，再做最小实现；不绕过 ServiceContext，Manage 不绕过 ModelList，普通 API 不绕过模型持久化方法。
 3. 对外部能力同时检查 config Validate、factory、真实启动链、lifecycle owner 和 integration gate。
 4. 运行 `gofmt`、定向测试、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 race/CI gate。
 

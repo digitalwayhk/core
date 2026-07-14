@@ -60,7 +60,7 @@ HTTP 鉴权请求使用 `Authorization: Bearer <token>`。
 测试会构建独立子进程，在系统临时目录生成配置和 SQLite 数据，使用真实 HTTP、TestToken 与 WebSocket，结束后自动清理：
 
 ```bash
-go test ./examples/integration -count=1
-go test ./examples/integration -count=10
-go test -race ./examples/integration -count=1
+go test ./examples/integration/01-simple-shop -count=1
+go test ./examples/integration/01-simple-shop -count=10
+go test -race ./examples/integration/01-simple-shop -count=1
 ```

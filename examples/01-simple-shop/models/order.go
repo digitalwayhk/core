@@ -3,6 +3,8 @@ package models
 import (
 	"errors"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -32,18 +34,17 @@ func (own *Order) NewModel() {
 	}
 }
 
-// GetHash 优先返回已保存的 Hashcode，并为具有 ID 的新订单生成稳定值。
+// GetHash 以用户、商品和创建时间的 UTC 秒级值生成订单唯一哈希。
 func (own *Order) GetHash() string {
-	if own.Model == nil {
+	if own.Model == nil || own.CreatedAt == nil || strings.TrimSpace(own.UserID) == "" || own.ProductID == 0 {
+		if own.Model != nil {
+			return own.Hashcode
+		}
 		return ""
 	}
-	if own.Hashcode != "" {
-		return own.Hashcode
-	}
-	if own.ID == 0 {
-		return ""
-	}
-	return utils.HashCodes(strconv.FormatUint(uint64(own.ID), 10))
+	createdAt := own.CreatedAt.UTC().Truncate(time.Second).Format(time.RFC3339)
+	key := strings.TrimSpace(own.UserID) + ":" + strconv.FormatUint(uint64(own.ProductID), 10) + ":" + createdAt
+	return utils.HashCodes(key)
 }
 
 // NewValidationError 创建可以安全返回给调用方的中文校验错误。

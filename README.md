@@ -36,7 +36,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo {
 
 ## 模型与管理 CRUD
 
-- 使用 `entity.NewModelList[T](nil)` 访问模型。
+- Manage CRUD 使用 `entity.NewModelList[T](nil)`；public/private 路由调用模型封装的 `IDataAction` 查询与操作方法。
 - 嵌入 `*entity.Model` 或 `*entity.BaseModel` 的类型必须在 `NewModel()` 中初始化嵌入字段。
 - 只有天然具有稳定 `Code` 语义的资料模型才使用 `BaseModel`。
 - 管理 CRUD 路径为 `/api/manage/{service}/{manageStructLower}/{operationLower}`。

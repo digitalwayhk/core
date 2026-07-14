@@ -38,7 +38,7 @@ userID, userName := req.GetUser()
 
 禁止从 body/query 的 user id 推断认证身份。
 
-## 模型与 ModelList
+## 模型、ModelList 与普通 API 持久化
 
 普通记录：
 
@@ -69,6 +69,8 @@ rows, err = list.SearchWhere("UserID", userID)
 ```
 
 `SearchWhere` 未显式改 size 时最多 500 条；分页接口使用 `SearchAll`。
+
+Manage CRUD 保持使用 `ModelList`。public/private 路由应调用模型封装的查询、插入、更新或删除方法，这些方法依赖 `types.IDataAction`，不向路由泄露 GORM/SQLite。对外返回独立 `responsemodel`，并实现 `IRouterResponse.GetResponse()` 供 OpenAPI 描述。
 
 SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖；负值关闭。不得恢复机器级 30GB 默认。
 

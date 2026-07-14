@@ -24,6 +24,21 @@ func (own *ProductManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove}
 }
 
+// ValidationAfter 在 ModelList 通用唯一检查前执行商品模型校验，返回明确的重名业务错误。
+func (own *ProductManage) ValidationAfter(sender interface{}, _ servertypes.IRequest) error {
+	switch operation := sender.(type) {
+	case *managepkg.Add[models.Product]:
+		if operation.Model != nil {
+			return operation.Model.AddValid()
+		}
+	case *managepkg.Edit[models.Product]:
+		if operation.Model != nil {
+			return operation.Model.UpdateValid(operation.OldItem)
+		}
+	}
+	return nil
+}
+
 // ViewModel 设置管理界面的商品标题和自动加载行为。
 func (own *ProductManage) ViewModel(model *view.ViewModel) {
 	model.Title = "商品管理"

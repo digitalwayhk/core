@@ -18,22 +18,21 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
-var suite *shopSuite
-
-// shopSuite 保存一次集成测试进程共享的服务地址和子进程资源。
-type shopSuite struct {
-	rootDir    string
-	baseURL    string
-	wsURL      string
-	command    *exec.Cmd
-	outputFile *os.File
+// Suite 保存一次集成测试进程共享的服务地址和子进程资源。
+type Suite struct {
+	RootDir      string
+	BaseURL      string
+	WebSocketURL string
+	command      *exec.Cmd
+	outputFile   *os.File
 }
 
-// responseEnvelope 对应框架默认 HTTP 响应外壳。
-type responseEnvelope struct {
+// ResponseEnvelope 对应框架默认 HTTP 响应外壳。
+type ResponseEnvelope struct {
 	HTTPStatus   int             `json:"-"`
 	Body         string          `json:"-"`
 	Success      bool            `json:"success"`
@@ -42,43 +41,26 @@ type responseEnvelope struct {
 	Data         json.RawMessage `json:"data"`
 }
 
-// productDTO 是集成测试关注的商品公开字段。
-type productDTO struct {
+// ProductDTO 是集成测试关注的商品公开字段。
+type ProductDTO struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Price string `json:"price"`
 }
 
-// orderDTO 是集成测试关注的订单公开字段。
-type orderDTO struct {
+// OrderDTO 是集成测试关注的订单公开字段。
+type OrderDTO struct {
 	ID          string `json:"id"`
 	ProductID   uint   `json:"productID"`
 	ProductName string `json:"productName"`
 	UnitPrice   string `json:"unitPrice"`
 	Quantity    int    `json:"quantity"`
 	UserID      string `json:"userID"`
+	CreatedAt   string `json:"createdAt"`
 }
 
-// TestMain 启动真实商城进程，并保证测试结束后回收进程和临时目录。
-func TestMain(m *testing.M) {
-	created, err := startShopSuite()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	suite = created
-	code := m.Run()
-	if code != 0 && suite != nil {
-		if data, err := os.ReadFile(filepath.Join(suite.rootDir, "service.log")); err == nil {
-			fmt.Fprintf(os.Stderr, "\n--- 商城集成测试服务日志 ---\n%s\n", data)
-		}
-	}
-	suite.stop()
-	os.Exit(code)
-}
-
-// startShopSuite 构建示例二进制，写入隔离配置并等待 HTTP 服务可用。
-func startShopSuite() (*shopSuite, error) {
+// StartShopSuite 构建示例二进制，写入隔离配置并等待 HTTP 服务可用。
+func StartShopSuite() (*Suite, error) {
 	repoRoot, err := repositoryRoot()
 	if err != nil {
 		return nil, err
@@ -122,15 +104,15 @@ func startShopSuite() (*shopSuite, error) {
 		return nil, fmt.Errorf("启动商城示例: %w", err)
 	}
 
-	created := &shopSuite{
-		rootDir:    rootDir,
-		baseURL:    "http://127.0.0.1:" + strconv.Itoa(shopPort),
-		wsURL:      "ws://127.0.0.1:" + strconv.Itoa(shopPort) + "/ws",
-		command:    command,
-		outputFile: outputFile,
+	created := &Suite{
+		RootDir:      rootDir,
+		BaseURL:      "http://127.0.0.1:" + strconv.Itoa(shopPort),
+		WebSocketURL: "ws://127.0.0.1:" + strconv.Itoa(shopPort) + "/ws",
+		command:      command,
+		outputFile:   outputFile,
 	}
 	if err := created.waitReady(); err != nil {
-		created.stop()
+		created.Stop()
 		return nil, err
 	}
 	return created, nil
@@ -240,15 +222,15 @@ func stringifyDurations(value reflect.Value, values map[string]interface{}) {
 }
 
 // waitReady 轮询认证、商品和订单路由，确认 HTTP 与延迟数据表均已就绪。
-func (s *shopSuite) waitReady() error {
+func (s *Suite) waitReady() error {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		tokenResponse, err := http.Get(s.baseURL + "/api/servermanage/testtoken?userid=health")
+		tokenResponse, err := http.Get(s.BaseURL + "/api/servermanage/testtoken?userid=health")
 		if err != nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		var tokenEnvelope responseEnvelope
+		var tokenEnvelope ResponseEnvelope
 		_ = json.NewDecoder(tokenResponse.Body).Decode(&tokenEnvelope)
 		_ = tokenResponse.Body.Close()
 		var token string
@@ -258,12 +240,12 @@ func (s *shopSuite) waitReady() error {
 			continue
 		}
 
-		productsResponse, err := http.Get(s.baseURL + "/api/shop/getproducts")
+		productsResponse, err := http.Get(s.BaseURL + "/api/shop/getproducts")
 		if err != nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		var productsEnvelope responseEnvelope
+		var productsEnvelope ResponseEnvelope
 		_ = json.NewDecoder(productsResponse.Body).Decode(&productsEnvelope)
 		_ = productsResponse.Body.Close()
 		if productsResponse.StatusCode != http.StatusOK || !productsEnvelope.Success {
@@ -271,7 +253,7 @@ func (s *shopSuite) waitReady() error {
 			continue
 		}
 
-		ordersRequest, err := http.NewRequest(http.MethodGet, s.baseURL+"/api/shop/getorders", nil)
+		ordersRequest, err := http.NewRequest(http.MethodGet, s.BaseURL+"/api/shop/getorders", nil)
 		if err != nil {
 			return err
 		}
@@ -281,7 +263,7 @@ func (s *shopSuite) waitReady() error {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		var ordersEnvelope responseEnvelope
+		var ordersEnvelope ResponseEnvelope
 		_ = json.NewDecoder(ordersResponse.Body).Decode(&ordersEnvelope)
 		_ = ordersResponse.Body.Close()
 		if ordersResponse.StatusCode == http.StatusOK && ordersEnvelope.Success {
@@ -289,12 +271,12 @@ func (s *shopSuite) waitReady() error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	data, _ := os.ReadFile(filepath.Join(s.rootDir, "service.log"))
+	data, _ := os.ReadFile(filepath.Join(s.RootDir, "service.log"))
 	return fmt.Errorf("等待商城服务启动超时\n%s", data)
 }
 
-// stop 先请求优雅退出，超时后强制结束子进程并清理临时文件。
-func (s *shopSuite) stop() {
+// Stop 先请求优雅退出，超时后强制结束子进程并清理临时文件。
+func (s *Suite) Stop() {
 	if s == nil {
 		return
 	}
@@ -315,11 +297,40 @@ func (s *shopSuite) stop() {
 	if s.outputFile != nil {
 		_ = s.outputFile.Close()
 	}
-	_ = os.RemoveAll(s.rootDir)
+	_ = os.RemoveAll(s.RootDir)
 }
 
-// requestJSON 发起 HTTP 请求并解析框架默认响应外壳。
-func requestJSON(t *testing.T, method, path, token string, body interface{}) responseEnvelope {
+// PrintLog 在测试失败时输出子进程日志。
+func (s *Suite) PrintLog() {
+	if s == nil {
+		return
+	}
+	if data, err := os.ReadFile(filepath.Join(s.RootDir, "service.log")); err == nil {
+		fmt.Fprintf(os.Stderr, "\n--- 商城集成测试服务日志 ---\n%s\n", data)
+	}
+}
+
+// ValidateServiceConfigs 验证指定示例的静态服务配置可通过当前配置契约。
+func ValidateServiceConfigs(t *testing.T, example string, serviceNames ...string) {
+	t.Helper()
+	repoRoot, err := repositoryRoot()
+	require.NoError(t, err)
+	for _, name := range serviceNames {
+		name := name
+		t.Run("config-"+name, func(t *testing.T) {
+			path := filepath.Join(repoRoot, "examples", example, "main", "etc", name+".json")
+			data, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			var serviceConfig config.ServerConfig
+			require.NoError(t, json.Unmarshal(data, &serviceConfig))
+			serviceConfig.ApplyDefaults()
+			require.NoError(t, serviceConfig.Validate())
+		})
+	}
+}
+
+// RequestJSON 发起 HTTP 请求并解析框架默认响应外壳。
+func (s *Suite) RequestJSON(t *testing.T, method, path, token string, body interface{}) ResponseEnvelope {
 	t.Helper()
 	var reader io.Reader
 	if body != nil {
@@ -327,7 +338,7 @@ func requestJSON(t *testing.T, method, path, token string, body interface{}) res
 		require.NoError(t, err)
 		reader = bytes.NewReader(data)
 	}
-	request, err := http.NewRequest(method, suite.baseURL+path, reader)
+	request, err := http.NewRequest(method, s.BaseURL+path, reader)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
 	if token != "" {
@@ -338,21 +349,21 @@ func requestJSON(t *testing.T, method, path, token string, body interface{}) res
 	defer response.Body.Close()
 	data, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	envelope := responseEnvelope{HTTPStatus: response.StatusCode, Body: string(data)}
+	envelope := ResponseEnvelope{HTTPStatus: response.StatusCode, Body: string(data)}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		require.NotEqual(t, http.StatusOK, response.StatusCode, string(data))
 	}
 	return envelope
 }
 
-// tokenFor 通过框架内建 TestToken 路由获取指定用户类型的令牌。
-func tokenFor(t *testing.T, userID string, tokenType int) string {
+// TokenFor 通过框架内建 TestToken 路由获取指定用户类型的令牌。
+func (s *Suite) TokenFor(t *testing.T, userID string, tokenType int) string {
 	t.Helper()
 	path := "/api/servermanage/testtoken?userid=" + userID
 	if tokenType != 0 {
 		path += "&type=" + strconv.Itoa(tokenType)
 	}
-	envelope := requestJSON(t, http.MethodGet, path, "", nil)
+	envelope := s.RequestJSON(t, http.MethodGet, path, "", nil)
 	require.True(t, envelope.Success, envelope.ErrorMessage)
 	var token string
 	require.NoError(t, json.Unmarshal(envelope.Data, &token))
@@ -360,24 +371,134 @@ func tokenFor(t *testing.T, userID string, tokenType int) string {
 	return token
 }
 
-// addProduct 通过真实 Manage Add 路由创建商品并返回公开字段。
-func addProduct(t *testing.T, adminToken, name, price string) productDTO {
+// AddProduct 通过真实 Manage Add 路由创建商品并返回公开字段。
+func (s *Suite) AddProduct(t *testing.T, adminToken, name, price string) ProductDTO {
 	t.Helper()
-	envelope := requestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/add", adminToken, map[string]interface{}{
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/add", adminToken, map[string]interface{}{
 		"name":  name,
 		"price": price,
 	})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
-	var product productDTO
+	var product ProductDTO
 	require.NoError(t, json.Unmarshal(envelope.Data, &product))
 	require.NotEmpty(t, product.ID)
 	return product
 }
 
-// uintID 将框架以字符串编码的模型 ID 转换为 uint。
-func uintID(t *testing.T, id string) uint {
+// UintID 将框架以字符串编码的模型 ID 转换为 uint。
+func UintID(t *testing.T, id string) uint {
 	t.Helper()
 	value, err := strconv.ParseUint(strings.TrimSpace(id), 10, 64)
 	require.NoError(t, err)
 	return uint(value)
+}
+
+// WebSocketMessage 对应框架 WebSocket 的 event/channel/data 信封。
+type WebSocketMessage struct {
+	Event   string          `json:"event"`
+	Channel string          `json:"channel"`
+	Data    json.RawMessage `json:"data"`
+}
+
+// OrderEvent 是用户订阅收到的订单变更消息。
+type OrderEvent struct {
+	Action string   `json:"action"`
+	Order  OrderDTO `json:"order"`
+}
+
+// ConnectAndSubscribe 建立 WebSocket，使用 TestToken 登录并订阅本人订单。
+func (s *Suite) ConnectAndSubscribe(t *testing.T, token string) *websocket.Conn {
+	t.Helper()
+	connection, _, err := websocket.DefaultDialer.Dial(s.WebSocketURL, nil)
+	require.NoError(t, err)
+	s.WriteWebSocket(t, connection, "sub", "logon", map[string]string{"token": token})
+	logon := s.ReadWebSocket(t, connection, 3*time.Second)
+	require.Equal(t, "success", logon.Event, string(logon.Data))
+	require.Equal(t, "logon", logon.Channel)
+
+	s.WriteWebSocket(t, connection, "sub", "/api/shop/getorders", map[string]interface{}{})
+	subscribed := s.ReadWebSocket(t, connection, 3*time.Second)
+	require.Equal(t, "sub", subscribed.Event, string(subscribed.Data))
+	require.Equal(t, "/api/shop/getorders", subscribed.Channel)
+	return connection
+}
+
+// WriteWebSocket 发送符合框架协议的 WebSocket 消息。
+func (s *Suite) WriteWebSocket(t *testing.T, connection *websocket.Conn, event, channel string, data interface{}) {
+	t.Helper()
+	require.NoError(t, connection.WriteJSON(map[string]interface{}{
+		"event":   event,
+		"channel": channel,
+		"data":    data,
+	}))
+}
+
+// ReadWebSocket 在给定时限内读取并解析一条 WebSocket 消息。
+func (s *Suite) ReadWebSocket(t *testing.T, connection *websocket.Conn, timeout time.Duration) WebSocketMessage {
+	t.Helper()
+	require.NoError(t, connection.SetReadDeadline(time.Now().Add(timeout)))
+	_, data, err := connection.ReadMessage()
+	require.NoError(t, err)
+	var message WebSocketMessage
+	require.NoError(t, json.Unmarshal(data, &message), string(data))
+	return message
+}
+
+// ReadOrderEvent 读取并解析当前用户的订单变更消息。
+func (s *Suite) ReadOrderEvent(t *testing.T, connection *websocket.Conn) OrderEvent {
+	t.Helper()
+	message := s.ReadWebSocket(t, connection, 3*time.Second)
+	require.Equal(t, "/api/shop/getorders", message.Channel)
+	var event OrderEvent
+	require.NoError(t, json.Unmarshal(message.Data, &event), string(message.Data))
+	return event
+}
+
+// StreamWebSocket 持续读取指定连接，使多次“没有消息”断言不会破坏连接状态。
+func (s *Suite) StreamWebSocket(t *testing.T, connection *websocket.Conn) <-chan WebSocketMessage {
+	t.Helper()
+	require.NoError(t, connection.SetReadDeadline(time.Time{}))
+	messages := make(chan WebSocketMessage, 4)
+	go func() {
+		defer close(messages)
+		for {
+			_, data, err := connection.ReadMessage()
+			if err != nil {
+				return
+			}
+			var message WebSocketMessage
+			if json.Unmarshal(data, &message) == nil {
+				messages <- message
+			}
+		}
+	}()
+	return messages
+}
+
+// AssertNoOrderEvent 验证另一用户在短窗口内没有收到订单通知。
+func AssertNoOrderEvent(t *testing.T, messages <-chan WebSocketMessage) {
+	t.Helper()
+	select {
+	case message := <-messages:
+		t.Fatalf("其他用户不应收到订单事件: %+v", message)
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+// ProductNames 提取商品名称，简化列表断言。
+func ProductNames(products []ProductDTO) []string {
+	names := make([]string, 0, len(products))
+	for _, product := range products {
+		names = append(names, product.Name)
+	}
+	return names
+}
+
+// OrderIDs 提取订单 ID，简化所有权与删除结果断言。
+func OrderIDs(orders []OrderDTO) []string {
+	ids := make([]string, 0, len(orders))
+	for _, order := range orders {
+		ids = append(ids, order.ID)
+	}
+	return ids
 }
