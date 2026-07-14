@@ -670,4 +670,11 @@ GOCACHE=/private/tmp/core-codex-go-cache ./scripts/ci.sh required/contracts
 - [x] 整计划最终外部只读审查 `APPROVED`（BASE `7631d78c4e7541d1ea431adf8e1b5512d5186014`，FINAL `a91cf6220bf2e6b5f1d8e116451344ff0e743ae7`，2026-07-14）；无 P0/P1。
 - [x] 设计规格和使用文档与实际配置、启动和降级行为一致。
 
-终审残余 P2（不阻断关闭）：`Exec/ExecDo` 直接调用尚未额外校验冻结快照；`storeRoutePolicy` 的创建语义需在未来引入 `DisableRoute` 时再拆分；`HasRouter` 仅返回 map 存在性；已入队控制事件在调用方 context 取消后仍可能完成，取消不表示撤销。
+终审残余 P2 后续处理：
+
+- [x] WebSocket 生命周期复审登记的三项 P2 已由 `a72844d` 关闭：失败订阅不再记录成功日志；认证订阅必须实现 `IWebSocketUserIdentity`；初始化期 `Exec/ExecDo` 仍保持原有统计和 panic 语义，但请求实例始终归还对象池。
+- [x] `Exec/ExecDo` 直接调用与 `HasRouter` 已由 `8c6d332` 接入冻结快照校验。校验发生在创建请求实例前；`ExecDo` 校验失败时仍归还调用方传入的池化实例。
+- **触发式后续：** `storeRoutePolicy` 的创建语义仅在未来引入 `DisableRoute` 时需要拆分。当前没有删除路由能力，Recover 已只更新快照中仍存在的路由；提前增加未使用的创建开关不属于本计划范围。
+- **既定语义：** 已入队控制事件在调用方 context 取消后仍可能完成，这是文档化的 EventBridge 交付语义；取消不表示撤销，不作为缺陷修复。
+
+后续加固验收证据：`types/router` 聚焦测试 `-count=20`、两包全量与 race、`pkg/server/...` 全量、日志守卫和 `release-contract` 均通过。当前可落实的 RouterInfo 生命周期与冻结一致性问题已关闭。
