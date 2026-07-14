@@ -22,13 +22,26 @@ func TestTransactionDoesNotCaptureConcurrentOrderInsert(t *testing.T) {
 	product.Price = decimal.RequireFromString("9.90")
 	require.NoError(t, product.Insert())
 
+	rollbackRecord := models.NewPaymentRecord()
+	rollbackRecord.SetID(1301)
+	rollbackRecord.OrderID = 1201
+	rollbackRecord.UserID = "isolation-user"
+	rollbackRecord.PaymentTypeID = 1401
+	rollbackRecord.PaymentTypeCode = "isolation-pay"
+	rollbackRecord.PaymentTypeName = "事务隔离测试支付"
+	rollbackRecord.Amount = product.Price
+	rollbackRecord.Attempt = 1
+
 	transactionStarted := make(chan struct{})
 	orderInserted := make(chan struct{})
 	transactionResult := make(chan error, 1)
 	go func() {
-		transactionResult <- models.RunInTransaction(func(_ persistencetypes.IDataAction) error {
+		transactionResult <- models.RunInTransaction(func(action persistencetypes.IDataAction) error {
 			close(transactionStarted)
 			<-orderInserted
+			if err := rollbackRecord.InsertWith(action); err != nil {
+				return err
+			}
 			return errors.New("主动回滚测试事务")
 		})
 	}()
@@ -42,4 +55,8 @@ func TestTransactionDoesNotCaptureConcurrentOrderInsert(t *testing.T) {
 	persisted, err := models.NewOrder().FindByID(created.Order.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, persisted, "普通下单不应被其他事务回滚")
+
+	rolledBack, err := models.NewPaymentRecord().FindByID(rollbackRecord.ID)
+	require.NoError(t, err)
+	assert.Nil(t, rolledBack, "事务内支付流水必须随事务回滚")
 }

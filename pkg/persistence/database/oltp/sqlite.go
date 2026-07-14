@@ -599,7 +599,8 @@ func (own *Sqlite) Clone() types.IDataAction {
 		Path:         own.Path,
 		tables:       own.tables,
 		IsLog:        own.IsLog,
-		isTansaction: own.isTansaction,
+		tx:           nil,
+		isTansaction: false,
 	}
 	if own.db != nil {
 		clone.db = own.db.Session(&gorm.Session{NewDB: true})
