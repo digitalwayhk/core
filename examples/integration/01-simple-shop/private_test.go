@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +19,7 @@ func TestPrivateAPIs(t *testing.T) {
 	userBToken := suite.TokenFor(t, "private-user-b", 0)
 	productName := fmt.Sprintf("私有商品-%d", time.Now().UnixNano())
 	product := suite.AddProduct(t, adminToken, productName, "39.80")
-	productID := integration.UintID(t, product.ID)
+	productID := UintID(t, product.ID)
 
 	for _, request := range []struct {
 		method string
@@ -51,7 +50,7 @@ func TestPrivateAPIs(t *testing.T) {
 		"productID": productID, "quantity": 2,
 	})
 	require.True(t, created.Success, created.ErrorMessage)
-	var order integration.OrderDTO
+	var order OrderDTO
 	require.NoError(t, json.Unmarshal(created.Data, &order))
 	assert.Equal(t, "private-user-a", order.UserID)
 	assert.Equal(t, productName, order.ProductName)
@@ -69,9 +68,9 @@ func TestPrivateAPIs(t *testing.T) {
 
 	ordersA := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userAToken, nil)
 	require.True(t, ordersA.Success, ordersA.ErrorMessage)
-	var userAOrders []integration.OrderDTO
+	var userAOrders []OrderDTO
 	require.NoError(t, json.Unmarshal(ordersA.Data, &userAOrders))
-	assert.Contains(t, integration.OrderIDs(userAOrders), order.ID)
+	assert.Contains(t, OrderIDs(userAOrders), order.ID)
 	for _, saved := range userAOrders {
 		if saved.ID == order.ID {
 			assert.Equal(t, productName, saved.ProductName)
@@ -80,9 +79,9 @@ func TestPrivateAPIs(t *testing.T) {
 	}
 
 	ordersB := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userBToken, nil)
-	var userBOrders []integration.OrderDTO
+	var userBOrders []OrderDTO
 	require.NoError(t, json.Unmarshal(ordersB.Data, &userBOrders))
-	assert.NotContains(t, integration.OrderIDs(userBOrders), order.ID)
+	assert.NotContains(t, OrderIDs(userBOrders), order.ID)
 
 	forbidden := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userBToken, map[string]string{"id": order.ID})
 	assert.Equal(t, http.StatusUnprocessableEntity, forbidden.HTTPStatus)
@@ -91,11 +90,11 @@ func TestPrivateAPIs(t *testing.T) {
 	duplicateProduct := suite.AddProduct(t, adminToken, fmt.Sprintf("秒级商品-%d", time.Now().UnixNano()), "9.90")
 	waitForNextSecond()
 	first := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
-		"productID": integration.UintID(t, duplicateProduct.ID), "quantity": 1,
+		"productID": UintID(t, duplicateProduct.ID), "quantity": 1,
 	})
 	require.True(t, first.Success, first.ErrorMessage)
 	second := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
-		"productID": integration.UintID(t, duplicateProduct.ID), "quantity": 1,
+		"productID": UintID(t, duplicateProduct.ID), "quantity": 1,
 	})
 	assert.False(t, second.Success, "同一用户同一商品每秒只能下单一次")
 	assert.Contains(t, second.ErrorMessage, "每秒只能购买一次")
@@ -106,7 +105,7 @@ func TestPrivateAPIs(t *testing.T) {
 
 	afterDelete := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userAToken, nil)
 	require.NoError(t, json.Unmarshal(afterDelete.Data, &userAOrders))
-	assert.NotContains(t, integration.OrderIDs(userAOrders), order.ID)
+	assert.NotContains(t, OrderIDs(userAOrders), order.ID)
 }
 
 // TestPrivateWebSocket 验证匿名订阅被拒绝，并且订单新增与删除事件只投递给当前用户。
@@ -130,20 +129,20 @@ func TestPrivateWebSocket(t *testing.T) {
 	messagesB := suite.StreamWebSocket(t, connectionB)
 
 	created := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
-		"productID": integration.UintID(t, product.ID), "quantity": 3,
+		"productID": UintID(t, product.ID), "quantity": 3,
 	})
 	require.True(t, created.Success, created.ErrorMessage)
 	createdEvent := suite.ReadOrderEvent(t, connectionA)
 	assert.Equal(t, "created", createdEvent.Action)
 	assert.Equal(t, "ws-user-a", createdEvent.Order.UserID)
-	integration.AssertNoOrderEvent(t, messagesB)
+	AssertNoOrderEvent(t, messagesB)
 
 	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": createdEvent.Order.ID})
 	require.True(t, deleted.Success, deleted.ErrorMessage)
 	deletedEvent := suite.ReadOrderEvent(t, connectionA)
 	assert.Equal(t, "deleted", deletedEvent.Action)
 	assert.Equal(t, createdEvent.Order.ID, deletedEvent.Order.ID)
-	integration.AssertNoOrderEvent(t, messagesB)
+	AssertNoOrderEvent(t, messagesB)
 }
 
 // waitForNextSecond 将重复下单测试放在同一秒开头，避免跨秒边界导致假失败。

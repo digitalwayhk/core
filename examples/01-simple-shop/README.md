@@ -4,7 +4,7 @@
 
 ## 启动
 
-配置文件必须和可执行文件位于同一目录的 `etc` 下：
+首次运行会在可执行文件所在目录自动创建 `etc/server.json` 和 `etc/shop.json`，无需手工准备运行配置：
 
 ```bash
 cd examples/01-simple-shop/main
@@ -57,7 +57,7 @@ HTTP 鉴权请求使用 `Authorization: Bearer <token>`。
 
 ## 集成测试
 
-测试会构建独立子进程，在系统临时目录生成配置和 SQLite 数据，使用真实 HTTP、TestToken 与 WebSocket，结束后自动清理：
+测试会在系统临时目录启动独立子进程，由框架首次运行自动生成配置和 SQLite 数据，使用真实 HTTP、TestToken 与 WebSocket，结束后自动清理：
 
 ```bash
 go test ./examples/integration/01-simple-shop -count=1

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,13 +17,13 @@ func TestPublicAPIs(t *testing.T) {
 	adminToken := suite.TokenFor(t, "public-admin", 1)
 	productName := fmt.Sprintf("公开商品-%d", time.Now().UnixNano())
 	product := suite.AddProduct(t, adminToken, productName, "39.80")
-	productID := integration.UintID(t, product.ID)
+	productID := UintID(t, product.ID)
 
 	all := suite.RequestJSON(t, http.MethodGet, "/api/shop/getproducts", "", nil)
 	require.True(t, all.Success, all.ErrorMessage)
-	var products []integration.ProductDTO
+	var products []ProductDTO
 	require.NoError(t, json.Unmarshal(all.Data, &products))
-	assert.Contains(t, integration.ProductNames(products), productName)
+	assert.Contains(t, ProductNames(products), productName)
 	assert.NotContains(t, string(all.Data), "hashCode")
 	assert.NotContains(t, string(all.Data), "modelState")
 	assert.NotContains(t, string(all.Data), "createdAt")

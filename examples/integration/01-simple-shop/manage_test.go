@@ -8,16 +8,15 @@ import (
 	"testing"
 	"time"
 
-	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var suite *integration.Suite
+var suite *shopSuite
 
 // TestMain 启动一个真实商城进程，供 Manage、Public 和 Private 三组测试共用。
 func TestMain(m *testing.M) {
-	created, err := integration.StartShopSuite()
+	created, err := startShopSuite()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -33,7 +32,6 @@ func TestMain(m *testing.M) {
 
 // TestManageAPIs 验证商品全部 CRUD、名称唯一性、权限隔离与订单只读管理面。
 func TestManageAPIs(t *testing.T) {
-	integration.ValidateServiceConfigs(t, "01-simple-shop", "server", "shop")
 	adminToken := suite.TokenFor(t, "manage-admin", 1)
 	userToken := suite.TokenFor(t, "manage-user", 0)
 	productName := fmt.Sprintf("管理商品-%d", time.Now().UnixNano())
@@ -63,7 +61,7 @@ func TestManageAPIs(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusUnprocessableEntity, duplicateEdit.HTTPStatus)
 	afterDuplicateEdit := suite.RequestJSON(t, http.MethodGet, "/api/shop/getproducts?id="+secondProduct.ID, "", nil)
-	var unchangedProducts []integration.ProductDTO
+	var unchangedProducts []ProductDTO
 	require.NoError(t, json.Unmarshal(afterDuplicateEdit.Data, &unchangedProducts))
 	require.Len(t, unchangedProducts, 1)
 	assert.Equal(t, productName+"-第二个", unchangedProducts[0].Name)
@@ -73,10 +71,10 @@ func TestManageAPIs(t *testing.T) {
 	})
 	require.True(t, search.Success, search.ErrorMessage)
 	var table struct {
-		Rows []integration.ProductDTO `json:"rows"`
+		Rows []ProductDTO `json:"rows"`
 	}
 	require.NoError(t, json.Unmarshal(search.Data, &table))
-	assert.Contains(t, integration.ProductNames(table.Rows), productName)
+	assert.Contains(t, ProductNames(table.Rows), productName)
 
 	updatedName := productName + "-已修改"
 	edit := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", adminToken, map[string]interface{}{

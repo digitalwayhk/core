@@ -47,10 +47,7 @@ examples/
 │   ├── README.md
 │   ├── service.go
 │   ├── main/
-│   │   ├── main.go
-│   │   └── etc/
-│   │       ├── server.json
-│   │       └── shop.json
+│   │   └── main.go
 │   ├── models/
 │   │   ├── product.go
 │   │   └── order.go
@@ -65,10 +62,13 @@ examples/
 │           ├── getorders.go
 │           └── deleteorder.go
 └── integration/
-    ├── helpers_test.go
-    ├── shop_http_test.go
-    ├── shop_manage_test.go
-    └── shop_websocket_test.go
+    ├── helpers.go
+    ├── helpers_contract_test.go
+    └── 01-simple-shop/
+        ├── helpers_test.go
+        ├── manage_test.go
+        ├── public_test.go
+        └── private_test.go
 ```
 
 `examples/README.md` 只负责指向完整示例、说明运行命令和测试命令。业务说明、接口清单、请求样例和 WebSocket 协议放在 `01-simple-shop/README.md`。
@@ -77,17 +77,21 @@ examples/
 
 服务名固定为 `shop`。`main` 使用 `run.NewWebServer()`，注册 `ShopService` 后启动。框架自带的 `servermanage` 服务继续由 WebServer 自动注册。
 
-示例配置满足以下约束：
+示例不提交运行时配置。首次启动由框架在运行目录自动生成 `server.json` 和
+`shop.json`；使用方需要调整端口、认证或外部能力时，再修改生成的配置。默认配置满足
+以下约束：
 
 - 使用固定的本地演示端口，`server` 与 `shop` 不冲突。
-- SQLite 数据存入示例运行目录；集成测试覆盖为 `t.TempDir()`。
+- SQLite 数据存入示例运行目录；集成测试使用独立的系统临时运行目录。
 - Cluster 使用本地模式。
 - 不配置 Redis、外部 MQ 或外部服务发现。
 - CORS 默认关闭；示例不依赖浏览器前端。
 - `TrustedProxies` 默认为空。
-- Auth、ManageAuth 和 ServerManageAuth 使用不同的演示密钥。
+- Auth、ManageAuth 和 ServerManageAuth 由框架生成独立密钥。
 
-集成测试动态创建隔离配置、分配可用端口并恢复涉及的进程级测试配置。由于配置目录和 SQLite 测试路径包含进程级兼容变量，这组集成测试不使用 `t.Parallel()`。
+集成测试只分配连续可用端口并在临时工作目录启动二进制，不创建或改写配置；框架首次
+运行自动生成配置。测试结束后删除整个临时目录。这组集成测试共享一个真实子进程，
+因此不使用 `t.Parallel()`。
 
 ## 6. 数据模型
 
@@ -300,13 +304,16 @@ ws://127.0.0.1:{shopPort}/ws
 
 测试辅助层负责：
 
-1. 创建 `t.TempDir()`。
-2. 生成隔离的 `server.json` 和 `shop.json`，配置独立端口和固定测试密钥。
-3. 将 SQLite 路径指向临时目录。
-4. 启动 WebServer 并等待健康可用，不用固定 `time.Sleep` 猜测启动时间。
+1. 创建独立的系统临时运行目录。
+2. 分配一段连续可用端口，通过启动参数传给 WebServer。
+3. 在空临时目录启动 WebServer，由框架自动生成服务配置和 SQLite 文件。
+4. 等待健康可用，不用固定 `time.Sleep` 猜测启动时间。
 5. 通过 `/api/servermanage/testtoken` 获取管理员及两个普通用户令牌。
-6. 测试结束后关闭 WebServer、WebSocket 和数据库资源。
-7. 恢复测试修改的进程级配置，断言无残留文件和后台 worker。
+6. 测试结束后关闭 WebServer、WebSocket 和数据库资源并删除临时目录。
+
+`examples/integration/helpers.go` 只保留进程、HTTP、TestToken 和通用 WebSocket
+协议能力；商品/订单 DTO、商城路由封装及订单订阅断言必须放在
+`examples/integration/01-simple-shop`，不能进入公共 helper。
 
 测试串行运行，不使用外部 Docker 服务。
 
