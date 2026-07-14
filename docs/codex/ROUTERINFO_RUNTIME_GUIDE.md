@@ -33,6 +33,7 @@
 
 - 观察事件是 best-effort：没有订阅者时不构造 payload；队列满时允许丢弃并累计 dropped 指标。
 - 控制事件按 `ShardKey` 固定分片串行处理，调用方同步获得失败结果。
+- 控制队列入队等待默认最多 5 秒，可通过 `ServiceEventBridgeOptions.ControlEnqueueTimeout` 调整。队列持续满时返回 `ErrControlQueueTimeout`，并由 `ControlQueueTimeouts()` 累计；该事件未入队，调用方必须按控制失败处理。已入队事件不使用此超时伪装取消。
 - 默认只在本服务内发布；只有显式 `External=true` 才通过 MQ adapter 外发。
 - 外发控制事件要求 MQ `Usage` 包含 `event-stream`，没有外部 provider 时明确失败。
 
