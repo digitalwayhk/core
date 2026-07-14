@@ -6,14 +6,26 @@ import (
 
 	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
 // GetProducts 查询全部商品，或按可选 ID 与名称组合筛选。
 type GetProducts struct {
-	ID   uint
-	Name string
+	ID     uint
+	Name   string
+	action persistencetypes.IDataAction
+}
+
+// NewGetProducts 创建使用指定数据适配器的商品查询路由原型。
+func NewGetProducts(action persistencetypes.IDataAction) *GetProducts {
+	return &GetProducts{action: action}
+}
+
+// New 为 RouterInfo 对象池创建保留 IDataAction 的独立请求实例。
+func (own *GetProducts) New(interface{}) servertypes.IRouter {
+	return NewGetProducts(own.action)
 }
 
 // Parse 读取可选的 id 精确条件和 name 模糊条件。
@@ -38,7 +50,7 @@ func (own *GetProducts) Validation(servertypes.IRequest) error {
 
 // Do 通过 Product 模型的直接查询方法组合筛选，并转换为最小公开结构。
 func (own *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
-	items, err := models.NewProduct().Query(own.ID, own.Name)
+	items, err := models.NewProduct().Query(own.action, own.ID, own.Name)
 	if err != nil {
 		return nil, err
 	}

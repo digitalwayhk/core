@@ -4,12 +4,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
 // Insert 规范化秒级创建时间和唯一哈希后，直接通过模型数据适配器写入订单。
-func (own *Order) Insert() error {
+func (own *Order) Insert(action persistencetypes.IDataAction) error {
+	if err := requireDataAction(action); err != nil {
+		return err
+	}
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	if own.CreatedAt != nil {
 		createdAt = own.CreatedAt.UTC().Truncate(time.Second)
@@ -17,7 +19,7 @@ func (own *Order) Insert() error {
 	own.SetCreatedAt(createdAt)
 	own.SetUpdatedAt(createdAt)
 	own.SetHashcode(own.GetHash())
-	err := entity.GetGlobalSqliteInstance(own.GetLocalDBName()).Insert(own)
+	err := action.Insert(own)
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
 		return NewBusinessError("同一用户每秒只能购买一次同一商品")
 	}
@@ -25,21 +27,27 @@ func (own *Order) Insert() error {
 }
 
 // QueryByUser 直接通过模型数据适配器查询指定用户的全部订单。
-func (own *Order) QueryByUser(userID string) ([]*Order, error) {
+func (own *Order) QueryByUser(action persistencetypes.IDataAction, userID string) ([]*Order, error) {
+	if err := requireDataAction(action); err != nil {
+		return nil, err
+	}
 	search := newOrderSearch(own, 500)
 	search.AddWhereN("UserID", strings.TrimSpace(userID))
 	var orders []*Order
-	err := entity.GetGlobalSqliteInstance(own.GetLocalDBName()).Load(search, &orders)
+	err := action.Load(search, &orders)
 	return orders, err
 }
 
 // FindOwned 使用订单 ID 与用户 ID 组合条件查找当前用户的订单。
-func (own *Order) FindOwned(id uint, userID string) (*Order, error) {
+func (own *Order) FindOwned(action persistencetypes.IDataAction, id uint, userID string) (*Order, error) {
+	if err := requireDataAction(action); err != nil {
+		return nil, err
+	}
 	search := newOrderSearch(own, 1)
 	search.AddWhereN("ID", id)
 	search.AddWhereN("UserID", strings.TrimSpace(userID))
 	var orders []*Order
-	if err := entity.GetGlobalSqliteInstance(own.GetLocalDBName()).Load(search, &orders); err != nil {
+	if err := action.Load(search, &orders); err != nil {
 		return nil, err
 	}
 	if len(orders) == 0 {
@@ -49,8 +57,11 @@ func (own *Order) FindOwned(id uint, userID string) (*Order, error) {
 }
 
 // Delete 直接通过模型数据适配器物理删除已查询的订单。
-func (own *Order) Delete() error {
-	return entity.GetGlobalSqliteInstance(own.GetLocalDBName()).Delete(own)
+func (own *Order) Delete(action persistencetypes.IDataAction) error {
+	if err := requireDataAction(action); err != nil {
+		return err
+	}
+	return action.Delete(own)
 }
 
 // newOrderSearch 创建模型直接查询所需的统一 SearchItem。

@@ -98,10 +98,12 @@ examples/
 | 字段 | 类型 | 约束 |
 | --- | --- | --- |
 | ID | 框架模型主键 | 自动生成 |
-| Name | string | 必填，去除首尾空白后不能为空 |
+| Name | string | 必填，去除首尾空白后不能为空；规范化名称通过 `Hashcode` 保证全局唯一 |
 | Price | decimal.Decimal | 必须大于 0 |
 
-商品名称不要求全局唯一。本示例不实现库存、分类、上下架和软删除。
+商品名称必须全局唯一：`Product.GetHash()` 使用去除首尾空白后的名称生成
+`Hashcode`，Manage 新增和修改时执行名称占用校验，数据库唯一索引作为并发写入的
+最终一致性约束。本示例不实现库存、分类、上下架和软删除。
 
 ### 6.2 Order
 
@@ -118,7 +120,10 @@ examples/
 
 订单总价不重复入库，由 `UnitPrice * Quantity` 计算。商品后续改名或改价不会改变历史订单。
 
-两个模型都通过 `entity.NewModelList[T](nil)` 操作，不增加 Repository 层。
+Manage API 通过 `entity.NewModelList[T](nil)` 操作；public/private API 由
+`ShopService` 向路由注入同一个 `types.IDataAction`，再传给模型持久化方法，不增加
+Repository 层，也不让普通业务路由依赖 SQLite、GORM 等具体数据库实现。默认 SQLite
+只在示例 `main` 组合根中选择。
 
 ## 7. 路由与权限
 

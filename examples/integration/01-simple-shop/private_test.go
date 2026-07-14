@@ -98,6 +98,7 @@ func TestPrivateAPIs(t *testing.T) {
 		"productID": integration.UintID(t, duplicateProduct.ID), "quantity": 1,
 	})
 	assert.False(t, second.Success, "同一用户同一商品每秒只能下单一次")
+	assert.Contains(t, second.ErrorMessage, "每秒只能购买一次")
 
 	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": order.ID})
 	require.True(t, deleted.Success, deleted.ErrorMessage)

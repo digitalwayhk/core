@@ -5,6 +5,7 @@ import (
 
 	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -13,6 +14,17 @@ import (
 type AddOrder struct {
 	ProductID uint `json:"productID"`
 	Quantity  int  `json:"quantity"`
+	action    persistencetypes.IDataAction
+}
+
+// NewAddOrder 创建使用指定数据适配器的下单路由原型。
+func NewAddOrder(action persistencetypes.IDataAction) *AddOrder {
+	return &AddOrder{action: action}
+}
+
+// New 为 RouterInfo 对象池创建保留 IDataAction 的独立请求实例。
+func (own *AddOrder) New(interface{}) servertypes.IRouter {
+	return NewAddOrder(own.action)
 }
 
 // Parse 绑定下单参数，UserID 不属于客户端可提交字段。
@@ -37,7 +49,7 @@ func (own *AddOrder) Validation(req servertypes.IRequest) error {
 
 // Do 查询商品事实数据、保存订单，并在提交成功后发布新增通知。
 func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
-	product, err := models.NewProduct().FindByID(own.ProductID)
+	product, err := models.NewProduct().FindByID(own.action, own.ProductID)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +63,7 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	order.UnitPrice = product.Price
 	order.Quantity = own.Quantity
 	order.UserID, _ = req.GetUser()
-	if err := order.Insert(); err != nil {
+	if err := order.Insert(own.action); err != nil {
 		return nil, err
 	}
 	response := responsemodel.NewOrder(order)
