@@ -635,11 +635,14 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 - [x] 配置 L2 或 L3 时，L1 直接命中与下层回填统一返回 `json.RawMessage`（实现 `9ef4ab3`，独立只读复核 `APPROVED`）；纯 L1 本地模式保留原对象语义。
 - [x] 每次缓存写入在 L3/L2/L1 共用的有效 TTL 上施加 ±10% 有界 jitter（实现 `17ffa77`，独立只读复核无 P0/P1）。
 - [x] `TempStore` 仅为源码兼容保留并明确废弃；公开元数据允许注册前构造，冻结后在 `ServiceRouter` 查询和枚举出口 fail closed（实现 `73a11ae`，独立只读复核无 P0/P1）。
-- [ ] WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
+- [x] WebSocket Hub 接管每客户 Router 租约，在退订、注册失败和 Hub 关闭时精确归还；同 hash 的 canonical Router 保留到最后退订，激活中的并发注册等待单次控制事件结果（实现 `b200f6f`，独立只读复核无 P0/P1）。
+- [ ] 控制队列超时与指标继续作为后续优化项。
 
 TTL jitter 内部验收：边界与 Manager 实际消费测试、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。
 
 RouterInfo 元数据内部验收：定向交错测试 `-count=20`、`types/router -count=20` 与对应 race 回归全部通过；框架内部无 `TempStore` 读写。
+
+WebSocket 租约内部验收：Hub 定向测试 `-count=20`、`types` 全包与 race、`trans/rest` 和 `trans/websocket/melody` 回归全部通过；REST 生命周期测试在允许 loopback 临时端口后通过。
 
 ## 最终关闭条件
 

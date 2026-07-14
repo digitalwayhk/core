@@ -70,6 +70,7 @@ Redis 配置只支持 DB 0，因为当前 go-zero Redis adapter 不消费 DB 选
 
 - 订阅按完整业务 hash 隔离，即使两个 hash 落在同一分片也不会串消息。
 - 同一客户端可订阅多个 hash；重复注册和重复注销幂等。
+- `RegisterWebSocketClient` 成功后，传入的请求级 Router 由 Hub 接管为订阅租约；调用方不得自行回池。每个客户退订时释放自己的租约，canonical Router 保留到该 hash 最后一个客户退订；注册失败和 Hub 关闭也会归还全部租约。
 - 0 到 1、1 到 0 的订阅变化通过 ServiceEventBridge 控制事件处理。
 - 本地通知不要求 MQ；跨节点通知要求服务级 CrossNode forwarder 和可用的外部控制通道。
 - 旧 `WebSocketNotificationSystem`、`StartPeriodicCleanup` 和 `StopPeriodicCleanup` 仅保留无状态兼容入口，新代码不得使用。
