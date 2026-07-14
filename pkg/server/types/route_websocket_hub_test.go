@@ -129,6 +129,22 @@ func TestRouteWebSocketHubRejectsPrivateRouterWithoutIdentityContract(t *testing
 	require.Zero(t, hub.ActiveClientCount(info))
 }
 
+func TestRouteWebSocketHubRejectsAuthenticatedPublicRouterWithoutIdentityContract(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/authenticated-public")
+	info.Auth = true
+	router := &hubTestRouter{info: info, hash: 44}
+	info.SetInstance(router)
+	client := &hubTestWebSocket{}
+	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+
+	hash := hub.Register(info, router, client, req)
+
+	require.Zero(t, hash)
+	require.Equal(t, int32(1), router.cleans.Load())
+	require.Zero(t, hub.ActiveClientCount(info))
+}
+
 func (*hubTestRouter) Parse(IRequest) error             { return nil }
 func (*hubTestRouter) Validation(IRequest) error        { return nil }
 func (*hubTestRouter) Do(IRequest) (interface{}, error) { return nil, nil }

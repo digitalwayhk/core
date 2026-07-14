@@ -90,7 +90,7 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 		info.releaseSubscription(router)
 		return 0
 	}
-	if info.PathType == PrivateType {
+	if info.Auth || info.PathType == PrivateType {
 		identity, ok := router.(IWebSocketUserIdentity)
 		if !ok {
 			info.releaseSubscription(router)
