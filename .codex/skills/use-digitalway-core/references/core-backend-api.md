@@ -1,10 +1,136 @@
 # Digitalway Core 后端开发参考
 
-本参考以当前代码和发布契约为准。完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。
+本参考以当前代码和发布契约为准。`examples/01-simple-shop` 是最简平台应用的标准样例，包含普通业务服务默认需要的模型、持久化、DTO、Manage/Public/Private API、身份隔离、WebSocket、服务组合和真实集成测试。`examples/02-shop-payment` 是业务编排进阶样例，增加 business 层、跨模型事务、状态机、Manage hook、自定义命令和支付结果通知。创建新服务时按复杂度选择最近的样例，不要另造平行约定。
 
-## 路由
+完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。
 
-所有 API 实现：
+## 标准样例目录
+
+```text
+examples/01-simple-shop/
+├── contract/
+│   └── service.go                # 无依赖服务名与跨服务基础契约
+├── models/
+│   ├── product.go                # 商品模型、名称哈希、字段和唯一性校验
+│   ├── product_persistence.go    # 商品查询与名称唯一性操作
+│   ├── order.go                  # 订单模型、价格快照和秒级业务哈希
+│   ├── order_persistence.go      # 下单、本人查询、所有权查询和删除
+│   └── data_action.go            # 模型层共享 IDataAction 持久化边界
+├── api/
+│   ├── dto/                      # 面向 HTTP、OpenAPI 和 WebSocket 的扁平 DTO
+│   ├── manage/                   # 商品完整 CRUD、订单只读管理
+│   ├── public/                   # 无需身份的商品查询
+│   └── private/                  # 下单、本人订单、删除和用户 WebSocket
+├── service.go                    # IService 路由组合根
+└── main/main.go                  # WebServer 启动组合根
+
+examples/integration/
+├── helpers.go                    # 通用真实进程、HTTP、TestToken、WebSocket 能力
+└── 01-simple-shop/
+    ├── helpers_test.go           # 商城专属 Suite、DTO 和业务辅助方法
+    ├── manage_test.go            # Manage command 集成测试
+    ├── public_test.go            # Public API 集成测试
+    └── private_test.go           # Private API 与 WebSocket 集成测试
+```
+
+进阶支付样例的关键目录：
+
+```text
+examples/02-shop-payment/
+├── models/                       # 商品、订单、支付类型、支付流水和 IDataAction 事务边界
+├── business/                     # 所有权、引用保护、金额计算和支付状态迁移
+├── api/dto/                      # 商品、支付类型和统一订单 DTO
+├── api/manage/                   # Manage hook、状态视图和受控命令
+├── api/public/                   # 商品与启用支付类型查询
+├── api/private/                  # 下单、支付、撤销、本人订单和 WebSocket
+├── service.go
+└── main/main.go
+
+examples/integration/02-shop-payment/
+├── helpers_test.go
+├── manage_test.go
+├── public_test.go
+└── private_test.go
+```
+
+普通 CRUD 和简单 API 以 `01-simple-shop` 为准；出现以下任一需求时，以 `02-shop-payment` 为参考：
+
+- API 需要组合多个模型操作；
+- 两个以上模型必须在同一事务内更新；
+- 业务状态只能沿有限状态机推进；
+- Manage 需要引用删除保护、字段冻结或启用/禁用命令；
+- 后台命令成功后需要通知最终用户 WebSocket。
+
+## 业务层与状态机
+
+业务复杂度超过单模型查询或写入时，增加无请求状态的 `business` 包：
+
+```text
+API / Manage command -> business service -> models -> IDataAction
+```
+
+- API 只负责绑定参数、读取可信身份、转换 DTO 和提交后的观察通知。
+- business 负责所有权、金额、引用关系、状态迁移和事务编排。
+- models 负责实体规则、查询和持久化，不引用 API、DTO、Manage 或 business。
+- `IDataAction` 仍只在 models 持久化边界选择，不能沿 Service -> API -> business 传递。
+
+支付样例使用 `OrderStatus` 和 `PaymentStatus` 分离订单生命周期与资金阶段。支付失败重试创建新 `PaymentRecord` 并递增 `Attempt`，旧流水只读保留；后台确认支付、标记失败和确认退款都在事务内重新读取订单与流水，不能信任页面提交的旧状态。
+
+Manage 扩展遵循以下顺序：
+
+1. 通用 CRUD 继续使用 `ManageService[T]` 和 `ModelList`；
+2. `ParseAfter` 只做输入规范化；
+3. `ValidationAfter` 调用 business 完成唯一性、引用保护和字段冻结；
+4. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
+5. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
+6. 自定义 Router 的 `Do` 调用 business，不直接修改模型。
+
+支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
+
+## 路由基础契约
+
+### 无依赖服务契约
+
+每个业务服务建立最底层 `contract` 包，供本服务各层和其他服务安全引用。该包不得导入其他包，不保存数据库模型、ServiceContext、RouterInfo、连接、请求或用户状态。
+
+```go
+package contract
+
+const ServiceName = "shop"
+```
+
+`IService.ServiceName()` 返回这个唯一常量。服务名用于配置、ServiceContext 注册和内部服务本地/远程分流；不要在各 API 中重复字符串。
+
+路由 Path 不放入 contract。任何 Router 都通过 `RouterInfo()` 提供 Path、Method、认证类型和服务归属。服务完成注册后，框架按路由类型身份返回 ServiceContext 持有并冻结的 RouterInfo；服务关闭时注销。相同 Router 类型如果同时归属多个 ServiceContext，无服务上下文的 `RouterInfo()` 调用会 fail closed，调用方必须从目标 ServiceContext 解析。
+
+路由元数据必须在 `RouterInfo()` 构造表达式中通过 Option 一次声明，注册后只读：
+
+```go
+func (own *GetProducts) RouterInfo() *types.RouterInfo {
+	return router.DefaultRouterInfoWithOptions(
+		own,
+		router.WithMethod(http.MethodGet),
+	)
+}
+```
+
+读取时使用 `GetPath()`、`GetMethod()`、`GetAuth()`、`GetServiceName()`、`GetPathType()` 等 Getter。当前导出的同名字段仅为旧消费方源码兼容保留，已废弃；新代码不得直接读写。后续破坏性版本会将这些冻结属性改为非导出字段，因此不要依赖字段赋值。Option 只在首次创建且尚未 Freeze 时执行；再次调用 `RouterInfo()` 返回已注册单例，不会重放 Option 或改写元数据。
+
+内部调用可先判断目标服务是否位于当前进程：
+
+```go
+serviceName := contract.ServiceName
+info := targetAPI.RouterInfo()
+if target := router.GetContext(serviceName); target != nil {
+	// 通过目标 ServiceContext 中的已注册 RouterInfo 走本地调用链。
+} else {
+	// 使用 serviceName、info.GetPath() 和服务发现结果走 Transport。
+}
+```
+
+`GetContext(serviceName)==nil` 只表示目标服务不在当前进程，不表示远程节点一定存在。远程服务发现失败必须明确返回错误；不得缓存 ServiceContext 指针，也不得直接调用目标 API 的 `Do()` 绕过完整执行链。
+
+所有普通 API 实现：
 
 ```go
 type IRouter interface {
@@ -17,10 +143,10 @@ type IRouter interface {
 
 职责：
 
-- `Parse`：绑定 JSON/query。
-- `Validation`：校验和默认值，不做副作用。
-- `Do`：业务副作用。
-- `RouterInfo`：普通路由返回 `router.DefaultRouterInfo(own)`。
+- `Parse`：绑定 JSON/query，不执行业务副作用。
+- `Validation`：校验身份、参数和调用前条件，不写数据库。
+- `Do`：查询事实数据并执行业务副作用。
+- `RouterInfo`：无自定义元数据时使用 `router.DefaultRouterInfo(own)`；需要覆盖 Method、Path、Auth、PathType、PoolSize 时使用 `router.DefaultRouterInfoWithOptions(own, options...)`。旧构造函数保留精确签名，保证函数值和既有消费方兼容。
 
 路径：
 
@@ -30,60 +156,122 @@ manage:         /api/manage/{service}/{manageLower}/{operationLower}
 server manage:  /api/servermanage/{structLower}
 ```
 
-`api/private` 自动认证。用户身份使用：
+`api/public` 与 `api/private` 只决定认证策略，不进入 URL。private 身份只能来自：
 
 ```go
 userID, userName := req.GetUser()
 ```
 
-禁止从 body/query 的 user id 推断认证身份。
+禁止从 body/query 的 UserID 推断认证身份，也不要把当前请求、用户、trace 或响应保存在 `RouterInfo`、ServiceContext 或其他共享对象中。
 
-## 模型、ModelList 与普通 API 持久化
+## 模型默认能力
 
-普通记录：
+### 选择 Model 或 BaseModel
+
+普通业务记录使用 `entity.Model`：
 
 ```go
-type Order struct {
+type Product struct {
 	*entity.Model
-	UserID string
+	Name  string
+	Price decimal.Decimal
 }
 
-func (own *Order) NewModel() {
+func NewProduct() *Product {
+	return &Product{Model: entity.NewModel()}
+}
+
+func (own *Product) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
 }
 ```
 
-只有具有稳定唯一 `Code`、`Name` 和资料状态语义时才使用 `BaseModel`。`BaseModel.GetHash()` 基于 Code；没有 Code 时使用 `Model`。
+只有具有稳定唯一 `Code`、`Name` 和资料状态语义时才使用 `BaseModel`。`BaseModel.GetHash()` 基于 Code；没有 Code 的模型不要为了复用字段而误用 `BaseModel`。
+
+嵌入指针必须在显式构造器和 `NewModel()` 中初始化。前者供业务代码使用，后者供 ModelList 反射创建实例。
+
+### 哈希表达业务唯一性
+
+`GetHash` 不是随机值，应表达真实的业务唯一约束：
+
+- 商品以规范化后的名称生成哈希，因此名称不能重复。
+- 订单以 `UserID + ProductID + CreatedAt(UTC 秒)` 生成哈希，因此同一用户同一商品每秒只能创建一次订单。
+- 时间参与哈希时，保存值和哈希值必须使用同一精度，不能一个保留纳秒、一个截断到秒。
+
+数据库唯一约束是并发下的最终防线，`AddValid`/`UpdateValid` 仍应提前返回清晰的公开业务错误：
 
 ```go
-list := entity.NewModelList[models.Order](nil)
-item := list.NewItem()
-_ = list.Add(item)
-_ = list.Save()
+func (own *Product) AddValid() error {
+	return own.validate(true)
+}
 
-rows, total, err := list.SearchAll(page, size)
-one, err := list.SearchId(id)
-rows, err = list.SearchWhere("UserID", userID)
+func (own *Product) UpdateValid(_ interface{}) error {
+	return own.validate(true)
+}
 ```
 
-`SearchWhere` 未显式改 size 时最多 500 条；分页接口使用 `SearchAll`。
+校验应同时覆盖字段格式、数值范围和业务唯一性。公开错误使用框架的类型化公开错误，不直接暴露数据库错误文本。
 
-Manage CRUD 保持使用 `ModelList`。public/private 路由应调用模型封装的查询、插入、更新或删除方法，这些方法依赖 `types.IDataAction`，不向路由泄露 GORM/SQLite。对外返回独立 `responsemodel`，并实现 `IRouterResponse.GetResponse()` 供 OpenAPI 描述。
+### 模型持久化边界
+
+Manage CRUD 使用 `entity.NewModelList[T](nil)`。public/private 不直接依赖 GORM、SQLite 或具体数据库类型，而是调用模型封装的方法，例如：
+
+```go
+product, err := models.NewProduct().FindByID(productID)
+orders, err := models.NewOrder().QueryByUser(userID)
+order, err := models.NewOrder().FindOwned(orderID, userID)
+err = order.Delete()
+```
+
+模型方法内部依赖 `types.IDataAction`。数据库实现只在模型持久化边界选择，不沿 Service -> API -> Model 逐层传递。标准样例在 `models/data_action.go` 中延迟创建并共享 IDataAction：
+
+```go
+var (
+	dataActionOnce sync.Once
+	dataAction     persistencetypes.IDataAction
+)
+
+func getDataAction() persistencetypes.IDataAction {
+	dataActionOnce.Do(func() {
+		dataAction = entity.GetGlobalSqliteInstance(NewProduct().GetLocalDBName())
+	})
+	return dataAction
+}
+```
+
+这里共享的是无请求状态的数据访问能力。模型实例、当前用户、查询条件和响应不得放入该单例。
 
 SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖；负值关闭。不得恢复机器级 30GB 默认。
 
-### PrefixedBadgerDB
+## DTO 与响应契约
 
-- 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
-- 可靠写回使用 `EnableWriteBehind`，配置必须满足 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。
-- `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写并通过 `EnableWriteBehind` 校验。
-- `SetSyncDB` 已废弃，仅保留编译兼容；其绑定错误会在后续写入和关闭时返回。
-- 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
-- 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
+public/private API 返回独立 `api/dto` 类型，不直接序列化持久化模型。原因包括：
 
-## Manage CRUD
+- 持久化模型可能具有很深的嵌入关系和内部字段。
+- 对外字段、名称和时间格式需要稳定，不应随数据库模型重构漂移。
+- HTTP、OpenAPI 与 WebSocket 可以复用同一份公开结构。
+
+标准样例使用：
+
+- `dto.ProductResponse`：只暴露 ID、名称和价格。
+- `dto.OrderResponse`：暴露订单快照、数量、用户和创建时间。
+- `OrderResponse.Action`：HTTP 响应为空；WebSocket 事件复制 DTO 后设置 `created` 或 `deleted`。
+
+普通 API 实现 `IRouterResponse`，让 OpenAPI 在不执行路由的情况下获得响应结构：
+
+```go
+func (own *GetProducts) GetResponse() interface{} {
+	return []*dto.ProductResponse{}
+}
+```
+
+DTO 转换集中放在 `api/dto`，不要放入通用集成测试 helpers，也不要让测试 DTO 进入生产包。
+
+## Manage API
+
+### 完整 CRUD
 
 ```go
 type ProductManage struct {
@@ -99,23 +287,124 @@ func NewProductManage() *ProductManage {
 
 必须把真实 owner 传给 `NewManageService`，否则 `ViewModel`、Parse/Validation/Do 和 Search hooks 不会落到自定义类型。
 
-自定义操作以值嵌入 `manage.Operation[T]`，不要嵌入指针。
+商品管理注册 `view/search/add/edit/remove`，通过模型的 `AddValid`/`UpdateValid` 校验名称、价格和唯一性。自定义操作以值嵌入 `manage.Operation[T]`，不要嵌入指针。
 
-## 服务与启动
+### 只读管理
+
+订单管理只注册 `view/search`，不注册 `add/edit/remove`。只读不是依赖 handler 内拒绝写入，而是根本不把写 command 暴露为路由。集成测试应断言未注册 command 返回 404。
+
+`ModelList` 只用于 Manage 和框架管理能力。public/private 使用面向业务语义的模型方法，不直接暴露通用列表操作。
+
+## Public API
+
+Public API 无需身份，但仍执行参数解析、校验、类型化错误和 DTO 转换。
+
+`GetProducts` 展示标准可选筛选模式：
+
+- `id` 为空时不按 ID 限制；有值时精确匹配。
+- `name` 为空时不按名称限制；有值时模糊匹配。
+- 两者同时存在时组合筛选。
+- 条件全部为空时返回全部可下单商品。
+- 非法 ID 返回稳定的公开校验错误。
+
+不要为了 public 查询复用 Manage 的列表请求/响应结构；它们面向不同调用方和兼容性契约。
+
+## Private API
+
+### 创建订单
+
+下单只接收 `productID` 和 `quantity`。UserID 从 `req.GetUser()` 获取，商品名称和价格从数据库中的当前商品读取。订单保存商品 ID、名称和价格快照，因此商品后来改名或改价不会改变历史订单。
+
+标准顺序：
+
+1. `Parse` 绑定商品 ID 与数量。
+2. `Validation` 验证可信身份、商品 ID 和正数数量。
+3. `Do` 查询商品事实数据。
+4. 创建订单并设置框架 ID、UserID、商品快照和秒级 CreatedAt。
+5. 持久化成功后才发布 `created` WebSocket 通知。
+6. HTTP 返回不带 `action` 的订单 DTO。
+
+### 查询本人订单
+
+`GetOrders` 不接受 UserID 参数，只按可信身份调用 `QueryByUser`。响应使用订单 DTO，不能返回其他用户订单。
+
+### 删除本人订单
+
+删除先以 `ID + UserID` 查询所有权，再物理删除。不存在与不属于当前用户返回同一公开错误，避免泄露其他用户订单是否存在。持久化成功后发布 `deleted` 通知。
+
+## WebSocket 最终用户订阅
+
+WebSocket 只面向最终外部用户。内部服务之间不使用 WebSocket，内部请求使用 TransportSelector，内部事件使用每个 ServiceContext 所属的 EventBridge。
+
+订阅使用真实路由路径：
+
+```text
+/api/shop/getorders
+```
+
+private WebSocket 路由至少需要以下职责：
+
+- `IWebSocketUserIdentity`：`SetUserID` 接收 WebSocket 登录会话解析出的可信身份，`GetUserID` 返回已绑定身份。private 路由使用 WebSocket 时必须实现。
+- `IRouterHashKey`：按 UserID 生成稳定 hash，将不同用户放入不同订阅组。
+- `IWebSocketRouterNotice`：校验消息 DTO，并只向消息所属用户投递。
+
+框架为每次订阅直接创建并持有独立路由实例，直到退订或连接关闭；WebSocket 订阅实例不进入普通请求对象池。路由没有额外启动/停止资源时，不要为了形式实现空的 `IWebSocketRouter` 生命周期回调。
+
+通知应复用 HTTP DTO：
+
+```json
+{
+  "action": "created",
+  "id": "123",
+  "productID": 1,
+  "productName": "示例商品",
+  "unitPrice": "39.8",
+  "quantity": 2,
+  "userID": "user-a",
+  "createdAt": "2026-07-14T10:00:00Z"
+}
+```
+
+不要再包一层 `order`，也不要把 action 写回 HTTP DTO 原对象。通知过滤失败、类型不匹配或用户不匹配时直接不投递。
+
+跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；IPv6 地址通过 `net.JoinHostPort`；非 2xx 转发视为错误。
+
+worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
+
+## Service 与启动组合根
+
+业务 Service 只组装路由：
 
 ```go
-type OrderService struct{}
+type ShopService struct{}
 
-func (*OrderService) ServiceName() string { return "orders" }
-func (*OrderService) Routers() []types.IRouter {
-	return []types.IRouter{&public.Ping{}, &private.AddOrder{}}
+func (*ShopService) ServiceName() string {
+	return contract.ServiceName
 }
-func (*OrderService) SubscribeRouters() []*types.ObserveArgs { return nil }
+
+func (*ShopService) Routers() []types.IRouter {
+	routers := make([]types.IRouter, 0, 11)
+	routers = append(routers, manage.NewProductManage().Routers()...)
+	routers = append(routers, manage.NewOrderManage().Routers()...)
+	routers = append(routers,
+		&public.GetProducts{},
+		&private.AddOrder{},
+		&private.GetOrders{},
+		&private.DeleteOrder{},
+	)
+	return routers
+}
+
+func (*ShopService) SubscribeRouters() []*types.ObserveArgs { return nil }
 ```
+
+`SubscribeRouters` 用于内部 EventBridge 观察订阅，不是外部用户 WebSocket 订阅。没有内部观察者时返回 nil。
+
+main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。
 
 ```go
 server := run.NewWebServer()
-server.AddIService(&OrderService{}, &types.ServerOption{
+server.AddIService(&simpleshop.ShopService{}, &types.ServerOption{
 	IsCors:     true,
 	OriginCors: []string{"http://localhost:8000"},
 })
@@ -125,6 +414,152 @@ server.Start()
 CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主动选择。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
+
+## 标准集成测试模板
+
+集成测试是平台服务的标准能力，不是可选示例。为新服务创建集成测试时，必须优先复用以下两层模板。
+
+### 公共测试能力
+
+`examples/integration/helpers.go` 负责与业务无关的能力：
+
+- `StartProcess(ProcessOptions)`：编译并启动真实服务进程。
+- 为服务分配隔离端口和系统临时目录。
+- 捕获服务日志并在失败时输出。
+- `RequestJSON`：通过真实 HTTP 调用路由并解析统一响应信封。
+- `TokenFor`：调用框架内建 `/api/servermanage/testtoken` 获取普通用户或管理员令牌。
+- `WriteWebSocket`、`ReadWebSocket`、`StreamWebSocket`：使用真实 WebSocket 协议测试订阅和事件。
+- `Stop`：关闭进程并清理临时目录。
+
+不要在每个服务里重新实现进程管理、端口分配、TestToken、HTTP 信封或 WebSocket 通信。
+
+### 服务专属 Suite
+
+以 `examples/integration/01-simple-shop/helpers_test.go` 为模板：
+
+```go
+type serviceSuite struct {
+	*integration.Suite
+}
+
+func startServiceSuite() (*serviceSuite, error) {
+	base, err := integration.StartProcess(integration.ProcessOptions{
+		BuildPackage: "./path/to/service/main",
+		BinaryName:   "service-name",
+		TempPrefix:   "core-service-name-",
+		ServiceCount: 2,
+		ServiceIndex: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// 等待本服务真实业务路由可用；失败时 Stop。
+	return &serviceSuite{Suite: base}, nil
+}
+```
+
+服务专属目录只保存：
+
+- 当前服务的测试 DTO。
+- 业务路由辅助方法。
+- 就绪探测。
+- 业务 WebSocket 登录/订阅和事件解析。
+
+业务 DTO 放在对应服务集成测试目录，不放入 `examples/integration/helpers.go`。
+
+### TestMain 生命周期
+
+一个服务测试目录启动一个真实进程，供三类测试共用：
+
+```go
+func TestMain(m *testing.M) {
+	created, err := startServiceSuite()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	suite = created
+	code := m.Run()
+	if code != 0 {
+		suite.PrintLog()
+	}
+	suite.Stop()
+	os.Exit(code)
+}
+```
+
+测试必须等待认证和真实业务路由可用，不能只等待端口监听。框架应在临时目录首次启动时自动生成配置；测试可验证必要配置存在，但不向源码目录写运行配置。
+
+### 文件和测试分组
+
+```text
+manage_test.go
+public_test.go
+private_test.go
+```
+
+每个 API 或 Manage command 使用独立测试函数，整组入口保留并调用全部子测试：
+
+```go
+func TestPrivateAPIs(t *testing.T) {
+	t.Run("AddOrder", testAddOrderAPI)
+	t.Run("GetOrders", testGetOrdersAPI)
+	t.Run("DeleteOrder", testDeleteOrderAPI)
+	t.Run("GetOrdersWebSocket", testGetOrdersWebSocketAPI)
+}
+```
+
+Manage 按 command 拆分，而不是把 view/search/add/edit/remove 堆在一个测试函数中。Public/Private 按 API 拆分。这样既能单独定位失败，也能一次运行整类能力。
+
+### 最低验收范围
+
+Manage：
+
+- 管理员鉴权。
+- view/search 元数据与列表。
+- add/edit/remove 的成功和业务校验。
+- 只读 Manage 的写 command 未注册。
+
+Public：
+
+- 空筛选、单条件和组合条件。
+- 非法参数公开错误。
+- DTO 不泄露持久化字段。
+
+Private：
+
+- 未认证请求被拒绝。
+- UserID 来自令牌，不接受客户端伪造。
+- 资源所有权和跨用户隔离。
+- 业务事实快照、唯一性和删除语义。
+- HTTP DTO 不包含仅供事件使用的 action。
+
+WebSocket：
+
+- 匿名订阅被拒绝。
+- 登录后按真实 RouterInfo 路径订阅。
+- 创建和删除事件结构正确。
+- 事件只投递给当前用户，其他用户无消息。
+- 连接和读取具有明确超时，测试结束关闭连接。
+
+### 标准命令
+
+```bash
+go test ./examples/integration/01-simple-shop -count=1
+go test ./examples/integration/01-simple-shop -count=10
+go test -race ./examples/integration/01-simple-shop -count=1
+```
+
+新服务将路径替换为自身集成测试目录。涉及并发、身份隔离或 WebSocket 时必须运行 race；需要稳定性证据时运行多次，不用无断言 sleep 或 retry 掩盖失败。
+
+## PrefixedBadgerDB
+
+- 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
+- 可靠写回使用 `EnableWriteBehind`，配置必须满足 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。
+- `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写并通过 `EnableWriteBehind` 校验。
+- `SetSyncDB` 已废弃，仅保留编译兼容；其绑定错误会在后续写入和关闭时返回。
+- 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
+- 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
 
 ## Cluster、Transport、MQ 与事件
 
@@ -137,12 +572,6 @@ CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 
 go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
-
-## WebSocket 与跨节点通知
-
-订阅使用真实 `RouterInfo().Path`。跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；IPv6 地址通过 `net.JoinHostPort`，非 2xx 转发视为错误。
-
-worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
 
 ## 日志与错误
 
@@ -185,10 +614,15 @@ go get github.com/digitalwayhk/core@<commit>
 ## 常见错误
 
 - URL 加入 `/public`、`/private`。
-- private API 使用客户端 user id。
+- private API 使用客户端提交的 UserID。
 - `NewModel()` 未初始化嵌入指针。
 - 无稳定 Code 的模型使用 BaseModel。
+- `GetHash` 与业务唯一性、保存时间精度不一致。
 - ManageService 传入内嵌实例而非真实 owner。
-- 绕过 ModelList/ServiceContext 或自行实现成熟基础设施能力。
+- public/private 直接返回持久化模型，或复用 Manage 列表 DTO。
+- WebSocket 把外部用户订阅与内部 EventBridge 混为一谈。
+- private WebSocket 未实现可信身份注入和用户级通知过滤。
+- 绕过 ModelList/模型持久化边界/ServiceContext，或自行实现成熟基础设施能力。
+- 集成测试重新实现公共 Suite，只测 handler，或依赖开发机已有配置和数据库。
 - 仅因配置字段存在就声明能力稳定。
 - 单元测试隐式依赖 Docker/本机数据库。
