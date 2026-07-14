@@ -27,8 +27,10 @@ type routeWebSocketNoticeEvent struct {
 	Forward bool   `json:"forward"`
 }
 
-// RouteWebSocketHub 保存一个 ServiceContext 内全部路由的 WebSocket 订阅。
+// RouteWebSocketHub 保存一个 ServiceContext 内面向外部客户端的 WebSocket 订阅。
 // 完整 hash 是订阅隔离边界，分片只用于降低锁竞争，不能替代 hash 分组。
+// 内部服务不通过本 Hub 建立 WebSocket 连接；跨节点通知只转发给拥有
+// 外部订阅者的节点，节点间传输仍由 EventBridge/MQ/Transport 承担。
 type RouteWebSocketHub struct {
 	service string
 	events  RouteEventRuntime

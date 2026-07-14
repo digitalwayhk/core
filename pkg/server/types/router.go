@@ -59,7 +59,9 @@ type IPackRouterHook interface {
 	GetInstance() interface{}
 }
 
-// IWebSocketRouter 接收本节点 WebSocket 订阅组的生命周期回调。
+// IWebSocketRouter 接收本节点外部客户端 WebSocket 订阅组的生命周期回调。
+// 该接口不是内部服务通信协议；服务间调用应使用 TransportSelector，
+// 内部事件和跨节点控制应使用 ServiceEventBridge/MQ。
 // RegisterWebSocket 和 UnRegisterWebSocket 可能由并发连接触发，实现必须线程安全，
 // 且不得长期持有可被对象池回收的 IRequest 或 IRouter 引用。
 type IWebSocketRouter interface {
@@ -67,7 +69,7 @@ type IWebSocketRouter interface {
 	UnRegisterWebSocket(client IWebSocket, req IRequest)
 }
 
-// IWebSocketRouterNotice 过滤并转换 WebSocket 广播内容。
+// IWebSocketRouterNotice 过滤并转换发送给外部订阅者的 WebSocket 内容。
 // 返回 false 表示当前订阅不接收该消息；返回数据应视为不可变发送快照。
 // 实现不得修改共享 RouterInfo，也不应执行无界阻塞操作。
 type IWebSocketRouterNotice interface {

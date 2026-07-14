@@ -157,6 +157,8 @@ RouterInfo 只允许在 ServiceContext 范围内按路由唯一，不允许成�
 
 ## 6. RouteWebSocketHub
 
+`RouteWebSocketHub` 是最终外部客户端的订阅与推送组件，不承担内部服务间通信。内部同步调用属于 `TransportSelector`，内部异步事件与控制属于 `ServiceEventBridge`/MQ。跨节点 WebSocket Notice 的业务目标仍是外部订阅者；节点间传输使用 EventBridge/MQ/HTTP/Transport，禁止为此建立服务间 WebSocket 依赖。
+
 ### 6.1 精确订阅模型
 
 WebSocket 分片只用于降低锁竞争，不表示订阅边界。每个分片内部按完整 hash 保存订阅组：

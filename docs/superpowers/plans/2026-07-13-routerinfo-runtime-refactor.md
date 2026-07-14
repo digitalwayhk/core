@@ -667,5 +667,7 @@ GOCACHE=/private/tmp/core-codex-go-cache ./scripts/ci.sh required/contracts
 - [x] 每节定向测试和 race 验收通过。
 - [x] `pkg/server/...`、日志检查、release-contract、required quick/contracts 全绿。
 - [x] 首轮外部审查及两项 P1 修复复审无 P0/P1；P2 明确登记。
-- [ ] 本轮已完成的全部 P2 补强需按 `docs/codex/ROUTERINFO_RUNTIME_FINAL_REVIEW_PROMPT.md` 执行整计划最终外部只读审查，只有获得 `APPROVED` 才能勾选。
+- [x] 整计划最终外部只读审查 `APPROVED`（BASE `7631d78c4e7541d1ea431adf8e1b5512d5186014`，FINAL `a91cf6220bf2e6b5f1d8e116451344ff0e743ae7`，2026-07-14）；无 P0/P1。
 - [x] 设计规格和使用文档与实际配置、启动和降级行为一致。
+
+终审残余 P2（不阻断关闭）：`Exec/ExecDo` 直接调用尚未额外校验冻结快照；`storeRoutePolicy` 的创建语义需在未来引入 `DisableRoute` 时再拆分；`HasRouter` 仅返回 map 存在性；已入队控制事件在调用方 context 取消后仍可能完成，取消不表示撤销。

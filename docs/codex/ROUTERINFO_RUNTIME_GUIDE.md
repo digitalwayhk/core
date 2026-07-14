@@ -34,6 +34,7 @@
 - 观察事件是 best-effort：没有订阅者时不构造 payload；队列满时允许丢弃并累计 dropped 指标。
 - 控制事件按 `ShardKey` 固定分片串行处理，调用方同步获得失败结果。
 - 控制队列入队等待默认最多 5 秒，可通过 `ServiceEventBridgeOptions.ControlEnqueueTimeout` 调整。队列持续满时返回 `ErrControlQueueTimeout`，并由 `ControlQueueTimeouts()` 累计；该事件未入队，调用方必须按控制失败处理。已入队事件不使用此超时伪装取消。
+- 调用方 context 在事件入队后取消，只表示调用方不再等待，不表示撤销已入队的控制事件；worker 仍可能完成交付。
 - 默认只在本服务内发布；只有显式 `External=true` 才通过 MQ adapter 外发。
 - 外发控制事件要求 MQ `Usage` 包含 `event-stream`，没有外部 provider 时明确失败。
 
@@ -68,6 +69,8 @@ Redis 配置只支持 DB 0，因为当前 go-zero Redis adapter 不消费 DB 选
 ## WebSocket
 
 每个 ServiceContext 独占一个 `RouteWebSocketHub`。RouterInfo 的注册、注销、通知、清理和统计方法都是兼容门面，不保存连接集合。
+
+`RouteWebSocketHub` 只服务于最终外部客户端的长连接订阅和服务端推送，不是内部服务通信方式。内部同步调用使用 `TransportSelector`（gRPC/HTTP/socket 等），内部异步事件和控制使用 `ServiceEventBridge` 及显式配置的 MQ adapter。跨节点 WebSocket Notice 也只是将外部订阅者的通知转发到拥有该订阅的节点；节点之间实际使用 EventBridge/MQ/Transport，不建立服务间 WebSocket。
 
 - 订阅按完整业务 hash 隔离，即使两个 hash 落在同一分片也不会串消息。
 - 同一客户端可订阅多个 hash；重复注册和重复注销幂等。
