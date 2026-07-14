@@ -53,17 +53,8 @@ func clearRequest(req interface{}, channel string) {
 	}
 }
 
-type IUserID interface {
-	GetUserID() string
-	SetUserID(userID, userName string)
-}
-
 func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, data interface{}) (types.IRouter, types.IRequest, error) {
 	req := s.getIRequest(channel)
-	api, err := s.manage.parseRequest(info, data)
-	if err != nil {
-		return nil, nil, err
-	}
 	if info.Auth {
 		if s.req == nil {
 			return nil, nil, errors.New("未登录，无法订阅需要认证的路由")
@@ -74,12 +65,18 @@ func (s *SessionSubscriptions) getApi(info *types.RouterInfo, channel string, da
 		if s.req.userID == "" {
 			return nil, nil, fmt.Errorf("invalid user ID in session request: %s", s.req.userID)
 		}
-		if iuid, ok := api.(IUserID); ok {
-			iuid.SetUserID(s.req.userID, s.req.userName)
+	}
+	api, err := s.manage.parseSubscriptionRequest(info, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.Auth {
+		if identity, ok := api.(types.IWebSocketUserIdentity); ok {
+			identity.SetUserID(s.req.userID, s.req.userName)
 		}
 	}
-	err = api.Validation(req)
-	if err != nil {
+	if err := api.Validation(req); err != nil {
+		info.ReleaseSubscription(api)
 		return nil, nil, err
 	}
 	return api, req, nil
@@ -149,6 +146,10 @@ func (s *SessionSubscriptions) HandleSubscribe(msg *Message) {
 	}
 
 	hash := info.RegisterWebSocketClient(api, s.client, req)
+	if hash == 0 {
+		s.client.SendError(channel, "订阅注册失败")
+		return
+	}
 	s.subscriptions[channel][hash] = api
 	s.client.Send("sub", channel, s.subscriptions[channel])
 	s.lastActivity = time.Now() // 更新最后活动时间
@@ -171,6 +172,7 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 			return
 		}
 		hash = info.UnRegisterWebSocketClient(api, s.client)
+		info.ReleaseSubscription(api)
 	} else {
 		info.UnRegisterWebSocketHash(hash, s.client)
 	}

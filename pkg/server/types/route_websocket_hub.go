@@ -80,19 +80,29 @@ func routeWebSocketNoticeEventType(service string) string {
 }
 
 func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IWebSocket, req IRequest) uint64 {
-	if h == nil || h.closed.Load() || info == nil || router == nil || client == nil || req == nil {
+	if info == nil || router == nil {
+		return 0
+	}
+	if h == nil || h.closed.Load() || client == nil || req == nil {
+		info.releaseSubscription(router)
 		return 0
 	}
 	if info.ServiceName != h.service {
+		info.releaseSubscription(router)
 		return 0
 	}
 	if info.PathType == PrivateType {
-		id, _ := req.GetUser()
+		id, name := req.GetUser()
 		if strings.TrimSpace(id) != "" {
-			utils.SetPropertyValue(router, "userid", id)
+			if setter, ok := router.(interface{ SetUserID(string, string) }); ok {
+				setter.SetUserID(id, name)
+			} else {
+				utils.SetPropertyValue(router, "userid", id)
+			}
 		} else {
-			identity, ok := router.(interface{ GetUserID() string })
-			if !ok || strings.TrimSpace(identity.GetUserID()) == "" {
+			getter, ok := router.(interface{ GetUserID() string })
+			if !ok || strings.TrimSpace(getter.GetUserID()) == "" {
+				info.releaseSubscription(router)
 				return 0
 			}
 		}
@@ -102,7 +112,7 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 	shard := state.shard(hash)
 	for {
 		if h.closed.Load() {
-			info.putRouter(router)
+			info.releaseSubscription(router)
 			return 0
 		}
 		shard.mu.Lock()
@@ -123,12 +133,12 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 			select {
 			case <-done:
 				if subscription.activationErr != nil {
-					info.putRouter(router)
+					info.releaseSubscription(router)
 					return 0
 				}
 				continue
 			case <-h.ctx.Done():
-				info.putRouter(router)
+				info.releaseSubscription(router)
 				return 0
 			}
 		}
@@ -158,7 +168,7 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 			close(subscription.activationDone)
 			shard.mu.Unlock()
 			if err != nil {
-				info.putRouter(router)
+				info.releaseSubscription(router)
 				return 0
 			}
 			callWebSocketRegister(router, client, req)
@@ -216,13 +226,13 @@ retry:
 		callWebSocketUnregister(router, client, lease.request)
 	}
 	if !sameRouterLease(lease.router, router) {
-		info.putRouter(lease.router)
+		info.releaseSubscription(lease.router)
 	}
 	for _, additional := range lease.additional {
-		info.putRouter(additional)
+		info.releaseSubscription(additional)
 	}
 	if remaining == 0 {
-		info.putRouter(router)
+		info.releaseSubscription(router)
 	}
 }
 

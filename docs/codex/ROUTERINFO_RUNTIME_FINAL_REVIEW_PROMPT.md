@@ -26,7 +26,7 @@ git diff "$BASE..$FINAL"
 2. IRouter 对象池的创建、Reset、Parse/Validation/Do、Clean 和归还是否闭环；panic、观察快照、自定义 Factory/Reset/Clean 是否不会泄漏请求状态。
 3. ServiceContext registry 是否对同名不同配置 fail closed，关闭期间不返回 terminated 实例，多 waiter 是否只重建一次，关闭后是否精确注销。
 4. ServiceEventBridge 是否每服务独立；观察事件 best-effort、无订阅者直接丢弃；控制事件是否按 shard 串行、不静默丢弃，入队超时是否不入队、返回稳定错误并精确计数。检查关闭、context 取消、worker 阻塞和 goroutine 泄漏。
-5. RouteWebSocketHub 是否 ServiceContext 级隔离；完整 hash 是否为隔离边界；每客户 Router 租约、重复订阅附加租约、canonical Router、注册失败、最后退订和 Hub Close 是否只释放一次。特别检查激活中并发注册/关闭交错、回调顺序和对象池引用。
+5. RouteWebSocketHub 是否 ServiceContext 级隔离；完整 hash 是否为隔离边界；每客户独立 Router、重复订阅附加实例、canonical Router、注册失败、最后退订和 Hub Close 是否只清理一次且从不进入请求对象池。特别检查激活中并发注册/关闭交错、回调顺序和实例所有权。
 6. RouteCacheManager 的 L1/L2/L3 值类型、有效 TTL 共享与 ±10% jitter、Redis 权威 generation、SETNX 冷键、Enable/Delete/Recover 并发单调性是否正确。Recover 是否不会重建已删除路由、不会命中旧世代；共享模式失效发布错误是否继续 fail closed/degraded。
 7. 是否存在数据竞争、死锁、无界队列、双重释放、超时后迟到副作用、跨 ServiceContext 全局可变状态、敏感日志或公共 API/JSON/配置兼容性破坏。
 8. 测试是否确定性制造交错，修复前能失败，严格断言权威值、miss、释放次数和错误语义，而不是依赖 sleep/retry 刷绿。

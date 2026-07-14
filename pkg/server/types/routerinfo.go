@@ -52,9 +52,11 @@ var (
 // 当前用户、请求参数、trace、响应或其他请求级可变状态。服务注册完成后，Path、Auth、
 // Method、ServiceName、PathType 和实例类型等身份字段应视为只读。
 //
-// RouterInfo.New、ParseNew、JsonNew 和 Exec 使用独立的请求级 IRouter。标准 Router
+// RouterInfo.New、ParseNew、JsonNew 和 Exec 使用池化的请求级 IRouter。标准 Router
 // 由类型工厂创建，IRouterFactory 可覆盖创建方式；实例从本 RouterInfo 专属的有界池
 // 取得，并通过 IRouterResettable/IRouterCleanable 或默认重置逻辑安全复用。
+// NewSubscription、ParseSubscription 创建独立 WebSocket 订阅实例；它由 Hub 持有到
+// 退订、断线或关闭，最后执行 Clean 并丢弃，绝不能放入请求对象池。
 //
 // UseCache、Subscribe 和 WebSocket 相关方法是框架公开兼容入口。后续实现应委托给所属
 // ServiceContext 的 RouteCacheManager、ServiceEventBridge 和 RouteWebSocketHub，避免
@@ -81,14 +83,18 @@ type RouterInfo struct {
 	TempStore sync.Map
 	// 自定义响应处理函数
 	ResponseHandlerFunc func(w http.ResponseWriter, r *http.Request, res IResponse) `json:"-"`
-	channelPool         *ChannelPool
-	eventRuntime        RouteEventRuntime
-	eventCancels        map[ObserveState]map[string]func()
-	webSocketHub        *RouteWebSocketHub
-	cacheRuntime        RouteCacheRuntime
-	owner               string
-	frozen              bool
-	frozenMetadata      routerMetadata
+	// PoolSize 控制该路由对象池的容量。0 表示使用默认自适应值（基于 GOMAXPROCS）。
+	// 高并发路由可适当增大（如 512），低频管理路由可设为 8 减少内存占用。
+	// 必须在路由注册完成（Freeze）前设置，之后修改无效。
+	PoolSize       int
+	channelPool    *ChannelPool
+	eventRuntime   RouteEventRuntime
+	eventCancels   map[ObserveState]map[string]func()
+	webSocketHub   *RouteWebSocketHub
+	cacheRuntime   RouteCacheRuntime
+	owner          string
+	frozen         bool
+	frozenMetadata routerMetadata
 
 	// 🆕 性能统计字段
 	stats     *RouterStats `json:"-"`
@@ -153,11 +159,13 @@ func (own *RouterInfo) ParseNew(instance interface{}) (IRouter, error) {
 	value, err := json.Marshal(instance)
 	if err != nil {
 		logx.Error(err)
+		own.putRouter(item)
 		return nil, err
 	}
 	err = json.Unmarshal(value, item)
 	if err != nil {
 		logx.Error(err)
+		own.putRouter(item)
 		return nil, err
 	}
 	return item, err
@@ -167,9 +175,39 @@ func (own *RouterInfo) JsonNew(txt string) (IRouter, error) {
 	err := json.Unmarshal(utils.String2Bytes(txt), item)
 	if err != nil {
 		logx.Error(err)
+		own.putRouter(item)
 		return nil, err
 	}
 	return item, nil
+}
+
+// NewSubscription 创建一个不进入请求对象池的 WebSocket 订阅实例。
+// 该实例由 RouteWebSocketHub 持有到退订、断线或 Hub 关闭。
+func (own *RouterInfo) NewSubscription() IRouter {
+	return own.newRouterInstance()
+}
+
+// ParseSubscription 创建并解析一个独立 WebSocket 订阅实例。
+func (own *RouterInfo) ParseSubscription(instance interface{}) (IRouter, error) {
+	item := own.NewSubscription()
+	if item == nil {
+		return nil, errors.New("create websocket subscription router failed")
+	}
+	value, err := json.Marshal(instance)
+	if err != nil {
+		own.releaseSubscription(item)
+		return nil, err
+	}
+	if err := json.Unmarshal(value, item); err != nil {
+		own.releaseSubscription(item)
+		return nil, err
+	}
+	return item, nil
+}
+
+// ReleaseSubscription 清理尚未交给 Hub 或已从 Hub 移除的订阅实例。
+func (own *RouterInfo) ReleaseSubscription(router IRouter) {
+	own.releaseSubscription(router)
 }
 func (own *RouterInfo) GetInstance() interface{} {
 	return own.instance
@@ -279,14 +317,17 @@ func (own *RouterInfo) GetServiceName() string {
 //	}
 func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	api := own.New()
+	delegated := false
 	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
 	defer func() {
 		if config.IsServerInitializing() {
 			return
 		}
 
-		// 🔧 回收对象到池
-		own.putRouter(api)
+		// Parse 失败或 panic 时 ExecDo 尚未接管实例，由 Exec 归还。
+		if !delegated {
+			own.putRouter(api)
+		}
 
 		if err := recover(); err != nil {
 			logx.Errorw("router_execution_panicked",
@@ -308,11 +349,17 @@ func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "parse", msg, 600, err)
 		return req.NewResponse(nil, err)
 	}
+	delegated = true
 	return own.ExecDo(api, req)
 }
 
 // 🔧 修改 ExecDo 方法，添加统计
 func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
+	defer func() {
+		if !config.IsServerInitializing() {
+			own.putRouter(api)
+		}
+	}()
 	// 🆕 记录请求开始
 	recordEnd := own.recordRequestStart()
 	startTime := time.Now()

@@ -74,6 +74,34 @@ type hubPrivateIdentityRouter struct {
 	UserID string
 }
 
+type hubAuthenticatedRequest struct {
+	shardTestRequest
+	userID   string
+	userName string
+}
+
+func (r *hubAuthenticatedRequest) GetUser() (string, string) {
+	return r.userID, r.userName
+}
+
+type hubInjectedIdentityRouter struct {
+	*hubTestRouter
+	userID   string
+	userName string
+}
+
+func (r *hubInjectedIdentityRouter) GetUserID() string { return r.userID }
+func (r *hubInjectedIdentityRouter) SetUserID(userID, userName string) {
+	r.userID = userID
+	r.userName = userName
+}
+func (r *hubInjectedIdentityRouter) GetHashKey() uint64 {
+	if r.userID == "trusted-user" && r.userName == "可信用户" {
+		return 42
+	}
+	return 0
+}
+
 func (r *hubPrivateIdentityRouter) GetUserID() string { return r.UserID }
 func (r *hubPrivateIdentityRouter) GetHashKey() uint64 {
 	if r.UserID == "trusted-user" {
@@ -161,6 +189,23 @@ func TestRouteWebSocketHubPreservesSessionIdentityWhenHandshakeRequestHasNoUser(
 	require.Equal(t, "trusted-user", router.UserID)
 }
 
+func TestRouteWebSocketHubInjectsAuthenticatedIdentityThroughContract(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/private-orders")
+	info.PathType = PrivateType
+	router := &hubInjectedIdentityRouter{hubTestRouter: &hubTestRouter{info: info}}
+	info.SetInstance(router)
+	client := &hubTestWebSocket{}
+	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+
+	hash := hub.Register(info, router, client, req)
+
+	require.Equal(t, uint64(42), hash)
+	require.Equal(t, "trusted-user", router.userID)
+	require.Equal(t, "可信用户", router.userName)
+	hub.Unregister(info, hash, client)
+}
+
 func TestRouteWebSocketHubAllowsClientOnMultipleHashes(t *testing.T) {
 	_, hub := newHubTestRuntime(t, "service-a")
 	info := newHubTestRoute("service-a", "/ws/orders")
@@ -229,6 +274,23 @@ func TestRouteWebSocketHubReleasesSubscriptionRouterAfterLastClient(t *testing.T
 
 	assert.Equal(t, int32(1), router.unregisters.Load(), "注销回调必须在租约释放前执行")
 	assert.Equal(t, int32(1), router.cleans.Load(), "最后一个客户退订后必须释放 Router")
+}
+
+func TestRouteWebSocketHubDoesNotReturnSubscriptionRouterToRequestPool(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/detached-orders")
+	prototype := &hubTestRouter{info: info, hash: 34}
+	info.SetInstance(prototype)
+	_ = info.New() // 初始化并取空请求池，便于检测订阅实例是否被误放入。
+	subscription := &hubTestRouter{info: info, hash: 34}
+	client := &hubTestWebSocket{}
+
+	require.Equal(t, uint64(34), hub.Register(info, subscription, client, &shardTestRequest{}))
+	hub.Unregister(info, 34, client)
+	request := info.New()
+
+	assert.NotSame(t, subscription, request, "WebSocket 订阅实例退订后不得进入请求对象池")
+	assert.Equal(t, int32(1), subscription.cleans.Load())
 }
 
 func TestRouteWebSocketHubReleasesEachClientRouterLease(t *testing.T) {

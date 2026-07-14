@@ -3,6 +3,8 @@ package melody
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -414,21 +416,39 @@ func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
 	logx.Infof("客户端退订成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
 }
 
-func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (types.IRouter, error) {
+func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
 	defer func() {
-		if err := recover(); err != nil {
-			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.ServiceName, info.Path, err)
+		if recovered := recover(); recovered != nil {
+			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.ServiceName, info.Path, recovered)
+			err = fmt.Errorf("parse websocket call request: %v", recovered)
+			api = nil
 		}
 	}()
 
-	var api types.IRouter
-	var err error
 	if data == nil {
 		api = info.New()
 	} else {
 		api, err = info.ParseNew(data)
 	}
 	return api, err
+}
+
+func (mm *MelodyManager) parseSubscriptionRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logx.Errorf("服务%s的路由%s发生异常:ParseSubscription, error: %v", info.ServiceName, info.Path, recovered)
+			err = fmt.Errorf("parse websocket subscription request: %v", recovered)
+			api = nil
+		}
+	}()
+	if data == nil {
+		api = info.NewSubscription()
+		if api == nil {
+			return nil, errors.New("创建 WebSocket 订阅实例失败")
+		}
+		return api, nil
+	}
+	return info.ParseSubscription(data)
 }
 
 func (mm *MelodyManager) cleanupSession(s *melody.Session) {

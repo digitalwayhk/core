@@ -3,10 +3,11 @@ package types
 // IRouter 是 Digitalway Core 的请求级业务路由契约。
 //
 // RouterInfo 是路由注册期创建、由 ServiceContext 持有的长期元数据；IRouter
-// 实例则只服务于一次请求或一次明确的 WebSocket 订阅。框架通常从 RouterInfo
+// 实例则只服务于一次请求或一次明确的 WebSocket 订阅。普通请求从 RouterInfo
 // 的有界对象池取得实例，依次调用 Parse、Validation 和 Do，并在所有同步使用
-// 以及事件快照完成后归还对象池。因此实现不得把当前请求、用户、trace 或响应写入
-// 包级变量、RouterInfo 或其他跨请求共享对象。
+// 以及事件快照完成后归还对象池。WebSocket 订阅使用独立实例，由 Hub 持有到退订、
+// 断线或关闭，随后执行 Clean 并丢弃，不进入请求对象池。因此实现不得把当前请求、
+// 用户、trace 或响应写入包级变量、RouterInfo 或其他跨请求共享对象。
 //
 // 基础实现只需要实现本接口。按需还可以实现以下可选接口：
 //   - IRouterFactory：自定义请求实例的创建方式，常用于泛型 Manage Router。
@@ -47,8 +48,9 @@ type IRouterInfo interface {
 
 // IRouterFactory 覆盖默认反射创建逻辑。
 //
-// 常用于泛型或包装 Router。New 必须返回一个独立、可执行的请求级 IRouter，
-// 不得返回正在被其他请求使用的共享实例。返回实例仍受 RouterInfo 对象池生命周期管理。
+// 常用于泛型或包装 Router。New 必须返回一个独立、可执行的 IRouter，不得返回
+// 正在被其他请求或订阅使用的共享实例。普通请求实例由 RouterInfo 对象池管理；
+// WebSocket 订阅实例由 RouteWebSocketHub 独占并在订阅结束后清理丢弃。
 type IRouterFactory interface {
 	New(instance interface{}) IRouter
 }
@@ -63,10 +65,18 @@ type IPackRouterHook interface {
 // 该接口不是内部服务通信协议；服务间调用应使用 TransportSelector，
 // 内部事件和跨节点控制应使用 ServiceEventBridge/MQ。
 // RegisterWebSocket 和 UnRegisterWebSocket 可能由并发连接触发，实现必须线程安全，
-// 且不得长期持有可被对象池回收的 IRequest 或 IRouter 引用。
+// WebSocket 订阅 Router 在订阅存续期内不会进入请求对象池；回调仍不得把 IRequest、
+// Router 或其可变字段泄漏给订阅生命周期之外的 goroutine。
 type IWebSocketRouter interface {
 	RegisterWebSocket(client IWebSocket, req IRequest)
 	UnRegisterWebSocket(client IWebSocket, req IRequest)
+}
+
+// IWebSocketUserIdentity 接收已通过认证的 WebSocket 会话身份。
+// 身份只能由传输层注入，Router 不得从订阅 payload 读取用户字段。
+type IWebSocketUserIdentity interface {
+	GetUserID() string
+	SetUserID(userID, userName string)
 }
 
 // IWebSocketRouterNotice 过滤并转换发送给外部订阅者的 WebSocket 内容。

@@ -75,7 +75,7 @@ ServiceContext
 
 `RouterInfo` 是所属 `ServiceContext` 内每条路由唯一的长期元数据对象，不进入请求级对象池。`IRouter` 是每次请求使用的业务实例，在高并发路径会被大量创建，因此保留每个 RouterInfo 独立的有界对象池。当前 channel pool 与 sync.Pool 没有形成同一条回收链，实施时统一为一个 `ChannelPool`：创建、获取、清理和归还都必须经过该池，不再保留未被读取的 sync.Pool。
 
-简单 Router 默认使用通用反射重置；实现了 `IRouterResettable` 的复杂 Router 必须由 `Reset()` 完整恢复到可供下一次 `Parse` 使用的状态，并跳过通用反射重置。实现了 `IRouterCleanable` 的 Router 在归还前调用 `Clean()` 清除敏感数据或释放请求级引用。`IRouterFactory` 负责自定义实例创建，但最终创建出的请求实例仍由该 RouterInfo 的对象池管理。任何观察事件、WebSocket 订阅或异步任务都不得持有即将归还对象池的 Router；必须先生成不可变快照，完成同步使用后才能归还。
+简单 Router 默认使用通用反射重置；实现了 `IRouterResettable` 的复杂 Router 必须由 `Reset()` 完整恢复到可供下一次 `Parse` 使用的状态，并跳过通用反射重置。实现了 `IRouterCleanable` 的 Router 在归还前调用 `Clean()` 清除敏感数据或释放请求级引用。`IRouterFactory` 负责自定义实例创建：普通请求实例由该 RouterInfo 的对象池管理；WebSocket 订阅实例独立创建，由 Hub 持有到退订、断线或关闭，最后清理并丢弃。观察事件或异步任务不得持有即将归还对象池的 Router；必须先生成不可变快照，完成同步使用后才能归还。
 
 RouterInfo 只允许在 ServiceContext 范围内按路由唯一，不允许成为跨服务共享的进程级可变单例。进程级 ServiceContext registry 仅作为兼容查找入口：同名活动实例可以复用；配置冲突必须明确失败；已终止实例在资源关闭后必须注销，不能在下一次创建时返回失效上下文。
 

@@ -344,42 +344,6 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	return values, nil
 }
 
-// func (own *Server) websocket() {
-// 	hub := NewHub()
-// 	hub.serviceContext = own.context
-// 	go hub.Run()
-// 	own.context.Hub = hub
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/ws",
-// 		Handler: websocketHandler(own.context),
-// 	})
-// 	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/ws")
-// }
-
-// func (own *Server) websocketauth() {
-// 	opts := make([]rest.RouteOption, 0)
-// 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-// 	//opts = append(opts, rest.WithTimeout(0))
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/wsauth",
-// 		Handler: websocketHandler(own.context),
-// 	}, opts...)
-// 	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/wsauth")
-// }
-
-//	func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			ip := utils.ClientPublicIP(r)
-//			err := trans.VerifyIPWhiteList(sc.Config, ip)
-//			if err != nil {
-//				httpx.OkJson(w, err)
-//				return
-//			}
-//			ServeWs(sc.Hub.(*Hub), w, r)
-//		}
-//	}
 func (own *Server) GetIPandPort() (string, int) {
 	return own.context.Config.Host, own.context.Config.Port
 }
@@ -398,18 +362,6 @@ func (own *Server) websocket() {
 		Handler: securityHeaders(websocketHandler(own.context)).ServeHTTP,
 	}, opts...)
 }
-
-// func (own *Server) websocketauth() {
-// 	opts := make([]rest.RouteOption, 0)
-// 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-// 	opts = append(opts, rest.WithTimeout(0)) // 添加：为认证WebSocket路由也禁用超时
-
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/wsauth",
-// 		Handler: websocketHandler(own.context),
-// 	}, opts...)
-// }
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
