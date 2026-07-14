@@ -634,9 +634,12 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 - [x] 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试（测试加固 `c844aa0`，外部复审 `APPROVED`）。前者验证 128 个并发调用全部得到 generation=1 且仅一次 `SETNX` 创建成功；后者阻塞首个 initializer，验证 32 个调用仅初始化一次并返回同一新实例。
 - [x] 配置 L2 或 L3 时，L1 直接命中与下层回填统一返回 `json.RawMessage`（实现 `9ef4ab3`，独立只读复核 `APPROVED`）；纯 L1 本地模式保留原对象语义。
 - [x] 每次缓存写入在 L3/L2/L1 共用的有效 TTL 上施加 ±10% 有界 jitter（实现 `17ffa77`，独立只读复核无 P0/P1）。
-- [ ] `TempStore`/公开元数据、WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
+- [x] `TempStore` 仅为源码兼容保留并明确废弃；公开元数据允许注册前构造，冻结后在 `ServiceRouter` 查询和枚举出口 fail closed（实现 `73a11ae`，独立只读复核无 P0/P1）。
+- [ ] WebSocket 订阅租约、控制队列超时与指标继续作为后续优化项。
 
 TTL jitter 内部验收：边界与 Manager 实际消费测试、`routecache -count=20`、`routecache -race`、`types/event/routecache/router` 回归、日志守卫与 `release-contract` 全部通过。
+
+RouterInfo 元数据内部验收：定向交错测试 `-count=20`、`types/router -count=20` 与对应 race 回归全部通过；框架内部无 `TempStore` 读写。
 
 ## 最终关闭条件
 

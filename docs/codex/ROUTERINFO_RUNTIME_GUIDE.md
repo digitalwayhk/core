@@ -6,6 +6,8 @@
 
 路由注册完成后，`Path`、`ServiceName`、`Auth`、`Method`、`PathType`、结构名和实例类型会被冻结。冻结后修改会被明确拒绝。`RouterInfo` 不保存当前请求、用户、trace、响应、缓存条目或 WebSocket 请求实例。
 
+上述公开元数据字段仅为现有路由构造代码保留：它们可在注册前设置，注册冻结后必须视为只读。`ServiceRouter` 在查询和枚举路由时会校验冻结快照，检测到篡改会 fail closed。`TempStore` 已废弃，只为源码兼容保留；新代码不得写入，尤其不得用于存放请求、用户、trace 或响应状态。
+
 同名 ServiceContext 只有在规范化配置指纹一致且原实例仍活动时才能复用。配置不同会 fail closed；服务关闭后按实例身份注销，后续可重新创建，不会取得旧缓存、事件或 WebSocket 状态。
 
 ## IRouter 请求实例
