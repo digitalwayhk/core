@@ -32,12 +32,26 @@ func TestMain(m *testing.M) {
 func TestManageAPIs(t *testing.T) {
 	t.Run("SupplierCRUDAndReadOnlyProducts", testSupplierCRUDAndReadOnlyProducts)
 	t.Run("RejectRemovingUsedSupplier", testRejectRemovingUsedSupplier)
+	t.Run("RejectEnablingProductForDisabledSupplier", testRejectEnablingProductForDisabledSupplier)
 	t.Run("ProductCRUD", testProductCRUD)
 	t.Run("RejectRemovingUsedProduct", testRejectRemovingUsedProduct)
 	t.Run("PaymentTypeCRUDAndStateCommands", testPaymentTypeCRUDAndStateCommands)
 	t.Run("RejectRemovingUsedPaymentType", testRejectRemovingUsedPaymentType)
 	t.Run("OrderManageReadOnly", testOrderManageReadOnly)
 	t.Run("PaymentRecordCommands", testPaymentRecordCommands)
+}
+
+func testRejectEnablingProductForDisabledSupplier(t *testing.T) {
+	admin := suite.TokenFor(t, "disabled-supplier-product-admin", 1)
+	suffix := time.Now().UnixNano()
+	supplier := suite.AddSupplier(t, admin, fmt.Sprintf("disabled-enable-supplier-%d", suffix), "禁用启用供应商", true)
+	product := suite.AddProductForSupplier(t, admin, fmt.Sprintf("disabled-enable-product-%d", suffix), "待重新启用商品", "12.80", uintID(t, supplier.ID), true)
+	suite.SetBaseDataEnabled(t, admin, "productmanage", product.ID, false)
+	suite.SetBaseDataEnabled(t, admin, "suppliermanage", supplier.ID, false)
+
+	enabled := suite.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/productmanage/enablebasedata", admin, map[string]interface{}{"id": product.ID})
+	assert.False(t, enabled.Success)
+	assert.Contains(t, enabled.ErrorMessage, "供应商已禁用")
 }
 
 func testSupplierCRUDAndReadOnlyProducts(t *testing.T) {

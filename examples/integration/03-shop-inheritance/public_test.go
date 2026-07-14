@@ -16,7 +16,31 @@ func TestPublicAPIs(t *testing.T) {
 	t.Run("GetSuppliers", testGetSuppliers)
 	t.Run("GetProducts", testGetProducts)
 	t.Run("SupplierDisableControlsProductVisibility", testSupplierDisableControlsProductVisibility)
+	t.Run("GetProductsCombinesFiltersWithAND", testGetProductsCombinesFiltersWithAND)
 	t.Run("GetPaymentTypes", testGetPaymentTypes)
+}
+
+func testGetProductsCombinesFiltersWithAND(t *testing.T) {
+	admin := suite.TokenFor(t, "public-combined-filter-admin", 1)
+	suffix := time.Now().UnixNano()
+	supplierA := suite.AddSupplier(t, admin, fmt.Sprintf("combined-supplier-a-%d", suffix), "组合供应商 A", true)
+	supplierB := suite.AddSupplier(t, admin, fmt.Sprintf("combined-supplier-b-%d", suffix), "组合供应商 B", true)
+	productA := suite.AddProductForSupplier(t, admin, fmt.Sprintf("combined-product-a-%d", suffix), "组合筛选商品 A", "31.00", uintID(t, supplierA.ID), true)
+	suite.AddProductForSupplier(t, admin, fmt.Sprintf("combined-product-b-%d", suffix), "组合筛选商品 B", "32.00", uintID(t, supplierB.ID), true)
+
+	codeAndName := "/api/inheritanceshop/getproducts?code=" + url.QueryEscape(productA.Code) + "&name=" + url.QueryEscape("商品 A")
+	response := suite.RequestJSON(t, http.MethodGet, codeAndName, "", nil)
+	require.True(t, response.Success, response.ErrorMessage)
+	var items []ProductDTO
+	require.NoError(t, json.Unmarshal(response.Data, &items))
+	require.Len(t, items, 1)
+	assert.Equal(t, productA.ID, items[0].ID)
+
+	supplierAndName := "/api/inheritanceshop/getproducts?supplierID=" + url.QueryEscape(supplierA.ID) + "&name=" + url.QueryEscape("商品 B")
+	response = suite.RequestJSON(t, http.MethodGet, supplierAndName, "", nil)
+	require.True(t, response.Success, response.ErrorMessage)
+	require.NoError(t, json.Unmarshal(response.Data, &items))
+	assert.Empty(t, items, "组合筛选必须使用 AND，不能返回其他供应商的同类结果")
 }
 
 func testGetSuppliers(t *testing.T) {

@@ -14,10 +14,36 @@ func TestPrivateAPIs(t *testing.T) {
 	t.Run("AddOrder", testAddOrder)
 	t.Run("RejectDisabledSupplierOrder", testRejectDisabledSupplierOrder)
 	t.Run("GetOrders", testGetOrders)
+	t.Run("RejectCrossUserOrderMutations", testRejectCrossUserOrderMutations)
 	t.Run("DeleteOrder", testDeleteOrder)
 	t.Run("CreatePayment", testCreatePayment)
 	t.Run("CancelOrder", testCancelOrder)
 	t.Run("WebSocketPaymentFlow", testWebSocketPaymentFlow)
+}
+
+func testRejectCrossUserOrderMutations(t *testing.T) {
+	admin := suite.TokenFor(t, "cross-user-admin", 1)
+	userA := suite.TokenFor(t, "cross-user-a", 0)
+	userB := suite.TokenFor(t, "cross-user-b", 0)
+	product := suite.AddProduct(t, admin, fmt.Sprintf("跨用户商品-%d", time.Now().UnixNano()), "25.00")
+	paymentType := suite.AddPaymentType(t, admin, fmt.Sprintf("cross-user-pay-%d", time.Now().UnixNano()), "跨用户支付", true)
+	order := suite.AddOrder(t, userA, uintID(t, product.ID), 1)
+
+	deleted := suite.RequestJSON(t, http.MethodPost, "/api/inheritanceshop/deleteorder", userB, map[string]interface{}{"id": order.ID})
+	assert.False(t, deleted.Success)
+	assert.Contains(t, deleted.ErrorMessage, "订单不存在或无权操作")
+
+	paidByOther := suite.RequestJSON(t, http.MethodPost, "/api/inheritanceshop/createpayment", userB, map[string]interface{}{
+		"orderID": order.ID, "paymentTypeID": paymentType.ID,
+	})
+	assert.False(t, paidByOther.Success)
+	assert.Contains(t, paidByOther.ErrorMessage, "订单不存在或无权操作")
+
+	pending := suite.CreatePayment(t, userA, order.ID, paymentType.ID)
+	suite.PaymentCommand(t, admin, "confirmpayment", pending.PaymentID)
+	cancelledByOther := suite.RequestJSON(t, http.MethodPost, "/api/inheritanceshop/cancelorder", userB, map[string]interface{}{"id": order.ID})
+	assert.False(t, cancelledByOther.Success)
+	assert.Contains(t, cancelledByOther.ErrorMessage, "订单不存在或无权操作")
 }
 
 func testAddOrder(t *testing.T) {
