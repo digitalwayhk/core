@@ -6,13 +6,17 @@ import (
 	"hash/fnv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
 	ErrExternalProviderUnavailable = errors.New("event external provider unavailable")
 	ErrServiceEventBridgeClosed    = errors.New("service event bridge closed")
 	ErrInvalidPublishRequest       = errors.New("invalid event publish request")
+	ErrControlQueueTimeout         = errors.New("service event bridge control queue timeout")
 )
+
+const defaultControlEnqueueTimeout = 5 * time.Second
 
 type DeliveryClass uint8
 
@@ -38,9 +42,10 @@ type ExternalSubscriber interface {
 }
 
 type ServiceEventBridgeOptions struct {
-	ObserverQueueSize int
-	ControlQueueSize  int
-	ControlShards     int
+	ObserverQueueSize     int
+	ControlQueueSize      int
+	ControlShards         int
+	ControlEnqueueTimeout time.Duration
 }
 
 type controlEvent struct {
@@ -54,8 +59,9 @@ type controlEvent struct {
 type ServiceEventBridge struct {
 	stream *Stream
 
-	observerQueue chan PublishRequest
-	controlQueues []chan controlEvent
+	observerQueue  chan PublishRequest
+	controlQueues  []chan controlEvent
+	controlTimeout time.Duration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -63,10 +69,11 @@ type ServiceEventBridge struct {
 	closed atomic.Bool
 	once   sync.Once
 
-	externalMu sync.RWMutex
-	external   ExternalPublisher
-	subscriber ExternalSubscriber
-	dropped    atomic.Uint64
+	externalMu           sync.RWMutex
+	external             ExternalPublisher
+	subscriber           ExternalSubscriber
+	dropped              atomic.Uint64
+	controlQueueTimeouts atomic.Uint64
 }
 
 func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *ServiceEventBridge {
@@ -82,13 +89,17 @@ func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *S
 	if options.ControlShards <= 0 {
 		options.ControlShards = 8
 	}
+	if options.ControlEnqueueTimeout <= 0 {
+		options.ControlEnqueueTimeout = defaultControlEnqueueTimeout
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &ServiceEventBridge{
-		stream:        stream,
-		observerQueue: make(chan PublishRequest, options.ObserverQueueSize),
-		controlQueues: make([]chan controlEvent, options.ControlShards),
-		ctx:           ctx,
-		cancel:        cancel,
+		stream:         stream,
+		observerQueue:  make(chan PublishRequest, options.ObserverQueueSize),
+		controlQueues:  make([]chan controlEvent, options.ControlShards),
+		controlTimeout: options.ControlEnqueueTimeout,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 	b.wg.Add(1)
 	go b.runObserver()
@@ -168,11 +179,26 @@ func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest
 	queue := b.controlQueues[b.controlShard(request.Envelope)]
 	select {
 	case queue <- job:
+		return b.waitControlResult(ctx, job)
+	default:
+	}
+
+	timer := time.NewTimer(b.controlTimeout)
+	defer timer.Stop()
+	select {
+	case queue <- job:
+		return b.waitControlResult(ctx, job)
+	case <-timer.C:
+		b.controlQueueTimeouts.Add(1)
+		return ErrControlQueueTimeout
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-b.ctx.Done():
 		return ErrServiceEventBridgeClosed
 	}
+}
+
+func (b *ServiceEventBridge) waitControlResult(ctx context.Context, job controlEvent) error {
 	select {
 	case err := <-job.result:
 		return err
@@ -188,6 +214,13 @@ func (b *ServiceEventBridge) ObserverDropped() uint64 {
 		return 0
 	}
 	return b.dropped.Load()
+}
+
+func (b *ServiceEventBridge) ControlQueueTimeouts() uint64 {
+	if b == nil {
+		return 0
+	}
+	return b.controlQueueTimeouts.Load()
 }
 
 func (b *ServiceEventBridge) Close(ctx context.Context) error {
