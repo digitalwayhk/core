@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：设计已确认，等待书面规格复审
+- 状态：实现完成，等待外部只读审查
 - 日期：2026-07-14
 - 应用目录：`examples/03-shop-inheritance`
 - 集成测试目录：`examples/integration/03-shop-inheritance`

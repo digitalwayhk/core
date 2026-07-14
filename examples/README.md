@@ -1,15 +1,12 @@
 # 示例
 
-本目录只保留一个完整示例：[01-simple-shop](./01-simple-shop)。它通过商品与订单业务演示：
+本目录提供三个可以独立运行和测试的完整示例：
 
-- `entity.Model`、Manage `ModelList` 与模型封装的 SQLite 持久化方法；
-- Manage 商品 CRUD 与只读订单管理；
-- public 商品筛选与 private 用户订单；
-- 框架内建 TestToken；
-- 面向最终用户的 WebSocket 登录、订阅和隔离推送；
-- 真实 HTTP、WebSocket 和 SQLite 集成测试。
+1. [01-simple-shop](./01-simple-shop)：模型、Manage CRUD、Public/Private API、认证和订单 WebSocket 的最小闭环。
+2. [02-shop-payment](./02-shop-payment)：API、business、models 分层，跨模型事务、支付状态机和 Manage 自定义命令。
+3. [03-shop-inheritance](./03-shop-inheritance)：供应商业务、模型继承、Manage 继承、通用启停和只读子表。
 
-集成测试通用能力位于 `integration` 根目录，商城的 Manage、Public、Private/WebSocket 测试位于 `integration/01-simple-shop`。
+集成测试通用能力位于 `integration` 根目录。每个示例在 `integration/<示例名>` 下保留 Manage、Public、Private/WebSocket 的真实进程测试。
 
 运行全部示例测试：
 
