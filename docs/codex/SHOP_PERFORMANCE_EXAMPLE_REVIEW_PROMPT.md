@@ -5,12 +5,12 @@
 ## 审查范围
 
 ```bash
-git diff aff21d0..HEAD
+git diff aff21d0..7b50d05
 ```
 
 - 设计规格：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
 - 设计提交：`aff21d0`
-- 实现目标：`HEAD`
+- 实现提交：`7b50d05`
 - 重点目录：
   - `examples/04-shop-performance`
   - `examples/integration/04-shop-performance`
