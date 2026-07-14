@@ -372,3 +372,42 @@ func TestRouterInfoExecParseFailureReturnsRequestToPoolDuringInitialization(t *t
 
 	require.Equal(t, int32(1), initializationParseFactoryCalls.Load(), "初始化期 Parse 失败后应归还请求实例")
 }
+
+func TestRouterInfoExecRejectsFrozenMetadataMutationBeforeCreatingRequest(t *testing.T) {
+	factoryCalls.Store(0)
+	info := &RouterInfo{
+		Path:        "/api/test/frozen-exec",
+		ServiceName: "test",
+		Method:      "POST",
+		PathType:    PublicType,
+	}
+	info.SetInstance(&factoryPoolRouter{})
+	info.Freeze("test")
+	info.Auth = true
+
+	require.PanicsWithValue(t, "router metadata changed after registration", func() {
+		info.Exec(&shardTestRequest{})
+	})
+	require.Zero(t, factoryCalls.Load(), "冻结校验必须发生在创建请求实例之前")
+}
+
+func TestRouterInfoExecDoRejectsFrozenMetadataMutationAndReturnsRequest(t *testing.T) {
+	const originalPath = "/api/test/frozen-exec-do"
+	info := &RouterInfo{
+		Path:        originalPath,
+		ServiceName: "test",
+		Method:      "POST",
+		PathType:    PublicType,
+	}
+	info.SetInstance(&plainPoolRouter{})
+	info.Freeze("test")
+	requestRouter := info.New()
+	info.Path = "/api/test/changed"
+
+	require.PanicsWithValue(t, "router metadata changed after registration", func() {
+		info.ExecDo(requestRouter, &shardTestRequest{})
+	})
+
+	info.Path = originalPath
+	require.Same(t, requestRouter, info.New(), "ExecDo 冻结校验失败后仍应归还请求实例")
+}

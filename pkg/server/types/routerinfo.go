@@ -151,6 +151,12 @@ func (own *RouterInfo) assertMetadataFrozenLocked() {
 	}
 }
 
+func (own *RouterInfo) assertMetadataFrozen() {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+}
+
 func (own *RouterInfo) New() IRouter {
 	return own.getNew()
 }
@@ -316,6 +322,7 @@ func (own *RouterInfo) GetServiceName() string {
 //		return nil
 //	}
 func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
+	own.assertMetadataFrozen()
 	api := own.New()
 	delegated := false
 	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
@@ -357,6 +364,7 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 	defer func() {
 		own.putRouter(api)
 	}()
+	own.assertMetadataFrozen()
 	// 🆕 记录请求开始
 	recordEnd := own.recordRequestStart()
 	startTime := time.Now()

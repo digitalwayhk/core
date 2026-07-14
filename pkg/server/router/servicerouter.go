@@ -135,18 +135,18 @@ func checkedRouterInfo(info *types.RouterInfo) *types.RouterInfo {
 	return info
 }
 func (own *ServiceRouter) HasRouter(path string, t types.ApiType) bool {
-	res := false
+	var info *types.RouterInfo
 	switch t {
 	case types.PublicType:
-		_, res = own.publicAPI[path]
+		info = own.publicAPI[path]
 	case types.PrivateType:
-		_, res = own.privateAPI[path]
+		info = own.privateAPI[path]
 	case types.ManageType:
-		_, res = own.manageAPI[path]
+		info = own.manageAPI[path]
 	case types.ServerManagerType:
-		_, res = own.serverManagerAPI[path]
+		info = own.serverManagerAPI[path]
 	}
-	return res
+	return checkedRouterInfo(info) != nil
 }
 func GetRouterPackAndTypeName(item interface{}) (string, string) {
 	pack := utils.GetPackageName(item)

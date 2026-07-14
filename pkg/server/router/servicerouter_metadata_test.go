@@ -52,3 +52,20 @@ func TestServiceRouterEnumerationRejectsFrozenMetadataMutation(t *testing.T) {
 		typeRouter.GetTypeRouters(types.PublicType)
 	})
 }
+
+func TestServiceRouterHasRouterRejectsFrozenMetadataMutation(t *testing.T) {
+	const path = "/api/test/frozen"
+	info := &types.RouterInfo{
+		Path:        path,
+		ServiceName: "test",
+		Method:      "POST",
+		PathType:    types.PublicType,
+	}
+	info.Freeze("test")
+	router := &ServiceRouter{publicAPI: map[string]*types.RouterInfo{path: info}}
+	info.Method = "GET"
+
+	require.PanicsWithValue(t, "router metadata changed after registration", func() {
+		router.HasRouter(path, types.PublicType)
+	})
+}
