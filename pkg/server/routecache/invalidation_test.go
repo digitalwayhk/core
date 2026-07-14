@@ -239,6 +239,7 @@ func TestRecoverDoesNotRollBackConcurrentInvalidationGeneration(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(manager.Close)
 	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	require.NoError(t, manager.Set("/api/items", "same", map[string]int{"value": 1}, time.Minute))
 	manager.MarkInvalidationUnavailable()
 
 	blocked, release := redisClient.blockNextGenerationRead()
@@ -264,7 +265,48 @@ func TestRecoverDoesNotRollBackConcurrentInvalidationGeneration(t *testing.T) {
 	result := <-recoverDone
 	require.NoError(t, result.err)
 	require.True(t, result.recovered)
-	assert.Equal(t, generation, manager.routeGeneration("/api/items"))
+	redisGeneration, err := manager.redis.Generation(context.Background(), "service-a", "/api/items")
+	require.NoError(t, err)
+	assert.Equal(t, redisGeneration, manager.routeGeneration("/api/items"))
+	assert.Equal(t, generation, redisGeneration)
+	value, ok, err := manager.Get("/api/items", "same")
+	require.NoError(t, err)
+	assert.False(t, ok, "Recover 不得命中失效世代的值: %v", value)
+}
+
+func TestRecoverDoesNotRecreateRouteRemovedAfterSnapshot(t *testing.T) {
+	redisClient := newBlockingGenerationRedis()
+	bridge := newFakeInvalidationBridge(newFakeInvalidationBus())
+	manager, err := NewManager("service-a", sharedCacheConfig(),
+		WithRedisClient(redisClient), WithInvalidationBridge(bridge))
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	manager.MarkInvalidationUnavailable()
+
+	blocked, release := redisClient.blockNextGenerationRead()
+	type recoveryResult struct {
+		recovered bool
+		err       error
+	}
+	recoverDone := make(chan recoveryResult, 1)
+	go func() {
+		recovered, recoverErr := manager.Recover(context.Background())
+		recoverDone <- recoveryResult{recovered: recovered, err: recoverErr}
+	}()
+	<-blocked
+	manager.routesMu.Lock()
+	delete(manager.routes, "/api/items")
+	manager.routesMu.Unlock()
+	close(release)
+
+	result := <-recoverDone
+	require.NoError(t, result.err)
+	require.True(t, result.recovered)
+	manager.routesMu.RLock()
+	_, exists := manager.routes["/api/items"]
+	manager.routesMu.RUnlock()
+	assert.False(t, exists, "Recover 不得用迟到的 generation 重建已删除路由")
 }
 
 func TestLocalConcurrentDeleteRouteDoesNotLoseGeneration(t *testing.T) {

@@ -358,6 +358,20 @@ func (m *Manager) storeRoutePolicy(route string, ttl time.Duration, generation u
 	return policy
 }
 
+func (m *Manager) updateExistingRouteGeneration(route string, generation uint64) bool {
+	m.routesMu.Lock()
+	defer m.routesMu.Unlock()
+	policy, ok := m.routes[route]
+	if !ok {
+		return false
+	}
+	if generation > policy.generation {
+		policy.generation = generation
+		m.routes[route] = policy
+	}
+	return true
+}
+
 func (m *Manager) Take(route string, source interface{}, ttl time.Duration, loader func() (interface{}, error)) (interface{}, error) {
 	if value, ok, err := m.Get(route, source); err != nil || ok {
 		return value, err
@@ -429,7 +443,7 @@ func (m *Manager) refreshSharedGenerations(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		m.storeRoutePolicy(route, 0, generation)
+		m.updateExistingRouteGeneration(route, generation)
 	}
 	return nil
 }
