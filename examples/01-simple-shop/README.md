@@ -53,7 +53,7 @@ HTTP 鉴权请求使用 `Authorization: Bearer <token>`。
 {"event":"sub","channel":"/api/shop/getorders","data":{}}
 ```
 
-新增和删除订单会向当前用户发送 `created` 或 `deleted` 事件。WebSocket 只面向最终外部用户，内部服务通信使用 TransportSelector 与 EventBridge。
+新增和删除订单会向当前用户发送扁平的订单 DTO，其 `action` 为 `created` 或 `deleted`。WebSocket 只面向最终外部用户，内部服务通信使用 TransportSelector 与 EventBridge。
 
 ## 集成测试
 

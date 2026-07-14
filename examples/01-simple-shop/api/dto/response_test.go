@@ -48,3 +48,19 @@ func TestOrderResponse(t *testing.T) {
 	assert.NotContains(t, string(data), "hashCode")
 	assert.NotContains(t, string(data), "modelState")
 }
+
+// TestOrderResponseWithAction 验证 WebSocket 动作使用独立 DTO 副本，不污染 HTTP 响应。
+func TestOrderResponseWithAction(t *testing.T) {
+	response := &OrderResponse{ID: 7, UserID: "user-1"}
+	notification := response.WithAction("created")
+
+	require.NotSame(t, response, notification)
+	assert.Empty(t, response.Action)
+	assert.Equal(t, "created", notification.Action)
+	responseData, err := json.Marshal(response)
+	require.NoError(t, err)
+	assert.NotContains(t, string(responseData), "action")
+	notificationData, err := json.Marshal(notification)
+	require.NoError(t, err)
+	assert.Contains(t, string(notificationData), `"action":"created"`)
+}

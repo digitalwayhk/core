@@ -47,6 +47,7 @@ func testAddOrderAPI(t *testing.T) {
 		"productID": productID, "quantity": 2,
 	})
 	require.True(t, created.Success, created.ErrorMessage)
+	assert.NotContains(t, string(created.Data), `"action"`)
 	var order OrderDTO
 	require.NoError(t, json.Unmarshal(created.Data, &order))
 	assert.Equal(t, "add-order-user", order.UserID)
@@ -114,6 +115,7 @@ func testDeleteOrderAPI(t *testing.T) {
 
 	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": order.ID})
 	require.True(t, deleted.Success, deleted.ErrorMessage)
+	assert.NotContains(t, string(deleted.Data), `"action"`)
 	assert.NotContains(t, string(deleted.Data), "hashCode")
 	assert.NotContains(t, OrderIDs(suite.GetOrders(t, userAToken)), order.ID)
 }
@@ -144,14 +146,14 @@ func testGetOrdersWebSocketAPI(t *testing.T) {
 	require.True(t, created.Success, created.ErrorMessage)
 	createdEvent := suite.ReadOrderEvent(t, connectionA)
 	assert.Equal(t, "created", createdEvent.Action)
-	assert.Equal(t, "ws-user-a", createdEvent.Order.UserID)
+	assert.Equal(t, "ws-user-a", createdEvent.UserID)
 	AssertNoOrderEvent(t, messagesB)
 
-	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": createdEvent.Order.ID})
+	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": createdEvent.ID})
 	require.True(t, deleted.Success, deleted.ErrorMessage)
 	deletedEvent := suite.ReadOrderEvent(t, connectionA)
 	assert.Equal(t, "deleted", deletedEvent.Action)
-	assert.Equal(t, createdEvent.Order.ID, deletedEvent.Order.ID)
+	assert.Equal(t, createdEvent.ID, deletedEvent.ID)
 	AssertNoOrderEvent(t, messagesB)
 }
 

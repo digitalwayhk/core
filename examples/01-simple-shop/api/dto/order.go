@@ -8,6 +8,7 @@ import (
 
 // OrderResponse 是 Private API 和 WebSocket 对外暴露的订单 DTO。
 type OrderResponse struct {
+	Action      string `json:"action,omitempty" desc:"订单变更动作"`
 	ID          uint   `json:"id,string" desc:"订单 ID"`
 	ProductID   uint   `json:"productID" desc:"商品 ID"`
 	ProductName string `json:"productName" desc:"商品名称快照"`
@@ -15,6 +16,16 @@ type OrderResponse struct {
 	Quantity    int    `json:"quantity" desc:"购买数量"`
 	UserID      string `json:"userID" desc:"用户 ID"`
 	CreatedAt   string `json:"createdAt" desc:"秒级下单时间"`
+}
+
+// WithAction 创建用于 WebSocket 通知的独立副本，不修改 HTTP 响应 DTO。
+func (own *OrderResponse) WithAction(action string) *OrderResponse {
+	if own == nil {
+		return nil
+	}
+	result := *own
+	result.Action = action
+	return &result
 }
 
 // NewOrderResponse 从持久化订单创建不含深层基础模型的秒级响应 DTO。

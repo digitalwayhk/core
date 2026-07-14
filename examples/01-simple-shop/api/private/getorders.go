@@ -10,28 +10,21 @@ import (
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// OrderEvent 是订单新增或删除后发送给当前用户的通知。
-type OrderEvent struct {
-	Action string             `json:"action"`
-	Order  *dto.OrderResponse `json:"order"`
-}
-
 // notifyOrderChange 通过当前 ServiceContext 中已冻结的订单路由发布用户通知。
-func notifyOrderChange(req servertypes.IRequest, event *OrderEvent) {
+func notifyOrderChange(req servertypes.IRequest, response *dto.OrderResponse) {
 	serviceContext := router.GetContext(req.ServiceName())
 	if serviceContext == nil || serviceContext.Router == nil {
 		return
 	}
 	info := serviceContext.Router.GetRouter("/api/shop/getorders")
 	if info != nil {
-		info.NoticeWebSocket(event)
+		info.NoticeWebSocket(response)
 	}
 }
 
 // GetOrders 查询当前登录用户的订单，并作为该用户的 WebSocket 订阅路由。
 type GetOrders struct {
-	UserID   string `json:"userID"`
-	UserName string `json:"-"`
+	subscriptionUserID string
 }
 
 // Parse 不接受客户端身份参数，身份只能来自认证上下文或 WebSocket 登录会话。
@@ -39,20 +32,17 @@ func (own *GetOrders) Parse(servertypes.IRequest) error {
 	return nil
 }
 
-// Validation 从 HTTP 认证上下文补齐用户身份并拒绝匿名访问。
+// Validation 验证 HTTP 认证上下文或 WebSocket 订阅会话中的用户身份。
 func (own *GetOrders) Validation(req servertypes.IRequest) error {
-	if own.UserID == "" {
-		own.UserID, own.UserName = req.GetUser()
-	}
-	if strings.TrimSpace(own.UserID) == "" {
+	if own.resolveUserID(req) == "" {
 		return models.NewBusinessError("用户身份无效")
 	}
 	return nil
 }
 
-// Do 只按当前 UserID 查询订单，绝不接受调用方指定其他用户。
-func (own *GetOrders) Do(servertypes.IRequest) (interface{}, error) {
-	orders, err := models.NewOrder().QueryByUser(own.UserID)
+// Do 只按可信请求或订阅身份查询订单，不接受客户端身份参数。
+func (own *GetOrders) Do(req servertypes.IRequest) (interface{}, error) {
+	orders, err := models.NewOrder().QueryByUser(own.resolveUserID(req))
 	if err != nil {
 		return nil, err
 	}
@@ -71,33 +61,55 @@ func (own *GetOrders) RouterInfo() *servertypes.RouterInfo {
 	return info
 }
 
+// resolveUserID 优先读取 HTTP 认证上下文，WebSocket 订阅时回退到会话注入的身份。
+func (own *GetOrders) resolveUserID(req servertypes.IRequest) string {
+	if req != nil {
+		if userID, _ := req.GetUser(); strings.TrimSpace(userID) != "" {
+			return strings.TrimSpace(userID)
+		}
+	}
+	return strings.TrimSpace(own.subscriptionUserID)
+}
+
 // SetUserID 接收 WebSocket logon 会话解析出的可信用户身份。
-func (own *GetOrders) SetUserID(userID, userName string) {
-	own.UserID = userID
-	own.UserName = userName
+func (own *GetOrders) SetUserID(userID, _ string) {
+	own.subscriptionUserID = strings.TrimSpace(userID)
 }
 
 // GetUserID 返回当前订阅绑定的可信用户 ID。
 func (own *GetOrders) GetUserID() string {
-	return own.UserID
+	return own.subscriptionUserID
 }
 
 // GetHashKey 以 UserID 生成稳定订阅哈希，实现不同用户的订阅分组。
 func (own *GetOrders) GetHashKey() uint64 {
 	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(own.UserID))
+	_, _ = hash.Write([]byte(own.subscriptionUserID))
 	return hash.Sum64()
+}
+
+// Reset 在对象池重用前清除 WebSocket 订阅身份。
+func (own *GetOrders) Reset() {
+	own.subscriptionUserID = ""
+}
+
+// Clean 在对象归还路由池前尽早清除 WebSocket 订阅身份。
+func (own *GetOrders) Clean() {
+	own.subscriptionUserID = ""
 }
 
 // NoticeFiltersRouter 只允许订单事件投递给同一用户的订阅实例。
 func (own *GetOrders) NoticeFiltersRouter(message interface{}, api servertypes.IRouter) (bool, interface{}) {
-	event, ok := message.(*OrderEvent)
-	if !ok || event == nil || event.Order == nil {
+	response, ok := message.(*dto.OrderResponse)
+	if !ok || response == nil {
 		return false, nil
 	}
 	subscription, ok := api.(*GetOrders)
-	if !ok || subscription.UserID == "" {
+	if !ok || subscription.subscriptionUserID == "" {
 		return false, nil
 	}
-	return event.Order.UserID == subscription.UserID, event
+	if response.UserID != subscription.subscriptionUserID {
+		return false, nil
+	}
+	return true, response
 }

@@ -239,7 +239,7 @@ ws://127.0.0.1:{shopPort}/ws
 
 ### 8.2 用户隔离
 
-`GetOrders` 实现框架识别的用户注入能力，并使用 UserID 生成稳定订阅哈希。它还实现 `IWebSocketRouterNotice`，发送前再次比较事件 UserID 与订阅 Router 的 UserID。
+`GetOrders` 实现框架识别的用户注入能力，并使用私有的 `subscriptionUserID` 生成稳定订阅哈希。HTTP 调用始终从 `IRequest.GetUser()` 读取身份，不将当前用户写入路由对象；WebSocket 订阅实例在退订前保留会话注入的身份，并在归还对象池时通过 `Reset/Clean` 清除。它还实现 `IWebSocketRouterNotice`，发送前再次比较 DTO UserID 与订阅身份。
 
 因此用户隔离同时存在于两个层次：
 
@@ -250,19 +250,18 @@ ws://127.0.0.1:{shopPort}/ws
 
 ### 8.3 事件结构
 
-内部通知结构：
+订单查询与 WebSocket 通知共用 `dto.OrderResponse`。HTTP 响应的 `action` 为空并由 `omitempty` 省略；WebSocket 通知使用带动作的独立 DTO 副本：
 
 ```json
 {
   "action": "created",
-  "order": {
-    "id": 1,
-    "productID": 10,
-    "productName": "示例商品",
-    "unitPrice": "19.90",
-    "quantity": 2,
-    "userID": "user-a"
-  }
+  "id": "1",
+  "productID": 10,
+  "productName": "示例商品",
+  "unitPrice": "19.90",
+  "quantity": 2,
+  "userID": "user-a",
+  "createdAt": "2026-07-14T00:00:00Z"
 }
 ```
 

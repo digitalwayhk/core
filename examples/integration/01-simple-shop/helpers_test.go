@@ -30,6 +30,7 @@ type ProductDTO struct {
 
 // OrderDTO 是商城集成测试关注的订单公开字段。
 type OrderDTO struct {
+	Action      string `json:"action,omitempty"`
 	ID          string `json:"id"`
 	ProductID   uint   `json:"productID"`
 	ProductName string `json:"productName"`
@@ -37,12 +38,6 @@ type OrderDTO struct {
 	Quantity    int    `json:"quantity"`
 	UserID      string `json:"userID"`
 	CreatedAt   string `json:"createdAt"`
-}
-
-// OrderEvent 是用户订阅收到的订单变更消息。
-type OrderEvent struct {
-	Action string   `json:"action"`
-	Order  OrderDTO `json:"order"`
 }
 
 // startShopSuite 启动真实商城进程，并等待框架自动生成配置和业务路由可用。
@@ -197,14 +192,18 @@ func (s *shopSuite) ConnectAndSubscribe(t *testing.T, token string) *websocket.C
 	return connection
 }
 
-// ReadOrderEvent 读取并解析当前用户的订单变更消息。
-func (s *shopSuite) ReadOrderEvent(t *testing.T, connection *websocket.Conn) OrderEvent {
+// ReadOrderEvent 读取并解析当前用户的订单变更 DTO。
+func (s *shopSuite) ReadOrderEvent(t *testing.T, connection *websocket.Conn) OrderDTO {
 	t.Helper()
 	message := s.ReadWebSocket(t, connection, 3*time.Second)
 	require.Equal(t, "/api/shop/getorders", message.Channel)
-	var event OrderEvent
-	require.NoError(t, json.Unmarshal(message.Data, &event), string(message.Data))
-	return event
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(message.Data, &fields), string(message.Data))
+	require.Contains(t, fields, "action")
+	require.NotContains(t, fields, "order")
+	var order OrderDTO
+	require.NoError(t, json.Unmarshal(message.Data, &order), string(message.Data))
+	return order
 }
 
 // AssertNoOrderEvent 验证另一用户在短窗口内没有收到商城订单通知。

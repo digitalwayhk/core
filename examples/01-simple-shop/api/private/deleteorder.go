@@ -52,7 +52,7 @@ func (own *DeleteOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		return nil, err
 	}
 	response := dto.NewOrderResponse(order)
-	notifyOrderChange(req, &OrderEvent{Action: "deleted", Order: response})
+	notifyOrderChange(req, response.WithAction("deleted"))
 	return response, nil
 }
 
