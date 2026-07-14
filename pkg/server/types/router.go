@@ -14,7 +14,7 @@ package types
 //   - IRouterResettable：覆盖对象池默认反射重置，适合包含复杂内部状态的 Router。
 //   - IRouterCleanable：归还对象池前清理敏感数据或请求级引用。
 //   - IRouterHashKey：提供稳定的参数 hash，供当前缓存和 WebSocket 订阅使用。
-//   - IWebSocketRouter：接收 WebSocket 订阅注册与注销回调。
+//   - IWebSocketRouter：可选的 WebSocket 订阅组启用与停用回调；不实现也能正常订阅。
 //   - IWebSocketRouterNotice：过滤并转换发送给订阅者的 WebSocket 通知。
 //   - IRouterResponse：为 OpenAPI 等描述场景提供响应示例。
 //   - IPackRouterHook：让包装 Router 暴露用于推导包路径和类型的真实实例。
@@ -61,14 +61,28 @@ type IPackRouterHook interface {
 	GetInstance() interface{}
 }
 
-// IWebSocketRouter 接收本节点外部客户端 WebSocket 订阅组的生命周期回调。
-// 该接口不是内部服务通信协议；服务间调用应使用 TransportSelector，
-// 内部事件和跨节点控制应使用 ServiceEventBridge/MQ。
-// RegisterWebSocket 和 UnRegisterWebSocket 可能由并发连接触发，实现必须线程安全，
-// WebSocket 订阅 Router 在订阅存续期内不会进入请求对象池；回调仍不得把 IRequest、
-// Router 或其可变字段泄漏给订阅生命周期之外的 goroutine。
+// IWebSocketRouter 是可选的本节点 WebSocket 订阅组生命周期回调。
+//
+// 框架默认负责订阅参数解析、hash 分组、客户端登记、通知投递、退订和实例清理；
+// Router 不实现本接口也可以正常被订阅。只有业务需要在某个“路由 + 完整 hash”
+// 订阅组启用或停用时执行额外动作，才需要实现本接口。
+//
+// 回调粒度是本节点的单个完整 hash 订阅组，不是整个 RouterInfo：
+//   - 该组从 0 个客户端变为 1 个时，调用一次 RegisterWebSocket。
+//   - 该组从 1 个客户端变为 0 个时，调用一次 UnRegisterWebSocket。
+//   - 同组增加第二个客户端或移除非最后一个客户端时，不调用这两个方法。
+//
+// client 和 req 分别来自触发边界变化的外部连接及其订阅请求。回调可能由不同连接
+// 并发触发，实现必须线程安全、快速返回且可重复执行；不得长期持有 IRequest、IRouter
+// 或其可变字段。回调没有错误返回值，不能用来决定订阅是否成功；关键控制操作应在
+// Validation、ServiceEventBridge 或其他可返回错误的边界完成。
+//
+// WebSocket 只面向最终外部用户。服务间调用使用 TransportSelector，内部事件和
+// 跨节点控制使用 ServiceEventBridge/MQ，不使用本接口建立服务间通信。
 type IWebSocketRouter interface {
+	// RegisterWebSocket 在本节点某个完整 hash 订阅组首次出现客户端后调用。
 	RegisterWebSocket(client IWebSocket, req IRequest)
+	// UnRegisterWebSocket 在本节点某个完整 hash 订阅组移除最后一个客户端时调用。
 	UnRegisterWebSocket(client IWebSocket, req IRequest)
 }
 
