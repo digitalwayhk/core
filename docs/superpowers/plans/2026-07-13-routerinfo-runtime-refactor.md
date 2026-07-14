@@ -630,7 +630,7 @@ GOCACHE=/private/tmp/core-codex-go-cache go test ./pkg/server/... -count=1
 - [x] 并发 `EnableRoute` 与 `DeleteRoute` 时保证本地 generation 单调不回退（实现 `2715fe6`，外部复审 `APPROVED`）。确定性交错测试在修复前证明本地 generation 从 2 回退到 1 并命中旧 g1 值；修复后使用 `max(local, candidate)` 在同一锁内合并路由策略。
 - [x] `Recover` 加载共享 generation 时不得覆盖并发失效事件推进的本地世代（实现 `3912f06`，外部复审 `APPROVED`）。`refreshSharedGenerations` 统一复用单调 `storeRoutePolicy`；确定性交错测试在修复前证明 Recover 将本地从 2 回退到 1。
 - [x] 本地模式并发 `DeleteRoute` 的 generation 递增在写锁内完成（实现 `a414c0a`，外部复审 `APPROVED`）。修复前 256 次并发删除最终仅推进到 35，修复后精确推进到 257。
-- [ ] 未来引入 `DisableRoute` 或删除路由策略时，`storeRoutePolicy` 不得重建已删除的空 TTL 条目；同时补强 Recover 后本地与 Redis 权威 generation 直接对齐的断言。
+- [x] Recover 只单调更新仍存在的路由策略，路由在快照后被删除时不会被迟到 generation 重建；交错测试同时校验本地与 Redis 权威 generation 相等且旧世代 miss（实现 `16f5669`，独立只读复核无 P0/P1）。
 - [x] 补充多 goroutine 冷 key `SETNX` 竞态和关闭后多 waiter 同名重建测试（测试加固 `c844aa0`，外部复审 `APPROVED`）。前者验证 128 个并发调用全部得到 generation=1 且仅一次 `SETNX` 创建成功；后者阻塞首个 initializer，验证 32 个调用仅初始化一次并返回同一新实例。
 - [x] 配置 L2 或 L3 时，L1 直接命中与下层回填统一返回 `json.RawMessage`（实现 `9ef4ab3`，独立只读复核 `APPROVED`）；纯 L1 本地模式保留原对象语义。
 - [x] 每次缓存写入在 L3/L2/L1 共用的有效 TTL 上施加 ±10% 有界 jitter（实现 `17ffa77`，独立只读复核无 P0/P1）。
@@ -645,6 +645,8 @@ RouterInfo 元数据内部验收：定向交错测试 `-count=20`、`types/route
 WebSocket 租约内部验收：Hub 定向测试 `-count=20`、`types` 全包与 race、`trans/rest` 和 `trans/websocket/melody` 回归全部通过；REST 生命周期测试在允许 loopback 临时端口后通过。
 
 EventBridge 控制队列内部验收：单分片、容量 1 的确定性满队列测试 `-count=20`、`event -count=20` 与 race 全部通过；超时事件未进入处理器。
+
+Recover 防御项内部验收：删除路由交错与 generation 回退测试 `-count=20`、`routecache -count=20` 与 race 全部通过。
 
 ## 最终关闭条件
 
