@@ -12,8 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPublicAPIs 验证商品列表的空条件、ID、名称、组合筛选与最小响应模型。
+// TestPublicAPIs 按 API 运行全部 Public 集成测试。
 func TestPublicAPIs(t *testing.T) {
+	t.Run("GetProducts", testGetProductsAPI)
+}
+
+// testGetProductsAPI 验证商品列表的空条件、ID、名称、组合筛选与最小响应模型。
+func testGetProductsAPI(t *testing.T) {
 	adminToken := suite.TokenFor(t, "public-admin", 1)
 	productName := fmt.Sprintf("公开商品-%d", time.Now().UnixNano())
 	product := suite.AddProduct(t, adminToken, productName, "39.80")

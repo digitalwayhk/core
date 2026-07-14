@@ -12,47 +12,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPrivateAPIs 验证下单、本人查询、本人删除、快照与每秒重复下单约束。
+// TestPrivateAPIs 按 API 运行全部 Private 集成测试。
 func TestPrivateAPIs(t *testing.T) {
-	adminToken := suite.TokenFor(t, "private-admin", 1)
-	userAToken := suite.TokenFor(t, "private-user-a", 0)
-	userBToken := suite.TokenFor(t, "private-user-b", 0)
-	productName := fmt.Sprintf("私有商品-%d", time.Now().UnixNano())
+	t.Run("AddOrder", testAddOrderAPI)
+	t.Run("GetOrders", testGetOrdersAPI)
+	t.Run("DeleteOrder", testDeleteOrderAPI)
+	t.Run("GetOrdersWebSocket", testGetOrdersWebSocketAPI)
+}
+
+// testAddOrderAPI 验证下单认证、参数、商品存在性、响应模型与每秒重复下单约束。
+func testAddOrderAPI(t *testing.T) {
+	adminToken := suite.TokenFor(t, "add-order-admin", 1)
+	userToken := suite.TokenFor(t, "add-order-user", 0)
+	productName := fmt.Sprintf("下单商品-%d", time.Now().UnixNano())
 	product := suite.AddProduct(t, adminToken, productName, "39.80")
 	productID := UintID(t, product.ID)
 
-	for _, request := range []struct {
-		method string
-		path   string
-		body   interface{}
-	}{
-		{http.MethodPost, "/api/shop/addorder", map[string]interface{}{"productID": productID, "quantity": 1}},
-		{http.MethodGet, "/api/shop/getorders", nil},
-		{http.MethodPost, "/api/shop/deleteorder", map[string]string{"id": "1"}},
-	} {
-		response := suite.RequestJSON(t, request.method, request.path, "", request.body)
-		assert.Equal(t, http.StatusUnauthorized, response.HTTPStatus, request.path)
-	}
+	unauthorized := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", "", map[string]interface{}{"productID": productID, "quantity": 1})
+	assert.Equal(t, http.StatusUnauthorized, unauthorized.HTTPStatus)
 
-	missing := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
+	missing := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userToken, map[string]interface{}{
 		"productID": uint(999999999), "quantity": 1,
 	})
 	assert.Equal(t, http.StatusUnprocessableEntity, missing.HTTPStatus)
 	assert.Equal(t, "商品不存在", missing.ErrorMessage)
 
-	invalid := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
+	invalid := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userToken, map[string]interface{}{
 		"productID": productID, "quantity": 0,
 	})
 	assert.Equal(t, http.StatusBadRequest, invalid.HTTPStatus)
 	assert.Equal(t, "订单数量必须大于 0", invalid.ErrorMessage)
 
-	created := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
+	created := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userToken, map[string]interface{}{
 		"productID": productID, "quantity": 2,
 	})
 	require.True(t, created.Success, created.ErrorMessage)
 	var order OrderDTO
 	require.NoError(t, json.Unmarshal(created.Data, &order))
-	assert.Equal(t, "private-user-a", order.UserID)
+	assert.Equal(t, "add-order-user", order.UserID)
 	assert.Equal(t, productName, order.ProductName)
 	assert.Equal(t, "39.8", order.UnitPrice)
 	assert.NotContains(t, string(created.Data), "hashCode")
@@ -61,15 +58,35 @@ func TestPrivateAPIs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, createdAt.Nanosecond())
 
-	edit := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", adminToken, map[string]interface{}{
+	duplicateProduct := suite.AddProduct(t, adminToken, fmt.Sprintf("秒级商品-%d", time.Now().UnixNano()), "9.90")
+	waitForNextSecond()
+	first := suite.AddOrder(t, userToken, duplicateProduct.ID, 1)
+	require.NotEmpty(t, first.ID)
+	second := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userToken, map[string]interface{}{
+		"productID": UintID(t, duplicateProduct.ID), "quantity": 1,
+	})
+	assert.False(t, second.Success, "同一用户同一商品每秒只能下单一次")
+	assert.Contains(t, second.ErrorMessage, "每秒只能购买一次")
+}
+
+// testGetOrdersAPI 验证订单查询认证、用户隔离和商品快照。
+func testGetOrdersAPI(t *testing.T) {
+	adminToken := suite.TokenFor(t, "get-orders-admin", 1)
+	userAToken := suite.TokenFor(t, "get-orders-user-a", 0)
+	userBToken := suite.TokenFor(t, "get-orders-user-b", 0)
+	productName := fmt.Sprintf("订单查询商品-%d", time.Now().UnixNano())
+	product := suite.AddProduct(t, adminToken, productName, "39.80")
+	order := suite.AddOrder(t, userAToken, product.ID, 2)
+
+	unauthorized := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", "", nil)
+	assert.Equal(t, http.StatusUnauthorized, unauthorized.HTTPStatus)
+
+	edited := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", adminToken, map[string]interface{}{
 		"id": product.ID, "name": productName + "-新名称", "price": "88.00",
 	})
-	require.True(t, edit.Success, edit.ErrorMessage)
+	require.True(t, edited.Success, edited.ErrorMessage)
 
-	ordersA := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userAToken, nil)
-	require.True(t, ordersA.Success, ordersA.ErrorMessage)
-	var userAOrders []OrderDTO
-	require.NoError(t, json.Unmarshal(ordersA.Data, &userAOrders))
+	userAOrders := suite.GetOrders(t, userAToken)
 	assert.Contains(t, OrderIDs(userAOrders), order.ID)
 	for _, saved := range userAOrders {
 		if saved.ID == order.ID {
@@ -77,39 +94,32 @@ func TestPrivateAPIs(t *testing.T) {
 			assert.Equal(t, "39.8", saved.UnitPrice)
 		}
 	}
+	assert.NotContains(t, OrderIDs(suite.GetOrders(t, userBToken)), order.ID)
+}
 
-	ordersB := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userBToken, nil)
-	var userBOrders []OrderDTO
-	require.NoError(t, json.Unmarshal(ordersB.Data, &userBOrders))
-	assert.NotContains(t, OrderIDs(userBOrders), order.ID)
+// testDeleteOrderAPI 验证删除认证、订单所有权和物理删除结果。
+func testDeleteOrderAPI(t *testing.T) {
+	adminToken := suite.TokenFor(t, "delete-order-admin", 1)
+	userAToken := suite.TokenFor(t, "delete-order-user-a", 0)
+	userBToken := suite.TokenFor(t, "delete-order-user-b", 0)
+	product := suite.AddProduct(t, adminToken, fmt.Sprintf("删单商品-%d", time.Now().UnixNano()), "20.00")
+	order := suite.AddOrder(t, userAToken, product.ID, 1)
+
+	unauthorized := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", "", map[string]string{"id": order.ID})
+	assert.Equal(t, http.StatusUnauthorized, unauthorized.HTTPStatus)
 
 	forbidden := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userBToken, map[string]string{"id": order.ID})
 	assert.Equal(t, http.StatusUnprocessableEntity, forbidden.HTTPStatus)
 	assert.Equal(t, "订单不存在或无权操作", forbidden.ErrorMessage)
 
-	duplicateProduct := suite.AddProduct(t, adminToken, fmt.Sprintf("秒级商品-%d", time.Now().UnixNano()), "9.90")
-	waitForNextSecond()
-	first := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
-		"productID": UintID(t, duplicateProduct.ID), "quantity": 1,
-	})
-	require.True(t, first.Success, first.ErrorMessage)
-	second := suite.RequestJSON(t, http.MethodPost, "/api/shop/addorder", userAToken, map[string]interface{}{
-		"productID": UintID(t, duplicateProduct.ID), "quantity": 1,
-	})
-	assert.False(t, second.Success, "同一用户同一商品每秒只能下单一次")
-	assert.Contains(t, second.ErrorMessage, "每秒只能购买一次")
-
 	deleted := suite.RequestJSON(t, http.MethodPost, "/api/shop/deleteorder", userAToken, map[string]string{"id": order.ID})
 	require.True(t, deleted.Success, deleted.ErrorMessage)
 	assert.NotContains(t, string(deleted.Data), "hashCode")
-
-	afterDelete := suite.RequestJSON(t, http.MethodGet, "/api/shop/getorders", userAToken, nil)
-	require.NoError(t, json.Unmarshal(afterDelete.Data, &userAOrders))
-	assert.NotContains(t, OrderIDs(userAOrders), order.ID)
+	assert.NotContains(t, OrderIDs(suite.GetOrders(t, userAToken)), order.ID)
 }
 
-// TestPrivateWebSocket 验证匿名订阅被拒绝，并且订单新增与删除事件只投递给当前用户。
-func TestPrivateWebSocket(t *testing.T) {
+// testGetOrdersWebSocketAPI 验证匿名订阅被拒绝，且订单新增与删除事件只投递给当前用户。
+func testGetOrdersWebSocketAPI(t *testing.T) {
 	adminToken := suite.TokenFor(t, "ws-admin", 1)
 	userAToken := suite.TokenFor(t, "ws-user-a", 0)
 	userBToken := suite.TokenFor(t, "ws-user-b", 0)

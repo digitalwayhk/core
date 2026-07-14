@@ -139,6 +139,39 @@ func (s *shopSuite) AddProduct(t *testing.T, adminToken, name, price string) Pro
 	return product
 }
 
+// GetProducts 通过公开路由按查询条件获取商品响应模型。
+func (s *shopSuite) GetProducts(t *testing.T, query string) []ProductDTO {
+	t.Helper()
+	envelope := s.RequestJSON(t, http.MethodGet, "/api/shop/getproducts"+query, "", nil)
+	require.True(t, envelope.Success, envelope.ErrorMessage)
+	var products []ProductDTO
+	require.NoError(t, json.Unmarshal(envelope.Data, &products))
+	return products
+}
+
+// AddOrder 为其他 API 测试准备归属当前用户的订单数据。
+func (s *shopSuite) AddOrder(t *testing.T, token, productID string, quantity int) OrderDTO {
+	t.Helper()
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/shop/addorder", token, map[string]interface{}{
+		"productID": UintID(t, productID), "quantity": quantity,
+	})
+	require.True(t, envelope.Success, envelope.ErrorMessage)
+	var order OrderDTO
+	require.NoError(t, json.Unmarshal(envelope.Data, &order))
+	require.NotEmpty(t, order.ID)
+	return order
+}
+
+// GetOrders 获取当前用户的订单响应模型。
+func (s *shopSuite) GetOrders(t *testing.T, token string) []OrderDTO {
+	t.Helper()
+	envelope := s.RequestJSON(t, http.MethodGet, "/api/shop/getorders", token, nil)
+	require.True(t, envelope.Success, envelope.ErrorMessage)
+	var orders []OrderDTO
+	require.NoError(t, json.Unmarshal(envelope.Data, &orders))
+	return orders
+}
+
 // UintID 将框架以字符串编码的商城模型 ID 转换为 uint。
 func UintID(t *testing.T, id string) uint {
 	t.Helper()
