@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：设计已确认，等待开发
+- 状态：已实现，等待外部只读审查
 - 日期：2026-07-15
 - 基线应用：`examples/03-shop-inheritance`
 - 应用目录：`examples/04-shop-performance`

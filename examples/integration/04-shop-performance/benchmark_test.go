@@ -1,0 +1,207 @@
+package performanceshop_test
+
+import (
+	"fmt"
+	"net/http"
+	"runtime"
+	"sort"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type benchmarkFixture struct {
+	admin       string
+	user        string
+	product     ProductDTO
+	paymentType PaymentTypeDTO
+	order       OrderDTO
+}
+
+func newBenchmarkFixture(b *testing.B) benchmarkFixture {
+	b.Helper()
+	suffix := time.Now().UnixNano()
+	admin := suite.TokenFor(b, fmt.Sprintf("bench-admin-%d", suffix), 1)
+	user := suite.TokenFor(b, fmt.Sprintf("bench-user-%d", suffix), 0)
+	product := suite.AddProduct(b, admin, fmt.Sprintf("基准商品-%d", suffix), "12.50")
+	paymentType := suite.AddPaymentType(b, admin, fmt.Sprintf("bench-pay-%d", suffix), fmt.Sprintf("基准支付-%d", suffix), true)
+	order := suite.AddOrder(b, user, uintID(b, product.ID), 1)
+	return benchmarkFixture{admin: admin, user: user, product: product, paymentType: paymentType, order: order}
+}
+
+func benchmarkConcurrencies() []int {
+	values := []int{1, runtime.GOMAXPROCS(0), 4 * runtime.GOMAXPROCS(0)}
+	result := make([]int, 0, len(values))
+	seen := make(map[int]struct{})
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
+	for _, concurrency := range benchmarkConcurrencies() {
+		concurrency := concurrency
+		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
+			const maxSamples = 4096
+			samples := make([]int64, 0, min(b.N, maxSamples))
+			var sampleMu sync.Mutex
+			var next atomic.Int64
+			var firstErr error
+			var errOnce sync.Once
+			start := make(chan struct{})
+			var workers sync.WaitGroup
+			workers.Add(concurrency)
+			b.ReportAllocs()
+			b.ResetTimer()
+			startedAt := time.Now()
+			for worker := 0; worker < concurrency; worker++ {
+				go func() {
+					defer workers.Done()
+					<-start
+					for {
+						index := int(next.Add(1) - 1)
+						if index >= b.N {
+							return
+						}
+						requestStartedAt := time.Now()
+						if err := operation(index); err != nil {
+							errOnce.Do(func() { firstErr = err })
+							return
+						}
+						if index < maxSamples {
+							sampleMu.Lock()
+							samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
+							sampleMu.Unlock()
+						}
+					}
+				}()
+			}
+			close(start)
+			workers.Wait()
+			elapsed := time.Since(startedAt)
+			b.StopTimer()
+			if firstErr != nil {
+				b.Fatal(firstErr)
+			}
+			if elapsed > 0 {
+				b.ReportMetric(float64(b.N)/elapsed.Seconds(), "req/s")
+			}
+			reportLatencyPercentiles(b, samples)
+		})
+	}
+}
+
+func reportLatencyPercentiles(b *testing.B, samples []int64) {
+	if len(samples) == 0 {
+		return
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	b.ReportMetric(float64(samples[(len(samples)-1)*50/100]), "p50-ns")
+	b.ReportMetric(float64(samples[(len(samples)-1)*95/100]), "p95-ns")
+}
+
+func requestSucceeded(method, path, token string, body interface{}) error {
+	response, err := suite.DoJSON(method, path, token, body)
+	if err != nil {
+		return err
+	}
+	if !response.Success {
+		return fmt.Errorf("%s %s 失败: %s", method, path, response.ErrorMessage)
+	}
+	return nil
+}
+
+func BenchmarkGetProducts(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	path := "/api/performanceshop/getproducts?id=" + fixture.product.ID
+	runHTTPBenchmark(b, func(int) error { return requestSucceeded(http.MethodGet, path, "", nil) })
+}
+
+func BenchmarkGetSuppliers(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	path := fmt.Sprintf("/api/performanceshop/getsuppliers?id=%d", fixture.product.SupplierID)
+	runHTTPBenchmark(b, func(int) error { return requestSucceeded(http.MethodGet, path, "", nil) })
+}
+
+func BenchmarkGetPaymentTypes(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	path := "/api/performanceshop/getpaymenttypes?code=" + fixture.paymentType.Code
+	runHTTPBenchmark(b, func(int) error { return requestSucceeded(http.MethodGet, path, "", nil) })
+}
+
+func BenchmarkGetOrders(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	runHTTPBenchmark(b, func(int) error {
+		return requestSucceeded(http.MethodGet, "/api/performanceshop/getorders", fixture.user, nil)
+	})
+}
+
+func BenchmarkAddOrder(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	for _, concurrency := range benchmarkConcurrencies() {
+		concurrency := concurrency
+		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
+			tokens := make([]string, b.N)
+			for index := range tokens {
+				tokens[index] = suite.TokenFor(b, fmt.Sprintf("bench-order-%d-%d", time.Now().UnixNano(), index), 0)
+			}
+			runHTTPBenchmarkSingleConcurrency(b, concurrency, func(index int) error {
+				return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", tokens[index], map[string]interface{}{
+					"productID": uintID(b, fixture.product.ID), "quantity": 1,
+				})
+			})
+		})
+	}
+}
+
+func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation func(index int) error) {
+	const maxSamples = 4096
+	samples := make([]int64, 0, min(b.N, maxSamples))
+	var sampleMu sync.Mutex
+	var next atomic.Int64
+	var firstErr error
+	var errOnce sync.Once
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	start := make(chan struct{})
+	b.ReportAllocs()
+	b.ResetTimer()
+	startedAt := time.Now()
+	for worker := 0; worker < concurrency; worker++ {
+		go func() {
+			defer workers.Done()
+			<-start
+			for {
+				index := int(next.Add(1) - 1)
+				if index >= b.N {
+					return
+				}
+				requestStartedAt := time.Now()
+				if err := operation(index); err != nil {
+					errOnce.Do(func() { firstErr = err })
+					return
+				}
+				if index < maxSamples {
+					sampleMu.Lock()
+					samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
+					sampleMu.Unlock()
+				}
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	elapsed := time.Since(startedAt)
+	b.StopTimer()
+	if firstErr != nil {
+		b.Fatal(firstErr)
+	}
+	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "orders/s")
+	reportLatencyPercentiles(b, samples)
+}

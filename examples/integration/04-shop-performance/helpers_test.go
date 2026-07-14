@@ -1,4 +1,4 @@
-package inheritanceshop_test
+package performanceshop_test
 
 import (
 	"encoding/json"
@@ -66,8 +66,8 @@ type OrderDTO struct {
 
 func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
-		BuildPackage: "./examples/03-shop-inheritance/main", BinaryName: "shop-inheritance",
-		TempPrefix: "core-shop-inheritance-", ServiceCount: 2, ServiceIndex: 1,
+		BuildPackage: "./examples/04-shop-performance/main", BinaryName: "shop-performance",
+		TempPrefix: "core-shop-performance-", ServiceCount: 2, ServiceIndex: 1,
 		Arguments:   []string{"-view", "0"},
 		DisableRace: integration.IsBenchmarkRun(),
 	})
@@ -79,19 +79,69 @@ func startShopSuite() (*shopSuite, error) {
 		created.Stop()
 		return nil, err
 	}
-	for _, name := range []string{"server.json", "inheritanceshop.json"} {
+	for _, name := range []string{"server.json", "performanceshop.json"} {
 		if _, err := os.Stat(filepath.Join(created.RootDir, "etc", name)); err != nil {
 			created.Stop()
 			return nil, fmt.Errorf("框架未自动生成配置 %s: %w", name, err)
 		}
 	}
+	created.StopProcess()
+	if err := enableLocalRouteCache(filepath.Join(created.RootDir, "etc", "performanceshop.json")); err != nil {
+		created.Stop()
+		return nil, err
+	}
+	if err := created.Restart(); err != nil {
+		created.Stop()
+		return nil, err
+	}
+	if err := created.waitReady(); err != nil {
+		created.Stop()
+		return nil, err
+	}
 	return created, nil
+}
+
+func enableLocalRouteCache(configPath string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("读取性能示例配置: %w", err)
+	}
+	var content map[string]interface{}
+	if err := json.Unmarshal(data, &content); err != nil {
+		return fmt.Errorf("解析性能示例配置: %w", err)
+	}
+	content["RouteCache"] = map[string]interface{}{
+		"Mode": "local",
+		"TTL":  int64(10 * time.Second),
+		"L1": map[string]interface{}{
+			"Limit": 4096,
+		},
+		"L2": map[string]interface{}{
+			"Enable":           true,
+			"Path":             filepath.Join(filepath.Dir(filepath.Dir(configPath)), "route-cache-l2"),
+			"MaxBytes":         int64(64 << 20),
+			"CorruptionPolicy": "fail",
+		},
+		"Redis": map[string]interface{}{
+			"Prefix":        "digitalway:routecache",
+			"OnUnavailable": "fail",
+		},
+	}
+	content["MQ"] = map[string]interface{}{"Mode": "off"}
+	encoded, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		return fmt.Errorf("编码性能示例配置: %w", err)
+	}
+	if err := os.WriteFile(configPath, encoded, 0o644); err != nil {
+		return fmt.Errorf("写入性能示例配置: %w", err)
+	}
+	return nil
 }
 
 func (s *shopSuite) waitReady() error {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		response, err := http.Get(s.BaseURL + "/api/inheritanceshop/getproducts")
+		response, err := http.Get(s.BaseURL + "/api/performanceshop/getproducts")
 		if err == nil {
 			var envelope integration.ResponseEnvelope
 			_ = json.NewDecoder(response.Body).Decode(&envelope)
@@ -115,7 +165,7 @@ func (s *shopSuite) AddProduct(t testing.TB, token, name, price string) ProductD
 
 func (s *shopSuite) AddProductForSupplier(t testing.TB, token, code, name, price string, supplierID uint, enabled bool) ProductDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/productmanage/add", token, map[string]interface{}{
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/performanceshop/productmanage/add", token, map[string]interface{}{
 		"code": code, "name": name, "price": price, "supplierID": supplierID, "enabled": true,
 	})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
@@ -131,7 +181,7 @@ func (s *shopSuite) AddProductForSupplier(t testing.TB, token, code, name, price
 
 func (s *shopSuite) AddSupplier(t testing.TB, token, code, name string, enabled bool) SupplierDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/suppliermanage/add", token, map[string]interface{}{
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/performanceshop/suppliermanage/add", token, map[string]interface{}{
 		"code": code, "name": name, "enabled": true, "description": name + "说明",
 	})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
@@ -151,13 +201,13 @@ func (s *shopSuite) SetBaseDataEnabled(t testing.TB, token, manageName, id strin
 	if enabled {
 		command = "enablebasedata"
 	}
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/"+manageName+"/"+command, token, map[string]interface{}{"id": id})
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/performanceshop/"+manageName+"/"+command, token, map[string]interface{}{"id": id})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
 }
 
 func (s *shopSuite) AddPaymentType(t testing.TB, token, code, name string, enabled bool) PaymentTypeDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/paymenttypemanage/add", token, map[string]interface{}{
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/performanceshop/paymenttypemanage/add", token, map[string]interface{}{
 		"code": code, "name": name, "enabled": enabled, "description": name + "说明",
 	})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
@@ -173,14 +223,14 @@ func (s *shopSuite) AddPaymentType(t testing.TB, token, code, name string, enabl
 
 func (s *shopSuite) AddOrder(t testing.TB, token string, productID uint, quantity int) OrderDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/inheritanceshop/addorder", token, map[string]interface{}{"productID": productID, "quantity": quantity})
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/performanceshop/addorder", token, map[string]interface{}{"productID": productID, "quantity": quantity})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
 	return decodeOrder(t, envelope.Data)
 }
 
 func (s *shopSuite) CreatePayment(t testing.TB, token, orderID, paymentTypeID string) OrderDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/inheritanceshop/createpayment", token, map[string]interface{}{
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/performanceshop/createpayment", token, map[string]interface{}{
 		"orderID": orderID, "paymentTypeID": paymentTypeID,
 	})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
@@ -189,14 +239,14 @@ func (s *shopSuite) CreatePayment(t testing.TB, token, orderID, paymentTypeID st
 
 func (s *shopSuite) PaymentCommand(t testing.TB, token, command, paymentID string) OrderDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/inheritanceshop/paymentrecordmanage/"+command, token, map[string]interface{}{"id": paymentID})
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/manage/performanceshop/paymentrecordmanage/"+command, token, map[string]interface{}{"id": paymentID})
 	require.True(t, envelope.Success, envelope.ErrorMessage)
 	return decodeOrder(t, envelope.Data)
 }
 
 func (s *shopSuite) GetOrders(t testing.TB, token string) []OrderDTO {
 	t.Helper()
-	envelope := s.RequestJSON(t, http.MethodGet, "/api/inheritanceshop/getorders", token, nil)
+	envelope := s.RequestJSON(t, http.MethodGet, "/api/performanceshop/getorders", token, nil)
 	require.True(t, envelope.Success, envelope.ErrorMessage)
 	var result []OrderDTO
 	require.NoError(t, json.Unmarshal(envelope.Data, &result))
@@ -209,7 +259,7 @@ func (s *shopSuite) ConnectAndSubscribe(t testing.TB, token string) *websocket.C
 	require.NoError(t, err)
 	s.WriteWebSocket(t, connection, "sub", "logon", map[string]string{"token": token})
 	require.Equal(t, "success", s.ReadWebSocket(t, connection, 3*time.Second).Event)
-	s.WriteWebSocket(t, connection, "sub", "/api/inheritanceshop/getorders", map[string]interface{}{})
+	s.WriteWebSocket(t, connection, "sub", "/api/performanceshop/getorders", map[string]interface{}{})
 	require.Equal(t, "sub", s.ReadWebSocket(t, connection, 3*time.Second).Event)
 	return connection
 }
@@ -217,7 +267,7 @@ func (s *shopSuite) ConnectAndSubscribe(t testing.TB, token string) *websocket.C
 func (s *shopSuite) ReadOrderEvent(t testing.TB, connection *websocket.Conn) OrderDTO {
 	t.Helper()
 	message := s.ReadWebSocket(t, connection, 3*time.Second)
-	require.Equal(t, "/api/inheritanceshop/getorders", message.Channel)
+	require.Equal(t, "/api/performanceshop/getorders", message.Channel)
 	return decodeOrder(t, message.Data)
 }
 

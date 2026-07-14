@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/syncx"
 )
 
@@ -396,6 +397,54 @@ func (m *Manager) Take(route string, source interface{}, ttl time.Duration, load
 		}
 		return value, nil
 	})
+}
+
+// TakeBestEffort 合并同一缓存键的并发加载，但不让缓存故障改变业务结果。
+// 只有 loader 返回的错误会传递给调用方；缓存错误会记录后旁路。
+func (m *Manager) TakeBestEffort(route string, source interface{}, ttl time.Duration, loader func() (interface{}, error)) (interface{}, error) {
+	if loader == nil {
+		return nil, errors.New("route cache loader is nil")
+	}
+	if m == nil || m.closed.Load() || m.State() != StateEnabled {
+		return loader()
+	}
+	if value, ok, err := m.Get(route, source); err == nil && ok {
+		return value, nil
+	} else if err != nil {
+		m.logBestEffortBypass("read", route, err)
+	}
+	key, enabled, err := m.cacheKey(route, source)
+	if err != nil {
+		m.logBestEffortBypass("key", route, err)
+		return loader()
+	}
+	if !enabled || m.State() != StateEnabled {
+		return loader()
+	}
+	return m.flight.Do(key, func() (interface{}, error) {
+		if value, ok, getErr := m.Get(route, source); getErr == nil && ok {
+			return value, nil
+		} else if getErr != nil {
+			m.logBestEffortBypass("read", route, getErr)
+		}
+		value, loadErr := loader()
+		if loadErr != nil || value == nil {
+			return value, loadErr
+		}
+		if setErr := m.Set(route, source, value, ttl); setErr != nil {
+			m.logBestEffortBypass("write", route, setErr)
+		}
+		return value, nil
+	})
+}
+
+func (m *Manager) logBestEffortBypass(operation, route string, err error) {
+	logx.Errorw("route_cache_bypassed",
+		logx.Field("service", m.service),
+		logx.Field("route", route),
+		logx.Field("operation", operation),
+		logx.Field("error", err),
+	)
 }
 
 func (m *Manager) MarkInvalidationUnavailable() {

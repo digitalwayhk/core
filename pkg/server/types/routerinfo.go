@@ -415,12 +415,21 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 	}
 
 	go own.requestNotify(snapshotNotifyValue(api), req.GetTraceId())
-	data, err := api.Do(req)
+	var data interface{}
+	usedTakeRuntime := false
+	if own.useCache {
+		data, err, usedTakeRuntime = own.takeCache(api, func() (interface{}, error) {
+			return api.Do(req)
+		})
+	}
+	if !usedTakeRuntime {
+		data, err = api.Do(req)
+	}
 	if err != nil {
 		msg := fmt.Sprintf("调用执行异常:%s", err)
 		err = NewTypeErrorWithCause(own.ServiceName, own.Path, "do", msg, 800, err)
 	} else {
-		if own.useCache && data != nil {
+		if own.useCache && !usedTakeRuntime && data != nil {
 			own.setCache(api, data)
 		}
 	}
@@ -432,6 +441,21 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 		go own.responseNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
 	}
 	return resp
+}
+
+func (own *RouterInfo) takeCache(api IRouter, loader func() (interface{}, error)) (interface{}, error, bool) {
+	own.assertMetadataFrozen()
+	own.RLock()
+	runtime := own.cacheRuntime
+	path := own.Path
+	ttl := own.cacheTime
+	own.RUnlock()
+	takeRuntime, ok := runtime.(RouteCacheTakeRuntime)
+	if !ok {
+		return nil, nil, false
+	}
+	value, err := takeRuntime.TakeBestEffort(path, api, ttl, loader)
+	return value, err, true
 }
 
 func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {

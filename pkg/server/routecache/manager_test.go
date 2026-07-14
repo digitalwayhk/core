@@ -1,6 +1,7 @@
 package routecache_test
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -107,4 +108,64 @@ func TestRouteCacheSingleFlightLoadsOnce(t *testing.T) {
 	for value := range results {
 		assert.Equal(t, "loaded", value)
 	}
+}
+
+func TestRouteCacheTakeBestEffortLoadsSameKeyOnce(t *testing.T) {
+	manager := newL1Manager(t, 16)
+	var loads atomic.Int32
+	loaderEntered := make(chan struct{})
+	releaseLoader := make(chan struct{})
+	start := make(chan struct{})
+	results := make(chan interface{}, 16)
+	errors := make(chan error, 16)
+	var wg sync.WaitGroup
+
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			value, err := manager.TakeBestEffort("/api/items", preferredCacheKey{}, time.Second, func() (interface{}, error) {
+				if loads.Add(1) == 1 {
+					close(loaderEntered)
+				}
+				<-releaseLoader
+				return "loaded", nil
+			})
+			results <- value
+			errors <- err
+		}()
+	}
+
+	close(start)
+	<-loaderEntered
+	close(releaseLoader)
+	wg.Wait()
+	close(results)
+	close(errors)
+
+	assert.Equal(t, int32(1), loads.Load())
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	for value := range results {
+		assert.Equal(t, "loaded", value)
+	}
+}
+
+func TestRouteCacheTakeBestEffortDoesNotCacheLoaderError(t *testing.T) {
+	manager := newL1Manager(t, 16)
+	wantErr := errors.New("load failed")
+	var loads atomic.Int32
+
+	for range 2 {
+		value, err := manager.TakeBestEffort("/api/items", "error-key", time.Second, func() (interface{}, error) {
+			loads.Add(1)
+			return nil, wantErr
+		})
+		assert.Nil(t, value)
+		assert.ErrorIs(t, err, wantErr)
+	}
+
+	assert.Equal(t, int32(2), loads.Load())
 }
