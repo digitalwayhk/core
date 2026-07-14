@@ -24,12 +24,17 @@ func getDataAction() persistencetypes.IDataAction {
 
 // ensureModel 确保首次查询发生在模型表初始化之后。
 func ensureModel(model interface{}) error {
+	return ensureModelWith(getDataAction(), model)
+}
+
+// ensureModelWith 使用指定的数据操作器确保模型表已初始化。
+func ensureModelWith(action persistencetypes.IDataAction, model interface{}) error {
 	modelType := reflect.TypeOf(model)
 	if modelType == nil || modelType.Kind() != reflect.Ptr {
 		return NewBusinessError("模型类型无效")
 	}
 	result := reflect.New(reflect.SliceOf(modelType)).Interface()
-	return getDataAction().Load(newSearch(model, 1), result)
+	return action.Load(newSearch(model, 1), result)
 }
 
 // EnsureStorage 在事务开始前创建本示例使用的全部模型表。
@@ -42,14 +47,21 @@ func EnsureStorage() error {
 	return nil
 }
 
-// RunInTransaction 串行保护共享适配器的事务生命周期。
-func RunInTransaction(operation func() error) (err error) {
+// RunInTransaction 使用独立事务状态的适配器串行执行业务事务。
+// operation 内的模型读写必须使用传入的 action，避免与普通非事务读写串扰。
+func RunInTransaction(operation func(action persistencetypes.IDataAction) error) (err error) {
 	transactionMu.Lock()
 	defer transactionMu.Unlock()
 	if err = EnsureStorage(); err != nil {
 		return err
 	}
-	action := getDataAction()
+	cloner, ok := getDataAction().(interface {
+		Clone() persistencetypes.IDataAction
+	})
+	if !ok {
+		return NewBusinessError("数据操作器不支持独立事务")
+	}
+	action := cloner.Clone()
 	if err = action.Transaction(); err != nil {
 		return err
 	}
@@ -59,7 +71,7 @@ func RunInTransaction(operation func() error) (err error) {
 			_ = action.Rollback()
 		}
 	}()
-	if err = operation(); err != nil {
+	if err = operation(action); err != nil {
 		return err
 	}
 	if err = action.Commit(); err != nil {

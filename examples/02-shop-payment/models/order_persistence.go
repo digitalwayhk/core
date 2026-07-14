@@ -3,6 +3,8 @@ package models
 import (
 	"strings"
 	"time"
+
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
 // Insert 规范化秒级创建时间并写入订单。
@@ -25,8 +27,13 @@ func (own *Order) Insert() error {
 
 // Update 保存订单状态变化。
 func (own *Order) Update() error {
+	return own.UpdateWith(getDataAction())
+}
+
+// UpdateWith 使用指定事务适配器保存订单状态变化。
+func (own *Order) UpdateWith(action persistencetypes.IDataAction) error {
 	own.SetUpdatedAt(time.Now().UTC())
-	return getDataAction().Update(own)
+	return action.Update(own)
 }
 
 // Delete 物理删除订单。
@@ -34,13 +41,18 @@ func (own *Order) Delete() error { return getDataAction().Delete(own) }
 
 // FindByID 按 ID 查询订单。
 func (own *Order) FindByID(id uint) (*Order, error) {
-	if err := ensureModel(own); err != nil {
+	return own.FindByIDWith(getDataAction(), id)
+}
+
+// FindByIDWith 使用指定事务适配器按 ID 查询订单。
+func (own *Order) FindByIDWith(action persistencetypes.IDataAction, id uint) (*Order, error) {
+	if err := ensureModelWith(action, own); err != nil {
 		return nil, err
 	}
 	var result []*Order
 	search := newSearch(own, 1)
 	search.AddWhereN("ID", id)
-	if err := getDataAction().Load(search, &result); err != nil || len(result) == 0 {
+	if err := action.Load(search, &result); err != nil || len(result) == 0 {
 		return nil, err
 	}
 	return result[0], nil
@@ -48,14 +60,19 @@ func (own *Order) FindByID(id uint) (*Order, error) {
 
 // FindOwned 按 ID 和可信用户查找订单。
 func (own *Order) FindOwned(id uint, userID string) (*Order, error) {
-	if err := ensureModel(own); err != nil {
+	return own.FindOwnedWith(getDataAction(), id, userID)
+}
+
+// FindOwnedWith 使用指定事务适配器查找用户本人的订单。
+func (own *Order) FindOwnedWith(action persistencetypes.IDataAction, id uint, userID string) (*Order, error) {
+	if err := ensureModelWith(action, own); err != nil {
 		return nil, err
 	}
 	var result []*Order
 	search := newSearch(own, 1)
 	search.AddWhereN("ID", id)
 	search.AddWhereN("UserID", strings.TrimSpace(userID))
-	if err := getDataAction().Load(search, &result); err != nil || len(result) == 0 {
+	if err := action.Load(search, &result); err != nil || len(result) == 0 {
 		return nil, err
 	}
 	return result[0], nil

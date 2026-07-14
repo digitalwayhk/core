@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/digitalwayhk/core/examples/02-shop-payment/models"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -100,8 +101,8 @@ func TestPaymentFlowSupportsFailureRetryAndRefund(t *testing.T) {
 	rollbackRecord.PaymentTypeName = paymentType.Name
 	rollbackRecord.Amount = decimal.RequireFromString("1.00")
 	rollbackRecord.Attempt = 99
-	err = models.RunInTransaction(func() error {
-		require.NoError(t, rollbackRecord.Insert())
+	err = models.RunInTransaction(func(action persistencetypes.IDataAction) error {
+		require.NoError(t, rollbackRecord.InsertWith(action))
 		return errors.New("触发回滚")
 	})
 	require.ErrorContains(t, err, "触发回滚")

@@ -27,13 +27,18 @@ func (own *PaymentType) Delete() error { return getDataAction().Delete(own) }
 
 // FindByID 按 ID 查询支付类型。
 func (own *PaymentType) FindByID(id uint) (*PaymentType, error) {
-	if err := ensureModel(own); err != nil {
+	return own.FindByIDWith(getDataAction(), id)
+}
+
+// FindByIDWith 使用指定事务适配器按 ID 查询支付类型。
+func (own *PaymentType) FindByIDWith(action persistencetypes.IDataAction, id uint) (*PaymentType, error) {
+	if err := ensureModelWith(action, own); err != nil {
 		return nil, err
 	}
 	var result []*PaymentType
 	search := newSearch(own, 1)
 	search.AddWhereN("ID", id)
-	if err := getDataAction().Load(search, &result); err != nil || len(result) == 0 {
+	if err := action.Load(search, &result); err != nil || len(result) == 0 {
 		return nil, err
 	}
 	return result[0], nil

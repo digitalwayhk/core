@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/examples/02-shop-payment/models"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
 // OrderService 处理下单、查询、删除和撤销申请。
@@ -71,9 +72,9 @@ func (own *OrderService) DeleteUnpaidOrder(userID string, orderID uint) (*OrderC
 // RequestCancellation 把已支付订单和当前流水同时置为退款中。
 func (own *OrderService) RequestCancellation(userID string, orderID uint) (*OrderChange, error) {
 	var order *models.Order
-	err := models.RunInTransaction(func() error {
+	err := models.RunInTransaction(func(action persistencetypes.IDataAction) error {
 		var err error
-		order, err = own.findOwned(orderID, userID)
+		order, err = own.findOwnedWith(action, orderID, userID)
 		if err != nil {
 			return err
 		}
@@ -83,7 +84,7 @@ func (own *OrderService) RequestCancellation(userID string, orderID uint) (*Orde
 		if order.Status != models.OrderStatusNormal || order.PaymentStatus != models.PaymentStatusPaid {
 			return models.NewBusinessError("只有已支付订单可以申请撤销")
 		}
-		payment, err := models.NewPaymentRecord().FindByID(order.PaymentID)
+		payment, err := models.NewPaymentRecord().FindByIDWith(action, order.PaymentID)
 		if err != nil {
 			return err
 		}
@@ -93,10 +94,10 @@ func (own *OrderService) RequestCancellation(userID string, orderID uint) (*Orde
 		order.Status = models.OrderStatusCancelling
 		order.PaymentStatus = models.PaymentStatusRefunding
 		payment.Status = models.PaymentStatusRefunding
-		if err := payment.Update(); err != nil {
+		if err := payment.UpdateWith(action); err != nil {
 			return err
 		}
-		return order.Update()
+		return order.UpdateWith(action)
 	})
 	if err != nil {
 		return nil, err
@@ -106,7 +107,20 @@ func (own *OrderService) RequestCancellation(userID string, orderID uint) (*Orde
 
 // findOwned 使用统一错误隐藏其他用户的订单存在性。
 func (own *OrderService) findOwned(orderID uint, userID string) (*models.Order, error) {
-	order, err := models.NewOrder().FindOwned(orderID, strings.TrimSpace(userID))
+	return own.findOwnedWith(nil, orderID, userID)
+}
+
+// findOwnedWith 使用可选的事务适配器查询本人订单。
+func (own *OrderService) findOwnedWith(action persistencetypes.IDataAction, orderID uint, userID string) (*models.Order, error) {
+	var (
+		order *models.Order
+		err   error
+	)
+	if action == nil {
+		order, err = models.NewOrder().FindOwned(orderID, strings.TrimSpace(userID))
+	} else {
+		order, err = models.NewOrder().FindOwnedWith(action, orderID, strings.TrimSpace(userID))
+	}
 	if err != nil {
 		return nil, err
 	}

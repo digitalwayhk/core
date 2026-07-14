@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/examples/02-shop-payment/models"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
 // PaymentService 处理支付创建及后台支付结果确认。
@@ -18,9 +19,9 @@ func (own *PaymentService) CreatePayment(userID string, orderID, paymentTypeID, 
 	userID = strings.TrimSpace(userID)
 	var order *models.Order
 	var payment *models.PaymentRecord
-	err := models.RunInTransaction(func() error {
+	err := models.RunInTransaction(func(action persistencetypes.IDataAction) error {
 		var err error
-		order, err = models.NewOrder().FindOwned(orderID, userID)
+		order, err = models.NewOrder().FindOwnedWith(action, orderID, userID)
 		if err != nil {
 			return err
 		}
@@ -36,14 +37,14 @@ func (own *PaymentService) CreatePayment(userID string, orderID, paymentTypeID, 
 		if order.PaymentStatus != models.PaymentStatusUnpaid && order.PaymentStatus != models.PaymentStatusFailed {
 			return models.NewBusinessError("当前订单不能发起支付")
 		}
-		paymentType, err := models.NewPaymentType().FindByID(paymentTypeID)
+		paymentType, err := models.NewPaymentType().FindByIDWith(action, paymentTypeID)
 		if err != nil {
 			return err
 		}
 		if paymentType == nil || !paymentType.Enabled {
 			return models.NewBusinessError("支付类型不存在或未启用")
 		}
-		attempt, err := models.NewPaymentRecord().NextAttempt(order.ID)
+		attempt, err := models.NewPaymentRecord().NextAttemptWith(action, order.ID)
 		if err != nil {
 			return err
 		}
@@ -56,12 +57,12 @@ func (own *PaymentService) CreatePayment(userID string, orderID, paymentTypeID, 
 		payment.PaymentTypeName = paymentType.Name
 		payment.Amount = order.TotalAmount()
 		payment.Attempt = attempt
-		if err := payment.Insert(); err != nil {
+		if err := payment.InsertWith(action); err != nil {
 			return err
 		}
 		order.PaymentID = payment.ID
 		order.PaymentStatus = models.PaymentStatusPending
-		return order.Update()
+		return order.UpdateWith(action)
 	})
 	if err != nil {
 		return nil, err
@@ -83,9 +84,9 @@ func (own *PaymentService) FailPayment(paymentID uint) (*PaymentChange, error) {
 func (own *PaymentService) finishPending(paymentID uint, success bool) (*PaymentChange, error) {
 	var order *models.Order
 	var payment *models.PaymentRecord
-	err := models.RunInTransaction(func() error {
+	err := models.RunInTransaction(func(action persistencetypes.IDataAction) error {
 		var err error
-		payment, err = models.NewPaymentRecord().FindByID(paymentID)
+		payment, err = models.NewPaymentRecord().FindByIDWith(action, paymentID)
 		if err != nil {
 			return err
 		}
@@ -97,13 +98,13 @@ func (own *PaymentService) finishPending(paymentID uint, success bool) (*Payment
 			target = models.PaymentStatusPaid
 		}
 		if payment.Status == target {
-			order, err = models.NewOrder().FindByID(payment.OrderID)
+			order, err = models.NewOrder().FindByIDWith(action, payment.OrderID)
 			return err
 		}
 		if payment.Status != models.PaymentStatusPending {
 			return models.NewBusinessError("只有支付中的流水可以处理支付结果")
 		}
-		order, err = models.NewOrder().FindByID(payment.OrderID)
+		order, err = models.NewOrder().FindByIDWith(action, payment.OrderID)
 		if err != nil {
 			return err
 		}
@@ -116,10 +117,10 @@ func (own *PaymentService) finishPending(paymentID uint, success bool) (*Payment
 			now := time.Now().UTC()
 			payment.PaidAt = &now
 		}
-		if err := payment.Update(); err != nil {
+		if err := payment.UpdateWith(action); err != nil {
 			return err
 		}
-		return order.Update()
+		return order.UpdateWith(action)
 	})
 	if err != nil {
 		return nil, err
@@ -135,16 +136,16 @@ func (own *PaymentService) finishPending(paymentID uint, success bool) (*Payment
 func (own *PaymentService) ConfirmRefund(paymentID uint) (*PaymentChange, error) {
 	var order *models.Order
 	var payment *models.PaymentRecord
-	err := models.RunInTransaction(func() error {
+	err := models.RunInTransaction(func(action persistencetypes.IDataAction) error {
 		var err error
-		payment, err = models.NewPaymentRecord().FindByID(paymentID)
+		payment, err = models.NewPaymentRecord().FindByIDWith(action, paymentID)
 		if err != nil {
 			return err
 		}
 		if payment == nil {
 			return models.NewBusinessError("支付流水不存在")
 		}
-		order, err = models.NewOrder().FindByID(payment.OrderID)
+		order, err = models.NewOrder().FindByIDWith(action, payment.OrderID)
 		if err != nil {
 			return err
 		}
@@ -159,10 +160,10 @@ func (own *PaymentService) ConfirmRefund(paymentID uint) (*PaymentChange, error)
 		payment.RefundedAt = &now
 		order.Status = models.OrderStatusCancelled
 		order.PaymentStatus = models.PaymentStatusRefunded
-		if err := payment.Update(); err != nil {
+		if err := payment.UpdateWith(action); err != nil {
 			return err
 		}
-		return order.Update()
+		return order.UpdateWith(action)
 	})
 	if err != nil {
 		return nil, err
