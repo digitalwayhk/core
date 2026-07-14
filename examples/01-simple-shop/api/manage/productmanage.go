@@ -2,7 +2,6 @@ package manage
 
 import (
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
-	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	managepkg "github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -11,12 +10,11 @@ import (
 // ProductManage 组装商品的查看、查询、新增、修改和删除管理路由。
 type ProductManage struct {
 	*managepkg.ManageService[models.Product]
-	action persistencetypes.IDataAction
 }
 
 // NewProductManage 创建商品管理服务并传入正确的 hook owner。
-func NewProductManage(action persistencetypes.IDataAction) *ProductManage {
-	own := &ProductManage{action: action}
+func NewProductManage() *ProductManage {
+	own := &ProductManage{}
 	own.ManageService = managepkg.NewManageService[models.Product](own)
 	return own
 }
@@ -31,15 +29,10 @@ func (own *ProductManage) ValidationAfter(sender interface{}, _ servertypes.IReq
 	switch operation := sender.(type) {
 	case *managepkg.Add[models.Product]:
 		if operation.Model != nil {
-			operation.Model.SetDataAction(own.action)
 			return operation.Model.AddValid()
 		}
 	case *managepkg.Edit[models.Product]:
 		if operation.Model != nil {
-			operation.Model.SetDataAction(own.action)
-			if operation.OldItem != nil {
-				operation.OldItem.SetDataAction(own.action)
-			}
 			return operation.Model.UpdateValid(operation.OldItem)
 		}
 	}

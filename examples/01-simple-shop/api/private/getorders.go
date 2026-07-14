@@ -6,7 +6,6 @@ import (
 
 	"github.com/digitalwayhk/core/examples/01-simple-shop/api/responsemodel"
 	"github.com/digitalwayhk/core/examples/01-simple-shop/models"
-	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -33,17 +32,6 @@ func notifyOrderChange(req servertypes.IRequest, event *OrderEvent) {
 type GetOrders struct {
 	UserID   string `json:"userID"`
 	UserName string `json:"-"`
-	action   persistencetypes.IDataAction
-}
-
-// NewGetOrders 创建使用指定数据适配器的本人订单查询和订阅路由原型。
-func NewGetOrders(action persistencetypes.IDataAction) *GetOrders {
-	return &GetOrders{action: action}
-}
-
-// New 为 RouterInfo 对象池创建保留 IDataAction 的独立请求实例。
-func (own *GetOrders) New(interface{}) servertypes.IRouter {
-	return NewGetOrders(own.action)
 }
 
 // Parse 不接受客户端身份参数，身份只能来自认证上下文或 WebSocket 登录会话。
@@ -64,7 +52,7 @@ func (own *GetOrders) Validation(req servertypes.IRequest) error {
 
 // Do 只按当前 UserID 查询订单，绝不接受调用方指定其他用户。
 func (own *GetOrders) Do(servertypes.IRequest) (interface{}, error) {
-	orders, err := models.NewOrder().QueryByUser(own.action, own.UserID)
+	orders, err := models.NewOrder().QueryByUser(own.UserID)
 	if err != nil {
 		return nil, err
 	}

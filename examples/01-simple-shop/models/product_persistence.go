@@ -7,10 +7,7 @@ import (
 )
 
 // Query 直接通过模型数据适配器按可选 ID 和名称组合查询商品。
-func (own *Product) Query(action persistencetypes.IDataAction, id uint, name string) ([]*Product, error) {
-	if err := requireDataAction(action); err != nil {
-		return nil, err
-	}
+func (own *Product) Query(id uint, name string) ([]*Product, error) {
 	search := newProductSearch(own, 500)
 	if id > 0 {
 		search.AddWhereN("ID", id)
@@ -19,19 +16,16 @@ func (own *Product) Query(action persistencetypes.IDataAction, id uint, name str
 		search.AddWhereNS("Name", persistencetypes.SymbolLike, "%"+name+"%")
 	}
 	var products []*Product
-	err := action.Load(search, &products)
+	err := getDataAction().Load(search, &products)
 	return products, err
 }
 
 // FindByID 直接通过模型数据适配器查找单个商品。
-func (own *Product) FindByID(action persistencetypes.IDataAction, id uint) (*Product, error) {
-	if err := requireDataAction(action); err != nil {
-		return nil, err
-	}
+func (own *Product) FindByID(id uint) (*Product, error) {
 	search := newProductSearch(own, 1)
 	search.AddWhereN("ID", id)
 	var products []*Product
-	if err := action.Load(search, &products); err != nil {
+	if err := getDataAction().Load(search, &products); err != nil {
 		return nil, err
 	}
 	if len(products) == 0 {
@@ -41,16 +35,13 @@ func (own *Product) FindByID(action persistencetypes.IDataAction, id uint) (*Pro
 }
 
 // NameExists 检查规范化名称是否已被其他商品占用。
-func (own *Product) NameExists(action persistencetypes.IDataAction, name string, excludeID uint) (bool, error) {
-	if err := requireDataAction(action); err != nil {
-		return false, err
-	}
+func (own *Product) NameExists(name string, excludeID uint) (bool, error) {
 	search := newProductSearch(own, 2)
 	productWithName := NewProduct()
 	productWithName.Name = strings.TrimSpace(name)
 	search.AddWhereN("Hashcode", productWithName.GetHash())
 	var products []*Product
-	if err := action.Load(search, &products); err != nil {
+	if err := getDataAction().Load(search, &products); err != nil {
 		return false, err
 	}
 	for _, product := range products {

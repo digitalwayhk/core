@@ -1,15 +1,22 @@
 package models
 
 import (
-	"errors"
+	"sync"
 
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-// requireDataAction 拒绝缺失的数据适配器，避免模型静默回退到进程级具体数据库。
-func requireDataAction(action persistencetypes.IDataAction) error {
-	if action == nil {
-		return errors.New("模型持久化需要显式配置 IDataAction")
-	}
-	return nil
+var (
+	dataActionOnce sync.Once
+	dataAction     persistencetypes.IDataAction
+)
+
+// getDataAction 返回商城模型共享的数据操作接口。
+// 数据库实现的选择集中在模型持久化边界，不向 Service 或 API 路由传递。
+func getDataAction() persistencetypes.IDataAction {
+	dataActionOnce.Do(func() {
+		dataAction = entity.GetGlobalSqliteInstance(NewProduct().GetLocalDBName())
+	})
+	return dataAction
 }

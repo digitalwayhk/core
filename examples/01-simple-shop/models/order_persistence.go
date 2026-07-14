@@ -8,10 +8,7 @@ import (
 )
 
 // Insert 规范化秒级创建时间和唯一哈希后，直接通过模型数据适配器写入订单。
-func (own *Order) Insert(action persistencetypes.IDataAction) error {
-	if err := requireDataAction(action); err != nil {
-		return err
-	}
+func (own *Order) Insert() error {
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	if own.CreatedAt != nil {
 		createdAt = own.CreatedAt.UTC().Truncate(time.Second)
@@ -19,7 +16,7 @@ func (own *Order) Insert(action persistencetypes.IDataAction) error {
 	own.SetCreatedAt(createdAt)
 	own.SetUpdatedAt(createdAt)
 	own.SetHashcode(own.GetHash())
-	err := action.Insert(own)
+	err := getDataAction().Insert(own)
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
 		return NewBusinessError("同一用户每秒只能购买一次同一商品")
 	}
@@ -27,27 +24,21 @@ func (own *Order) Insert(action persistencetypes.IDataAction) error {
 }
 
 // QueryByUser 直接通过模型数据适配器查询指定用户的全部订单。
-func (own *Order) QueryByUser(action persistencetypes.IDataAction, userID string) ([]*Order, error) {
-	if err := requireDataAction(action); err != nil {
-		return nil, err
-	}
+func (own *Order) QueryByUser(userID string) ([]*Order, error) {
 	search := newOrderSearch(own, 500)
 	search.AddWhereN("UserID", strings.TrimSpace(userID))
 	var orders []*Order
-	err := action.Load(search, &orders)
+	err := getDataAction().Load(search, &orders)
 	return orders, err
 }
 
 // FindOwned 使用订单 ID 与用户 ID 组合条件查找当前用户的订单。
-func (own *Order) FindOwned(action persistencetypes.IDataAction, id uint, userID string) (*Order, error) {
-	if err := requireDataAction(action); err != nil {
-		return nil, err
-	}
+func (own *Order) FindOwned(id uint, userID string) (*Order, error) {
 	search := newOrderSearch(own, 1)
 	search.AddWhereN("ID", id)
 	search.AddWhereN("UserID", strings.TrimSpace(userID))
 	var orders []*Order
-	if err := action.Load(search, &orders); err != nil {
+	if err := getDataAction().Load(search, &orders); err != nil {
 		return nil, err
 	}
 	if len(orders) == 0 {
@@ -57,11 +48,8 @@ func (own *Order) FindOwned(action persistencetypes.IDataAction, id uint, userID
 }
 
 // Delete 直接通过模型数据适配器物理删除已查询的订单。
-func (own *Order) Delete(action persistencetypes.IDataAction) error {
-	if err := requireDataAction(action); err != nil {
-		return err
-	}
-	return action.Delete(own)
+func (own *Order) Delete() error {
+	return getDataAction().Delete(own)
 }
 
 // newOrderSearch 创建模型直接查询所需的统一 SearchItem。

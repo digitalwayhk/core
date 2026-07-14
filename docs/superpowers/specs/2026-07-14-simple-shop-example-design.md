@@ -120,10 +120,9 @@ examples/
 
 订单总价不重复入库，由 `UnitPrice * Quantity` 计算。商品后续改名或改价不会改变历史订单。
 
-Manage API 通过 `entity.NewModelList[T](nil)` 操作；public/private API 由
-`ShopService` 向路由注入同一个 `types.IDataAction`，再传给模型持久化方法，不增加
-Repository 层，也不让普通业务路由依赖 SQLite、GORM 等具体数据库实现。默认 SQLite
-只在示例 `main` 组合根中选择。
+Manage API 通过 `entity.NewModelList[T](nil)` 操作；public/private API 调用模型持久化
+方法，模型层通过单例入口复用同一个 `types.IDataAction`。不增加 Repository 层，也不
+让 Service 或普通业务路由感知 SQLite、GORM 等具体数据库实现。
 
 ## 7. 路由与权限
 
