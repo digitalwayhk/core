@@ -34,7 +34,7 @@ examples/02-shop-payment/
 ├── contract/
 ├── models/
 │   ├── data_action.go
-│   ├── transaction.go
+│   ├── data_action.go            # IDataAction 单例与事务边界
 │   ├── product.go
 │   ├── product_persistence.go
 │   ├── order.go
