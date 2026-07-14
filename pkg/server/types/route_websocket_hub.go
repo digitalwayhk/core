@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -89,36 +90,73 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 	hash := getApiHash(router)
 	state := h.routeState(info)
 	shard := state.shard(hash)
-	shard.mu.Lock()
-	subscription := shard.subscriptions[hash]
-	if subscription == nil {
-		subscription = &routeWebSocketSubscription{
-			router:  router,
-			clients: make(map[IWebSocket]IRequest),
-		}
-		shard.subscriptions[hash] = subscription
-	}
-	if _, exists := subscription.clients[client]; exists {
-		shard.mu.Unlock()
-		return hash
-	}
-	first := len(subscription.clients) == 0
-	subscription.clients[client] = req
-	shard.mu.Unlock()
-
-	if first {
-		if err := h.publishSubscription(info, hash, true); err != nil {
-			shard.mu.Lock()
-			delete(subscription.clients, client)
-			delete(shard.subscriptions, hash)
-			shard.mu.Unlock()
+	for {
+		if h.closed.Load() {
+			info.putRouter(router)
 			return 0
 		}
-		callWebSocketRegister(router, client, req)
+		shard.mu.Lock()
+		subscription := shard.subscriptions[hash]
+		created := subscription == nil
+		if created {
+			subscription = &routeWebSocketSubscription{
+				router:         router,
+				clients:        make(map[IWebSocket]routeWebSocketClientLease),
+				activationDone: make(chan struct{}),
+				activating:     true,
+			}
+			shard.subscriptions[hash] = subscription
+		}
+		if !created && subscription.activating {
+			done := subscription.activationDone
+			shard.mu.Unlock()
+			select {
+			case <-done:
+				if subscription.activationErr != nil {
+					info.putRouter(router)
+					return 0
+				}
+				continue
+			case <-h.ctx.Done():
+				info.putRouter(router)
+				return 0
+			}
+		}
+		if existing, exists := subscription.clients[client]; exists {
+			if !clientLeaseContainsRouter(existing, router) {
+				existing.additional = append(existing.additional, router)
+				subscription.clients[client] = existing
+			}
+			shard.mu.Unlock()
+			return hash
+		}
+		subscription.clients[client] = routeWebSocketClientLease{router: router, request: req}
+		shard.mu.Unlock()
+
+		if created {
+			err := h.publishSubscription(info, hash, true)
+			if err == nil && h.closed.Load() {
+				err = context.Canceled
+			}
+			shard.mu.Lock()
+			subscription.activationErr = err
+			subscription.activating = false
+			if err != nil {
+				delete(subscription.clients, client)
+				delete(shard.subscriptions, hash)
+			}
+			close(subscription.activationDone)
+			shard.mu.Unlock()
+			if err != nil {
+				info.putRouter(router)
+				return 0
+			}
+			callWebSocketRegister(router, client, req)
+		}
+		h.stats.activeClients.Add(1)
+		info.recordWebSocketConnect(hash)
+		return hash
 	}
-	h.stats.activeClients.Add(1)
-	info.recordWebSocketConnect(hash)
-	return hash
 }
 
 func (h *RouteWebSocketHub) Unregister(info *RouterInfo, hash uint64, client IWebSocket) {
@@ -130,13 +168,25 @@ func (h *RouteWebSocketHub) Unregister(info *RouterInfo, hash uint64, client IWe
 		return
 	}
 	shard := state.shard(hash)
+
+retry:
 	shard.mu.Lock()
 	subscription := shard.subscriptions[hash]
 	if subscription == nil {
 		shard.mu.Unlock()
 		return
 	}
-	req, exists := subscription.clients[client]
+	if subscription.activating {
+		done := subscription.activationDone
+		shard.mu.Unlock()
+		select {
+		case <-done:
+			goto retry
+		case <-h.ctx.Done():
+			return
+		}
+	}
+	lease, exists := subscription.clients[client]
 	if !exists {
 		shard.mu.Unlock()
 		return
@@ -153,8 +203,40 @@ func (h *RouteWebSocketHub) Unregister(info *RouterInfo, hash uint64, client IWe
 	info.recordWebSocketDisconnect(hash)
 	if remaining == 0 {
 		_ = h.publishSubscription(info, hash, false)
-		callWebSocketUnregister(router, client, req)
+		callWebSocketUnregister(router, client, lease.request)
 	}
+	if !sameRouterLease(lease.router, router) {
+		info.putRouter(lease.router)
+	}
+	for _, additional := range lease.additional {
+		info.putRouter(additional)
+	}
+	if remaining == 0 {
+		info.putRouter(router)
+	}
+}
+
+func sameRouterLease(left, right IRouter) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftType := reflect.TypeOf(left)
+	if leftType != reflect.TypeOf(right) || !leftType.Comparable() {
+		return false
+	}
+	return left == right
+}
+
+func clientLeaseContainsRouter(lease routeWebSocketClientLease, router IRouter) bool {
+	if sameRouterLease(lease.router, router) {
+		return true
+	}
+	for _, additional := range lease.additional {
+		if sameRouterLease(additional, router) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *RouteWebSocketHub) publishSubscription(info *RouterInfo, hash uint64, active bool) error {

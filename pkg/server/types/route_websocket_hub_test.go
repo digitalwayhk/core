@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingHubEventRuntime struct{}
+
+func (failingHubEventRuntime) Subscribe(string, event.Handler) (func(), error) {
+	return func() {}, nil
+}
+
+func (failingHubEventRuntime) Publish(context.Context, event.PublishRequest) error {
+	return errors.New("control publish failed")
+}
 
 type hubTestWebSocket struct {
 	mu     sync.Mutex
@@ -55,6 +66,7 @@ type hubTestRouter struct {
 	hash        uint64
 	registers   atomic.Int32
 	unregisters atomic.Int32
+	cleans      atomic.Int32
 }
 
 func (*hubTestRouter) Parse(IRequest) error             { return nil }
@@ -68,6 +80,7 @@ func (r *hubTestRouter) RegisterWebSocket(IWebSocket, IRequest) {
 func (r *hubTestRouter) UnRegisterWebSocket(IWebSocket, IRequest) {
 	r.unregisters.Add(1)
 }
+func (r *hubTestRouter) Clean() { r.cleans.Add(1) }
 func (*hubTestRouter) NoticeFiltersRouter(message interface{}, _ IRouter) (bool, interface{}) {
 	return true, message
 }
@@ -149,6 +162,92 @@ func TestRouteWebSocketHubDuplicateRegisterIsIdempotent(t *testing.T) {
 
 	assert.Equal(t, int32(1), router.registers.Load())
 	assert.Equal(t, 1, hub.ActiveClientCount(info))
+}
+
+func TestRouteWebSocketHubDuplicateRegisterReleasesNewLeaseOnUnregister(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/orders")
+	retained := &hubTestRouter{info: info, hash: 29}
+	duplicate := &hubTestRouter{info: info, hash: 29}
+	info.SetInstance(retained)
+	client := &hubTestWebSocket{}
+
+	require.Equal(t, uint64(29), hub.Register(info, retained, client, &shardTestRequest{}))
+	require.Equal(t, uint64(29), hub.Register(info, duplicate, client, &shardTestRequest{}))
+	require.Equal(t, uint64(29), hub.Register(info, duplicate, client, &shardTestRequest{}))
+
+	assert.Zero(t, retained.cleans.Load())
+	assert.Zero(t, duplicate.cleans.Load(), "会话表仍引用的附加租约不得提前释放")
+	assert.Equal(t, 1, hub.ActiveClientCount(info))
+
+	hub.Unregister(info, 29, client)
+	assert.Equal(t, int32(1), retained.cleans.Load())
+	assert.Equal(t, int32(1), duplicate.cleans.Load(), "退订时必须释放重复订阅产生的附加租约")
+}
+
+func TestRouteWebSocketHubReleasesSubscriptionRouterAfterLastClient(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/orders")
+	router := &hubTestRouter{info: info, hash: 30}
+	info.SetInstance(router)
+	client := &hubTestWebSocket{}
+	req := &shardTestRequest{}
+
+	require.Equal(t, uint64(30), hub.Register(info, router, client, req))
+	assert.Zero(t, router.cleans.Load(), "活跃订阅必须持有 Router 租约")
+
+	hub.Unregister(info, 30, client)
+
+	assert.Equal(t, int32(1), router.unregisters.Load(), "注销回调必须在租约释放前执行")
+	assert.Equal(t, int32(1), router.cleans.Load(), "最后一个客户退订后必须释放 Router")
+}
+
+func TestRouteWebSocketHubReleasesEachClientRouterLease(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/orders")
+	retained := &hubTestRouter{info: info, hash: 31}
+	additional := &hubTestRouter{info: info, hash: 31}
+	info.SetInstance(retained)
+	firstClient := &hubTestWebSocket{}
+	secondClient := &hubTestWebSocket{}
+
+	require.Equal(t, uint64(31), hub.Register(info, retained, firstClient, &shardTestRequest{}))
+	require.Equal(t, uint64(31), hub.Register(info, additional, secondClient, &shardTestRequest{}))
+
+	assert.Zero(t, retained.cleans.Load())
+	assert.Zero(t, additional.cleans.Load(), "活跃客户的 Router 租约不得提前回收")
+
+	hub.Unregister(info, 31, secondClient)
+	assert.Equal(t, int32(1), additional.cleans.Load(), "客户退订时必须释放自己的 Router 租约")
+	assert.Zero(t, retained.cleans.Load(), "canonical Router 必须保留到 hash 最后退订")
+
+	hub.Unregister(info, 31, firstClient)
+	assert.Equal(t, int32(1), retained.cleans.Load())
+}
+
+func TestRouteWebSocketHubCloseReleasesSubscriptionRouter(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	hub := NewRouteWebSocketHub("service-a", bridge)
+	info := newHubTestRoute("service-a", "/ws/orders")
+	router := &hubTestRouter{info: info, hash: 32}
+	info.SetInstance(router)
+	require.Equal(t, uint64(32), hub.Register(info, router, &hubTestWebSocket{}, &shardTestRequest{}))
+
+	require.NoError(t, hub.Close(context.Background()))
+	assert.Equal(t, int32(1), router.cleans.Load(), "Hub 关闭必须释放所有 Router 租约")
+	require.NoError(t, bridge.Close(context.Background()))
+}
+
+func TestRouteWebSocketHubPublishFailureReleasesRouterLease(t *testing.T) {
+	hub := NewRouteWebSocketHub("service-a", failingHubEventRuntime{})
+	info := newHubTestRoute("service-a", "/ws/orders")
+	router := &hubTestRouter{info: info, hash: 33}
+	info.SetInstance(router)
+
+	assert.Zero(t, hub.Register(info, router, &hubTestWebSocket{}, &shardTestRequest{}))
+	assert.Equal(t, int32(1), router.cleans.Load())
+	assert.Empty(t, hub.SubscribedHashes(info))
+	require.NoError(t, hub.Close(context.Background()))
 }
 
 func TestRouteWebSocketHubCleanupUpdatesSubscriptionState(t *testing.T) {

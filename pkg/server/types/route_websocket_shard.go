@@ -10,8 +10,19 @@ type routeWebSocketShard struct {
 }
 
 type routeWebSocketSubscription struct {
-	router  IRouter
-	clients map[IWebSocket]IRequest
+	router         IRouter
+	clients        map[IWebSocket]routeWebSocketClientLease
+	activationDone chan struct{}
+	activationErr  error
+	activating     bool
+}
+
+// routeWebSocketClientLease 记录一个连接在订阅期间持有的请求对象。
+// Router 由 Hub 接管，在客户退订时归还所属 RouterInfo 的对象池。
+type routeWebSocketClientLease struct {
+	router     IRouter
+	request    IRequest
+	additional []IRouter
 }
 
 type routeWebSocketState struct {
