@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -51,15 +52,16 @@ func WithInvalidationBridge(bridge InvalidationBridge) Option {
 }
 
 type Manager struct {
-	service string
-	config  config.RouteCacheConfig
-	l1      *l1Cache
-	l2      *BadgerL2
-	redis   *RedisL3
-	events  InvalidationBridge
-	flight  syncx.SingleFlight
-	closed  atomic.Bool
-	state   atomic.Uint32
+	service   string
+	config    config.RouteCacheConfig
+	l1        *l1Cache
+	l2        *BadgerL2
+	redis     *RedisL3
+	events    InvalidationBridge
+	flight    syncx.SingleFlight
+	closed    atomic.Bool
+	state     atomic.Uint32
+	ttlJitter func(time.Duration) time.Duration
 
 	invalidationReady atomic.Bool
 	recoveryMu        sync.Mutex
@@ -83,11 +85,12 @@ func NewManager(service string, cfg config.RouteCacheConfig, options ...Option) 
 		}
 	}
 	manager := &Manager{
-		service: service,
-		config:  cfg,
-		events:  resolved.events,
-		flight:  syncx.NewSingleFlight(),
-		routes:  make(map[string]routePolicy),
+		service:   service,
+		config:    cfg,
+		events:    resolved.events,
+		flight:    syncx.NewSingleFlight(),
+		routes:    make(map[string]routePolicy),
+		ttlJitter: jitterTTL,
 	}
 	manager.state.Store(uint32(StateEnabled))
 
@@ -237,6 +240,9 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 	if ttl <= 0 {
 		ttl = m.routeTTL(route)
 	}
+	if m.ttlJitter != nil {
+		ttl = m.ttlJitter(ttl)
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -262,6 +268,14 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 	}
 	m.l1.Set(key, l1Value, ttl)
 	return nil
+}
+
+func jitterTTL(ttl time.Duration) time.Duration {
+	span := ttl / 10
+	if span <= 0 {
+		return ttl
+	}
+	return ttl - span + time.Duration(rand.Int64N(int64(2*span+1)))
 }
 
 func (m *Manager) Delete(route string, source interface{}) error {
