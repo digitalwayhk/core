@@ -27,12 +27,17 @@ type ServiceRouter struct {
 }
 
 func DefaultRouterInfo(item interface{}) *types.RouterInfo {
+	return DefaultRouterInfoWithOptions(item)
+}
+
+// DefaultRouterInfoWithOptions 创建路由元数据，并在注册冻结前应用 options。
+func DefaultRouterInfoWithOptions(item interface{}, options ...RouterInfoOption) *types.RouterInfo {
 	pack, name := GetRouterPackAndTypeName(item)
 	index := strings.Index(pack, "api")
 	if index <= 1 {
 		panic(fmt.Sprintf("api package not found,Path:%s  \n 请修改包名称或手动指定路由路径。", pack))
 	}
-	return NewRouterInfo(item, pack, name)
+	return NewRouterInfoWithOptions(item, pack, name, options...)
 }
 func NewServiceRouter(service *ServiceContext, tis types.IService) *ServiceRouter {
 	sr := &ServiceRouter{
@@ -50,42 +55,63 @@ func NewServiceRouter(service *ServiceContext, tis types.IService) *ServiceRoute
 	return sr
 }
 func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
+	registered := make([]*types.RouterInfo, 0, len(routers))
 	for _, router := range routers {
 		info := router.RouterInfo()
-		if info.ServiceName != own.Service.Service.Name {
-			tsn := strings.ToLower(info.ServiceName)
-			ssn := strings.ToLower(own.Service.Service.Name)
-			info.Path = strings.Replace(info.Path, tsn, ssn, -1)
-			info.ServiceName = own.Service.Service.Name
+		if info.PrepareRegistration(own.Service.Service.Name) {
+			if info.ServiceName != own.Service.Service.Name {
+				tsn := strings.ToLower(info.ServiceName)
+				ssn := strings.ToLower(own.Service.Service.Name)
+				info.Path = strings.Replace(info.Path, tsn, ssn, -1)
+				info.ServiceName = own.Service.Service.Name
+			}
+			info.ID = utils.HashCode64(info.Path)
+			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
+			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
+			info.Freeze(own.Service.Service.Name)
 		}
-		info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
-		info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
-		info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
-		info.Freeze(own.Service.Service.Name)
-		if info.PathType == types.PublicType {
-			own.publicAPI[info.Path] = info
+		path := info.GetPath()
+		pathType := info.GetPathType()
+		if pathType == types.PublicType {
+			own.publicAPI[path] = info
 		}
-		if info.PathType == types.PrivateType {
-			own.privateAPI[info.Path] = info
+		if pathType == types.PrivateType {
+			own.privateAPI[path] = info
 		}
-		if info.PathType == types.ManageType {
-			own.manageAPI[info.Path] = info
+		if pathType == types.ManageType {
+			own.manageAPI[path] = info
 		}
-		if _, ok := own.allAPI[info.Path]; !ok {
-			own.allAPI[info.Path] = info
+		if _, ok := own.allAPI[path]; !ok {
+			own.allAPI[path] = info
 		} else {
-			panic(fmt.Sprintf("service :%s router already exists. path:%s", info.ServiceName, info.Path))
+			panic(fmt.Sprintf("service :%s router already exists. path:%s", info.GetServiceName(), path))
 		}
+		registered = append(registered, info)
+	}
+	for _, info := range registered {
+		registeredRouterInfos.register(info)
+	}
+}
+
+func (own *ServiceRouter) unregisterRouterInfos() {
+	if own == nil {
+		return
+	}
+	for _, info := range own.allAPI {
+		registeredRouterInfos.unregister(info)
 	}
 }
 func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
-		info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
-		info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
-		info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
-		info.Freeze(own.Service.Service.Name)
-		own.serverManagerAPI[info.Path] = info
+		if info.PrepareRegistration(own.Service.Service.Name) {
+			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
+			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
+			info.Freeze(own.Service.Service.Name)
+		}
+		own.serverManagerAPI[info.GetPath()] = info
 	}
 }
 func (own *ServiceRouter) GetRouters() []*types.RouterInfo {
@@ -161,6 +187,17 @@ func GetRouterPackAndTypeName(item interface{}) (string, string) {
 	return pack, name
 }
 func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
+	return NewRouterInfoWithOptions(item, pack, name)
+}
+
+// NewRouterInfoWithOptions 使用指定包和类型名称创建路由元数据，并在注册冻结前应用 options。
+func NewRouterInfoWithOptions(item interface{}, pack, name string, options ...RouterInfoOption) *types.RouterInfo {
+	sname := utils.GetTypeName(item)
+	if !config.IsServerInitializing() {
+		if info := registeredRouterInfos.resolve(pack, name, sname); info != nil {
+			return info
+		}
+	}
 	defer func() {
 		if err := recover(); err != nil {
 			logx.Errorw("router_creation_panicked",
@@ -204,7 +241,6 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 			}
 		}
 	}
-	sname := utils.GetTypeName(item)
 	info := &types.RouterInfo{
 		ID:                utils.HashCode64(Path),
 		Path:              Path,
@@ -219,5 +255,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 		WebSocketWaitTime: time.Second * 10,
 	}
 	info.SetInstance(item.(types.IRouter))
+	applyRouterInfoOptions(info, options)
+	info.ID = utils.HashCode64(info.Path)
 	return info
 }

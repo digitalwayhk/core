@@ -486,6 +486,7 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
 func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
+	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
@@ -555,6 +556,15 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
+}
+
+func assertServiceRoutesRegistrationMutable(owner string, routes []types.IRouter) {
+	for _, route := range routes {
+		if route == nil {
+			continue
+		}
+		route.RouterInfo().PrepareRegistration(owner)
+	}
 }
 func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	service := &types.Service{
@@ -671,6 +681,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
+	if !state && own.Router != nil {
+		own.Router.unregisterRouterInfos()
+	}
 	if !state {
 		defer func() {
 			contextRegistry.remove(own.Service.Name, own)
@@ -1119,14 +1132,14 @@ func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse
 		TraceID:       strconv.Itoa(int(own.NewID())),
 		SourceService: own.Service.Name,
 		SourcePath:    "",
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        "",
 		UserName:      "",
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,
 		Instance:      api,
-		HttpMethod:    info.Method,
+		HttpMethod:    info.GetMethod(),
 	}
 	return own.CallService(pl)
 }

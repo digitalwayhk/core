@@ -63,15 +63,15 @@ var (
 // 在 RouterInfo 内继续累积服务级队列、连接和跨节点状态。Destroy 必须幂等，只关闭
 // 本路由持有的资源，不得影响其他服务或其他 RouterInfo。
 type RouterInfo struct {
-	ID                uint64
-	Path              string
-	Auth              bool
-	Method            string
-	ServiceName       string
-	PackPath          string //包路径
-	PathType          ApiType
-	StructName        string
-	InstanceName      string
+	ID                uint64  // Deprecated: 注册后请使用 GetID；仅为源码兼容保留导出字段。
+	Path              string  // Deprecated: 注册后请使用 GetPath；仅为源码兼容保留导出字段。
+	Auth              bool    // Deprecated: 注册后请使用 GetAuth；仅为源码兼容保留导出字段。
+	Method            string  // Deprecated: 注册后请使用 GetMethod；仅为源码兼容保留导出字段。
+	ServiceName       string  // Deprecated: 注册后请使用 GetServiceName；仅为源码兼容保留导出字段。
+	PackPath          string  // Deprecated: 注册后请使用 GetPackPath；仅为源码兼容保留导出字段。
+	PathType          ApiType // Deprecated: 注册后请使用 GetPathType；仅为源码兼容保留导出字段。
+	StructName        string  // Deprecated: 注册后请使用 GetStructName；仅为源码兼容保留导出字段。
+	InstanceName      string  // Deprecated: 注册后请使用 GetInstanceName；仅为源码兼容保留导出字段。
 	instance          IRouter
 	WebSocketWaitTime time.Duration                            //websocket默认通知的循环等待时间 默认:10秒
 	Subscriber        map[ObserveState]map[string]*ObserveArgs //订阅者
@@ -86,7 +86,7 @@ type RouterInfo struct {
 	// PoolSize 控制该路由对象池的容量。0 表示使用默认自适应值（基于 GOMAXPROCS）。
 	// 高并发路由可适当增大（如 512），低频管理路由可设为 8 减少内存占用。
 	// 必须在路由注册完成（Freeze）前设置，之后修改无效。
-	PoolSize       int
+	PoolSize       int // Deprecated: 注册后请使用 GetPoolSize；仅为源码兼容保留导出字段。
 	channelPool    *ChannelPool
 	eventRuntime   RouteEventRuntime
 	eventCancels   map[ObserveState]map[string]func()
@@ -102,14 +102,17 @@ type RouterInfo struct {
 }
 
 type routerMetadata struct {
+	id           uint64
 	path         string
 	serviceName  string
 	auth         bool
 	method       string
+	packPath     string
 	pathType     ApiType
 	structName   string
 	instanceName string
 	instanceType string
+	poolSize     int
 }
 
 // Freeze 在路由完成注册后冻结身份元数据。重复冻结仅在所有者和元数据一致时幂等。
@@ -134,14 +137,17 @@ func (own *RouterInfo) currentMetadataLocked() routerMetadata {
 		instanceType = reflect.TypeOf(own.instance).String()
 	}
 	return routerMetadata{
+		id:           own.ID,
 		path:         own.Path,
 		serviceName:  own.ServiceName,
 		auth:         own.Auth,
 		method:       own.Method,
+		packPath:     own.PackPath,
 		pathType:     own.PathType,
 		structName:   own.StructName,
 		instanceName: own.InstanceName,
 		instanceType: instanceType,
+		poolSize:     own.PoolSize,
 	}
 }
 
@@ -155,6 +161,22 @@ func (own *RouterInfo) assertMetadataFrozen() {
 	own.RLock()
 	defer own.RUnlock()
 	own.assertMetadataFrozenLocked()
+}
+
+// PrepareRegistration 校验 RouterInfo 的注册所有者。
+// 返回 true 表示元数据尚未冻结，调用方可以配置并完成首次注册；返回 false 表示同一
+// owner 正在复用已冻结元数据，调用方只能读取，不能再次配置或绑定运行组件。
+func (own *RouterInfo) PrepareRegistration(owner string) bool {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	if !own.frozen {
+		return true
+	}
+	if own.owner != owner {
+		panic("router metadata owner conflict")
+	}
+	return false
 }
 
 func (own *RouterInfo) New() IRouter {
@@ -232,6 +254,7 @@ func (own *RouterInfo) SetInstance(instance IRouter) {
 func (own *RouterInfo) SetEventBridge(owner string, runtime RouteEventRuntime) {
 	own.Lock()
 	defer own.Unlock()
+	own.assertMetadataFrozenLocked()
 	if own.frozen && own.owner != owner {
 		panic("router event bridge owner conflict")
 	}
@@ -258,6 +281,7 @@ func (own *RouterInfo) SetEventBridge(owner string, runtime RouteEventRuntime) {
 func (own *RouterInfo) SetWebSocketHub(owner string, hub *RouteWebSocketHub) {
 	own.Lock()
 	defer own.Unlock()
+	own.assertMetadataFrozenLocked()
 	if own.frozen && own.owner != owner {
 		panic("router websocket hub owner conflict")
 	}
@@ -268,6 +292,7 @@ func (own *RouterInfo) SetWebSocketHub(owner string, hub *RouteWebSocketHub) {
 func (own *RouterInfo) SetCacheManager(owner string, runtime RouteCacheRuntime) {
 	own.Lock()
 	defer own.Unlock()
+	own.assertMetadataFrozenLocked()
 	if own.frozen && own.owner != owner {
 		panic("router cache manager owner conflict")
 	}
@@ -289,6 +314,70 @@ func (own *RouterInfo) GetServiceName() string {
 	defer own.RUnlock()
 	own.assertMetadataFrozenLocked()
 	return own.ServiceName
+}
+
+// GetID 返回路由注册期确定的稳定 ID。
+func (own *RouterInfo) GetID() uint64 {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.ID
+}
+
+// GetAuth 返回路由注册期确定的认证要求。
+func (own *RouterInfo) GetAuth() bool {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.Auth
+}
+
+// GetMethod 返回路由注册期确定的 HTTP 方法。
+func (own *RouterInfo) GetMethod() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.Method
+}
+
+// GetPackPath 返回路由实现的包路径。
+func (own *RouterInfo) GetPackPath() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.PackPath
+}
+
+// GetPathType 返回路由注册类型。
+func (own *RouterInfo) GetPathType() ApiType {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.PathType
+}
+
+// GetStructName 返回路由实例的结构名称。
+func (own *RouterInfo) GetStructName() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.StructName
+}
+
+// GetInstanceName 返回用于生成默认路径的实例名称。
+func (own *RouterInfo) GetInstanceName() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.InstanceName
+}
+
+// GetPoolSize 返回路由注册期确定的对象池容量配置。
+func (own *RouterInfo) GetPoolSize() int {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return own.PoolSize
 }
 
 //	func (own *RouterInfo) limit(ip string, userid uint) error {
@@ -464,6 +553,7 @@ func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {
 	}
 	own.Lock()
 	defer own.Unlock()
+	own.assertMetadataFrozenLocked()
 	if own.Subscriber == nil {
 		own.Subscriber = make(map[ObserveState]map[string]*ObserveArgs, 3)
 	}
@@ -548,6 +638,7 @@ func snapshotNotifyValue(value interface{}) interface{} {
 func (own *RouterInfo) subscriberSnapshot(state ObserveState) []*ObserveArgs {
 	own.RLock()
 	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
 	source := own.Subscriber[state]
 	items := make([]*ObserveArgs, 0, len(source))
 	for _, item := range source {
@@ -605,6 +696,7 @@ func (own *RouterInfo) errorNotify(api interface{}, traceid string, resp interfa
 }
 
 func (own *RouterInfo) publishObservation(state ObserveState, api interface{}, traceID string, response interface{}) bool {
+	own.assertMetadataFrozen()
 	own.RLock()
 	runtime := own.eventRuntime
 	eventType := own.observeEventType(state)
@@ -646,6 +738,7 @@ type cacheObject struct {
 }
 
 func (own *RouterInfo) UseCache(cacheTime time.Duration) {
+	own.assertMetadataFrozen()
 	own.Lock()
 	own.useCache = true
 	own.cacheTime = cacheTime
@@ -666,6 +759,7 @@ func (own *RouterInfo) UseCache(cacheTime time.Duration) {
 	}
 }
 func (own *RouterInfo) getCache(api IRouter) *cacheObject {
+	own.assertMetadataFrozen()
 	own.RLock()
 	runtime := own.cacheRuntime
 	path := own.Path
@@ -680,6 +774,7 @@ func (own *RouterInfo) getCache(api IRouter) *cacheObject {
 	return nil
 }
 func (own *RouterInfo) setCache(api IRouter, value interface{}) {
+	own.assertMetadataFrozen()
 	own.RLock()
 	runtime := own.cacheRuntime
 	path := own.Path
@@ -696,6 +791,7 @@ func (own *RouterInfo) setCache(api IRouter, value interface{}) {
 	}
 }
 func (own *RouterInfo) FailureCache(api IRouter) {
+	own.assertMetadataFrozen()
 	own.RLock()
 	runtime := own.cacheRuntime
 	path := own.Path
@@ -746,6 +842,7 @@ func (own *RouterInfo) UnRegisterWebSocketClient(router IRouter, client IWebSock
 }
 
 func (own *RouterInfo) Destroy() {
+	own.assertMetadataFrozen()
 	own.RLock()
 	hub := own.webSocketHub
 	own.RUnlock()
