@@ -79,8 +79,7 @@ func (s *shopSuite) waitReady() error {
 		var tokenEnvelope integration.ResponseEnvelope
 		_ = json.NewDecoder(tokenResponse.Body).Decode(&tokenEnvelope)
 		_ = tokenResponse.Body.Close()
-		var token string
-		_ = json.Unmarshal(tokenEnvelope.Data, &token)
+		token, _ := integration.AccessTokenFromData(tokenEnvelope.Data)
 		if tokenResponse.StatusCode != http.StatusOK || !tokenEnvelope.Success || token == "" {
 			time.Sleep(50 * time.Millisecond)
 			continue

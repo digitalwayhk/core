@@ -53,6 +53,28 @@ type ResponseEnvelope struct {
 	Data         json.RawMessage `json:"data"`
 }
 
+// TokenResponse 对应框架 Callback、Refresh 和 TestToken 的结构化 Token 响应。
+type TokenResponse struct {
+	AccessToken      string `json:"access_token"`
+	RefreshToken     string `json:"refresh_token,omitempty"`
+	TokenType        string `json:"token_type"`
+	AccessExpiresIn  int64  `json:"access_expires_in"`
+	RefreshExpiresIn int64  `json:"refresh_expires_in,omitempty"`
+}
+
+// AccessTokenFromData 优先解析结构化 Token 响应，并在过渡期兼容旧字符串响应。
+func AccessTokenFromData(data json.RawMessage) (string, error) {
+	var response TokenResponse
+	if err := json.Unmarshal(data, &response); err == nil && strings.TrimSpace(response.AccessToken) != "" {
+		return response.AccessToken, nil
+	}
+	var legacy string
+	if err := json.Unmarshal(data, &legacy); err == nil && strings.TrimSpace(legacy) != "" {
+		return legacy, nil
+	}
+	return "", fmt.Errorf("响应中缺少 access_token")
+}
+
 // SetJSONConfigLogLevel 仅用于已由框架生成的临时集成测试配置。
 // benchmark 可用它关闭 info 级访问日志，避免把日志 I/O 误计为业务热路径成本。
 func SetJSONConfigLogLevel(configPath, level string) error {
@@ -351,8 +373,8 @@ func (s *Suite) TokenFor(t testing.TB, userID string, tokenType int) string {
 	}
 	envelope := s.RequestJSON(t, http.MethodGet, path, "", nil)
 	require.True(t, envelope.Success, envelope.ErrorMessage)
-	var token string
-	require.NoError(t, json.Unmarshal(envelope.Data, &token))
+	token, err := AccessTokenFromData(envelope.Data)
+	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	return token
 }
