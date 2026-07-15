@@ -38,7 +38,11 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 	return nil
 }
 
-func ServerRouterInfo(item interface{}, options ...router.RouterInfoOption) *types.RouterInfo {
+func ServerRouterInfo(item interface{}) *types.RouterInfo {
+	return ServerRouterInfoWithOptions(item)
+}
+
+func ServerRouterInfoWithOptions(item interface{}, options ...router.RouterInfoOption) *types.RouterInfo {
 	pack, name := router.GetRouterPackAndTypeName(item)
 	options = append([]router.RouterInfoOption{
 		router.WithPathResolver(func(info *types.RouterInfo) string {

@@ -32,7 +32,7 @@ func (own *QueryConfig) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *QueryConfig) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
+	return api.ServerRouterInfoWithOptions(own, withSystemEndpointRateLimit())
 }
 
 func (own *QueryConfig) GetConfigPath(address string, port int) (*config.ServerConfig, error) {

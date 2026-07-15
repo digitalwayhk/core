@@ -52,5 +52,5 @@ func (*TestToken) GetResponse() interface{} {
 }
 
 func (own *TestToken) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own, router.WithMethod("GET"))
+	return api.ServerRouterInfoWithOptions(own, router.WithMethod("GET"))
 }

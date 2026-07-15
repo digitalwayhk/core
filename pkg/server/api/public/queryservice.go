@@ -44,7 +44,7 @@ func (own *QueryService) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *QueryService) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
+	return api.ServerRouterInfoWithOptions(own, withSystemEndpointRateLimit())
 }
 func toData(sr *router.ServiceContext, path string) *ServiceData {
 	title := ""

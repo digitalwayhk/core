@@ -35,7 +35,7 @@ func (own *OpenAPI) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *OpenAPI) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
+	return api.ServerRouterInfoWithOptions(own, withSystemEndpointRateLimit())
 }
 
 func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {

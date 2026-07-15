@@ -39,6 +39,15 @@ type RefreshTokenIdentity struct {
 	ExpiresAt time.Time
 }
 
+// AccessTokenIdentity 是从已验证 Access Token 中提取的身份。
+type AccessTokenIdentity struct {
+	UID       string
+	Username  string
+	AuthType  types.AuthType
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+}
+
 // IssueTokenPair 使用同一 IssuedAt 颁发 Access Token 和可选的 Refresh Token。
 func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 	if err := validateTokenIssueRequest(req); err != nil {
@@ -115,6 +124,55 @@ func baseTokenClaims(uid, username string, authType types.AuthType, tokenUse str
 func signMapClaims(claims jwt.MapClaims, secret string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
+}
+
+// ValidateAccessToken 验证签名、算法、用途、认证类型和有效期后返回身份。
+func ValidateAccessToken(tokenString, secret string, expectedAuthType types.AuthType, now time.Time) (*AccessTokenIdentity, error) {
+	if tokenString == "" || secret == "" || now.IsZero() {
+		return nil, errors.New("Access Token 验证参数无效")
+	}
+	if expectedAuthType != types.AuthTypeUser && expectedAuthType != types.AuthTypeManage && expectedAuthType != types.AuthTypeServerManage {
+		return nil, errors.New("Access Token 认证类型无效")
+	}
+
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithoutClaimsValidation(),
+	)
+	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, errors.New("Access Token 签名算法无效")
+		}
+		return []byte(secret), nil
+	})
+	if err != nil || token == nil || !token.Valid {
+		return nil, errors.New("Access Token 签名无效")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("Access Token Claims 无效")
+	}
+
+	uid, _ := claims["uid"].(string)
+	username, _ := claims["uname"].(string)
+	authType, _ := claims["auth_type"].(string)
+	tokenUse, _ := claims["token_use"].(string)
+	issuedAt, iatOK := numericDate(claims["iat"])
+	expiresAt, expOK := numericDate(claims["exp"])
+	if uid == "" || tokenUse != "access" || authType != string(expectedAuthType) || !iatOK || !expOK {
+		return nil, errors.New("Access Token Claims 不完整")
+	}
+	if expiresAt <= now.Unix() || issuedAt > now.Unix() || issuedAt > expiresAt {
+		return nil, errors.New("Access Token 已过期或时间无效")
+	}
+
+	return &AccessTokenIdentity{
+		UID:       uid,
+		Username:  username,
+		AuthType:  expectedAuthType,
+		IssuedAt:  time.Unix(issuedAt, 0).UTC(),
+		ExpiresAt: time.Unix(expiresAt, 0).UTC(),
+	}, nil
 }
 
 // ValidateRefreshToken 验证签名、算法、用途、认证类型和有效期后返回身份。

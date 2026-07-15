@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
@@ -99,46 +100,15 @@ func isSensitiveKey(key string) bool {
 	}
 	return false
 }
+
+// ValidateJWTToken 保留为最终用户 Access Token 的兼容包装。
+// Deprecated: 使用 ValidateAccessToken 并显式传入期望的认证类型和当前时间。
 func ValidateJWTToken(tokenString string, auth config.AuthSecret) (string, string, error) {
-	return defaultToken(tokenString, auth.AccessSecret)
-}
-
-func defaultToken(tokenString, secret string) (string, string, error) {
-	if tokenString == "" || secret == "" {
-		return "", "", errors.New("Access Token 验证参数无效")
+	identity, err := ValidateAccessToken(tokenString, auth.AccessSecret, types.AuthTypeUser, time.Now())
+	if err != nil {
+		return "", "", err
 	}
-	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
-		jwt.WithoutClaimsValidation(),
-	)
-	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, errors.New("Access Token 签名算法无效")
-		}
-		return []byte(secret), nil
-	})
-	if err != nil || token == nil || !token.Valid {
-		return "", "", errors.New("Access Token 签名无效")
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", "", errors.New("Access Token Claims 无效")
-	}
-
-	uid, _ := claims["uid"].(string)
-	username, _ := claims["uname"].(string)
-	authType, _ := claims["auth_type"].(string)
-	tokenUse, _ := claims["token_use"].(string)
-	issuedAt, iatOK := numericDate(claims["iat"])
-	expiresAt, expOK := numericDate(claims["exp"])
-	now := time.Now().Unix()
-	if uid == "" || tokenUse != "access" || authType != "auth" || !iatOK || !expOK {
-		return "", "", errors.New("Access Token Claims 不完整")
-	}
-	if expiresAt <= now || issuedAt > now || issuedAt > expiresAt {
-		return "", "", errors.New("Access Token 已过期或时间无效")
-	}
-	return uid, username, nil
+	return identity.UID, identity.Username, nil
 }
 
 func GetJWTExpiry(tokenString string) int64 {

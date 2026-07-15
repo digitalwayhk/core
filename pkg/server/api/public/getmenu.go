@@ -53,7 +53,7 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *GetMenu) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own,
+	return api.ServerRouterInfoWithOptions(own,
 		router.WithMethod(http.MethodGet),
 		withSystemEndpointRateLimit(),
 	)

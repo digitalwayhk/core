@@ -236,17 +236,20 @@ func (s *SessionSubscriptions) Logon(req *SessionRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	var sid string
-	var sname string
-	var err error
-	if sid, sname, err = safe.ValidateJWTToken(req.Token, s.manage.serviceContext.Config.Auth); err != nil {
+	identity, err := safe.ValidateAccessToken(
+		req.Token,
+		s.manage.serviceContext.Config.Auth.AccessSecret,
+		types.AuthTypeUser,
+		time.Now(),
+	)
+	if err != nil {
 		return err
 	}
-	if sid == "" {
+	if identity.UID == "" {
 		return errors.New("invalid session request")
 	}
-	req.userID = sid
-	req.userName = sname
+	req.userID = identity.UID
+	req.userName = identity.Username
 	s.req = req
 
 	return nil

@@ -57,6 +57,38 @@ func TestValidateRefreshTokenRejectsAccessToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestValidateAccessTokenUsesExplicitAuthType(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	token := signTokenClaims(t, "access-secret", jwt.MapClaims{
+		"uid":       "manager-1",
+		"uname":     "管理员",
+		"auth_type": "manage",
+		"token_use": "access",
+		"iat":       now.Add(-time.Minute).Unix(),
+		"exp":       now.Add(time.Hour).Unix(),
+	})
+
+	verified, err := ValidateAccessToken(token, "access-secret", types.AuthTypeManage, now)
+	require.NoError(t, err)
+	require.Equal(t, "manager-1", verified.UID)
+	require.Equal(t, "管理员", verified.Username)
+	require.Equal(t, types.AuthTypeManage, verified.AuthType)
+}
+
+func TestValidateAccessTokenRejectsWrongAuthType(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	token := signTokenClaims(t, "access-secret", jwt.MapClaims{
+		"uid":       "manager-1",
+		"auth_type": "manage",
+		"token_use": "access",
+		"iat":       now.Add(-time.Minute).Unix(),
+		"exp":       now.Add(time.Hour).Unix(),
+	})
+
+	_, err := ValidateAccessToken(token, "access-secret", types.AuthTypeUser, now)
+	require.Error(t, err)
+}
+
 func TestValidateRefreshTokenRejectsWrongAuthType(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0).UTC()
 	token := signTokenClaims(t, "refresh-secret", jwt.MapClaims{
