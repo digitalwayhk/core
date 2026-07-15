@@ -94,8 +94,9 @@ func (*Callback) GetResponse() interface{} {
 }
 
 func (own *Callback) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(own)
-	info.Method = http.MethodGet
-	info.Path = "/api/callback"
-	return info
+	return router.DefaultRouterInfoWithOptions(own,
+		router.WithMethod(http.MethodGet),
+		router.WithPath("/api/callback"),
+		withAuthEndpointRateLimit(),
+	)
 }

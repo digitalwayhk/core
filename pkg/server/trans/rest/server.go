@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
+	zeroresthandler "github.com/zeromicro/go-zero/rest/handler"
 )
 
 type Server struct {
@@ -198,40 +201,101 @@ func (own *Server) register() error {
 }
 
 func handers(own *Server, api *types.RouterInfo) error {
-	opts := make([]rest.RouteOption, 0)
-	path := api.Path
-	handler := RouteHandler(own.context.Router)
+	path := api.GetPath()
+	var handler http.Handler = http.HandlerFunc(RouteHandler(own.context.Router))
 	if api.GetAuth() {
 		auth := own.context.Config.Auth
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			auth = own.context.Config.ManageAuth
 		}
 		if selectAuthMode(auth) == authModeLogto {
-			authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), auth.Logto)
+			authHandler, err := own.newLogtoHandler(handler.ServeHTTP, auth.Logto)
 			if err != nil {
 				return fmt.Errorf("initialize Logto authentication: %w", err)
 			}
-			handler = authHandler.ServeHTTP
+			handler = authHandler
 		} else {
-			opts = append(opts, rest.WithJwt(auth.AccessSecret))
+			handler = zeroresthandler.Authorize(auth.AccessSecret)(handler)
 		}
 	}
-	handler = securityHeaders(http.HandlerFunc(handler)).ServeHTTP
+	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))
 
 	own.Server.AddRoutes([]rest.Route{
 		{
-			Method:  api.Method,
+			Method:  api.GetMethod(),
 			Path:    path,
-			Handler: handler,
+			Handler: handler.ServeHTTP,
 		},
-	}, opts...)
+	})
 	logx.Debugw("route_registered",
 		logx.Field("service", own.context.Config.Name),
 		logx.Field("route", path),
-		logx.Field("method", api.Method),
-		logx.Field("auth", api.Auth),
+		logx.Field("method", api.GetMethod()),
+		logx.Field("auth", api.GetAuth()),
 	)
 	return nil
+}
+
+func externalRateLimitHandler(sc *router.ServiceContext, api *types.RouterInfo, next http.Handler) http.Handler {
+	if next == nil {
+		next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
+		})
+	}
+	policy := api.GetExternalRateLimit()
+	if policy == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isDirectLoopbackRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if sc == nil || sc.Config == nil || sc.PublicRateLimiter == nil {
+			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
+			return
+		}
+		clientIP := utils.ClientPublicIP(r, sc.Config.TrustedProxies...)
+		if sc.PublicRateLimiter.Allow(api.GetPath(), clientIP, *policy) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		serviceName := sc.Config.Name
+		if sc.Service != nil && sc.Service.Name != "" {
+			serviceName = sc.Service.Name
+		}
+		logx.Infow("external_api_rate_limited",
+			logx.Field("service", serviceName),
+			logx.Field("route", api.GetPath()),
+			logx.Field("client", maskClientIP(clientIP)),
+		)
+		writePublicErrorContract(w, types.NewPublicError(types.ErrorKindRateLimited, 0, "", nil).PublicErrorContract())
+	})
+}
+
+func isDirectLoopbackRequest(r *http.Request) bool {
+	if r == nil || strings.TrimSpace(r.Header.Get("X-Forwarded-For")) != "" || strings.TrimSpace(r.Header.Get("X-Real-IP")) != "" {
+		return false
+	}
+	host := strings.TrimSpace(r.RemoteAddr)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	return err == nil && addr.Unmap().IsLoopback()
+}
+
+func maskClientIP(clientIP string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(clientIP))
+	if err != nil {
+		return "unknown"
+	}
+	addr = addr.Unmap()
+	bits := 64
+	if addr.Is4() {
+		bits = 24
+	}
+	return netip.PrefixFrom(addr, bits).Masked().String()
 }
 
 func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {

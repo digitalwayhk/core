@@ -46,5 +46,6 @@ func (own *Refresh) RouterInfo() *types.RouterInfo {
 	return router.DefaultRouterInfoWithOptions(own,
 		router.WithMethod(http.MethodPost),
 		router.WithPath("/api/refresh"),
+		withAuthEndpointRateLimit(),
 	)
 }

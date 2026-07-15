@@ -35,7 +35,7 @@ func (own *OpenAPI) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *OpenAPI) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
 }
 
 func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
@@ -106,20 +106,20 @@ func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.
 	}
 }
 func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method string, operation *openapi3.Operation) {
-	path = info.Path
-	method = info.Method
+	path = info.GetPath()
+	method = info.GetMethod()
 	operation = &openapi3.Operation{
-		Tags:        []string{info.ServiceName},
-		Summary:     info.StructName,
+		Tags:        []string{info.GetServiceName()},
+		Summary:     info.GetStructName(),
 		Responses:   make(openapi3.Responses, 0),
-		OperationID: strings.TrimPrefix(strings.ReplaceAll(info.Path, "/", "_"), "_"),
+		OperationID: strings.TrimPrefix(strings.ReplaceAll(info.GetPath(), "/", "_"), "_"),
 	}
 	api := info.New()
 	defer func() {
 		if err := recover(); err != nil {
 			logx.Errorw("openapi_router_panicked",
-				logx.Field("service", info.ServiceName),
-				logx.Field("route", info.Path),
+				logx.Field("service", info.GetServiceName()),
+				logx.Field("route", info.GetPath()),
 				logx.Field("error", err),
 				logx.Field("stack", string(debug.Stack())),
 			)
@@ -141,7 +141,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 		operation.RequestBody = getRequestBody(api, doc)
 	}
 	req := &router.InitRequest{}
-	data := router.GetTestResult(info.Path)
+	data := router.GetTestResult(info.GetPath())
 	if data == nil {
 		if igp, ok := api.(types.IRouterResponse); ok {
 			data = igp.GetResponse()
@@ -151,7 +151,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	for k, v := range ress {
 		operation.AddResponse(k, v)
 	}
-	if info.PathType == types.PrivateType {
+	if info.GetPathType() == types.PrivateType {
 		operation.Security = openapi3.NewSecurityRequirements()
 		nsr := openapi3.NewSecurityRequirement()
 		nsr.Authenticate("Bearer")

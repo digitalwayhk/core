@@ -50,5 +50,5 @@ func (own *Observe) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *Observe) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
 }

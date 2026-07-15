@@ -67,13 +67,14 @@ func (own *Casdoor) Do(req types.IRequest) (interface{}, error) {
 		ClientID:              casdoorConfig.Server.ClientID,
 		Organization:          casdoorConfig.Server.Organization,
 		Application:           casdoorConfig.Server.Application,
-		BackgroundCallbackURL: url.RouterInfo().Path,
+		BackgroundCallbackURL: url.RouterInfo().GetPath(),
 	}
 	return casdoorRes, nil
 }
 func (own *Casdoor) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(own)
-	info.Method = http.MethodGet
-	info.Path = "/api/casdoor"
-	return info
+	return router.DefaultRouterInfoWithOptions(own,
+		router.WithMethod(http.MethodGet),
+		router.WithPath("/api/casdoor"),
+		withSystemEndpointRateLimit(),
+	)
 }

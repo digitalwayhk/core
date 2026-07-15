@@ -16,6 +16,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
+	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/routecache"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -61,6 +62,7 @@ type ServiceContext struct {
 	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
 	RouteWebSocketHub  *types.RouteWebSocketHub       `json:"-"`
 	RouteCacheManager  *routecache.Manager            `json:"-"`
+	PublicRateLimiter  *ratelimit.Manager             `json:"-"`
 	AuthHookProvider   types.IAuthHookProvider        `json:"-"`
 	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
 	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
@@ -557,6 +559,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
 	}
 	sc.RouteCacheManager = cacheManager
+	sc.PublicRateLimiter = ratelimit.NewManager(sc.Service.Name, 0)
 
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
@@ -674,6 +677,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	serviceEventBridge := own.ServiceEventBridge
 	routeWebSocketHub := own.RouteWebSocketHub
 	routeCacheManager := own.RouteCacheManager
+	publicRateLimiter := own.PublicRateLimiter
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -682,6 +686,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.ServiceEventBridge = nil
 		own.RouteWebSocketHub = nil
 		own.RouteCacheManager = nil
+		own.PublicRateLimiter = nil
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
@@ -725,6 +730,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 		}
 		if routeCacheManager != nil {
 			routeCacheManager.Close()
+		}
+		if publicRateLimiter != nil {
+			publicRateLimiter.Close()
 		}
 		if serviceEventBridge != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

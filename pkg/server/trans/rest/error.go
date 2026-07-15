@@ -84,6 +84,14 @@ func writeErrorResponse(w http.ResponseWriter, statusCode int, message string, e
 	httpx.WriteJson(w, statusCode, response)
 }
 
+func writePublicErrorContract(w http.ResponseWriter, contract types.PublicErrorContract) {
+	httpx.WriteJson(w, contract.HTTPStatus, &ErrorResponse{
+		Success: false,
+		Code:    contract.Code,
+		Message: contract.Message,
+	})
+}
+
 // 获取错误类型名称
 func getErrorType(statusCode int) string {
 	switch statusCode {
@@ -99,6 +107,8 @@ func getErrorType(statusCode int) string {
 		return "ConflictError"
 	case StatusUnprocessableEntity:
 		return "BusinessError"
+	case StatusTooManyRequests:
+		return "RateLimitError"
 	case StatusInternalServerError:
 		return "SystemError"
 	default:

@@ -32,11 +32,11 @@ func (own *QueryConfig) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *QueryConfig) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	return api.ServerRouterInfo(own, withSystemEndpointRateLimit())
 }
 
 func (own *QueryConfig) GetConfigPath(address string, port int) (*config.ServerConfig, error) {
-	path := address + ":" + strconv.Itoa(port) + own.RouterInfo().Path
+	path := address + ":" + strconv.Itoa(port) + own.RouterInfo().GetPath()
 	values, err := rest.PostJson(path, nil, nil)
 	if err != nil {
 		return nil, err
