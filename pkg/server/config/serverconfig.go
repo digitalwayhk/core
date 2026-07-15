@@ -125,11 +125,19 @@ func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
 }
 
 type AuthSecret struct {
-	AccessSecret string
-	AccessExpire int64
-	Logto        LogtoConfig
-	CasDoor      CasDoorConfig
+	AccessSecret  string
+	AccessExpire  int64
+	RefreshSecret string
+	RefreshExpire int64
+	Logto         LogtoConfig
+	CasDoor       CasDoorConfig
 }
+
+const (
+	DefaultAccessExpireSeconds  int64 = 7200
+	DefaultRefreshExpireSeconds int64 = 2592000
+)
+
 type AttachAddress struct {
 	Name       string
 	Address    string
@@ -198,7 +206,9 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	//con.Log.Path = "logs/" + servicename
 	con.RunIp = ip
 	con.Auth.AccessSecret = uuid.Must(uuid.NewV4()).String()
-	con.Auth.AccessExpire = 86400
+	con.Auth.AccessExpire = DefaultAccessExpireSeconds
+	con.Auth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
+	con.Auth.RefreshExpire = DefaultRefreshExpireSeconds
 	con.Auth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
@@ -208,7 +218,9 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		YamlFilePath: "",
 	}
 	con.ManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
-	con.ManageAuth.AccessExpire = 86400
+	con.ManageAuth.AccessExpire = DefaultAccessExpireSeconds
+	con.ManageAuth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
+	con.ManageAuth.RefreshExpire = DefaultRefreshExpireSeconds
 	con.ManageAuth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
@@ -278,7 +290,13 @@ func migrateConfig(file string) error {
 		return fmt.Errorf("decode config migration source: %w", err)
 	}
 
-	changed := migrateDurations(m) || migrateNullSlices(m)
+	changed := migrateDurations(m)
+	if migrateNullSlices(m) {
+		changed = true
+	}
+	if migrateRefreshSecrets(m) {
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -290,6 +308,36 @@ func migrateConfig(file string) error {
 		return fmt.Errorf("write migrated config: %w", err)
 	}
 	return nil
+}
+
+// migrateRefreshSecrets 为已有 AccessSecret 的历史 auth/manage 配置生成一次性
+// Refresh 密钥。密钥会由 migrateConfig 回写，后续启动不得重新生成。
+func migrateRefreshSecrets(m map[string]interface{}) bool {
+	changed := false
+	for _, key := range []string{"Auth", "ManageAuth"} {
+		auth, ok := m[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		accessSecret, _ := auth["AccessSecret"].(string)
+		if strings.TrimSpace(accessSecret) == "" {
+			continue
+		}
+		refreshSecret, _ := auth["RefreshSecret"].(string)
+		if strings.TrimSpace(refreshSecret) == "" {
+			for refreshSecret == "" || refreshSecret == accessSecret {
+				refreshSecret = uuid.Must(uuid.NewV4()).String()
+			}
+			auth["RefreshSecret"] = refreshSecret
+			changed = true
+		}
+		refreshExpire, ok := auth["RefreshExpire"].(float64)
+		if !ok || refreshExpire <= 0 {
+			auth["RefreshExpire"] = DefaultRefreshExpireSeconds
+			changed = true
+		}
+	}
+	return changed
 }
 
 func writeConfigFile(file string, data []byte) error {

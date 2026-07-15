@@ -52,6 +52,8 @@
 | `ServerConfig.Auth` | supported | auth middleware | 认证容器由 router 装配并按子字段启用 |
 | `ServerConfig.Auth.AccessSecret` | supported | JWT auth middleware | JWT 签名校验消费 |
 | `ServerConfig.Auth.AccessExpire` | supported | JWT auth middleware | JWT 过期时间消费 |
+| `ServerConfig.Auth.RefreshSecret` | supported | auth token issuer | Refresh Token 签名和刷新校验消费 |
+| `ServerConfig.Auth.RefreshExpire` | supported | auth token issuer | Refresh Token 有效期消费 |
 | `ServerConfig.Auth.Logto` | supported | Logto auth middleware | Enable 控制外部认证生命周期 |
 | `ServerConfig.Auth.Logto.ExpectedAudience` | supported | Logto auth middleware | token audience 校验消费 |
 | `ServerConfig.Auth.Logto.Issuer` | supported | Logto auth middleware | token issuer 校验消费 |
@@ -62,6 +64,8 @@
 | `ServerConfig.ManageAuth` | supported | manage auth middleware | 管理路由认证容器装配 |
 | `ServerConfig.ManageAuth.AccessSecret` | supported | manage JWT middleware | JWT 签名校验消费 |
 | `ServerConfig.ManageAuth.AccessExpire` | supported | manage JWT middleware | JWT 过期时间消费 |
+| `ServerConfig.ManageAuth.RefreshSecret` | supported | manage token issuer | 管理端 Refresh Token 签名和刷新校验消费 |
+| `ServerConfig.ManageAuth.RefreshExpire` | supported | manage token issuer | 管理端 Refresh Token 有效期消费 |
 | `ServerConfig.ManageAuth.Logto` | supported | manage Logto middleware | Enable 控制外部认证生命周期 |
 | `ServerConfig.ManageAuth.Logto.ExpectedAudience` | supported | manage Logto middleware | token audience 校验消费 |
 | `ServerConfig.ManageAuth.Logto.Issuer` | supported | manage Logto middleware | token issuer 校验消费 |
@@ -72,6 +76,8 @@
 | `ServerConfig.ServerManageAuth` | supported | server-manage auth middleware | 服务管理路由认证容器装配 |
 | `ServerConfig.ServerManageAuth.AccessSecret` | supported | server-manage JWT middleware | JWT 签名校验消费 |
 | `ServerConfig.ServerManageAuth.AccessExpire` | supported | server-manage JWT middleware | JWT 过期时间消费 |
+| `ServerConfig.ServerManageAuth.RefreshSecret` | rejected | server-manage token issuer | servermanage 仅颁发 Access Token，默认必须为空 |
+| `ServerConfig.ServerManageAuth.RefreshExpire` | rejected | server-manage token issuer | servermanage 不支持刷新，默认必须为零 |
 | `ServerConfig.ServerManageAuth.Logto` | supported | server-manage Logto middleware | Enable 控制外部认证生命周期 |
 | `ServerConfig.ServerManageAuth.Logto.ExpectedAudience` | supported | server-manage Logto middleware | token audience 校验消费 |
 | `ServerConfig.ServerManageAuth.Logto.Issuer` | supported | server-manage Logto middleware | token issuer 校验消费 |
