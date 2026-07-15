@@ -61,6 +61,7 @@ type ServiceContext struct {
 	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
 	RouteWebSocketHub  *types.RouteWebSocketHub       `json:"-"`
 	RouteCacheManager  *routecache.Manager            `json:"-"`
+	AuthHookProvider   types.IAuthHookProvider        `json:"-"`
 	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
 	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
 	membership         *cluster.MembershipManager     `json:"-"`
@@ -486,6 +487,9 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
 func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
+	if provider, ok := service.(types.IAuthHookProvider); ok {
+		sc.AuthHookProvider = provider
+	}
 	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
