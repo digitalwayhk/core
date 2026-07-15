@@ -134,6 +134,20 @@ func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
 	own.serverOptionMu.Unlock()
 }
 
+// GetAuthRequestRuntime 返回一次请求使用的认证运行时快照。
+// active 为 false 表示 ServiceContext 已进入终止阶段，新认证必须 fail closed。
+func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IAuthRequestHookProvider, bool) {
+	if own == nil {
+		return nil, nil, false
+	}
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.terminated {
+		return nil, nil, false
+	}
+	return own.AuthRevocationManager, own.AuthRequestHookProvider, true
+}
+
 // EnableEventBridge wires an in-process event.Stream to the MQManager so that
 // event.Envelope values can be published and consumed via the MQ provider.
 // It is called automatically during NewServiceContext when MQ.Usage contains

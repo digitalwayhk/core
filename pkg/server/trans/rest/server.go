@@ -205,10 +205,14 @@ func handers(own *Server, api *types.RouterInfo) error {
 	var handler http.Handler = http.HandlerFunc(RouteHandler(own.context.Router))
 	if api.GetAuth() {
 		auth := own.context.Config.Auth
+		authType := types.AuthTypeUser
 		if own.context.Router.HasRouter(path, types.ManageType) {
 			auth = own.context.Config.ManageAuth
+			authType = types.AuthTypeManage
 		}
-		if selectAuthMode(auth) == authModeLogto {
+		mode := selectAuthMode(auth)
+		handler = authRequestHandler(own.context, api, authType, mode, handler)
+		if mode == authModeLogto {
 			authHandler, err := own.newLogtoHandler(handler.ServeHTTP, auth.Logto)
 			if err != nil {
 				return fmt.Errorf("initialize Logto authentication: %w", err)
