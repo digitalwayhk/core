@@ -5,7 +5,7 @@
 ## 审查范围
 
 ```bash
-git diff 1e1d6d6..f68c874
+git diff 1e1d6d6..d43467f
 ```
 
 - 基线提交：`1e1d6d6`
@@ -13,6 +13,7 @@ git diff 1e1d6d6..f68c874
 - RouterInfo 注册前置：`7435bc9`
 - Manage 路由并发修复：`4a19517`
 - 示例 1 订阅路由并发修复：`f68c874`
+- Benchmark HTTP 连接复用：`d43467f`
 - 设计规格：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
 - 重点文件：
   - `examples/04-shop-performance/models/order_batcher.go`
@@ -102,9 +103,9 @@ git diff 1e1d6d6..f68c874
 
 | 并发 | 示例 3 | 示例 4 | 提升 |
 | ---: | ---: | ---: | ---: |
-| 1 | 2,884 orders/s | 6,324 orders/s | 119.3% |
-| 16 | 8,275 orders/s | 13,216 orders/s | 59.7% |
-| 64 | 8,751 orders/s | 24,866 orders/s | 184.1% |
+| 1 | 3,338 orders/s | 6,834 orders/s | 104.7% |
+| 16 | 8,067 orders/s | 13,500 orders/s | 67.3% |
+| 64 | 8,160 orders/s | 24,649 orders/s | 202.1% |
 
 参数：Apple M3 Max，`-benchtime=5s -count=3`，不使用 race。
 
@@ -114,6 +115,7 @@ git diff 1e1d6d6..f68c874
 2. 示例 4 的提升是否主要来自事实缓存、原子快路径和高并发 Group Commit，而非跳过可靠持久化或跳过响应校验。
 3. 低/中/高并发行为是否与阈值设计一致，是否存在 benchmark 特化代码。
 4. README 是否明确这些数字只是同机样本，不是跨机器承诺。
+5. 共享 `http.Client` 是否真正复用连接，且不会因 `MaxIdleConnsPerHost` 过低耗尽临时端口或影响普通集成测试隔离。
 
 ## 验证命令
 
