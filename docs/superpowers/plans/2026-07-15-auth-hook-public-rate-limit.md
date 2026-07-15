@@ -10,6 +10,24 @@
 
 ---
 
+## 执行状态
+
+| 任务 | 状态 | 提交 |
+|------|------|------|
+| 1. Auth Hook 公共契约与 ServiceContext 绑定 | 已完成 | `c3d427f` |
+| 2. TokenIssuer 与 Refresh Token 严格验证 | 已完成 | `d2a8c49` |
+| 3. RefreshSecret 默认值和历史配置迁移 | 已完成 | `5291110` |
+| 4. Callback、Refresh 与 TestToken 调用 Hook | 已完成 | `07326ae` |
+| 5. Casdoor 只作身份交换 | 已完成 | `a8353c4` |
+| 6. RouterInfo 限流元数据与本地 Manager | 已完成 | `ef09823` |
+| 7. REST 限流包装与系统 Public 路由配置 | 已完成 | `f8fd617` |
+| 8. 真实进程集成与兼容契约 | 已完成 | `5252a34` |
+| 9. 总验收与外部审查交接 | 进行中 | 待最终门禁与审查提示词提交 |
+
+正文保留 TDD 实施步骤作为审计记录；现行进度与提交证据以上表为准。
+
+---
+
 ## 文件边界
 
 - `pkg/server/types/auth.go`：AuthType/AuthSource、Hook 参数、Provider 接口。
@@ -273,7 +291,7 @@ Expected: FAIL，原始 `context["user"]` 仍可提供身份或路由仍包装 C
 
 - [ ] **Step 3: 移除旧身份分支并统一内置 JWT**
 
-`getUserIDAndName` 只读 `uid/uname` context。`handers` 在 Logto 未启用时，即使 CasDoor.Enable 也使用 `rest.WithJwt(AccessSecret)`；Casdoor middleware 不再包装 Private/Manage 路由。
+`getUserIDAndName` 只读 `uid/uname` context。`handers` 在 Logto 未启用时，即使 CasDoor.Enable 也直接复用 go-zero 的 `handler.Authorize(AccessSecret)`；Casdoor middleware 不再包装 Private/Manage 路由。
 
 - [ ] **Step 4: 验证 GREEN**
 

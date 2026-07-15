@@ -59,7 +59,7 @@
 ## Auth Hook 接口定义
 
 ```go
-// pkg/server/types/interface.go
+// pkg/server/types/auth.go
 
 // IClaimsMutator 允许 OnAuth 向即将颁发的内置 JWT 注入自定义数据。
 // safe.Claims 已实现 AddData，天然满足此接口，无需跨包引用。
@@ -208,10 +208,10 @@ type AuthSecret struct {
 
 | 文件 | 改动内容 |
 |------|----------|
-| `pkg/server/types/interface.go` | 追加 `IClaimsMutator`、`AuthHookArgs`、`IAuthHookProvider` |
+| `pkg/server/types/auth.go` | 新增 `IClaimsMutator`、`AuthHookArgs`、`IAuthHookProvider` |
 | `pkg/server/config/serverconfig.go` | `AuthSecret` 加 `RefreshSecret`、`RefreshExpire` |
 | `pkg/server/router/servicecontext.go` | `ServiceContext` 加 AuthHook Provider 和本地 Public API 限流器；初始化时检测并注入 |
-| `pkg/server/safe/jwt.go` | 增加带 `token_use/auth_type` 的双 Token 颁发与 Refresh Token 严格验证 |
+| `pkg/server/safe/tokenissuer.go` | 增加带 `token_use/auth_type` 的双 Token 颁发与 Refresh Token 严格验证 |
 | `pkg/server/api/public/callback.go` | `Do()` 在 `GetOAuthToken` 后解析 Casdoor Claims → 运行 AuthHook → 颁发双 token |
 | `pkg/server/api/public/refresh.go` | **新建**：验证 refresh token → 运行 AuthHook → 颁发新 access token |
 | `pkg/server/api/public/testtoken.go` | 在签名前运行 AuthHook；auth/manage 返回双 Token，servermanage 仅返回 Access Token |
