@@ -14,11 +14,13 @@
 第四个示例完整保留第三个示例的模型继承、Manage 继承、供应商、商品、订单、支付、认证和 WebSocket 行为，只改变可明确验证的性能路径：
 
 1. 使用 RouterInfo 的本地 L1 与 Badger L2 分层缓存优化 Public 查询和本人订单查询。
-2. 使用 `PrefixedBadgerDB[Order]` 可靠接收新增订单，再批量异步同步到 SQLite。
+2. 使用 `PrefixedBadgerDB[Order]` 可靠接收新增订单，以自适应 Group Commit 合并高并发本地事务，再批量异步同步到 SQLite。
 3. 保证刚写入 Badger、尚未同步 SQLite 的订单立即可查、可支付、可删除。
 4. 使用现有 `ISyncAfterDelete` 在 SQLite 同步成功后自动清理 Badger 订单副本。
 5. 补齐 RouterInfo 对 RouteCache SingleFlight 的兼容接入，防止冷缓存并发击穿 SQLite。
 6. 在示例 3 和示例 4 中用同名真实 HTTP benchmark 比较查询 QPS、下单确认 TPS 和最终 SQLite 同步 TPS。
+7. 缓存下单所需的最小商品/供应商事实，并通过服务专属 EventBridge 控制事件主动失效。
+8. 服务启动后通过原子指针读取长期存活的 `OrderWriteStore`，消除下单热路径上的全局锁竞争。
 
 本示例必须独立启动、独立测试，不引用示例 3 的业务包。示例 3 保持原样，作为诚实的 SQLite 直读直写基线。
 
@@ -59,8 +61,9 @@ RouterInfo 请求级路由实例
   |
   +-- AddOrder
         |
-        +-- SQLite 校验商品和供应商
-        +-- PrefixedBadgerDB 同步持久写入
+        +-- 下单事实缓存（冷加载 -> SingleFlight -> SQLite）
+        +-- 低积压逐单提交；高积压可靠 Group Commit
+        +-- PrefixedBadgerDB SyncWrites 成功后确认
         +-- 立即返回并推送 WebSocket
         +-- 后台批量写入 SQLite
         +-- 同步成功后删除 Badger 副本
@@ -151,26 +154,36 @@ type RouteCacheTakeRuntime interface {
 
 确定性测试必须阻塞首个 loader，再启动多个同键请求，断言 loader 只执行一次、所有响应一致、不同键不互相阻塞。
 
-## 7. 订单 Write-Behind
+## 7. 下单事实缓存与订单 Write-Behind
 
-### 7.1 本地键与业务唯一性
+### 7.1 下单事实缓存
+
+`OrderReferenceCache` 是 `ServiceContext` 生命周期内的本地只读缓存，只保存构造订单所需的商品、供应商和价格最小快照：
+
+- 同一 ProductID 的冷加载复用 go-zero `syncx.SingleFlight`，避免并发下单重复查询 SQLite。
+- 商品或供应商 Manage 操作成功后，通过 `ServiceEventBridge` 发布控制事件并同步清理本地快照。
+- 失效 generation 单调递增；失效前开始的迟到加载不得把旧快照重新写回。
+- 事件默认 `External=false`，只服务当前进程；部署为多节点且需要共享事实时，必须显式接入可靠外发控制事件。
+- 缓存不保存完整 Model、请求、用户、trace 或响应，避免把请求级可变状态提升为服务级状态。
+
+### 7.2 本地键与业务唯一性
 
 示例 4 的订单 Badger key 使用：
 
 ```text
-Order:<hash(userID)>:<productID>:<createdAtUnixSecond>
+Order:<orderID>
 ```
 
 该键同时满足：
 
-- 保留“同一用户、同一商品、同一秒只能下单一次”的业务唯一性。
-- 可按用户哈希前缀扫描待同步订单。
-- 不在本地键中暴露原始 UserID。
-- SQLite `hashcode` 继续提供相同唯一约束。
+- 复用接口层 `req.NewID()` 生成的稳定订单 ID，不需要进程内唯一性互斥锁。
+- Badger 与 SQLite 使用相同 ID，合并查询可直接按 ID 去重。
+- 本地 key 不包含原始 UserID、商品信息或时间信息。
+- 用户隔离依赖 Token 注入的可信 UserID；扫描待同步项后在服务端过滤，禁止接受客户端自报 UserID。
 
-`CreatedAt` 在构造订单时固定为 UTC 秒级，同一个对象写入 Badger 和 SQLite，不允许同步阶段重新生成时间或哈希。
+`CreatedAt` 仍在构造订单时固定，同一个对象写入 Badger 和 SQLite，不允许同步阶段重新生成时间。
 
-### 7.2 OrderWriteStore
+### 7.3 OrderWriteStore 与可靠 Group Commit
 
 示例级 `OrderWriteStore` 是订单写回唯一所有者：
 
@@ -181,6 +194,10 @@ Order:<hash(userID)>:<productID>:<createdAtUnixSecond>
 - 服务关闭时调用有超时的 `CloseWithTimeout`。
 - 未同步完成或绑定失败必须返回可判断错误，禁止静默丢数据。
 - 不承担商品校验、支付状态机、DTO 或 WebSocket。
+- 服务成功启动后将 store 发布到 `atomic.Pointer`；请求热路径只做一次原子读，初始化和停止仍由互斥锁保护。
+- Group Commit 最多合并 128 笔、最多等待 1ms；积压少于 16 笔时逐单立即提交，避免低并发等待窗口。
+- `Submit` 必须等待所属批次 `BatchInsert` 返回；只有 Badger `SyncWrites` 成功后，请求才能返回成功。
+- 批次错误原样返回该批所有等待请求；`Close` 停止接收、排空已接收批次并返回首个提交错误。
 
 订单实现：
 
@@ -190,13 +207,14 @@ func (own *Order) IsSyncAfterDelete() bool { return true }
 
 SQLite 同步成功并确认本地版本未变化后，由框架异步删除 Badger 副本。
 
-### 7.3 下单流程
+### 7.4 下单流程
 
 ```text
 校验 Token 用户
-  -> SQLite 查询商品和供应商并确认启用
+  -> 读取下单事实缓存；冷加载时查询商品和供应商并确认启用
   -> 构造完整订单及价格、商品、供应商快照
-  -> Badger 同步持久写入并登记同步队列
+  -> 自适应 Group Commit 写入 Badger 并登记同步队列
+  -> 等待所属批次 SyncWrites 成功
   -> 清理当前用户 GetOrders 缓存
   -> 返回 DTO 并推送一次 WebSocket
   -> 后台批量 Insert SQLite
@@ -212,12 +230,12 @@ Badger 必须使用可靠写回配置：
 
 Badger 写入失败时下单失败，不允许降级为内存成功。
 
-### 7.4 查询和状态变更
+### 7.5 查询和状态变更
 
 `GetOrders`：
 
 1. 查询 SQLite 中当前用户订单。
-2. 按用户哈希前缀扫描 Badger 中待同步订单。
+2. 扫描 Badger 中待同步订单，并按 Token 注入的可信 UserID 过滤。
 3. 按 OrderID 去重；过渡窗口内 Badger 更新版本优先。
 4. 按 ID 和 CreatedAt 稳定倒序。
 5. 转换为与示例 3 相同的 DTO。
@@ -308,7 +326,7 @@ L2 首次回填不得冒充稳定态 HTTP QPS。
 - 两个示例使用相同数据规模、筛选参数、Token 数量、商品组合和 HTTP 客户端配置。
 - 并发矩阵为 1、`GOMAXPROCS`、`4*GOMAXPROCS`。
 - 查询在计时前预热；03 预热 SQLite，04 预热 L1。
-- AddOrder 预生成足够的 TestToken 与商品组合，不能因每秒唯一约束产生业务失败。
+- AddOrder 预生成足够的 TestToken；每次请求使用独立的框架订单 ID，不能因测试数据重复产生业务失败。
 - HTTP 复用连接；请求体可预编码，但计时内必须发送请求并完整读取响应体。
 - 每个 benchmark 使用独立临时目录和数据库。
 - 性能进程不使用 `-race` 构建；功能验收仍运行 race。
@@ -331,6 +349,7 @@ L2 首次回填不得冒充稳定态 HTTP QPS。
 - RouteCache 已有 JSON 单次序列化与 `json.RawMessage` 回填，示例直接复用。
 - SQLite 索引、分页、HTTP 压缩和 Redis L3 留给后续独立示例，避免混淆本次对比原因。
 - 不在业务层重复实现连接池、重试器、队列或 SingleFlight。
+- Group Commit 属于本示例的持久化组合逻辑：不关闭 `SyncWrites`，也不把内存入队作为成功；它只合并已经并发到达的可靠 Badger 提交。
 
 ## 12. 实施顺序
 

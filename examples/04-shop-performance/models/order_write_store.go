@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/v3"
@@ -17,14 +18,21 @@ import (
 )
 
 // OrderWriteStore 使用 Badger 接收订单写入，再复用框架写后同步能力汇合到 SQLite。
+// Add 无进程内互斥锁：唯一键为订单 ID（接口层 req.NewID），并发写依赖 Badger 自身。
 type OrderWriteStore struct {
 	db      *nosql.PrefixedBadgerDB[Order]
-	addMu   sync.Mutex
+	batcher *orderBatcher
 	flushMu sync.Mutex
-	recent  map[string]time.Time
 	closeMu sync.Mutex
 	closed  bool
 }
+
+const (
+	// orderCommitMaxBatch 限制单个 Badger 事务的订单数，避免过大事务增加内存和尾延迟。
+	orderCommitMaxBatch = 128
+	// orderCommitWait 是吞吐量与单请求延迟的平衡点：最多等待 1ms 收集同批订单。
+	orderCommitWait = time.Millisecond
+)
 
 func newOrderWriteStore(path string, action persistencetypes.IDataAction, config nosql.BadgerDBConfig) (*OrderWriteStore, error) {
 	db, err := nosql.NewSharedBadgerDB[Order](path, config)
@@ -36,58 +44,46 @@ func newOrderWriteStore(path string, action persistencetypes.IDataAction, config
 		_ = db.Close()
 		return nil, err
 	}
-	return &OrderWriteStore{db: db, recent: make(map[string]time.Time)}, nil
+	store := &OrderWriteStore{db: db}
+	// BatchInsert 使同批订单共享一次 SyncWrites 事务；每个 Submit 仍会等待该事务完成。
+	store.batcher = newOrderBatcher(orderCommitMaxBatch, orderCommitWait, db.BatchInsert)
+	return store, nil
 }
 
 // Add 将订单持久写入本地 Badger；返回成功后请求即可完成。
+// 无全局锁；调用方必须先为订单设置非零 ID（如接口层 req.NewID）。
 func (s *OrderWriteStore) Add(order *Order) error {
 	if order == nil {
 		return NewValidationError("订单不能为空")
 	}
+	if order.GetID() == 0 {
+		return NewValidationError("订单 ID 不能为空")
+	}
 	order.prepareForInsert()
-	key := order.GetHash()
-	if key == "" {
+	if key := order.GetHash(); key == "" {
 		return NewValidationError("订单缓存键无效")
 	}
-
-	s.addMu.Lock()
-	defer s.addMu.Unlock()
-	now := time.Now().UTC()
-	for candidate, expiresAt := range s.recent {
-		if !expiresAt.After(now) {
-			delete(s.recent, candidate)
-		}
-	}
-	if _, exists := s.recent[key]; exists {
-		return NewBusinessError("同一用户每秒只能购买一次同一商品")
-	}
-	if _, err := s.db.Get(key); err == nil {
-		return NewBusinessError("同一用户每秒只能购买一次同一商品")
-	} else if !errors.Is(err, badger.ErrKeyNotFound) {
-		return err
-	}
-	if err := s.db.Set(order, 0); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return NewBusinessError("同一用户每秒只能购买一次同一商品")
-		}
-		return err
-	}
-	s.recent[key] = order.CreatedAt.UTC().Truncate(time.Second).Add(time.Second)
-	return nil
+	return s.batcher.Submit(order)
 }
 
-// PendingByUser 返回尚在本地层可见的用户订单。
+// PendingByUser 返回尚在本地层可见的用户订单（按 ID 键扫描后过滤 UserID）。
 func (s *OrderWriteStore) PendingByUser(userID string) ([]*Order, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, NewBusinessError("用户身份无效")
 	}
-	items, err := s.db.Scan(orderUserPrefix(userID), 0)
+	items, err := s.db.ScanAll()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
-	return items, nil
+	result := make([]*Order, 0, len(items))
+	for _, item := range items {
+		if item != nil && strings.TrimSpace(item.UserID) == userID {
+			result = append(result, item)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID > result[j].ID })
+	return result, nil
 }
 
 // FindPendingOwned 从本地层查找指定用户的订单。
@@ -104,9 +100,13 @@ func (s *OrderWriteStore) FindPendingOwned(userID string, orderID uint) (*Order,
 	return nil, nil
 }
 
-// RemoveLocal 删除已由 SQLite 状态机处理完成的本地副本，不产生远端删除操作。
+// RemoveLocal 立即清除本地 Badger 事实与同步队列项，不产生远端删除操作。
+// 必须在 SQLite 删除之前调用，避免 SQLite 已删而 pending 合并读把订单复活。
 func (s *OrderWriteStore) RemoveLocal(order *Order) error {
-	err := s.db.DeleteByItemWithSync(order, false)
+	if order == nil {
+		return nil
+	}
+	err := s.db.ForceDeleteLocal(order)
 	if errors.Is(err, badger.ErrKeyNotFound) {
 		return nil
 	}
@@ -131,14 +131,18 @@ func (s *OrderWriteStore) Close(timeout time.Duration) error {
 		return nil
 	}
 	s.closed = true
+	batchErr := s.batcher.Close()
 	flushErr := s.Flush()
 	closeErr := s.db.CloseWithTimeout(timeout, timeout)
-	return errors.Join(flushErr, closeErr)
+	return errors.Join(batchErr, flushErr, closeErr)
 }
 
 var (
 	globalOrderWriteStoreMu sync.Mutex
 	globalOrderWriteState   *orderWriteStoreState
+	// activeOrderWriteStore 是请求热路径。Service.Start 完成后，每次下单只需一次原子读，
+	// 不再为了获取长期存活的 store 反复竞争全局互斥锁。
+	activeOrderWriteStore atomic.Pointer[OrderWriteStore]
 )
 
 type orderWriteStoreState struct {
@@ -154,6 +158,7 @@ func StartOrderWriteStore() error {
 	defer globalOrderWriteStoreMu.Unlock()
 	path := filepath.Join(utils.Getpath(), "data", "order-write-behind")
 	if globalOrderWriteState != nil && globalOrderWriteState.path != path {
+		activeOrderWriteStore.Store(nil)
 		if globalOrderWriteState.store != nil {
 			if err := globalOrderWriteState.store.Close(10 * time.Second); err != nil {
 				return fmt.Errorf("关闭旧订单写入存储失败: %w", err)
@@ -176,16 +181,29 @@ func StartOrderWriteStore() error {
 		config.AutoSync = true
 		config.SyncBatchDelay = 500 * time.Millisecond
 		state.store, state.err = newOrderWriteStore(path, cloneDataAction(), config)
+		if state.err == nil {
+			activeOrderWriteStore.Store(state.store)
+		}
 	})
 	return state.err
 }
 
 func getOrderWriteStore() (*OrderWriteStore, error) {
+	if store := activeOrderWriteStore.Load(); store != nil {
+		return store, nil
+	}
 	if err := StartOrderWriteStore(); err != nil {
 		return nil, err
 	}
+	if store := activeOrderWriteStore.Load(); store != nil {
+		return store, nil
+	}
+	// 仅保留初始化测试注入的慢路径；生产 Start 成功后必须走上面的原子读。
 	globalOrderWriteStoreMu.Lock()
 	defer globalOrderWriteStoreMu.Unlock()
+	if globalOrderWriteState == nil || globalOrderWriteState.store == nil {
+		return nil, errors.New("订单写入存储未初始化")
+	}
 	return globalOrderWriteState.store, nil
 }
 
@@ -196,6 +214,7 @@ func StopOrderWriteStore() error {
 	if globalOrderWriteState == nil {
 		return nil
 	}
+	activeOrderWriteStore.Store(nil)
 	var err error
 	if globalOrderWriteState.store != nil {
 		err = globalOrderWriteState.store.Close(10 * time.Second)

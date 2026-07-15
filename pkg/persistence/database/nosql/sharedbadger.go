@@ -851,6 +851,52 @@ func (p *PrefixedBadgerDB[T]) DeleteByItemWithSync(item *T, needSync bool) error
 	return p.delete(key, needSync)
 }
 
+// ForceDeleteLocal 立即物理删除本地数据键与同步队列索引，不产生远端删除操作。
+// 用于业务已决定丢弃本地事实（例如 SQLite 侧将同步删除）时，避免 pending 合并读复活记录。
+func (p *PrefixedBadgerDB[T]) ForceDeleteLocal(item *T) error {
+	if item == nil {
+		return fmt.Errorf("item 不能为空")
+	}
+	if p.IsClosed() {
+		return fmt.Errorf("数据库实例已关闭 [prefix=%s]", p.prefix)
+	}
+	key := p.generateKey(item)
+	if key == "" {
+		return badger.ErrEmptyKey
+	}
+	wasPending := false
+	err := p.manager.db.Update(func(txn *badger.Txn) error {
+		entry, getErr := txn.Get([]byte(key))
+		if getErr == nil {
+			if valErr := entry.Value(func(val []byte) error {
+				var wrapper SyncQueueItem[T]
+				if unmarshalErr := json.Unmarshal(val, &wrapper); unmarshalErr == nil && !wrapper.IsSynced {
+					wasPending = true
+				}
+				return nil
+			}); valErr != nil {
+				return valErr
+			}
+		} else if getErr != badger.ErrKeyNotFound {
+			return getErr
+		}
+		if delErr := txn.Delete([]byte(key)); delErr != nil && delErr != badger.ErrKeyNotFound {
+			return delErr
+		}
+		if delErr := txn.Delete([]byte(p.syncQueueKey(key))); delErr != nil && delErr != badger.ErrKeyNotFound {
+			return delErr
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if wasPending {
+		p.incrementPendingCount(-1)
+	}
+	return nil
+}
+
 func (p *PrefixedBadgerDB[T]) deleteLocalOnly(key string) error {
 	if !p.syncDB {
 		return p.manager.db.Update(func(txn *badger.Txn) error {

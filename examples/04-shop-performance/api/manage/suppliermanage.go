@@ -1,6 +1,8 @@
 package manage
 
 import (
+	"context"
+
 	publicapi "github.com/digitalwayhk/core/examples/04-shop-performance/api/public"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/business"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
@@ -71,12 +73,13 @@ func (own *SupplierManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Su
 	model, err := business.NewSupplierService().SetEnabled(id, enabled)
 	if err == nil {
 		publicapi.InvalidateSupplierCaches()
+		err = business.InvalidateOrderReferenceCache(context.Background())
 	}
 	return model, err
 }
 
-// DoAfter 在供应商增删改成功后清理供应商及依赖它的商品缓存。
+// DoAfter 在供应商增删改成功后清理供应商、商品查询及下单事实缓存。
 func (own *SupplierManage) DoAfter(sender interface{}, req servertypes.IRequest) (interface{}, error) {
 	publicapi.InvalidateSupplierCaches()
-	return nil, nil
+	return nil, business.InvalidateOrderReferenceCache(context.Background())
 }

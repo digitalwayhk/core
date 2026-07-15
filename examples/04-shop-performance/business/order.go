@@ -14,43 +14,33 @@ type OrderService struct{}
 func NewOrderService() *OrderService { return &OrderService{} }
 
 // CreateOrder 使用商品事实数据创建用户订单快照。
+// orderID 须由接口层 req.NewID() 提供，作为 GetHash / 主键。
 func (own *OrderService) CreateOrder(userID string, productID uint, quantity int, orderID uint) (*OrderChange, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, models.NewBusinessError("用户身份无效")
 	}
+	if orderID == 0 {
+		return nil, models.NewValidationError("订单 ID 不能为空")
+	}
 	if quantity <= 0 {
 		return nil, models.NewValidationError("订单数量必须大于 0")
 	}
-	product, err := models.NewProduct().FindByID(productID)
+	// 商品、供应商和价格是下单时的事实快照。服务启动后从本地事实缓存读取，
+	// 冷加载由 go-zero SingleFlight 合并；Manage 变更通过 EventBridge 立即失效。
+	reference, err := getOrderReference(productID)
 	if err != nil {
 		return nil, err
-	}
-	if product == nil {
-		return nil, models.NewBusinessError("商品不存在")
-	}
-	if !product.Enabled {
-		return nil, models.NewBusinessError("商品已禁用")
-	}
-	supplier, err := models.NewSupplier().FindByID(product.SupplierID)
-	if err != nil {
-		return nil, err
-	}
-	if supplier == nil {
-		return nil, models.NewBusinessError("供应商不存在")
-	}
-	if !supplier.Enabled {
-		return nil, models.NewBusinessError("供应商已禁用")
 	}
 	order := models.NewOrder()
 	order.SetID(orderID)
-	order.ProductID = product.ID
-	order.ProductCode = product.Code
-	order.ProductName = product.Name
-	order.SupplierID = supplier.ID
-	order.SupplierCode = supplier.Code
-	order.SupplierName = supplier.Name
-	order.UnitPrice = product.Price
+	order.ProductID = reference.ProductID
+	order.ProductCode = reference.ProductCode
+	order.ProductName = reference.ProductName
+	order.SupplierID = reference.SupplierID
+	order.SupplierCode = reference.SupplierCode
+	order.SupplierName = reference.SupplierName
+	order.UnitPrice = reference.UnitPrice
 	order.Quantity = quantity
 	order.UserID = userID
 	if err := order.Insert(); err != nil {

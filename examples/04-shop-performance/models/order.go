@@ -2,10 +2,7 @@ package models
 
 import (
 	"strconv"
-	"strings"
-	"time"
 
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
 )
 
@@ -40,24 +37,19 @@ func (own *Order) NewModel() {
 // OrderStatus 返回强类型订单状态。
 func (own *Order) OrderStatus() OrderStatus { return OrderStatus(own.Status) }
 
-// GetHash 使用可信用户摘要、商品和 UTC 秒构造可按用户扫描的唯一键。
+// GetHash 使用订单 ID 作为稳定唯一键（由接口层 req.NewID 赋值）。
 func (own *Order) GetHash() string {
-	if own.Model == nil || own.CreatedAt == nil || strings.TrimSpace(own.UserID) == "" || own.ProductID == 0 {
-		if own.Model != nil {
-			return own.Hashcode
-		}
+	if own.Model == nil {
 		return ""
 	}
-	createdAt := own.CreatedAt.UTC().Truncate(time.Second).Unix()
-	return orderUserPrefix(own.UserID) + strconv.FormatUint(uint64(own.ProductID), 10) + ":" + strconv.FormatInt(createdAt, 10)
+	if own.ID == 0 {
+		return own.Hashcode
+	}
+	return strconv.FormatUint(uint64(own.ID), 10)
 }
 
 // IsSyncAfterDelete 声明订单同步到 SQLite 后自动删除 Badger 本地副本。
 func (own *Order) IsSyncAfterDelete() bool { return true }
-
-func orderUserPrefix(userID string) string {
-	return utils.HashCodes(strings.TrimSpace(userID)) + ":"
-}
 
 // TotalAmount 返回订单价格快照计算出的金额。
 func (own *Order) TotalAmount() decimal.Decimal {
