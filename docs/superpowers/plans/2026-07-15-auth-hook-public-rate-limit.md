@@ -22,9 +22,28 @@
 | 6. RouterInfo 限流元数据与本地 Manager | 已完成 | `ef09823` |
 | 7. REST 限流包装与系统 Public 路由配置 | 已完成 | `f8fd617` |
 | 8. 真实进程集成与兼容契约 | 已完成 | `5252a34` |
-| 9. 总验收与外部审查交接 | 已完成 | `8fbbf22` |
+| 9. 总验收与外部审查交接 | 修复完成，等待外部复审 | 首轮 `CHANGES_REQUIRED`；修复 `c95b0ab`、`aa0ecfc` |
 
 正文保留 TDD 实施步骤作为审计记录；现行进度与提交证据以上表为准。
+
+---
+
+## 首轮外部终审修复
+
+首轮外部终审审查 `4d736da..85560f9`，裁定 `CHANGES_REQUIRED`，计划不得关闭。以下阻断已经实现并提交，仍须由外部 Agent 复审后才能重新关闭：
+
+| 原问题 | 修复 | 证据 |
+|--------|------|------|
+| P0：`ServerRouterInfo` 定义未接收注册期 Option，干净提交无法编译 | `c95b0ab` | 增加可变参数并通过 `NewRouterInfoWithOptions` 应用；TestToken 改用 `WithMethod`；新增真实路由契约测试 |
+| P1：Casdoor 开启时 WebSocket 仍接受第三方原始 Token | `aa0ecfc` | WebSocket 固定验证内置 HS256 Access Token，并强制 `token_use=access`、`auth_type=auth`、`iat/exp`；新增 Casdoor 开启与 RS256 拒绝测试 |
+| P1：遗留 Casdoor middleware 写入 `context["user"]` | `aa0ecfc` | 删除身份 context 注入；使用真实 RS256 Casdoor Token 验证下游 context 不含 user |
+
+补充加固：`Claims.GetToken` 已标记废弃；新增错误 RefreshSecret 负向测试。Hook 业务拒绝的 HTTP 状态映射、REST Access 中间件用途强校验，以及未注册 QueryLog/Statistics 的未来限流策略继续登记为非阻断 P2，不在本轮扩大实现范围。
+
+验收证据：
+
+- 当前工作区定向测试、race、示例 01 真实进程集成、vet、日志规范和 `release-contract` 全部通过。
+- detached 干净 worktree `aa0ecfc` 下，`pkg/server/api/public`、safe、Casdoor、WebSocket 测试及 race、vet 全部通过，已排除脏树假绿。
 
 ---
 
