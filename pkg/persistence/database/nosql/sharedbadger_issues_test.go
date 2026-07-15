@@ -289,6 +289,28 @@ func TestForceDeleteLocalWaitsForInflightSync(t *testing.T) {
 	require.False(t, exists, "远端不得被迟到的同步插入复活")
 }
 
+// TestForceDeleteLocalBeforeSyncSkipsStaleSnapshot 钉住与“同步先行”对称的时序：
+// 删除已经完成后，旧队列快照再进入 syncBatch 也不得写入远端。
+func TestForceDeleteLocalBeforeSyncSkipsStaleSnapshot(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("delete-before-sync", "ETH", 200, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	items, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.NoError(t, db.ForceDeleteLocal(item))
+
+	synced, err := db.syncBatch(items)
+	require.NoError(t, err)
+	require.Empty(t, synced, "已删除键的旧快照必须在远端事务前被过滤")
+	_, exists := action.value(item)
+	require.False(t, exists, "删除先行时远端不得出现该记录")
+	_, err = db.Get(item.GetHash())
+	require.ErrorIs(t, err, badger.ErrKeyNotFound, "旧快照不得使本地记录复活")
+}
+
 // ============================================================
 // 问题 2: batchInsertWithErrorHandling 缺少致命错误中断检查
 //

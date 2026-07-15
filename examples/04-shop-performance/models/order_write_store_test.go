@@ -167,8 +167,8 @@ func TestOrderWriteStorePerformanceSnapshotSeparatesCommitAndSync(t *testing.T) 
 	require.GreaterOrEqual(t, snapshot.Sync.SyncedItems, uint64(1))
 	require.Zero(t, snapshot.PendingOrders)
 	require.Greater(t, snapshot.BadgerDiskBytes, int64(0))
-	require.Greater(t, snapshot.APIConfirmedTPS, float64(0))
-	require.Greater(t, snapshot.SQLiteConvergenceTPS, float64(0))
+	require.Greater(t, snapshot.LifetimeAPIConfirmedTPS, float64(0))
+	require.Greater(t, snapshot.LifetimeSQLiteConvergenceTPS, float64(0))
 }
 
 func TestOrderWriteStoreKeepsPendingWhenSQLiteSyncFails(t *testing.T) {

@@ -6,6 +6,10 @@ ARTIFACT_DIR=${BENCHMARK_ARTIFACT_DIR:-"/tmp/shop-benchmark-$(date +%Y%m%d-%H%M%
 BENCHTIME=${SHOP_BENCHTIME:-1s}
 mkdir -p "$ARTIFACT_DIR"
 
+if [[ "$BENCHTIME" == "1s" ]]; then
+  printf '%s\n' '提示：默认 1s 仅用于基准烟测；吞吐窗口分位数需至少 30 个完整窗口，请使用 SHOP_BENCHTIME=30s 或更长时间。'
+fi
+
 run_benchmark() {
   local package=$1
   local output=$2
@@ -51,6 +55,7 @@ REPORT="$ARTIFACT_DIR/商城示例性能对比.md"
   echo "- 优化：示例 4 RouterInfo L1/L2 缓存与 Badger 写后同步"
   echo "- benchtime：$BENCHTIME"
   echo "- 说明：结果仅用于同机同次对比，不作为 CI 固定倍数门禁。"
+  echo "- 稳定度：吞吐窗口少于 30 个时只报告 win-windows 和错误率，不输出可能误导的 win-p* 分位数。"
   echo
   echo '| Benchmark | 示例 3 | 示例 4 | 单位 | 变化 |'
   echo '| --- | ---: | ---: | --- | ---: |'

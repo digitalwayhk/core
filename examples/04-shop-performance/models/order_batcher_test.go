@@ -88,6 +88,10 @@ func TestOrderBatcherGroupsConcurrentOrders(t *testing.T) {
 	require.Equal(t, count, total)
 	require.Greater(t, maxBatch, 1, "并发订单必须至少产生一个真实合批")
 	require.Less(t, commits.Load(), int32(count), "Group Commit 的提交数应少于订单数")
+	snapshot := batcher.Snapshot()
+	require.Zero(t, snapshot.ThresholdImmediateBatches)
+	require.Greater(t, snapshot.AggregatedBatches, uint64(0))
+	require.Zero(t, snapshot.SingletonAggregatedBatches)
 }
 
 // TestOrderBatcherPropagatesBatchFailure 确保整批持久化失败会传递给每个等待者，
@@ -199,8 +203,24 @@ func TestOrderBatcherSnapshotRecordsReliableCommits(t *testing.T) {
 	require.Equal(t, uint64(1), snapshot.SubmittedOrders)
 	require.Equal(t, uint64(1), snapshot.CommittedOrders)
 	require.Equal(t, uint64(1), snapshot.CommitBatches)
-	require.Equal(t, uint64(1), snapshot.ImmediateBatches)
+	require.Equal(t, uint64(1), snapshot.ThresholdImmediateBatches)
+	require.Zero(t, snapshot.SingletonAggregatedBatches)
 	require.Equal(t, uint64(0), snapshot.FailedBatches)
 	require.Equal(t, 1, snapshot.MaxBatchSize)
 	require.GreaterOrEqual(t, snapshot.TotalCommitDuration, time.Duration(0))
+}
+
+func TestOrderBatcherSnapshotSeparatesSingletonAggregationPath(t *testing.T) {
+	batcher := &orderBatcher{commit: func([]*Order) error { return nil }}
+	order := NewOrder()
+	order.SetID(1)
+	result := make(chan error, 1)
+
+	batcher.finishBatch([]orderBatchRequest{{order: order, result: result}}, false)
+	require.NoError(t, <-result)
+
+	snapshot := batcher.Snapshot()
+	require.Zero(t, snapshot.ThresholdImmediateBatches)
+	require.Equal(t, uint64(1), snapshot.SingletonAggregatedBatches)
+	require.Zero(t, snapshot.AggregatedBatches)
 }

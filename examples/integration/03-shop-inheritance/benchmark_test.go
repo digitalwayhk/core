@@ -201,18 +201,21 @@ func BenchmarkAddOrder(b *testing.B) {
 	}
 }
 
-// BenchmarkMixedWorkload 与示例 4 使用完全相同的 70/20/10 读写比，作为未优化基线。
+// BenchmarkMixedWorkload 与示例 4 使用完全相同的 70/20/10 读写比和轮转用户池，
+// 避免单用户订单列表持续增长把数据规模成本误计为框架性能退化。
 func BenchmarkMixedWorkload(b *testing.B) {
 	fixture := newBenchmarkFixture(b)
 	productPath := "/api/inheritanceshop/getproducts?id=" + fixture.product.ID
+	users := suite.TokenPoolFor(b, fmt.Sprintf("bench-mixed-%d", time.Now().UnixNano()), 128, 0)
 	runHTTPBenchmark(b, func(index int) error {
+		user := users[benchmetrics.RotatingSlot(index, 10, len(users))]
 		switch index % 10 {
 		case 0:
-			return requestSucceeded(http.MethodPost, "/api/inheritanceshop/addorder", fixture.user, map[string]interface{}{
+			return requestSucceeded(http.MethodPost, "/api/inheritanceshop/addorder", user, map[string]interface{}{
 				"productID": uintID(b, fixture.product.ID), "quantity": 1,
 			})
 		case 1, 2:
-			return requestSucceeded(http.MethodGet, "/api/inheritanceshop/getorders", fixture.user, nil)
+			return requestSucceeded(http.MethodGet, "/api/inheritanceshop/getorders", user, nil)
 		default:
 			return requestSucceeded(http.MethodGet, productPath, "", nil)
 		}

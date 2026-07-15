@@ -148,20 +148,21 @@ func (s *OrderWriteStore) SyncStatus() nosql.SyncStatus { return s.db.GetSyncSta
 
 // OrderWritePerformanceSnapshot 把 API 确认、Group Commit、SQLite 收敛与本地容量指标分开展示。
 type OrderWritePerformanceSnapshot struct {
-	Uptime               time.Duration
-	PendingOrders        int
-	BadgerDiskBytes      int64
-	DiskScanFailures     uint64
-	APIConfirmedTPS      float64
-	SQLiteConvergenceTPS float64
-	SQLiteActiveSyncTPS  float64
-	GroupCommit          OrderBatcherSnapshot
-	Backpressure         OrderWriteGuardSnapshot
-	Sync                 nosql.SyncMetrics
+	Uptime                       time.Duration
+	PendingOrders                int
+	BadgerDiskBytes              int64
+	DiskScanFailures             uint64
+	LifetimeAPIConfirmedTPS      float64
+	LifetimeSQLiteConvergenceTPS float64
+	SQLiteActiveSyncTPS          float64
+	GroupCommit                  OrderBatcherSnapshot
+	Backpressure                 OrderWriteGuardSnapshot
+	Sync                         nosql.SyncMetrics
 }
 
 // PerformanceSnapshot 返回当前进程生命周期的指标。
-// APIConfirmedTPS 以 Badger 可靠提交为成功；SQLiteConvergenceTPS 以最终同步条数为成功。
+// LifetimeAPIConfirmedTPS 以 Badger 可靠提交为成功；
+// LifetimeSQLiteConvergenceTPS 以最终同步条数为成功。两者都是含启动和空闲时间的进程生命周期均值。
 func (s *OrderWriteStore) PerformanceSnapshot() OrderWritePerformanceSnapshot {
 	if s == nil {
 		return OrderWritePerformanceSnapshot{}
@@ -180,8 +181,8 @@ func (s *OrderWriteStore) PerformanceSnapshot() OrderWritePerformanceSnapshot {
 		Sync:             syncMetrics,
 	}
 	if seconds := uptime.Seconds(); seconds > 0 {
-		snapshot.APIConfirmedTPS = float64(batch.CommittedOrders) / seconds
-		snapshot.SQLiteConvergenceTPS = float64(syncMetrics.SyncedItems) / seconds
+		snapshot.LifetimeAPIConfirmedTPS = float64(batch.CommittedOrders) / seconds
+		snapshot.LifetimeSQLiteConvergenceTPS = float64(syncMetrics.SyncedItems) / seconds
 	}
 	if seconds := syncMetrics.TotalDuration.Seconds(); seconds > 0 {
 		snapshot.SQLiteActiveSyncTPS = float64(syncMetrics.SyncedItems) / seconds

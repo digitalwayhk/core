@@ -288,7 +288,7 @@ Badger 写入失败时下单失败，不允许降级为内存成功。
 - Group Commit：提交订单、批次、立即/合并批次、最大批量、队列峰值、提交耗时和失败数。
 - SQLite 收敛：尝试、失败、成功条数、pending 峰值、总/最后耗时和最后成功时间。
 - 容量：当前 pending、Badger 磁盘字节、磁盘采样失败和各类背压拒绝数。
-- TPS：`APIConfirmedTPS` 以 Badger 可靠提交为口径；`SQLiteConvergenceTPS` 以进程墙钟时间为口径；`SQLiteActiveSyncTPS` 只计算真正执行同步的时间。
+- TPS：`LifetimeAPIConfirmedTPS` 以 Badger 可靠提交为口径；`LifetimeSQLiteConvergenceTPS` 以进程墙钟时间为口径；两者都是包含启动和空闲的生命周期均值。`SQLiteActiveSyncTPS` 只计算真正执行同步的时间。
 
 ## 9. 集成测试
 
@@ -322,6 +322,8 @@ BenchmarkGetPaymentTypes
 BenchmarkGetOrders
 BenchmarkAddOrder
 BenchmarkMixedWorkload
+
+混合长稳基准在 03/04 中都使用相同的 128 用户轮转池，每组 10 次操作保持同一用户，避免单用户订单列表无界增长扭曲曲线。吞吐窗口少于 30 个时不输出 `win-p*` 分位数。
 ```
 
 主对比：

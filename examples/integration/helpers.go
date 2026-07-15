@@ -357,6 +357,20 @@ func (s *Suite) TokenFor(t testing.TB, userID string, tokenType int) string {
 	return token
 }
 
+// TokenPoolFor 在 benchmark 计时前创建一组可轮转的身份令牌。
+// 长稳流量应在固定用户池中均匀分散，避免单用户列表无界增长污染读写吞吐曲线。
+func (s *Suite) TokenPoolFor(t testing.TB, prefix string, count, tokenType int) []string {
+	t.Helper()
+	if count <= 0 {
+		count = 1
+	}
+	tokens := make([]string, count)
+	for index := range tokens {
+		tokens[index] = s.TokenFor(t, fmt.Sprintf("%s-%d", prefix, index), tokenType)
+	}
+	return tokens
+}
+
 // WriteWebSocket 发送符合框架协议的 WebSocket 消息。
 func (s *Suite) WriteWebSocket(t testing.TB, connection *websocket.Conn, event, channel string, data interface{}) {
 	t.Helper()

@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// MinimumDistributionWindows 是输出吞吐分位数所需的最少完整窗口数。
+// 默认一秒窗口下对应至少 30 秒，避免把烟测的一两个样本误读为稳定性分布。
+const MinimumDistributionWindows = 30
+
 // Stats 描述单次 benchmark 中“每秒吞吐”样本的分布，不是请求延迟分位数。
 type Stats struct {
 	Windows      int
@@ -142,7 +146,8 @@ type Reporter interface {
 }
 
 func Report(reporter Reporter, stats Stats) {
-	if stats.Windows > 0 {
+	reporter.ReportMetric(float64(stats.Windows), "win-windows")
+	if stats.Windows >= MinimumDistributionWindows {
 		reporter.ReportMetric(stats.P01, "win-p01/s")
 		reporter.ReportMetric(stats.P05, "win-p05/s")
 		reporter.ReportMetric(stats.P50, "win-p50/s")
@@ -154,4 +159,12 @@ func Report(reporter Reporter, stats Stats) {
 	}
 	reporter.ReportMetric(float64(stats.Errors), "errors")
 	reporter.ReportMetric(stats.ErrorPercent, "error-pct")
+}
+
+// RotatingSlot 把一组连续操作稳定映射到轮转槽位，用于长稳基准分散单用户数据增长。
+func RotatingSlot(operationIndex, operationsPerSlot, slotCount int) int {
+	if operationIndex < 0 || operationsPerSlot <= 0 || slotCount <= 0 {
+		return 0
+	}
+	return (operationIndex / operationsPerSlot) % slotCount
 }

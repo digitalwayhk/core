@@ -202,18 +202,20 @@ func BenchmarkAddOrder(b *testing.B) {
 }
 
 // BenchmarkMixedWorkload 用 70% 商品查询、20% 本人订单查询和 10% 下单模拟读写混合流量。
-// 长稳测试直接通过 SHOP_BENCHTIME=15m 运行此 benchmark，不进入日常 CI。
+// 03/04 都在 128 个用户间按每 10 次操作轮转，避免单用户列表自然增长污染长稳曲线。
 func BenchmarkMixedWorkload(b *testing.B) {
 	fixture := newBenchmarkFixture(b)
 	productPath := "/api/performanceshop/getproducts?id=" + fixture.product.ID
+	users := suite.TokenPoolFor(b, fmt.Sprintf("bench-mixed-%d", time.Now().UnixNano()), 128, 0)
 	runHTTPBenchmark(b, func(index int) error {
+		user := users[benchmetrics.RotatingSlot(index, 10, len(users))]
 		switch index % 10 {
 		case 0:
-			return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", fixture.user, map[string]interface{}{
+			return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", user, map[string]interface{}{
 				"productID": uintID(b, fixture.product.ID), "quantity": 1,
 			})
 		case 1, 2:
-			return requestSucceeded(http.MethodGet, "/api/performanceshop/getorders", fixture.user, nil)
+			return requestSucceeded(http.MethodGet, "/api/performanceshop/getorders", user, nil)
 		default:
 			return requestSucceeded(http.MethodGet, productPath, "", nil)
 		}

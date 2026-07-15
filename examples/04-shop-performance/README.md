@@ -43,7 +43,7 @@ AddOrder
 - go-zero `syncx.TimeoutLimit` 保护单实例最多 500 个在途订单写入；超出部分最多等待 2 秒。
 - pending 软/硬阈值是 10,000/50,000；软阈值持续 30 秒或达到硬阈值时拒绝新写入。
 - Badger 目录每 5 秒采样，示例硬上限是 1 GiB。生产项目必须根据磁盘配额重新配置，不应照搬数字。
-- `models.GetOrderWritePerformanceSnapshot()` 返回 Group Commit、SQLite 同步、pending/磁盘和背压快照。`APIConfirmedTPS` 是 Badger 可靠提交速率，`SQLiteConvergenceTPS` 才是墙钟最终收敛速率，两者不能互相代替。
+- `models.GetOrderWritePerformanceSnapshot()` 返回 Group Commit、SQLite 同步、pending/磁盘和背压快照。`LifetimeAPIConfirmedTPS` 是 Badger 可靠提交的进程生命周期均值，`LifetimeSQLiteConvergenceTPS` 是 SQLite 墙钟收敛的进程生命周期均值；两者都包含启动和空闲时间，不是当前一秒的瞬时 TPS。`SQLiteActiveSyncTPS` 只表示实际同步忙碌时段的效率。
 
 `ShopService.Start/Stop` 管理订单存储生命周期。服务强制终止后，同一运行目录重启会恢复同步队列；优雅关闭会尝试冲刷积压并返回可观察错误。
 
@@ -94,9 +94,9 @@ go vet ./examples/04-shop-performance/... ./examples/integration/04-shop-perform
 benchmark 现在同时输出两类分位数：
 
 - `p50-ns/p95-ns/p99-ns`：单请求延迟分布。
-- `win-p01/s` 到 `win-p99/s`：每秒吞吐窗口的分布；`win-cv-pct` 是变异系数，越低说明越稳定。
+- `win-p01/s` 到 `win-p99/s`：每秒吞吐窗口的分布；`win-cv-pct` 是变异系数，越低说明越稳定。只有收集到至少 30 个完整窗口时才输出这些分布指标；更短的运行只输出 `win-windows`、错误数和错误率。
 
-`BenchmarkMixedWorkload` 使用 70% 商品查询、20% 本人订单查询、10% 下单，03/04 口径一致。长稳不进入日常 CI：
+`BenchmarkMixedWorkload` 使用 70% 商品查询、20% 本人订单查询、10% 下单，03/04 口径一致。每 10 次操作共享同一用户，然后在 128 个预生成用户中轮转，使长稳读成本不再被单用户订单列表快速增长主导。长稳不进入日常 CI：
 
 ```bash
 SHOP_BENCH_CONCURRENCIES=500 go test ./examples/integration/04-shop-performance \

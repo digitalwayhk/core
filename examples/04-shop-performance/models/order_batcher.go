@@ -45,29 +45,31 @@ type orderBatcher struct {
 }
 
 type orderBatcherMetrics struct {
-	submittedOrders   atomic.Uint64
-	committedOrders   atomic.Uint64
-	commitBatches     atomic.Uint64
-	immediateBatches  atomic.Uint64
-	aggregatedBatches atomic.Uint64
-	failedBatches     atomic.Uint64
-	maxBatchSize      atomic.Int64
-	maxQueueDepth     atomic.Int64
-	totalCommitNanos  atomic.Int64
+	submittedOrders            atomic.Uint64
+	committedOrders            atomic.Uint64
+	commitBatches              atomic.Uint64
+	thresholdImmediateBatches  atomic.Uint64
+	singletonAggregatedBatches atomic.Uint64
+	aggregatedBatches          atomic.Uint64
+	failedBatches              atomic.Uint64
+	maxBatchSize               atomic.Int64
+	maxQueueDepth              atomic.Int64
+	totalCommitNanos           atomic.Int64
 }
 
 // OrderBatcherSnapshot 是可序列化的 Group Commit 运行快照。
 type OrderBatcherSnapshot struct {
-	SubmittedOrders       uint64
-	CommittedOrders       uint64
-	CommitBatches         uint64
-	ImmediateBatches      uint64
-	AggregatedBatches     uint64
-	FailedBatches         uint64
-	MaxBatchSize          int
-	MaxQueueDepth         int
-	TotalCommitDuration   time.Duration
-	AverageCommitDuration time.Duration
+	SubmittedOrders            uint64
+	CommittedOrders            uint64
+	CommitBatches              uint64
+	ThresholdImmediateBatches  uint64
+	SingletonAggregatedBatches uint64
+	AggregatedBatches          uint64
+	FailedBatches              uint64
+	MaxBatchSize               int
+	MaxQueueDepth              int
+	TotalCommitDuration        time.Duration
+	AverageCommitDuration      time.Duration
 }
 
 // newOrderBatcher 创建并立即启动一个单 worker 批量提交器。
@@ -146,7 +148,7 @@ func (b *orderBatcher) run() {
 		// 让出后仍无积压表示当前是低流量，立即提交以避免固定 1ms 延迟。
 		runtime.Gosched()
 		if len(b.requests) < orderCommitBacklogThreshold {
-			b.finishBatch(batch)
+			b.finishBatch(batch, true)
 			continue
 		}
 		timer := time.NewTimer(b.wait)
@@ -172,22 +174,24 @@ func (b *orderBatcher) run() {
 			}
 		}
 
-		b.finishBatch(batch)
+		b.finishBatch(batch, false)
 		if channelClosed {
 			return
 		}
 	}
 }
 
-func (b *orderBatcher) finishBatch(batch []orderBatchRequest) {
+func (b *orderBatcher) finishBatch(batch []orderBatchRequest, thresholdImmediate bool) {
 	started := time.Now()
 	err := b.commitSafely(batch)
 	duration := time.Since(started)
 	b.metrics.commitBatches.Add(1)
 	b.metrics.totalCommitNanos.Add(duration.Nanoseconds())
 	updateAtomicMax(&b.metrics.maxBatchSize, int64(len(batch)))
-	if len(batch) == 1 {
-		b.metrics.immediateBatches.Add(1)
+	if thresholdImmediate {
+		b.metrics.thresholdImmediateBatches.Add(1)
+	} else if len(batch) == 1 {
+		b.metrics.singletonAggregatedBatches.Add(1)
 	} else {
 		b.metrics.aggregatedBatches.Add(1)
 	}
@@ -218,16 +222,17 @@ func (b *orderBatcher) Snapshot() OrderBatcherSnapshot {
 		average = total / time.Duration(batches)
 	}
 	return OrderBatcherSnapshot{
-		SubmittedOrders:       b.metrics.submittedOrders.Load(),
-		CommittedOrders:       b.metrics.committedOrders.Load(),
-		CommitBatches:         batches,
-		ImmediateBatches:      b.metrics.immediateBatches.Load(),
-		AggregatedBatches:     b.metrics.aggregatedBatches.Load(),
-		FailedBatches:         b.metrics.failedBatches.Load(),
-		MaxBatchSize:          int(b.metrics.maxBatchSize.Load()),
-		MaxQueueDepth:         int(b.metrics.maxQueueDepth.Load()),
-		TotalCommitDuration:   total,
-		AverageCommitDuration: average,
+		SubmittedOrders:            b.metrics.submittedOrders.Load(),
+		CommittedOrders:            b.metrics.committedOrders.Load(),
+		CommitBatches:              batches,
+		ThresholdImmediateBatches:  b.metrics.thresholdImmediateBatches.Load(),
+		SingletonAggregatedBatches: b.metrics.singletonAggregatedBatches.Load(),
+		AggregatedBatches:          b.metrics.aggregatedBatches.Load(),
+		FailedBatches:              b.metrics.failedBatches.Load(),
+		MaxBatchSize:               int(b.metrics.maxBatchSize.Load()),
+		MaxQueueDepth:              int(b.metrics.maxQueueDepth.Load()),
+		TotalCommitDuration:        total,
+		AverageCommitDuration:      average,
 	}
 }
 
