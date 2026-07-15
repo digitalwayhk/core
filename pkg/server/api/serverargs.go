@@ -38,9 +38,12 @@ func (own *ServerArgs) Validation(req types.IRequest) error {
 	return nil
 }
 
-func ServerRouterInfo(item interface{}) *types.RouterInfo {
+func ServerRouterInfo(item interface{}, options ...router.RouterInfoOption) *types.RouterInfo {
 	pack, name := router.GetRouterPackAndTypeName(item)
-	info := router.NewRouterInfo(item, pack, name)
-	info.Path = "/api/servermanage/" + strings.ToLower(info.StructName)
-	return info
+	options = append([]router.RouterInfoOption{
+		router.WithPathResolver(func(info *types.RouterInfo) string {
+			return "/api/servermanage/" + strings.ToLower(info.GetStructName())
+		}),
+	}, options...)
+	return router.NewRouterInfoWithOptions(item, pack, name, options...)
 }
