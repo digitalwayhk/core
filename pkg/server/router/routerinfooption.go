@@ -60,6 +60,13 @@ func WithPoolSize(size int) RouterInfoOption {
 	})
 }
 
+// WithExternalRateLimit 为系统 Public API 配置每实例、每路由、每客户端 IP 限流。
+func WithExternalRateLimit(rate float64, burst int) RouterInfoOption {
+	return routerInfoOptionFunc(func(info *types.RouterInfo) {
+		info.ConfigureExternalRateLimit(types.ExternalRateLimitPolicy{Rate: rate, Burst: burst})
+	})
+}
+
 func applyRouterInfoOptions(info *types.RouterInfo, options []RouterInfoOption) {
 	for _, option := range options {
 		if option != nil {

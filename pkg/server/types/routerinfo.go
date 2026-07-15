@@ -86,15 +86,17 @@ type RouterInfo struct {
 	// PoolSize 控制该路由对象池的容量。0 表示使用默认自适应值（基于 GOMAXPROCS）。
 	// 高并发路由可适当增大（如 512），低频管理路由可设为 8 减少内存占用。
 	// 必须在路由注册完成（Freeze）前设置，之后修改无效。
-	PoolSize       int // Deprecated: 注册后请使用 GetPoolSize；仅为源码兼容保留导出字段。
-	channelPool    *ChannelPool
-	eventRuntime   RouteEventRuntime
-	eventCancels   map[ObserveState]map[string]func()
-	webSocketHub   *RouteWebSocketHub
-	cacheRuntime   RouteCacheRuntime
-	owner          string
-	frozen         bool
-	frozenMetadata routerMetadata
+	PoolSize             int // Deprecated: 注册后请使用 GetPoolSize；仅为源码兼容保留导出字段。
+	channelPool          *ChannelPool
+	eventRuntime         RouteEventRuntime
+	eventCancels         map[ObserveState]map[string]func()
+	webSocketHub         *RouteWebSocketHub
+	cacheRuntime         RouteCacheRuntime
+	externalRateLimit    ExternalRateLimitPolicy
+	hasExternalRateLimit bool
+	owner                string
+	frozen               bool
+	frozenMetadata       routerMetadata
 
 	// 🆕 性能统计字段
 	stats     *RouterStats `json:"-"`
@@ -102,17 +104,19 @@ type RouterInfo struct {
 }
 
 type routerMetadata struct {
-	id           uint64
-	path         string
-	serviceName  string
-	auth         bool
-	method       string
-	packPath     string
-	pathType     ApiType
-	structName   string
-	instanceName string
-	instanceType string
-	poolSize     int
+	id                   uint64
+	path                 string
+	serviceName          string
+	auth                 bool
+	method               string
+	packPath             string
+	pathType             ApiType
+	structName           string
+	instanceName         string
+	instanceType         string
+	poolSize             int
+	externalRateLimit    ExternalRateLimitPolicy
+	hasExternalRateLimit bool
 }
 
 // Freeze 在路由完成注册后冻结身份元数据。重复冻结仅在所有者和元数据一致时幂等。
@@ -137,17 +141,19 @@ func (own *RouterInfo) currentMetadataLocked() routerMetadata {
 		instanceType = reflect.TypeOf(own.instance).String()
 	}
 	return routerMetadata{
-		id:           own.ID,
-		path:         own.Path,
-		serviceName:  own.ServiceName,
-		auth:         own.Auth,
-		method:       own.Method,
-		packPath:     own.PackPath,
-		pathType:     own.PathType,
-		structName:   own.StructName,
-		instanceName: own.InstanceName,
-		instanceType: instanceType,
-		poolSize:     own.PoolSize,
+		id:                   own.ID,
+		path:                 own.Path,
+		serviceName:          own.ServiceName,
+		auth:                 own.Auth,
+		method:               own.Method,
+		packPath:             own.PackPath,
+		pathType:             own.PathType,
+		structName:           own.StructName,
+		instanceName:         own.InstanceName,
+		instanceType:         instanceType,
+		poolSize:             own.PoolSize,
+		externalRateLimit:    own.externalRateLimit,
+		hasExternalRateLimit: own.hasExternalRateLimit,
 	}
 }
 
