@@ -29,6 +29,8 @@ func TestRequestIgnoresCasdoorUserContext(t *testing.T) {
 	cfg.Transport.Fallback = nil
 	cfg.Auth.CasDoor.Enable = true
 	cfg.Auth.CasDoor.WebhookSecret = "request-security-test-webhook"
+	cfg.Auth.CasDoor.YamlFilePath = writeRouterCasdoorConfig(t, name)
+	cfg.AuthRevocation.BadgerPath = t.TempDir()
 	sc := NewServiceContextWithConfig(service, cfg)
 	sc.SetRunState(true)
 	t.Cleanup(func() { sc.SetRunState(false) })

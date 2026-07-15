@@ -12,12 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/authstate"
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/routecache"
+	casdoorauth "github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -39,37 +41,41 @@ func init() {
 }
 
 type ServiceContext struct {
-	Config             *config.ServerConfig
-	Service            *types.Service
-	snow               idgen.ISnowWorker
-	Router             *ServiceRouter
-	isStart            atomic.Bool
-	terminated         bool
-	shutdownDone       chan struct{}
-	shutdownOnce       sync.Once
-	lifecycleMu        sync.Mutex
-	lifecycleOpOnce    sync.Once
-	lifecycleOp        chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
-	Pid                int
-	Hub                interface{} `json:"-"`
-	StateChan          chan bool   `json:"-"`
-	serverOption       *types.ServerOption
-	serverOptionMu     sync.RWMutex
-	TransportSelector  transport.TransportSelector    `json:"-"`
-	MQManager          *mq.MQManager                  `json:"-"`
-	EventStream        *event.Stream                  `json:"-"`
-	EventBridge        *event.MQBridge                `json:"-"`
-	ServiceEventBridge *event.ServiceEventBridge      `json:"-"`
-	RouteWebSocketHub  *types.RouteWebSocketHub       `json:"-"`
-	RouteCacheManager  *routecache.Manager            `json:"-"`
-	PublicRateLimiter  *ratelimit.Manager             `json:"-"`
-	AuthHookProvider   types.IAuthHookProvider        `json:"-"`
-	ClusterProvider    cluster.DiscoveryProvider      `json:"-"`
-	ClusterSwitcher    cluster.ProviderSwitcher       `json:"-"`
-	membership         *cluster.MembershipManager     `json:"-"`
-	CrossNodeBroker    *cluster.CrossNodeNoticeBroker `json:"-"`
-	nodeID             string
-	configFingerprint  string
+	Config                   *config.ServerConfig
+	Service                  *types.Service
+	snow                     idgen.ISnowWorker
+	Router                   *ServiceRouter
+	isStart                  atomic.Bool
+	terminated               bool
+	shutdownDone             chan struct{}
+	shutdownOnce             sync.Once
+	lifecycleMu              sync.Mutex
+	lifecycleOpOnce          sync.Once
+	lifecycleOp              chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
+	Pid                      int
+	Hub                      interface{} `json:"-"`
+	StateChan                chan bool   `json:"-"`
+	serverOption             *types.ServerOption
+	serverOptionMu           sync.RWMutex
+	TransportSelector        transport.TransportSelector     `json:"-"`
+	MQManager                *mq.MQManager                   `json:"-"`
+	EventStream              *event.Stream                   `json:"-"`
+	EventBridge              *event.MQBridge                 `json:"-"`
+	ServiceEventBridge       *event.ServiceEventBridge       `json:"-"`
+	RouteWebSocketHub        *types.RouteWebSocketHub        `json:"-"`
+	RouteCacheManager        *routecache.Manager             `json:"-"`
+	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
+	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
+	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
+	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
+	CasdoorClients           *casdoorauth.ClientSet          `json:"-"`
+	AuthRevocationManager    *authstate.Manager              `json:"-"`
+	ClusterProvider          cluster.DiscoveryProvider       `json:"-"`
+	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
+	membership               *cluster.MembershipManager      `json:"-"`
+	CrossNodeBroker          *cluster.CrossNodeNoticeBroker  `json:"-"`
+	nodeID                   string
+	configFingerprint        string
 }
 
 func (own *ServiceContext) beginLifecycleOperation() {
@@ -489,8 +495,25 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
 func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
+	initialized := false
+	defer func() {
+		if initialized {
+			return
+		}
+		failure := recover()
+		cleanupInitializedServiceContext(sc)
+		if failure != nil {
+			panic(failure)
+		}
+	}()
 	if provider, ok := service.(types.IAuthHookProvider); ok {
 		sc.AuthHookProvider = provider
+	}
+	if provider, ok := service.(types.IAuthRequestHookProvider); ok {
+		sc.AuthRequestHookProvider = provider
+	}
+	if provider, ok := service.(types.ICasdoorEventHookProvider); ok {
+		sc.CasdoorEventHookProvider = provider
 	}
 	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
 	sc.EventStream = event.NewStream()
@@ -541,6 +564,27 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		}
 	}
 
+	casdoorEnabled := con.Auth.CasDoor.Enable || con.ManageAuth.CasDoor.Enable
+	if casdoorEnabled {
+		clients, err := casdoorauth.NewClientSet(con.Auth.CasDoor, con.ManageAuth.CasDoor)
+		if err != nil {
+			panic(fmt.Sprintf("auth lifecycle: Casdoor client init failed: %v", err))
+		}
+		sc.CasdoorClients = clients
+		if con.AuthRevocation.Mode == config.AuthRevocationModeShared && sc.EventBridge == nil {
+			panic("auth lifecycle: shared mode requires MQ event-stream")
+		}
+		manager, err := authstate.NewManager(
+			sc.Service.Name,
+			con.AuthRevocation,
+			authstate.WithEventBridge(sc.ServiceEventBridge),
+		)
+		if err != nil {
+			panic(fmt.Sprintf("auth lifecycle: revocation manager init failed: %v", err))
+		}
+		sc.AuthRevocationManager = manager
+	}
+
 	// shared 缓存必须等 MQ/EventBridge 外部适配器装配完成后再初始化，确保
 	// Redis 事实缓存与跨节点失效订阅同时就绪，不允许只启动本地层。
 	cacheManager, cacheErr := routecache.NewManager(
@@ -549,13 +593,6 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		routecache.WithInvalidationBridge(sc.ServiceEventBridge),
 	)
 	if cacheErr != nil {
-		if sc.MQManager != nil {
-			_ = sc.MQManager.Close()
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = sc.RouteWebSocketHub.Close(ctx)
-		_ = sc.ServiceEventBridge.Close(ctx)
-		cancel()
 		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
 	}
 	sc.RouteCacheManager = cacheManager
@@ -563,6 +600,47 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
+	initialized = true
+}
+
+func cleanupInitializedServiceContext(sc *ServiceContext) {
+	if sc == nil {
+		return
+	}
+	if sc.AuthRevocationManager != nil {
+		sc.AuthRevocationManager.BeginClose()
+	}
+	if sc.RouteWebSocketHub != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sc.RouteWebSocketHub.Close(ctx)
+		cancel()
+	}
+	if sc.RouteCacheManager != nil {
+		sc.RouteCacheManager.Close()
+	}
+	if sc.PublicRateLimiter != nil {
+		sc.PublicRateLimiter.Close()
+	}
+	if sc.ServiceEventBridge != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sc.ServiceEventBridge.Close(ctx)
+		cancel()
+	}
+	if sc.MQManager != nil {
+		_ = sc.MQManager.Close()
+	}
+	if sc.AuthRevocationManager != nil {
+		_ = sc.AuthRevocationManager.Close()
+	}
+	sc.AuthRevocationManager = nil
+	sc.CasdoorClients = nil
+	sc.RouteWebSocketHub = nil
+	sc.RouteCacheManager = nil
+	sc.PublicRateLimiter = nil
+	sc.EventBridge = nil
+	sc.ServiceEventBridge = nil
+	sc.MQManager = nil
+	sc.EventStream = nil
 }
 
 func assertServiceRoutesRegistrationMutable(owner string, routes []types.IRouter) {
@@ -657,7 +735,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		return
 	}
 	if own.isStart.Load() == state {
-		if state || own.MQManager == nil {
+		if state {
 			own.lifecycleMu.Unlock()
 			return
 		}
@@ -678,6 +756,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	routeWebSocketHub := own.RouteWebSocketHub
 	routeCacheManager := own.RouteCacheManager
 	publicRateLimiter := own.PublicRateLimiter
+	authRevocationManager := own.AuthRevocationManager
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -687,9 +766,17 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.RouteWebSocketHub = nil
 		own.RouteCacheManager = nil
 		own.PublicRateLimiter = nil
+		own.AuthRevocationManager = nil
+		own.CasdoorClients = nil
+		own.AuthRequestHookProvider = nil
+		own.CasdoorEventHookProvider = nil
+		own.AuthHookProvider = nil
 		own.EventStream = nil
 	}
 	own.lifecycleMu.Unlock()
+	if !state && authRevocationManager != nil {
+		authRevocationManager.BeginClose()
+	}
 	if !state && own.Router != nil {
 		own.Router.unregisterRouterInfos()
 	}
@@ -758,6 +845,14 @@ func (own *ServiceContext) SetRunState(state bool) {
 		if mqManager != nil {
 			if err := mqManager.Close(); err != nil {
 				logx.Errorf("mq: close failed: %v", err)
+			}
+		}
+		if authRevocationManager != nil {
+			if err := authRevocationManager.Close(); err != nil {
+				logx.Errorw("auth_revocation_manager_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
 			}
 		}
 	}

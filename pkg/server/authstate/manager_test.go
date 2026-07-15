@@ -2,11 +2,13 @@ package authstate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
@@ -52,6 +54,72 @@ func TestManagerAuthorizeFailsClosedWhenAuthorityUnavailable(t *testing.T) {
 	err := manager.Authorize(context.Background(), testAuthIdentity(0))
 	require.ErrorIs(t, err, ErrAuthorityUnavailable)
 	require.NotContains(t, err.Error(), "backend detail")
+}
+
+type fakeAuthEventBridge struct {
+	localCanceled    bool
+	externalCanceled bool
+	handler          event.Handler
+	subject          string
+}
+
+func (f *fakeAuthEventBridge) Subscribe(_ string, handler event.Handler) (func(), error) {
+	f.handler = handler
+	return func() { f.localCanceled = true }, nil
+}
+
+func (f *fakeAuthEventBridge) SubscribeExternal(_ context.Context, subject string) (func(), error) {
+	f.subject = subject
+	return func() { f.externalCanceled = true }, nil
+}
+
+func TestManagerBeginCloseStopsSubscriptionsBeforeStorageClose(t *testing.T) {
+	store, err := OpenBadgerStore(t.TempDir())
+	require.NoError(t, err)
+	bridge := &fakeAuthEventBridge{}
+	manager := newManagerWithStores("shop", store, store, false)
+	require.NoError(t, manager.bindEventBridge(bridge))
+
+	manager.BeginClose()
+	require.True(t, bridge.localCanceled)
+	require.False(t, bridge.externalCanceled)
+	require.ErrorIs(t, manager.Authorize(context.Background(), testAuthIdentity(0)), ErrAuthorityUnavailable)
+	_, err = store.Current(context.Background(), testIdentityKey())
+	require.NoError(t, err, "BeginClose只停认证运行时，存储留到最后关闭")
+	require.NoError(t, manager.Close())
+}
+
+func TestSharedManagerBindsAndClosesLocalAndExternalSubscriptions(t *testing.T) {
+	snapshot, err := OpenBadgerStore(t.TempDir())
+	require.NoError(t, err)
+	bridge := &fakeAuthEventBridge{}
+	manager := newManagerWithStores("shop", unavailableStore{}, snapshot, true)
+	require.NoError(t, manager.bindEventBridge(bridge))
+	require.Equal(t, IdentityChangedSubject("shop"), bridge.subject)
+
+	manager.BeginClose()
+	require.True(t, bridge.localCanceled)
+	require.True(t, bridge.externalCanceled)
+	require.NoError(t, manager.Close())
+}
+
+func TestManagerEventSubscriptionStoresConfirmedSnapshot(t *testing.T) {
+	store, err := OpenBadgerStore(t.TempDir())
+	require.NoError(t, err)
+	bridge := &fakeAuthEventBridge{}
+	manager := newManagerWithStores("shop", store, store, false)
+	require.NoError(t, manager.bindEventBridge(bridge))
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	payload := testCasdoorEvent("evt-control", "delete-user", 9, true)
+	payload.Generation = 4
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	bridge.handler(&event.Envelope{Type: IdentityChangedEventType, Data: data})
+	state, err := store.Current(context.Background(), testIdentityKey())
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), state.Generation)
+	require.True(t, state.Blocked)
 }
 
 func TestSharedManagerNeverAuthorizesFromSnapshot(t *testing.T) {

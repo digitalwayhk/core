@@ -23,6 +23,8 @@ func (s *authHookTestService) OnAuth(_ context.Context, args *types.AuthHookArgs
 	s.captured = args
 	return nil
 }
+func (*authHookTestService) OnAuthRequest(context.Context, types.AuthRequestArgs) error { return nil }
+func (*authHookTestService) OnCasdoorEvent(context.Context, types.CasdoorEvent) error   { return nil }
 
 func TestServiceContextCapturesAuthHookProvider(t *testing.T) {
 	name := fmt.Sprintf("auth-hook-provider-%d", time.Now().UnixNano())
@@ -38,4 +40,6 @@ func TestServiceContextCapturesAuthHookProvider(t *testing.T) {
 	t.Cleanup(func() { sc.SetRunState(false) })
 
 	require.Same(t, service, sc.AuthHookProvider)
+	require.Same(t, service, sc.AuthRequestHookProvider)
+	require.Same(t, service, sc.CasdoorEventHookProvider)
 }
