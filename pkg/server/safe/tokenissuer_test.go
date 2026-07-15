@@ -71,6 +71,20 @@ func TestValidateRefreshTokenRejectsWrongAuthType(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestValidateRefreshTokenRejectsWrongSecret(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	token := signTokenClaims(t, "refresh-secret", jwt.MapClaims{
+		"uid":       "user-1",
+		"auth_type": "auth",
+		"token_use": "refresh",
+		"iat":       now.Unix(),
+		"exp":       now.Add(time.Hour).Unix(),
+	})
+
+	_, err := ValidateRefreshToken(token, "wrong-secret", types.AuthTypeUser, now)
+	require.Error(t, err)
+}
+
 func TestValidateRefreshTokenReturnsVerifiedIdentity(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0).UTC()
 	token := signTokenClaims(t, "refresh-secret", jwt.MapClaims{

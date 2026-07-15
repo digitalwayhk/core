@@ -11,7 +11,6 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
-	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
@@ -71,6 +70,8 @@ func (own *Claims) GetData(key string) (string, error) {
 	return "", errors.New("未找到数据")
 }
 
+// GetToken 保留用于源代码兼容；新代码应使用 IssueTokenPair 生成带用途隔离的 Token。
+// Deprecated: 使用 IssueTokenPair。
 func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 	iat := time.Now().Unix()
 	claims := make(jwt.MapClaims)
@@ -99,41 +100,45 @@ func isSensitiveKey(key string) bool {
 	return false
 }
 func ValidateJWTToken(tokenString string, auth config.AuthSecret) (string, string, error) {
-	if auth.CasDoor.Enable {
-		user, err := casdoor.TokenParse(tokenString)
-		if err != nil {
-			return "", "", err
-		}
-		return user.Id, user.Email, nil
-	}
 	return defaultToken(tokenString, auth.AccessSecret)
 }
 
 func defaultToken(tokenString, secret string) (string, string, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+	if tokenString == "" || secret == "" {
+		return "", "", errors.New("Access Token 验证参数无效")
+	}
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithoutClaimsValidation(),
+	)
+	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, errors.New("Access Token 签名算法无效")
 		}
 		return []byte(secret), nil
 	})
+	if err != nil || token == nil || !token.Valid {
+		return "", "", errors.New("Access Token 签名无效")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", "", errors.New("Access Token Claims 无效")
+	}
 
-	if err != nil {
-		return "", "", err
+	uid, _ := claims["uid"].(string)
+	username, _ := claims["uname"].(string)
+	authType, _ := claims["auth_type"].(string)
+	tokenUse, _ := claims["token_use"].(string)
+	issuedAt, iatOK := numericDate(claims["iat"])
+	expiresAt, expOK := numericDate(claims["exp"])
+	now := time.Now().Unix()
+	if uid == "" || tokenUse != "access" || authType != "auth" || !iatOK || !expOK {
+		return "", "", errors.New("Access Token Claims 不完整")
 	}
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		uidStr, unameStr := "", ""
-		if uname, ok := claims["uname"].(string); ok {
-			unameStr = uname
-		}
-		if uid, ok := claims["uid"].(string); ok {
-			uidStr = uid
-		}
-		if uidStr != "" {
-			return uidStr, unameStr, nil
-		}
-		return "", "", errors.New("userid is empty")
+	if expiresAt <= now || issuedAt > now || issuedAt > expiresAt {
+		return "", "", errors.New("Access Token 已过期或时间无效")
 	}
-	return "", "", errors.New("invalid token")
+	return uid, username, nil
 }
 
 func GetJWTExpiry(tokenString string) int64 {

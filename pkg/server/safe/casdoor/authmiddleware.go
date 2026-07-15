@@ -1,7 +1,6 @@
 package casdoor
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -56,10 +55,6 @@ func AuthHandler(next http.HandlerFunc) http.Handler {
 			return
 		}
 		userJson, _ := json.Marshal(claims.User)
-		con := r.Context()
-		// r = r.WithContext(context.WithValue(con, "uid", claims.User.Id))
-		// r = r.WithContext(context.WithValue(con, "uname", claims.User.Email))
-		r = r.WithContext(context.WithValue(con, "user", claims.User))
 		r.Header.Set("Casdoor-User-Json", string(userJson))
 		next.ServeHTTP(w, r)
 	})
