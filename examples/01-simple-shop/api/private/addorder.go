@@ -55,7 +55,7 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		return nil, err
 	}
 	response := dto.NewOrderResponse(order)
-	notifyOrderChange(req, response.WithAction("created"))
+	notifyOrderChange(response.WithAction("created"))
 	return response, nil
 }
 

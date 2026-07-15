@@ -1,6 +1,7 @@
 package private
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/digitalwayhk/core/examples/01-simple-shop/api/dto"
@@ -10,13 +11,9 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-// notifyOrderChange 通过当前 ServiceContext 中已冻结的订单路由发布用户通知。
-func notifyOrderChange(req servertypes.IRequest, response *dto.OrderResponse) {
-	serviceContext := router.GetContext(req.ServiceName())
-	if serviceContext == nil || serviceContext.Router == nil {
-		return
-	}
-	info := serviceContext.Router.GetRouter("/api/shop/getorders")
+// notifyOrderChange 通过已注册并冻结的订单 RouterInfo 发布用户通知。
+func notifyOrderChange(response *dto.OrderResponse) {
+	info := (&GetOrders{}).RouterInfo()
 	if info != nil {
 		info.NoticeWebSocket(response)
 	}
@@ -58,9 +55,7 @@ func (own *GetOrders) GetResponse() interface{} {
 
 // RouterInfo 将本人订单查询注册为需要认证的 GET 路由。
 func (own *GetOrders) RouterInfo() *servertypes.RouterInfo {
-	info := router.DefaultRouterInfo(own)
-	info.Method = "GET"
-	return info
+	return router.DefaultRouterInfoWithOptions(own, router.WithMethod(http.MethodGet))
 }
 
 // resolveUserID 优先读取 HTTP 认证上下文，WebSocket 订阅时回退到会话注入的身份。
@@ -73,12 +68,12 @@ func (own *GetOrders) resolveUserID(req servertypes.IRequest) string {
 	return strings.TrimSpace(own.subscriptionUserID)
 }
 
-// SetUserID 实现 IWebSocketUserIdentity，接收 WebSocket 会话解析出的可信身份。
+// SetUserID 实现 IWebSocketUserIdentity，接收 WebSocket 会话解析出的可信身份。在private中使用websocket时必须实现
 func (own *GetOrders) SetUserID(userID, _ string) {
 	own.subscriptionUserID = strings.TrimSpace(userID)
 }
 
-// GetUserID 实现 IWebSocketUserIdentity，返回当前订阅绑定的可信用户 ID。
+// GetUserID 实现 IWebSocketUserIdentity，返回当前订阅绑定的可信用户 ID。在private中使用websocket时必须实现
 func (own *GetOrders) GetUserID() string {
 	return own.subscriptionUserID
 }
