@@ -1,152 +1,143 @@
-# 示例 4 下单性能优化外部只读审查提示词
+# 示例 4 性能保护与同步正确性外部只读审查提示词
 
-请只读审查示例 4 的下单热路径优化，不要修改代码。
+请只读审查示例 4 的性能保护、SharedBadger 删除/同步正确性和基准可观测性，不要修改代码。
 
 ## 审查范围
 
 ```bash
-git diff 1e1d6d6..6fb355f
+git diff 52633dc..4355984
 ```
 
-- 基线提交：`1e1d6d6`
-- 性能实现提交：`43962b0`
-- RouterInfo 注册前置：`7435bc9`
-- Manage 路由并发修复：`4a19517`
-- 示例 1 订阅路由并发修复：`f68c874`
-- Benchmark HTTP 连接复用：`d43467f`
-- 千级并发矩阵与 P99：`5b348da`
-- 千级并发性能报告：`6fb355f`
-- 设计规格：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
-- 重点文件：
-  - `examples/04-shop-performance/models/order_batcher.go`
-  - `examples/04-shop-performance/models/order_write_store.go`
-  - `examples/04-shop-performance/business/order_reference_cache.go`
-  - `examples/04-shop-performance/business/order.go`
-  - `examples/04-shop-performance/service.go`
-  - `examples/04-shop-performance/api/manage/productmanage.go`
-  - `examples/04-shop-performance/api/manage/suppliermanage.go`
-  - `pkg/persistence/database/nosql/sharedbadger.go`
-  - `pkg/server/router/routerinfooption.go`
-  - `pkg/server/router/routerinforegistry.go`
-  - `pkg/server/router/servicerouter.go`
-  - `pkg/server/types/routerinfo.go`
-  - `docs/codex/SHOP_HIGH_CONCURRENCY_BENCHMARK_REPORT.md`
+- 基线：`52633dc`
+- 实现提交：`4355984 perf: 补全商城写入性能保护`
+- 设计：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
+- 使用指南：`examples/04-shop-performance/README.md`
 
-工作区可能存在范围外历史修改。只审查上述提交范围，不要把未提交文件计入本任务结论。
+工作区存在其他未提交历史修改；只审查上述提交范围，不要把脏工作区计入结论。
 
-`7435bc9..f68c874` 是示例 4 在 `7b50d05` 中已引用、但此前遗漏提交的 RouterInfo 冻结前置。请同时确认这些前置提交只完成注册期 option、单例解析、注销和并发只读契约，没有把 RouterInfo 对象池误当成并发限制。
+## 上轮阻断项
 
-## 优化目标
+1. `ForceDeleteLocal` 与后台 `syncBatch` 存在 TOCTOU：同步已读取内存快照后，本地删除可先删 SQLite，迟到 insert 再把订单复活。
+2. Group Commit 队列已满时，`Submit` 持有 `stateMu.RLock` 阻塞发送，`Close` 可长时间无法获得写锁。
 
-1. 缓存下单所需的最小商品、供应商和价格事实，避免每次下单重复读取 SQLite。
-2. 同一商品冷加载使用 go-zero `syncx.SingleFlight` 合并。
-3. 商品或供应商变更后，只通过服务专属 `EventBridge` 控制事件清理事实缓存。
-4. 服务启动后通过原子指针取得长期存活的 `OrderWriteStore`，移除请求热路径的全局锁竞争。
-5. 保持 Badger `SyncWrites=true`，低积压立即提交；高积压把最多 128 笔、最多 1ms 内的订单合并为一个可靠事务。
-6. 请求必须等待所属批次 Badger 提交成功，不能以内存入队冒充持久化成功。
+本轮还处理了上轮 P2：`PendingByUser` 全表扫描、损坏 value 时 pending 计数不减、Manage 已提交后失效失败误报业务失败，并补充背压、同步 TPS、窗口稳定度和混合长稳入口。
+
+## 重点文件
+
+- `pkg/persistence/database/nosql/sharedbadger.go`
+- `pkg/persistence/database/nosql/badgerdb.go`
+- `pkg/persistence/types/interface.go`
+- `examples/04-shop-performance/models/order.go`
+- `examples/04-shop-performance/models/order_batcher.go`
+- `examples/04-shop-performance/models/order_write_guard.go`
+- `examples/04-shop-performance/models/order_write_store.go`
+- `examples/04-shop-performance/api/manage/cache_invalidation.go`
+- `examples/integration/benchmetrics/throughput.go`
+- `examples/integration/03-shop-inheritance/benchmark_test.go`
+- `examples/integration/04-shop-performance/benchmark_test.go`
+- `examples/integration/helpers.go`
+- `scripts/benchmark-shop-examples.sh`
 
 ## 必查事项
 
-### 1. 可靠 Group Commit
+### 1. 删除与在途同步
 
-1. `Submit` 是否只有在所属 `BatchInsert` 成功后才返回成功。
-2. 队列关闭、并发 Submit、通道满、重复 Close 时是否可能 panic、死锁、丢请求或泄漏 goroutine。
-3. 低于 16 笔积压时是否立即逐单提交，不固定等待 1ms。
-4. 达到阈值后是否最多等待 1ms、最多合并 128 笔，且批次顺序稳定。
-5. 批次提交错误和 panic 是否通知该批全部等待者；Close 是否排空已接收请求并返回错误。
-6. Badger `SyncWrites`、冲突检测、写后同步队列和故障恢复语义是否被保持。
-7. `Close` 是否先停止并排空 Group Commit，再 Flush SQLite，最后关闭 Badger。
+1. 按键分片锁是否真正覆盖“重新校验 Badger -> 远端事务 -> 本地确认”全过程。
+2. 删除先取锁时，同步是否在锁内发现键已不存在并跳过远端 insert。
+3. 同步先取锁时，`ForceDeleteLocal` 是否等待同步提交，使业务随后的 SQLite Delete 最终生效。
+4. 多键批次按分片序号加锁是否无死锁；哈希碰撞是否只影响并发度而不影响正确性。
+5. `fromSyncQueue` 仅为内存来源标记，是否不被 JSON 持久化，且不会让生产快照绕过重检。
+6. 确定性交错测试是否在修复前真会失败，修复后无 sleep 刷绿。
 
-### 2. 订单键与本地删除
+### 2. Group Commit 关闭协议
 
-1. `Order:<orderID>` 是否由接口层 `req.NewID()` 提供，零 ID 是否 fail closed。
-2. ID 键是否消除了原“用户+商品+秒”进程锁，同时保持 Badger/SQLite 合并去重正确。
-3. `PendingByUser` 扫描后是否只按模型中的可信 UserID 返回本人订单，是否有越权风险。
-4. `ForceDeleteLocal` 是否在同一 Badger 事务删除数据键与同步索引，并正确维护 pending 计数。
-5. 先清本地 pending 再删 SQLite 是否避免删除后订单被合并读复活；失败顺序是否可能造成数据丢失或状态不一致。
-6. `ForceDeleteLocal` 与后台同步并发时是否存在 ABA、计数漂移、旧版本同步或误删新版本问题。
+1. `closing + submitters WaitGroup + requests close` 的顺序是否避免 send-on-closed、WaitGroup Add/Wait 竞态和丢失已接收请求。
+2. 满队列 Submit 是否不再长时间持锁，`Close` 是否能唤醒未入队请求。
+3. 已入队请求是否仍等待 `BatchInsert` 真实结果，没有退化成“入队即成功”。
+4. panic/提交错误是否传递给整批；重复 Close 是否幂等。
+5. 合批测试是否通过先填满队列再启 worker 确定性验证，不依赖调度运气。
 
-### 3. 下单事实缓存
+### 3. 本地用户前缀键
 
-1. 缓存是否只保存最小不可变快照，不保存请求、用户、响应或完整可变 Model。
-2. `SingleFlight` 是否只合并同一 ProductID，不同商品不互相阻塞。
-3. 商品不存在、商品禁用、供应商不存在或禁用时，错误是否不缓存。
-4. Manage 持久化成功后是否通过 `ServiceEventBridge` 控制事件失效；失败路径是否会产生误导性业务结果。
-5. generation 是否阻止失效前开始的迟到加载把旧值重新写回；并发 Get/Invalidate 是否有 data race。
-6. `Start/Stop` 是否正确绑定 ServiceContext 生命周期，重复启动或停止是否泄漏订阅。
-7. 当前 `External=false` 的本地默认语义是否被文档准确说明，是否没有虚假宣称多节点一致。
+1. 新增 `ILocalRowCode` 是否只改变 Badger 本地键，`Order.GetHash()`、SQLite Hashcode 和订单 ID 契约是否仍稳定。
+2. `Order:u:<sha256-128>:<orderID>` 是否不暴露原始 UserID，且所有 Set/Get/Delete/同步确认路径使用一致键。
+3. `PendingByUser` 是否真正只扫描当前 Token 用户前缀，不存在跨用户越权或全局 O(N) 回退。
+4. 新增公共接口是否向后兼容，是否需要兼容登记或额外契约测试。
 
-### 4. 原子热路径与生命周期
+### 4. 背压与磁盘保护
 
-1. `activeOrderWriteStore` 是否只在完整初始化成功后发布，并在切换路径或停止前清空。
-2. 原子快路径是否可能返回正在关闭、已关闭或属于旧运行目录的 store。
-3. 初始化失败是否仍由同一 state 稳定返回，未绕过 fail-closed。
-4. 全局互斥锁、store closeMu、batcher stateMu、flushMu 的锁序是否可能形成死锁。
-5. 测试是否真实证明热路径不等待 `globalOrderWriteStoreMu`。
+1. 是否复用 go-zero `syncx.TimeoutLimit`，单实例在途写入上限 500、等待上限 2 秒是否真正生效。
+2. pending 10,000 软阈值是否只启动 30 秒计时；降到阈值以下是否自动恢复。
+3. pending 50,000 或 Badger 1 GiB 是否 fail closed，错误是否不泄露路径、UserID 或订单数据。
+4. 高频背压是否使用 O(1) 缓存 pending，没有在每次 Add 扫描队列。
+5. 磁盘监视 goroutine 是否在 Close 时稳定退出，无 close panic、泄漏或数据竞争。
 
-### 5. RouterInfo 前置完整性
+### 5. 指标语义
 
-1. `DefaultRouterInfoWithOptions` / `NewRouterInfoWithOptions` 是否只在首次注册冻结前应用 option；再次解析同一 owner 时是否只读。
-2. 注册索引是否以服务所有权隔离，歧义解析是否 fail closed，ServiceContext 关闭后是否注销。
-3. Manage 泛型路由与示例 1 GetOrders 是否不再在每次 `RouterInfo()` 调用时写冻结字段。
-4. `TestRouterInfoConcurrentResolveIsReadOnly` 与 `TestManageRouterInfoConcurrentResolveIsReadOnly` 是否能在 `-race` 下真实覆盖并发解析。
-5. 兼容导出字段与新增 Getter 是否存在 API、锁序或注册生命周期回归。
+1. Group Commit 的 submitted/committed/batches/immediate/aggregated/failures/max batch/max queue/耗时是否在正确时机记录。
+2. SharedBadger `SyncMetrics` 的 attempts/failures/synced items/max pending/耗时/最后成功时间是否无重复或遗漏。
+3. `APIConfirmedTPS`、`SQLiteConvergenceTPS`、`SQLiteActiveSyncTPS` 的分母和命名是否准确，是否可能误导运维。
+4. 指标读写是否在 `-race` 下无竞争，是否不给写入热路径增加高成本扫描或全局锁。
+5. `ForceDeleteLocal` 在 value 损坏时是否以同步索引为 pending 权威事实并正确扣减计数。
 
-### 6. API、可靠性与兼容性
+### 6. 吞吐窗口与混合基准
 
-1. 下单成功前是否已经完成可靠本地持久化；进程异常退出后已确认订单是否可恢复。
-2. DTO、认证、用户所有权、订单状态机、WebSocket 一次推送语义是否保持。
-3. Group Commit 或事实缓存故障是否泄露内部错误、Token、UserID 或订单内容。
-4. 新增 `ForceDeleteLocal` 是否是合理的框架公共 API，是否需要额外契约测试或兼容性登记。
-5. 纯低并发场景是否因调度策略增加不可接受的尾延迟。
+1. `benchmetrics.Collector` 请求热路径是否只做原子计数，Stop 是否必然结束 goroutine。
+2. `win-p01/p05/p50/p95/p99` 是否表示每秒吞吐窗口分布，而非请求延迟分位数。
+3. 尾部不完整窗口、CV、标准差和错误率计算是否正确；小样本是否会给出误导数字。
+4. 03/04 `BenchmarkMixedWorkload` 是否严格使用相同 70% 商品查询、20% 订单查询、10% 下单口径。
+5. benchmark 临时把日志调为 `error` 是否只作用于临时进程，03/04 是否公平，普通集成测试是否仍保留日志。
+6. `scripts/benchmark-shop-examples.sh` 是否包含 Mixed 且仍只读源码/生成临时产物。
 
-### 7. Benchmark 真实性
+### 7. Manage 失效和文档
 
-同机、同参数、三轮中位数：
+1. 数据持久化成功后 EventBridge 失效失败是否记录结构化错误，但不再把已成功写入伪装成业务失败。
+2. 公开路由缓存是否仍先立即失效；失效失败后是否有 TTL 兜底。
+3. README 是否说清背压数字是示例值、历史高并发报告是改造前样本，且没有把 API TPS 冒充 SQLite TPS。
+4. 15 分钟长稳和 pprof 命令是否可执行、不进日常 CI。
 
-| 并发 | 示例 3 | 示例 4 | 提升 |
-| ---: | ---: | ---: | ---: |
-| 1 | 3,338 orders/s | 6,834 orders/s | 104.7% |
-| 16 | 8,067 orders/s | 13,500 orders/s | 67.3% |
-| 64 | 8,160 orders/s | 24,649 orders/s | 202.1% |
-
-参数：Apple M3 Max，`-benchtime=5s -count=3`，不使用 race。
-
-请检查：
-
-1. 示例 3 与 4 是否使用相同真实 HTTP 口径、数据准备、客户端连接复用和响应读取。
-2. 示例 4 的提升是否主要来自事实缓存、原子快路径和高并发 Group Commit，而非跳过可靠持久化或跳过响应校验。
-3. 低/中/高并发行为是否与阈值设计一致，是否存在 benchmark 特化代码。
-4. README 是否明确这些数字只是同机样本，不是跨机器承诺。
-5. 共享 `http.Client` 是否真正复用连接，且不会因 `MaxIdleConnsPerHost` 过低耗尽临时端口或影响普通集成测试隔离。
-6. `SHOP_BENCH_CONCURRENCIES=100,500,1000` 是否严格执行指定矩阵；延迟样本是否覆盖整个窗口并正确输出 P99。
-
-## 验证命令
+## 已执行验证
 
 ```bash
-go test -race ./examples/04-shop-performance/... -count=1
+go test ./pkg/persistence/database/nosql -count=1
+go test -race ./pkg/persistence/database/nosql ./examples/04-shop-performance/... ./examples/integration/benchmetrics -count=1 -timeout=5m
 go test -race ./examples/integration/04-shop-performance -count=1 -timeout=20m
-go test -race ./pkg/server/router ./pkg/server/types -count=1
-go vet ./examples/04-shop-performance/... ./examples/integration/04-shop-performance
+go vet ./pkg/persistence/database/nosql ./examples/04-shop-performance/... \
+  ./examples/integration/benchmetrics ./examples/integration/03-shop-inheritance \
+  ./examples/integration/04-shop-performance
+go test ./internal/compat ./pkg/persistence/types -count=1
+bash -n scripts/benchmark-shop-examples.sh
 ./scripts/check-logging.sh
+```
 
+短混合基准冒烟（Apple M3 Max，100 并发，2s，只用于验证指标输出）：
+
+- 示例 3：约 3,424 req/s，窗口 CV 23.4%，错误率 0。
+- 示例 4：约 10,461 req/s，窗口 CV 0.46%，错误率 0。
+
+这两个数字不是正式性能承诺，不应作为固定倍数门禁。
+
+## 建议复核命令
+
+```bash
+go test ./pkg/persistence/database/nosql \
+  -run 'TestForceDeleteLocal|TestSyncMetrics' -count=20
 go test ./examples/04-shop-performance/models \
-  -run 'TestOrderBatcher|TestOrderWriteStoreFastPath' -count=20
-
-go test ./examples/integration/03-shop-inheritance -run '^$' \
-  -bench '^BenchmarkAddOrder$' -benchmem -benchtime=5s -count=3 -timeout=20m
-go test ./examples/integration/04-shop-performance -run '^$' \
-  -bench '^BenchmarkAddOrder$' -benchmem -benchtime=5s -count=3 -timeout=20m
+  -run 'TestOrderBatcher|TestOrderWriteGuard|TestOrderWriteStore' -count=20
+go test -race ./pkg/persistence/database/nosql ./examples/04-shop-performance/... -count=1 -timeout=10m
+go test -race ./examples/integration/04-shop-performance -count=1 -timeout=20m
+go test ./examples/integration/benchmetrics -count=50
+go vet ./pkg/persistence/database/nosql ./examples/04-shop-performance/... \
+  ./examples/integration/03-shop-inheritance ./examples/integration/04-shop-performance
+./scripts/check-logging.sh
 ```
 
 ## 输出格式
 
-请输出：
-
-1. `Findings`，按 P0/P1/P2 排序；每项提供文件与行号、触发场景、影响和修复建议。
-2. 可靠 Group Commit、事实缓存/EventBridge 失效、原子 store 热路径、本地删除是否分别达到目标。
-3. API、认证、用户隔离、状态机、WebSocket 和崩溃恢复兼容性评估。
-4. benchmark 是否公平、可复现，是否存在牺牲可靠性换吞吐的误导。
-5. 测试缺口与残余风险。
+1. `Findings`，按 P0/P1/P2 排序；每项给出文件/行号、触发场景、影响和修复建议。
+2. 明确裁定上轮 P1-1（删除复活）和 P1-2（满队列关闭）是否分别关闭。
+3. 评估 `ILocalRowCode`、`SyncMetrics`、`GetCachedPendingSyncCount` 新增公共 API 的兼容性。
+4. 评估背压、指标、混合基准和中文文档是否达到演示目标。
+5. 列出测试缺口和残余风险。
 6. 最终裁定：`APPROVED` 或 `CHANGES_REQUIRED`。
-7. 是否允许关闭本轮示例 4 性能优化。
+7. 是否允许关闭示例 4 性能优化并进入下一个示例。
