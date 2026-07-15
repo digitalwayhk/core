@@ -53,6 +53,25 @@ type ResponseEnvelope struct {
 	Data         json.RawMessage `json:"data"`
 }
 
+// httpClient 复用连接，避免高并发 benchmark 因 DefaultTransport
+// MaxIdleConnsPerHost=2 产生大量 TIME_WAIT 耗尽 ephemeral 端口。
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          256,
+		MaxIdleConnsPerHost:   128,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
 // WebSocketMessage 对应框架 WebSocket 的 event/channel/data 信封。
 type WebSocketMessage struct {
 	Event   string          `json:"event"`
@@ -275,7 +294,7 @@ func (s *Suite) DoJSON(method, path, token string, body interface{}) (ResponseEn
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return ResponseEnvelope{}, err
 	}
