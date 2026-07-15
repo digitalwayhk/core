@@ -5,7 +5,7 @@
 ## 审查范围
 
 ```bash
-git diff 1e1d6d6..5b348da
+git diff 1e1d6d6..6fb355f
 ```
 
 - 基线提交：`1e1d6d6`
@@ -15,6 +15,7 @@ git diff 1e1d6d6..5b348da
 - 示例 1 订阅路由并发修复：`f68c874`
 - Benchmark HTTP 连接复用：`d43467f`
 - 千级并发矩阵与 P99：`5b348da`
+- 千级并发性能报告：`6fb355f`
 - 设计规格：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
 - 重点文件：
   - `examples/04-shop-performance/models/order_batcher.go`
@@ -29,6 +30,7 @@ git diff 1e1d6d6..5b348da
   - `pkg/server/router/routerinforegistry.go`
   - `pkg/server/router/servicerouter.go`
   - `pkg/server/types/routerinfo.go`
+  - `docs/codex/SHOP_HIGH_CONCURRENCY_BENCHMARK_REPORT.md`
 
 工作区可能存在范围外历史修改。只审查上述提交范围，不要把未提交文件计入本任务结论。
 
