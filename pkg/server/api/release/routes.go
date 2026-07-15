@@ -23,6 +23,7 @@ func Routers() []types.IRouter {
 		&public.GetMenu{},
 		&public.Health{},
 		&public.Callback{},
+		&public.Refresh{},
 		&public.Casdoor{},
 		//&public.Statistics{},
 		&public.OpenAPI{},

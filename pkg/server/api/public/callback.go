@@ -5,8 +5,10 @@ import (
 	"net/http"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -25,6 +27,9 @@ func (own *Callback) Parse(req types.IRequest) error {
 func (own *Callback) Validation(req types.IRequest) error {
 	if own.Type == "" {
 		own.Type = "auth"
+	}
+	if own.Type != string(types.AuthTypeUser) && own.Type != string(types.AuthTypeManage) {
+		return fmt.Errorf("casdoor auth type is invalid")
 	}
 	con := router.GetContext(req.ServiceName())
 	if own.Type == "manage" {
@@ -67,10 +72,25 @@ func (own *Callback) Do(req types.IRequest) (interface{}, error) {
 	}
 	token, err := casdoorsdk.GetOAuthToken(own.Code, own.State)
 	if err != nil {
-		err := fmt.Errorf("GetOAuthToken() error: %w", err)
-		return nil, err
+		return nil, fmt.Errorf("GetOAuthToken() error: %w", err)
 	}
-	return token.AccessToken, nil
+	claims, err := casdoorsdk.ParseJwtToken(token.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("ParseJwtToken() error: %w", err)
+	}
+	return issueForService(
+		requestContext(req),
+		con,
+		claims.Id,
+		claims.Email,
+		types.AuthType(own.Type),
+		types.AuthSourceCallback,
+		claims,
+	)
+}
+
+func (*Callback) GetResponse() interface{} {
+	return &safe.TokenPairResponse{}
 }
 
 func (own *Callback) RouterInfo() *types.RouterInfo {
