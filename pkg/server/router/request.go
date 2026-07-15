@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -75,15 +74,6 @@ func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	nobj := ctext.Value("uname")
 	if nobj != nil {
 		uname = ctext.Value("uname").(string)
-	}
-	con := GetContext(req.ServiceName())
-	if con != nil && req.auth {
-		if con.Config.Auth.CasDoor.Enable || con.Config.ManageAuth.CasDoor.Enable {
-			if uu, ok := ctext.Value("user").(casdoorsdk.User); ok {
-				uid = uu.Id
-				uname = uu.Email
-			}
-		}
 	}
 	req.userID = uid
 	req.userName = uname

@@ -12,7 +12,6 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/safe/logto"
 	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/websocket/melody"
@@ -35,6 +34,20 @@ type Server struct {
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	stopped       bool
+}
+
+type authMode uint8
+
+const (
+	authModeInternalJWT authMode = iota
+	authModeLogto
+)
+
+func selectAuthMode(auth config.AuthSecret) authMode {
+	if auth.Logto.Enable {
+		return authModeLogto
+	}
+	return authModeInternalJWT
 }
 
 func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
@@ -188,32 +201,19 @@ func handers(own *Server, api *types.RouterInfo) error {
 	opts := make([]rest.RouteOption, 0)
 	path := api.Path
 	handler := RouteHandler(own.context.Router)
-	if api.Auth {
+	if api.GetAuth() {
+		auth := own.context.Config.Auth
 		if own.context.Router.HasRouter(path, types.ManageType) {
-			if own.context.Config.ManageAuth.Logto.Enable {
-				authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto)
-				if err != nil {
-					return fmt.Errorf("initialize manage Logto authentication: %w", err)
-				}
-				handler = authHandler.ServeHTTP
-			} else if own.context.Config.ManageAuth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
-			} else {
-				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
+			auth = own.context.Config.ManageAuth
+		}
+		if selectAuthMode(auth) == authModeLogto {
+			authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), auth.Logto)
+			if err != nil {
+				return fmt.Errorf("initialize Logto authentication: %w", err)
 			}
-
+			handler = authHandler.ServeHTTP
 		} else {
-			if own.context.Config.Auth.Logto.Enable {
-				authHandler, err := own.newLogtoHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto)
-				if err != nil {
-					return fmt.Errorf("initialize Logto authentication: %w", err)
-				}
-				handler = authHandler.ServeHTTP
-			} else if own.context.Config.Auth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
-			} else {
-				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-			}
+			opts = append(opts, rest.WithJwt(auth.AccessSecret))
 		}
 	}
 	handler = securityHeaders(http.HandlerFunc(handler)).ServeHTTP
