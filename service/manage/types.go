@@ -10,15 +10,18 @@ import (
 
 func RouterInfo(own interface{}) *st.RouterInfo {
 	pack, tname := router.GetRouterPackAndTypeName(own)
-	info := router.NewRouterInfo(own, pack, tname)
 	name := strings.ToLower(utils.GetTypeName(own))
 	index := strings.Index(name, "[")
 	if index > 0 {
 		name = name[:index]
 	}
 	ioh := own.(st.IPackRouterHook)
-	info.Path = "/api/manage/" + info.ServiceName + "/" + strings.ToLower(utils.GetTypeName(ioh.GetInstance())) + "/" + name
-	info.Auth = true
-	info.PathType = st.ManageType
-	return info
+	manageName := strings.ToLower(utils.GetTypeName(ioh.GetInstance()))
+	return router.NewRouterInfoWithOptions(own, pack, tname,
+		router.WithPathResolver(func(info *st.RouterInfo) string {
+			return "/api/manage/" + info.GetServiceName() + "/" + manageName + "/" + name
+		}),
+		router.WithAuth(true),
+		router.WithPathType(st.ManageType),
+	)
 }
