@@ -1,50 +1,68 @@
 package casdoor
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 )
 
-func TestAuthHandlerDoesNotInjectCasdoorUserIntoContext(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	require.NoError(t, err)
-	publicKey := pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyDER,
-	})
-	casdoorsdk.InitConfig("http://casdoor.invalid", "", "", string(publicKey), "", "")
+func TestLegacyAuthHandlerFailsClosedWithoutExplicitClient(t *testing.T) {
+	called := false
+	handler := AuthHandler(func(http.ResponseWriter, *http.Request) { called = true })
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
 
-	claims := &casdoorsdk.Claims{
-		User: casdoorsdk.User{Id: "casdoor-user", Email: "user@example.com"},
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
-		},
-	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(privateKey)
-	require.NoError(t, err)
+	require.NotPanics(t, func() { handler.ServeHTTP(response, request) })
+	require.Equal(t, http.StatusUnauthorized, response.Code)
+	require.False(t, called)
+}
 
-	var contextUser interface{}
-	handler := AuthHandler(func(_ http.ResponseWriter, request *http.Request) {
-		contextUser = request.Context().Value("user")
+func TestTokenParseRequiresExplicitClient(t *testing.T) {
+	claims, err := TokenParse("token")
+	require.Nil(t, claims)
+	require.ErrorIs(t, err, ErrClientRequired)
+}
+
+func TestExplicitClientAuthHandlerUsesProvidedDomain(t *testing.T) {
+	client := &fakeClient{claims: &casdoorsdk.Claims{User: casdoorsdk.User{Id: "user-1", Name: "alice"}}}
+	domain := &DomainClient{client: client, organization: "org", application: "app"}
+	called := false
+	handler := NewAuthHandler(domain, func(_ http.ResponseWriter, request *http.Request) {
+		called = true
+		require.Contains(t, request.Header.Get("Casdoor-User-Json"), "user-1")
 	})
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
+	require.True(t, called)
 	require.Equal(t, http.StatusOK, response.Code)
-	require.Nil(t, contextUser)
+	require.Equal(t, "token", client.parsedToken)
+}
+
+type fakeClient struct {
+	claims      *casdoorsdk.Claims
+	parseErr    error
+	parsedToken string
+}
+
+func (*fakeClient) GetOAuthToken(string, string, ...casdoorsdk.OAuthOption) (*oauth2.Token, error) {
+	return nil, errors.New("not implemented in auth middleware test")
+}
+
+func (c *fakeClient) ParseJwtToken(token string) (*casdoorsdk.Claims, error) {
+	c.parsedToken = token
+	return c.claims, c.parseErr
+}
+
+func (*fakeClient) GetUser(string) (*casdoorsdk.User, error) {
+	return nil, errors.New("not implemented in auth middleware test")
 }

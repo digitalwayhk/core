@@ -25,6 +25,9 @@ func TestNewConfigCreatesDistinctRefreshSecrets(t *testing.T) {
 
 	require.Empty(t, cfg.ServerManageAuth.RefreshSecret)
 	require.Zero(t, cfg.ServerManageAuth.RefreshExpire)
+	require.False(t, cfg.Auth.CasDoor.Enable)
+	require.False(t, cfg.ManageAuth.CasDoor.Enable)
+	require.False(t, cfg.ServerManageAuth.CasDoor.Enable)
 }
 
 func TestMigrateConfigPersistsRefreshSecretsOnce(t *testing.T) {

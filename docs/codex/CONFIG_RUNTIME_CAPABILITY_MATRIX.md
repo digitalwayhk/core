@@ -61,6 +61,7 @@
 | `ServerConfig.Auth.CasDoor` | supported | CasDoor auth middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.Auth.CasDoor.Enable` | supported | CasDoor auth middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.Auth.CasDoor.YamlFilePath` | supported | CasDoor auth middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.Auth.CasDoor.WebhookSecret` | supported | ServerConfig/Casdoor webhook | 配置层强制独立密钥；Webhook 运行时由认证生命周期接入 |
 | `ServerConfig.ManageAuth` | supported | manage auth middleware | 管理路由认证容器装配 |
 | `ServerConfig.ManageAuth.AccessSecret` | supported | manage JWT middleware | JWT 签名校验消费 |
 | `ServerConfig.ManageAuth.AccessExpire` | supported | manage JWT middleware | JWT 过期时间消费 |
@@ -73,6 +74,7 @@
 | `ServerConfig.ManageAuth.CasDoor` | supported | manage CasDoor middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.ManageAuth.CasDoor.Enable` | supported | manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.ManageAuth.CasDoor.YamlFilePath` | supported | manage CasDoor middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.ManageAuth.CasDoor.WebhookSecret` | supported | ServerConfig/Casdoor webhook | 与 Auth、JWT、ClientSecret 密钥隔离；Webhook 运行时由认证生命周期接入 |
 | `ServerConfig.ServerManageAuth` | supported | server-manage auth middleware | 服务管理路由认证容器装配 |
 | `ServerConfig.ServerManageAuth.AccessSecret` | supported | server-manage JWT middleware | JWT 签名校验消费 |
 | `ServerConfig.ServerManageAuth.AccessExpire` | supported | server-manage JWT middleware | JWT 过期时间消费 |
@@ -85,6 +87,7 @@
 | `ServerConfig.ServerManageAuth.CasDoor` | supported | server-manage CasDoor middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.ServerManageAuth.CasDoor.Enable` | supported | server-manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.ServerManageAuth.CasDoor.YamlFilePath` | supported | server-manage CasDoor middleware | ReloadConfig 加载指定文件 |
+| `ServerConfig.ServerManageAuth.CasDoor.WebhookSecret` | rejected | ServerConfig.Validate | ServerManage 不接入 Casdoor Webhook，非空配置明确拒绝 |
 | `ServerConfig.RunIp` | supported | ServiceContext | 服务地址与节点信息组装消费 |
 | `ServerConfig.ParentServerIP` | supported | server routing | 父服务连接路由消费 |
 | `ServerConfig.SocketPort` | supported | socket server | socket listener 构造消费 |
@@ -164,6 +167,13 @@
 | `ServerConfig.RouteCache.Redis.DB` | rejected | RouteCacheConfig.Validate | go-zero Redis adapter 不消费 DB；仅允许 0，防止配置静默失效 |
 | `ServerConfig.RouteCache.Redis.Prefix` | supported | RedisL3 | 作为所有共享缓存键的显式前缀 |
 | `ServerConfig.RouteCache.Redis.OnUnavailable` | supported | RouteCacheManager | fail 默认阻止启动；显式 bypass 关闭 L1/L2/L3 全部缓存层 |
+| `ServerConfig.AuthRevocation` | supported | ServerConfig/AuthRevocationManager | 配置层规范化；Casdoor 启用后由服务级撤销管理器消费 |
+| `ServerConfig.AuthRevocation.Mode` | supported | AuthRevocationConfig.Validate | 仅接受 local/shared；shared 强制要求 Redis |
+| `ServerConfig.AuthRevocation.BadgerPath` | supported | AuthRevocationManager | local 权威存储或 shared 已确认快照目录 |
+| `ServerConfig.AuthRevocation.Redis` | supported | AuthRevocationManager | 仅 shared 模式消费，使用 go-zero Redis 客户端 |
+| `ServerConfig.AuthRevocation.Redis.Addr` | supported | AuthRevocationConfig.Validate | shared 且 Casdoor 启用时必须非空 |
+| `ServerConfig.AuthRevocation.Redis.Password` | supported | AuthRevocationManager | 透传 go-zero RedisConf.Pass，不得写入日志 |
+| `ServerConfig.AuthRevocation.Redis.Prefix` | supported | AuthRevocationManager | 撤销状态、幂等事件和世代键命名空间 |
 | `ServerConfig.MQ` | supported | ServiceContext | ApplyDefaults/Validate 并按 Mode 创建和关闭 MQManager |
 | `ServerConfig.MQ.Mode` | supported | ServiceContext | 决定不创建、自动或强制 MQ runtime |
 | `ServerConfig.MQ.Provider` | supported | MQ factory | 选择内建或注册 factory，未实现 provider 拒绝 |

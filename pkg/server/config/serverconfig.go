@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -37,11 +38,12 @@ type ServerConfig struct {
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string           `json:",optional"`
-	Cluster               ClusterConfig    `json:",optional"`
-	Transport             TransportConfig  `json:",optional"`
-	MQ                    MQConfig         `json:",optional"`
-	RouteCache            RouteCacheConfig `json:",optional"`
+	MelodyConfigPath      string               `json:",optional"`
+	Cluster               ClusterConfig        `json:",optional"`
+	Transport             TransportConfig      `json:",optional"`
+	MQ                    MQConfig             `json:",optional"`
+	RouteCache            RouteCacheConfig     `json:",optional"`
+	AuthRevocation        AuthRevocationConfig `json:",optional"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -63,6 +65,7 @@ func (con *ServerConfig) ApplyDefaults() {
 	con.Transport.ApplyDefaults()
 	con.MQ.ApplyDefaults()
 	con.RouteCache.ApplyDefaults()
+	con.AuthRevocation.ApplyDefaults(con.Name)
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
@@ -88,7 +91,62 @@ func (con *ServerConfig) Validate() error {
 	if err := con.RouteCache.Validate(); err != nil {
 		return err
 	}
+	casdoorEnabled := con.Auth.CasDoor.Enable || con.ManageAuth.CasDoor.Enable
+	if err := con.AuthRevocation.Validate(casdoorEnabled); err != nil {
+		return err
+	}
+	if err := con.validateCasdoorSecrets(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (con *ServerConfig) validateCasdoorSecrets() error {
+	authWebhook := strings.TrimSpace(con.Auth.CasDoor.WebhookSecret)
+	manageWebhook := strings.TrimSpace(con.ManageAuth.CasDoor.WebhookSecret)
+	if strings.TrimSpace(con.ServerManageAuth.CasDoor.WebhookSecret) != "" {
+		return fmt.Errorf("ServerManageAuth.CasDoor.WebhookSecret is unsupported")
+	}
+	if con.Auth.CasDoor.Enable && authWebhook == "" {
+		return fmt.Errorf("Auth.CasDoor.WebhookSecret is required")
+	}
+	if con.ManageAuth.CasDoor.Enable && manageWebhook == "" {
+		return fmt.Errorf("ManageAuth.CasDoor.WebhookSecret is required")
+	}
+	if authWebhook != "" && manageWebhook != "" && subtleSecretEqual(authWebhook, manageWebhook) {
+		return fmt.Errorf("Auth and ManageAuth CasDoor WebhookSecret must be different")
+	}
+	protected := []struct {
+		name  string
+		value string
+	}{
+		{"Auth.AccessSecret", con.Auth.AccessSecret},
+		{"Auth.RefreshSecret", con.Auth.RefreshSecret},
+		{"ManageAuth.AccessSecret", con.ManageAuth.AccessSecret},
+		{"ManageAuth.RefreshSecret", con.ManageAuth.RefreshSecret},
+		{"ServerManageAuth.AccessSecret", con.ServerManageAuth.AccessSecret},
+	}
+	for _, webhook := range []struct {
+		name  string
+		value string
+	}{{"Auth.CasDoor.WebhookSecret", authWebhook}, {"ManageAuth.CasDoor.WebhookSecret", manageWebhook}} {
+		if webhook.value == "" {
+			continue
+		}
+		for _, secret := range protected {
+			if secret.value != "" && subtleSecretEqual(webhook.value, secret.value) {
+				return fmt.Errorf("%s must be different from %s", webhook.name, secret.name)
+			}
+		}
+	}
+	return nil
+}
+
+func subtleSecretEqual(left, right string) bool {
+	if len(left) != len(right) || left == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 // ReloadExternalConfigs 加载外部配置文件（Casdoor、Melody）。
@@ -225,7 +283,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
-	con.Auth.CasDoor = CasDoorConfig{
+	con.ManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
@@ -235,7 +293,7 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
-	con.Auth.CasDoor = CasDoorConfig{
+	con.ServerManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
