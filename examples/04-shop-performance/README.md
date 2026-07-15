@@ -75,3 +75,5 @@ go vet ./examples/04-shop-performance/... ./examples/integration/04-shop-perform
 该表来自干净提交 `d43467f`，用于解释优化方向，不是跨机器性能承诺。正式比较应在同一提交、同一机器、空闲环境下重新运行三轮以上并取中位数。基准客户端显式复用 HTTP 连接，避免高并发时因临时端口耗尽而得到虚假失败。
 
 完整设计见 `docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`。
+
+100、500、1000 并发下的 QPS、TPS 与 P50/P95/P99 正式结果见 `docs/codex/SHOP_HIGH_CONCURRENCY_BENCHMARK_REPORT.md`。

@@ -5,7 +5,7 @@
 ## 审查范围
 
 ```bash
-git diff 1e1d6d6..d43467f
+git diff 1e1d6d6..5b348da
 ```
 
 - 基线提交：`1e1d6d6`
@@ -14,6 +14,7 @@ git diff 1e1d6d6..d43467f
 - Manage 路由并发修复：`4a19517`
 - 示例 1 订阅路由并发修复：`f68c874`
 - Benchmark HTTP 连接复用：`d43467f`
+- 千级并发矩阵与 P99：`5b348da`
 - 设计规格：`docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`
 - 重点文件：
   - `examples/04-shop-performance/models/order_batcher.go`
@@ -116,6 +117,7 @@ git diff 1e1d6d6..d43467f
 3. 低/中/高并发行为是否与阈值设计一致，是否存在 benchmark 特化代码。
 4. README 是否明确这些数字只是同机样本，不是跨机器承诺。
 5. 共享 `http.Client` 是否真正复用连接，且不会因 `MaxIdleConnsPerHost` 过低耗尽临时端口或影响普通集成测试隔离。
+6. `SHOP_BENCH_CONCURRENCIES=100,500,1000` 是否严格执行指定矩阵；延迟样本是否覆盖整个窗口并正确输出 P99。
 
 ## 验证命令
 
