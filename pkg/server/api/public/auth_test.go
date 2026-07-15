@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/authstate"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -181,6 +182,66 @@ func TestRefreshAcceptsAuthAndManageSecretsIndependently(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestCasdoorRefreshRequiresOnlineUserAndCurrentGeneration(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	hook := &authHookRecorder{}
+	sc := authTestServiceContext(hook)
+	identity := types.AuthIdentity{
+		UID:             "user-1",
+		Username:        "用户一",
+		AuthType:        types.AuthTypeUser,
+		Provider:        types.AuthProviderCasdoor,
+		ProviderSubject: "alice",
+		Generation:      4,
+	}
+	original, err := issueForServiceIdentityAt(context.Background(), sc, identity, types.AuthSourceCallback, nil, now)
+	require.NoError(t, err)
+
+	client := activeCallbackClient()
+	authority := &callbackAuthorityStub{
+		current:   authstate.State{Generation: 4},
+		confirmed: authstate.State{Generation: 4},
+	}
+	refreshed, err := refreshForServiceWithDependenciesAt(
+		context.Background(), sc, original.RefreshToken, types.AuthTypeUser, now.Add(time.Hour), client, authority,
+	)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, refreshed.AccessToken)
+	require.Empty(t, refreshed.RefreshToken)
+	require.Equal(t, "alice", client.getUserName)
+	require.Equal(t, uint64(4), authority.expectedGeneration)
+}
+
+func TestCasdoorRefreshRejectsRevokedOrOfflineIdentity(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	sc := authTestServiceContext(&authHookRecorder{})
+	identity := types.AuthIdentity{
+		UID: "user-1", AuthType: types.AuthTypeUser, Provider: types.AuthProviderCasdoor,
+		ProviderSubject: "alice", Generation: 4,
+	}
+	original, err := issueForServiceIdentityAt(context.Background(), sc, identity, types.AuthSourceCallback, nil, now)
+	require.NoError(t, err)
+
+	t.Run("世代已变化", func(t *testing.T) {
+		_, err := refreshForServiceWithDependenciesAt(
+			context.Background(), sc, original.RefreshToken, types.AuthTypeUser, now.Add(time.Hour),
+			activeCallbackClient(), &callbackAuthorityStub{current: authstate.State{Generation: 5}},
+		)
+		require.Equal(t, 401, types.ResolvePublicError(err).HTTPStatus)
+	})
+
+	t.Run("用户已禁用", func(t *testing.T) {
+		client := activeCallbackClient()
+		client.user.IsForbidden = true
+		_, err := refreshForServiceWithDependenciesAt(
+			context.Background(), sc, original.RefreshToken, types.AuthTypeUser, now.Add(time.Hour),
+			client, &callbackAuthorityStub{current: authstate.State{Generation: 4}},
+		)
+		require.Equal(t, 401, types.ResolvePublicError(err).HTTPStatus)
+	})
 }
 
 func authTestServiceContext(hook types.IAuthHookProvider) *router.ServiceContext {

@@ -9,9 +9,13 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-type Casdoor struct {
+type CasdoorConfig struct {
 	Type string `json:"type" desc:"type of casdoor info, auth or manage"`
 }
+
+// Casdoor 为旧 Go 类型名保留兼容别名。
+// Deprecated: 使用 CasdoorConfig。
+type Casdoor = CasdoorConfig
 type CasdoorResponse struct {
 	Endpoint              string `yaml:"endpoint"`
 	ClientID              string `yaml:"client_id"`
@@ -20,14 +24,16 @@ type CasdoorResponse struct {
 	BackgroundCallbackURL string `yaml:"background_callback_url"`
 }
 
-func (own *Casdoor) Parse(req types.IRequest) error {
+func (own *CasdoorConfig) Parse(req types.IRequest) error {
 	own.Type = req.GetValue("type")
 	return nil
 }
-func (own *Casdoor) Validation(req types.IRequest) error {
-	if own.Type == "" {
-		own.Type = "auth"
+func (own *CasdoorConfig) Validation(req types.IRequest) error {
+	authType, err := normalizeCasdoorAuthType(own.Type)
+	if err != nil {
+		return err
 	}
+	own.Type = string(authType)
 	con := router.GetContext(req.ServiceName())
 	if own.Type == "auth" {
 		if !con.Config.Auth.CasDoor.Enable {
@@ -45,7 +51,7 @@ func (own *Casdoor) Validation(req types.IRequest) error {
 	return nil
 }
 
-func (own *Casdoor) Do(req types.IRequest) (interface{}, error) {
+func (own *CasdoorConfig) Do(req types.IRequest) (interface{}, error) {
 	con := router.GetContext(req.ServiceName())
 	var casdoorConfig *config.CasDoorConfigData
 	var err error
@@ -61,17 +67,16 @@ func (own *Casdoor) Do(req types.IRequest) (interface{}, error) {
 	if casdoorConfig == nil {
 		return nil, fmt.Errorf("casdoor %s config is nil", own.Type)
 	}
-	url := Callback{}
 	casdoorRes := &CasdoorResponse{
 		Endpoint:              casdoorConfig.Server.Endpoint,
 		ClientID:              casdoorConfig.Server.ClientID,
 		Organization:          casdoorConfig.Server.Organization,
 		Application:           casdoorConfig.Server.Application,
-		BackgroundCallbackURL: url.RouterInfo().GetPath(),
+		BackgroundCallbackURL: casdoorCallbackPath(),
 	}
 	return casdoorRes, nil
 }
-func (own *Casdoor) RouterInfo() *types.RouterInfo {
+func (own *CasdoorConfig) RouterInfo() *types.RouterInfo {
 	return router.DefaultRouterInfoWithOptions(own,
 		router.WithMethod(http.MethodGet),
 		router.WithPath("/api/casdoor"),

@@ -22,9 +22,9 @@ func Routers() []types.IRouter {
 		&public.QueryService{},
 		&public.GetMenu{},
 		&public.Health{},
-		&public.Callback{},
+		&public.CasdoorCallback{},
 		&public.Refresh{},
-		&public.Casdoor{},
+		&public.CasdoorConfig{},
 		//&public.Statistics{},
 		&public.OpenAPI{},
 	}

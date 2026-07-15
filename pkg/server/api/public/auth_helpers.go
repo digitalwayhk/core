@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/authstate"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
+	casdoorauth "github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -81,6 +83,26 @@ func refreshForServiceAt(
 	authType types.AuthType,
 	now time.Time,
 ) (safe.TokenPairResponse, error) {
+	var client casdoorCallbackClient
+	var authority authIdentityAuthority
+	if sc != nil && sc.CasdoorClients != nil {
+		client, _ = casdoorClientForType(sc, authType)
+	}
+	if sc != nil {
+		authority = sc.AuthRevocationManager
+	}
+	return refreshForServiceWithDependenciesAt(ctx, sc, token, authType, now, client, authority)
+}
+
+func refreshForServiceWithDependenciesAt(
+	ctx context.Context,
+	sc *router.ServiceContext,
+	token string,
+	authType types.AuthType,
+	now time.Time,
+	client casdoorCallbackClient,
+	authority authIdentityAuthority,
+) (safe.TokenPairResponse, error) {
 	auth, err := authSecretForType(sc, authType)
 	if err != nil {
 		return safe.TokenPairResponse{}, err
@@ -92,6 +114,11 @@ func refreshForServiceAt(
 	remaining := int64(identity.ExpiresAt.Sub(now).Seconds())
 	if remaining <= 0 {
 		return safe.TokenPairResponse{}, errors.New("Refresh Token 已过期")
+	}
+	if identity.Identity.Provider == types.AuthProviderCasdoor {
+		if err := verifyCasdoorRefreshIdentity(ctx, identity.Identity, client, authority); err != nil {
+			return safe.TokenPairResponse{}, authBoundaryError(err)
+		}
 	}
 	return issueWithSchedule(
 		ctx,
@@ -105,6 +132,36 @@ func refreshForServiceAt(
 		identity.ExpiresAt,
 		false,
 	)
+}
+
+func verifyCasdoorRefreshIdentity(
+	ctx context.Context,
+	identity types.AuthIdentity,
+	client casdoorCallbackClient,
+	authority authIdentityAuthority,
+) error {
+	if client == nil || authority == nil || strings.TrimSpace(identity.ProviderSubject) == "" {
+		return authstate.ErrAuthorityUnavailable
+	}
+	current, err := authority.Current(ctx, identity)
+	if err != nil || current.Blocked || current.Generation != identity.Generation {
+		return authstate.ErrIdentityRevoked
+	}
+	user, err := client.GetUser(identity.ProviderSubject)
+	if err != nil {
+		return err
+	}
+	if err := casdoorauth.VerifyActiveUser(user, client.Organization(), identity.ProviderSubject); err != nil {
+		return err
+	}
+	if strings.TrimSpace(user.Id) == "" || strings.TrimSpace(user.Id) != identity.UID {
+		return casdoorauth.ErrIdentityInactive
+	}
+	confirmed, err := authority.ConfirmActive(ctx, identity, identity.Generation)
+	if err != nil || confirmed.Blocked || confirmed.Generation != identity.Generation {
+		return authstate.ErrIdentityRevoked
+	}
+	return nil
 }
 
 func issueWithSchedule(
