@@ -55,6 +55,8 @@ type ResponseEnvelope struct {
 
 // httpClient 复用连接，避免高并发 benchmark 因 DefaultTransport
 // MaxIdleConnsPerHost=2 产生大量 TIME_WAIT 耗尽 ephemeral 端口。
+// 连接上限覆盖示例性能报告的 1000 并发档位；普通集成测试只会按实际请求建立连接，
+// 这里的容量不是预创建数量，也不会让低并发测试额外占用 2048 条连接。
 var httpClient = &http.Client{
 	Timeout: 30 * time.Second,
 	Transport: &http.Transport{
@@ -64,8 +66,9 @@ var httpClient = &http.Client{
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          256,
-		MaxIdleConnsPerHost:   128,
+		MaxIdleConns:          2048,
+		MaxIdleConnsPerHost:   2048,
+		MaxConnsPerHost:       2048,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,

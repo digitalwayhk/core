@@ -3,8 +3,11 @@ package performanceshop_test
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -31,6 +34,26 @@ func newBenchmarkFixture(b *testing.B) benchmarkFixture {
 }
 
 func benchmarkConcurrencies() []int {
+	// 正式压力测试可显式指定并发矩阵，例如：
+	// SHOP_BENCH_CONCURRENCIES=100,500,1000 go test ... -bench ...
+	// 未设置时保留适合日常开发机的 1/GOMAXPROCS/4*GOMAXPROCS 默认值。
+	if configured := strings.TrimSpace(os.Getenv("SHOP_BENCH_CONCURRENCIES")); configured != "" {
+		parts := strings.Split(configured, ",")
+		result := make([]int, 0, len(parts))
+		seen := make(map[int]struct{}, len(parts))
+		for _, part := range parts {
+			value, err := strconv.Atoi(strings.TrimSpace(part))
+			if err != nil || value <= 0 {
+				panic(fmt.Sprintf("SHOP_BENCH_CONCURRENCIES 包含无效并发值 %q", part))
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+		return result
+	}
 	values := []int{1, runtime.GOMAXPROCS(0), 4 * runtime.GOMAXPROCS(0)}
 	result := make([]int, 0, len(values))
 	seen := make(map[int]struct{})
@@ -74,7 +97,7 @@ func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
 							errOnce.Do(func() { firstErr = err })
 							return
 						}
-						if index < maxSamples {
+						if shouldSampleLatency(index, b.N, maxSamples) {
 							sampleMu.Lock()
 							samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
 							sampleMu.Unlock()
@@ -104,6 +127,17 @@ func reportLatencyPercentiles(b *testing.B, samples []int64) {
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	b.ReportMetric(float64(samples[(len(samples)-1)*50/100]), "p50-ns")
 	b.ReportMetric(float64(samples[(len(samples)-1)*95/100]), "p95-ns")
+	b.ReportMetric(float64(samples[(len(samples)-1)*99/100]), "p99-ns")
+}
+
+// shouldSampleLatency 将最多 maxSamples 个样本均匀分布到整个 benchmark 窗口，
+// 避免只采集启动阶段请求导致 P95/P99 偏向冷启动。
+func shouldSampleLatency(index, total, maxSamples int) bool {
+	if total <= maxSamples {
+		return true
+	}
+	step := (total + maxSamples - 1) / maxSamples
+	return index%step == 0
 }
 
 func requestSucceeded(method, path, token string, body interface{}) error {
@@ -187,7 +221,7 @@ func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation 
 					errOnce.Do(func() { firstErr = err })
 					return
 				}
-				if index < maxSamples {
+				if shouldSampleLatency(index, b.N, maxSamples) {
 					sampleMu.Lock()
 					samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
 					sampleMu.Unlock()
