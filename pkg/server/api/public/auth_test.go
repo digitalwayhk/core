@@ -17,11 +17,15 @@ type authHookRecorder struct {
 	calls    int
 	captured *types.AuthHookArgs
 	reject   error
+	mutate   func(*types.AuthHookArgs)
 }
 
 func (h *authHookRecorder) OnAuth(_ context.Context, args *types.AuthHookArgs) error {
 	h.calls++
 	h.captured = args
+	if h.mutate != nil {
+		h.mutate(args)
+	}
 	if h.reject != nil {
 		return h.reject
 	}
@@ -54,6 +58,70 @@ func TestIssueForServiceCallsHookBeforeSigning(t *testing.T) {
 	refresh := decodeAuthToken(t, pair.RefreshToken, "auth-refresh")
 	require.Equal(t, "gold", access["shop_level"])
 	require.NotContains(t, refresh, "shop_level")
+}
+
+func TestIssueForServiceCarriesCasdoorIdentityToHookAndTokens(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	hook := &authHookRecorder{}
+	sc := authTestServiceContext(hook)
+	identity := types.AuthIdentity{
+		UID:             "user-1",
+		Username:        "用户一",
+		AuthType:        types.AuthTypeUser,
+		Provider:        types.AuthProviderCasdoor,
+		ProviderSubject: "alice",
+		Generation:      4,
+	}
+
+	pair, err := issueForServiceIdentityAt(context.Background(), sc, identity, types.AuthSourceCallback, nil, now)
+
+	require.NoError(t, err)
+	require.Equal(t, identity.Provider, hook.captured.Identity.Provider)
+	require.Equal(t, identity.ProviderSubject, hook.captured.Identity.ProviderSubject)
+	access := decodeAuthToken(t, pair.AccessToken, "auth-access")
+	refresh := decodeAuthToken(t, pair.RefreshToken, "auth-refresh")
+	require.Equal(t, "casdoor", access["auth_provider"])
+	require.Equal(t, "alice", access["provider_subject"])
+	require.EqualValues(t, 4, access["auth_generation"])
+	require.Equal(t, access["auth_provider"], refresh["auth_provider"])
+	require.Equal(t, access["provider_subject"], refresh["provider_subject"])
+	require.Equal(t, access["auth_generation"], refresh["auth_generation"])
+}
+
+func TestAuthHookCannotRewriteCanonicalIdentity(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	hook := &authHookRecorder{mutate: func(args *types.AuthHookArgs) {
+		args.Identity.ProviderSubject = "mallory"
+		args.Identity.Generation = 99
+	}}
+	sc := authTestServiceContext(hook)
+
+	pair, err := issueForServiceIdentityAt(context.Background(), sc, types.AuthIdentity{
+		UID:             "user-1",
+		AuthType:        types.AuthTypeUser,
+		Provider:        types.AuthProviderCasdoor,
+		ProviderSubject: "alice",
+		Generation:      4,
+	}, types.AuthSourceCallback, nil, now)
+
+	require.NoError(t, err)
+	access := decodeAuthToken(t, pair.AccessToken, "auth-access")
+	require.Equal(t, "alice", access["provider_subject"])
+	require.EqualValues(t, 4, access["auth_generation"])
+}
+
+func TestAuthHookPublicErrorKeepsSafeContract(t *testing.T) {
+	hookErr := types.NewPublicError(types.ErrorKindForbidden, 40321, "账户已冻结", errors.New("internal account state"))
+	hook := &authHookRecorder{reject: hookErr}
+	sc := authTestServiceContext(hook)
+
+	_, err := issueForServiceAt(context.Background(), sc, "user-1", "", types.AuthTypeUser, types.AuthSourceCallback, nil, time.Now())
+
+	contract := types.ResolvePublicError(err)
+	require.Equal(t, 403, contract.HTTPStatus)
+	require.Equal(t, 40321, contract.Code)
+	require.Equal(t, "账户已冻结", contract.Message)
+	require.NotContains(t, contract.Message, "internal")
 }
 
 func TestIssueForServiceRejectsEmptyUIDBeforeHook(t *testing.T) {

@@ -34,11 +34,26 @@ func issueForServiceAt(
 	extra interface{},
 	issuedAt time.Time,
 ) (safe.TokenPairResponse, error) {
-	auth, err := authSecretForType(sc, authType)
+	return issueForServiceIdentityAt(ctx, sc, types.AuthIdentity{
+		UID:      uid,
+		Username: username,
+		AuthType: authType,
+	}, source, extra, issuedAt)
+}
+
+func issueForServiceIdentityAt(
+	ctx context.Context,
+	sc *router.ServiceContext,
+	identity types.AuthIdentity,
+	source types.AuthSource,
+	extra interface{},
+	issuedAt time.Time,
+) (safe.TokenPairResponse, error) {
+	auth, err := authSecretForType(sc, identity.AuthType)
 	if err != nil {
 		return safe.TokenPairResponse{}, err
 	}
-	issueRefresh := authType != types.AuthTypeServerManage
+	issueRefresh := identity.AuthType != types.AuthTypeServerManage
 	refreshExpiresAt := time.Time{}
 	refreshExpireSeconds := int64(0)
 	if issueRefresh {
@@ -49,9 +64,7 @@ func issueForServiceAt(
 		ctx,
 		sc,
 		auth,
-		uid,
-		username,
-		authType,
+		identity,
 		source,
 		extra,
 		issuedAt,
@@ -84,9 +97,7 @@ func refreshForServiceAt(
 		ctx,
 		sc,
 		auth,
-		identity.UID,
-		identity.Username,
-		authType,
+		identity.Identity,
 		types.AuthSourceRefresh,
 		nil,
 		now,
@@ -100,9 +111,7 @@ func issueWithSchedule(
 	ctx context.Context,
 	sc *router.ServiceContext,
 	auth *config.AuthSecret,
-	uid string,
-	username string,
-	authType types.AuthType,
+	identity types.AuthIdentity,
 	source types.AuthSource,
 	extra interface{},
 	issuedAt time.Time,
@@ -110,6 +119,9 @@ func issueWithSchedule(
 	refreshExpiresAt time.Time,
 	issueRefresh bool,
 ) (safe.TokenPairResponse, error) {
+	uid := identity.UID
+	username := identity.Username
+	authType := identity.AuthType
 	uid = strings.TrimSpace(uid)
 	if uid == "" {
 		return safe.TokenPairResponse{}, errors.New("颁发 Token 时 UID 不能为空")
@@ -128,6 +140,11 @@ func issueWithSchedule(
 	}
 
 	claims := safe.NewClaims(uid, username)
+	identity.UID = uid
+	identity.Username = username
+	identity.AuthType = authType
+	identity.IssuedAt = issuedAt
+	identity.ExpiresAt = issuedAt.Add(time.Duration(auth.AccessExpire) * time.Second)
 	args := &types.AuthHookArgs{
 		UID:                  uid,
 		Username:             username,
@@ -140,6 +157,7 @@ func issueWithSchedule(
 		RefreshExpiresAt:     refreshExpiresAt,
 		Extra:                extra,
 		Claims:               claims,
+		Identity:             identity,
 	}
 	if sc != nil && sc.AuthHookProvider != nil {
 		if err := sc.AuthHookProvider.OnAuth(ctx, args); err != nil {
@@ -149,6 +167,7 @@ func issueWithSchedule(
 
 	return safe.IssueTokenPair(safe.TokenIssueRequest{
 		Claims:               claims,
+		Identity:             identity,
 		AuthType:             authType,
 		IssuedAt:             issuedAt,
 		AccessSecret:         auth.AccessSecret,
