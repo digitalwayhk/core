@@ -22,7 +22,7 @@
 | 6. RouterInfo 限流元数据与本地 Manager | 已完成 | `ef09823` |
 | 7. REST 限流包装与系统 Public 路由配置 | 已完成 | `f8fd617` |
 | 8. 真实进程集成与兼容契约 | 已完成 | `5252a34` |
-| 9. 总验收与外部审查交接 | 修复完成，等待外部复审 | 首轮 `CHANGES_REQUIRED`；修复 `c95b0ab`、`aa0ecfc` |
+| 9. 总验收与外部审查交接 | P2 修复完成，等待最终复审 | 阻断修复 `c95b0ab`、`aa0ecfc`；P2 修复 `619a99b` |
 
 正文保留 TDD 实施步骤作为审计记录；现行进度与提交证据以上表为准。
 
@@ -44,6 +44,20 @@
 
 - 当前工作区定向测试、race、示例 01 真实进程集成、vet、日志规范和 `release-contract` 全部通过。
 - detached 干净 worktree `aa0ecfc` 下，`pkg/server/api/public`、safe、Casdoor、WebSocket 测试及 race、vet 全部通过，已排除脏树假绿。
+
+---
+
+## 首轮修复复审 P2 收口
+
+只读复审裁定原 P0/P1 已关闭，并登记三个非阻断 P2。用户要求继续关闭后，统一由 `619a99b` 完成：
+
+| P2 | 处理 | 确定性证据 |
+|----|------|------------|
+| WebSocket RS256 负向测试不是 SDK 可验证的真实 Casdoor Token | 使用生成证书初始化 Casdoor SDK，签发包含 `User.Id` 的有效 RS256 Token | 同一测试在旧提交 `03b6456` 明确失败：旧实现登录成功、返回 nil；在 `619a99b` 通过 |
+| `ServerRouterInfo` 可变参数改变精确函数类型 | 恢复 `ServerRouterInfo(item)` 原签名，新增 `ServerRouterInfoWithOptions` | 编译期函数赋值契约先 RED，修复后 api/public 测试通过 |
+| `ValidateJWTToken` 名称通用但语义硬编码 auth | 新增 `ValidateAccessToken(token, secret, expectedAuthType, now)`；WebSocket 显式使用 `AuthTypeUser`；旧函数保留为废弃包装 | manage 成功与认证类型混用失败测试先 RED 后 GREEN |
+
+干净 detached `619a99b` 已通过定向测试、race、示例 01 真实进程集成、vet、日志规范及 `release-contract`。本节只关闭复审报告新增的三个 P2；上节明确登记的其他长期 P2 状态不变。
 
 ---
 
