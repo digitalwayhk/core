@@ -2,6 +2,7 @@ package authstate
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -104,6 +105,40 @@ func TestBadgerPendingHooksSeekPastStateRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	require.Equal(t, hook.ID, pending[0].ID)
+}
+
+func TestBadgerPendingHookBecomesReadyWithoutRecreatingAcknowledgedHook(t *testing.T) {
+	store, err := OpenBadgerStore(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	hook := PendingHook{ID: "hook-ready", Event: testCasdoorEvent("hook-ready", "logout", 1, false)}
+	require.NoError(t, store.SavePendingHook(context.Background(), hook))
+	require.NoError(t, store.MarkPendingHookReady(context.Background(), hook.ID))
+
+	pending, err := store.PendingHooks(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.True(t, pending[0].Ready)
+	require.NoError(t, store.AckHook(context.Background(), hook.ID))
+	require.ErrorIs(t, store.MarkPendingHookReady(context.Background(), hook.ID), ErrEventNotFound)
+}
+
+func TestBadgerPendingHooksPrioritizeReadyRecords(t *testing.T) {
+	store, err := OpenBadgerStore(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	for index := 0; index < 64; index++ {
+		require.NoError(t, store.SavePendingHook(context.Background(), PendingHook{
+			ID: fmt.Sprintf("unready-%02d", index), NextAttempt: time.Time{},
+		}))
+	}
+	ready := PendingHook{ID: "ready", Ready: true, NextAttempt: time.Now().UTC()}
+	require.NoError(t, store.SavePendingHook(context.Background(), ready))
+
+	pending, err := store.PendingHooks(context.Background(), 64)
+	require.NoError(t, err)
+	require.Len(t, pending, 64)
+	require.Equal(t, ready.ID, pending[0].ID)
 }
 
 func TestBadgerRejectsSameEventIDWithDifferentPayload(t *testing.T) {

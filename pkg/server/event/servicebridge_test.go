@@ -2,6 +2,7 @@ package event_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -151,9 +152,12 @@ func TestServiceEventBridgeHandlerPanicDoesNotStopControlWorker(t *testing.T) {
 
 type fakeExternalEventAdapter struct {
 	subscribeCalls atomic.Int32
+	publishErr     error
 }
 
-func (*fakeExternalEventAdapter) Publish(context.Context, string, *event.Envelope) error { return nil }
+func (a *fakeExternalEventAdapter) Publish(context.Context, string, *event.Envelope) error {
+	return a.publishErr
+}
 func (a *fakeExternalEventAdapter) Subscribe(context.Context, string) (func(), error) {
 	a.subscribeCalls.Add(1)
 	return func() {}, nil
@@ -168,4 +172,34 @@ func TestServiceEventBridgeSubscribesThroughExternalAdapter(t *testing.T) {
 	require.NoError(t, err)
 	cancel()
 	assert.Equal(t, int32(1), adapter.subscribeCalls.Load())
+}
+
+func TestServiceEventBridgeControlWaitsForLocalDeliveryAndPropagatesExternalFailure(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	externalErr := errors.New("external publish failed")
+	bridge.SetExternalPublisher(&fakeExternalEventAdapter{publishErr: externalErr})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cancel, err := bridge.Subscribe("auth.casdoor.identity.changed", func(*event.Envelope) {
+		close(started)
+		<-release
+	})
+	require.NoError(t, err)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bridge.Publish(context.Background(), event.PublishRequest{
+			Class: event.ControlDelivery, External: true, Subject: "shop.auth.casdoor.identity.changed",
+			Envelope: event.NewEnvelope("shop", "auth.casdoor.identity.changed", nil),
+		})
+	}()
+	<-started
+	select {
+	case <-done:
+		t.Fatal("本地控制事件处理完成前Publish不得返回")
+	default:
+	}
+	close(release)
+	require.ErrorIs(t, <-done, externalErr)
 }

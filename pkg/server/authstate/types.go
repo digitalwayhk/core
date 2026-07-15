@@ -71,6 +71,7 @@ type ApplyResult struct {
 type PendingHook struct {
 	ID          string             `json:"id"`
 	Event       types.CasdoorEvent `json:"event"`
+	Ready       bool               `json:"ready"`
 	Attempts    int                `json:"attempts"`
 	NextAttempt time.Time          `json:"next_attempt"`
 }
@@ -83,6 +84,7 @@ type Store interface {
 	SaveSnapshot(context.Context, State) error
 	MarkControlPublished(context.Context, types.CasdoorEvent) error
 	SavePendingHook(context.Context, PendingHook) error
+	MarkPendingHookReady(context.Context, string) error
 	PendingHooks(context.Context, int) ([]PendingHook, error)
 	AckHook(context.Context, string) error
 	Close() error

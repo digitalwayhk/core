@@ -234,12 +234,53 @@ func (s *BadgerStore) SavePendingHook(ctx context.Context, hook PendingHook) err
 	if strings.TrimSpace(hook.ID) == "" {
 		return errors.New("Pending Hook ID不能为空")
 	}
-	record := hookRecord{Version: badgerRecordVersion, Hook: hook}
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		return err
+	return s.update(ctx, func(txn *badger.Txn) error {
+		if hook.Attempts == 0 {
+			if _, err := txn.Get(badgerHookKey(hook.ID)); err == nil {
+				return nil
+			} else if !errors.Is(err, badger.ErrKeyNotFound) {
+				return err
+			}
+		}
+		record := hookRecord{Version: badgerRecordVersion, Hook: hook}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		return txn.Set(badgerHookKey(hook.ID), encoded)
+	})
+}
+
+func (s *BadgerStore) MarkPendingHookReady(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("Pending Hook ID不能为空")
 	}
-	return s.update(ctx, func(txn *badger.Txn) error { return txn.Set(badgerHookKey(hook.ID), encoded) })
+	return s.update(ctx, func(txn *badger.Txn) error {
+		item, err := txn.Get(badgerHookKey(id))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return ErrEventNotFound
+		}
+		if err != nil {
+			return err
+		}
+		encoded, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		record := hookRecord{}
+		if err := json.Unmarshal(encoded, &record); err != nil || record.Version != badgerRecordVersion {
+			return errors.New("Badger Pending Hook记录版本无效")
+		}
+		record.Hook.Ready = true
+		if record.Hook.NextAttempt.IsZero() {
+			record.Hook.NextAttempt = time.Now().UTC()
+		}
+		encoded, err = json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		return txn.Set(badgerHookKey(id), encoded)
+	})
 }
 
 func (s *BadgerStore) PendingHooks(ctx context.Context, limit int) ([]PendingHook, error) {
@@ -268,7 +309,12 @@ func (s *BadgerStore) PendingHooks(ctx context.Context, limit int) ([]PendingHoo
 		}
 		return nil
 	})
-	sort.Slice(result, func(i, j int) bool { return result[i].NextAttempt.Before(result[j].NextAttempt) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Ready != result[j].Ready {
+			return result[i].Ready
+		}
+		return result[i].NextAttempt.Before(result[j].NextAttempt)
+	})
 	if len(result) > limit {
 		result = result[:limit]
 	}

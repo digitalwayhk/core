@@ -208,6 +208,9 @@ func (s *RedisStore) MarkControlPublished(ctx context.Context, event types.Casdo
 func (*RedisStore) SavePendingHook(context.Context, PendingHook) error {
 	return errors.New("Pending Hook必须保存到本地Badger")
 }
+func (*RedisStore) MarkPendingHookReady(context.Context, string) error {
+	return errors.New("Pending Hook必须由本地Badger激活")
+}
 func (*RedisStore) PendingHooks(context.Context, int) ([]PendingHook, error) {
 	return nil, errors.New("Pending Hook必须从本地Badger读取")
 }

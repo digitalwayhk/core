@@ -15,6 +15,7 @@ func TestSystemPublicRateLimitPolicies(t *testing.T) {
 		burst  int
 	}{
 		{name: "callback", router: &Callback{}, rate: 5, burst: 10},
+		{name: "casdoor-webhook", router: &CasdoorWebhook{}, rate: 5, burst: 10},
 		{name: "refresh", router: &Refresh{}, rate: 5, burst: 10},
 		{name: "health", router: &Health{}, rate: 20, burst: 40},
 		{name: "casdoor", router: &Casdoor{}, rate: 10, burst: 20},

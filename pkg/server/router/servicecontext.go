@@ -592,6 +592,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			sc.Service.Name,
 			con.AuthRevocation,
 			authstate.WithEventBridge(sc.ServiceEventBridge),
+			authstate.WithCasdoorEventHook(sc.CasdoorEventHookProvider),
 		)
 		if err != nil {
 			panic(fmt.Sprintf("auth lifecycle: revocation manager init failed: %v", err))
