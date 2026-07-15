@@ -47,6 +47,9 @@
 | 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
 | 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和 600/700/800 保留；parse/validation→400，do→422，panic/未知→500 | `pkg/server/types/typeerror.go`、兼容测试 |
 | 未分类普通错误 | Stable security | 固定返回 HTTP 500、`50000` 和 `internal server error`，不得按错误文字猜状态 | `pkg/server/trans/rest/error.go`、安全测试 |
+| Casdoor 配置与回调 | Stable | `/api/casdoor?type=auth|manage` 返回对应域配置；回调固定为 `/api/casdoor/callback`，旧 `/api/callback` 已删除 | `pkg/server/api/public/casdoor.go`、`casdoorcallback.go`、真实集成测试 |
+| Token 刷新 | Stable security | `/api/refresh` 只接受框架 Refresh Token；Auth/Manage 密钥、用途和撤销域严格隔离 | `pkg/server/api/public/refresh.go`、认证生命周期测试 |
+| Casdoor Webhook | Stable security | `/api/casdoor/webhook?type=auth|manage`；独立 Bearer Secret、64KiB 上限、域绑定、幂等控制事件 | `pkg/server/api/public/casdoorwebhook.go`、authstate 测试 |
 
 当前 `run.GetOpenApi` 只输出 Public 与 Private 路由，因此 OpenAPI golden 的稳定范围也仅限这两类。Manage 与 ServerManage 仍属于稳定 HTTP 路由，但本阶段由路由元数据、Manage CRUD 测试和 server API 测试保护；是否纳入 OpenAPI 由后续兼容变更单独评估，不能从当前 golden 推导其已被覆盖。
 
@@ -68,6 +71,15 @@
 | Manage hook 顺序与 stop 语义 | Stable | Before/After、stop/result/error 顺序保持 | `service/manage/crud_test.go` |
 | ServiceContext 运行资源关闭 | Stable | owner 有界关闭、重复关闭幂等、关闭后不承诺复用 | 任务 12/14 生命周期与 race 测试 |
 | Provider 注册扩展点 | Stable（已登记部分） | 注册、注销、并发与关闭语义保持 | cluster/transport/mq factory 测试 |
+| Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
+| 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试 | `pkg/server/types/auth.go`、认证 Hook 测试 |
+
+## Casdoor 迁移与运行约束
+
+- Auth 与 Manage 必须配置不同的 Casdoor Client、Access Secret、Refresh Secret 和 Webhook Secret；升级后需要轮换四个 Token Secret，并要求全部用户和管理员重新登录。
+- 单节点默认使用 Badger 撤销权威。`AuthRevocation.Mode=shared` 时 Redis 是共享事实源，并且服务必须配置 MQ `event-stream` 供 EventBridge 可靠传播控制事件；Redis 或控制通道故障时 Private、Manage、Callback、Refresh 和新 WebSocket fail closed，Public REST 不受影响。
+- Webhook Secret 不得复用 Client/Token Secret，只能通过 HTTPS 传输；日志不得记录 Authorization Header、Token、Secret、Claims 或原始 Payload。
+- Hook 只有 `types.PublicError` 的安全消息可以返回调用方；普通错误、panic 和超时统一脱敏为 `internal server error`。
 
 ## 快照规则
 

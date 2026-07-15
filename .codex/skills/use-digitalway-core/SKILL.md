@@ -56,6 +56,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`exampl
 11. CORS origin、TrustedProxies 和外部依赖必须显式配置。默认单元测试不依赖 Docker。
 12. 日志使用 `logx` 稳定事件和字段；不记录 token、TOTP、payload/body/response、SQL、参数或对象 dump。
 13. 修改公共 Go API、路由、JSON、配置或错误前，运行兼容性/发布契约并登记迁移。
+14. Casdoor 的 Auth 与 Manage 是两个独立认证域，必须使用不同 Client、Access/Refresh Secret 和 Webhook Secret。Callback、Refresh、REST 与 WebSocket 都由 ServiceContext 的撤销权威约束；不得直接调用 Casdoor 全局 SDK。
 
 ## 工作流
 
@@ -65,6 +66,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`exampl
 4. 集成测试必须启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP、内建 TestToken 和真实 WebSocket；测试结束必须关闭进程并清理临时目录。
 5. 对外部能力同时检查 config Validate、factory、真实启动链、lifecycle owner 和 integration gate。
 6. 运行 `gofmt`、定向测试、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 race/CI gate。
+7. Casdoor 生命周期改动必须运行 `./scripts/test.sh security`；共享 Redis 测试只通过 `CORE_TEST_REDIS_ADDR=... ./scripts/test.sh integration-casdoor-auth` 显式开启。
 
 ## 审查重点
 

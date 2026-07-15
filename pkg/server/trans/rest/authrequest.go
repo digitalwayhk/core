@@ -119,6 +119,40 @@ func bearerAccessToken(header string) (string, bool) {
 	return token, token != ""
 }
 
+// internalJWTAuthorize 验证框架签发的 Access Token，并把已验证 Claims 注入请求上下文。
+// 不使用 go-zero 默认 Authorize 的失败日志，因为它会转储包含 Authorization 的完整请求。
+func internalJWTAuthorize(secret string, authType types.AuthType, next http.Handler) http.Handler {
+	if next == nil {
+		next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
+		})
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerAccessToken(r.Header.Get("Authorization"))
+		if !ok {
+			writeInternalJWTUnauthorized(w, authType)
+			return
+		}
+		verified, err := safe.ValidateAccessToken(token, secret, authType, time.Now().UTC())
+		if err != nil {
+			writeInternalJWTUnauthorized(w, authType)
+			return
+		}
+		ctx := r.Context()
+		for key, value := range verified.Claims {
+			ctx = context.WithValue(ctx, key, value)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func writeInternalJWTUnauthorized(w http.ResponseWriter, authType types.AuthType) {
+	logx.Infow("jwt_access_denied", logx.Field("auth_type", authType))
+	writePublicErrorContract(w, types.NewPublicError(
+		types.ErrorKindUnauthenticated, types.PublicCodeUnauthenticated, "authentication failed", nil,
+	).PublicErrorContract())
+}
+
 func buildAuthRequestArgs(
 	r *http.Request,
 	sc *router.ServiceContext,

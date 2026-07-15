@@ -10,5 +10,7 @@
 | `router.TestResult` 直接变量 | `SetTestResult`、`GetTestResult` | v0.0.248 | v0.1.0 | server/router | OpenAPI/路由测试扩展 | `pkg/server/router/servicecontext_registry_test.go` |
 | `config.INITSERVER` 直接并发读写 | `IsServerInitializing` 及受同步初始化入口 | v0.0.248 | v0.1.0 | server/config | 框架启动扩展 | config/router 并发测试 |
 | `PrefixedBadgerDB.SetSyncDB` | `EnableWriteBehind` | v0.0.248 | v0.1.0 | persistence/nosql | 下游本地写回扩展 | `pkg/persistence/database/nosql/sharedbadger_writebehind_test.go` |
+| `public.Callback`、`public.Casdoor` Go 类型 | `public.CasdoorCallback`、`public.CasdoorConfig` | v0.0.249 | v0.1.0 | server/api/public | Casdoor 登录前端、认证扩展 | `pkg/server/api/public/casdoorcallback_test.go` |
+| HTTP `/api/callback` | `/api/casdoor` 返回的 `background_callback_url`，当前为 `/api/casdoor/callback` | v0.0.249 | v0.1.0 | server/api/public | Casdoor 登录前端 | `examples/integration/casdoor-auth-lifecycle/rest_test.go` |
 
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。

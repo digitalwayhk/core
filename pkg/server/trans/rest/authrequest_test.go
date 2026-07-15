@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -15,8 +16,30 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
-	zeroresthandler "github.com/zeromicro/go-zero/rest/handler"
+	"github.com/zeromicro/go-zero/core/logx"
 )
+
+func TestInternalJWTAuthorizeDoesNotLogToken(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() {
+		logx.SetWriter(previous)
+		logx.Reset()
+	})
+
+	const rawToken = "integration-secret-token-value"
+	request := httptest.NewRequest(http.MethodGet, "/private", nil)
+	request.Header.Set("Authorization", "Bearer "+rawToken)
+	response := httptest.NewRecorder()
+	internalJWTAuthorize("access-secret", types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("无效 Token 不得进入下游")
+	})).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusUnauthorized, response.Code)
+	require.NotContains(t, output.String(), rawToken)
+	require.NotContains(t, output.String(), "Authorization")
+}
 
 func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 	var callsMu sync.Mutex
@@ -43,7 +66,7 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 		calls = append(calls, "router")
 		callsMu.Unlock()
 	})
-	handler := zeroresthandler.Authorize(sc.Config.Auth.AccessSecret)(
+	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, next),
 	)
 	request := authenticatedRequest(t, sc.Config.Auth.AccessSecret, types.AuthIdentity{
@@ -65,7 +88,7 @@ func TestCasdoorAuthorityUnavailableRejectsProtectedRequest(t *testing.T) {
 	}))
 	info := authRequestRouterInfo(types.PrivateType)
 	called := false
-	handler := zeroresthandler.Authorize(sc.Config.Auth.AccessSecret)(
+	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
@@ -88,7 +111,7 @@ func TestAuthRequestRejectsTokenFromWrongAuthDomain(t *testing.T) {
 	sc.Config.ManageAuth.AccessSecret = sc.Config.Auth.AccessSecret
 	info := authRequestRouterInfo(types.ManageType)
 	called := false
-	handler := zeroresthandler.Authorize(sc.Config.ManageAuth.AccessSecret)(
+	handler := internalJWTAuthorize(sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
 		authRequestHandler(sc, info, types.AuthTypeManage, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
@@ -143,7 +166,7 @@ func TestAuthRequestHookFailureContract(t *testing.T) {
 			sc := authRequestServiceContext(tt.hook)
 			sc.Config.Timeout = 10
 			info := authRequestRouterInfo(types.PrivateType)
-			handler := zeroresthandler.Authorize(sc.Config.Auth.AccessSecret)(
+			handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 				authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 					t.Fatal("Hook失败时不得执行Router")
 				})),

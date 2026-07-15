@@ -22,7 +22,6 @@ import (
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
-	zeroresthandler "github.com/zeromicro/go-zero/rest/handler"
 )
 
 type Server struct {
@@ -219,7 +218,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 			}
 			handler = authHandler
 		} else {
-			handler = zeroresthandler.Authorize(auth.AccessSecret)(handler)
+			handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
 		}
 	}
 	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))

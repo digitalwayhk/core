@@ -125,9 +125,11 @@ func authenticateCasdoorCallback(
 		ProviderSubject: strings.TrimSpace(user.Name),
 	}
 	current, err := authority.Current(ctx, identity)
-	if err != nil || current.Blocked {
+	if err != nil {
 		return safe.TokenPairResponse{}, authBoundaryError(err)
 	}
+	// GetUser 已在线确认身份有效。即使旧会话曾被 logout 事件标记为 blocked，
+	// 新登录也必须以当前世代原子解除阻断；旧 Token 仍因世代落后而继续失效。
 	identity.Generation = current.Generation
 	confirmed, err := authority.ConfirmActive(ctx, identity, current.Generation)
 	if err != nil || confirmed.Blocked || confirmed.Generation != current.Generation {

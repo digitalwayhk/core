@@ -64,6 +64,24 @@ func TestCasdoorCallbackConfirmsGenerationBeforeIssuing(t *testing.T) {
 	require.Equal(t, uint64(7), hook.captured.Identity.Generation)
 }
 
+func TestCasdoorCallbackAllowsVerifiedReloginAfterLogout(t *testing.T) {
+	client := activeCallbackClient()
+	authority := &callbackAuthorityStub{
+		current:   authstate.State{Generation: 8, Blocked: true},
+		confirmed: authstate.State{Generation: 8, Blocked: false},
+	}
+
+	pair, err := authenticateCasdoorCallback(
+		context.Background(), authTestServiceContext(&authHookRecorder{}), client, authority,
+		types.AuthTypeUser, "code", "state", time.Now().UTC(),
+	)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, pair.AccessToken)
+	require.Equal(t, 1, authority.confirmCalls)
+	require.Equal(t, uint64(8), authority.expectedGeneration)
+}
+
 func TestCasdoorCallbackRejectsConcurrentGenerationChange(t *testing.T) {
 	client := activeCallbackClient()
 	authority := &callbackAuthorityStub{

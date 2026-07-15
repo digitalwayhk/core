@@ -66,6 +66,11 @@ if grep -Eq 'rtk|git (tag|push)|update-public-api|integration-|CORE_TEST_' <<<"$
   fail "required 调用的 test.sh 模式包含禁止命令或外部依赖"
 fi
 
+casdoor_integration_mode="$(sed -n '/^[[:space:]]*integration-casdoor-auth)/,/^[[:space:]]*;;/p' "$TEST_SCRIPT")"
+grep -q 'CORE_TEST_REDIS_ADDR' <<<"$casdoor_integration_mode" || fail "Casdoor 集成模式未显式要求 Redis 地址"
+grep -q 'CORE_TEST_CASDOOR_AUTH=1' <<<"$casdoor_integration_mode" || fail "Casdoor Redis 测试未使用显式开启标记"
+grep -q 'examples/integration/casdoor-auth-lifecycle' <<<"$casdoor_integration_mode" || fail "Casdoor 集成模式未运行目标测试包"
+
 grep -q 'log=".*/required-quick.log"' "$tmp_dir/failure.out" || fail "END 元数据中的日志路径未加引号"
 
 success_bin="$tmp_dir/success-bin"

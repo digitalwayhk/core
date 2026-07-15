@@ -15,8 +15,24 @@ case "${1:-quick}" in
     go test ./pkg/server/... -count=1
     ;;
   security)
-    go test ./pkg/server/config ./pkg/server/safe/logto ./pkg/server/trans/rest ./pkg/utils -count=1
+    security_packages=(
+      ./pkg/server/config
+      ./pkg/server/safe/logto
+      ./pkg/server/safe/casdoor
+      ./pkg/server/authstate
+      ./pkg/server/api/public
+      ./pkg/server/trans/rest
+      ./pkg/server/trans/websocket/melody
+      ./pkg/utils
+    )
+    for package in "${security_packages[@]}"; do
+      go test "$package" -count=1
+    done
     ;;
+	integration-casdoor-auth)
+	  : "${CORE_TEST_REDIS_ADDR:?CORE_TEST_REDIS_ADDR is required}"
+	  CORE_TEST_CASDOOR_AUTH=1 go test -race ./examples/integration/casdoor-auth-lifecycle -count=1 -timeout=15m
+	  ;;
   config-contract)
     go test \
       ./pkg/server/config \
@@ -458,7 +474,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|all}" >&2
     exit 2
     ;;
 esac
