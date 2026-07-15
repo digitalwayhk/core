@@ -36,7 +36,7 @@
 6. 使用 Redis 保证水平扩展时的权威认证世代和原子递增
 7. 使用每个服务默认存在的 EventBridge 分发可靠撤销控制事件
 8. 在撤销后关闭该身份已有的 WebSocket 会话
-9. 保留现有 `/api/casdoor` 和 `/api/callback` URL
+9. 保留 `/api/casdoor` 配置入口，并由其向前端返回新的 `/api/casdoor/callback` 路径
 10. 通过一次密钥轮换淘汰缺少新 Claims 的旧 Token
 
 ### 2.2 非目标
@@ -92,12 +92,18 @@ ServiceContext
 | Go 类型 | 方法和 URL | 职责 |
 | --- | --- | --- |
 | `CasdoorConfig` | `GET /api/casdoor` | 返回前端发起 OAuth 所需的公开配置 |
-| `CasdoorCallback` | `GET /api/callback` | 使用 OAuth Code 获取 Casdoor Token，再签发内部 Token |
+| `CasdoorCallback` | `GET /api/casdoor/callback` | 使用 OAuth Code 获取 Casdoor Token，再签发内部 Token |
 | `CasdoorWebhook` | `POST /api/casdoor/webhook?type=auth|manage` | 接收并标准化 Casdoor 身份事件 |
 
-现有 `Casdoor` 和 `Callback` Go 类型保留为废弃别名。URL 不变，避免现有前端迁移。
+现有 `Casdoor` 和 `Callback` Go 类型保留为废弃别名。旧 `/api/callback` URL 不再保留；前端不得硬编码 Callback 路径，必须读取 `/api/casdoor` 响应中的 `BackgroundCallbackURL`。该字段返回 `/api/casdoor/callback`，并继续由前端按当前登录域传递 `type=auth|manage`。
 
-### 4.2 Webhook 认证域选择
+### 4.2 Callback 路径发现
+
+`CasdoorConfig` 根据 `type` 返回对应 Casdoor 的公开配置。响应中的 `BackgroundCallbackURL` 是 Callback 路径的唯一现行来源。前端使用返回值发起后端 Callback 请求，因此路由迁移不要求兼容旧 `/api/callback`。
+
+配置响应不得根据 Host、Forwarded Header 或客户端输入拼接不可信绝对 URL。默认返回服务内相对路径，由部署层和前端使用已知站点 Origin 组成完整地址。
+
+### 4.3 Webhook 认证域选择
 
 Webhook 共用一个 RouterInfo。查询参数 `type` 只能选择预先存在的认证域：
 
@@ -142,7 +148,20 @@ type IAuthRequestHookProvider interface {
 
 Hook 不接收请求 Body、可变 `IRequest`、响应对象或可变 `RouterInfo`。资源所有权和请求参数授权继续由具体 API 的 `Validation` 或 `Do` 处理。
 
-Hook 返回错误时，框架停止请求并返回统一 `403`。Hook panic、超时和依赖错误同样 fail closed，外部响应不得包含内部错误文本。
+Hook 返回错误时，框架停止请求。服务可以返回 `types.NewPublicError`，由现有 `ResolvePublicError` 契约将明确声明可公开的 HTTP 状态、业务错误码和安全消息返回前端。例如账户冻结可以返回 `403` 和“账户已冻结”，业务前置条件不满足可以返回 `422` 和对应安全提示。
+
+普通 `error`、Hook panic、超时和未分类依赖错误仍 fail closed，并对外返回通用内部错误。框架只记录脱敏后的内部诊断信息，不把任意 `err.Error()`、调用栈或依赖错误直接返回前端。
+
+```go
+return types.NewPublicError(
+    types.ErrorKindForbidden,
+    40321,
+    "账户已冻结",
+    internalErr,
+)
+```
+
+上述公开错误规则同时适用于现有 `IAuthHookProvider.OnAuth`。Callback、Refresh 和 TestToken 的 Hook 可以向前端返回服务明确声明的安全错误；未包装的错误继续使用通用脱敏响应。
 
 ### 5.3 Casdoor 事件 Hook
 
@@ -458,14 +477,15 @@ authRevocation:
     host: 127.0.0.1:6379
 ```
 
-运行时配置文件和 Casdoor YAML 文件必须使用 `0600` 权限。`CasdoorConfig` API 只能返回 Endpoint、Client ID、Organization、Application 和公开前端地址，不能返回 Client Secret、Webhook Secret 或证书私钥材料。
+运行时配置文件和 Casdoor YAML 文件必须使用 `0600` 权限。`CasdoorConfig` API 只能返回 Endpoint、Client ID、Organization、Application、公开前端地址和 Callback 相对路径，不能返回 Client Secret、Webhook Secret 或证书私钥材料。
 
 ## 14. 兼容和发布策略
 
 本次变更涉及公开 Go 类型、配置、JWT Claims、认证中间件、路由和运行时行为。实施必须遵守发布契约：
 
 - 保留 `Casdoor` 和 `Callback` 类型的废弃别名
-- 保留 `/api/casdoor` 和 `/api/callback` URL
+- 保留 `/api/casdoor` URL，并让其返回新的 `/api/casdoor/callback`
+- 删除旧 `/api/callback` URL，在路由兼容登记中记录有意迁移
 - 新增 `/api/casdoor/webhook`
 - 为新增配置提供明确校验和迁移错误
 - 在废弃登记中记录全局 Casdoor SDK 入口
@@ -474,7 +494,7 @@ authRevocation:
 - 明确所有用户和管理员需要重新登录
 - 不自动生成可预测的 Webhook Secret
 
-旧 Token 不兼容属于本次有意安全变更。发布前必须完成迁移说明和批准记录。
+旧 Token 和旧 Callback URL 不兼容属于本次有意安全变更。发布前必须完成迁移说明和批准记录。消费方必须从 `/api/casdoor` 动态读取 Callback 路径，不能继续硬编码 `/api/callback`。
 
 ## 15. 测试和验收
 
@@ -488,7 +508,9 @@ authRevocation:
 - auth Token 不能访问 manage，manage Token 不能访问 private
 - 缺少 Provider、ProviderSubject 或 Generation 的新 Token 被拒绝
 - `OnAuthRequest` 收到只读副本，无法修改框架状态
-- Hook 返回错误、panic 和超时时 fail closed
+- `OnAuth` 和 `OnAuthRequest` 返回类型化公开错误时保留安全状态、错误码和消息
+- Hook 返回普通错误、panic 和超时时 fail closed，响应不包含内部错误
+- `/api/casdoor` 返回 `/api/casdoor/callback`，旧 `/api/callback` 不再注册
 - Webhook Secret 使用常量时间比较
 - Webhook `type`、组织和应用不匹配时拒绝
 - 重复事件不重复递增世代
