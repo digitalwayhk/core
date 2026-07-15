@@ -194,13 +194,15 @@ AuthTypeManage -> Config.ManageAuth.CasDoor client
 
 ### 6.2 身份状态验证
 
-框架内部验证器执行以下检查：
+框架内部验证器按当前 Casdoor Go SDK 的 `User` 契约执行以下检查：
 
 - Casdoor 用户存在
-- `Enabled` 为允许状态
 - `IsForbidden` 为 `false`
 - `IsDeleted` 为 `false`
-- 用户组织与当前 Client 配置匹配
+- `Owner` 与当前 Client 的 Organization 匹配
+- `Name` 与 Token 中经过验证的 ProviderSubject 匹配
+
+当前 SDK 的 `User` 没有通用 `Enabled` 字段。Casdoor 控制台中的停用或禁止用户按 `IsForbidden=true` 处理，删除用户按 `IsDeleted=true` 处理；实现不得访问不存在的 `User.Enabled`。
 
 验证器由框架根据配置创建并注入 `ServiceContext`。它不是服务必须实现的消费方接口。测试可以注入假验证器，避免访问真实 Casdoor。
 
@@ -336,8 +338,7 @@ Webhook 在解析业务字段前执行以下边界检查：
 - `update-user`
 - `delete-user`
 - `unlink`
-- 用户禁用
-- 用户禁止
+- 用户停用或禁止，对应 `IsForbidden=true`
 
 `update-user` 无论修改资料还是权限，都要求重新登录或刷新身份。这一规则保证 Access Token 中的业务 Claims 不会在权限变化后继续使用。
 
@@ -503,7 +504,7 @@ authRevocation:
 必须覆盖：
 
 - Auth 和 Manage Casdoor Client 使用各自配置且不串扰
-- Casdoor 用户不存在、禁用、禁止和删除时拒绝签发
+- Casdoor 用户不存在、`IsForbidden=true` 或 `IsDeleted=true` 时拒绝签发
 - Access 和 Refresh Token 包含相同身份域和世代
 - auth Token 不能访问 manage，manage Token 不能访问 private
 - 缺少 Provider、ProviderSubject 或 Generation 的新 Token 被拒绝
