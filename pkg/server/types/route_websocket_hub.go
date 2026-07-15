@@ -45,6 +45,8 @@ type RouteWebSocketHub struct {
 
 	subscriptionCancel func()
 	noticeCancel       func()
+	authChangeCancel   func()
+	authFailureCancel  func()
 	pendingNotices     sync.Map
 
 	deliveryOnce   sync.Once
@@ -66,6 +68,8 @@ func NewRouteWebSocketHub(service string, events RouteEventRuntime) *RouteWebSoc
 	if events != nil {
 		hub.subscriptionCancel, _ = events.Subscribe(routeWebSocketSubscriptionEventType(service), hub.handleSubscriptionEvent)
 		hub.noticeCancel, _ = events.Subscribe(routeWebSocketNoticeEventType(service), hub.handleNoticeEvent)
+		hub.authChangeCancel, _ = events.Subscribe(CasdoorIdentityChangedEventType, hub.handleAuthIdentityChanged)
+		hub.authFailureCancel, _ = events.Subscribe(CasdoorAuthorityUnavailableEventType, hub.handleAuthAuthorityUnavailable)
 	}
 	return hub
 }
@@ -86,23 +90,29 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 		info.releaseSubscription(router)
 		return 0
 	}
-	if info.ServiceName != h.service {
+	if info.GetServiceName() != h.service {
 		info.releaseSubscription(router)
 		return 0
 	}
-	if info.Auth || info.PathType == PrivateType {
+	authenticated := info.GetAuth() || info.GetPathType() == PrivateType
+	leaseIdentity := WebSocketAuthIdentity{}
+	if authenticated {
 		identity, ok := router.(IWebSocketUserIdentity)
 		if !ok {
 			info.releaseSubscription(router)
 			return 0
 		}
-		id, name := req.GetUser()
-		if strings.TrimSpace(id) != "" {
-			identity.SetUserID(id, name)
-		} else if strings.TrimSpace(identity.GetUserID()) == "" {
+		authRequest, ok := req.(IWebSocketAuthRequest)
+		if !ok {
 			info.releaseSubscription(router)
 			return 0
 		}
+		leaseIdentity, ok = authRequest.GetWebSocketAuthIdentity()
+		if !ok || leaseIdentity.ServiceName != h.service || leaseIdentity.AuthType != AuthTypeUser || strings.TrimSpace(leaseIdentity.UID) == "" {
+			info.releaseSubscription(router)
+			return 0
+		}
+		identity.SetUserID(leaseIdentity.UID, leaseIdentity.Username)
 	}
 	hash := getApiHash(router)
 	state := h.routeState(info)
@@ -147,7 +157,7 @@ func (h *RouteWebSocketHub) Register(info *RouterInfo, router IRouter, client IW
 			shard.mu.Unlock()
 			return hash
 		}
-		subscription.clients[client] = routeWebSocketClientLease{router: router, request: req}
+		subscription.clients[client] = routeWebSocketClientLease{router: router, request: req, identity: leaseIdentity}
 		shard.mu.Unlock()
 
 		if created {

@@ -139,6 +139,12 @@ func (h *RouteWebSocketHub) Close(ctx context.Context) error {
 		if h.noticeCancel != nil {
 			h.noticeCancel()
 		}
+		if h.authChangeCancel != nil {
+			h.authChangeCancel()
+		}
+		if h.authFailureCancel != nil {
+			h.authFailureCancel()
+		}
 		h.cancel()
 	})
 	done := make(chan struct{})

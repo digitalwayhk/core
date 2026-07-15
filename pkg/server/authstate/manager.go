@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	IdentityChangedEventType = "auth.casdoor.identity.changed"
+	IdentityChangedEventType = types.CasdoorIdentityChangedEventType
 	casdoorEventHookTimeout  = 3 * time.Second
 )
 
@@ -68,6 +68,7 @@ type Manager struct {
 	hookBackoff    []time.Duration
 	hookSlots      chan struct{}
 	hookTimeout    time.Duration
+	authorityDown  atomic.Bool
 }
 
 func NewManager(service string, cfg config.AuthRevocationConfig, options ...Option) (*Manager, error) {
@@ -197,8 +198,10 @@ func (m *Manager) Authorize(ctx context.Context, identity types.AuthIdentity) er
 	}
 	state, err := m.authority.Current(ctx, key)
 	if err != nil {
+		m.signalAuthorityUnavailable()
 		return ErrAuthorityUnavailable
 	}
+	m.authorityDown.Store(false)
 	if state.Blocked || state.Generation != identity.Generation {
 		return ErrIdentityRevoked
 	}
@@ -220,8 +223,10 @@ func (m *Manager) Current(ctx context.Context, identity types.AuthIdentity) (Sta
 	}
 	state, err := m.authority.Current(ctx, key)
 	if err != nil {
+		m.signalAuthorityUnavailable()
 		return State{}, ErrAuthorityUnavailable
 	}
+	m.authorityDown.Store(false)
 	if m.shared && m.snapshot != nil {
 		if err := m.snapshot.SaveSnapshot(ctx, state); err != nil {
 			return State{}, ErrAuthorityUnavailable
@@ -242,8 +247,10 @@ func (m *Manager) ApplyEvent(ctx context.Context, event types.CasdoorEvent, rete
 		if errors.Is(err, ErrInvalidEvent) {
 			return ApplyResult{}, err
 		}
+		m.signalAuthorityUnavailable()
 		return ApplyResult{}, ErrAuthorityUnavailable
 	}
+	m.authorityDown.Store(false)
 	if m.shared && m.snapshot != nil {
 		if err := m.snapshot.SaveSnapshot(ctx, result.State); err != nil {
 			return ApplyResult{}, ErrAuthorityUnavailable
@@ -265,8 +272,10 @@ func (m *Manager) ConfirmActive(ctx context.Context, identity types.AuthIdentity
 		return State{}, err
 	}
 	if err != nil {
+		m.signalAuthorityUnavailable()
 		return State{}, ErrAuthorityUnavailable
 	}
+	m.authorityDown.Store(false)
 	if m.shared && m.snapshot != nil {
 		if err := m.snapshot.SaveSnapshot(ctx, state); err != nil {
 			return State{}, ErrAuthorityUnavailable
@@ -286,6 +295,22 @@ func (m *Manager) MarkControlPublished(ctx context.Context, event types.CasdoorE
 		return ErrAuthorityUnavailable
 	}
 	return nil
+}
+
+func (m *Manager) signalAuthorityUnavailable() {
+	if m == nil || !m.shared || m.events == nil || !m.authorityDown.CompareAndSwap(false, true) {
+		return
+	}
+	envelope := event.NewEnvelope(m.service, types.CasdoorAuthorityUnavailableEventType, nil)
+	envelope.Subject = m.service
+	envelope.ShardKey = m.service + ":casdoor-authority"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := m.events.Publish(ctx, event.PublishRequest{
+		Class: event.ControlDelivery, Envelope: envelope,
+	}); err != nil {
+		m.authorityDown.Store(false)
+	}
 }
 
 func (m *Manager) SavePendingHook(ctx context.Context, hook PendingHook) error {

@@ -161,6 +161,26 @@ func TestManagerAuthorizeRejectsBlockedOrStaleGeneration(t *testing.T) {
 	require.ErrorIs(t, manager.Authorize(context.Background(), testAuthIdentity(2)), ErrIdentityRevoked)
 }
 
+func TestSharedManagerSignalsWebSocketClosureWhenAuthorityFails(t *testing.T) {
+	published := make(chan event.PublishRequest, 1)
+	bridge := &fakeAuthEventBridge{publish: func(_ context.Context, request event.PublishRequest) error {
+		published <- request
+		return nil
+	}}
+	manager := newManagerWithStores("shop", unavailableStore{}, unavailableStore{}, true)
+	require.NoError(t, manager.bindEventBridge(bridge))
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+
+	err := manager.Authorize(context.Background(), testAuthIdentity(1))
+
+	require.ErrorIs(t, err, ErrAuthorityUnavailable)
+	request := <-published
+	require.Equal(t, event.ControlDelivery, request.Class)
+	require.False(t, request.External)
+	require.Equal(t, types.CasdoorAuthorityUnavailableEventType, request.Envelope.Type)
+	require.Equal(t, "shop", request.Envelope.Source)
+}
+
 func TestManagerProcessEventWaitsForControlAndDoesNotRepublishCompleteDuplicate(t *testing.T) {
 	store, err := OpenBadgerStore(t.TempDir())
 	require.NoError(t, err)

@@ -28,7 +28,8 @@ func TestServiceContextOwnsAuthLifecycleComponents(t *testing.T) {
 	require.Same(t, service, sc.AuthHookProvider)
 	require.Same(t, service, sc.AuthRequestHookProvider)
 	require.Same(t, service, sc.CasdoorEventHookProvider)
-	require.Equal(t, 1, sc.EventStream.SubscriberCount(authstate.IdentityChangedEventType))
+	require.Equal(t, 2, sc.EventStream.SubscriberCount(authstate.IdentityChangedEventType),
+		"撤销Manager与WebSocket Hub必须分别订阅服务级身份控制事件")
 
 	sc.SetRunState(true)
 	sc.SetRunState(false)

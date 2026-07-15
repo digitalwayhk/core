@@ -49,6 +49,11 @@ func (w *hubTestWebSocket) close() {
 	w.mu.Unlock()
 }
 
+func (w *hubTestWebSocket) Close() error {
+	w.close()
+	return nil
+}
+
 func (w *hubTestWebSocket) eventCount(eventName string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -78,6 +83,25 @@ type hubAuthenticatedRequest struct {
 	shardTestRequest
 	userID   string
 	userName string
+}
+
+type hubVerifiedAuthRequest struct {
+	*hubAuthenticatedRequest
+	identity WebSocketAuthIdentity
+}
+
+func (r *hubVerifiedAuthRequest) GetWebSocketAuthIdentity() (WebSocketAuthIdentity, bool) {
+	return r.identity, r.identity.UID != ""
+}
+
+func verifiedHubRequest(service string, generation uint64) *hubVerifiedAuthRequest {
+	return &hubVerifiedAuthRequest{
+		hubAuthenticatedRequest: &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"},
+		identity: WebSocketAuthIdentity{
+			ServiceName: service, AuthType: AuthTypeUser, Provider: AuthProviderCasdoor,
+			ProviderSubject: "alice", UID: "trusted-user", Username: "可信用户", Generation: generation,
+		},
+	}
 }
 
 func (r *hubAuthenticatedRequest) GetUser() (string, string) {
@@ -120,7 +144,7 @@ func TestRouteWebSocketHubRejectsPrivateRouterWithoutIdentityContract(t *testing
 	router := &hubTestRouter{info: info, hash: 43}
 	info.SetInstance(router)
 	client := &hubTestWebSocket{}
-	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+	req := verifiedHubRequest("service-a", 1)
 
 	hash := hub.Register(info, router, client, req)
 
@@ -136,7 +160,7 @@ func TestRouteWebSocketHubRejectsAuthenticatedPublicRouterWithoutIdentityContrac
 	router := &hubTestRouter{info: info, hash: 44}
 	info.SetInstance(router)
 	client := &hubTestWebSocket{}
-	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+	req := verifiedHubRequest("service-a", 1)
 
 	hash := hub.Register(info, router, client, req)
 
@@ -218,7 +242,10 @@ func TestRouteWebSocketHubPreservesSessionIdentityWhenHandshakeRequestHasNoUser(
 	}
 	info.SetInstance(router)
 
-	hash := hub.Register(info, router, &hubTestWebSocket{}, &shardTestRequest{})
+	req := verifiedHubRequest("service-a", 1)
+	req.userID = ""
+	req.userName = ""
+	hash := hub.Register(info, router, &hubTestWebSocket{}, req)
 
 	require.Equal(t, uint64(41), hash)
 	require.Equal(t, "trusted-user", router.UserID)
@@ -231,7 +258,7 @@ func TestRouteWebSocketHubInjectsAuthenticatedIdentityThroughContract(t *testing
 	router := &hubInjectedIdentityRouter{hubTestRouter: &hubTestRouter{info: info}}
 	info.SetInstance(router)
 	client := &hubTestWebSocket{}
-	req := &hubAuthenticatedRequest{userID: "trusted-user", userName: "可信用户"}
+	req := verifiedHubRequest("service-a", 1)
 
 	hash := hub.Register(info, router, client, req)
 
@@ -239,6 +266,71 @@ func TestRouteWebSocketHubInjectsAuthenticatedIdentityThroughContract(t *testing
 	require.Equal(t, "trusted-user", router.userID)
 	require.Equal(t, "可信用户", router.userName)
 	hub.Unregister(info, hash, client)
+}
+
+func TestRouteWebSocketHubHigherGenerationClosesOldSession(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/private-orders")
+	info.PathType = PrivateType
+	route := &hubInjectedIdentityRouter{hubTestRouter: &hubTestRouter{info: info}}
+	info.SetInstance(route)
+	client := &hubTestWebSocket{}
+	require.Equal(t, uint64(42), hub.Register(info, route, client, verifiedHubRequest("service-a", 3)))
+
+	hub.RevokeIdentity(CasdoorEvent{
+		ServiceName: "service-a", AuthType: AuthTypeUser, Provider: AuthProviderCasdoor,
+		ProviderSubject: "alice", Generation: 4,
+	})
+
+	require.True(t, client.IsClosed())
+	require.Zero(t, hub.ActiveClientCount(info))
+	require.Equal(t, int32(1), route.cleans.Load())
+}
+
+func TestRouteWebSocketHubRevocationDoesNotReenterControlShard(t *testing.T) {
+	bridge, hub := newHubTestRuntime(t, "service-a")
+	info := newHubTestRoute("service-a", "/ws/private-orders")
+	info.PathType = PrivateType
+	route := &hubInjectedIdentityRouter{hubTestRouter: &hubTestRouter{info: info}}
+	info.SetInstance(route)
+	client := &hubTestWebSocket{}
+	hash := hub.Register(info, route, client, verifiedHubRequest("service-a", 3))
+	require.Equal(t, uint64(42), hash)
+	payload, err := json.Marshal(CasdoorEvent{
+		ServiceName: "service-a", AuthType: AuthTypeUser, Provider: AuthProviderCasdoor,
+		ProviderSubject: "alice", Generation: 4,
+	})
+	require.NoError(t, err)
+	envelope := event.NewEnvelope("service-a", CasdoorIdentityChangedEventType, payload)
+	envelope.ShardKey = "service-a:/ws/private-orders:42"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	require.NoError(t, bridge.Publish(ctx, event.PublishRequest{Class: event.ControlDelivery, Envelope: envelope}))
+	waitForHub(t, client.IsClosed)
+	require.Zero(t, hub.ActiveClientCount(info))
+}
+
+func TestRouteWebSocketHubAuthorityFailureOnlyClosesCasdoorSessions(t *testing.T) {
+	_, hub := newHubTestRuntime(t, "service-a")
+	privateInfo := newHubTestRoute("service-a", "/ws/private-orders")
+	privateInfo.PathType = PrivateType
+	privateRoute := &hubInjectedIdentityRouter{hubTestRouter: &hubTestRouter{info: privateInfo}}
+	privateInfo.SetInstance(privateRoute)
+	casdoorClient := &hubTestWebSocket{}
+	require.NotZero(t, hub.Register(privateInfo, privateRoute, casdoorClient, verifiedHubRequest("service-a", 3)))
+
+	publicInfo := newHubTestRoute("service-a", "/ws/public")
+	publicRoute := &hubTestRouter{info: publicInfo, hash: 90}
+	publicInfo.SetInstance(publicRoute)
+	publicClient := &hubTestWebSocket{}
+	require.Equal(t, uint64(90), hub.Register(publicInfo, publicRoute, publicClient, &shardTestRequest{}))
+
+	hub.CloseCasdoorSessions()
+
+	require.True(t, casdoorClient.IsClosed())
+	require.False(t, publicClient.IsClosed())
+	require.Equal(t, 1, hub.ActiveClientCount(publicInfo))
 }
 
 func TestRouteWebSocketHubAllowsClientOnMultipleHashes(t *testing.T) {

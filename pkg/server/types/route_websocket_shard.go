@@ -23,6 +23,7 @@ type routeWebSocketClientLease struct {
 	router     IRouter
 	request    IRequest
 	additional []IRouter
+	identity   WebSocketAuthIdentity
 }
 
 type routeWebSocketState struct {
