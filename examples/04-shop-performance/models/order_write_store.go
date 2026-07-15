@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,11 +21,18 @@ import (
 // OrderWriteStore 使用 Badger 接收订单写入，再复用框架写后同步能力汇合到 SQLite。
 // Add 无进程内互斥锁：唯一键为订单 ID（接口层 req.NewID），并发写依赖 Badger 自身。
 type OrderWriteStore struct {
-	db      *nosql.PrefixedBadgerDB[Order]
-	batcher *orderBatcher
-	flushMu sync.Mutex
-	closeMu sync.Mutex
-	closed  bool
+	db               *nosql.PrefixedBadgerDB[Order]
+	batcher          *orderBatcher
+	guard            *orderWriteGuard
+	path             string
+	startedAt        time.Time
+	diskBytes        atomic.Int64
+	diskScanFailures atomic.Uint64
+	monitorStop      chan struct{}
+	monitorDone      chan struct{}
+	flushMu          sync.Mutex
+	closeMu          sync.Mutex
+	closed           bool
 }
 
 const (
@@ -44,9 +52,18 @@ func newOrderWriteStore(path string, action persistencetypes.IDataAction, config
 		_ = db.Close()
 		return nil, err
 	}
-	store := &OrderWriteStore{db: db}
+	store := &OrderWriteStore{
+		db:          db,
+		guard:       newOrderWriteGuard(defaultOrderWriteGuardConfig()),
+		path:        path,
+		startedAt:   time.Now(),
+		monitorStop: make(chan struct{}),
+		monitorDone: make(chan struct{}),
+	}
 	// BatchInsert 使同批订单共享一次 SyncWrites 事务；每个 Submit 仍会等待该事务完成。
 	store.batcher = newOrderBatcher(orderCommitMaxBatch, orderCommitWait, db.BatchInsert)
+	store.refreshDiskUsage()
+	go store.monitorDiskUsage()
 	return store, nil
 }
 
@@ -63,16 +80,22 @@ func (s *OrderWriteStore) Add(order *Order) error {
 	if key := order.GetHash(); key == "" {
 		return NewValidationError("订单缓存键无效")
 	}
+	release, err := s.guard.Acquire(s.db.GetCachedPendingSyncCount(), s.diskBytes.Load(), time.Now())
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.batcher.Submit(order)
 }
 
-// PendingByUser 返回尚在本地层可见的用户订单（按 ID 键扫描后过滤 UserID）。
+// PendingByUser 返回尚在本地层可见的用户订单。
+// Badger 本地键已编入可信 UserID 摘要，因此这里只扫描该用户前缀，不随全局积压量线性增长。
 func (s *OrderWriteStore) PendingByUser(userID string) ([]*Order, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, NewBusinessError("用户身份无效")
 	}
-	items, err := s.db.ScanAll()
+	items, err := s.db.Scan(orderPendingUserPrefix(userID), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +146,101 @@ func (s *OrderWriteStore) Flush() error {
 // SyncStatus 返回积压、同步进度和关闭状态。
 func (s *OrderWriteStore) SyncStatus() nosql.SyncStatus { return s.db.GetSyncStatus() }
 
+// OrderWritePerformanceSnapshot 把 API 确认、Group Commit、SQLite 收敛与本地容量指标分开展示。
+type OrderWritePerformanceSnapshot struct {
+	Uptime               time.Duration
+	PendingOrders        int
+	BadgerDiskBytes      int64
+	DiskScanFailures     uint64
+	APIConfirmedTPS      float64
+	SQLiteConvergenceTPS float64
+	SQLiteActiveSyncTPS  float64
+	GroupCommit          OrderBatcherSnapshot
+	Backpressure         OrderWriteGuardSnapshot
+	Sync                 nosql.SyncMetrics
+}
+
+// PerformanceSnapshot 返回当前进程生命周期的指标。
+// APIConfirmedTPS 以 Badger 可靠提交为成功；SQLiteConvergenceTPS 以最终同步条数为成功。
+func (s *OrderWriteStore) PerformanceSnapshot() OrderWritePerformanceSnapshot {
+	if s == nil {
+		return OrderWritePerformanceSnapshot{}
+	}
+	s.refreshDiskUsage()
+	uptime := time.Since(s.startedAt)
+	batch := s.batcher.Snapshot()
+	syncMetrics := s.db.GetSyncMetrics()
+	snapshot := OrderWritePerformanceSnapshot{
+		Uptime:           uptime,
+		PendingOrders:    s.db.GetCachedPendingSyncCount(),
+		BadgerDiskBytes:  s.diskBytes.Load(),
+		DiskScanFailures: s.diskScanFailures.Load(),
+		GroupCommit:      batch,
+		Backpressure:     s.guard.Snapshot(),
+		Sync:             syncMetrics,
+	}
+	if seconds := uptime.Seconds(); seconds > 0 {
+		snapshot.APIConfirmedTPS = float64(batch.CommittedOrders) / seconds
+		snapshot.SQLiteConvergenceTPS = float64(syncMetrics.SyncedItems) / seconds
+	}
+	if seconds := syncMetrics.TotalDuration.Seconds(); seconds > 0 {
+		snapshot.SQLiteActiveSyncTPS = float64(syncMetrics.SyncedItems) / seconds
+	}
+	return snapshot
+}
+
+// GetOrderWritePerformanceSnapshot 供示例内的运维、调试或基准代码获取当前快照。
+// 它不暴露 store 指针，避免外部绕过生命周期和背压约束。
+func GetOrderWritePerformanceSnapshot() (OrderWritePerformanceSnapshot, error) {
+	store, err := getOrderWriteStore()
+	if err != nil {
+		return OrderWritePerformanceSnapshot{}, err
+	}
+	return store.PerformanceSnapshot(), nil
+}
+
+func (s *OrderWriteStore) monitorDiskUsage() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	defer close(s.monitorDone)
+	for {
+		select {
+		case <-ticker.C:
+			s.refreshDiskUsage()
+		case <-s.monitorStop:
+			return
+		}
+	}
+}
+
+func (s *OrderWriteStore) refreshDiskUsage() {
+	size, err := directorySize(s.path)
+	if err != nil {
+		s.diskScanFailures.Add(1)
+		return
+	}
+	s.diskBytes.Store(size)
+}
+
+func directorySize(root string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		size += info.Size()
+		return nil
+	})
+	return size, err
+}
+
 // Close 先尽力汇合积压，再关闭 Badger 和后台同步协程。
 func (s *OrderWriteStore) Close(timeout time.Duration) error {
 	s.closeMu.Lock()
@@ -131,6 +249,8 @@ func (s *OrderWriteStore) Close(timeout time.Duration) error {
 		return nil
 	}
 	s.closed = true
+	close(s.monitorStop)
+	<-s.monitorDone
 	batchErr := s.batcher.Close()
 	flushErr := s.Flush()
 	closeErr := s.db.CloseWithTimeout(timeout, timeout)

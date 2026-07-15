@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,12 +33,41 @@ type orderBatcher struct {
 	commit   func([]*Order) error
 	requests chan orderBatchRequest
 	done     chan struct{}
+	closing  chan struct{}
 
-	stateMu  sync.RWMutex
-	closed   bool
-	once     sync.Once
-	errMu    sync.Mutex
-	firstErr error
+	stateMu    sync.RWMutex
+	closed     bool
+	submitters sync.WaitGroup
+	once       sync.Once
+	errMu      sync.Mutex
+	firstErr   error
+	metrics    orderBatcherMetrics
+}
+
+type orderBatcherMetrics struct {
+	submittedOrders   atomic.Uint64
+	committedOrders   atomic.Uint64
+	commitBatches     atomic.Uint64
+	immediateBatches  atomic.Uint64
+	aggregatedBatches atomic.Uint64
+	failedBatches     atomic.Uint64
+	maxBatchSize      atomic.Int64
+	maxQueueDepth     atomic.Int64
+	totalCommitNanos  atomic.Int64
+}
+
+// OrderBatcherSnapshot 是可序列化的 Group Commit 运行快照。
+type OrderBatcherSnapshot struct {
+	SubmittedOrders       uint64
+	CommittedOrders       uint64
+	CommitBatches         uint64
+	ImmediateBatches      uint64
+	AggregatedBatches     uint64
+	FailedBatches         uint64
+	MaxBatchSize          int
+	MaxQueueDepth         int
+	TotalCommitDuration   time.Duration
+	AverageCommitDuration time.Duration
 }
 
 // newOrderBatcher 创建并立即启动一个单 worker 批量提交器。
@@ -55,13 +85,15 @@ func newOrderBatcher(maxBatch int, wait time.Duration, commit func([]*Order) err
 		commit:   commit,
 		requests: make(chan orderBatchRequest, maxBatch*8),
 		done:     make(chan struct{}),
+		closing:  make(chan struct{}),
 	}
 	go batcher.run()
 	return batcher
 }
 
 // Submit 把订单加入当前批次，并等待该批持久化结果。
-// 读锁覆盖发送动作，确保 Close 关闭 requests 时不会与并发发送产生 panic。
+// 提交者在状态锁内登记后即释放锁，队列已满时通过 closing 被 Close 唤醒。
+// submitters 保证 Close 只在所有在途发送退出后才关闭 requests，避免 send-on-closed panic。
 func (b *orderBatcher) Submit(order *Order) error {
 	if b == nil || order == nil {
 		return NewValidationError("订单不能为空")
@@ -72,8 +104,17 @@ func (b *orderBatcher) Submit(order *Order) error {
 		b.stateMu.RUnlock()
 		return errOrderBatcherClosed
 	}
-	b.requests <- request
+	b.submitters.Add(1)
 	b.stateMu.RUnlock()
+	select {
+	case b.requests <- request:
+		b.metrics.submittedOrders.Add(1)
+		updateAtomicMax(&b.metrics.maxQueueDepth, int64(len(b.requests)))
+		b.submitters.Done()
+	case <-b.closing:
+		b.submitters.Done()
+		return errOrderBatcherClosed
+	}
 	return <-request.result
 }
 
@@ -86,8 +127,10 @@ func (b *orderBatcher) Close() error {
 	b.once.Do(func() {
 		b.stateMu.Lock()
 		b.closed = true
-		close(b.requests)
+		close(b.closing)
 		b.stateMu.Unlock()
+		b.submitters.Wait()
+		close(b.requests)
 	})
 	<-b.done
 	b.errMu.Lock()
@@ -137,16 +180,62 @@ func (b *orderBatcher) run() {
 }
 
 func (b *orderBatcher) finishBatch(batch []orderBatchRequest) {
+	started := time.Now()
 	err := b.commitSafely(batch)
+	duration := time.Since(started)
+	b.metrics.commitBatches.Add(1)
+	b.metrics.totalCommitNanos.Add(duration.Nanoseconds())
+	updateAtomicMax(&b.metrics.maxBatchSize, int64(len(batch)))
+	if len(batch) == 1 {
+		b.metrics.immediateBatches.Add(1)
+	} else {
+		b.metrics.aggregatedBatches.Add(1)
+	}
 	if err != nil {
+		b.metrics.failedBatches.Add(1)
 		b.errMu.Lock()
 		if b.firstErr == nil {
 			b.firstErr = err
 		}
 		b.errMu.Unlock()
+	} else {
+		b.metrics.committedOrders.Add(uint64(len(batch)))
 	}
 	for _, request := range batch {
 		request.result <- err
+	}
+}
+
+// Snapshot 返回无锁指标快照，用于判断是否真实合批及 fsync 耗时是否恶化。
+func (b *orderBatcher) Snapshot() OrderBatcherSnapshot {
+	if b == nil {
+		return OrderBatcherSnapshot{}
+	}
+	batches := b.metrics.commitBatches.Load()
+	total := time.Duration(b.metrics.totalCommitNanos.Load())
+	average := time.Duration(0)
+	if batches > 0 {
+		average = total / time.Duration(batches)
+	}
+	return OrderBatcherSnapshot{
+		SubmittedOrders:       b.metrics.submittedOrders.Load(),
+		CommittedOrders:       b.metrics.committedOrders.Load(),
+		CommitBatches:         batches,
+		ImmediateBatches:      b.metrics.immediateBatches.Load(),
+		AggregatedBatches:     b.metrics.aggregatedBatches.Load(),
+		FailedBatches:         b.metrics.failedBatches.Load(),
+		MaxBatchSize:          int(b.metrics.maxBatchSize.Load()),
+		MaxQueueDepth:         int(b.metrics.maxQueueDepth.Load()),
+		TotalCommitDuration:   total,
+		AverageCommitDuration: average,
+	}
+}
+
+func updateAtomicMax(value *atomic.Int64, candidate int64) {
+	for current := value.Load(); candidate > current; current = value.Load() {
+		if value.CompareAndSwap(current, candidate) {
+			return
+		}
 	}
 }
 

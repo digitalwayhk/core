@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/digitalwayhk/core/examples/integration/benchmetrics"
 )
 
 type benchmarkFixture struct {
@@ -83,6 +85,7 @@ func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			startedAt := time.Now()
+			throughput := benchmetrics.NewCollector(time.Second)
 			for worker := 0; worker < concurrency; worker++ {
 				go func() {
 					defer workers.Done()
@@ -94,9 +97,11 @@ func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
 						}
 						requestStartedAt := time.Now()
 						if err := operation(index); err != nil {
+							throughput.RecordError()
 							errOnce.Do(func() { firstErr = err })
 							return
 						}
+						throughput.RecordSuccess()
 						if shouldSampleLatency(index, b.N, maxSamples) {
 							sampleMu.Lock()
 							samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
@@ -108,6 +113,7 @@ func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
 			close(start)
 			workers.Wait()
 			elapsed := time.Since(startedAt)
+			throughputStats := throughput.Stop()
 			b.StopTimer()
 			if firstErr != nil {
 				b.Fatal(firstErr)
@@ -116,6 +122,7 @@ func runHTTPBenchmark(b *testing.B, operation func(index int) error) {
 				b.ReportMetric(float64(b.N)/elapsed.Seconds(), "req/s")
 			}
 			reportLatencyPercentiles(b, samples)
+			benchmetrics.Report(b, throughputStats)
 		})
 	}
 }
@@ -194,6 +201,25 @@ func BenchmarkAddOrder(b *testing.B) {
 	}
 }
 
+// BenchmarkMixedWorkload 用 70% 商品查询、20% 本人订单查询和 10% 下单模拟读写混合流量。
+// 长稳测试直接通过 SHOP_BENCHTIME=15m 运行此 benchmark，不进入日常 CI。
+func BenchmarkMixedWorkload(b *testing.B) {
+	fixture := newBenchmarkFixture(b)
+	productPath := "/api/performanceshop/getproducts?id=" + fixture.product.ID
+	runHTTPBenchmark(b, func(index int) error {
+		switch index % 10 {
+		case 0:
+			return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", fixture.user, map[string]interface{}{
+				"productID": uintID(b, fixture.product.ID), "quantity": 1,
+			})
+		case 1, 2:
+			return requestSucceeded(http.MethodGet, "/api/performanceshop/getorders", fixture.user, nil)
+		default:
+			return requestSucceeded(http.MethodGet, productPath, "", nil)
+		}
+	})
+}
+
 func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation func(index int) error) {
 	const maxSamples = 4096
 	samples := make([]int64, 0, min(b.N, maxSamples))
@@ -207,6 +233,7 @@ func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation 
 	b.ReportAllocs()
 	b.ResetTimer()
 	startedAt := time.Now()
+	throughput := benchmetrics.NewCollector(time.Second)
 	for worker := 0; worker < concurrency; worker++ {
 		go func() {
 			defer workers.Done()
@@ -218,9 +245,11 @@ func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation 
 				}
 				requestStartedAt := time.Now()
 				if err := operation(index); err != nil {
+					throughput.RecordError()
 					errOnce.Do(func() { firstErr = err })
 					return
 				}
+				throughput.RecordSuccess()
 				if shouldSampleLatency(index, b.N, maxSamples) {
 					sampleMu.Lock()
 					samples = append(samples, time.Since(requestStartedAt).Nanoseconds())
@@ -232,10 +261,12 @@ func runHTTPBenchmarkSingleConcurrency(b *testing.B, concurrency int, operation 
 	close(start)
 	workers.Wait()
 	elapsed := time.Since(startedAt)
+	throughputStats := throughput.Stop()
 	b.StopTimer()
 	if firstErr != nil {
 		b.Fatal(firstErr)
 	}
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "orders/s")
 	reportLatencyPercentiles(b, samples)
+	benchmetrics.Report(b, throughputStats)
 }

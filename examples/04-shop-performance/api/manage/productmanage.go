@@ -1,8 +1,6 @@
 package manage
 
 import (
-	"context"
-
 	publicapi "github.com/digitalwayhk/core/examples/04-shop-performance/api/public"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/business"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
@@ -70,7 +68,7 @@ func (own *ProductManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Pro
 	model, err := business.NewProductService().SetEnabled(id, enabled)
 	if err == nil {
 		publicapi.InvalidateProductCache()
-		err = business.InvalidateOrderReferenceCache(context.Background())
+		invalidateOrderReferenceBestEffort("product_set_enabled")
 	}
 	return model, err
 }
@@ -79,5 +77,6 @@ func (own *ProductManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Pro
 // 事实缓存的清理不直接调用 map，而是发布 EventBridge 控制事件。
 func (own *ProductManage) DoAfter(sender interface{}, req servertypes.IRequest) (interface{}, error) {
 	publicapi.InvalidateProductCache()
-	return nil, business.InvalidateOrderReferenceCache(context.Background())
+	invalidateOrderReferenceBestEffort("product_changed")
+	return nil, nil
 }

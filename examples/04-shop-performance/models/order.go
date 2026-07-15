@@ -1,7 +1,10 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -46,6 +49,29 @@ func (own *Order) GetHash() string {
 		return own.Hashcode
 	}
 	return strconv.FormatUint(uint64(own.ID), 10)
+}
+
+// GetLocalKey 把可信用户维度编入 Badger 本地键，使待同步订单可按用户前缀查询。
+// GetHash 仍只返回订单 ID，因此 SQLite 哈希、主键和对外契约不受影响。
+func (own *Order) GetLocalKey() string {
+	if own == nil || own.GetID() == 0 {
+		return ""
+	}
+	prefix := orderPendingUserPrefix(own.UserID)
+	if prefix == "" {
+		return ""
+	}
+	return prefix + strconv.FormatUint(uint64(own.GetID()), 10)
+}
+
+// orderPendingUserPrefix 使用 128 位摘要隔离用户的本地键空间，避免在磁盘键中暴露原始 UserID。
+func orderPendingUserPrefix(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(userID))
+	return "u:" + hex.EncodeToString(digest[:16]) + ":"
 }
 
 // IsSyncAfterDelete 声明订单同步到 SQLite 后自动删除 Badger 本地副本。

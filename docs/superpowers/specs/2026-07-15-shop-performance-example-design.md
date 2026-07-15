@@ -18,7 +18,7 @@
 3. 保证刚写入 Badger、尚未同步 SQLite 的订单立即可查、可支付、可删除。
 4. 使用现有 `ISyncAfterDelete` 在 SQLite 同步成功后自动清理 Badger 订单副本。
 5. 补齐 RouterInfo 对 RouteCache SingleFlight 的兼容接入，防止冷缓存并发击穿 SQLite。
-6. 在示例 3 和示例 4 中用同名真实 HTTP benchmark 比较查询 QPS、下单确认 TPS 和最终 SQLite 同步 TPS。
+6. 在示例 3 和示例 4 中用同名真实 HTTP benchmark 比较查询 QPS 和下单确认 TPS；SQLite 最终同步 TPS 由独立收敛指标快照给出，不与 API 确认吞吐混为一谈。
 7. 缓存下单所需的最小商品/供应商事实，并通过服务专属 EventBridge 控制事件主动失效。
 8. 服务启动后通过原子指针读取长期存活的 `OrderWriteStore`，消除下单热路径上的全局锁竞争。
 
@@ -171,15 +171,15 @@ type RouteCacheTakeRuntime interface {
 示例 4 的订单 Badger key 使用：
 
 ```text
-Order:<orderID>
+Order:u:<trusted-user-id-sha256-128>:<orderID>
 ```
 
 该键同时满足：
 
 - 复用接口层 `req.NewID()` 生成的稳定订单 ID，不需要进程内唯一性互斥锁。
-- Badger 与 SQLite 使用相同 ID，合并查询可直接按 ID 去重。
-- 本地 key 不包含原始 UserID、商品信息或时间信息。
-- 用户隔离依赖 Token 注入的可信 UserID；扫描待同步项后在服务端过滤，禁止接受客户端自报 UserID。
+- `GetHash()` 和 SQLite 哈希仍只使用订单 ID，合并查询按 ID 去重；仅 Badger 通过可选 `ILocalRowCode` 使用本地索引键。
+- 本地 key 只包含 UserID 的 128 位 SHA-256 摘要和订单 ID，不暴露原始 UserID、商品信息或时间信息。
+- `PendingByUser` 只扫描 Token 注入的可信 UserID 对应前缀，复杂度由 O(全部 pending) 降为 O(当前用户 pending)。
 
 `CreatedAt` 仍在构造订单时固定，同一个对象写入 Badger 和 SQLite，不允许同步阶段重新生成时间。
 
@@ -198,6 +198,8 @@ Order:<orderID>
 - Group Commit 最多合并 128 笔、最多等待 1ms；积压少于 16 笔时逐单立即提交，避免低并发等待窗口。
 - `Submit` 必须等待所属批次 `BatchInsert` 返回；只有 Badger `SyncWrites` 成功后，请求才能返回成功。
 - 批次错误原样返回该批所有等待请求；`Close` 停止接收、排空已接收批次并返回首个提交错误。
+- `Close` 通过独立 closing 信号唤醒满队列的提交者，禁止在阻塞发送期间长时间持有状态读锁。
+- 后台同步与 `ForceDeleteLocal` 使用同一组按键分片锁；同步在锁内重新校验 Badger 快照，防止已删订单被迟到的 SQLite insert 复活。
 
 订单实现：
 
@@ -235,7 +237,7 @@ Badger 写入失败时下单失败，不允许降级为内存成功。
 `GetOrders`：
 
 1. 查询 SQLite 中当前用户订单。
-2. 扫描 Badger 中待同步订单，并按 Token 注入的可信 UserID 过滤。
+2. 按 Token 注入的可信 UserID 摘要前缀扫描 Badger 待同步订单。
 3. 按 OrderID 去重；过渡窗口内 Badger 更新版本优先。
 4. 按 ID 和 CreatedAt 稳定倒序。
 5. 转换为与示例 3 相同的 DTO。
@@ -272,6 +274,22 @@ Badger 写入失败时下单失败，不允许降级为内存成功。
 - `route_cache_load_coalesced`
 - `route_cache_bypassed`
 
+### 8.1 背压与单实例保护
+
+- 复用 go-zero `syncx.TimeoutLimit` 将单实例在途订单写入限制为 500，外层并发可等待最多 2 秒。
+- pending 达到 10,000 时进入软阈值观察；持续 30 秒未恢复或直接达到 50,000 时拒绝新写入。
+- Badger 目录每 5 秒采样；示例硬上限为 1 GiB。这些是演示值，消费方必须按磁盘配额、单条大小和 SQLite 恢复时间重新定标。
+- 软阈值只处理持续故障，不会因短时峰值立即拒绝。
+
+### 8.2 性能快照
+
+`GetOrderWritePerformanceSnapshot()` 分开输出：
+
+- Group Commit：提交订单、批次、立即/合并批次、最大批量、队列峰值、提交耗时和失败数。
+- SQLite 收敛：尝试、失败、成功条数、pending 峰值、总/最后耗时和最后成功时间。
+- 容量：当前 pending、Badger 磁盘字节、磁盘采样失败和各类背压拒绝数。
+- TPS：`APIConfirmedTPS` 以 Badger 可靠提交为口径；`SQLiteConvergenceTPS` 以进程墙钟时间为口径；`SQLiteActiveSyncTPS` 只计算真正执行同步的时间。
+
 ## 9. 集成测试
 
 示例 4 完整复制示例 3 的 Manage、Public、Private 和 WebSocket 行为测试，并增加：
@@ -303,6 +321,7 @@ BenchmarkGetSuppliers
 BenchmarkGetPaymentTypes
 BenchmarkGetOrders
 BenchmarkAddOrder
+BenchmarkMixedWorkload
 ```
 
 主对比：
@@ -312,12 +331,13 @@ BenchmarkAddOrder
 - 示例 3 下单：SQLite 提交后确认。
 - 示例 4 下单：Badger 持久写入并进入同步队列后确认。
 
-示例 4 另报告：
+示例 4 性能快照另报告：
 
 - Badger L2 组件读取性能。
 - 真实进程冷 L1、热 L2 的首次回填延迟。
 - pending 最大值。
-- SQLite 最终同步条数、耗时和 `sync_orders/s`。
+- SQLite 最终同步条数、耗时、墙钟收敛 TPS 和活跃同步 TPS。
+- pending 峰值、Badger 磁盘增长、同步失败和背压拒绝。
 
 L2 首次回填不得冒充稳定态 HTTP QPS。
 
@@ -338,8 +358,9 @@ L2 首次回填不得冒充稳定态 HTTP QPS。
 - `ns/op`
 - `B/op`
 - `allocs/op`
-- 固定次数采样得到的 P50/P95
-- 04 的 `sync_orders/s` 和最终一致性结果
+- 固定次数采样得到的请求延迟 P50/P95/P99
+- 每秒吞吐窗口 P1/P5/P50/P95/P99、均值、标准差、CV 和错误率
+- 04 性能快照的 SQLite 收敛指标和最终一致性结果
 
 `scripts/benchmark-shop-examples.sh` 连续运行 03/04 benchmark，保留原始 Go 输出并生成中文 Markdown 对比表。脚本不得修改基线，也不得把性能波动作为普通 CI 失败。
 
@@ -374,8 +395,8 @@ go test -race ./pkg/server/routecache ./pkg/server/types -count=1
 go vet ./examples/04-shop-performance/... ./examples/integration/04-shop-performance
 ./scripts/check-logging.sh
 
-go test ./examples/integration/03-shop-inheritance -run '^$' -bench 'Benchmark(Get|Add)' -benchmem
-go test ./examples/integration/04-shop-performance -run '^$' -bench 'Benchmark(Get|Add)' -benchmem
+go test ./examples/integration/03-shop-inheritance -run '^$' -bench 'Benchmark(Get|Add|Mixed)' -benchmem
+go test ./examples/integration/04-shop-performance -run '^$' -bench 'Benchmark(Get|Add|Mixed)' -benchmem
 ./scripts/benchmark-shop-examples.sh
 ```
 

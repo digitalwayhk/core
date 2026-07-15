@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -167,6 +168,9 @@ type SyncQueueItem[T types.IModel] struct {
 	SyncedAt  time.Time `json:"synced_at,omitempty"`
 	IsDeleted bool      `json:"is_deleted"`
 	DeletedAt time.Time `json:"deleted_at,omitempty"`
+	// fromSyncQueue 只由 getUnsyncedBatch 在内存中设置，不持久化。
+	// syncBatch 用它区分真实队列快照与底层单测直接构造的合成项。
+	fromSyncQueue bool `json:"-"`
 }
 
 type syncAfterDeleteCandidate[T types.IModel] struct {
@@ -180,6 +184,7 @@ const (
 	syncAfterDeleteCoalesce  = 10 * time.Millisecond
 	syncAfterDeleteQueueStep = 256
 	syncAfterDeleteSlowBatch = 500 * time.Millisecond
+	syncKeyLockStripeCount   = 256
 )
 
 // PrefixedBadgerDB 带前缀的共享 BadgerDB
@@ -194,6 +199,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	syncMutex      sync.Mutex
 	syncInProgress bool
 	syncExecMu     sync.Mutex // 保证 processSyncQueue 串行执行，防止并发调用
+	syncKeyLocks   [syncKeyLockStripeCount]sync.Mutex
 	closeCh        chan struct{}
 	syncTrigger    chan struct{} // 写入时立即触发同步，无需等待 ticker
 	sadTrigger     chan struct{}
@@ -219,6 +225,20 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	closed    bool
 	closeErr  error
 	closeMu   sync.RWMutex
+
+	syncMetricsMu sync.RWMutex
+	syncMetrics   SyncMetrics
+}
+
+// SyncMetrics 记录写后同步的真实收敛情况，与本地 Badger 提交 TPS 分开观察。
+type SyncMetrics struct {
+	Attempts      uint64
+	Failures      uint64
+	SyncedItems   uint64
+	MaxPending    int
+	TotalDuration time.Duration
+	LastDuration  time.Duration
+	LastSuccessAt time.Time
 }
 
 // NewSharedBadgerDB 创建共享 BadgerDB 实例
@@ -249,6 +269,9 @@ func NewSharedBadgerDB[T types.IModel](basePath string, config ...BadgerDBConfig
 func (p *PrefixedBadgerDB[T]) generateKey(item *T) string {
 	if item == nil {
 		return ""
+	}
+	if localRowCode, ok := any(item).(types.ILocalRowCode); ok {
+		return p.prefix + localRowCode.GetLocalKey()
 	}
 	if rowCode, ok := any(item).(types.IRowCode); ok {
 		return p.prefix + rowCode.GetHash()
@@ -864,19 +887,14 @@ func (p *PrefixedBadgerDB[T]) ForceDeleteLocal(item *T) error {
 	if key == "" {
 		return badger.ErrEmptyKey
 	}
+	unlock := p.lockSyncKeys([]string{key})
+	defer unlock()
 	wasPending := false
 	err := p.manager.db.Update(func(txn *badger.Txn) error {
-		entry, getErr := txn.Get([]byte(key))
-		if getErr == nil {
-			if valErr := entry.Value(func(val []byte) error {
-				var wrapper SyncQueueItem[T]
-				if unmarshalErr := json.Unmarshal(val, &wrapper); unmarshalErr == nil && !wrapper.IsSynced {
-					wasPending = true
-				}
-				return nil
-			}); valErr != nil {
-				return valErr
-			}
+		// 同步队列索引是 pending 的权威事实。不依赖数据 value 反序列化，
+		// 否则损坏 value 被强制删除后会遗留错误的 pendingCountCache。
+		if _, getErr := txn.Get([]byte(p.syncQueueKey(key))); getErr == nil {
+			wasPending = true
 		} else if getErr != badger.ErrKeyNotFound {
 			return getErr
 		}
@@ -1159,7 +1177,13 @@ func (p *PrefixedBadgerDB[T]) ScanPage(prefix string, limit int, lastKey string)
 func (p *PrefixedBadgerDB[T]) incrementPendingCount(delta int) {
 	p.pendingCountMutex.Lock()
 	p.pendingCountCache += delta
+	pending := p.pendingCountCache
 	p.pendingCountMutex.Unlock()
+	p.syncMetricsMu.Lock()
+	if pending > p.syncMetrics.MaxPending {
+		p.syncMetrics.MaxPending = pending
+	}
+	p.syncMetricsMu.Unlock()
 }
 
 // triggerSync 通知 syncToOtherDB 立即执行同步（非阻塞，幂等）
@@ -1490,11 +1514,13 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 }
 
 // processSyncQueue 执行一轮同步，返回实际同步成功数和错误
-func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
+func (p *PrefixedBadgerDB[T]) processSyncQueue() (synced int, err error) {
 	// 串行执行：如果有另一个调用正在进行，等其完成后再执行一次（不跳过）
 	// 这样既防止并发事务冲突，又确保直接调用方（如测试）总能观察到最新的同步状态
 	p.syncExecMu.Lock()
 	defer p.syncExecMu.Unlock()
+	started := time.Now()
+	defer func() { p.recordSyncMetrics(synced, err, time.Since(started)) }()
 
 	unsyncedItems, err := p.getUnsyncedBatch(p.manager.config.SyncBatchSize)
 	if err != nil {
@@ -1525,6 +1551,29 @@ func (p *PrefixedBadgerDB[T]) processSyncQueue() (int, error) {
 	return successCount, nil
 }
 
+func (p *PrefixedBadgerDB[T]) recordSyncMetrics(synced int, err error, duration time.Duration) {
+	p.syncMetricsMu.Lock()
+	defer p.syncMetricsMu.Unlock()
+	p.syncMetrics.Attempts++
+	p.syncMetrics.LastDuration = duration
+	p.syncMetrics.TotalDuration += duration
+	if err != nil {
+		p.syncMetrics.Failures++
+		return
+	}
+	if synced > 0 {
+		p.syncMetrics.SyncedItems += uint64(synced)
+		p.syncMetrics.LastSuccessAt = time.Now().UTC()
+	}
+}
+
+// GetSyncMetrics 返回后台同步指标快照。
+func (p *PrefixedBadgerDB[T]) GetSyncMetrics() SyncMetrics {
+	p.syncMetricsMu.RLock()
+	defer p.syncMetricsMu.RUnlock()
+	return p.syncMetrics
+}
+
 // GetPendingSyncCount 通过同步队列索引快速统计待同步条数（O(K)，无需反序列化）
 func (p *PrefixedBadgerDB[T]) GetPendingSyncCount() (int, error) {
 	count := 0
@@ -1543,6 +1592,14 @@ func (p *PrefixedBadgerDB[T]) GetPendingSyncCount() (int, error) {
 	})
 
 	return count, err
+}
+
+// GetCachedPendingSyncCount 返回由写入和同步事务维护的 O(1) 待同步计数。
+// 它适合高频背压判断；运维对账仍应使用 GetPendingSyncCount 扫描同步索引。
+func (p *PrefixedBadgerDB[T]) GetCachedPendingSyncCount() int {
+	p.pendingCountMutex.RLock()
+	defer p.pendingCountMutex.RUnlock()
+	return p.pendingCountCache
 }
 
 // getUnsyncedBatch 通过同步队列索引获取未同步数据（O(K)，K=待同步条数）
@@ -1591,6 +1648,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 						hook.NewModel()
 					}
 				}
+				wrapper.fromSyncQueue = true
 				items = append(items, &wrapper)
 				count++
 				return nil
@@ -1630,6 +1688,24 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 		return nil, fmt.Errorf("未开启 syncDB")
 	}
 	p.syncLock.RUnlock()
+
+	keys := make([]string, 0, len(items))
+	for _, wrapper := range items {
+		if wrapper != nil && wrapper.Key != "" {
+			keys = append(keys, wrapper.Key)
+		}
+	}
+	unlock := p.lockSyncKeys(keys)
+	defer unlock()
+
+	currentItems, err := p.currentSyncItems(items)
+	if err != nil {
+		return nil, err
+	}
+	items = currentItems
+	if len(items) == 0 {
+		return nil, nil
+	}
 
 	// 按「操作类型 + 目标 DB 名」双维分组，确保每个事务只操作同一个库。
 	// 若所有 item 的 GetRemoteDBName() 结果相同，行为等同于原来的单分组逻辑。
@@ -1742,6 +1818,77 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	}
 
 	return p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+}
+
+// lockSyncKeys 使同一数据键的远端同步与强制本地删除串行。
+// 分片锁避免为每个业务键长期保留 mutex；按分片序号排序后加锁可避免批量同步死锁。
+func (p *PrefixedBadgerDB[T]) lockSyncKeys(keys []string) func() {
+	indexes := make([]int, 0, len(keys))
+	seen := make(map[int]struct{}, len(keys))
+	for _, key := range keys {
+		index := syncKeyLockIndex(key)
+		if _, ok := seen[index]; ok {
+			continue
+		}
+		seen[index] = struct{}{}
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		p.syncKeyLocks[index].Lock()
+	}
+	return func() {
+		for index := len(indexes) - 1; index >= 0; index-- {
+			p.syncKeyLocks[indexes[index]].Unlock()
+		}
+	}
+}
+
+func syncKeyLockIndex(key string) int {
+	const offset32 = uint32(2166136261)
+	const prime32 = uint32(16777619)
+	hash := offset32
+	for index := 0; index < len(key); index++ {
+		hash ^= uint32(key[index])
+		hash *= prime32
+	}
+	return int(hash % syncKeyLockStripeCount)
+}
+
+// currentSyncItems 在获得按键同步锁后重新校验 Badger 中的当前事实。
+// 键已被 ForceDeleteLocal 删除或快照已过期时，不得再把旧快照写入远端。
+func (p *PrefixedBadgerDB[T]) currentSyncItems(items []*SyncQueueItem[T]) ([]*SyncQueueItem[T], error) {
+	current := make([]*SyncQueueItem[T], 0, len(items))
+	err := p.manager.db.View(func(txn *badger.Txn) error {
+		for _, snapshot := range items {
+			if snapshot == nil || snapshot.Key == "" {
+				continue
+			}
+			if !snapshot.fromSyncQueue {
+				current = append(current, snapshot)
+				continue
+			}
+			entry, err := txn.Get([]byte(snapshot.Key))
+			if err == badger.ErrKeyNotFound {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			var wrapper SyncQueueItem[T]
+			if err := entry.Value(func(value []byte) error {
+				return json.Unmarshal(value, &wrapper)
+			}); err != nil {
+				return fmt.Errorf("反序列化当前同步数据失败 [key=%s]: %w", snapshot.Key, err)
+			}
+			if wrapper.IsSynced || !wrapper.UpdatedAt.Equal(snapshot.UpdatedAt) {
+				continue
+			}
+			current = append(current, snapshot)
+		}
+		return nil
+	})
+	return current, err
 }
 
 func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotTimes map[string]time.Time, candidates []syncAfterDeleteCandidate[T]) ([]string, error) {

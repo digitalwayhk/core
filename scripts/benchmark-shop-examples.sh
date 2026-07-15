@@ -12,7 +12,7 @@ run_benchmark() {
   (
     cd "$ROOT_DIR"
     GOCACHE=${GOCACHE:-/private/tmp/core-codex-go-cache} go test "$package" \
-      -run '^$' -bench 'Benchmark(Get|Add)' -benchmem -benchtime "$BENCHTIME" -count=1 -timeout=30m
+      -run '^$' -bench 'Benchmark(Get|Add|Mixed)' -benchmem -benchtime "$BENCHTIME" -count=1 -timeout=30m
   ) | tee "$output"
 }
 

@@ -53,6 +53,33 @@ type ResponseEnvelope struct {
 	Data         json.RawMessage `json:"data"`
 }
 
+// SetJSONConfigLogLevel 仅用于已由框架生成的临时集成测试配置。
+// benchmark 可用它关闭 info 级访问日志，避免把日志 I/O 误计为业务热路径成本。
+func SetJSONConfigLogLevel(configPath, level string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("读取集成测试配置: %w", err)
+	}
+	var content map[string]interface{}
+	if err := json.Unmarshal(data, &content); err != nil {
+		return fmt.Errorf("解析集成测试配置: %w", err)
+	}
+	logConfig, _ := content["Log"].(map[string]interface{})
+	if logConfig == nil {
+		logConfig = make(map[string]interface{})
+	}
+	logConfig["Level"] = strings.TrimSpace(level)
+	content["Log"] = logConfig
+	encoded, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		return fmt.Errorf("编码集成测试配置: %w", err)
+	}
+	if err := os.WriteFile(configPath, encoded, 0o600); err != nil {
+		return fmt.Errorf("写入集成测试配置: %w", err)
+	}
+	return nil
+}
+
 // httpClient 复用连接，避免高并发 benchmark 因 DefaultTransport
 // MaxIdleConnsPerHost=2 产生大量 TIME_WAIT 耗尽 ephemeral 端口。
 // 连接上限覆盖示例性能报告的 1000 并发档位；普通集成测试只会按实际请求建立连接，

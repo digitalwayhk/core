@@ -85,6 +85,22 @@ func startShopSuite() (*shopSuite, error) {
 			return nil, fmt.Errorf("框架未自动生成配置 %s: %w", name, err)
 		}
 	}
+	if integration.IsBenchmarkRun() {
+		created.StopProcess()
+		configPath := filepath.Join(created.RootDir, "etc", "inheritanceshop.json")
+		if err := integration.SetJSONConfigLogLevel(configPath, "error"); err != nil {
+			created.Stop()
+			return nil, err
+		}
+		if err := created.Restart(); err != nil {
+			created.Stop()
+			return nil, err
+		}
+		if err := created.waitReady(); err != nil {
+			created.Stop()
+			return nil, err
+		}
+	}
 	return created, nil
 }
 

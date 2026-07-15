@@ -19,18 +19,25 @@ func TestOrderBatcherGroupsConcurrentOrders(t *testing.T) {
 	var commits atomic.Int32
 	var batchMu sync.Mutex
 	batchSizes := make([]int, 0, count)
-	batcher := newOrderBatcher(64, 20*time.Millisecond, func(items []*Order) error {
-		commits.Add(1)
-		batchMu.Lock()
-		batchSizes = append(batchSizes, len(items))
-		batchMu.Unlock()
-		select {
-		case commitEntered <- struct{}{}:
-		default:
-		}
-		<-releaseCommit
-		return nil
-	})
+	batcher := &orderBatcher{
+		maxBatch: 64,
+		wait:     20 * time.Millisecond,
+		requests: make(chan orderBatchRequest, 64*8),
+		done:     make(chan struct{}),
+		closing:  make(chan struct{}),
+		commit: func(items []*Order) error {
+			commits.Add(1)
+			batchMu.Lock()
+			batchSizes = append(batchSizes, len(items))
+			batchMu.Unlock()
+			select {
+			case commitEntered <- struct{}{}:
+			default:
+			}
+			<-releaseCommit
+			return nil
+		},
+	}
 	t.Cleanup(func() { require.NoError(t, batcher.Close()) })
 
 	start := make(chan struct{})
@@ -47,6 +54,9 @@ func TestOrderBatcherGroupsConcurrentOrders(t *testing.T) {
 		}(order)
 	}
 	close(start)
+	require.Eventually(t, func() bool { return len(batcher.requests) == count }, time.Second, time.Millisecond,
+		"必须先确定性地把并发请求放入队列，再启动 worker 验证真实合批")
+	go batcher.run()
 
 	select {
 	case <-commitEntered:
@@ -134,4 +144,63 @@ func TestOrderBatcherDoesNotDelayBelowBacklogThreshold(t *testing.T) {
 	}
 	require.Less(t, time.Since(started), aggregationWindow/2,
 		"低于积压阈值时不应等待整个 Group Commit 窗口")
+}
+
+// TestOrderBatcherCloseReleasesBlockedSubmitters 验证队列已满时，Close 仍能先标记关闭，
+// 并唤醒还没有进入队列的 Submit，不会因其长时间持有读锁而无法开始优雅停机。
+func TestOrderBatcherCloseReleasesBlockedSubmitters(t *testing.T) {
+	commitEntered := make(chan struct{}, 1)
+	releaseCommit := make(chan struct{})
+	batcher := newOrderBatcher(1, time.Millisecond, func([]*Order) error {
+		select {
+		case commitEntered <- struct{}{}:
+		default:
+		}
+		<-releaseCommit
+		return nil
+	})
+
+	const queued = 8
+	results := make(chan error, queued+2)
+	for index := 0; index < queued+2; index++ {
+		order := NewOrder()
+		order.SetID(uint(index + 1))
+		go func(item *Order) { results <- batcher.Submit(item) }(order)
+	}
+	select {
+	case <-commitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("批量提交未进入阻塞点")
+	}
+
+	closeResult := make(chan error, 1)
+	go func() { closeResult <- batcher.Close() }()
+
+	select {
+	case err := <-results:
+		require.ErrorIs(t, err, errOrderBatcherClosed,
+			"尚未入队的 Submit 应在 Close 后立即返回关闭错误")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Close 未唤醒被满队列阻塞的 Submit")
+	}
+
+	close(releaseCommit)
+	require.NoError(t, <-closeResult)
+}
+
+func TestOrderBatcherSnapshotRecordsReliableCommits(t *testing.T) {
+	batcher := newOrderBatcher(8, time.Millisecond, func([]*Order) error { return nil })
+	order := NewOrder()
+	order.SetID(1)
+	require.NoError(t, batcher.Submit(order))
+	require.NoError(t, batcher.Close())
+
+	snapshot := batcher.Snapshot()
+	require.Equal(t, uint64(1), snapshot.SubmittedOrders)
+	require.Equal(t, uint64(1), snapshot.CommittedOrders)
+	require.Equal(t, uint64(1), snapshot.CommitBatches)
+	require.Equal(t, uint64(1), snapshot.ImmediateBatches)
+	require.Equal(t, uint64(0), snapshot.FailedBatches)
+	require.Equal(t, 1, snapshot.MaxBatchSize)
+	require.GreaterOrEqual(t, snapshot.TotalCommitDuration, time.Duration(0))
 }

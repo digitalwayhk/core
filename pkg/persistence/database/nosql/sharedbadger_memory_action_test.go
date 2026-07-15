@@ -27,6 +27,8 @@ type memoryActionState struct {
 	existsCalls      int
 	getModelDBErrors []error
 	getModelDBCalls  int
+	commitEntered    chan struct{}
+	commitRelease    chan struct{}
 }
 
 type memoryExistsResult struct {
@@ -86,6 +88,13 @@ func (a *memoryAction) setCommitError(err error) {
 func (a *memoryAction) setRollbackError(err error) {
 	a.state.mu.Lock()
 	a.state.rollbackErr = err
+	a.state.mu.Unlock()
+}
+
+func (a *memoryAction) blockCommit(entered chan struct{}, release chan struct{}) {
+	a.state.mu.Lock()
+	a.state.commitEntered = entered
+	a.state.commitRelease = release
 	a.state.mu.Unlock()
 }
 
@@ -293,7 +302,18 @@ func (a *memoryAction) GetModelDB(interface{}) (interface{}, error) {
 func (a *memoryAction) Commit() error {
 	a.state.mu.RLock()
 	commitErr := a.state.commitErr
+	commitEntered := a.state.commitEntered
+	commitRelease := a.state.commitRelease
 	a.state.mu.RUnlock()
+	if commitEntered != nil {
+		select {
+		case commitEntered <- struct{}{}:
+		default:
+		}
+	}
+	if commitRelease != nil {
+		<-commitRelease
+	}
 	if commitErr != nil {
 		return commitErr
 	}

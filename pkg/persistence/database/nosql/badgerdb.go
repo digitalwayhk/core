@@ -271,6 +271,9 @@ func (b *BadgerDB[T]) generateKey(item *T) string {
 	if item == nil {
 		return ""
 	}
+	if localRowCode, ok := any(item).(types.ILocalRowCode); ok {
+		return localRowCode.GetLocalKey()
+	}
 	if rowCode, ok := any(item).(types.IRowCode); ok {
 		return rowCode.GetHash()
 	}

@@ -34,7 +34,16 @@ AddOrder
 
 这里的 Group Commit 不是“内存入队即成功”。每个请求只有在所属批次完成 Badger `SyncWrites` 后才返回，所以已确认订单在进程异常退出后仍可恢复。队列积压少于 16 笔时逐单立即提交，避免低并发固定等待；达到阈值后才短暂聚合，以减少高并发下的 fsync 次数。
 
-订单键为 `Order:<orderID>`，订单 ID 由框架请求上下文生成；查询 Badger 全部待同步项后再按可信 UserID 过滤。查询合并 SQLite 与 Badger，支付、删除和撤销在进入 SQLite 事务前按需汇合目标订单。Badger 写入失败、批次提交失败或写后同步初始化失败时 fail closed，不以内存成功冒充持久化成功。
+订单 `GetHash()` 仍是 `orderID`；Badger 通过 `ILocalRowCode` 使用 `Order:u:<UserID摘要>:<orderID>`，因此可直接扫描当前可信用户的 pending 前缀，不再遍历全局积压，也不在磁盘键中暴露原始 UserID。查询合并 SQLite 与 Badger，支付、删除和撤销在进入 SQLite 事务前按需汇合目标订单。
+
+后台同步与强制本地删除按键串行：若同步先开始，删除等待远端提交后再删 SQLite；若删除先开始，同步重新校验发现键已不存在后跳过。这保证已删订单不会被在途快照复活。
+
+## 容量保护与可观测性
+
+- go-zero `syncx.TimeoutLimit` 保护单实例最多 500 个在途订单写入；超出部分最多等待 2 秒。
+- pending 软/硬阈值是 10,000/50,000；软阈值持续 30 秒或达到硬阈值时拒绝新写入。
+- Badger 目录每 5 秒采样，示例硬上限是 1 GiB。生产项目必须根据磁盘配额重新配置，不应照搬数字。
+- `models.GetOrderWritePerformanceSnapshot()` 返回 Group Commit、SQLite 同步、pending/磁盘和背压快照。`APIConfirmedTPS` 是 Badger 可靠提交速率，`SQLiteConvergenceTPS` 才是墙钟最终收敛速率，两者不能互相代替。
 
 `ShopService.Start/Stop` 管理订单存储生命周期。服务强制终止后，同一运行目录重启会恢复同步队列；优雅关闭会尝试冲刷积压并返回可观察错误。
 
@@ -77,3 +86,35 @@ go vet ./examples/04-shop-performance/... ./examples/integration/04-shop-perform
 完整设计见 `docs/superpowers/specs/2026-07-15-shop-performance-example-design.md`。
 
 100、500、1000 并发下的 QPS、TPS 与 P50/P95/P99 正式结果见 `docs/codex/SHOP_HIGH_CONCURRENCY_BENCHMARK_REPORT.md`。
+
+该报告是容量保护加入前的历史样本，依然可用于解释缓存和 Group Commit 的收益，但不代表新版本的最终数字。
+
+### 吞吐稳定度
+
+benchmark 现在同时输出两类分位数：
+
+- `p50-ns/p95-ns/p99-ns`：单请求延迟分布。
+- `win-p01/s` 到 `win-p99/s`：每秒吞吐窗口的分布；`win-cv-pct` 是变异系数，越低说明越稳定。
+
+`BenchmarkMixedWorkload` 使用 70% 商品查询、20% 本人订单查询、10% 下单，03/04 口径一致。长稳不进入日常 CI：
+
+```bash
+SHOP_BENCH_CONCURRENCIES=500 go test ./examples/integration/04-shop-performance \
+  -run '^$' -bench '^BenchmarkMixedWorkload$' -benchtime=15m -count=1 -timeout=20m
+```
+
+长稳结束后应同时记录性能快照，确认 pending 能排空、SQLite 收敛 TPS 稳定、Badger 磁盘不无界增长、同步失败和背压拒绝符合预期。
+
+### CPU 与内存定位
+
+只有在基准证明分配或某个热点是瓶颈后才继续优化：
+
+```bash
+SHOP_BENCH_CONCURRENCIES=500 go test ./examples/integration/04-shop-performance \
+  -run '^$' -bench '^BenchmarkAddOrder$' -benchtime=30s -count=1 \
+  -cpuprofile /tmp/shop04-cpu.pprof -memprofile /tmp/shop04-mem.pprof -timeout=10m
+go tool pprof -http=:0 /tmp/shop04-cpu.pprof
+go tool pprof -http=:0 /tmp/shop04-mem.pprof
+```
+
+benchmark 子进程会把服务日志级别临时调为 `error`，减少 info 访问日志 I/O 干扰；普通集成测试保持默认日志便于失败诊断。

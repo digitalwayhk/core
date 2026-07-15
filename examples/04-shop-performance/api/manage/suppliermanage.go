@@ -1,8 +1,6 @@
 package manage
 
 import (
-	"context"
-
 	publicapi "github.com/digitalwayhk/core/examples/04-shop-performance/api/public"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/business"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
@@ -73,7 +71,7 @@ func (own *SupplierManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Su
 	model, err := business.NewSupplierService().SetEnabled(id, enabled)
 	if err == nil {
 		publicapi.InvalidateSupplierCaches()
-		err = business.InvalidateOrderReferenceCache(context.Background())
+		invalidateOrderReferenceBestEffort("supplier_set_enabled")
 	}
 	return model, err
 }
@@ -81,5 +79,6 @@ func (own *SupplierManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Su
 // DoAfter 在供应商增删改成功后清理供应商、商品查询及下单事实缓存。
 func (own *SupplierManage) DoAfter(sender interface{}, req servertypes.IRequest) (interface{}, error) {
 	publicapi.InvalidateSupplierCaches()
-	return nil, business.InvalidateOrderReferenceCache(context.Background())
+	invalidateOrderReferenceBestEffort("supplier_changed")
+	return nil, nil
 }

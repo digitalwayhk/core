@@ -239,6 +239,56 @@ func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
 	}
 }
 
+// TestForceDeleteLocalWaitsForInflightSync 确定性制造后台同步已取得快照、
+// 但远端事务尚未提交时的删除。本地删除必须等待该键的在途同步结束，
+// 这样业务紧随其后的远端删除才不会被迟到的 insert 复活。
+func TestForceDeleteLocalWaitsForInflightSync(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("delete-during-sync", "BTC", 100, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	items, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	commitEntered := make(chan struct{}, 1)
+	commitRelease := make(chan struct{})
+	action.blockCommit(commitEntered, commitRelease)
+	syncResult := make(chan error, 1)
+	go func() {
+		_, syncErr := db.syncBatch(items)
+		syncResult <- syncErr
+	}()
+
+	select {
+	case <-commitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("后台同步未进入远端提交阶段")
+	}
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		if deleteErr := db.ForceDeleteLocal(item); deleteErr != nil {
+			deleteDone <- deleteErr
+			return
+		}
+		deleteDone <- action.Delete(item)
+	}()
+
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("在途同步未结束时本地删除不得先返回: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(commitRelease)
+	require.NoError(t, <-syncResult)
+	require.NoError(t, <-deleteDone)
+	_, exists := action.value(item)
+	require.False(t, exists, "远端不得被迟到的同步插入复活")
+}
+
 // ============================================================
 // 问题 2: batchInsertWithErrorHandling 缺少致命错误中断检查
 //

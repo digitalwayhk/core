@@ -128,6 +128,14 @@ func enableLocalRouteCache(configPath string) error {
 		},
 	}
 	content["MQ"] = map[string]interface{}{"Mode": "off"}
+	if integration.IsBenchmarkRun() {
+		logConfig, _ := content["Log"].(map[string]interface{})
+		if logConfig == nil {
+			logConfig = make(map[string]interface{})
+		}
+		logConfig["Level"] = "error"
+		content["Log"] = logConfig
+	}
 	encoded, err := json.MarshalIndent(content, "", "  ")
 	if err != nil {
 		return fmt.Errorf("编码性能示例配置: %w", err)

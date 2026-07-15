@@ -114,6 +114,18 @@ func TestOrderWriteStoreAllowsSameUserProductWhenIDsDiffer(t *testing.T) {
 	require.Len(t, pending, 2)
 }
 
+// TestOrderUsesUserPrefixedLocalKey 确保 Badger 可以按用户前缀扫描，
+// 同时保持 SQLite 和公共 GetHash 仍以订单 ID 为唯一契约。
+func TestOrderUsesUserPrefixedLocalKey(t *testing.T) {
+	order := NewOrder()
+	order.SetID(42)
+	order.UserID = "user-a"
+
+	require.Equal(t, "42", order.GetHash())
+	require.Equal(t, orderPendingUserPrefix("user-a")+"42", order.GetLocalKey())
+	require.NotContains(t, order.GetLocalKey(), "user-a", "Badger 键不应暴露原始用户 ID")
+}
+
 func TestOrderWriteStoreRejectsMissingID(t *testing.T) {
 	root := t.TempDir()
 	utils.TESTPATH = root
@@ -129,6 +141,34 @@ func TestOrderWriteStoreRejectsMissingID(t *testing.T) {
 	order.UserID = "user-a"
 	order.ProductID = 2
 	require.ErrorContains(t, store.Add(order), "订单 ID 不能为空")
+}
+
+func TestOrderWriteStorePerformanceSnapshotSeparatesCommitAndSync(t *testing.T) {
+	root := t.TempDir()
+	utils.TESTPATH = root
+	action := oltp.NewSqlite()
+	require.NoError(t, ensureModelWith(action, NewOrder()))
+	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
+	config.EnableLogger = false
+	store, err := newOrderWriteStore(config.Path, action, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close(3 * time.Second) })
+
+	order := NewOrder()
+	order.SetID(2001)
+	order.UserID = "metrics-user"
+	order.ProductID = 2002
+	order.Quantity = 1
+	require.NoError(t, store.Add(order))
+	require.NoError(t, store.Flush())
+
+	snapshot := store.PerformanceSnapshot()
+	require.Equal(t, uint64(1), snapshot.GroupCommit.CommittedOrders)
+	require.GreaterOrEqual(t, snapshot.Sync.SyncedItems, uint64(1))
+	require.Zero(t, snapshot.PendingOrders)
+	require.Greater(t, snapshot.BadgerDiskBytes, int64(0))
+	require.Greater(t, snapshot.APIConfirmedTPS, float64(0))
+	require.Greater(t, snapshot.SQLiteConvergenceTPS, float64(0))
 }
 
 func TestOrderWriteStoreKeepsPendingWhenSQLiteSyncFails(t *testing.T) {
@@ -156,8 +196,9 @@ func TestOrderWriteStoreKeepsPendingWhenSQLiteSyncFails(t *testing.T) {
 	require.Error(t, store.Close(3*time.Second), "关闭时仍同步失败必须返回错误")
 }
 
-// TestRemoveLocalPurgesPendingImmediately 确保业务删除先清本地时 pending 立刻消失。
-func TestRemoveLocalPurgesPendingImmediately(t *testing.T) {
+// TestRemoveLocalWaitsForInflightSyncThenPurgesPending 确保业务删除不越过已取得快照的远端同步。
+// 同步完成后删除才返回，使调用方紧随其后的 SQLite Delete 不会被迟到 insert 复活。
+func TestRemoveLocalWaitsForInflightSyncThenPurgesPending(t *testing.T) {
 	root := t.TempDir()
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
@@ -171,8 +212,10 @@ func TestRemoveLocalPurgesPendingImmediately(t *testing.T) {
 	config.EnableLogger = false
 	store, err := newOrderWriteStore(config.Path, blocking, config)
 	require.NoError(t, err)
+	var releaseOnce sync.Once
+	releaseSync := func() { releaseOnce.Do(func() { close(blocking.release) }) }
 	t.Cleanup(func() {
-		close(blocking.release)
+		releaseSync()
 		_ = store.Close(3 * time.Second)
 	})
 
@@ -192,7 +235,15 @@ func TestRemoveLocalPurgesPendingImmediately(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 
-	require.NoError(t, store.RemoveLocal(order))
+	removeDone := make(chan error, 1)
+	go func() { removeDone <- store.RemoveLocal(order) }()
+	select {
+	case err := <-removeDone:
+		t.Fatalf("远端同步尚未完成时 RemoveLocal 不得返回: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	releaseSync()
+	require.NoError(t, <-removeDone)
 	pending, err = store.PendingByUser("purge-user")
 	require.NoError(t, err)
 	require.Empty(t, pending, "ForceDeleteLocal 必须立即清除未同步订单，避免合并读复活")

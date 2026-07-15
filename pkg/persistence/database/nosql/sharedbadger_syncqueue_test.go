@@ -260,6 +260,38 @@ func TestSyncQueue_GetUnsyncedBatchUsesIndex(t *testing.T) {
 	require.Equal(t, 3, len(unsyncedItems), "应只返回通过 Set 写入的 3 条未同步数据")
 }
 
+func TestSyncMetricsRecordConvergence(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("metrics-user", "BTC", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	synced, err := db.processSyncQueue()
+	require.NoError(t, err)
+	require.Equal(t, 1, synced)
+
+	metrics := db.GetSyncMetrics()
+	require.Equal(t, uint64(1), metrics.Attempts)
+	require.Equal(t, uint64(1), metrics.SyncedItems)
+	require.Zero(t, metrics.Failures)
+	require.GreaterOrEqual(t, metrics.TotalDuration, time.Duration(0))
+	require.False(t, metrics.LastSuccessAt.IsZero())
+}
+
+func TestForceDeleteLocalDecrementsPendingWhenValueIsCorrupt(t *testing.T) {
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](newMemoryAction()))
+	item := newLedger("corrupt-delete", "BTC", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+	require.Equal(t, 1, db.GetCachedPendingSyncCount())
+	key := db.generateKey(item)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(key), []byte("not-json"))
+	}))
+
+	require.NoError(t, db.ForceDeleteLocal(item))
+	require.Zero(t, db.GetCachedPendingSyncCount(), "同步索引存在时必须扣减 pending，不依赖 value 反序列化")
+}
+
 // TestSyncQueue_RebuildOnUpgrade 验证启动时为旧数据补建队列索引
 func TestSyncQueue_RebuildOnUpgrade(t *testing.T) {
 	dir := t.TempDir()
