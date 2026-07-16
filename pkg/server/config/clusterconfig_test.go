@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -265,8 +264,8 @@ func TestTransportConfigApplyDefaults_EmptyStruct(t *testing.T) {
 	tr.ApplyDefaults()
 
 	assert.Equal(t, "grpc", tr.Internal)
-	assert.Equal(t, []string{"grpc", "http", "socket"}, tr.Fallback)
-	assert.Equal(t, 19090, tr.GRPC.Port)
+	assert.Empty(t, tr.Fallback)
+	assert.Zero(t, tr.GRPC.Port)
 	assert.Equal(t, 4*1024*1024, tr.GRPC.MaxRecvMsgSize)
 	assert.Equal(t, 4*1024*1024, tr.GRPC.MaxSendMsgSize)
 }
@@ -329,7 +328,6 @@ func TestTransportConfigValidate_UnimplementedEnableFields(t *testing.T) {
 	}{
 		{name: "http", configure: func(tr *TransportConfig) { tr.HTTP.Enable = true }, fieldPath: "transport.http.enable"},
 		{name: "socket", configure: func(tr *TransportConfig) { tr.Socket.Enable = true }, fieldPath: "transport.socket.enable"},
-		{name: "grpc", configure: func(tr *TransportConfig) { tr.GRPC.Enable = true }, fieldPath: "transport.grpc.enable"},
 	}
 
 	for _, tt := range tests {
@@ -346,15 +344,9 @@ func TestTransportConfigValidate_UnimplementedEnableFields(t *testing.T) {
 	}
 }
 
-func TestTransportConfigValidate_GRPCPortNotConfigurable(t *testing.T) {
-	for _, port := range []int{-1, 1, 19089, 19091, 65535, 65536} {
-		t.Run(fmt.Sprintf("port_%d", port), func(t *testing.T) {
-			err := (&TransportConfig{GRPC: GRPCTransportConfig{Port: port}}).Validate()
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "transport.grpc.port")
-			assert.Contains(t, err.Error(), "not configurable")
-		})
-	}
+func TestTransportConfigValidate_GRPCPortIsConfigurable(t *testing.T) {
+	tr := TransportConfig{GRPC: GRPCTransportConfig{Port: 25051}}
+	assert.NoError(t, tr.Validate())
 }
 
 func TestTransportConfigValidate_DefaultAndConfigurableMessageSizes(t *testing.T) {
@@ -364,7 +356,7 @@ func TestTransportConfigValidate_DefaultAndConfigurableMessageSizes(t *testing.T
 
 	configured := TransportConfig{
 		GRPC: GRPCTransportConfig{
-			Port:           19090,
+			Port:           25051,
 			MaxRecvMsgSize: 8 * 1024 * 1024,
 			MaxSendMsgSize: 16 * 1024 * 1024,
 		},

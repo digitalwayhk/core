@@ -1,11 +1,27 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestServerConfigLoadsLegacySocketJSONWithoutChangingGRPCDefault(t *testing.T) {
+	const legacy = `{"Port":8080,"SocketPort":18080,"Transport":{"Socket":{"Enable":true}}}`
+	var cfg ServerConfig
+	require.NoError(t, json.Unmarshal([]byte(legacy), &cfg))
+
+	cfg.ApplyDefaults()
+
+	assert.Equal(t, 18080, cfg.SocketPort)
+	assert.True(t, cfg.Transport.Socket.Enable)
+	assert.Equal(t, 18080, cfg.Transport.GRPC.Port)
+}
 
 func TestMigrateConfigReturnsWriteFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {

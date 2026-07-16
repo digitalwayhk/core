@@ -65,6 +65,7 @@ func (con *ServerConfig) ApplyDefaults() {
 	}
 	con.Cluster.ApplyDefaults()
 	con.Transport.ApplyDefaults()
+	con.Transport.ApplyServerDefaults(con.Cluster, con.Port)
 	con.MQ.ApplyDefaults()
 	con.RouteCache.ApplyDefaults()
 	con.AuthRevocation.ApplyDefaults(con.Name)
@@ -85,6 +86,9 @@ func (con *ServerConfig) Validate() error {
 		return err
 	}
 	if err := con.Transport.Validate(); err != nil {
+		return err
+	}
+	if err := con.Transport.ValidateForServer(con.Cluster, con.RunIp); err != nil {
 		return err
 	}
 	if err := con.MQ.Validate(); err != nil {

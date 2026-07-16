@@ -2,6 +2,10 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -34,24 +38,27 @@ type QUICTransportConfig struct {
 	KeyFile  string `json:",optional"`
 }
 
+// GRPCSecurityConfig gRPC 传输安全配置。
+type GRPCSecurityConfig struct {
+	Mode       string `json:",optional"` // insecure | tls | mtls | mesh
+	CAFile     string `json:",optional"`
+	CertFile   string `json:",optional"`
+	KeyFile    string `json:",optional"`
+	ServerName string `json:",optional"`
+}
+
 // GRPCTransportConfig gRPC 传输配置。
 type GRPCTransportConfig struct {
-	Enable         bool `json:",optional"`
-	Port           int  `json:",optional"`
-	MaxRecvMsgSize int  `json:",optional"`
-	MaxSendMsgSize int  `json:",optional"`
+	Port           int                `json:",optional"`
+	MaxRecvMsgSize int                `json:",optional"`
+	MaxSendMsgSize int                `json:",optional"`
+	Security       GRPCSecurityConfig `json:",optional"`
 }
 
 // ApplyDefaults 为 TransportConfig 补充缺失的默认值。
 func (t *TransportConfig) ApplyDefaults() {
 	if t.Internal == "" {
 		t.Internal = "grpc"
-	}
-	if len(t.Fallback) == 0 {
-		t.Fallback = []string{"grpc", "http", "socket"}
-	}
-	if t.GRPC.Port == 0 {
-		t.GRPC.Port = 19090
 	}
 	if t.GRPC.MaxRecvMsgSize == 0 {
 		t.GRPC.MaxRecvMsgSize = 4 * 1024 * 1024 // 4MB
@@ -65,6 +72,21 @@ func (t *TransportConfig) ApplyDefaults() {
 	if t.RetryDelay <= 0 {
 		t.RetryDelay = 100 * time.Millisecond
 	}
+}
+
+// ApplyServerDefaults 根据服务端口和集群拓扑补充 gRPC 默认值。
+func (t *TransportConfig) ApplyServerDefaults(cluster ClusterConfig, httpPort int) {
+	if t.GRPC.Port == 0 {
+		t.GRPC.Port = httpPort + 10000
+	}
+	if t.GRPC.Security.Mode != "" {
+		return
+	}
+	if cluster.Mode == "off" || !isExternalClusterProvider(cluster.Provider) {
+		t.GRPC.Security.Mode = "insecure"
+		return
+	}
+	t.GRPC.Security.Mode = "mtls"
 }
 
 // Validate 校验 TransportConfig 中的字段合法性。
@@ -96,9 +118,6 @@ func (t *TransportConfig) Validate() error {
 	if t.Socket.Enable {
 		return errors.New("transport.socket.enable is not implemented; use Transport.Internal/Fallback")
 	}
-	if t.GRPC.Enable {
-		return errors.New("transport.grpc.enable is not implemented; use Transport.Internal/Fallback")
-	}
 	if t.QUIC.Enable {
 		return errors.New("transport.quic.enable is not implemented; remove it or set it to false")
 	}
@@ -108,8 +127,94 @@ func (t *TransportConfig) Validate() error {
 	if t.QUIC.KeyFile != "" {
 		return errors.New("transport.quic.keyFile is not implemented; remove this field")
 	}
-	if t.GRPC.Port != 0 && t.GRPC.Port != 19090 {
-		return errors.New("transport.grpc.port is not configurable; use 0 or 19090")
+	if t.GRPC.Port < 0 || t.GRPC.Port > 65535 {
+		return fmt.Errorf("Transport.GRPC.Port must be between 1 and 65535, got %d", t.GRPC.Port)
+	}
+	if err := t.GRPC.Security.validate(); err != nil {
+		return err
 	}
 	return nil
+}
+
+// ValidateForServer 校验需要服务端集群上下文的 gRPC 约束。
+func (t *TransportConfig) ValidateForServer(cluster ClusterConfig, runIP string) error {
+	if cluster.Mode == "off" || !isExternalClusterProvider(cluster.Provider) || t.GRPC.Security.Mode != "insecure" {
+		return nil
+	}
+	address := strings.TrimSpace(cluster.AdvertiseAddress)
+	if address == "" {
+		address = strings.TrimSpace(runIP)
+	}
+	if !isLoopbackAddress(address) {
+		return fmt.Errorf("Transport.GRPC.Security.Mode: insecure grpc is limited to loopback for external provider %q", cluster.Provider)
+	}
+	return nil
+}
+
+func (s GRPCSecurityConfig) validate() error {
+	switch s.Mode {
+	case "":
+		return nil
+	case "tls":
+		if s.CertFile == "" {
+			return errors.New("Transport.GRPC.Security.CertFile is required when Mode=tls")
+		}
+		if s.KeyFile == "" {
+			return errors.New("Transport.GRPC.Security.KeyFile is required when Mode=tls")
+		}
+	case "mtls":
+		if s.CAFile == "" {
+			return errors.New("Transport.GRPC.Security.CAFile is required when Mode=mtls")
+		}
+		if s.CertFile == "" {
+			return errors.New("Transport.GRPC.Security.CertFile is required when Mode=mtls")
+		}
+		if s.KeyFile == "" {
+			return errors.New("Transport.GRPC.Security.KeyFile is required when Mode=mtls")
+		}
+	case "insecure", "mesh":
+		if s.CAFile != "" {
+			return fmt.Errorf("Transport.GRPC.Security.CAFile must be empty when Mode=%s", s.Mode)
+		}
+		if s.CertFile != "" {
+			return fmt.Errorf("Transport.GRPC.Security.CertFile must be empty when Mode=%s", s.Mode)
+		}
+		if s.KeyFile != "" {
+			return fmt.Errorf("Transport.GRPC.Security.KeyFile must be empty when Mode=%s", s.Mode)
+		}
+		if s.ServerName != "" {
+			return fmt.Errorf("Transport.GRPC.Security.ServerName must be empty when Mode=%s", s.Mode)
+		}
+	default:
+		return fmt.Errorf("Transport.GRPC.Security.Mode=%q is invalid; use insecure, tls, mtls, or mesh", s.Mode)
+	}
+	return nil
+}
+
+func isExternalClusterProvider(provider string) bool {
+	switch provider {
+	case "redis", "etcd", "consul":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLoopbackAddress(address string) bool {
+	if strings.EqualFold(address, "localhost") {
+		return true
+	}
+	if addr, err := netip.ParseAddr(address); err == nil {
+		return addr.IsLoopback()
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
