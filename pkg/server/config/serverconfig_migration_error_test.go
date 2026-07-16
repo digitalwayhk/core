@@ -1,10 +1,8 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -18,16 +16,7 @@ func TestReadConfigLoadsLegacySocketWithoutChangingGRPCDefaults(t *testing.T) {
 	t.Cleanup(func() { CONFIGDIRPATH = originalConfigDirPath })
 
 	const serviceName = "legacy-socket"
-	legacy := NewServiceDefaultConfig(serviceName, 8080)
-	legacy.Transport.Socket.Enable = true
-	data, err := json.Marshal(legacy)
-	require.NoError(t, err)
-	var document map[string]any
-	require.NoError(t, json.Unmarshal(data, &document))
-	fixDurations(reflect.ValueOf(legacy).Elem(), document)
-	transport := document["Transport"].(map[string]any)
-	delete(transport, "GRPC")
-	data, err = json.Marshal(document)
+	data, err := os.ReadFile(filepath.Join("testdata", "legacy_socket_config.json"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(CONFIGDIRPATH, serviceName+".json"), data, 0o600))
 

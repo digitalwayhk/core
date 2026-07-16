@@ -164,6 +164,33 @@ func TestTransportConfigSecurityRejectsInvalidMode(t *testing.T) {
 	require.ErrorContains(t, err, "Transport.GRPC.Security.Mode")
 }
 
+func TestTransportConfigSecurityRequiresModeWhenFieldsConfigured(t *testing.T) {
+	tests := []struct {
+		name     string
+		security GRPCSecurityConfig
+	}{
+		{name: "ca file", security: GRPCSecurityConfig{CAFile: "ca.crt"}},
+		{name: "cert file", security: GRPCSecurityConfig{CertFile: "server.crt"}},
+		{name: "key file", security: GRPCSecurityConfig{KeyFile: "server.key"}},
+		{name: "server name", security: GRPCSecurityConfig{ServerName: "core.internal"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := TransportConfig{GRPC: GRPCTransportConfig{Security: tt.security}}
+
+			err := tr.Validate()
+
+			require.ErrorContains(t, err, "Transport.GRPC.Security.Mode")
+			require.ErrorContains(t, err, "Mode is required when security fields are configured")
+		})
+	}
+}
+
+func TestTransportConfigSecurityAllowsEmptyModeWithoutFields(t *testing.T) {
+	tr := TransportConfig{GRPC: GRPCTransportConfig{Security: GRPCSecurityConfig{}}}
+	require.NoError(t, tr.Validate())
+}
+
 func TestTransportConfigSecurityRejectsCertificatesForInsecureAndMesh(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -216,7 +243,8 @@ func TestTransportConfigGRPCPortBoundaries(t *testing.T) {
 			tr := TransportConfig{GRPC: GRPCTransportConfig{Port: tt.port}}
 			err := tr.Validate()
 			if tt.wantErr {
-				require.Error(t, err)
+				require.ErrorContains(t, err, "Transport.GRPC.Port")
+				require.ErrorContains(t, err, "must be 0 or between 1 and 65535")
 				return
 			}
 			require.NoError(t, err)

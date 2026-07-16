@@ -125,7 +125,7 @@ func (t *TransportConfig) Validate() error {
 		return errors.New("transport.quic.keyFile is not implemented; remove this field")
 	}
 	if t.GRPC.Port < 0 || t.GRPC.Port > 65535 {
-		return fmt.Errorf("Transport.GRPC.Port must be between 1 and 65535, got %d", t.GRPC.Port)
+		return fmt.Errorf("Transport.GRPC.Port must be 0 or between 1 and 65535, got %d", t.GRPC.Port)
 	}
 	if err := t.GRPC.Security.validate(); err != nil {
 		return err
@@ -151,6 +151,9 @@ func (t *TransportConfig) ValidateForServer(cluster ClusterConfig, runIP string)
 func (s GRPCSecurityConfig) validate() error {
 	switch s.Mode {
 	case "":
+		if s.CAFile != "" || s.CertFile != "" || s.KeyFile != "" || s.ServerName != "" {
+			return errors.New("Transport.GRPC.Security.Mode is required when security fields are configured")
+		}
 		return nil
 	case "tls":
 		if s.CertFile == "" {
