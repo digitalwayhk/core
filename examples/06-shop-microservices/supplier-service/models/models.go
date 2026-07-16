@@ -20,9 +20,12 @@ import (
 const databaseName = "shop-supplier"
 
 var (
-	actionOnce    sync.Once
-	action        persistencetypes.IDataAction
-	transactionMu sync.Mutex
+	actionOnce     sync.Once
+	storageOnce    sync.Once
+	action         persistencetypes.IDataAction
+	actionTemplate persistencetypes.IDataAction
+	storageErr     error
+	transactionMu  sync.Mutex
 )
 
 type Supplier struct {
@@ -102,14 +105,21 @@ func (*Outbox) GetLocalDBName() string  { return databaseName }
 func (*Outbox) GetRemoteDBName() string { return databaseName }
 func (o *Outbox) GetHash() string       { return utils.HashCodes(o.EventID) }
 
-func dataAction() persistencetypes.IDataAction {
+func baseAction() persistencetypes.IDataAction {
 	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
-	if cloner, ok := action.(interface {
+	return action
+}
+func dataAction() persistencetypes.IDataAction {
+	_ = EnsureStorage()
+	if actionTemplate == nil {
+		return baseAction()
+	}
+	if cloner, ok := actionTemplate.(interface {
 		Clone() persistencetypes.IDataAction
 	}); ok {
 		return cloner.Clone()
 	}
-	return action
+	return actionTemplate
 }
 
 func search(model interface{}, size int) *persistencetypes.SearchItem {
@@ -125,12 +135,23 @@ func ensureWith(a persistencetypes.IDataAction, model interface{}) error {
 }
 
 func EnsureStorage() error {
-	for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOutbox(), NewInbox()} {
-		if err := ensureWith(dataAction(), model); err != nil {
-			return err
+	storageOnce.Do(func() {
+		action := baseAction()
+		for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOutbox(), NewInbox()} {
+			if err := ensureWith(action, model); err != nil {
+				storageErr = err
+				return
+			}
 		}
-	}
-	return nil
+		if cloner, ok := action.(interface {
+			Clone() persistencetypes.IDataAction
+		}); ok {
+			actionTemplate = cloner.Clone()
+		} else {
+			actionTemplate = action
+		}
+	})
+	return storageErr
 }
 
 func RunTransaction(operation func(persistencetypes.IDataAction) error) (err error) {
@@ -178,6 +199,16 @@ func (s *Supplier) Save() error {
 	return dataAction().Update(s)
 }
 
+func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
+	s.UserID, s.Name, s.Code = strings.TrimSpace(s.UserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
+	if s.UserID == "" || s.Name == "" || s.Code == "" {
+		return errors.New("供应商身份、名称和编码不能为空")
+	}
+	s.SetHashcode(s.GetHash())
+	s.SetUpdatedAt(time.Now().UTC())
+	return action.Update(s)
+}
+
 func FindSupplier(userID string) (*Supplier, error) {
 	if err := ensureWith(dataAction(), NewSupplier()); err != nil {
 		return nil, err
@@ -185,6 +216,19 @@ func FindSupplier(userID string) (*Supplier, error) {
 	var items []*Supplier
 	q := search(NewSupplier(), 1)
 	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+
+func FindSupplierByID(id uint) (*Supplier, error) {
+	if err := ensureWith(dataAction(), NewSupplier()); err != nil {
+		return nil, err
+	}
+	var items []*Supplier
+	q := search(NewSupplier(), 1)
+	q.AddWhereN("ID", id)
 	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
 		return nil, err
 	}
@@ -287,6 +331,13 @@ func ProductChangedPayload(eventID, supplierID string, productID uint, action st
 		EventID: eventID, Version: 1, EventType: "shop.product.changed", OccurredAt: time.Now().UTC(),
 		SourceService: "shop-supplier", AggregateID: eventID,
 	}, SupplierID: supplierID, ProductID: productID, Action: action}
+}
+
+func SupplierChangedPayload(eventID, supplierID, action string) eventdto.SupplierChanged {
+	return eventdto.SupplierChanged{Metadata: eventdto.Metadata{
+		EventID: eventID, Version: 1, EventType: "shop.supplier.changed", OccurredAt: time.Now().UTC(),
+		SourceService: "shop-supplier", AggregateID: supplierID,
+	}, SupplierID: supplierID, Action: action}
 }
 
 func EventID(id uint) string { return strconv.FormatUint(uint64(id), 10) }

@@ -17,6 +17,7 @@ type Order struct {
 	Quantity      int                         `json:"quantity"`
 	TotalAmount   decimal.Decimal             `json:"totalAmount"`
 	PaymentStatus int                         `json:"paymentStatus"`
+	PaymentID     uint                        `json:"paymentID"`
 	Status        int                         `json:"status"`
 	CreatedAt     time.Time                   `json:"createdAt"`
 }
@@ -41,9 +42,10 @@ type PaymentType struct {
 }
 
 type PaymentRecord struct {
-	ID        uint            `json:"id"`
-	OrderID   uint            `json:"orderID"`
-	Amount    decimal.Decimal `json:"amount"`
-	Status    int             `json:"status"`
-	CreatedAt time.Time       `json:"createdAt"`
+	ID            uint            `json:"id"`
+	OrderID       uint            `json:"orderID"`
+	PaymentTypeID uint            `json:"paymentTypeID"`
+	Amount        decimal.Decimal `json:"amount"`
+	Status        int             `json:"status"`
+	CreatedAt     time.Time       `json:"createdAt"`
 }

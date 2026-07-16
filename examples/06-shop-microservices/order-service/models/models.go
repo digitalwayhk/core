@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +34,12 @@ const (
 )
 
 var (
-	actionOnce    sync.Once
-	action        persistencetypes.IDataAction
-	transactionMu sync.Mutex
+	actionOnce     sync.Once
+	storageOnce    sync.Once
+	action         persistencetypes.IDataAction
+	actionTemplate persistencetypes.IDataAction
+	storageErr     error
+	transactionMu  sync.Mutex
 )
 
 type Order struct {
@@ -55,6 +59,7 @@ type Order struct {
 	AddressDetail  string          `json:"addressDetail"`
 	AddressID      uint            `json:"addressID"`
 	PaymentStatus  int             `json:"paymentStatus"`
+	PaymentID      uint            `json:"paymentID"`
 	Status         int             `json:"status"`
 }
 
@@ -89,9 +94,10 @@ func (p *PaymentType) GetHash() string {
 
 type PaymentRecord struct {
 	*entity.Model
-	OrderID uint            `gorm:"not null;index" json:"orderID"`
-	Amount  decimal.Decimal `json:"amount"`
-	Status  int             `json:"status"`
+	OrderID       uint            `gorm:"not null;index" json:"orderID"`
+	PaymentTypeID uint            `gorm:"not null;index" json:"paymentTypeID"`
+	Amount        decimal.Decimal `json:"amount"`
+	Status        int             `json:"status"`
 }
 
 func NewPaymentRecord() *PaymentRecord { return &PaymentRecord{Model: entity.NewModel()} }
@@ -102,6 +108,9 @@ func (p *PaymentRecord) NewModel() {
 }
 func (*PaymentRecord) GetLocalDBName() string  { return databaseName }
 func (*PaymentRecord) GetRemoteDBName() string { return databaseName }
+func (p *PaymentRecord) GetHash() string {
+	return utils.HashCodes(strconv.FormatUint(uint64(p.OrderID), 10))
+}
 
 type Outbox struct {
 	*entity.Model
@@ -138,14 +147,21 @@ func (*Inbox) GetLocalDBName() string  { return databaseName }
 func (*Inbox) GetRemoteDBName() string { return databaseName }
 func (i *Inbox) GetHash() string       { return utils.HashCodes(i.EventID) }
 
-func dataAction() persistencetypes.IDataAction {
+func baseAction() persistencetypes.IDataAction {
 	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
-	if cloner, ok := action.(interface {
+	return action
+}
+func dataAction() persistencetypes.IDataAction {
+	_ = EnsureStorage()
+	if actionTemplate == nil {
+		return baseAction()
+	}
+	if cloner, ok := actionTemplate.(interface {
 		Clone() persistencetypes.IDataAction
 	}); ok {
 		return cloner.Clone()
 	}
-	return action
+	return actionTemplate
 }
 func search(model interface{}, size int) *persistencetypes.SearchItem {
 	return &persistencetypes.SearchItem{Page: 1, Size: size, Model: model}
@@ -158,12 +174,23 @@ func ensureWith(a persistencetypes.IDataAction, model interface{}) error {
 	return a.Load(search(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
 }
 func EnsureStorage() error {
-	for _, m := range []interface{}{NewOrder(), NewPaymentType(), NewPaymentRecord(), NewOutbox(), NewInbox()} {
-		if err := ensureWith(dataAction(), m); err != nil {
-			return err
+	storageOnce.Do(func() {
+		action := baseAction()
+		for _, m := range []interface{}{NewOrder(), NewPaymentType(), NewPaymentRecord(), NewOutbox(), NewInbox()} {
+			if err := ensureWith(action, m); err != nil {
+				storageErr = err
+				return
+			}
 		}
-	}
-	return nil
+		if cloner, ok := action.(interface {
+			Clone() persistencetypes.IDataAction
+		}); ok {
+			actionTemplate = cloner.Clone()
+		} else {
+			actionTemplate = action
+		}
+	})
+	return storageErr
 }
 func RunTransaction(operation func(persistencetypes.IDataAction) error) (err error) {
 	transactionMu.Lock()
@@ -282,7 +309,10 @@ func FindPaymentType(id uint) (*PaymentType, error) {
 	}
 	return items[0], nil
 }
-func (p *PaymentRecord) InsertWith(a persistencetypes.IDataAction) error { return a.Insert(p) }
+func (p *PaymentRecord) InsertWith(a persistencetypes.IDataAction) error {
+	p.SetHashcode(p.GetHash())
+	return a.Insert(p)
+}
 func FindPaymentRecord(id uint) (*PaymentRecord, error) {
 	if err := ensureWith(dataAction(), NewPaymentRecord()); err != nil {
 		return nil, err
@@ -334,8 +364,8 @@ func ToDTO(o *Order) *orderdto.Order {
 	if o.CreatedAt != nil {
 		created = *o.CreatedAt
 	}
-	return &orderdto.Order{ID: o.ID, UserID: o.UserID, Product: supplierdto.ProductSnapshot{ProductID: o.ProductID, SupplierID: o.SupplierID, SupplierName: o.SupplierName, ProductCode: o.ProductCode, ProductName: o.ProductName, UnitPrice: o.UnitPrice}, Address: userdto.AddressSnapshot{AddressID: o.AddressID, Recipient: o.Recipient, Phone: o.Phone, Region: o.Region, Detail: o.AddressDetail}, Quantity: o.Quantity, TotalAmount: o.UnitPrice.Mul(decimal.NewFromInt(int64(o.Quantity))), PaymentStatus: o.PaymentStatus, Status: o.Status, CreatedAt: created}
+	return &orderdto.Order{ID: o.ID, UserID: o.UserID, Product: supplierdto.ProductSnapshot{ProductID: o.ProductID, SupplierID: o.SupplierID, SupplierName: o.SupplierName, ProductCode: o.ProductCode, ProductName: o.ProductName, UnitPrice: o.UnitPrice}, Address: userdto.AddressSnapshot{AddressID: o.AddressID, Recipient: o.Recipient, Phone: o.Phone, Region: o.Region, Detail: o.AddressDetail}, Quantity: o.Quantity, TotalAmount: o.UnitPrice.Mul(decimal.NewFromInt(int64(o.Quantity))), PaymentStatus: o.PaymentStatus, PaymentID: o.PaymentID, Status: o.Status, CreatedAt: created}
 }
-func ChangeEvent(eventID, action string, o *Order) eventdto.OrderChanged {
-	return eventdto.OrderChanged{Metadata: eventdto.Metadata{EventID: eventID, Version: 1, EventType: "shop.order.changed", OccurredAt: time.Now().UTC(), SourceService: "shop-order", AggregateID: eventID}, UserID: o.UserID, SupplierID: o.SupplierID, OrderID: o.ID, ProductID: o.ProductID, ProductName: o.ProductName, Action: action}
+func ChangeEvent(eventID, eventType, action string, o *Order) eventdto.OrderChanged {
+	return eventdto.OrderChanged{Metadata: eventdto.Metadata{EventID: eventID, Version: 1, EventType: eventType, OccurredAt: time.Now().UTC(), SourceService: "shop-order", AggregateID: eventID}, UserID: o.UserID, SupplierID: o.SupplierID, OrderID: o.ID, ProductID: o.ProductID, ProductName: o.ProductName, Action: action}
 }

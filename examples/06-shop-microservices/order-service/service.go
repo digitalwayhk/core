@@ -2,6 +2,8 @@ package orderservice
 
 import (
 	"context"
+	"sync"
+
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/private"
@@ -10,7 +12,6 @@ import (
 	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	"sync"
 )
 
 // Service 是订单、支付和事件 Outbox 的事实服务。

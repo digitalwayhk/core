@@ -162,8 +162,12 @@ func (own *ServiceContext) EnableEventBridge() {
 		own.EventStream = event.NewStream()
 	}
 	if own.ServiceEventBridge == nil {
+		subscriberID := ""
+		if own.Service != nil {
+			subscriberID = own.Service.Name
+		}
 		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{
-			SubscriberID: own.Service.Name,
+			SubscriberID: subscriberID,
 		})
 	}
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)

@@ -38,10 +38,12 @@ func CreatePayment(userID string, orderID, paymentTypeID, paymentID uint, eventI
 	record := models.NewPaymentRecord()
 	record.SetID(paymentID)
 	record.OrderID = order.ID
+	record.PaymentTypeID = paymentType.ID
 	record.Amount = order.UnitPrice.Mul(decimal.NewFromInt(int64(order.Quantity)))
 	record.Status = models.PaymentStatusProcessing
 	order.PaymentStatus = models.PaymentStatusProcessing
-	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, "payment_processing", order))
+	order.PaymentID = record.ID
+	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, contract.EventPaymentChanged, "payment_processing", order))
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +59,7 @@ func CreatePayment(userID string, orderID, paymentTypeID, paymentID uint, eventI
 	if err != nil {
 		return nil, err
 	}
-	return &orderdto.PaymentRecord{ID: record.ID, OrderID: record.OrderID, Amount: record.Amount, Status: record.Status}, nil
+	return &orderdto.PaymentRecord{ID: record.ID, OrderID: record.OrderID, PaymentTypeID: record.PaymentTypeID, Amount: record.Amount, Status: record.Status}, nil
 }
 
 func ConfirmPayment(paymentID uint, eventID string) (*orderdto.Order, error) {
@@ -71,7 +73,7 @@ func ConfirmPayment(paymentID uint, eventID string) (*orderdto.Order, error) {
 	}
 	record.Status = models.PaymentStatusPaid
 	order.PaymentStatus = models.PaymentStatusPaid
-	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, "paid", order))
+	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, contract.EventPaymentChanged, "paid", order))
 	if err != nil {
 		return nil, err
 	}

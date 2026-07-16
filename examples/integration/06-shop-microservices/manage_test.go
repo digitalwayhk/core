@@ -7,12 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestManageAPIs(t *testing.T) {
 	t.Run("PaymentTypeAndConfirmation", testPaymentTypeAndConfirmation)
 	t.Run("SupplierManageRequiresPlatformAdmin", testSupplierManageRequiresPlatformAdmin)
+	t.Run("SupplierChangeInvalidatesProductCache", testSupplierChangeInvalidatesProductCache)
 }
 func testPaymentTypeAndConfirmation(t *testing.T) {
 	admin := suites.order.TokenFor(t, "platform-admin", 1)
@@ -44,4 +47,43 @@ func testSupplierManageRequiresPlatformAdmin(t *testing.T) {
 	admin := suites.supplier.TokenFor(t, "platform-admin", 1)
 	allowed := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/suppliermanage/search", admin, map[string]interface{}{"page": 1, "size": 10})
 	assert.True(t, allowed.Success, allowed.ErrorMessage)
+}
+
+func testSupplierChangeInvalidatesProductCache(t *testing.T) {
+	userID := "supplier-cache-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	product, _ := addProduct(t, userID)
+	productPath := "/api/shop-user/getproducts?code=" + product.Code
+	cached := suites.user.RequestJSON(t, http.MethodGet, productPath, "", nil)
+	require.True(t, cached.Success, cached.ErrorMessage)
+	assert.Contains(t, string(cached.Data), product.Code)
+
+	admin := suites.supplier.TokenFor(t, "platform-admin", 1)
+	searched := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/suppliermanage/search", admin, map[string]interface{}{"page": 1, "size": 100})
+	require.True(t, searched.Success, searched.ErrorMessage)
+	var table struct {
+		Rows []struct {
+			ID     string `json:"id"`
+			UserID string `json:"userID"`
+			Name   string `json:"name"`
+		} `json:"rows"`
+	}
+	require.NoError(t, json.Unmarshal(searched.Data, &table))
+	var supplierID, supplierName string
+	for _, row := range table.Rows {
+		if row.UserID == userID {
+			supplierID, supplierName = row.ID, row.Name
+			break
+		}
+	}
+	require.NotEmpty(t, supplierID)
+	edited := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/suppliermanage/edit", admin, map[string]interface{}{"id": supplierID, "name": supplierName, "enabled": false})
+	require.True(t, edited.Success, edited.ErrorMessage)
+	require.Eventually(t, func() bool {
+		response := suites.user.RequestJSON(t, http.MethodGet, productPath, "", nil)
+		return response.Success && !jsonContains(response.Data, product.Code)
+	}, 5*time.Second, 25*time.Millisecond)
+}
+
+func jsonContains(data json.RawMessage, value string) bool {
+	return strings.Contains(string(data), value)
 }

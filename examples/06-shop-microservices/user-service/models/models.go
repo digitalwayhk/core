@@ -16,8 +16,13 @@ import (
 
 const databaseName = "shop-user"
 
-var actionOnce sync.Once
-var action persistencetypes.IDataAction
+var (
+	actionOnce     sync.Once
+	storageOnce    sync.Once
+	action         persistencetypes.IDataAction
+	actionTemplate persistencetypes.IDataAction
+	storageErr     error
+)
 
 type User struct {
 	*entity.Model
@@ -72,32 +77,51 @@ func (a *Address) GetHash() string {
 	return utils.HashCodes(strings.TrimSpace(a.UserID), strings.TrimSpace(a.Recipient), strings.TrimSpace(a.Phone), strings.TrimSpace(a.Detail))
 }
 
-func dataAction() persistencetypes.IDataAction {
+func baseAction() persistencetypes.IDataAction {
 	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
-	if cloner, ok := action.(interface {
+	return action
+}
+func dataAction() persistencetypes.IDataAction {
+	_ = EnsureStorage()
+	if actionTemplate == nil {
+		return baseAction()
+	}
+	if cloner, ok := actionTemplate.(interface {
 		Clone() persistencetypes.IDataAction
 	}); ok {
 		return cloner.Clone()
 	}
-	return action
+	return actionTemplate
 }
 func search(model interface{}, size int) *persistencetypes.SearchItem {
 	return &persistencetypes.SearchItem{Page: 1, Size: size, Model: model}
 }
-func ensure(model interface{}) error {
+func ensureWith(a persistencetypes.IDataAction, model interface{}) error {
 	t := reflect.TypeOf(model)
 	if t == nil || t.Kind() != reflect.Ptr {
 		return errors.New("模型类型无效")
 	}
-	return dataAction().Load(search(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
+	return a.Load(search(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
 }
+func ensure(model interface{}) error { return ensureWith(dataAction(), model) }
 func EnsureStorage() error {
-	for _, m := range []interface{}{NewUser(), NewAddress(), NewInbox()} {
-		if err := ensure(m); err != nil {
-			return err
+	storageOnce.Do(func() {
+		action := baseAction()
+		for _, m := range []interface{}{NewUser(), NewAddress(), NewInbox()} {
+			if err := ensureWith(action, m); err != nil {
+				storageErr = err
+				return
+			}
 		}
-	}
-	return nil
+		if cloner, ok := action.(interface {
+			Clone() persistencetypes.IDataAction
+		}); ok {
+			actionTemplate = cloner.Clone()
+		} else {
+			actionTemplate = action
+		}
+	})
+	return storageErr
 }
 
 func EnsureUser(userID, name string) (*User, error) {

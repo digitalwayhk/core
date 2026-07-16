@@ -40,7 +40,7 @@ func CreateOrder(id uint, userID, idempotencyKey, eventID string, product suppli
 	item.Phone = address.Phone
 	item.Region = address.Region
 	item.AddressDetail = address.Detail
-	outbox, err := models.NewOutboxRecord(eventID, contract.EventOrderChanged, contract.SubjectOrderChanged, models.ChangeEvent(eventID, "created", item))
+	outbox, err := models.NewOutboxRecord(eventID, contract.EventOrderChanged, contract.SubjectOrderChanged, models.ChangeEvent(eventID, contract.EventOrderChanged, "created", item))
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func DeleteOrCancel(userID string, id uint, eventID string) (*orderdto.Order, er
 		item.Status = models.OrderStatusCancelled
 		action = "cancelled"
 	}
-	outbox, err := models.NewOutboxRecord(eventID, contract.EventOrderChanged, contract.SubjectOrderChanged, models.ChangeEvent(eventID, action, item))
+	outbox, err := models.NewOutboxRecord(eventID, contract.EventOrderChanged, contract.SubjectOrderChanged, models.ChangeEvent(eventID, contract.EventOrderChanged, action, item))
 	if err != nil {
 		return nil, err
 	}

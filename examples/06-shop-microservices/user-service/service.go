@@ -42,17 +42,19 @@ func (s *Service) Start() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	productCancel, err := sc.ServiceEventBridge.SubscribeControl(contract.EventProductChanged, func(env *event.Envelope) error {
-		payload := &eventdto.ProductChanged{}
-		if err := json.Unmarshal(env.Data, payload); err != nil {
+	cacheHandler := func(env *event.Envelope) error {
+		metadata := &eventdto.Metadata{}
+		if err := json.Unmarshal(env.Data, metadata); err != nil {
 			return err
 		}
-		return models.ProcessInbox(payload.EventID, payload.EventType, func() error { (&publicapi.GetProducts{}).RouterInfo().FailureCache(nil); return nil })
-	})
-	if err == nil {
-		s.cancels = append(s.cancels, productCancel)
+		return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error { (&publicapi.GetProducts{}).RouterInfo().FailureCache(nil); return nil })
 	}
-	orderCancel, err := sc.ServiceEventBridge.SubscribeControl(contract.EventOrderChanged, func(env *event.Envelope) error {
+	for _, eventType := range []string{contract.EventProductChanged, contract.EventSupplierChanged} {
+		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, cacheHandler); subscribeErr == nil {
+			s.cancels = append(s.cancels, cancel)
+		}
+	}
+	orderHandler := func(env *event.Envelope) error {
 		payload := &eventdto.OrderChanged{}
 		if err := json.Unmarshal(env.Data, payload); err != nil {
 			return err
@@ -62,11 +64,13 @@ func (s *Service) Start() {
 			(&privateapi.GetOrders{}).RouterInfo().NoticeWebSocket(payload)
 			return nil
 		})
-	})
-	if err == nil {
-		s.cancels = append(s.cancels, orderCancel)
 	}
-	for _, subject := range []string{contract.SubjectProductChanged, contract.SubjectOrderChanged} {
+	for _, eventType := range []string{contract.EventOrderChanged, contract.EventPaymentChanged} {
+		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, orderHandler); subscribeErr == nil {
+			s.cancels = append(s.cancels, cancel)
+		}
+	}
+	for _, subject := range []string{contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectOrderChanged, contract.SubjectPaymentChanged} {
 		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeExternalControl(context.Background(), subject); subscribeErr == nil {
 			s.cancels = append(s.cancels, cancel)
 		}

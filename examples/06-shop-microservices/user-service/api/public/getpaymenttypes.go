@@ -1,11 +1,12 @@
 package public
 
 import (
+	"net/http"
+
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	orderapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	"net/http"
 )
 
 // GetPaymentTypes 是买家查询可用支付类型的 facade。

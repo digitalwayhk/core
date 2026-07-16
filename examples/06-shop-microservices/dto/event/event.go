@@ -19,6 +19,12 @@ type ProductChanged struct {
 	Action     string `json:"action"`
 }
 
+type SupplierChanged struct {
+	Metadata
+	SupplierID string `json:"supplierID"`
+	Action     string `json:"action"`
+}
+
 type OrderChanged struct {
 	Metadata
 	UserID      string `json:"userID"`

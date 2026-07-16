@@ -2,13 +2,16 @@ package shopmicroservices_test
 
 import (
 	"encoding/json"
-	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
-	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
+
+	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
+	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
+	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrivateAPIs(t *testing.T) {
@@ -55,6 +58,15 @@ func testBuyerAndSupplierWebSocketIsolation(t *testing.T) {
 	require.NoError(t, json.Unmarshal(supplierMessage.Data, &supplierEvent))
 	assert.Equal(t, order.ID, buyerEvent.OrderID)
 	assert.Equal(t, order.ID, supplierEvent.OrderID)
+	paymentType := addPaymentType(t, "ws-pay-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	paying := suites.user.RequestJSON(t, http.MethodPost, "/api/shop-user/createpayment", userToken, map[string]interface{}{"orderID": order.ID, "paymentTypeID": paymentType.ID})
+	require.True(t, paying.Success, paying.ErrorMessage)
+	for _, message := range []integration.WebSocketMessage{suites.user.ReadWebSocket(t, buyerWS, 5*time.Second), suites.supplier.ReadWebSocket(t, supplierWS, 5*time.Second)} {
+		var paymentEvent eventdto.OrderChanged
+		require.NoError(t, json.Unmarshal(message.Data, &paymentEvent))
+		assert.Equal(t, "shop.payment.changed", paymentEvent.EventType)
+		assert.Equal(t, order.ID, paymentEvent.OrderID)
+	}
 	select {
 	case message := <-otherEvents:
 		t.Fatalf("其他用户不应收到订单事件: %+v", message)

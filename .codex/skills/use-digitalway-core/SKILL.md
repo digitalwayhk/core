@@ -1,89 +1,85 @@
 ---
 name: use-digitalway-core
-description: 当任务涉及 github.com/digitalwayhk/core 的服务、IRouter、ModelList、Manage CRUD、认证、WebSocket、Cluster、Transport、MQ/EventBridge、配置、测试或框架消费方兼容性时使用。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、Model/Manage 继承、认证、WebSocket、缓存、本地可靠写、EventBridge、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
 
-## 开始前
+## 定位
 
-Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`examples/01-simple-shop` 是最简平台应用的标准样例，覆盖模型、持久化、DTO、Manage/Public/Private API、认证、WebSocket、服务组合与真实集成测试。`examples/02-shop-payment` 是进阶业务样例，覆盖 API -> business -> models 分层、跨模型事务、支付状态机、Manage hook、自定义命令和支付结果 WebSocket。`examples/05-shop-casdoor-rbac` 是身份生命周期样例，覆盖 Auth/Manage 双 Casdoor 域、三类认证 Hook、撤销与幂等审计。创建或审查普通业务服务时先核对第一个样例；涉及业务编排或受控后台命令时再核对第二个样例；涉及 Casdoor 登录和业务授权时核对第五个样例。不要从已删除的 Copilot skill、旧文档或记忆恢复行为。
+Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码是最终事实，示例是用法模板，`docs/codex` 现行指南是边界与运维契约。不得从已删除的 Copilot skill、历史计划、审查提示词或记忆恢复当前行为。
 
-按任务读取：
+具体 API、目录、模型、Manage、WebSocket、认证和测试模板见 `references/core-backend-api.md`。
 
-- API、模型、Manage、WebSocket、启动、集成测试与版本引用：`references/core-backend-api.md`
-- 最简平台应用源码：`examples/01-simple-shop`
-- 业务层与支付状态机样例：`examples/02-shop-payment`
-- 标准集成测试公共能力：`examples/integration/helpers.go`
-- 最简平台应用集成测试模板：`examples/integration/01-simple-shop`
-- 业务状态机集成测试模板：`examples/integration/02-shop-payment`
-- Casdoor 双域与三 Hook 样例：`examples/05-shop-casdoor-rbac`
-- Fake Casdoor 真实登录集成测试模板：`examples/integration/05-shop-casdoor-rbac`
-- 场景与成熟度：`docs/codex/FRAMEWORK_USAGE_GUIDE.md`
-- 配置能力：`docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`
-- 日志与错误：`docs/codex/LOGGING_AUDIT_AND_STANDARD.md`
+## 示例选择
 
-## 标准样例索引
+| 场景 | 标准示例 | 核心能力 |
+| --- | --- | --- |
+| 最简平台服务 | `examples/01-simple-shop` | contract、models、DTO、Manage/Public/Private、TestToken、用户 WebSocket、真实集成测试 |
+| 业务编排与状态机 | `examples/02-shop-payment` | API -> business -> models、跨模型事务、支付状态机、受控 Manage 命令 |
+| 模型和 Manage 继承 | `examples/03-shop-inheritance` | Shop/BaseData/Business 多层模型、Manage Hook 继承、只读子表、联合有效性 |
+| 性能优化 | `examples/04-shop-performance` | RouterInfo L1/L2/L3、EventBridge 主动失效、SingleFlight、Badger 可靠本地写、Group Commit、基准与分位数 |
+| Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
+| Redis 多服务 | `examples/06-shop-microservices` | 三服务边界、共享 DTO、Redis 发现、CallService、可靠 EventBridge、Outbox/Inbox、同进程/三进程测试 |
 
-| 能力 | 标准实现 |
+对应真实进程测试位于 `examples/integration/01-simple-shop`至 `05-shop-casdoor-rbac`，多服务还必须同时参考 `examples/integration/06-shop-microservices` 和 `06-shop-microservices-three-process`；通用进程、HTTP、TestToken 和 WebSocket 能力只复用 `examples/integration/helpers.go`。
+
+## 目录决策
+
+- 最简 CRUD 按 01 平铺 `models/api`；出现跨模型规则时增加无请求状态的 `business`。
+- 出现基础资料、交易业务或身份审计继承时，按 03/05 拆分 `common/basedata/transaction/identity`；根包只做兼容门面。
+- `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
+- 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
+
+## 现行指南索引
+
+| 任务 | 必读文档 |
 | --- | --- |
-| 无依赖服务契约 | `examples/01-simple-shop/contract` |
-| 模型初始化、哈希、校验 | `examples/01-simple-shop/models/product.go`、`order.go` |
-| 模型持久化边界 | `models/data_action.go`、`product_persistence.go`、`order_persistence.go` |
-| 对外 DTO | `api/dto` |
-| 完整/只读 Manage | `api/manage/productmanage.go`、`ordermanage.go` |
-| 可选条件 Public 查询 | `api/public/getproducts.go` |
-| 身份与所有权 Private API | `api/private` |
-| 最终用户 WebSocket 订阅 | `api/private/getorders.go` |
-| 服务组合根 | `service.go`、`main/main.go` |
-| 真实进程集成测试 | `examples/integration/01-simple-shop` |
-| API、业务层、模型三层编排 | `examples/02-shop-payment/business` |
-| 跨模型事务与支付状态机 | `business/payment.go`、`business/order.go`、`models/data_action.go` |
-| Manage hook 与自定义命令 | `api/manage/productmanage.go`、`paymenttypemanage.go`、`paymentrecord_commands.go` |
-| 支付状态 WebSocket | `api/private/getorders.go`、`api/private/common.go` |
-| 进阶真实进程集成测试 | `examples/integration/02-shop-payment` |
-| Auth/Manage 双 Casdoor 域 | `examples/05-shop-casdoor-rbac/README.md`、`auth_hooks.go` |
-| 签发、请求、身份事件三 Hook | `examples/05-shop-casdoor-rbac/auth_hooks.go` |
-| 身份事件幂等审计 | `examples/05-shop-casdoor-rbac/business/identityevent.go`、`api/manage/identityeventmanage.go` |
-| Fake Casdoor 真实 OAuth/Callback/Webhook | `examples/integration/05-shop-casdoor-rbac` |
+| 场景和能力选择 | `docs/codex/FRAMEWORK_USAGE_GUIDE.md` |
+| 配置是否真正接入运行时 | `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md` |
+| RouterInfo、对象池、EventBridge、缓存、WebSocket 和生命周期 | `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md` |
+| 日志级别、字段和敏感信息 | `docs/codex/LOGGING_AUDIT_AND_STANDARD.md` |
+| Docker 外部依赖集成 | `docs/codex/EXTERNAL_INTEGRATION_GUIDE.md` |
+| NATS JetStream 可靠写路径 | `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md` |
+| 性能、容量、RED/USE 和 SLO | `docs/codex/PERFORMANCE_SLO_BASELINE.md` |
+| go-zero 与成熟能力复用 | `docs/codex/GO_ZERO_REUSE_AUDIT.md` |
+| 无用代码和架构债 | `docs/codex/DEAD_CODE_AUDIT.md`、`ARCHITECTURE_HARDENING.md` |
+| 公共 API、废弃和消费方兼容 | `docs/codex/API_COMPATIBILITY_SURFACE.md`、`DEPRECATION_REGISTER.md`、`CONSUMER_COMPATIBILITY_MATRIX.md` |
+| CI 和发布门禁 | `docs/codex/CI_QUALITY_GATE_MATRIX.md`、`docs/RELEASE_POLICY.md` |
 
-## 核心决策
+`PROJECT_REVIEW_ACTION_PLAN.md`、`plans/`、`*_PROMPT.md`、`*_REVIEW.md` 和 `COMPLETED_TASKS_IMPLEMENTATION_REVIEW.md` 是历史审计证据，不是新实现的默认规范。
 
-1. 普通路由实现 `types.IRouter`；public/private 路径为 `/api/{service}/{structLower}`，目录决定认证但不进入 URL。
-2. 服务名和跨服务共享基础类型放入无依赖 `contract` 包；`IService.ServiceName()` 返回其中的稳定常量。不要为路由重复定义 Path 常量，路由契约来自已注册的 `RouterInfo()`。注册期差异只通过 `router.WithMethod`、`WithPath`、`WithAuth`、`WithPathType`、`WithPoolSize` 等 Option 声明，运行期只通过 Getter 读取；不得直接修改 `RouterInfo` 导出兼容字段。
-3. private 身份只读 `req.GetUser()`/claims，不信任请求字段。
-4. Manage 使用 `NewManageService[T](owner)`，路径为 `/api/manage/{service}/{manage}/{operation}`。
-5. Manage CRUD 通过 `entity.NewModelList[T](nil)` 操作；public/private 只调用模型封装的 `IDataAction` 持久化方法，不直接依赖 GORM/SQLite。数据库实现只在模型持久化边界选择，不沿 Service -> API -> Model 传递。
-6. 嵌入 `*Model`/`*BaseModel` 必须在 `NewModel()` 初始化。`GetHash` 表达真实业务唯一性；`AddValid`/`UpdateValid` 同时保护字段和唯一性。
-7. public/private 返回独立 `dto`，不得直接序列化可能深度嵌入的持久化模型；实现 `IRouterResponse.GetResponse()` 供 OpenAPI 描述。
-8. WebSocket 只面向最终外部用户。内部服务通信使用 TransportSelector 与 EventBridge；private WebSocket 路由必须从会话注入可信身份并按用户隔离和过滤通知。
-9. 先复用 go-zero/成熟客户端；Digitalway 抽象只保留路由、模型、MachineID、Provider 切换、事件和跨节点通知等领域契约。
-10. 配置字段不等于支持。`Unsupported` 值必须 fail closed；QUIC/MQ transport 和内建 Kafka/RabbitMQ/RocketMQ 不得伪装可用。
-11. CORS origin、TrustedProxies 和外部依赖必须显式配置。默认单元测试不依赖 Docker。
-12. 日志使用 `logx` 稳定事件和字段；不记录 token、TOTP、payload/body/response、SQL、参数或对象 dump。
-13. 修改公共 Go API、路由、JSON、配置或错误前，运行兼容性/发布契约并登记迁移。
-14. Casdoor 的 Auth 与 Manage 是两个独立认证域，必须使用不同 Client、Access/Refresh Secret 和 Webhook Secret。Callback、Refresh、REST 与 WebSocket 都由 ServiceContext 的撤销权威约束；不得直接调用 Casdoor 全局 SDK。
+## 不可违反的契约
+
+1. public/private URL 为 `/api/{service}/{router}`；Manage 为 `/api/manage/{service}/{manage}/{operation}`。
+2. 服务名放无依赖 `contract`；RouterInfo 注册后 Path、ServiceName、Method、Auth 等元数据冻结，只通过 Getter 读取。
+3. private 身份只读 `req.GetUser()`/claims，缓存键和 WebSocket 订阅不信任客户端 UserID。
+4. Manage CRUD 不绕过 ModelList；public/private 不直接依赖 GORM/SQLite；`IDataAction` 实现只在 models 边界选择。
+5. 模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料只能禁用，不能删除。
+6. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
+7. WebSocket 只面向最终外部用户；内部服务通信使用 TransportSelector/EventBridge。
+8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。
+9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
+10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
+11. 优先复用 go-zero/成熟客户端；不支持的配置值 fail closed，不得伪装可用。
+12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump。
+13. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
+14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`。
+15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。
 
 ## 工作流
 
-1. 普通平台服务先读 `examples/01-simple-shop`；涉及业务层、跨模型事务、状态机或 Manage 自定义命令时再读 `examples/02-shop-payment`。
-2. 先写失败测试，再做最小实现；不绕过 ServiceContext，Manage 不绕过 ModelList，普通 API 不绕过模型持久化方法。
-3. 为服务创建集成测试时，复用 `examples/integration/helpers.go`，并以 `examples/integration/01-simple-shop` 为目录模板：每个 API/command 一个子测试，按 Manage/Public/Private 分文件，同时保留 `TestManageAPIs`、`TestPublicAPIs`、`TestPrivateAPIs` 整组入口。
-4. 集成测试必须启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP 和真实 WebSocket；普通业务测试使用内建 TestToken，认证生命周期测试使用示例 05 的 Fake Casdoor 模板。测试结束必须关闭进程并清理临时目录。
-5. 对外部能力同时检查 config Validate、factory、真实启动链、lifecycle owner 和 integration gate。
-6. 运行 `gofmt`、定向测试、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 race/CI gate。
-7. Casdoor 生命周期改动必须运行 `./scripts/test.sh security`；共享 Redis 测试只通过 `CORE_TEST_REDIS_ADDR=... ./scripts/test.sh integration-casdoor-auth` 显式开启。
+1. 选择最近示例，再读对应现行指南，然后核对当前代码。
+2. 先写失败测试；不绕过 ServiceContext、ModelList、模型持久化和认证生命周期。
+3. 集成测试启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP/WebSocket；普通业务用 TestToken，Casdoor 生命周期用 Fake Casdoor。
+4. 运行 `gofmt`、定向测试、race、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 CI gate。
 
-## 审查重点
+## 审查红旗
 
-- URL 中错误加入 `/public` 或 `/private`。
-- 请求身份/trace 存入共享单例。
-- `RouterInfo()` 取得已注册单例后再写 `Method`、`Path`、`Auth`、`ServiceName` 等冻结元数据；应改为 `DefaultRouterInfoWithOptions(own, router.With...)` 并通过 Getter 读取。
-- 模型嵌入指针未初始化，或无 Code 模型误用 BaseModel。
-- ManageService 传错 owner，导致 hook 不执行。
-- public/private 直接返回持久化模型，或 DTO 混入集成测试公共 helpers。
-- private WebSocket 接受客户端 UserID、跨用户投递，或为无额外启停动作的路由实现空生命周期回调。
-- 集成测试重新实现进程/TestToken/WebSocket 公共能力，或只测 handler 而未经过真实启动链。
-- 静默接受不支持配置、重复制造连接池/重试/日志/队列。
-- 外部测试默认连接本机服务，或失败后残留 goroutine、容器和锁。
-- 日志/响应泄露内部错误和业务数据。
+- RouterInfo 冻结后修改元数据，或在共享单例中保存请求、用户、trace、response。
+- Manage owner 绑定错误、子类覆盖 Hook 却丢失必需父级规则，或用通用 CRUD 绕过状态机。
+- public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
+- WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
+- `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效，或把 write-behind pending 当缓存删除。
+- 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
+- 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。

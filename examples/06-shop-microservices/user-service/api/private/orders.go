@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
@@ -52,11 +53,12 @@ func (*AddOrder) GetResponse() interface{}              { return &orderdto.Order
 func (a *AddOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(a) }
 
 // GetOrders 查询本人订单，并作为买家 WebSocket 订阅路由。
-type GetOrders struct{ subscriptionUserID string }
+type GetOrders struct{ requestUserID, subscriptionUserID string }
 
 func (*GetOrders) Parse(servertypes.IRequest) error { return nil }
 func (g *GetOrders) Validation(req servertypes.IRequest) error {
-	if g.resolveUserID(req) == "" {
+	g.requestUserID = g.resolveUserID(req)
+	if g.requestUserID == "" {
 		return errors.New("用户身份无效")
 	}
 	return nil
@@ -75,8 +77,22 @@ func (g *GetOrders) Do(req servertypes.IRequest) (interface{}, error) {
 }
 func (*GetOrders) GetResponse() interface{} { return []*orderdto.Order{} }
 func (g *GetOrders) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info := router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info.UseCache(10 * time.Second)
+	return info
 }
+func (g *GetOrders) GetCacheKey() string {
+	uid := strings.TrimSpace(g.requestUserID)
+	if uid == "" {
+		uid = strings.TrimSpace(g.subscriptionUserID)
+	}
+	if uid == "" {
+		return ""
+	}
+	return utils.HashCodes(uid)
+}
+func (g *GetOrders) Reset()                  { g.requestUserID = "" }
+func (g *GetOrders) Clean()                  { g.requestUserID = "" }
 func (g *GetOrders) SetUserID(uid, _ string) { g.subscriptionUserID = strings.TrimSpace(uid) }
 func (g *GetOrders) GetUserID() string       { return g.subscriptionUserID }
 func (g *GetOrders) GetHashKey() uint64      { return utils.HashCode64(g.subscriptionUserID) }

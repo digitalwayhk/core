@@ -3,11 +3,13 @@ package public
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	supplierapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 )
 
 // GetProducts 是 User Service 面向买家的商品查询 facade。
@@ -33,6 +35,11 @@ func (g *GetProducts) Do(req servertypes.IRequest) (interface{}, error) {
 	return items, nil
 }
 func (*GetProducts) GetResponse() interface{} { return []*supplierdto.Product{} }
+func (g *GetProducts) GetCacheKey() string {
+	return utils.HashCodes(strings.ToLower(g.Name), strings.ToLower(g.Code), g.SupplierID)
+}
 func (g *GetProducts) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info := router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info.UseCache(30 * time.Second)
+	return info
 }

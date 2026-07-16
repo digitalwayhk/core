@@ -1,6 +1,6 @@
 # Digitalway Core 后端开发参考
 
-本参考以当前代码和发布契约为准。`examples/01-simple-shop` 是最简平台应用的标准样例，包含普通业务服务默认需要的模型、持久化、DTO、Manage/Public/Private API、身份隔离、WebSocket、服务组合和真实集成测试。`examples/02-shop-payment` 是业务编排进阶样例，增加 business 层、跨模型事务、状态机、Manage hook、自定义命令和支付结果通知。创建新服务时按复杂度选择最近的样例，不要另造平行约定。
+本参考以当前代码和发布契约为准。示例 01–06 依次覆盖最简服务、业务状态机、模型/Manage 继承、性能优化、Casdoor 身份生命周期和 Redis 多服务协同。创建新服务时按复杂度选择最近样例，不另造平行约定。
 
 完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。
 
@@ -53,6 +53,38 @@ examples/integration/02-shop-payment/
 └── private_test.go
 ```
 
+继承、性能与身份样例的关键目录：
+
+```text
+examples/03-shop-inheritance/
+├── models/                       # ShopModel -> BaseDataModel/BusinessModel -> 具体模型
+├── business/                     # 供应商/商品联合有效性、订单和支付规则
+└── api/manage/                   # ShopManage -> BaseDataManage/BusinessManage -> 具体 Manage
+
+examples/04-shop-performance/
+├── api/public,api/private/       # RouterInfo 结果缓存与可信缓存键
+├── api/manage/                   # EventBridge 主动失效
+├── business/                     # 下单事实缓存与 SingleFlight
+└── models/order_write_store.go   # Badger 可靠本地写、Group Commit、SQLite 同步
+
+examples/05-shop-casdoor-rbac/
+├── models/{common,basedata,transaction,identity,internal/store,schema}
+├── business/{basedata,transaction,identity}
+├── api/manage/{common,basedata,transaction,audit}
+├── auth_hooks.go                 # 签发、请求、身份事件三 Hook
+└── models.go/business.go/manage.go # 根包兼容门面
+
+examples/06-shop-microservices/
+├── contract,dto                  # 无反向依赖的跨服务契约
+├── user-service                 # 买家 facade 与地址权威
+├── supplier-service             # 供应商/商品权威与 api/call 目标 API
+├── order-service                # 订单/支付事实与 Outbox
+├── runtime                      # 通用 Outbox worker
+└── main,deploy                  # 同进程调试和三进程部署
+```
+
+单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
+
 普通 CRUD 和简单 API 以 `01-simple-shop` 为准；出现以下任一需求时，以 `02-shop-payment` 为参考：
 
 - API 需要组合多个模型操作；
@@ -79,11 +111,11 @@ API / Manage command -> business service -> models -> IDataAction
 Manage 扩展遵循以下顺序：
 
 1. 通用 CRUD 继续使用 `ManageService[T]` 和 `ModelList`；
-2. `ParseAfter` 只做输入规范化；
-3. `ValidationAfter` 调用 business 完成唯一性、引用保护和字段冻结；
+2. 服务级 `ShopManage` 用 `DoBefore/DoAfter/SearchBefore/SearchAfter` 统一处理授权、日志、分页和查询约束；
+3. `BaseDataManage` 与 `BusinessManage` 实现模型类别规则，具体 Manage 只重写差异 Hook；需保留父级规则时必须显式先调父级。
 4. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
 5. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
-6. 自定义 Router 的 `Do` 调用 business，不直接修改模型。
+6. 自定义 Router 的 `Do` 调用 business，不直接修改模型。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
 
 支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
 
@@ -334,6 +366,19 @@ Public API 无需身份，但仍执行参数解析、校验、类型化错误和
 
 删除先以 `ID + UserID` 查询所有权，再物理删除。不存在与不属于当前用户返回同一公开错误，避免泄露其他用户订单是否存在。持久化成功后发布 `deleted` 通知。
 
+## RouterInfo 缓存与高性能写
+
+API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCache` 时默认使用 local L1；Badger L2 和 shared Redis L3 才需显式配置。
+
+- Public 缓存键覆盖所有筛选维度；Private 键中的 UserID 只取自 Token 解析后的认证上下文。
+- L1/L2/L3 命中统一返回 `json.RawMessage`。L1 `MaxBytes=0` 按进程/容器有效内存 2% 解析为 16–256 MiB 共享预算；`MaxEntries=0` 自动解析；超过 `MaxValueBytes` 的响应正常返回但不进入任何缓存层。
+- 商品、供应商、支付类型、订单状态变更后，通过 ServiceContext 专属 EventBridge 执行主动失效；TTL 只是兜底。
+- 同键冷加载使用 RouteCache/`syncx.SingleFlight`，不在 API 自建锁和队列。
+
+`PrefixedBadgerDB` write-behind 与 RouterInfo L2 是两种不同能力：L2 可重建；write-behind pending 在远端数据库确认前是业务事实。高 TPS 路径必须等 Badger `SyncWrites` 成功后才返回，后台同步 SQLite 成功后再删除本地副本。基准必须与对照示例同机、同口径、多轮运行，同时报告 QPS/TPS、p50/p95/p99、错误率、pending 收敛和磁盘上限。
+
+详细运行时契约见 `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`，容量契约见 `docs/codex/PERFORMANCE_SLO_BASELINE.md`。
+
 ## WebSocket 最终用户订阅
 
 WebSocket 只面向最终外部用户。内部服务之间不使用 WebSocket，内部请求使用 TransportSelector，内部事件使用每个 ServiceContext 所属的 EventBridge。
@@ -402,7 +447,7 @@ func (*ShopService) SubscribeRouters() []*types.ObserveArgs { return nil }
 
 `SubscribeRouters` 用于内部 EventBridge 观察订阅，不是外部用户 WebSocket 订阅。没有内部观察者时返回 nil。
 
-main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。
+main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。单服务运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。示例 06 为了让同进程和三进程使用完全相同的 Redis 契约，由 `bootstrap.ServiceConfig` 在组合根显式构造配置，仍不提交运行后 JSON。
 
 ```go
 server := run.NewWebServer()
@@ -414,6 +459,20 @@ server.Start()
 ```
 
 CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主动选择。
+
+## 多服务调用与事件
+
+以 `examples/06-shop-microservices` 为标准模板：
+
+- 稳定服务名和事件名放根 `contract`；跨服务 JSON 结构放根 `dto`，不共享 Model。
+- 调用方直接构造目标服务已注册 API，不建保存地址的 client。如果 Go 目录名与 `IService.ServiceName()` 不同，目标 API 必须在 Freeze 前同时声明 `router.WithServiceName(contract.XxxServiceName)` 和稳定 `WithPath`。
+- `req.CallService` 先查同进程 ServiceContext，再查 ClusterProvider 健康快照。新链路不读 `AttachServices`；无节点时 fail closed。
+- 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和私网 socket 再验收一次。
+- Redis 发现和 EventBridge 使用不同 Prefix。控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。
+- 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。
+- WebSocket 仅把本服务已消费的订单摘要推送给当前最终用户，不承担服务间传输和离线积压。
+
+验收必须同时运行 `examples/integration/06-shop-microservices` 和 `examples/integration/06-shop-microservices-three-process`。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
 

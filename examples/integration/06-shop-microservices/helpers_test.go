@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -86,6 +87,22 @@ func addOrder(t *testing.T, token string, productID, addressID uint) orderdto.Or
 	var order orderdto.Order
 	require.NoError(t, json.Unmarshal(response.Data, &order))
 	return order
+}
+func addPaymentType(t *testing.T, code string) orderdto.PaymentType {
+	t.Helper()
+	admin := suites.order.TokenFor(t, "platform-admin", 1)
+	response := suites.order.RequestJSON(t, http.MethodPost, "/api/manage/shop-order/paymenttypemanage/add", admin, map[string]interface{}{"name": "集成支付", "code": code, "enabled": true})
+	require.True(t, response.Success, response.ErrorMessage)
+	var raw struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Code    string `json:"code"`
+		Enabled bool   `json:"enabled"`
+	}
+	require.NoError(t, json.Unmarshal(response.Data, &raw))
+	id, err := strconv.ParseUint(raw.ID, 10, 64)
+	require.NoError(t, err)
+	return orderdto.PaymentType{ID: uint(id), Name: raw.Name, Code: raw.Code, Enabled: raw.Enabled}
 }
 func connectAndSubscribe(t *testing.T, suite *integration.Suite, token, channel string) *websocket.Conn {
 	connection, _, err := websocket.DefaultDialer.Dial(suite.WebSocketURL, nil)

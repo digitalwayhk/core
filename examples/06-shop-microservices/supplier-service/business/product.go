@@ -47,6 +47,27 @@ func EnsureSupplier(userID, name string) (*models.Supplier, error) {
 	return item, item.Save()
 }
 
+func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models.Supplier, error) {
+	item, err := models.FindSupplierByID(id)
+	if err != nil || item == nil {
+		return nil, errors.New("供应商不存在")
+	}
+	item.Name = strings.TrimSpace(name)
+	item.Enabled = enabled
+	payload := models.SupplierChangedPayload(eventID, item.UserID, "updated")
+	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	if err != nil {
+		return nil, err
+	}
+	err = models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		return action.Insert(outbox)
+	})
+	return item, err
+}
+
 func CreateProduct(ownerID, name, code string, price decimal.Decimal, id uint, eventID string) (*models.Product, error) {
 	supplier, err := models.FindSupplier(ownerID)
 	if err != nil || supplier == nil || !supplier.Enabled {

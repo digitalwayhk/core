@@ -99,18 +99,22 @@ func (s *Service) Start() {
 		}
 		return nil
 	})
-	cancelLocal, err := sc.ServiceEventBridge.SubscribeControl(contract.EventOrderChanged, func(env *event.Envelope) error {
+	orderHandler := func(env *event.Envelope) error {
 		payload := &eventdto.OrderChanged{}
 		if err := json.Unmarshal(env.Data, payload); err != nil {
 			return err
 		}
 		return models.ProcessInbox(payload.EventID, payload.EventType, func() error { return privateapi.NotifyOrderChanged(payload) })
-	})
-	if err == nil {
-		s.cancels = append(s.cancels, cancelLocal)
 	}
-	if cancelExternal, err := sc.ServiceEventBridge.SubscribeExternalControl(context.Background(), contract.SubjectOrderChanged); err == nil {
-		s.cancels = append(s.cancels, cancelExternal)
+	for _, eventType := range []string{contract.EventOrderChanged, contract.EventPaymentChanged} {
+		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, orderHandler); subscribeErr == nil {
+			s.cancels = append(s.cancels, cancel)
+		}
+	}
+	for _, subject := range []string{contract.SubjectOrderChanged, contract.SubjectPaymentChanged} {
+		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeExternalControl(context.Background(), subject); subscribeErr == nil {
+			s.cancels = append(s.cancels, cancel)
+		}
 	}
 }
 func (s *Service) Stop() {
