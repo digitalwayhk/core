@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeromicro/go-zero/zrpc"
+	"golang.org/x/sync/singleflight"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
@@ -22,7 +23,10 @@ const (
 	defaultRPCTimeout  = 2 * time.Second
 )
 
-var errTransportStopped = errors.New("grpc transport: stopped")
+var (
+	errTransportStopped = errors.New("grpc transport: stopped")
+	errEmptyEndpoint    = errors.New("grpc transport: empty endpoint")
+)
 
 type zrpcClientFactory func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Client, error)
 
@@ -30,6 +34,7 @@ type zrpcClientFactory func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Clie
 type GRPCTransport struct {
 	config config.GRPCTransportConfig
 	pool   sync.Map // endpoint -> zrpc.Client
+	init   singleflight.Group
 
 	lifecycleMu sync.RWMutex
 	stopped     bool
@@ -135,6 +140,9 @@ func (g *GRPCTransport) Health(ctx context.Context, target string) error {
 }
 
 func (g *GRPCTransport) getClient(endpoint string) (zrpc.Client, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, errEmptyEndpoint
+	}
 	g.lifecycleMu.RLock()
 	defer g.lifecycleMu.RUnlock()
 	if g.stopped {
@@ -143,28 +151,41 @@ func (g *GRPCTransport) getClient(endpoint string) (zrpc.Client, error) {
 	if cached, ok := g.pool.Load(endpoint); ok {
 		return cached.(zrpc.Client), nil
 	}
-	options, err := g.clientOptions()
-	if err != nil {
-		return nil, err
+	result := <-g.initializeClient(endpoint)
+	if result.Err != nil {
+		return nil, result.Err
 	}
-	rpcConf := zrpc.RpcClientConf{
-		Endpoints: []string{endpoint},
-		NonBlock:  true,
-		Timeout:   defaultRPCTimeout.Milliseconds(),
-		Middlewares: zrpc.ClientMiddlewaresConf{
-			Trace: true, Duration: true, Prometheus: true, Breaker: true, Timeout: true,
-		},
-	}
-	client, err := g.newClient(rpcConf, options...)
-	if err != nil {
-		return nil, err
-	}
-	actual, loaded := g.pool.LoadOrStore(endpoint, client)
-	if loaded {
-		_ = client.Conn().Close()
-		return actual.(zrpc.Client), nil
-	}
-	return client, nil
+	return result.Val.(zrpc.Client), nil
+}
+
+func (g *GRPCTransport) initializeClient(endpoint string) <-chan singleflight.Result {
+	return g.init.DoChan(endpoint, func() (any, error) {
+		if cached, ok := g.pool.Load(endpoint); ok {
+			return cached.(zrpc.Client), nil
+		}
+		options, err := g.clientOptions()
+		if err != nil {
+			return nil, err
+		}
+		rpcConf := zrpc.RpcClientConf{
+			Endpoints: []string{endpoint},
+			NonBlock:  true,
+			Timeout:   defaultRPCTimeout.Milliseconds(),
+			Middlewares: zrpc.ClientMiddlewaresConf{
+				Trace: true, Duration: true, Prometheus: true, Breaker: true, Timeout: true,
+			},
+		}
+		client, err := g.newClient(rpcConf, options...)
+		if err != nil {
+			return nil, err
+		}
+		actual, loaded := g.pool.LoadOrStore(endpoint, client)
+		if loaded {
+			_ = client.Conn().Close()
+			return actual.(zrpc.Client), nil
+		}
+		return client, nil
+	})
 }
 
 func (g *GRPCTransport) clientOptions() ([]zrpc.ClientOption, error) {

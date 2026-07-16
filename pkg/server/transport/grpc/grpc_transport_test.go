@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
@@ -114,23 +116,27 @@ func TestGRPCTransport_Supports(t *testing.T) {
 }
 
 // startRawGRPCServer starts a grpc server directly using credentials for timeout test.
-func startRawGRPCServer(t *testing.T) (addr string, stop func()) {
+func startRawGRPCServer(t *testing.T) (addr string, entered <-chan struct{}, stop func()) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	srv := grpc.NewServer()
 	// Register a handler that blocks forever to test timeout.
-	pb.RegisterCoreTransportServer(srv, &blockingServer{})
+	blocking := &blockingServer{entered: make(chan struct{})}
+	pb.RegisterCoreTransportServer(srv, blocking)
 	go srv.Serve(lis)
-	return lis.Addr().String(), srv.GracefulStop
+	return lis.Addr().String(), blocking.entered, srv.GracefulStop
 }
 
 // blockingServer is a server that never responds (for timeout tests).
 type blockingServer struct {
 	pb.UnimplementedCoreTransportServer
+	entered chan struct{}
+	once    sync.Once
 }
 
 func (b *blockingServer) Call(ctx context.Context, _ *pb.PayloadRequest) (*pb.PayloadResponse, error) {
+	b.once.Do(func() { close(b.entered) })
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
@@ -211,15 +217,75 @@ func TestGRPCTransport_ConnectionPooling_CloseEvictsAll(t *testing.T) {
 }
 
 func TestGRPCTransport_Timeout(t *testing.T) {
-	addr, stop := startRawGRPCServer(t)
+	addr, entered, stop := startRawGRPCServer(t)
 	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 0) // immediately expire
-	defer cancel()
-
 	tr := newInsecureTransport()
-	_, err := tr.Send(ctx, &coretypes.PayLoad{}, addr)
-	assert.Error(t, err)
+	defer tr.Stop(context.Background())
+	started := time.Now()
+	_, err := tr.Send(context.Background(), &coretypes.PayLoad{}, addr)
+	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+	assert.Less(t, time.Since(started), 4*time.Second)
+	select {
+	case <-entered:
+	default:
+		t.Fatal("blocking RPC was not entered")
+	}
+}
+
+func TestGRPCTransport_StopInterruptsInFlightSend(t *testing.T) {
+	addr, entered, stopServer := startRawGRPCServer(t)
+	defer stopServer()
+	transport := newInsecureTransport()
+	result := make(chan error, 1)
+	go func() {
+		_, err := transport.Send(context.Background(), &coretypes.PayLoad{}, addr)
+		result <- err
+	}()
+	<-entered
+	require.NoError(t, transport.Stop(context.Background()))
+	select {
+	case err := <-result:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("in-flight Send did not return after Stop")
+	}
+	assert.Zero(t, transport.PooledConns())
+}
+
+func TestGRPCTransport_StopInterruptsInFlightHealth(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	blocking := &blockingHealthServer{entered: make(chan struct{})}
+	grpc_health_v1.RegisterHealthServer(server, blocking)
+	go server.Serve(lis)
+	defer server.GracefulStop()
+
+	transport := newInsecureTransport()
+	result := make(chan error, 1)
+	go func() { result <- transport.Health(context.Background(), lis.Addr().String()) }()
+	<-blocking.entered
+	require.NoError(t, transport.Stop(context.Background()))
+	select {
+	case err := <-result:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("in-flight Health did not return after Stop")
+	}
+	assert.Zero(t, transport.PooledConns())
+}
+
+type blockingHealthServer struct {
+	grpc_health_v1.UnimplementedHealthServer
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingHealthServer) Check(ctx context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	s.once.Do(func() { close(s.entered) })
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func TestGRPCTransport_ConcurrentCallsReuseOneZRPCClient(t *testing.T) {

@@ -8,14 +8,17 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
@@ -115,14 +118,49 @@ func TestGRPCTransport_RejectsWrongServerName(t *testing.T) {
 	require.Error(t, transport.Health(ctx, addr))
 }
 
-func TestGRPCTransport_LoadOrStoreClosesLosingZRPCClients(t *testing.T) {
-	const workers = 32
+func TestGRPCTransport_RejectsCertificateSignedByDifferentValidCA(t *testing.T) {
+	serverFiles := createTestCertificateFiles(t)
+	clientFiles := createTestCertificateFiles(t)
+	addr, stop := startSecureTestServer(t, serverFiles, false)
+	defer stop()
+	newTransport := func() *GRPCTransport {
+		return New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+			Mode: "tls", CAFile: clientFiles.caFile, CertFile: clientFiles.clientCertFile,
+			KeyFile: clientFiles.clientKeyFile, ServerName: "core.test",
+		}})
+	}
+	for _, call := range []struct {
+		name string
+		run  func(context.Context, *GRPCTransport) error
+	}{
+		{name: "health", run: func(ctx context.Context, transport *GRPCTransport) error {
+			return transport.Health(ctx, addr)
+		}},
+		{name: "send", run: func(ctx context.Context, transport *GRPCTransport) error {
+			_, err := transport.Send(ctx, &coretypes.PayLoad{}, addr)
+			return err
+		}},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			transport := newTransport()
+			defer transport.Stop(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			err := call.run(ctx, transport)
+			require.ErrorContains(t, err, "certificate signed by unknown authority")
+		})
+	}
+}
+
+func TestGRPCTransport_ConcurrentInitializationCallsFactoryOnce(t *testing.T) {
+	const workers = 100
 	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})
-	entered := make(chan struct{}, workers)
+	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	var connsMu sync.Mutex
-	var conns []*googlegrpc.ClientConn
+	var calls atomic.Int64
+	var conn *googlegrpc.ClientConn
 	transport.newClient = func(conf zrpc.RpcClientConf, _ ...zrpc.ClientOption) (zrpc.Client, error) {
+		calls.Add(1)
 		assert.Equal(t, []string{"127.0.0.1:19090"}, conf.Endpoints)
 		assert.True(t, conf.NonBlock)
 		assert.Equal(t, int64(2000), conf.Timeout)
@@ -131,50 +169,150 @@ func TestGRPCTransport_LoadOrStoreClosesLosingZRPCClients(t *testing.T) {
 		assert.True(t, conf.Middlewares.Prometheus)
 		assert.True(t, conf.Middlewares.Breaker)
 		assert.True(t, conf.Middlewares.Timeout)
-		conn, err := googlegrpc.NewClient("passthrough:///unused", googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+		created, err := googlegrpc.NewClient("passthrough:///unused", googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, err
 		}
-		connsMu.Lock()
-		conns = append(conns, conn)
-		connsMu.Unlock()
+		conn = created
 		entered <- struct{}{}
 		<-release
-		return testZRPCClient{conn: conn}, nil
+		return testZRPCClient{conn: created}, nil
 	}
 
-	errs := make(chan error, workers)
-	var group sync.WaitGroup
-	group.Add(workers)
-	for i := 0; i < workers; i++ {
+	results := make([]<-chan singleflight.Result, 0, workers)
+	results = append(results, transport.initializeClient("127.0.0.1:19090"))
+	<-entered
+	joined := make(chan (<-chan singleflight.Result), workers-1)
+	for i := 1; i < workers; i++ {
+		go func() { joined <- transport.initializeClient("127.0.0.1:19090") }()
+	}
+	for i := 1; i < workers; i++ {
+		results = append(results, <-joined)
+	}
+	close(release)
+	for _, result := range results {
+		initialized := <-result
+		require.NoError(t, initialized.Err)
+		require.NotNil(t, initialized.Val)
+	}
+	assert.Equal(t, int64(1), calls.Load())
+	assert.Equal(t, 1, transport.PooledConns())
+	require.NoError(t, transport.Stop(context.Background()))
+	assert.Equal(t, connectivity.Shutdown, conn.GetState())
+}
+
+func TestGRPCTransport_ConcurrentSendCallsZRPCFactoryExactlyOnce(t *testing.T) {
+	addr, stop := startInsecureCoreTestServer(t)
+	defer stop()
+	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})
+	defer transport.Stop(context.Background())
+	var calls atomic.Int64
+	transport.newClient = func(conf zrpc.RpcClientConf, options ...zrpc.ClientOption) (zrpc.Client, error) {
+		calls.Add(1)
+		return zrpc.NewClient(conf, options...)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 100)
+	var workers sync.WaitGroup
+	workers.Add(100)
+	for i := 0; i < 100; i++ {
 		go func() {
-			defer group.Done()
-			_, err := transport.getClient("127.0.0.1:19090")
+			defer workers.Done()
+			<-start
+			_, err := transport.Send(context.Background(), &coretypes.PayLoad{TraceID: "singleflight"}, addr)
 			errs <- err
 		}()
 	}
-	for i := 0; i < workers; i++ {
-		<-entered
-	}
-	close(release)
-	group.Wait()
+	close(start)
+	workers.Wait()
 	close(errs)
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Len(t, conns, workers)
+	assert.Equal(t, int64(1), calls.Load())
 	assert.Equal(t, 1, transport.PooledConns())
-	shutdown := 0
-	for _, conn := range conns {
-		if conn.GetState() == connectivity.Shutdown {
-			shutdown++
-		}
+}
+
+func TestGRPCTransport_ConcurrentInitializationSharesFailureAndLaterRetries(t *testing.T) {
+	const workers = 100
+	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})
+	wantErr := errors.New("dial failed")
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var calls atomic.Int64
+	transport.newClient = func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Client, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return nil, wantErr
 	}
-	assert.Equal(t, workers-1, shutdown)
+
+	results := make([]<-chan singleflight.Result, 0, workers)
+	results = append(results, transport.initializeClient("127.0.0.1:19090"))
+	<-entered
+	joined := make(chan (<-chan singleflight.Result), workers-1)
+	for i := 1; i < workers; i++ {
+		go func() { joined <- transport.initializeClient("127.0.0.1:19090") }()
+	}
+	for i := 1; i < workers; i++ {
+		results = append(results, <-joined)
+	}
+	close(release)
+	for _, result := range results {
+		initialized := <-result
+		require.ErrorIs(t, initialized.Err, wantErr)
+		assert.Nil(t, initialized.Val)
+	}
+	assert.Equal(t, int64(1), calls.Load())
+	assert.Zero(t, transport.PooledConns())
+
+	conn, err := googlegrpc.NewClient("passthrough:///unused", googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	transport.newClient = func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Client, error) {
+		calls.Add(1)
+		return testZRPCClient{conn: conn}, nil
+	}
+	client, err := transport.getClient("127.0.0.1:19090")
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.Equal(t, int64(2), calls.Load())
 	require.NoError(t, transport.Stop(context.Background()))
-	for _, conn := range conns {
-		assert.Equal(t, connectivity.Shutdown, conn.GetState())
+}
+
+func TestGRPCTransport_DifferentEndpointsInitializeInParallel(t *testing.T) {
+	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	transport.newClient = func(conf zrpc.RpcClientConf, _ ...zrpc.ClientOption) (zrpc.Client, error) {
+		entered <- conf.Endpoints[0]
+		<-release
+		conn, err := googlegrpc.NewClient("passthrough:///unused", googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+		return testZRPCClient{conn: conn}, err
 	}
+	first := transport.initializeClient("127.0.0.1:19090")
+	second := transport.initializeClient("127.0.0.1:19091")
+	seen := map[string]bool{<-entered: true, <-entered: true}
+	assert.True(t, seen["127.0.0.1:19090"])
+	assert.True(t, seen["127.0.0.1:19091"])
+	close(release)
+	require.NoError(t, (<-first).Err)
+	require.NoError(t, (<-second).Err)
+	assert.Equal(t, 2, transport.PooledConns())
+	require.NoError(t, transport.Stop(context.Background()))
+}
+
+func TestGRPCTransport_EmptyEndpointFailsBeforeClientCreation(t *testing.T) {
+	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})
+	var calls atomic.Int64
+	transport.newClient = func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Client, error) {
+		calls.Add(1)
+		return nil, errors.New("factory must not be called")
+	}
+	client, err := transport.getClient("  ")
+	require.ErrorIs(t, err, errEmptyEndpoint)
+	assert.Nil(t, client)
+	assert.Zero(t, calls.Load())
 }
 
 func TestGRPCTransport_StopWaitsForConcurrentClientCreationAndLeavesPoolEmpty(t *testing.T) {
@@ -211,6 +349,19 @@ type testZRPCClient struct {
 }
 
 func (c testZRPCClient) Conn() *googlegrpc.ClientConn { return c.conn }
+
+func startInsecureCoreTestServer(t *testing.T) (string, func()) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := googlegrpc.NewServer()
+	pb.RegisterCoreTransportServer(server, &secureTestCoreServer{})
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(server, healthServer)
+	go server.Serve(lis)
+	return lis.Addr().String(), server.GracefulStop
+}
 
 func startSecureTestServer(t *testing.T, files testCertificateFiles, requireMTLS bool) (string, func()) {
 	t.Helper()
