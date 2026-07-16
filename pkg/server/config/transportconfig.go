@@ -79,7 +79,7 @@ func (t *TransportConfig) ApplyServerDefaults(cluster ClusterConfig, httpPort in
 	if t.GRPC.Port == 0 {
 		t.GRPC.Port = httpPort + 10000
 	}
-	if t.GRPC.Security.Mode != "" {
+	if t.GRPC.Security.Mode != "" || t.GRPC.Security.hasConfiguredFields() {
 		return
 	}
 	if cluster.Mode == "off" || !isExternalClusterProvider(cluster.Provider) {
@@ -151,7 +151,7 @@ func (t *TransportConfig) ValidateForServer(cluster ClusterConfig, runIP string)
 func (s GRPCSecurityConfig) validate() error {
 	switch s.Mode {
 	case "":
-		if s.CAFile != "" || s.CertFile != "" || s.KeyFile != "" || s.ServerName != "" {
+		if s.hasConfiguredFields() {
 			return errors.New("Transport.GRPC.Security.Mode is required when security fields are configured")
 		}
 		return nil
@@ -189,6 +189,10 @@ func (s GRPCSecurityConfig) validate() error {
 		return fmt.Errorf("Transport.GRPC.Security.Mode=%q is invalid; use insecure, tls, mtls, or mesh", s.Mode)
 	}
 	return nil
+}
+
+func (s GRPCSecurityConfig) hasConfiguredFields() bool {
+	return s.CAFile != "" || s.CertFile != "" || s.KeyFile != "" || s.ServerName != ""
 }
 
 func isExternalClusterProvider(provider string) bool {

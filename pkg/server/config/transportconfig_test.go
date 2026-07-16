@@ -191,6 +191,51 @@ func TestTransportConfigSecurityAllowsEmptyModeWithoutFields(t *testing.T) {
 	require.NoError(t, tr.Validate())
 }
 
+func TestServerConfigDoesNotInferGRPCSecurityModeWhenFieldsConfigured(t *testing.T) {
+	environments := []struct {
+		name string
+		new  func() ServerConfig
+	}{
+		{name: "local", new: func() ServerConfig {
+			cfg := ServerConfig{}
+			cfg.Port = 8080
+			return cfg
+		}},
+		{name: "cluster off", new: func() ServerConfig {
+			cfg := ServerConfig{Cluster: ClusterConfig{Mode: "off", Provider: "redis"}}
+			cfg.Port = 8080
+			return cfg
+		}},
+		{name: "redis", new: func() ServerConfig { return externalServerConfig("redis") }},
+		{name: "etcd", new: func() ServerConfig { return externalServerConfig("etcd") }},
+		{name: "consul", new: func() ServerConfig { return externalServerConfig("consul") }},
+	}
+	fields := []struct {
+		name     string
+		security GRPCSecurityConfig
+	}{
+		{name: "ca file", security: GRPCSecurityConfig{CAFile: "ca.crt"}},
+		{name: "cert file", security: GRPCSecurityConfig{CertFile: "server.crt"}},
+		{name: "key file", security: GRPCSecurityConfig{KeyFile: "server.key"}},
+		{name: "server name", security: GRPCSecurityConfig{ServerName: "core.internal"}},
+	}
+	for _, environment := range environments {
+		for _, field := range fields {
+			t.Run(environment.name+"/"+field.name, func(t *testing.T) {
+				cfg := environment.new()
+				cfg.Transport.GRPC.Security = field.security
+
+				cfg.ApplyDefaults()
+
+				assert.Empty(t, cfg.Transport.GRPC.Security.Mode)
+				err := cfg.Validate()
+				require.ErrorContains(t, err, "Transport.GRPC.Security.Mode")
+				require.ErrorContains(t, err, "Mode is required when security fields are configured")
+			})
+		}
+	}
+}
+
 func TestTransportConfigSecurityRejectsCertificatesForInsecureAndMesh(t *testing.T) {
 	tests := []struct {
 		name     string
