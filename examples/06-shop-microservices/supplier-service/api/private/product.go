@@ -22,24 +22,6 @@ func trustedSupplier(req servertypes.IRequest) (string, error) {
 	return uid, nil
 }
 
-// GetProductSnapshot 供 Order Service 在下单时获取可售商品快照。
-type GetProductSnapshot struct {
-	ProductID uint `json:"productID"`
-}
-
-func (g *GetProductSnapshot) Parse(req servertypes.IRequest) error { return req.Bind(g) }
-func (g *GetProductSnapshot) Validation(servertypes.IRequest) error {
-	if g.ProductID == 0 {
-		return errors.New("商品 ID 不能为空")
-	}
-	return nil
-}
-func (g *GetProductSnapshot) Do(servertypes.IRequest) (interface{}, error) {
-	return business.ProductSnapshot(g.ProductID)
-}
-func (*GetProductSnapshot) GetResponse() interface{}              { return &supplierdto.ProductSnapshot{} }
-func (g *GetProductSnapshot) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(g) }
-
 // AddProduct 为当前供应商新增默认下架的商品。
 type AddProduct struct {
 	Name  string          `json:"name"`

@@ -76,6 +76,22 @@ type Outbox struct {
 	Published bool   `gorm:"index" json:"published"`
 }
 
+type Inbox struct {
+	*entity.Model
+	EventID   string `gorm:"not null;uniqueIndex"`
+	EventType string `gorm:"not null;index"`
+}
+
+func NewInbox() *Inbox { return &Inbox{Model: entity.NewModel()} }
+func (i *Inbox) NewModel() {
+	if i.Model == nil {
+		i.Model = entity.NewModel()
+	}
+}
+func (*Inbox) GetLocalDBName() string  { return databaseName }
+func (*Inbox) GetRemoteDBName() string { return databaseName }
+func (i *Inbox) GetHash() string       { return utils.HashCodes(i.EventID) }
+
 func NewOutbox() *Outbox { return &Outbox{Model: entity.NewModel()} }
 func (o *Outbox) NewModel() {
 	if o.Model == nil {
@@ -104,7 +120,7 @@ func ensureWith(a persistencetypes.IDataAction, model interface{}) error {
 }
 
 func EnsureStorage() error {
-	for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOutbox()} {
+	for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOutbox(), NewInbox()} {
 		if err := ensureWith(dataAction(), model); err != nil {
 			return err
 		}
@@ -233,6 +249,32 @@ func MarkOutboxPublished(item *Outbox) error {
 	item.Published = true
 	item.SetUpdatedAt(time.Now().UTC())
 	return dataAction().Update(item)
+}
+
+var inboxMu sync.Mutex
+
+func ProcessInbox(eventID, eventType string, operation func() error) error {
+	inboxMu.Lock()
+	defer inboxMu.Unlock()
+	if err := ensureWith(dataAction(), NewInbox()); err != nil {
+		return err
+	}
+	var items []*Inbox
+	q := search(NewInbox(), 1)
+	q.AddWhereN("EventID", eventID)
+	if err := dataAction().Load(q, &items); err != nil {
+		return err
+	}
+	if len(items) > 0 {
+		return nil
+	}
+	if err := operation(); err != nil {
+		return err
+	}
+	item := NewInbox()
+	item.EventID, item.EventType = eventID, eventType
+	item.SetHashcode(item.GetHash())
+	return dataAction().Insert(item)
 }
 
 func ProductChangedPayload(eventID, supplierID string, productID uint, action string) eventdto.ProductChanged {

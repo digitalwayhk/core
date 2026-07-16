@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	orderapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/private"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models"
@@ -80,7 +81,7 @@ func (g *GetOrders) SetUserID(uid, _ string) { g.subscriptionUserID = strings.Tr
 func (g *GetOrders) GetUserID() string       { return g.subscriptionUserID }
 func (g *GetOrders) GetHashKey() uint64      { return utils.HashCode64(g.subscriptionUserID) }
 func (g *GetOrders) NoticeFiltersRouter(message interface{}, api servertypes.IRouter) (bool, interface{}) {
-	event, ok := message.(*orderdto.Order)
+	event, ok := message.(*eventdto.OrderChanged)
 	if !ok || event == nil {
 		return false, nil
 	}

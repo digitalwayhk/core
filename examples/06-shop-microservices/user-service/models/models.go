@@ -44,6 +44,22 @@ type Address struct {
 	Detail    string `json:"detail"`
 }
 
+type Inbox struct {
+	*entity.Model
+	EventID   string `gorm:"not null;uniqueIndex"`
+	EventType string `gorm:"not null;index"`
+}
+
+func NewInbox() *Inbox { return &Inbox{Model: entity.NewModel()} }
+func (i *Inbox) NewModel() {
+	if i.Model == nil {
+		i.Model = entity.NewModel()
+	}
+}
+func (*Inbox) GetLocalDBName() string  { return databaseName }
+func (*Inbox) GetRemoteDBName() string { return databaseName }
+func (i *Inbox) GetHash() string       { return utils.HashCodes(i.EventID) }
+
 func NewAddress() *Address { return &Address{Model: entity.NewModel()} }
 func (a *Address) NewModel() {
 	if a.Model == nil {
@@ -71,7 +87,7 @@ func ensure(model interface{}) error {
 	return dataAction().Load(search(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
 }
 func EnsureStorage() error {
-	for _, m := range []interface{}{NewUser(), NewAddress()} {
+	for _, m := range []interface{}{NewUser(), NewAddress(), NewInbox()} {
 		if err := ensure(m); err != nil {
 			return err
 		}
@@ -153,4 +169,30 @@ func AddressDTO(item *Address) *userdto.Address {
 }
 func AddressSnapshot(item *Address) userdto.AddressSnapshot {
 	return userdto.AddressSnapshot{AddressID: item.ID, Recipient: item.Recipient, Phone: item.Phone, Region: item.Region, Detail: item.Detail}
+}
+
+var inboxMu sync.Mutex
+
+func ProcessInbox(eventID, eventType string, operation func() error) error {
+	inboxMu.Lock()
+	defer inboxMu.Unlock()
+	if err := ensure(NewInbox()); err != nil {
+		return err
+	}
+	var items []*Inbox
+	q := search(NewInbox(), 1)
+	q.AddWhereN("EventID", eventID)
+	if err := dataAction().Load(q, &items); err != nil {
+		return err
+	}
+	if len(items) > 0 {
+		return nil
+	}
+	if err := operation(); err != nil {
+		return err
+	}
+	item := NewInbox()
+	item.EventID, item.EventType = eventID, eventType
+	item.SetHashcode(item.GetHash())
+	return dataAction().Insert(item)
 }

@@ -10,7 +10,7 @@ import (
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
-	supplierapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/private"
+	supplierapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/call"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )

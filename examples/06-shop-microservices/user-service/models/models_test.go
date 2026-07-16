@@ -2,6 +2,7 @@ package models
 
 import (
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -18,6 +19,14 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
+	var calls atomic.Int32
+	operation := func() error { calls.Add(1); return nil }
+	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 func TestAddressOwnershipUsesTrustedUser(t *testing.T) {
