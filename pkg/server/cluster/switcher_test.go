@@ -34,6 +34,40 @@ func (p *closeTrackingProvider) Close() error {
 	return p.DiscoveryProvider.Close()
 }
 
+type retryCloseProvider struct {
+	cluster.DiscoveryProvider
+	closeCount atomic.Int32
+	failFirst  atomic.Bool
+	block      <-chan struct{}
+}
+
+type contextCloseProvider struct {
+	cluster.DiscoveryProvider
+	closeCount        atomic.Int32
+	closeContextCount atomic.Int32
+}
+
+func (p *contextCloseProvider) Close() error {
+	p.closeCount.Add(1)
+	return errors.New("不应调用普通 Close")
+}
+
+func (p *contextCloseProvider) CloseContext(context.Context) error {
+	p.closeContextCount.Add(1)
+	return p.DiscoveryProvider.Close()
+}
+
+func (p *retryCloseProvider) Close() error {
+	p.closeCount.Add(1)
+	if p.block != nil {
+		<-p.block
+	}
+	if p.failFirst.CompareAndSwap(true, false) {
+		return errors.New("模拟首次关闭失败")
+	}
+	return p.DiscoveryProvider.Close()
+}
+
 func (p *switcherTestProvider) List(
 	ctx context.Context,
 	serviceName string,
@@ -86,7 +120,7 @@ func TestClusterSwitcher_CompletePromotesPendingProvider(t *testing.T) {
 	assert.Equal(t, provB.Name(), switcher.Current().Name())
 }
 
-func TestClusterSwitcher_CompleteDefersOldCloseUntilFinalize(t *testing.T) {
+func TestClusterSwitcher_CompleteClosesOldProviderForLegacyCallers(t *testing.T) {
 	ctx := context.Background()
 	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
 	old := &closeTrackingProvider{DiscoveryProvider: oldBase}
@@ -95,14 +129,81 @@ func TestClusterSwitcher_CompleteDefersOldCloseUntilFinalize(t *testing.T) {
 	require.NoError(t, switcher.Begin(ctx, pending))
 	require.NoError(t, switcher.Complete(ctx))
 	assert.Same(t, pending, switcher.Current())
-	assert.Zero(t, old.closeCount.Load(), "Complete 只提升 pending，不得提前关闭旧 provider")
+	assert.Equal(t, int32(1), old.closeCount.Load(), "仅持有 ProviderSwitcher 的调用方不得泄漏旧 provider")
+	_ = pending.Close()
+}
 
-	finalizer, ok := switcher.(cluster.ProviderSwitchFinalizer)
+func TestClusterSwitcher_TransactionPromoteDefersOldCloseUntilFinalize(t *testing.T) {
+	ctx := context.Background()
+	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	old := &closeTrackingProvider{DiscoveryProvider: oldBase}
+	pending := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(old, "svc")
+	transaction, ok := switcher.(cluster.ProviderSwitchTransaction)
 	require.True(t, ok)
-	require.NoError(t, finalizer.Finalize(ctx))
+	require.NoError(t, switcher.Begin(ctx, pending))
+	require.NoError(t, transaction.Promote(ctx))
+	require.NoError(t, transaction.Promote(ctx), "已提升且 retired 存在时 Promote 必须幂等")
+	assert.Same(t, pending, switcher.Current())
+	assert.Zero(t, old.closeCount.Load(), "Promote 后必须保留旧 provider 供运行时同步")
+
+	require.NoError(t, transaction.Finalize(ctx))
 	assert.Equal(t, int32(1), old.closeCount.Load())
-	require.NoError(t, finalizer.Finalize(ctx), "Finalize 必须幂等")
+	require.NoError(t, transaction.Finalize(ctx), "Finalize 必须幂等")
 	assert.Equal(t, int32(1), old.closeCount.Load())
+	_ = pending.Close()
+}
+
+func TestClusterSwitcher_CompleteRetriesFinalizeFailure(t *testing.T) {
+	ctx := context.Background()
+	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	old := &retryCloseProvider{DiscoveryProvider: oldBase}
+	old.failFirst.Store(true)
+	pending := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(old, "svc")
+	require.NoError(t, switcher.Begin(ctx, pending))
+	require.Error(t, switcher.Complete(ctx))
+	require.NoError(t, switcher.Complete(ctx), "再次 Complete 必须重试 Finalize")
+	assert.Equal(t, int32(2), old.closeCount.Load())
+	_ = pending.Close()
+}
+
+func TestClusterSwitcher_FinalizeTimeoutDoesNotHoldOperationLock(t *testing.T) {
+	release := make(chan struct{})
+	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	old := &retryCloseProvider{DiscoveryProvider: oldBase, block: release}
+	pending := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(old, "svc")
+	transaction := switcher.(cluster.ProviderSwitchTransaction)
+	require.NoError(t, switcher.Begin(context.Background(), pending))
+	require.NoError(t, transaction.Promote(context.Background()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := transaction.Finalize(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	beginCtx, beginCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer beginCancel()
+	err = switcher.Begin(beginCtx, cluster.NewLocalProvider(time.Second, time.Second, time.Second))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "尚未完成关闭", "Begin 应快速报告 retired，而不是等待 Close")
+	close(release)
+	require.NoError(t, transaction.Finalize(context.Background()))
+	_ = pending.Close()
+}
+
+func TestClusterSwitcher_FinalizePrefersContextCloser(t *testing.T) {
+	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	old := &contextCloseProvider{DiscoveryProvider: oldBase}
+	pending := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(old, "svc")
+	transaction := switcher.(cluster.ProviderSwitchTransaction)
+	require.NoError(t, switcher.Begin(context.Background(), pending))
+	require.NoError(t, transaction.Promote(context.Background()))
+	require.NoError(t, transaction.Finalize(context.Background()))
+	assert.Zero(t, old.closeCount.Load())
+	assert.Equal(t, int32(1), old.closeContextCount.Load())
 	_ = pending.Close()
 }
 

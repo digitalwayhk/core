@@ -101,10 +101,17 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 			(&consulapi.QueryOptions{}).WithContext(cleanupCtx))
 		cancel()
 		c.nodeServices.Delete(node.ID)
-		if cleanupErr != nil {
+		compensated := cleanupErr == nil || errors.Is(cleanupErr, ErrNodeNotFound)
+		if cleanupErr != nil && !errors.Is(cleanupErr, ErrNodeNotFound) {
 			cleanupErr = fmt.Errorf("consul: cleanup service after ttl failure: %w", cleanupErr)
 		}
-		return errors.Join(fmt.Errorf("consul: update ttl after register: %w", ttlErr), cleanupErr)
+		return &RegistrationError{
+			Cause: errors.Join(
+				fmt.Errorf("consul: update ttl after register: %w", ttlErr),
+				cleanupErr,
+			),
+			Compensated: compensated,
+		}
 	}
 	return nil
 }

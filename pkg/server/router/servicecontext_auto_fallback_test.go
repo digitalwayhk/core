@@ -2,8 +2,12 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -154,6 +158,88 @@ func TestServiceContextAutoFallbackCleansPartiallyRegisteredProvider(t *testing.
 	assert.Equal(t, int32(1), local.registerCount.Load())
 	require.Same(t, local, sc.ClusterProvider)
 	sc.SetRunState(false)
+}
+
+func TestServiceContextAutoFallbackUsesConsulCompensationWithoutDoubleDeregister(t *testing.T) {
+	consulServer, deregisterCount := newFailingTTLConsulServer(t, false)
+	provider, err := cluster.NewConsulProvider(consulServer.URL)
+	require.NoError(t, err)
+	local := &autoFallbackProvider{name: "local"}
+	sc := newAutoFallbackContext(t, "consul-compensated")
+	sc.ClusterProvider = provider
+	sc.localFallbackProvider = local
+	sc.ServiceResolver.SetProvider(provider)
+
+	sc.SetRunState(true)
+	require.True(t, sc.IsRun())
+	assert.Equal(t, int32(1), deregisterCount.Load(), "Consul 已补偿成功时不得二次注销")
+	assert.Equal(t, int32(1), local.registerCount.Load())
+	require.Same(t, local, sc.ClusterProvider)
+	sc.SetRunState(false)
+}
+
+func TestServiceContextAutoFallbackRejectsConsulWhenCompensationFails(t *testing.T) {
+	consulServer, deregisterCount := newFailingTTLConsulServer(t, true)
+	provider, err := cluster.NewConsulProvider(consulServer.URL)
+	require.NoError(t, err)
+	local := &autoFallbackProvider{name: "local"}
+	sc := newAutoFallbackContext(t, "consul-compensation-failed")
+	sc.ClusterProvider = provider
+	sc.localFallbackProvider = local
+	sc.ServiceResolver.SetProvider(provider)
+
+	sc.SetRunState(true)
+	require.False(t, sc.IsRun())
+	assert.Equal(t, int32(2), deregisterCount.Load(), "补偿失败应再次尝试清理，但仍须 fail closed")
+	assert.Zero(t, local.registerCount.Load(), "补偿失败不得 fallback")
+	require.Error(t, sc.RuntimeError())
+}
+
+func newFailingTTLConsulServer(t *testing.T, failDeregister bool) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var registered atomic.Bool
+	var deregisterCount atomic.Int32
+	var serviceMu sync.RWMutex
+	var service map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/health/service/"):
+			w.Header().Set("Content-Type", "application/json")
+			if !registered.Load() {
+				_, _ = fmt.Fprint(w, "[]")
+				return
+			}
+			serviceMu.RLock()
+			current := service
+			serviceMu.RUnlock()
+			require.NoError(t, json.NewEncoder(w).Encode([]map[string]interface{}{{
+				"Service": current,
+				"Checks":  []interface{}{},
+			}}))
+		case r.URL.Path == "/v1/agent/service/register":
+			var registration map[string]interface{}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&registration))
+			serviceMu.Lock()
+			service = registration
+			serviceMu.Unlock()
+			registered.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/check/update/"):
+			http.Error(w, "ttl failed", http.StatusInternalServerError)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/service/deregister/"):
+			deregisterCount.Add(1)
+			if failDeregister {
+				http.Error(w, "cleanup failed", http.StatusInternalServerError)
+				return
+			}
+			registered.Store(false)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, &deregisterCount
 }
 
 func TestServiceContextAutoFallbackFailsClosedWhenPartialRegistrationCleanupFails(t *testing.T) {

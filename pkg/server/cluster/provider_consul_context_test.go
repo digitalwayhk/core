@@ -130,11 +130,44 @@ func TestConsulProviderRegisterCleansRemoteEntryWhenTTLUpdateFails(t *testing.T)
 
 	err = provider.Register(context.Background(), &NodeInfo{ID: "node", ServiceName: "orders"})
 	require.Error(t, err)
+	var registrationErr *RegistrationError
+	require.ErrorAs(t, err, &registrationErr)
+	assert.True(t, registrationErr.Compensated)
+	require.Error(t, registrationErr.Cause)
 	assert.Contains(t, err.Error(), "ttl")
 	assert.True(t, deregistered.Load(), "TTL 更新失败后必须补偿注销远端服务")
 	assert.False(t, registered.Load(), "TTL 更新失败后不得留下远端服务记录")
 	_, cached := provider.nodeServices.Load("node")
 	assert.False(t, cached, "TTL 更新失败后必须删除本地 nodeServices 映射")
+}
+
+func TestConsulProviderRegisterReportsFailedCompensation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/health/service/"):
+			_, _ = fmt.Fprint(w, "[]")
+		case r.URL.Path == "/v1/agent/service/register":
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/check/update/"):
+			http.Error(w, "ttl failed", http.StatusInternalServerError)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/service/deregister/"):
+			http.Error(w, "cleanup failed", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	provider, err := NewConsulProvider(server.URL)
+	require.NoError(t, err)
+
+	err = provider.Register(context.Background(), &NodeInfo{ID: "node", ServiceName: "orders"})
+	require.Error(t, err)
+	var registrationErr *RegistrationError
+	require.ErrorAs(t, err, &registrationErr)
+	assert.False(t, registrationErr.Compensated)
+	assert.Error(t, registrationErr.Cause)
+	assert.Contains(t, err.Error(), "ttl failed")
+	assert.Contains(t, err.Error(), "cleanup failed")
 }
 
 func TestConsulProviderOperationsHonorContext(t *testing.T) {

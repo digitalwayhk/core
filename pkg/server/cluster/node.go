@@ -90,17 +90,26 @@ type ProviderSwitcher interface {
 	// Begin starts the migration to the new provider.
 	Begin(ctx context.Context, to DiscoveryProvider) error
 
-	// Complete promotes the pending provider. The old provider remains open
-	// until an optional ProviderSwitchFinalizer closes it after runtime sync.
+	// Complete promotes the pending provider and closes the old provider.
+	// Callers that need runtime synchronization between those phases may use
+	// the optional ProviderSwitchTransaction interface.
 	Complete(ctx context.Context) error
 
 	// Rollback aborts and reverts to the old provider.
 	Rollback(ctx context.Context) error
 }
 
-// ProviderSwitchFinalizer completes the second phase of a provider switch.
-// It is intentionally separate from ProviderSwitcher so existing custom
-// switchers and test fakes remain source compatible.
-type ProviderSwitchFinalizer interface {
+// ProviderSwitchTransaction exposes the two phases required by ServiceContext:
+// Promote changes the discovery authority while retaining the old provider;
+// Finalize closes that retired provider after runtime state is synchronized.
+// It is separate from ProviderSwitcher to preserve legacy implementations.
+type ProviderSwitchTransaction interface {
+	Promote(ctx context.Context) error
 	Finalize(ctx context.Context) error
+}
+
+// ContextCloser is an optional provider capability for cancellable shutdown.
+// DiscoveryProvider intentionally keeps its original Close contract.
+type ContextCloser interface {
+	CloseContext(ctx context.Context) error
 }

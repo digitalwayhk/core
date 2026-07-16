@@ -105,7 +105,8 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 		}, nil
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	var err error
 	switch c.Action {
 	case "begin":
@@ -115,13 +116,18 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 		}
 		err = sc.ClusterSwitcher.Begin(ctx, to)
 	case "complete":
-		err = sc.ClusterSwitcher.Complete(ctx)
-		if err == nil {
-			err = sc.SyncProviderAfterSwitch()
-		}
-		if err == nil {
-			if finalizer, ok := sc.ClusterSwitcher.(cluster.ProviderSwitchFinalizer); ok {
-				err = finalizer.Finalize(ctx)
+		if transaction, ok := sc.ClusterSwitcher.(cluster.ProviderSwitchTransaction); ok {
+			err = transaction.Promote(ctx)
+			if err == nil {
+				err = sc.SyncProviderAfterSwitch()
+			}
+			if err == nil {
+				err = transaction.Finalize(ctx)
+			}
+		} else {
+			err = sc.ClusterSwitcher.Complete(ctx)
+			if err == nil {
+				err = sc.SyncProviderAfterSwitch()
 			}
 		}
 	case "rollback":

@@ -995,7 +995,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 				if own.Config.Cluster.Mode == "auto" && provider != own.localFallback() {
 					failedProvider := provider
 					registerErr := err
-					if cleanupErr := own.cleanupFailedRegistration(failedProvider, node.ID); cleanupErr != nil {
+					if cleanupErr := own.cleanupFailedRegistration(failedProvider, node.ID, registerErr); cleanupErr != nil {
 						err = errors.Join(registerErr, cleanupErr)
 					} else {
 						provider = own.localFallback()
@@ -1319,10 +1319,28 @@ func (own *ServiceContext) startMembership(
 	return membership, nil
 }
 
-func (own *ServiceContext) cleanupFailedRegistration(provider cluster.DiscoveryProvider, nodeID string) error {
+func (own *ServiceContext) cleanupFailedRegistration(
+	provider cluster.DiscoveryProvider,
+	nodeID string,
+	registerErr error,
+) error {
+	var registrationErr *cluster.RegistrationError
+	if errors.As(registerErr, &registrationErr) && registrationErr.Compensated {
+		return nil
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 	defer cancel()
 	err := provider.Deregister(cleanupCtx, nodeID)
+	if registrationErr != nil {
+		if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
+			return fmt.Errorf("cluster registration compensation was not confirmed: %w", registerErr)
+		}
+		return errors.Join(
+			fmt.Errorf("cluster registration compensation was not confirmed: %w", registerErr),
+			fmt.Errorf("cleanup failed cluster registration for node %s using provider %s: %w",
+				nodeID, provider.Name(), err),
+		)
+	}
 	if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,8 +20,10 @@ import (
 type manageSwitchFinalizer struct {
 	current     cluster.DiscoveryProvider
 	completeErr error
+	promoteErr  error
 	rollbackErr error
 	finalizeErr error
+	promoted    int
 	finalized   int
 }
 
@@ -30,9 +33,39 @@ func (*manageSwitchFinalizer) Begin(context.Context, cluster.DiscoveryProvider) 
 }
 func (s *manageSwitchFinalizer) Complete(context.Context) error { return s.completeErr }
 func (s *manageSwitchFinalizer) Rollback(context.Context) error { return s.rollbackErr }
+func (s *manageSwitchFinalizer) Promote(context.Context) error {
+	s.promoted++
+	return s.promoteErr
+}
 func (s *manageSwitchFinalizer) Finalize(context.Context) error {
 	s.finalized++
 	return s.finalizeErr
+}
+
+type legacyManageSwitcher struct {
+	current       cluster.DiscoveryProvider
+	completeCount int
+}
+
+func (s *legacyManageSwitcher) Current() cluster.DiscoveryProvider { return s.current }
+func (*legacyManageSwitcher) Begin(context.Context, cluster.DiscoveryProvider) error {
+	return nil
+}
+func (s *legacyManageSwitcher) Complete(context.Context) error {
+	s.completeCount++
+	return nil
+}
+func (*legacyManageSwitcher) Rollback(context.Context) error { return nil }
+
+type deadlineCheckingTransaction struct {
+	manageSwitchFinalizer
+	deadlineSeen bool
+}
+
+func (s *deadlineCheckingTransaction) Promote(ctx context.Context) error {
+	deadline, ok := ctx.Deadline()
+	s.deadlineSeen = ok && time.Until(deadline) > 0 && time.Until(deadline) <= 5*time.Second
+	return nil
 }
 
 type orderedManageProvider struct {
@@ -40,6 +73,18 @@ type orderedManageProvider struct {
 	mu            sync.Mutex
 	events        []string
 	deregisterErr error
+}
+
+type flakyCloseManageProvider struct {
+	cluster.DiscoveryProvider
+	closeCount atomic.Int32
+}
+
+func (p *flakyCloseManageProvider) Close() error {
+	if p.closeCount.Add(1) == 1 {
+		return errors.New("模拟首次 Close 失败")
+	}
+	return p.DiscoveryProvider.Close()
 }
 
 func (p *orderedManageProvider) Deregister(ctx context.Context, nodeID string) error {
@@ -336,6 +381,79 @@ func TestClusterSwitchProvider_CompleteFinalizeFailureDoesNotReturnOK(t *testing
 	require.ErrorIs(t, err, wantErr)
 	assert.Nil(t, result)
 	assert.Equal(t, 1, switcher.finalized)
+}
+
+func TestClusterSwitchProvider_CompleteUsesTransactionalOrder(t *testing.T) {
+	const svcName = "manage-test-transaction-order"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	newProvider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	switcher := &manageSwitchFinalizer{
+		current:     newProvider,
+		completeErr: errors.New("事务路径不得调用 legacy Complete"),
+	}
+	sc.ClusterSwitcher = switcher
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.(*manage.ClusterSwitchProvider).Result)
+	assert.Equal(t, 1, switcher.promoted)
+	assert.Equal(t, 1, switcher.finalized)
+	assert.Same(t, newProvider, sc.ClusterProvider)
+	_ = newProvider.Close()
+}
+
+func TestClusterSwitchProvider_CompleteKeepsLegacySwitcherCompatible(t *testing.T) {
+	const svcName = "manage-test-legacy-complete"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	newProvider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	switcher := &legacyManageSwitcher{current: newProvider}
+	sc.ClusterSwitcher = switcher
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.(*manage.ClusterSwitchProvider).Result)
+	assert.Equal(t, 1, switcher.completeCount)
+	assert.Same(t, newProvider, sc.ClusterProvider)
+	_ = newProvider.Close()
+}
+
+func TestClusterSwitchProvider_UsesBoundedOperationContext(t *testing.T) {
+	const svcName = "manage-test-bounded-context"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	switcher := &deadlineCheckingTransaction{
+		manageSwitchFinalizer: manageSwitchFinalizer{current: sc.ClusterProvider},
+	}
+	sc.ClusterSwitcher = switcher
+
+	_, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	assert.True(t, switcher.deadlineSeen, "Manage cluster 操作必须使用不超过 5 秒的 context")
+}
+
+func TestClusterSwitchProvider_RetriesFinalizeThenAllowsNextBegin(t *testing.T) {
+	const svcName = "manage-test-finalize-retry"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	oldBase := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	old := &flakyCloseManageProvider{DiscoveryProvider: oldBase}
+	pending := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	next := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	sc.ClusterProvider = old
+	sc.ClusterSwitcher = cluster.NewClusterSwitcher(old, svcName)
+	sc.ServiceResolver.SetProvider(old)
+	require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), pending))
+
+	api := &manage.ClusterSwitchProvider{Action: "complete"}
+	req := &mockRequest{serviceName: svcName}
+	_, err := api.Do(req)
+	require.Error(t, err)
+	result, err := api.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.(*manage.ClusterSwitchProvider).Result)
+	assert.Equal(t, int32(2), old.closeCount.Load())
+	require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), next),
+		"Finalize 重试成功后必须允许下一次 Begin")
+	require.NoError(t, sc.ClusterSwitcher.Rollback(context.Background()))
+	_ = pending.Close()
 }
 
 func TestClusterSwitchProvider_RollbackFailureDoesNotReturnOK(t *testing.T) {

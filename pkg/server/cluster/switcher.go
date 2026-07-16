@@ -36,6 +36,13 @@ type clusterSwitcher struct {
 	switchedAt  time.Time
 	serviceName string
 	migration   *providerMigration
+	closeFlight *providerCloseFlight
+}
+
+type providerCloseFlight struct {
+	provider DiscoveryProvider
+	done     chan struct{}
+	err      error
 }
 
 // NewClusterSwitcher 创建按服务名隔离的 Provider 切换器。
@@ -115,11 +122,28 @@ func (s *clusterSwitcher) Begin(ctx context.Context, to DiscoveryProvider) error
 	return nil
 }
 
-// Complete 停止对账 worker并提升 pending Provider。旧 Provider 会保留到
-// ServiceContext 完成 membership 切换后，再由 Finalize 关闭。
+// Complete 保持 ProviderSwitcher 的兼容后置条件：提升 pending 后关闭旧 Provider。
 func (s *clusterSwitcher) Complete(ctx context.Context) error {
+	if err := s.Promote(ctx); err != nil {
+		return err
+	}
+	return s.Finalize(ctx)
+}
+
+// Promote 停止对账 worker并提升 pending Provider，保留旧 Provider 供运行时同步。
+func (s *clusterSwitcher) Promote(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.mu.RLock()
+	alreadyPromoted := !s.inProgress && s.pending == nil && s.retired != nil
+	s.mu.RUnlock()
+	if alreadyPromoted {
+		return nil
+	}
 
 	migration, old, pending, err := s.migrationSnapshot()
 	if err != nil {
@@ -145,32 +169,67 @@ func (s *clusterSwitcher) Complete(ctx context.Context) error {
 	return nil
 }
 
-// Finalize closes the provider retired by Complete. Successful calls are
-// idempotent; failures retain the retired provider for diagnosis or retry.
+// Finalize closes the provider retired by Promote. Close runs outside opMu so
+// a blocked provider cannot deadlock later management operations. A failed
+// close is not cached: the next call starts a fresh attempt.
 func (s *clusterSwitcher) Finalize(ctx context.Context) error {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("cluster switcher: 关闭旧 Provider 前 context 已结束: %w", err)
 	}
+
+	s.opMu.Lock()
 	s.mu.RLock()
 	retired := s.retired
 	s.mu.RUnlock()
 	if retired == nil {
+		s.opMu.Unlock()
 		return nil
 	}
-	if err := retired.Close(); err != nil {
+	flight := s.closeFlight
+	if flight == nil {
+		flight = &providerCloseFlight{provider: retired, done: make(chan struct{})}
+		s.closeFlight = flight
+		go s.closeRetiredProvider(flight)
+	}
+	s.opMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("cluster switcher: 等待旧 Provider %s 关闭失败: %w", retired.Name(), ctx.Err())
+	case <-flight.done:
+	}
+
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	err := flight.err
+	if s.closeFlight == flight {
+		s.closeFlight = nil
+		if err == nil {
+			s.mu.Lock()
+			if s.retired == flight.provider {
+				s.retired = nil
+			}
+			s.mu.Unlock()
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("cluster switcher: 关闭旧 Provider %s 失败: %w", retired.Name(), err)
 	}
-	s.mu.Lock()
-	if s.retired == retired {
-		s.retired = nil
-	}
-	s.mu.Unlock()
 	return nil
+}
+
+func (s *clusterSwitcher) closeRetiredProvider(flight *providerCloseFlight) {
+	if closer, ok := flight.provider.(ContextCloser); ok {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		flight.err = closer.CloseContext(closeCtx)
+		cancel()
+	} else {
+		flight.err = flight.provider.Close()
+	}
+	close(flight.done)
 }
 
 // Rollback 停止对账 worker，保留 current Provider，并关闭 pending Provider。
