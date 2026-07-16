@@ -16,12 +16,13 @@ func (own *ShopService) ServiceName() string { return contract.ServiceName }
 
 // Routers 返回继承商城的 Manage、Public 和 Private 路由。
 func (own *ShopService) Routers() []types.IRouter {
-	routers := make([]types.IRouter, 0, 36)
+	routers := make([]types.IRouter, 0, 38)
 	routers = append(routers, manage.NewProductManage().Routers()...)
 	routers = append(routers, manage.NewSupplierManage().Routers()...)
 	routers = append(routers, manage.NewPaymentTypeManage().Routers()...)
 	routers = append(routers, manage.NewOrderManage().Routers()...)
 	routers = append(routers, manage.NewPaymentRecordManage().Routers()...)
+	routers = append(routers, manage.NewIdentityEventManage().Routers()...)
 	routers = append(routers,
 		&publicapi.GetProducts{},
 		&publicapi.GetSuppliers{},

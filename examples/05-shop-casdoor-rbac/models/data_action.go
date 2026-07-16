@@ -39,7 +39,7 @@ func ensureModelWith(action persistencetypes.IDataAction, model interface{}) err
 
 // EnsureStorage 在事务开始前创建本示例使用的全部模型表。
 func EnsureStorage() error {
-	for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOrder(), NewPaymentType(), NewPaymentRecord()} {
+	for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOrder(), NewPaymentType(), NewPaymentRecord(), NewIdentityEventRecord()} {
 		if err := ensureModel(model); err != nil {
 			return err
 		}
