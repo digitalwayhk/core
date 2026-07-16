@@ -10,13 +10,15 @@ import (
 var ErrClientRequired = errors.New("explicit Casdoor client is required")
 
 // AuthMiddleware 仅为保持旧函数签名而保留。
-// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；使用 NewAuthHandler。
+// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；
+// 请使用 ServiceContext 注册的 REST 认证链。
 func AuthMiddleware(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "authentication failed", http.StatusUnauthorized)
 }
 
 // AuthHandler 仅为保持旧函数签名而保留。
-// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；使用 NewAuthHandler。
+// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；
+// 请使用 ServiceContext 注册的 REST 认证链。
 func AuthHandler(_ http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
