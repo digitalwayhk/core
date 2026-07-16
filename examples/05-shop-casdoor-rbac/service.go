@@ -1,15 +1,21 @@
 package casdoorrbacshop
 
 import (
+	"sync"
+
 	"github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/api/public"
+	"github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/business"
 	"github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/contract"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// ShopService 组装模型与 Manage 继承能力完整示例。
-type ShopService struct{}
+// ShopService 组装模型继承、双域认证和三类认证 Hook。
+type ShopService struct {
+	identityEventsOnce sync.Once
+	identityEvents     *business.IdentityEventService
+}
 
 // ServiceName 返回继承商城的稳定服务名。
 func (own *ShopService) ServiceName() string { return contract.ServiceName }
