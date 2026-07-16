@@ -91,7 +91,7 @@
 | `ServerConfig.RunIp` | supported | ServiceContext | 服务地址与节点信息组装消费 |
 | `ServerConfig.ParentServerIP` | supported | server routing | 父服务连接路由消费 |
 | `ServerConfig.SocketPort` | supported | socket server | socket listener 构造消费 |
-| `ServerConfig.AttachServices` | supported | ServiceContext | attach 服务地址表被路由消费 |
+| `ServerConfig.AttachServices` | supported | legacy ServiceContext | 废弃兼容字段；新调用使用 ClusterProvider + ServiceResolver，不读取静态地址表 |
 | `ServerConfig.Debug` | supported | server runtime | debug 运行模式分支消费 |
 | `ServerConfig.IsWhiteList` | supported | access-control middleware | 白名单开关消费 |
 | `ServerConfig.WhiteList` | supported | access-control middleware | 白名单匹配消费 |

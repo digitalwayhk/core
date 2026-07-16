@@ -233,6 +233,13 @@ func (own *Request) GetServerInfo() *types.TargetInfo {
 	}
 }
 func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
+	if own != nil && own.service != nil && own.service.ServiceResolver != nil {
+		resolved, err := own.service.ServiceResolver.Resolve(context.Background(), serviceName)
+		if err == nil {
+			return resolved.Info
+		}
+		return nil
+	}
 	cont := GetContext(serviceName)
 	if cont == nil {
 		return nil
@@ -251,17 +258,6 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 	payload, err := own.callPayload(router)
 	if err != nil {
 		return nil, err
-	}
-	if utils.IsTest() {
-		err := router.Validation(own)
-		if err != nil {
-			return own.NewResponse(err, nil), nil
-		}
-		rest := own.NewResponse(router.Do(own))
-		if callback != nil {
-			callback[0](rest)
-		}
-		return rest, nil
 	}
 	if info != nil {
 		if info.TargetAddress == "" || info.TargetPort == 0 {

@@ -30,6 +30,8 @@ type ServerConfig struct {
 	RunIp                 string
 	ParentServerIP        string
 	SocketPort            int
+	// AttachServices 已由 ClusterProvider + ServiceResolver 替代。
+	// Deprecated: 仅保留旧调用链配置兼容，新服务不得再写入。
 	AttachServices        map[string]*AttachAddress
 	Debug                 bool
 	IsWhiteList           bool
@@ -564,6 +566,8 @@ func fixDurations(v reflect.Value, m map[string]interface{}) {
 		}
 	}
 }
+// SetAttachService 写入旧静态服务地址。
+// Deprecated: 新服务使用 ClusterProvider + ServiceResolver 自动解析目标节点。
 func (con *ServerConfig) SetAttachService(name string, address string, port, socketport int) {
 	if con.AttachServices == nil {
 		con.AttachServices = make(map[string]*AttachAddress)

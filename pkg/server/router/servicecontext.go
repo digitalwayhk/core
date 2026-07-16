@@ -72,8 +72,10 @@ type ServiceContext struct {
 	AuthRevocationManager    *authstate.Manager              `json:"-"`
 	ClusterProvider          cluster.DiscoveryProvider       `json:"-"`
 	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
-	membership               *cluster.MembershipManager      `json:"-"`
-	CrossNodeBroker          *cluster.CrossNodeNoticeBroker  `json:"-"`
+	ServiceResolver          *ServiceResolver                `json:"-"`
+	ownsClusterProvider      bool
+	membership               *cluster.MembershipManager     `json:"-"`
+	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
 	nodeID                   string
 	configFingerprint        string
 }
@@ -555,6 +557,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Field("error", err),
 		)
 	}
+	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext)
 	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
 		// Any error from BuildSelector means the user explicitly configured a
 		// transport protocol that cannot be built (e.g. quic, mq not yet implemented).
@@ -647,6 +650,12 @@ func cleanupInitializedServiceContext(sc *ServiceContext) {
 	if sc.AuthRevocationManager != nil {
 		_ = sc.AuthRevocationManager.Close()
 	}
+	if sc.ServiceResolver != nil {
+		sc.ServiceResolver.Close()
+	}
+	if sc.ownsClusterProvider && sc.ClusterProvider != nil {
+		_ = sc.ClusterProvider.Close()
+	}
 	sc.AuthRevocationManager = nil
 	sc.CasdoorClients = nil
 	sc.RouteWebSocketHub = nil
@@ -656,6 +665,9 @@ func cleanupInitializedServiceContext(sc *ServiceContext) {
 	sc.ServiceEventBridge = nil
 	sc.MQManager = nil
 	sc.EventStream = nil
+	sc.ServiceResolver = nil
+	sc.ClusterProvider = nil
+	sc.ownsClusterProvider = false
 }
 
 func assertServiceRoutesRegistrationMutable(owner string, routes []types.IRouter) {
@@ -772,6 +784,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 	routeCacheManager := own.RouteCacheManager
 	publicRateLimiter := own.PublicRateLimiter
 	authRevocationManager := own.AuthRevocationManager
+	serviceResolver := own.ServiceResolver
+	ownsClusterProvider := own.ownsClusterProvider
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -787,6 +801,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.CasdoorEventHookProvider = nil
 		own.AuthHookProvider = nil
 		own.EventStream = nil
+		own.ServiceResolver = nil
+		own.ownsClusterProvider = false
 	}
 	own.lifecycleMu.Unlock()
 	if !state && authRevocationManager != nil {
@@ -832,6 +848,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.CrossNodeBroker = broker
 		own.lifecycleMu.Unlock()
 	} else {
+		if serviceResolver != nil {
+			serviceResolver.Close()
+		}
 		if routeWebSocketHub != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := routeWebSocketHub.Close(ctx); err != nil {
@@ -868,6 +887,15 @@ func (own *ServiceContext) SetRunState(state bool) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			membership.Stop(ctx)
 			cancel()
+		}
+		if ownsClusterProvider && provider != nil {
+			if err := provider.Close(); err != nil {
+				logx.Errorw("cluster_provider_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("provider", provider.Name()),
+					logx.Field("error", err),
+				)
+			}
 		}
 		if mqManager != nil {
 			if err := mqManager.Close(); err != nil {
@@ -915,6 +943,10 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 
 	own.lifecycleMu.Lock()
 	own.ClusterProvider = newProvider
+	own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
+	if own.ServiceResolver != nil {
+		own.ServiceResolver.SetProvider(newProvider)
+	}
 	running := own.isStart.Load()
 	membership := own.membership
 	broker := own.CrossNodeBroker
@@ -1289,13 +1321,14 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	if callback != nil {
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
-			values, err := own.sendPayload(context.Background(), payload)
+			values, err := own.invokePayload(context.Background(), payload)
 			if err != nil {
 				for _, ecb := range errcallback {
 					res.err = err
 					ecb(res)
 				}
-				close(ch)
+				ch <- res
+				return
 			}
 			json.Unmarshal(values, res)
 			ch <- res
@@ -1305,7 +1338,7 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 			callback[0](res)
 		}
 	} else {
-		values, err := own.sendPayload(context.Background(), payload)
+		values, err := own.invokePayload(context.Background(), payload)
 		if err != nil {
 			logx.Errorw("service_call_failed",
 				logx.Field("service", own.Service.Name),
@@ -1330,6 +1363,48 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 		}
 	}
 	return res, nil
+}
+
+func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
+		return nil, fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
+	}
+	if local := GetContext(payload.TargetService); local != nil {
+		return own.dispatchLocal(payload, local)
+	}
+	if payload.TargetAddress == "" {
+		if own.ServiceResolver == nil {
+			return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
+		}
+		resolved, err := own.ServiceResolver.Resolve(ctx, payload.TargetService)
+		if err != nil {
+			return nil, err
+		}
+		payload.TargetAddress = resolved.Info.TargetAddress
+		payload.TargetPort = resolved.Info.TargetPort
+		payload.TargetSocketPort = resolved.Info.TargetSocketPort
+	}
+	return own.sendPayload(ctx, payload)
+}
+
+func (own *ServiceContext) dispatchLocal(payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
+	if target == nil || target.Router == nil {
+		return nil, fmt.Errorf("%w: service=%s", ErrTargetServiceUnavailable, payload.TargetService)
+	}
+	info := target.Router.GetRouter(payload.TargetPath)
+	if info == nil {
+		return nil, fmt.Errorf("%w: route=%s", ErrTargetServiceUnavailable, payload.TargetPath)
+	}
+	req := ToRequest(payload)
+	if req == nil {
+		return nil, fmt.Errorf("%w: request context for %s", ErrTargetServiceUnavailable, payload.TargetService)
+	}
+	api, err := info.ParseNew(payload.Instance)
+	if err != nil {
+		return nil, err
+	}
+	response := info.ExecDo(api, req)
+	return json.Marshal(response)
 }
 
 // sendPayload dispatches a payload. When a TransportSelector is configured,
@@ -1421,6 +1496,7 @@ func initCluster(sc *ServiceContext) error {
 		return err
 	}
 	sc.ClusterProvider = provider
+	sc.ownsClusterProvider = provider != nil && provider != processLocalRegistry
 	if provider != nil {
 		sc.ClusterSwitcher = cluster.NewClusterSwitcher(provider, sc.Service.Name)
 	} else {
