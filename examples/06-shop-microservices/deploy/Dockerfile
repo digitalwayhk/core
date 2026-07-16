@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -10,4 +10,3 @@ RUN go build -o /out/user ./examples/06-shop-microservices/main/user \
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=build /out/ /app/
-

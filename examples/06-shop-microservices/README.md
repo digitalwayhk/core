@@ -51,6 +51,7 @@ response, err := req.CallService(&orderapi.CreateOrder{
 3. Redis Streams 消费组使用逻辑服务名：同服务多实例竞争，不同服务各收一份。
 4. `ControlHandler` 成功后才 ACK；失败消息留在 pending，由同组存活消费者超时认领。
 5. 消费方以 EventID 写 Inbox，重复投递不重复执行缓存失效或 WebSocket 通知。
+6. User/Supplier 的外部控制主题必须全部订阅成功；任一主题失败会撤销本轮已建立订阅、记录 `service_external_control_subscribe_failed` 并终止服务，禁止部分启用。
 
 WebSocket 只面向最终买家和供应商。User 按 Token UID 过滤，Supplier 按 Token 映射的 SupplierID 过滤；未在线用户不积压观察通知。
 
@@ -88,6 +89,16 @@ docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml up --
 
 Compose 只映射 User `18081` 和 Supplier `18082` HTTP 端口。Order HTTP 和所有 socket 只在 Docker 私网中可见。Redis 发现使用 `core:discovery:*`，事件使用 `core:event:*`。
 
+端口由框架按“命令行 `-p` 基准端口 + DataCenterID - 1”解析，示例固定映射如下，部署时必须成组修改，不能只改 Compose 的 `ports`：
+
+| 进程 | `-p` 基准端口 | DataCenterID | 实际业务 HTTP | 内部 socket | 宿主机暴露 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| User | 18080 | 2 | 18081 | 28080 | 18081 |
+| Supplier | 18081 | 2 | 18082 | 28081 | 18082 |
+| Order | 18082 | 2 | 18083 | 28082 | 不暴露 |
+
+同进程入口为了让三个 ServiceContext 的 MachineID 空间保持独立，使用 DataCenterID `2/3/4`，业务 HTTP 仍固定为 `18081/18082/18083`。生产配置应从统一配置源生成这些参数，避免手工分别维护命令、DataCenterID 和端口映射。
+
 ## 验收
 
 ```bash
@@ -98,9 +109,16 @@ go test -race ./examples/06-shop-microservices/... -count=1
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
 go test ./examples/integration/06-shop-microservices -count=1 -timeout=15m
 
+# 最终用户活动 UAT：商品快照、订单归属、支付与供应商视图
+SHOP_REDIS_ADDR=127.0.0.1:6379 \
+go test ./examples/integration/06-shop-microservices \
+  -run TestUATBuyerOrderLifecycle -count=1 -timeout=15m
+
 # 三个独立 race 进程、Redis 发现和远程 socket
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
 go test ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=15m
 ```
 
 集成测试不写 `AttachServices`，因此绿灯可以直接证明新 Resolver 链路已生效。
+
+UAT 聚焦用户活动产生的业务事实，不替代 API 矩阵测试：它会在下单后修改商品价格，确认订单仍保留下单价格快照；随后验证支付确认和已支付订单撤销能通过 EventBridge 主动失效缓存，并在买家与供应商视图中收敛到同一状态，同时确保其他用户看不到该订单。

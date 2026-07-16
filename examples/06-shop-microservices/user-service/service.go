@@ -8,12 +8,14 @@ import (
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
+	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // Service 是买家唯一外部入口，不保存订单或商品权威副本。
@@ -70,11 +72,13 @@ func (s *Service) Start() {
 			s.cancels = append(s.cancels, cancel)
 		}
 	}
-	for _, subject := range []string{contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectOrderChanged, contract.SubjectPaymentChanged} {
-		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeExternalControl(context.Background(), subject); subscribeErr == nil {
-			s.cancels = append(s.cancels, cancel)
-		}
+	externalCancels, err := exampleruntime.SubscribeExternalControls(context.Background(), sc.ServiceEventBridge,
+		contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectOrderChanged, contract.SubjectPaymentChanged)
+	if err != nil {
+		logx.Errorw("service_external_control_subscribe_failed", logx.Field("service", contract.UserServiceName), logx.Field("error", err))
+		panic(err)
 	}
+	s.cancels = append(s.cancels, externalCancels...)
 }
 func (s *Service) Stop() {
 	s.mu.Lock()

@@ -109,7 +109,11 @@ func (p *PaymentRecord) NewModel() {
 func (*PaymentRecord) GetLocalDBName() string  { return databaseName }
 func (*PaymentRecord) GetRemoteDBName() string { return databaseName }
 func (p *PaymentRecord) GetHash() string {
-	return utils.HashCodes(strconv.FormatUint(uint64(p.OrderID), 10))
+	return utils.HashCodes(
+		strconv.FormatUint(uint64(p.OrderID), 10),
+		strconv.FormatUint(uint64(p.PaymentTypeID), 10),
+		strconv.FormatUint(uint64(p.ID), 10),
+	)
 }
 
 type Outbox struct {

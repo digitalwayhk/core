@@ -9,6 +9,7 @@
 - 配置到运行时闭集门禁、公共 API/OpenAPI/路由兼容基线和类型化公共错误契约。
 - `PrefixedBadgerDB.EnableWriteBehind`、显式损坏恢复策略和可识别的 `PendingSyncError`。
 - Casdoor Auth/Manage 独立客户端、持久撤销权威、可靠 Webhook 控制事件，以及签发/请求/事件三类服务 Hook。
+- Redis ClusterProvider、ServiceResolver、可靠 Redis Streams 控制订阅，以及演示三服务协同和两种部署方式的示例 06。
 
 ### Changed
 

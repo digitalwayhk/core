@@ -18,6 +18,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // Service 组装供应商、商品及其跨服务查询路由。
@@ -111,11 +112,13 @@ func (s *Service) Start() {
 			s.cancels = append(s.cancels, cancel)
 		}
 	}
-	for _, subject := range []string{contract.SubjectOrderChanged, contract.SubjectPaymentChanged} {
-		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeExternalControl(context.Background(), subject); subscribeErr == nil {
-			s.cancels = append(s.cancels, cancel)
-		}
+	externalCancels, err := exampleruntime.SubscribeExternalControls(context.Background(), sc.ServiceEventBridge,
+		contract.SubjectOrderChanged, contract.SubjectPaymentChanged)
+	if err != nil {
+		logx.Errorw("service_external_control_subscribe_failed", logx.Field("service", contract.SupplierServiceName), logx.Field("error", err))
+		panic(err)
 	}
+	s.cancels = append(s.cancels, externalCancels...)
 }
 func (s *Service) Stop() {
 	s.mu.Lock()
