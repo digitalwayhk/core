@@ -30,7 +30,7 @@ func startTestServer(t *testing.T, handler func(ctx context.Context, payload *co
 	}, handler)
 	require.NoError(t, err)
 	result := make(chan error, 1)
-	go func() { result <- srv.Start() }()
+	go func() { result <- srv.Serve() }()
 	select {
 	case <-srv.Ready():
 	case <-time.After(time.Second):

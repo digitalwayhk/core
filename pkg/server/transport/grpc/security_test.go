@@ -229,6 +229,7 @@ func TestServerTLS_HandshakeAndTrustFailures(t *testing.T) {
 
 func TestServerMTLS_RequiresAndAcceptsClientCertificate(t *testing.T) {
 	files := createTestCertificateFiles(t)
+	otherFiles := createTestCertificateFiles(t)
 	server, startResult := startConfiguredServer(t, config.GRPCSecurityConfig{
 		Mode: "mtls", CAFile: files.caFile, CertFile: files.serverCertFile, KeyFile: files.serverKeyFile,
 	})
@@ -249,6 +250,16 @@ func TestServerMTLS_RequiresAndAcceptsClientCertificate(t *testing.T) {
 	require.Error(t, err)
 	require.NoError(t, withoutCertificate.Close())
 
+	wrongCertificate := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+		Mode: "mtls", CAFile: files.caFile, CertFile: otherFiles.clientCertFile,
+		KeyFile: otherFiles.clientKeyFile, ServerName: "core.test",
+	}})
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	err = wrongCertificate.Health(ctx, server.Address())
+	cancel()
+	require.Error(t, err)
+	require.NoError(t, wrongCertificate.Stop(context.Background()))
+
 	withCertificate := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
 		Mode: "mtls", CAFile: files.caFile, CertFile: files.clientCertFile,
 		KeyFile: files.clientKeyFile, ServerName: "core.test",
@@ -262,7 +273,7 @@ func startConfiguredServer(t *testing.T, security config.GRPCSecurityConfig) (*S
 	server, err := NewServer("127.0.0.1:0", config.GRPCTransportConfig{Security: security}, echoHandler)
 	require.NoError(t, err)
 	result := make(chan error, 1)
-	go func() { result <- server.Start() }()
+	go func() { result <- server.Serve() }()
 	waitReady(t, server)
 	return server, result
 }
