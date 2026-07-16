@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -30,6 +31,19 @@ func TestBuildSelector_GRPCWithHTTPFallback(t *testing.T) {
 	assert.Equal(t, "grpc", ds.primary.Name())
 	assert.Equal(t, "http", ds.fallback[0].Name())
 	assert.Equal(t, "socket", ds.fallback[1].Name())
+}
+
+func TestBuildSelector_GRPCInjectsSecurityConfig(t *testing.T) {
+	sel, err := BuildSelector(config.TransportConfig{
+		Internal: "grpc",
+		GRPC: config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+			Mode: "mtls", CAFile: "/missing/ca.pem", CertFile: "/missing/client.pem", KeyFile: "/missing/client.key",
+		}},
+	})
+	require.NoError(t, err)
+	ds := sel.(*DefaultSelector)
+	err = ds.primary.Health(context.Background(), "127.0.0.1:19090")
+	require.ErrorContains(t, err, "Transport.GRPC.Security.CAFile")
 }
 
 func TestBuildSelector_EmptyConfig(t *testing.T) {

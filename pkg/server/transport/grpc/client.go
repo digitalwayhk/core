@@ -2,74 +2,110 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/zeromicro/go-zero/zrpc"
+	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
-	coretypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/server/config"
 	pb "github.com/digitalwayhk/core/pkg/server/transport/grpc/proto"
+	coretypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// GRPCTransport implements transport.Transport using gRPC.
+const (
+	defaultMessageSize = 4 * 1024 * 1024
+	defaultRPCTimeout  = 2 * time.Second
+)
+
+var errTransportStopped = errors.New("grpc transport: stopped")
+
+type zrpcClientFactory func(zrpc.RpcClientConf, ...zrpc.ClientOption) (zrpc.Client, error)
+
+// GRPCTransport implements transport.Transport using go-zero zrpc clients.
 type GRPCTransport struct {
-	maxRecvMsgSize int
-	maxSendMsgSize int
-	pool           sync.Map // map[string]*grpc.ClientConn
+	config config.GRPCTransportConfig
+	pool   sync.Map // endpoint -> zrpc.Client
+
+	lifecycleMu sync.RWMutex
+	stopped     bool
+
+	securityOnce sync.Once
+	securityOpts []zrpc.ClientOption
+	securityErr  error
+	newClient    zrpcClientFactory
 }
 
-// New returns a GRPCTransport. If msgSize is 0 the default (4 MiB) is used.
-func New(maxRecvMsgSize, maxSendMsgSize int) *GRPCTransport {
-	if maxRecvMsgSize <= 0 {
-		maxRecvMsgSize = 4 * 1024 * 1024
+// New returns a gRPC transport configured with the framework transport contract.
+func New(cfg config.GRPCTransportConfig) *GRPCTransport {
+	if cfg.MaxRecvMsgSize <= 0 {
+		cfg.MaxRecvMsgSize = defaultMessageSize
 	}
-	if maxSendMsgSize <= 0 {
-		maxSendMsgSize = 4 * 1024 * 1024
+	if cfg.MaxSendMsgSize <= 0 {
+		cfg.MaxSendMsgSize = defaultMessageSize
 	}
-	return &GRPCTransport{maxRecvMsgSize: maxRecvMsgSize, maxSendMsgSize: maxSendMsgSize}
+	return &GRPCTransport{config: cfg, newClient: zrpc.NewClient}
 }
 
 func (g *GRPCTransport) Name() string { return "grpc" }
 
-func (g *GRPCTransport) Start(_ context.Context) error { return nil }
-
-func (g *GRPCTransport) Stop(_ context.Context) error {
-	g.pool.Range(func(key, value interface{}) bool {
-		if cc, ok := value.(*grpc.ClientConn); ok {
-			cc.Close()
-		}
-		g.pool.Delete(key)
-		return true
-	})
+func (g *GRPCTransport) Start(_ context.Context) error {
+	g.lifecycleMu.RLock()
+	defer g.lifecycleMu.RUnlock()
+	if g.stopped {
+		return errTransportStopped
+	}
 	return nil
 }
 
-// PooledConns returns the number of cached gRPC connections in the pool.
+// Stop closes every cached zrpc connection and permanently stops this transport.
+func (g *GRPCTransport) Stop(_ context.Context) error {
+	g.lifecycleMu.Lock()
+	defer g.lifecycleMu.Unlock()
+	if g.stopped {
+		return nil
+	}
+	g.stopped = true
+	var firstErr error
+	g.pool.Range(func(key, value any) bool {
+		g.pool.Delete(key)
+		if client, ok := value.(zrpc.Client); ok && client.Conn() != nil {
+			if err := client.Conn().Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return true
+	})
+	return firstErr
+}
+
+// PooledConns returns the number of cached zrpc clients.
 func (g *GRPCTransport) PooledConns() int {
 	count := 0
-	g.pool.Range(func(_, _ interface{}) bool {
+	g.pool.Range(func(_, _ any) bool {
 		count++
 		return true
 	})
 	return count
 }
 
-// Supports returns true when the target looks like a gRPC address (host:port without http scheme).
 func (g *GRPCTransport) Supports(_ context.Context, _ *coretypes.PayLoad, target string) bool {
 	return target != "" && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://")
 }
 
-// Send dials the target, invokes the Call RPC, and returns the raw response bytes.
-// Connections are pooled and reused across calls to the same target.
 func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, target string) ([]byte, error) {
-	cc, err := g.getConn(target)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	client, err := g.getClient(target)
 	if err != nil {
 		return nil, err
 	}
-	client := pb.NewCoreTransportClient(cc)
-	resp, err := client.Call(ctx, payloadToPB(payload))
+	resp, err := pb.NewCoreTransportClient(client.Conn()).Call(ctx, payloadToPB(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -79,55 +115,71 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 	return resp.Data, nil
 }
 
-// Health checks the target gRPC server by calling the Health RPC.
+// Health uses the standard gRPC health protocol and only accepts SERVING.
 func (g *GRPCTransport) Health(ctx context.Context, target string) error {
-	cc, err := g.getConn(target)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	client, err := g.getClient(target)
 	if err != nil {
 		return err
 	}
-	client := pb.NewCoreTransportClient(cc)
-	resp, err := client.Health(ctx, &pb.HealthRequest{})
+	resp, err := grpc_health_v1.NewHealthClient(client.Conn()).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	if err != nil {
 		return err
 	}
-	if !resp.Healthy {
-		return fmt.Errorf("grpc: target %s reports unhealthy: %s", target, resp.Message)
+	if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+		return fmt.Errorf("grpc: target %s health status is %s", target, resp.Status)
 	}
 	return nil
 }
 
-// getConn returns a pooled grpc.ClientConn for target, creating one if needed.
-func (g *GRPCTransport) getConn(target string) (*grpc.ClientConn, error) {
-	if cached, ok := g.pool.Load(target); ok {
-		return cached.(*grpc.ClientConn), nil
+func (g *GRPCTransport) getClient(endpoint string) (zrpc.Client, error) {
+	g.lifecycleMu.RLock()
+	defer g.lifecycleMu.RUnlock()
+	if g.stopped {
+		return nil, errTransportStopped
 	}
-	cc, err := g.dial(target)
+	if cached, ok := g.pool.Load(endpoint); ok {
+		return cached.(zrpc.Client), nil
+	}
+	options, err := g.clientOptions()
 	if err != nil {
 		return nil, err
 	}
-	// Store only if not already cached by a concurrent caller; discard our copy
-	// if the race was lost to avoid leaking connections.
-	actual, loaded := g.pool.LoadOrStore(target, cc)
-	if loaded {
-		cc.Close()
-		return actual.(*grpc.ClientConn), nil
+	rpcConf := zrpc.RpcClientConf{
+		Endpoints: []string{endpoint},
+		NonBlock:  true,
+		Timeout:   defaultRPCTimeout.Milliseconds(),
+		Middlewares: zrpc.ClientMiddlewaresConf{
+			Trace: true, Duration: true, Prometheus: true, Breaker: true, Timeout: true,
+		},
 	}
-	return cc, nil
+	client, err := g.newClient(rpcConf, options...)
+	if err != nil {
+		return nil, err
+	}
+	actual, loaded := g.pool.LoadOrStore(endpoint, client)
+	if loaded {
+		_ = client.Conn().Close()
+		return actual.(zrpc.Client), nil
+	}
+	return client, nil
 }
 
-func (g *GRPCTransport) dial(target string) (*grpc.ClientConn, error) {
-	return grpc.NewClient(
-		target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(g.maxRecvMsgSize),
-			grpc.MaxCallSendMsgSize(g.maxSendMsgSize),
-		),
-	)
+func (g *GRPCTransport) clientOptions() ([]zrpc.ClientOption, error) {
+	g.securityOnce.Do(func() {
+		g.securityOpts, g.securityErr = clientSecurityOptions(g.config.Security)
+		g.securityOpts = append(g.securityOpts, zrpc.WithDialOption(googlegrpc.WithDefaultCallOptions(
+			googlegrpc.MaxCallRecvMsgSize(g.config.MaxRecvMsgSize),
+			googlegrpc.MaxCallSendMsgSize(g.config.MaxSendMsgSize),
+		)))
+	})
+	return g.securityOpts, g.securityErr
 }
 
 func payloadToPB(p *coretypes.PayLoad) *pb.PayloadRequest {
-	req := &pb.PayloadRequest{
+	return &pb.PayloadRequest{
 		TraceId:          p.TraceID,
 		SourceAddress:    p.SourceAddress,
 		SourcePort:       int32(p.SourcePort),
@@ -147,5 +199,4 @@ func payloadToPB(p *coretypes.PayLoad) *pb.PayloadRequest {
 		HttpMethod:       p.HttpMethod,
 		Token:            p.Token,
 	}
-	return req
 }

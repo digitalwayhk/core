@@ -23,7 +23,7 @@ import (
 func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
 	builders := map[string]func() Transport{
 		"grpc": func() Transport {
-			return grpctransport.New(cfg.GRPC.MaxRecvMsgSize, cfg.GRPC.MaxSendMsgSize)
+			return grpctransport.New(cfg.GRPC)
 		},
 		"http":   func() Transport { return httptransport.New() },
 		"socket": func() Transport { return sockettransport.New() },
