@@ -1,0 +1,156 @@
+// Package models 保存 User Service 独占的用户和地址事实。
+package models
+
+import (
+	"errors"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
+	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
+	"github.com/digitalwayhk/core/pkg/utils"
+)
+
+const databaseName = "shop-user"
+
+var actionOnce sync.Once
+var action persistencetypes.IDataAction
+
+type User struct {
+	*entity.Model
+	UserID string `gorm:"not null;uniqueIndex" json:"userID"`
+	Name   string `gorm:"not null" json:"name"`
+}
+
+func NewUser() *User { return &User{Model: entity.NewModel()} }
+func (u *User) NewModel() {
+	if u.Model == nil {
+		u.Model = entity.NewModel()
+	}
+}
+func (*User) GetLocalDBName() string  { return databaseName }
+func (*User) GetRemoteDBName() string { return databaseName }
+func (u *User) GetHash() string       { return utils.HashCodes(strings.TrimSpace(u.UserID)) }
+
+type Address struct {
+	*entity.Model
+	UserID    string `gorm:"not null;index" json:"userID"`
+	Recipient string `gorm:"not null" json:"recipient"`
+	Phone     string `json:"phone"`
+	Region    string `json:"region"`
+	Detail    string `json:"detail"`
+}
+
+func NewAddress() *Address { return &Address{Model: entity.NewModel()} }
+func (a *Address) NewModel() {
+	if a.Model == nil {
+		a.Model = entity.NewModel()
+	}
+}
+func (*Address) GetLocalDBName() string  { return databaseName }
+func (*Address) GetRemoteDBName() string { return databaseName }
+func (a *Address) GetHash() string {
+	return utils.HashCodes(strings.TrimSpace(a.UserID), strings.TrimSpace(a.Recipient), strings.TrimSpace(a.Phone), strings.TrimSpace(a.Detail))
+}
+
+func dataAction() persistencetypes.IDataAction {
+	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
+	return action
+}
+func search(model interface{}, size int) *persistencetypes.SearchItem {
+	return &persistencetypes.SearchItem{Page: 1, Size: size, Model: model}
+}
+func ensure(model interface{}) error {
+	t := reflect.TypeOf(model)
+	if t == nil || t.Kind() != reflect.Ptr {
+		return errors.New("模型类型无效")
+	}
+	return dataAction().Load(search(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
+}
+func EnsureStorage() error {
+	for _, m := range []interface{}{NewUser(), NewAddress()} {
+		if err := ensure(m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func EnsureUser(userID, name string) (*User, error) {
+	userID = strings.TrimSpace(userID)
+	name = strings.TrimSpace(name)
+	if userID == "" {
+		return nil, errors.New("用户身份无效")
+	}
+	if err := ensure(NewUser()); err != nil {
+		return nil, err
+	}
+	var items []*User
+	q := search(NewUser(), 1)
+	q.AddWhereN("UserID", userID)
+	if err := dataAction().Load(q, &items); err != nil {
+		return nil, err
+	}
+	if len(items) > 0 {
+		item := items[0]
+		if name != "" && item.Name != name {
+			item.Name = name
+			item.SetUpdatedAt(time.Now().UTC())
+			return item, dataAction().Update(item)
+		}
+		return item, nil
+	}
+	if name == "" {
+		name = userID
+	}
+	item := NewUser()
+	item.UserID, item.Name = userID, name
+	item.SetHashcode(item.GetHash())
+	return item, dataAction().Insert(item)
+}
+
+func InsertAddress(item *Address) error {
+	item.UserID = strings.TrimSpace(item.UserID)
+	item.Recipient = strings.TrimSpace(item.Recipient)
+	if item.UserID == "" || item.Recipient == "" {
+		return errors.New("用户和收件人不能为空")
+	}
+	item.SetHashcode(item.GetHash())
+	return dataAction().Insert(item)
+}
+func FindOwnedAddress(userID string, id uint) (*Address, error) {
+	if err := ensure(NewAddress()); err != nil {
+		return nil, err
+	}
+	var items []*Address
+	q := search(NewAddress(), 1)
+	q.AddWhereN("ID", id)
+	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+func ListAddresses(userID string) ([]*Address, error) {
+	if err := ensure(NewAddress()); err != nil {
+		return nil, err
+	}
+	var items []*Address
+	q := search(NewAddress(), 100)
+	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	err := dataAction().Load(q, &items)
+	return items, err
+}
+func DeleteAddress(item *Address) error { return dataAction().Delete(item) }
+func AddressDTO(item *Address) *userdto.Address {
+	if item == nil {
+		return nil
+	}
+	return &userdto.Address{ID: item.ID, Recipient: item.Recipient, Phone: item.Phone, Region: item.Region, Detail: item.Detail}
+}
+func AddressSnapshot(item *Address) userdto.AddressSnapshot {
+	return userdto.AddressSnapshot{AddressID: item.ID, Recipient: item.Recipient, Phone: item.Phone, Region: item.Region, Detail: item.Detail}
+}
