@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,13 +30,13 @@ func TestServerConfigAppliesGRPCDefaultsForClusterOff(t *testing.T) {
 func TestServerConfigExternalDiscoveryDefaultsToMTLS(t *testing.T) {
 	for _, provider := range []string{"redis", "etcd", "consul"} {
 		t.Run(provider, func(t *testing.T) {
-			cfg := ServerConfig{Cluster: ClusterConfig{Mode: "on", Provider: provider}}
-			cfg.Port = 8080
+			cfg := externalServerConfig(provider)
 
 			cfg.ApplyDefaults()
 
 			assert.Equal(t, 18080, cfg.Transport.GRPC.Port)
 			assert.Equal(t, "mtls", cfg.Transport.GRPC.Security.Mode)
+			require.ErrorContains(t, cfg.Validate(), "Transport.GRPC.Security.CAFile")
 		})
 	}
 }
@@ -62,12 +63,51 @@ func TestServerConfigRejectsRemoteInsecureGRPC(t *testing.T) {
 }
 
 func TestServerConfigAllowsExternalInsecureGRPCOnLoopback(t *testing.T) {
-	cfg := validExternalServerConfig()
-	cfg.Cluster.AdvertiseAddress = "127.0.0.1:18080"
-	cfg.Transport.GRPC.Security.Mode = "insecure"
-	cfg.ApplyDefaults()
+	addresses := []string{
+		"127.0.0.1",
+		"127.0.0.1:18080",
+		"::1",
+		"[::1]:18080",
+		"localhost",
+		"localhost:18080",
+	}
+	for _, address := range addresses {
+		t.Run(address, func(t *testing.T) {
+			cfg := validExternalServerConfig()
+			cfg.Cluster.AdvertiseAddress = address
+			cfg.Transport.GRPC.Security.Mode = "insecure"
+			cfg.ApplyDefaults()
 
-	require.NoError(t, cfg.Validate())
+			require.NoError(t, cfg.Validate())
+		})
+	}
+}
+
+func TestServerConfigExternalInsecureGRPCFallsBackToRunIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		runIP   string
+		wantErr bool
+	}{
+		{name: "loopback", runIP: "127.0.0.1"},
+		{name: "remote", runIP: "10.20.30.40", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validExternalServerConfig()
+			cfg.Cluster.AdvertiseAddress = ""
+			cfg.RunIp = tt.runIP
+			cfg.Transport.GRPC.Security.Mode = "insecure"
+			cfg.ApplyDefaults()
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				require.ErrorContains(t, err, "insecure grpc is limited to loopback")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestServerConfigPreservesCustomGRPCPort(t *testing.T) {
@@ -101,6 +141,27 @@ func TestTransportConfigSecurityRequiresTLSFiles(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantPath)
 		})
 	}
+}
+
+func TestTransportConfigSecurityAcceptsCompleteTLSAndMTLS(t *testing.T) {
+	tests := []GRPCSecurityConfig{
+		{Mode: "tls", CertFile: "server.crt", KeyFile: "server.key", ServerName: "core.internal"},
+		{Mode: "mtls", CAFile: "ca.crt", CertFile: "server.crt", KeyFile: "server.key", ServerName: "core.internal"},
+	}
+	for _, security := range tests {
+		t.Run(security.Mode, func(t *testing.T) {
+			tr := TransportConfig{GRPC: GRPCTransportConfig{Security: security}}
+			require.NoError(t, tr.Validate())
+		})
+	}
+}
+
+func TestTransportConfigSecurityRejectsInvalidMode(t *testing.T) {
+	tr := TransportConfig{GRPC: GRPCTransportConfig{Security: GRPCSecurityConfig{Mode: "plaintext"}}}
+
+	err := tr.Validate()
+
+	require.ErrorContains(t, err, "Transport.GRPC.Security.Mode")
 }
 
 func TestTransportConfigSecurityRejectsCertificatesForInsecureAndMesh(t *testing.T) {
@@ -139,17 +200,59 @@ func TestTransportConfigFallbackDefaultsToEmpty(t *testing.T) {
 	assert.Empty(t, tr.Fallback)
 }
 
+func TestTransportConfigGRPCPortBoundaries(t *testing.T) {
+	tests := []struct {
+		port    int
+		wantErr bool
+	}{
+		{port: -1, wantErr: true},
+		{port: 0},
+		{port: 1},
+		{port: 65535},
+		{port: 65536, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("port_%d", tt.port), func(t *testing.T) {
+			tr := TransportConfig{GRPC: GRPCTransportConfig{Port: tt.port}}
+			err := tr.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTransportConfigApplyServerDefaultsSetsNonZeroGRPCPort(t *testing.T) {
+	var tr TransportConfig
+	require.NoError(t, tr.Validate())
+
+	tr.ApplyServerDefaults(ClusterConfig{Mode: "off", Provider: "local"}, 8080)
+
+	assert.Equal(t, 18080, tr.GRPC.Port)
+}
+
 func validExternalServerConfig() ServerConfig {
+	return externalServerConfig("redis")
+}
+
+func externalServerConfig(provider string) ServerConfig {
 	cfg := ServerConfig{
 		RunIp: "10.20.30.40",
 		Cluster: ClusterConfig{
 			Mode:     "on",
-			Provider: "redis",
-			Providers: ClusterProviderConfig{
-				Redis: RedisProviderConfig{Addr: "127.0.0.1:6379"},
-			},
+			Provider: provider,
 		},
 	}
 	cfg.Port = 8080
+	switch provider {
+	case "redis":
+		cfg.Cluster.Providers.Redis.Addr = "127.0.0.1:6379"
+	case "etcd":
+		cfg.Cluster.Providers.Etcd.Endpoints = []string{"127.0.0.1:2379"}
+	case "consul":
+		cfg.Cluster.Providers.Consul.Address = "127.0.0.1:8500"
+	}
 	return cfg
 }

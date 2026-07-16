@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -11,16 +12,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestServerConfigLoadsLegacySocketJSONWithoutChangingGRPCDefault(t *testing.T) {
-	const legacy = `{"Port":8080,"SocketPort":18080,"Transport":{"Socket":{"Enable":true}}}`
-	var cfg ServerConfig
-	require.NoError(t, json.Unmarshal([]byte(legacy), &cfg))
+func TestReadConfigLoadsLegacySocketWithoutChangingGRPCDefaults(t *testing.T) {
+	originalConfigDirPath := CONFIGDIRPATH
+	CONFIGDIRPATH = t.TempDir() + string(os.PathSeparator)
+	t.Cleanup(func() { CONFIGDIRPATH = originalConfigDirPath })
 
-	cfg.ApplyDefaults()
+	const serviceName = "legacy-socket"
+	legacy := NewServiceDefaultConfig(serviceName, 8080)
+	legacy.Transport.Socket.Enable = true
+	data, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(data, &document))
+	fixDurations(reflect.ValueOf(legacy).Elem(), document)
+	transport := document["Transport"].(map[string]any)
+	delete(transport, "GRPC")
+	data, err = json.Marshal(document)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(CONFIGDIRPATH, serviceName+".json"), data, 0o600))
 
+	var cfg *ServerConfig
+	require.NotPanics(t, func() { cfg = ReadConfig(serviceName) })
+	require.NotNil(t, cfg)
 	assert.Equal(t, 18080, cfg.SocketPort)
 	assert.True(t, cfg.Transport.Socket.Enable)
 	assert.Equal(t, 18080, cfg.Transport.GRPC.Port)
+	assert.Equal(t, "insecure", cfg.Transport.GRPC.Security.Mode)
+	require.NoError(t, cfg.Validate())
 }
 
 func TestMigrateConfigReturnsWriteFailure(t *testing.T) {

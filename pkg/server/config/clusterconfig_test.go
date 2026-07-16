@@ -327,7 +327,6 @@ func TestTransportConfigValidate_UnimplementedEnableFields(t *testing.T) {
 		fieldPath string
 	}{
 		{name: "http", configure: func(tr *TransportConfig) { tr.HTTP.Enable = true }, fieldPath: "transport.http.enable"},
-		{name: "socket", configure: func(tr *TransportConfig) { tr.Socket.Enable = true }, fieldPath: "transport.socket.enable"},
 	}
 
 	for _, tt := range tests {
@@ -342,6 +341,11 @@ func TestTransportConfigValidate_UnimplementedEnableFields(t *testing.T) {
 			assert.Contains(t, err.Error(), "Internal/Fallback")
 		})
 	}
+}
+
+func TestTransportConfigValidateAllowsLegacySocketEnable(t *testing.T) {
+	tr := TransportConfig{Socket: SocketTransportConfig{Enable: true}}
+	assert.NoError(t, tr.Validate())
 }
 
 func TestTransportConfigValidate_GRPCPortIsConfigurable(t *testing.T) {

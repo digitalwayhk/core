@@ -115,9 +115,6 @@ func (t *TransportConfig) Validate() error {
 	if t.HTTP.Enable {
 		return errors.New("transport.http.enable is not implemented; use Transport.Internal/Fallback")
 	}
-	if t.Socket.Enable {
-		return errors.New("transport.socket.enable is not implemented; use Transport.Internal/Fallback")
-	}
 	if t.QUIC.Enable {
 		return errors.New("transport.quic.enable is not implemented; remove it or set it to false")
 	}
