@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/digitalwayhk/core/pkg/server/trans/socket"
+	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/proc"
@@ -34,6 +37,7 @@ type WebServer struct {
 	serverip         string
 	Port             int
 	SocketPort       int
+	GRPCPort         int
 	isRun            bool
 	registryVersion  uint64
 	optionApplyMu    sync.Mutex
@@ -94,6 +98,19 @@ func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
 	own.Unlock()
 	if !alreadyRunning {
 		go own.stateCallback(sc)
+	}
+	go own.failureCallback(sc)
+}
+
+func (own *WebServer) failureCallback(sc *router.ServiceContext) {
+	select {
+	case err := <-sc.Failure():
+		logx.Errorw("service_runtime_failed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("error", err),
+		)
+		own.Stop()
+	case <-own.stopChannel():
 	}
 }
 
@@ -373,15 +390,23 @@ func (own *WebServer) initServer() {
 		if ctx.Config.SocketPort != own.SocketPort && own.SocketPort != router.DEFAULTSOCKETPORT {
 			ctx.Config.SocketPort = own.SocketPort + int(ctx.Config.DataCenterID) - 1
 		}
-		err := ctx.Config.Save()
+		grpcPort, err := grpcPortOverride(own.GRPCPort, ctx.Config.DataCenterID)
 		if err != nil {
-			msg := "初始化服务器异常，服务名称：" + ctx.Config.Name + "，错误信息：" + err.Error()
-			panic(msg)
+			panic(fmt.Sprintf("初始化 gRPC 端口失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
+		}
+		if grpcPort != 0 {
+			ctx.Config.Transport.GRPC.Port = grpcPort
 		}
 		if err := own.newWebServer(ctx); err != nil {
 			panic(fmt.Sprintf("初始化 HTTP 服务失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
 		}
-		own.newInternalServer(ctx)
+		if err := own.newInternalServer(ctx); err != nil {
+			panic(fmt.Sprintf("初始化 gRPC 服务失败，服务名称：%s，地址：%s:%d，错误信息：%v",
+				ctx.Config.Name, ctx.Config.Host, ctx.Config.Transport.GRPC.Port, err))
+		}
+		if err := ctx.Config.Save(); err != nil {
+			panic("初始化服务器异常，服务名称：" + ctx.Config.Name + "，错误信息：" + err.Error())
+		}
 		htmls.AddServiceRouter(ctx.Router)
 	}
 }
@@ -389,6 +414,7 @@ func (own *WebServer) serverArgs() {
 	parentServer := flag.String("server", "", "主服务器地址,当前服务器的父服务器地址,如果是根服务器，则不需要此参数")
 	port := flag.Int("p", router.DEFAULTPORT, "运行端口,默认8080")
 	socket := flag.Int("socket", router.DEFAULTSOCKETPORT, "启用Socket服务并指定端口,为0时不启用Socket服务")
+	grpcPort := flag.Int("grpc", 0, "覆盖gRPC服务端口,为0时使用各服务配置")
 	view := flag.Int("view", 80, "启用视图服务并指定端口,为0时不启用视图服务")
 	flag.Parse()
 	if own.ViewPort == 0 {
@@ -400,6 +426,9 @@ func (own *WebServer) serverArgs() {
 	}
 	if own.SocketPort == 0 {
 		own.SocketPort = *socket
+	}
+	if own.GRPCPort == 0 {
+		own.GRPCPort = *grpcPort
 	}
 }
 func (own *WebServer) newWebServer(ctx *router.ServiceContext) error {
@@ -416,11 +445,58 @@ func (own *WebServer) newWebServer(ctx *router.ServiceContext) error {
 	ctx.SetHttpServer(rs)
 	return nil
 }
-func (own *WebServer) newInternalServer(ctx *router.ServiceContext) {
-	if own.SocketPort > 0 {
+func (own *WebServer) newInternalServer(ctx *router.ServiceContext) error {
+	grpcConfig := ctx.Config.Transport.GRPC
+	address := net.JoinHostPort(ctx.Config.Host, strconv.Itoa(grpcConfig.Port))
+	server, err := grpctransport.NewServer(address, grpcConfig, ctx.HandleInternalPayload)
+	if err != nil {
+		return err
+	}
+	_, portText, err := net.SplitHostPort(server.Address())
+	if err != nil {
+		server.Stop()
+		return fmt.Errorf("parse bound address %q: %w", server.Address(), err)
+	}
+	boundPort, err := strconv.Atoi(portText)
+	if err != nil {
+		server.Stop()
+		return fmt.Errorf("parse bound port %q: %w", portText, err)
+	}
+	ctx.Config.Transport.GRPC.Port = boundPort
+	ctx.SetGRPCServer(server)
+
+	if own.SocketPort > 0 && transportUsesProtocol(ctx.Config.Transport, "socket") {
 		ss := socket.NewServer(ctx)
 		ctx.SetSocketServer(ss)
 	}
+	return nil
+}
+
+func grpcPortOverride(base int, dataCenterID uint) (int, error) {
+	if base == 0 {
+		return 0, nil
+	}
+	offset := int(dataCenterID)
+	if offset < 1 {
+		offset = 1
+	}
+	port := base + offset - 1
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("gRPC port override %d with data center %d is outside 1..65535", base, dataCenterID)
+	}
+	return port, nil
+}
+
+func transportUsesProtocol(cfg config.TransportConfig, protocol string) bool {
+	if cfg.Internal == protocol {
+		return true
+	}
+	for _, fallback := range cfg.Fallback {
+		if fallback == protocol {
+			return true
+		}
+	}
+	return false
 }
 
 var (

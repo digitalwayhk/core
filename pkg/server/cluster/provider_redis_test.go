@@ -31,7 +31,7 @@ func TestRedisProvider_RegisterListHeartbeatAndDeregister(t *testing.T) {
 	node := &cluster.NodeInfo{
 		ID: "orders-1", ServiceName: "orders",
 		DataCenterID: 1, MachineID: 1,
-		Address: "order-1", Port: 8080, SocketPort: 18080, Weight: 1,
+		Address: "order-1", Port: 8080, SocketPort: 18080, GRPCPort: 19090, Weight: 1,
 	}
 
 	require.NoError(t, provider.Register(ctx, node))
@@ -39,6 +39,7 @@ func TestRedisProvider_RegisterListHeartbeatAndDeregister(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	assert.Equal(t, "order-1", nodes[0].Address)
+	assert.Equal(t, 19090, nodes[0].GRPCPort)
 
 	require.NoError(t, provider.Heartbeat(ctx, node.ID))
 	require.NoError(t, provider.Deregister(ctx, node.ID))

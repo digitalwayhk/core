@@ -31,6 +31,7 @@ var (
 const defaultServerStopTimeout = 5 * time.Second
 
 var _ service.Service = (*Server)(nil)
+var _ coretypes.GRPCServerLifecycle = (*Server)(nil)
 
 // Server wraps the gRPC server and implements the CoreTransport service.
 type Server struct {
@@ -173,6 +174,17 @@ func (s *Server) LastStopError() error {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	return s.stopErr
+}
+
+// BeginShutdown 同步将标准健康状态切换为 NOT_SERVING。
+// ServiceContext 使用该边界保证先停止接收流量，再注销服务发现。
+func (s *Server) BeginShutdown() {
+	s.stateMu.Lock()
+	if !s.completed {
+		s.stopRequested = true
+		s.health.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+	}
+	s.stateMu.Unlock()
 }
 
 // StopContext marks the server NOT_SERVING before graceful shutdown. If ctx

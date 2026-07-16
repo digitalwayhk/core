@@ -306,6 +306,16 @@ func TestTransportConfigApplyServerDefaultsSetsNonZeroGRPCPort(t *testing.T) {
 	assert.Equal(t, 18080, tr.GRPC.Port)
 }
 
+func TestTransportConfigApplyServerDefaultsKeepsAutomaticPortForUnsafeDerivation(t *testing.T) {
+	for _, httpPort := range []int{0, 60000} {
+		t.Run(fmt.Sprintf("http_%d", httpPort), func(t *testing.T) {
+			var tr TransportConfig
+			tr.ApplyServerDefaults(ClusterConfig{Mode: "off", Provider: "local"}, httpPort)
+			assert.Zero(t, tr.GRPC.Port)
+		})
+	}
+}
+
 func validExternalServerConfig() ServerConfig {
 	return externalServerConfig("redis")
 }

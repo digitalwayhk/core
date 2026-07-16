@@ -25,6 +25,7 @@ import (
 
 	"github.com/yitter/idgenerator-go/idgen"
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/service"
 )
 
 // processLocalRegistry is a shared in-memory cluster registry for all ServiceContexts
@@ -78,6 +79,108 @@ type ServiceContext struct {
 	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
 	nodeID                   string
 	configFingerprint        string
+	grpcServer               types.GRPCServerLifecycle
+	grpcSupervisorOnce       sync.Once
+	runtimeErrMu             sync.RWMutex
+	runtimeErr               error
+	runtimeFailure           chan error
+}
+
+const grpcLifecycleTimeout = 5 * time.Second
+
+type managedGRPCService struct {
+	owner  *ServiceContext
+	server types.GRPCServerLifecycle
+}
+
+func (s *managedGRPCService) Start() { s.server.Start() }
+func (s *managedGRPCService) Stop()  { s.owner.SetRunState(false) }
+
+// RuntimeError 返回服务运行期的稳定终态错误。
+func (own *ServiceContext) RuntimeError() error {
+	own.runtimeErrMu.RLock()
+	defer own.runtimeErrMu.RUnlock()
+	return own.runtimeErr
+}
+
+func (own *ServiceContext) setRuntimeError(err error) {
+	if err == nil {
+		return
+	}
+	own.runtimeErrMu.Lock()
+	if own.runtimeErr == nil {
+		own.runtimeErr = err
+		if own.runtimeFailure == nil {
+			own.runtimeFailure = make(chan error, 1)
+		}
+		own.runtimeFailure <- err
+	}
+	own.runtimeErrMu.Unlock()
+}
+
+// Failure 返回服务运行期终态错误。每个 ServiceContext 最多发布一次。
+func (own *ServiceContext) Failure() <-chan error {
+	own.runtimeErrMu.Lock()
+	defer own.runtimeErrMu.Unlock()
+	if own.runtimeFailure == nil {
+		own.runtimeFailure = make(chan error, 1)
+		if own.runtimeErr != nil {
+			own.runtimeFailure <- own.runtimeErr
+		}
+	}
+	return own.runtimeFailure
+}
+
+// SetGRPCServer 将服务专属 gRPC 生命周期交给 ServiceContext 管理。
+func (own *ServiceContext) SetGRPCServer(server types.GRPCServerLifecycle) {
+	own.lifecycleMu.Lock()
+	own.grpcServer = server
+	own.lifecycleMu.Unlock()
+	own.superviseGRPC(server)
+}
+
+func (own *ServiceContext) waitForGRPCReady(ctx context.Context, server types.GRPCServerLifecycle) error {
+	if server == nil {
+		return nil
+	}
+	select {
+	case <-server.Ready():
+		select {
+		case <-server.Done():
+			if err := server.Err(); err != nil {
+				return err
+			}
+			return errors.New("grpc server stopped before discovery registration")
+		default:
+			return nil
+		}
+	case <-server.Done():
+		if err := server.Err(); err != nil {
+			return err
+		}
+		return errors.New("grpc server stopped before becoming ready")
+	case <-ctx.Done():
+		return fmt.Errorf("wait for grpc ready: %w", ctx.Err())
+	}
+}
+
+func (own *ServiceContext) superviseGRPC(server types.GRPCServerLifecycle) {
+	if server == nil {
+		return
+	}
+	own.grpcSupervisorOnce.Do(func() {
+		go func() {
+			<-server.Done()
+			if err := server.Err(); err != nil {
+				own.setRuntimeError(err)
+				logx.Errorw("grpc_server_runtime_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+				own.SetRunState(false)
+			}
+		}()
+	})
 }
 
 func (own *ServiceContext) beginLifecycleOperation() {
@@ -798,6 +901,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	authRevocationManager := own.AuthRevocationManager
 	serviceResolver := own.ServiceResolver
 	ownsClusterProvider := own.ownsClusterProvider
+	grpcServer := own.grpcServer
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -831,6 +935,21 @@ func (own *ServiceContext) SetRunState(state bool) {
 	}
 
 	if state {
+		readyCtx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+		readyErr := own.waitForGRPCReady(readyCtx, grpcServer)
+		cancel()
+		if readyErr != nil {
+			own.setRuntimeError(readyErr)
+			own.isStart.Store(false)
+			if own.Config.Cluster.Mode == "on" {
+				panic(fmt.Sprintf("grpc: service %s failed before discovery registration: %v", own.Service.Name, readyErr))
+			}
+			logx.Errorw("grpc_server_not_ready",
+				logx.Field("service", own.Service.Name),
+				logx.Field("error", readyErr),
+			)
+			return
+		}
 		nodeID, node, interval := own.clusterMembershipConfig()
 		if provider != nil && membership == nil {
 			var err error
@@ -859,7 +978,37 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.membership = membership
 		own.CrossNodeBroker = broker
 		own.lifecycleMu.Unlock()
+		own.superviseGRPC(grpcServer)
 	} else {
+		if grpcServer != nil {
+			grpcServer.BeginShutdown()
+		}
+		if membership != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+			membership.Stop(ctx)
+			cancel()
+			membership = nil
+		}
+		if grpcServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+			if err := grpcServer.StopContext(ctx); err != nil {
+				logx.Errorw("grpc_server_stop_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+		if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+			if err := stopper.Stop(ctx); err != nil {
+				logx.Errorw("transport_client_pool_stop_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
 		if serviceResolver != nil {
 			serviceResolver.Close()
 		}
@@ -893,11 +1042,6 @@ func (own *ServiceContext) SetRunState(state bool) {
 			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			broker.DrainAndStop(ctx)
-			cancel()
-		}
-		if membership != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			membership.Stop(ctx)
 			cancel()
 		}
 		if ownsClusterProvider && provider != nil {
@@ -1022,6 +1166,7 @@ func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo,
 		Address:      address,
 		Port:         own.Config.Port,
 		SocketPort:   own.Config.SocketPort,
+		GRPCPort:     own.Config.Transport.GRPC.Port,
 		Weight:       1,
 	}
 	interval := own.Config.Cluster.HeartbeatInterval
@@ -1053,11 +1198,26 @@ func (own *ServiceContext) SetHttpServer(server types.IRunServer) {
 func (own *ServiceContext) SetSocketServer(server types.IRunServer) {
 	own.Service.AddInternalServer(server)
 }
-func (own *ServiceContext) GetServers() []types.IRunServer {
-	items := make([]types.IRunServer, 0)
-	items = append(items, own.Service.HttpServer)
-	items = append(items, own.Service.GetInternalServers()...)
+func (own *ServiceContext) GetServers() []service.Service {
+	items := make([]service.Service, 0, 2+len(own.Service.GetInternalServers()))
+	if own.Service.HttpServer != nil {
+		items = append(items, own.Service.HttpServer)
+	}
+	for _, server := range own.Service.GetInternalServers() {
+		if server != nil {
+			items = append(items, server)
+		}
+	}
+	if own.grpcServer != nil {
+		items = append(items, &managedGRPCService{owner: own, server: own.grpcServer})
+	}
 	return items
+}
+
+// HandleInternalPayload 是 gRPC 服务端调用业务路由的入口。
+func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+	own.TransportStats.RecordInboundGRPC()
+	return own.invokePayload(ctx, payload)
 }
 func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 	if cas, ok := own.Config.AttachServices[name]; ok {

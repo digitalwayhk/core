@@ -1,10 +1,22 @@
 package types
 
 import (
+	"context"
 	"errors"
 
 	"github.com/zeromicro/go-zero/core/service"
 )
+
+// GRPCServerLifecycle 是 ServiceContext 管理 gRPC 服务端所需的完整生命周期契约。
+// BeginShutdown 必须同步发布 NOT_SERVING，但不得等待在途 RPC 结束。
+type GRPCServerLifecycle interface {
+	service.Service
+	Ready() <-chan struct{}
+	Done() <-chan struct{}
+	BeginShutdown()
+	StopContext(context.Context) error
+	Err() error
+}
 
 type Service struct {
 	Name             string

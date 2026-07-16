@@ -19,6 +19,25 @@ type DefaultSelector struct {
 	stats    *Stats
 }
 
+// Stop 关闭本 Selector 持有的客户端传输资源。每个传输实例最多关闭一次。
+func (s *DefaultSelector) Stop(ctx context.Context) error {
+	seen := make(map[Transport]struct{}, 1+len(s.fallback))
+	var firstErr error
+	for _, candidate := range append([]Transport{s.primary}, s.fallback...) {
+		if candidate == nil {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if err := candidate.Stop(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // NewDefaultSelector creates a selector with a primary and optional fallbacks.
 func NewDefaultSelector(primary Transport, fallback ...Transport) *DefaultSelector {
 	return &DefaultSelector{primary: primary, fallback: fallback}

@@ -1,11 +1,14 @@
 package run
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -14,7 +17,94 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/stretchr/testify/require"
 )
+
+type failingGRPCLifecycle struct {
+	ready chan struct{}
+	done  chan struct{}
+	err   atomic.Pointer[error]
+}
+
+func newFailingGRPCLifecycle() *failingGRPCLifecycle {
+	ready := make(chan struct{})
+	close(ready)
+	return &failingGRPCLifecycle{ready: ready, done: make(chan struct{})}
+}
+
+func (s *failingGRPCLifecycle) Start()                            { <-s.done }
+func (s *failingGRPCLifecycle) Stop()                             {}
+func (s *failingGRPCLifecycle) Ready() <-chan struct{}            { return s.ready }
+func (s *failingGRPCLifecycle) Done() <-chan struct{}             { return s.done }
+func (s *failingGRPCLifecycle) BeginShutdown()                    {}
+func (s *failingGRPCLifecycle) StopContext(context.Context) error { return nil }
+func (s *failingGRPCLifecycle) Err() error {
+	if value := s.err.Load(); value != nil {
+		return *value
+	}
+	return nil
+}
+func (s *failingGRPCLifecycle) Fail(err error) {
+	s.err.Store(&err)
+	close(s.done)
+}
+
+func TestWebServerStopsWhenGRPCRuntimeFails(t *testing.T) {
+	service := &concurrencyTestService{name: "grpc-runtime-failure", started: make(chan struct{}, 1)}
+	ctx := newConcurrencyTestContext(service)
+	server := newFailingGRPCLifecycle()
+	ctx.SetGRPCServer(server)
+	webServer := bareWebServer()
+	webServer.AddServiceContext(ctx)
+
+	server.Fail(errors.New("serve failed"))
+
+	require.Eventually(t, webServer.stopped.Load, callbackTimeout, time.Millisecond)
+}
+
+func TestGRPCPortOverride(t *testing.T) {
+	tests := []struct {
+		name       string
+		base       int
+		dataCenter uint
+		want       int
+		wantErr    bool
+	}{
+		{name: "zero keeps service config", base: 0, dataCenter: 2, want: 0},
+		{name: "explicit first service", base: 19090, dataCenter: 1, want: 19090},
+		{name: "explicit second service", base: 19090, dataCenter: 2, want: 19091},
+		{name: "overflow fails closed", base: 65535, dataCenter: 2, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := grpcPortOverride(tt.base, tt.dataCenter)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("期望端口溢出错误")
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("grpcPortOverride() = %d, %v; want %d", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewInternalServerFailsClosedWhenMTLSFilesAreMissing(t *testing.T) {
+	service := &concurrencyTestService{name: "grpc-mtls-missing", started: make(chan struct{}, 1)}
+	ctx := newConcurrencyTestContext(service)
+	ctx.Config.Host = "127.0.0.1"
+	ctx.Config.Transport.GRPC.Port = 0
+	ctx.Config.Transport.GRPC.Security = config.GRPCSecurityConfig{
+		Mode: "mtls", CAFile: "missing-ca.pem", CertFile: "missing-cert.pem", KeyFile: "missing-key.pem",
+	}
+
+	err := bareWebServer().newInternalServer(ctx)
+	if err == nil || !strings.Contains(err.Error(), "Transport.GRPC.Security.") {
+		t.Fatalf("缺失 mTLS 文件必须使构造失败，得到 %v", err)
+	}
+}
 
 const callbackTimeout = 2 * time.Second
 

@@ -10,6 +10,7 @@ type Stats struct {
 	sendSuccess  atomic.Uint64
 	sendFailure  atomic.Uint64
 	httpFallback atomic.Uint64
+	inboundGRPC  atomic.Uint64
 }
 
 // StatsSnapshot 是传输指标的一致用途快照。
@@ -19,6 +20,7 @@ type StatsSnapshot struct {
 	SendSuccess  uint64
 	SendFailure  uint64
 	HTTPFallback uint64
+	InboundGRPC  uint64
 }
 
 // Snapshot 返回当前累计值。
@@ -32,6 +34,14 @@ func (s *Stats) Snapshot() StatsSnapshot {
 		SendSuccess:  s.sendSuccess.Load(),
 		SendFailure:  s.sendFailure.Load(),
 		HTTPFallback: s.httpFallback.Load(),
+		InboundGRPC:  s.inboundGRPC.Load(),
+	}
+}
+
+// RecordInboundGRPC 记录当前 ServiceContext 收到的一次 gRPC 调用。
+func (s *Stats) RecordInboundGRPC() {
+	if s != nil {
+		s.inboundGRPC.Add(1)
 	}
 }
 
