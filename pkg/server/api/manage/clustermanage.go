@@ -25,16 +25,18 @@ func (c *ClusterStatus) Validation(_ types.IRequest) error { return nil }
 
 func (c *ClusterStatus) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
-	if sc == nil || sc.ClusterProvider == nil {
+	if sc == nil {
 		return &ClusterStatus{ProviderName: "none"}, nil
 	}
-	nodes, err := sc.ClusterProvider.List(context.Background(), c.ServiceName)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	providerName, nodes, err := sc.ClusterProviderSnapshot(ctx, c.ServiceName)
 	if err != nil {
 		return nil, err
 	}
 	return &ClusterStatus{
 		ServiceName:  c.ServiceName,
-		ProviderName: sc.ClusterProvider.Name(),
+		ProviderName: providerName,
 		Nodes:        nodes,
 	}, nil
 }
@@ -61,14 +63,16 @@ func (c *ClusterNodes) Validation(_ types.IRequest) error { return nil }
 
 func (c *ClusterNodes) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
-	if sc == nil || sc.ClusterProvider == nil {
+	if sc == nil {
 		return &ClusterNodes{Nodes: []*cluster.NodeInfo{}}, nil
 	}
 	var statuses []cluster.NodeStatus
 	if c.Status != "" {
 		statuses = []cluster.NodeStatus{cluster.NodeStatus(c.Status)}
 	}
-	nodes, err := sc.ClusterProvider.List(context.Background(), c.ServiceName, statuses...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, nodes, err := sc.ClusterProviderSnapshot(ctx, c.ServiceName, statuses...)
 	if err != nil {
 		return nil, err
 	}

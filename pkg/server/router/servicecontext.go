@@ -223,11 +223,23 @@ func (own *ServiceContext) superviseGRPC(server types.GRPCServerLifecycle) {
 }
 
 func (own *ServiceContext) beginLifecycleOperation() {
+	_ = own.beginLifecycleOperationContext(context.Background())
+}
+
+func (own *ServiceContext) beginLifecycleOperationContext(ctx context.Context) error {
 	own.lifecycleOpOnce.Do(func() {
 		own.lifecycleOp = make(chan struct{}, 1)
 		own.lifecycleOp <- struct{}{}
 	})
-	<-own.lifecycleOp
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-own.lifecycleOp:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (own *ServiceContext) endLifecycleOperation() {
@@ -1055,7 +1067,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	} else {
 		if shutdown, ok := switcher.(cluster.ProviderSwitchShutdown); ok {
 			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
-			own.recordShutdownError(shutdown.Shutdown(ctx))
+			own.recordShutdownError(shutdown.Shutdown(ctx, provider))
 			cancel()
 		}
 		if grpcServer != nil {
@@ -1167,6 +1179,36 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	return own.syncProviderAfterSwitch()
 }
 
+// ClusterProviderSnapshot reads provider identity and nodes within the service
+// lifecycle boundary so switching and shutdown cannot replace or close it.
+func (own *ServiceContext) ClusterProviderSnapshot(
+	ctx context.Context,
+	serviceName string,
+	statuses ...cluster.NodeStatus,
+) (string, []*cluster.NodeInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := own.beginLifecycleOperationContext(ctx); err != nil {
+		return "", nil, fmt.Errorf("cluster: wait for provider query: %w", err)
+	}
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	provider := own.ClusterProvider
+	terminated := own.terminated
+	own.lifecycleMu.Unlock()
+	if terminated || provider == nil {
+		return "none", []*cluster.NodeInfo{}, nil
+	}
+	providerName := provider.Name()
+	nodes, err := provider.List(ctx, serviceName, statuses...)
+	if err != nil {
+		return "", nil, err
+	}
+	return providerName, nodes, nil
+}
+
 func (own *ServiceContext) syncProviderAfterSwitch() error {
 
 	own.lifecycleMu.Lock()
@@ -1255,7 +1297,12 @@ func (own *ServiceContext) syncProviderAfterSwitch() error {
 // BeginProviderSwitch starts a provider migration inside the service lifecycle
 // boundary. A target not accepted by Begin is closed before this method returns.
 func (own *ServiceContext) BeginProviderSwitch(ctx context.Context, to cluster.DiscoveryProvider) error {
-	own.beginLifecycleOperation()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := own.beginLifecycleOperationContext(ctx); err != nil {
+		return closeRejectedSwitchTarget(ctx, to, err)
+	}
 	defer own.endLifecycleOperation()
 
 	own.lifecycleMu.Lock()
@@ -1263,10 +1310,10 @@ func (own *ServiceContext) BeginProviderSwitch(ctx context.Context, to cluster.D
 	switcher := own.ClusterSwitcher
 	own.lifecycleMu.Unlock()
 	if terminated {
-		return closeRejectedSwitchTarget(to, errors.New("cluster: service context is terminated"))
+		return closeRejectedSwitchTarget(ctx, to, errors.New("cluster: service context is terminated"))
 	}
 	if switcher == nil {
-		return closeRejectedSwitchTarget(to, errors.New("cluster: switcher not initialised"))
+		return closeRejectedSwitchTarget(ctx, to, errors.New("cluster: switcher not initialised"))
 	}
 	return beginProviderSwitch(ctx, switcher, to)
 }
@@ -1334,17 +1381,37 @@ func beginProviderSwitch(
 	if err == nil {
 		return nil
 	}
-	return closeRejectedSwitchTarget(to, err)
+	return closeRejectedSwitchTarget(ctx, to, err)
 }
 
-func closeRejectedSwitchTarget(to cluster.DiscoveryProvider, beginErr error) error {
+func closeRejectedSwitchTarget(
+	ctx context.Context,
+	to cluster.DiscoveryProvider,
+	beginErr error,
+) error {
 	if to == nil {
 		return beginErr
 	}
-	if closeErr := to.Close(); closeErr != nil {
-		return errors.Join(beginErr, fmt.Errorf("cluster: close rejected target provider %s: %w", to.Name(), closeErr))
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return beginErr
+	closeDone := make(chan error, 1)
+	go func() {
+		if closer, ok := to.(cluster.ContextCloser); ok {
+			closeDone <- closer.CloseContext(ctx)
+			return
+		}
+		closeDone <- to.Close()
+	}()
+	select {
+	case closeErr := <-closeDone:
+		if closeErr != nil {
+			return errors.Join(beginErr, fmt.Errorf("cluster: close rejected target provider %s: %w", to.Name(), closeErr))
+		}
+		return beginErr
+	case <-ctx.Done():
+		return errors.Join(beginErr, fmt.Errorf("cluster: wait for rejected target provider %s close: %w", to.Name(), ctx.Err()))
+	}
 }
 
 func providerName(provider cluster.DiscoveryProvider) string {

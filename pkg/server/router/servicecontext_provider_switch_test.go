@@ -55,7 +55,7 @@ func (s *lifecycleBoundarySwitcher) Finalize(context.Context) error {
 	s.finalizeCount.Add(1)
 	return nil
 }
-func (s *lifecycleBoundarySwitcher) Shutdown(context.Context) error {
+func (s *lifecycleBoundarySwitcher) Shutdown(context.Context, cluster.DiscoveryProvider) error {
 	s.shutdownOnce.Do(func() { close(s.shutdownCalled) })
 	return nil
 }
@@ -81,12 +81,57 @@ type rejectedTargetProvider struct {
 	cluster.DiscoveryProvider
 	closeCount atomic.Int32
 	closeErr   error
+	closeStart chan struct{}
+	closeDone  chan struct{}
+	release    <-chan struct{}
+	closeOnce  sync.Once
 }
 
 func (p *rejectedTargetProvider) Name() string { return "rejected" }
 func (p *rejectedTargetProvider) Close() error {
 	p.closeCount.Add(1)
+	p.closeOnce.Do(func() {
+		if p.closeStart != nil {
+			close(p.closeStart)
+		}
+	})
+	if p.release != nil {
+		<-p.release
+	}
+	if p.closeDone != nil {
+		close(p.closeDone)
+	}
 	return p.closeErr
+}
+
+type lifecycleTrackingProvider struct {
+	cluster.DiscoveryProvider
+	closeCount  atomic.Int32
+	registerErr error
+}
+
+func (p *lifecycleTrackingProvider) Register(ctx context.Context, node *cluster.NodeInfo) error {
+	if p.registerErr != nil {
+		return p.registerErr
+	}
+	return p.DiscoveryProvider.Register(ctx, node)
+}
+
+func (p *lifecycleTrackingProvider) Close() error {
+	p.closeCount.Add(1)
+	return p.DiscoveryProvider.Close()
+}
+
+type retryLifecycleProvider struct {
+	cluster.DiscoveryProvider
+	closeCount atomic.Int32
+}
+
+func (p *retryLifecycleProvider) Close() error {
+	if p.closeCount.Add(1) == 1 {
+		return errors.New("first close failed")
+	}
+	return p.DiscoveryProvider.Close()
 }
 
 func (s *legacyLifecycleSwitcher) Current() cluster.DiscoveryProvider { return s.current }
@@ -222,6 +267,41 @@ func TestBeginProviderSwitchClosesTargetWhenBeginFails(t *testing.T) {
 	sc.SetRunState(false)
 }
 
+func TestBeginProviderSwitchBlockingCloseReturnsAtDeadlineAndEventuallyCloses(t *testing.T) {
+	sc := newProviderSwitchContext(t, "begin-blocking-close")
+	beginErr := errors.New("begin failed")
+	release := make(chan struct{})
+	target := &rejectedTargetProvider{
+		closeStart: make(chan struct{}),
+		closeDone:  make(chan struct{}),
+		release:    release,
+	}
+	sc.ClusterSwitcher = &beginFailureSwitcher{err: beginErr}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	result := make(chan error, 1)
+	go func() { result <- sc.BeginProviderSwitch(ctx, target) }()
+	<-target.closeStart
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, beginErr)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		t.Fatal("BeginProviderSwitch waited indefinitely for rejected target Close")
+	}
+
+	close(release)
+	select {
+	case <-target.closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("rejected target Close did not eventually complete")
+	}
+	assert.Equal(t, int32(1), target.closeCount.Load())
+	sc.SetRunState(false)
+}
+
 func TestCompleteProviderSwitchRejectsLegacySwitcherAfterShutdown(t *testing.T) {
 	sc := newProviderSwitchContext(t, "legacy-terminated")
 	switcher := &legacyLifecycleSwitcher{current: sc.ClusterProvider}
@@ -267,4 +347,54 @@ func TestServiceContextShutdownCancelsMigrationAndClosesPending(t *testing.T) {
 	sc.SetRunState(false)
 	assert.Equal(t, int32(1), pending.closeContextCount.Load(), "重复 shutdown 不得重复关闭 pending")
 	_ = current.Close()
+}
+
+func TestServiceContextShutdownAfterSyncFailureClosesSwitcherCurrentAndActiveProvider(t *testing.T) {
+	sc := newProviderSwitchContext(t, "sync-failure-ownership")
+	oldBase := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+	old := &lifecycleTrackingProvider{DiscoveryProvider: oldBase}
+	newBase := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+	newProvider := &lifecycleTrackingProvider{
+		DiscoveryProvider: newBase,
+		registerErr:       errors.New("register new provider failed"),
+	}
+	sc.ClusterProvider = old
+	sc.ownsClusterProvider = true
+	sc.ClusterSwitcher = cluster.NewClusterSwitcher(old, sc.Service.Name)
+	sc.ServiceResolver.SetProvider(old)
+	sc.SetRunState(true)
+	require.True(t, sc.isStart.Load())
+	require.NoError(t, sc.BeginProviderSwitch(context.Background(), newProvider))
+
+	err := sc.CompleteProviderSwitch(context.Background())
+	require.Error(t, err)
+	assert.Same(t, old, sc.ClusterProvider)
+	assert.Same(t, newProvider, sc.ClusterSwitcher.Current())
+
+	sc.SetRunState(false)
+	assert.Equal(t, int32(1), newProvider.closeCount.Load())
+	assert.Equal(t, int32(1), old.closeCount.Load())
+	assert.NoError(t, sc.ShutdownError())
+}
+
+func TestServiceContextShutdownAfterFinalizeFailureClosesRetiredAndActiveProvider(t *testing.T) {
+	sc := newProviderSwitchContext(t, "finalize-failure-ownership")
+	oldBase := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+	old := &retryLifecycleProvider{DiscoveryProvider: oldBase}
+	newBase := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+	newProvider := &lifecycleTrackingProvider{DiscoveryProvider: newBase}
+	sc.ClusterProvider = old
+	sc.ownsClusterProvider = true
+	sc.ClusterSwitcher = cluster.NewClusterSwitcher(old, sc.Service.Name)
+	sc.ServiceResolver.SetProvider(old)
+	require.NoError(t, sc.BeginProviderSwitch(context.Background(), newProvider))
+
+	err := sc.CompleteProviderSwitch(context.Background())
+	require.Error(t, err)
+	assert.Same(t, newProvider, sc.ClusterProvider)
+
+	sc.SetRunState(false)
+	assert.Equal(t, int32(2), old.closeCount.Load())
+	assert.Equal(t, int32(1), newProvider.closeCount.Load())
+	assert.NoError(t, sc.ShutdownError())
 }

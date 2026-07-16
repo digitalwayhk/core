@@ -80,6 +80,30 @@ type flakyCloseManageProvider struct {
 	closeCount atomic.Int32
 }
 
+type blockingQueryProvider struct {
+	cluster.DiscoveryProvider
+	block       atomic.Bool
+	listStarted chan struct{}
+	releaseList chan struct{}
+	startOnce   sync.Once
+}
+
+func (p *blockingQueryProvider) List(
+	ctx context.Context,
+	serviceName string,
+	statuses ...cluster.NodeStatus,
+) ([]*cluster.NodeInfo, error) {
+	if p.block.Load() {
+		p.startOnce.Do(func() { close(p.listStarted) })
+		select {
+		case <-p.releaseList:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return p.DiscoveryProvider.List(ctx, serviceName, statuses...)
+}
+
 func (p *flakyCloseManageProvider) Close() error {
 	if p.closeCount.Add(1) == 1 {
 		return errors.New("模拟首次 Close 失败")
@@ -284,6 +308,60 @@ func TestClusterNodes_NoContext_ReturnsEmptyList(t *testing.T) {
 	nodes, ok := result.(*manage.ClusterNodes)
 	require.True(t, ok)
 	assert.Empty(t, nodes.Nodes)
+}
+
+func TestClusterManageQueriesSerializeWithProviderSwitch(t *testing.T) {
+	tests := []struct {
+		name  string
+		query func(types.IRequest) (interface{}, error)
+	}{
+		{name: "status", query: (&manage.ClusterStatus{}).Do},
+		{name: "nodes", query: (&manage.ClusterNodes{}).Do},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serviceName := "manage-query-switch-" + tt.name
+			sc := router.NewServiceContext(&fakeManageSvc{serviceName})
+			oldBase := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+			old := &blockingQueryProvider{
+				DiscoveryProvider: oldBase,
+				listStarted:       make(chan struct{}),
+				releaseList:       make(chan struct{}),
+			}
+			newProvider := cluster.NewLocalProvider(time.Hour, time.Hour, time.Hour)
+			sc.ClusterProvider = old
+			sc.ClusterSwitcher = cluster.NewClusterSwitcher(old, serviceName)
+			sc.ServiceResolver.SetProvider(old)
+			require.NoError(t, sc.BeginProviderSwitch(context.Background(), newProvider))
+			old.block.Store(true)
+
+			queryDone := make(chan error, 1)
+			go func() {
+				_, err := tt.query(&mockRequest{serviceName: serviceName})
+				queryDone <- err
+			}()
+			<-old.listStarted
+			completeDone := make(chan error, 1)
+			go func() {
+				_, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(
+					&mockRequest{serviceName: serviceName},
+				)
+				completeDone <- err
+			}()
+
+			select {
+			case err := <-completeDone:
+				close(old.releaseList)
+				require.NoError(t, err)
+				t.Fatal("provider switch completed while manage query still used the old provider")
+			case <-time.After(30 * time.Millisecond):
+			}
+			close(old.releaseList)
+			require.NoError(t, <-queryDone)
+			require.NoError(t, <-completeDone)
+			sc.SetRunState(false)
+		})
+	}
 }
 
 // --- ClusterSwitchProvider success path tests ---
