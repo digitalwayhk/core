@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
@@ -55,8 +56,10 @@ func (c *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	uid, _ := identity(req)
 	return business.CreateOrder(req.NewID(), uid, c.IdempotencyKey, strconv.FormatUint(uint64(req.NewID()), 10), *snapshot, c.Address, c.Quantity)
 }
-func (*CreateOrder) GetResponse() interface{}              { return &orderdto.Order{} }
-func (c *CreateOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(c) }
+func (*CreateOrder) GetResponse() interface{} { return &orderdto.Order{} }
+func (c *CreateOrder) RouterInfo() *servertypes.RouterInfo {
+	return orderRoute(c, "createorder", http.MethodPost)
+}
 
 type GetUserOrders struct{}
 
@@ -68,7 +71,7 @@ func (*GetUserOrders) Do(req servertypes.IRequest) (interface{}, error) {
 }
 func (*GetUserOrders) GetResponse() interface{} { return []*orderdto.Order{} }
 func (g *GetUserOrders) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	return orderRoute(g, "getuserorders", http.MethodGet)
 }
 
 type GetSupplierOrders struct{}
@@ -84,7 +87,7 @@ func (*GetSupplierOrders) Do(req servertypes.IRequest) (interface{}, error) {
 }
 func (*GetSupplierOrders) GetResponse() interface{} { return []*orderdto.SupplierOrder{} }
 func (g *GetSupplierOrders) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	return orderRoute(g, "getsupplierorders", http.MethodGet)
 }
 
 type DeleteOrder struct {
@@ -109,8 +112,10 @@ func (c *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
 	uid, _ := identity(req)
 	return business.CreatePayment(uid, c.OrderID, c.PaymentTypeID, req.NewID(), strconv.FormatUint(uint64(req.NewID()), 10))
 }
-func (*CreatePayment) GetResponse() interface{}              { return &orderdto.PaymentRecord{} }
-func (c *CreatePayment) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(c) }
+func (*CreatePayment) GetResponse() interface{} { return &orderdto.PaymentRecord{} }
+func (c *CreatePayment) RouterInfo() *servertypes.RouterInfo {
+	return orderRoute(c, "createpayment", http.MethodPost)
+}
 
 func (d *DeleteOrder) Parse(req servertypes.IRequest) error { return req.Bind(d) }
 func (d *DeleteOrder) Validation(req servertypes.IRequest) error {
@@ -124,5 +129,11 @@ func (d *DeleteOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	uid, _ := identity(req)
 	return business.DeleteOrCancel(uid, d.OrderID, strconv.FormatUint(uint64(req.NewID()), 10))
 }
-func (*DeleteOrder) GetResponse() interface{}              { return &orderdto.Order{} }
-func (d *DeleteOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(d) }
+func (*DeleteOrder) GetResponse() interface{} { return &orderdto.Order{} }
+func (d *DeleteOrder) RouterInfo() *servertypes.RouterInfo {
+	return orderRoute(d, "deleteorder", http.MethodPost)
+}
+
+func orderRoute(api interface{}, name, method string) *servertypes.RouterInfo {
+	return router.DefaultRouterInfoWithOptions(api, router.WithServiceName(contract.OrderServiceName), router.WithPath("/api/"+contract.OrderServiceName+"/"+name), router.WithPathType(servertypes.PrivateType), router.WithAuth(true), router.WithMethod(method))
+}

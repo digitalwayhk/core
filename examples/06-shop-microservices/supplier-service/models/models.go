@@ -104,6 +104,11 @@ func (o *Outbox) GetHash() string       { return utils.HashCodes(o.EventID) }
 
 func dataAction() persistencetypes.IDataAction {
 	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
+	if cloner, ok := action.(interface {
+		Clone() persistencetypes.IDataAction
+	}); ok {
+		return cloner.Clone()
+	}
 	return action
 }
 

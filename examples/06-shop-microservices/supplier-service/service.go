@@ -46,11 +46,11 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	switch args.PathType {
 	case servertypes.ManageType:
 		if uid != contract.PlatformAdminUserID {
-			return contract.ErrForbidden
+			return servertypes.NewPublicError(servertypes.ErrorKindForbidden, servertypes.PublicCodeForbidden, "权限不足", contract.ErrForbidden)
 		}
 	case servertypes.PrivateType:
 		if uid == "" || uid == contract.PlatformAdminUserID {
-			return contract.ErrForbidden
+			return servertypes.NewPublicError(servertypes.ErrorKindForbidden, servertypes.PublicCodeForbidden, "权限不足", contract.ErrForbidden)
 		}
 	}
 	return nil

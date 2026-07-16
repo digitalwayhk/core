@@ -29,5 +29,5 @@ func (g *GetProductSnapshot) Do(servertypes.IRequest) (interface{}, error) {
 }
 func (*GetProductSnapshot) GetResponse() interface{} { return &supplierdto.ProductSnapshot{} }
 func (g *GetProductSnapshot) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithPath("/api/"+contract.SupplierServiceName+"/getproductsnapshot"), router.WithPathType(servertypes.PrivateType), router.WithAuth(true))
+	return router.DefaultRouterInfoWithOptions(g, router.WithServiceName(contract.SupplierServiceName), router.WithPath("/api/"+contract.SupplierServiceName+"/getproductsnapshot"), router.WithPathType(servertypes.PrivateType), router.WithAuth(true))
 }

@@ -29,6 +29,14 @@ func WithPath(path string) RouterInfoOption {
 	})
 }
 
+// WithServiceName 显式设置跨服务调用使用的稳定服务名。
+// 它只在 RouterInfo 首次创建且尚未 Freeze 时生效，适用于 Go 目录名与 IService.ServiceName 不同的跨进程 API。
+func WithServiceName(serviceName string) RouterInfoOption {
+	return routerInfoOptionFunc(func(info *types.RouterInfo) {
+		info.ServiceName = serviceName
+	})
+}
+
 // WithPathResolver 根据刚创建的默认元数据计算完整路径。
 // resolver 只在首次创建、Freeze 之前执行。
 func WithPathResolver(resolver func(*types.RouterInfo) string) RouterInfoOption {

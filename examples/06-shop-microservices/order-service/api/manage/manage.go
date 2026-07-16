@@ -74,5 +74,7 @@ func (c *ConfirmPayment) Validation(servertypes.IRequest) error {
 func (c *ConfirmPayment) Do(req servertypes.IRequest) (interface{}, error) {
 	return business.ConfirmPayment(c.PaymentID, strconv.FormatUint(uint64(req.NewID()), 10))
 }
-func (*ConfirmPayment) GetResponse() interface{}              { return &orderdto.Order{} }
-func (c *ConfirmPayment) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(c) }
+func (*ConfirmPayment) GetResponse() interface{} { return &orderdto.Order{} }
+func (c *ConfirmPayment) RouterInfo() *servertypes.RouterInfo {
+	return router.DefaultRouterInfoWithOptions(c, router.WithPath("/api/manage/shop-order/confirmpayment"))
+}

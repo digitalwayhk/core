@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -23,5 +24,5 @@ func (g *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
 }
 func (*GetProducts) GetResponse() interface{} { return business.ProductListResponse() }
 func (g *GetProducts) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	return router.DefaultRouterInfoWithOptions(g, router.WithServiceName(contract.SupplierServiceName), router.WithPath("/api/"+contract.SupplierServiceName+"/getproducts"), router.WithMethod(http.MethodGet))
 }

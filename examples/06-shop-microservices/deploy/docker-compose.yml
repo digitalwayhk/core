@@ -1,0 +1,26 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+  user:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/user", "-p", "18080", "-socket", "28080", "-view", "0"]
+    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=user"]
+    ports: ["18081:18081"]
+    depends_on: {redis: {condition: service_healthy}}
+  supplier:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/supplier", "-p", "18081", "-socket", "28081", "-view", "0"]
+    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=supplier"]
+    ports: ["18082:18082"]
+    depends_on: {redis: {condition: service_healthy}}
+  order:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/order", "-p", "18082", "-socket", "28082", "-view", "0"]
+    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=order"]
+    depends_on: {redis: {condition: service_healthy}}
