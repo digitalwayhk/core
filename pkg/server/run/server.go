@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +24,6 @@ import (
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 
 	"github.com/zeromicro/go-zero/core/logx"
-	"github.com/zeromicro/go-zero/core/proc"
 	"github.com/zeromicro/go-zero/core/service"
 )
 
@@ -49,12 +49,23 @@ type WebServer struct {
 	runOnce          sync.Once
 	runLifecycleOnce sync.Once
 	shutdownOnce     sync.Once
+	runReadyOnce     sync.Once
+	runDoneOnce      sync.Once
+	stopCloseOnce    sync.Once
 	runStarted       atomic.Bool
 	stopped          atomic.Bool
 	runReady         chan struct{}
 	runDone          chan struct{}
 	stopCh           chan struct{}
 	group            *service.ServiceGroup
+	saveConfig       func(*config.ServerConfig) error
+}
+
+func (own *WebServer) persistConfig(cfg *config.ServerConfig) error {
+	if own.saveConfig != nil {
+		return own.saveConfig(cfg)
+	}
+	return cfg.Save()
 }
 
 var _ sync.Locker = (*WebServer)(nil)
@@ -292,6 +303,20 @@ func (own *WebServer) htmlServerSnapshot() *HTMLServer {
 func (own *WebServer) Start() {
 	own.prepareRunLifecycle()
 	own.runOnce.Do(func() {
+		var constructed []service.Service
+		defer func() {
+			if failure := recover(); failure != nil {
+				for index := len(constructed) - 1; index >= 0; index-- {
+					constructed[index].Stop()
+				}
+				own.endInitialization()
+				own.stopped.Store(true)
+				own.closeStopChannel()
+				own.markRunReady()
+				own.markRunDone()
+				panic(failure)
+			}
+		}()
 		own.runMu.Lock()
 		if own.stopped.Load() {
 			own.runMu.Unlock()
@@ -300,14 +325,14 @@ func (own *WebServer) Start() {
 		own.runStarted.Store(true)
 		own.runMu.Unlock()
 		own.beginInitialization()
-		own.initServer()
+		var err error
+		constructed, err = own.initServer()
+		if err != nil {
+			panic(err)
+		}
 		group := service.NewServiceGroup()
-		for _, ctx := range own.serviceContextSnapshot() {
-			for _, server := range ctx.GetServers() {
-				if server != nil {
-					group.Add(server)
-				}
-			}
+		for _, server := range constructed {
+			group.Add(server)
 		}
 		//todo:test quic server
 		// for _, ctx := range own.serviceContexts {
@@ -325,21 +350,44 @@ func (own *WebServer) Stop() {
 	started := own.runStarted.Load()
 	own.runMu.Unlock()
 	own.shutdownOnce.Do(func() {
-		close(own.stopCh)
+		own.closeStopChannel()
 		if !started {
+			own.markRunReady()
+			own.markRunDone()
 			return
 		}
-		select {
-		case <-own.runReady:
-			// go-zero v1.10.2 的 StartWithOpts 在 listener 关闭后仍等待进程级 shutdown listener。
-			// WebServer 是应用级 owner，只在顶层 Stop 中统一触发，避免子服务递归关闭。
-			proc.Shutdown()
-		case <-own.runDone:
+		own.RLock()
+		group := own.group
+		own.RUnlock()
+		if group == nil {
+			select {
+			case <-own.runReady:
+			case <-own.runDone:
+				return
+			}
+			own.RLock()
+			group = own.group
+			own.RUnlock()
+		}
+		if group != nil {
+			group.Stop()
 		}
 	})
 	if started {
 		<-own.runDone
 	}
+}
+
+func (own *WebServer) closeStopChannel() {
+	own.stopCloseOnce.Do(func() { close(own.stopCh) })
+}
+
+func (own *WebServer) markRunReady() {
+	own.runReadyOnce.Do(func() { close(own.runReady) })
+}
+
+func (own *WebServer) markRunDone() {
+	own.runDoneOnce.Do(func() { close(own.runDone) })
 }
 
 func (own *WebServer) prepareRunLifecycle() {
@@ -356,7 +404,7 @@ func (own *WebServer) stopChannel() <-chan struct{} {
 }
 
 func (own *WebServer) runServiceGroup(group *service.ServiceGroup) {
-	defer close(own.runDone)
+	defer own.markRunDone()
 	defer func() {
 		group.Stop()
 		for _, ctx := range own.serviceContextSnapshot() {
@@ -366,21 +414,20 @@ func (own *WebServer) runServiceGroup(group *service.ServiceGroup) {
 		}
 	}()
 
-	group.Add(service.WithStart(func() { close(own.runReady) }))
+	group.Add(service.WithStart(own.markRunReady))
 	own.Lock()
 	own.group = group
 	own.Unlock()
 	group.Start()
 }
 
-func (own *WebServer) initServer() {
+func (own *WebServer) initServer() ([]service.Service, error) {
 	own.serverArgs()
-	htmls := NewHTMLServer(own.ViewPort)
-	htmls.Parent = own
-	own.Lock()
-	own.htmls = htmls
-	own.Unlock()
-	for _, ctx := range own.serviceContextSnapshot() {
+	return own.initializeServers(own.serviceContextSnapshot())
+}
+
+func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]service.Service, error) {
+	for _, ctx := range contexts {
 		if ctx.Config.ParentServerIP != own.serverip {
 			ctx.Config.ParentServerIP = own.serverip
 		}
@@ -390,25 +437,49 @@ func (own *WebServer) initServer() {
 		if ctx.Config.SocketPort != own.SocketPort && own.SocketPort != router.DEFAULTSOCKETPORT {
 			ctx.Config.SocketPort = own.SocketPort + int(ctx.Config.DataCenterID) - 1
 		}
-		grpcPort, err := grpcPortOverride(own.GRPCPort, ctx.Config.DataCenterID)
-		if err != nil {
-			panic(fmt.Sprintf("初始化 gRPC 端口失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
+	}
+	ordered, err := precomputeServicePorts(contexts, own.GRPCPort)
+	if err != nil {
+		return nil, fmt.Errorf("初始化服务端口失败：%w", err)
+	}
+	for _, ctx := range ordered {
+		if err := ctx.Config.Validate(); err != nil {
+			return nil, fmt.Errorf("初始化服务配置失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
-		if grpcPort != 0 {
-			ctx.Config.Transport.GRPC.Port = grpcPort
+	}
+	htmls := NewHTMLServer(own.ViewPort)
+	htmls.Parent = own
+	own.Lock()
+	own.htmls = htmls
+	own.Unlock()
+	constructed := make([]service.Service, 0, len(ordered)*2)
+	rollback := func() {
+		for index := len(constructed) - 1; index >= 0; index-- {
+			constructed[index].Stop()
 		}
+	}
+	for _, ctx := range ordered {
 		if err := own.newWebServer(ctx); err != nil {
-			panic(fmt.Sprintf("初始化 HTTP 服务失败，服务名称：%s，错误信息：%v", ctx.Config.Name, err))
+			rollback()
+			return nil, fmt.Errorf("初始化 HTTP 服务失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
+		constructed = append(constructed, ctx.Service.HttpServer)
 		if err := own.newInternalServer(ctx); err != nil {
-			panic(fmt.Sprintf("初始化 gRPC 服务失败，服务名称：%s，地址：%s:%d，错误信息：%v",
-				ctx.Config.Name, ctx.Config.Host, ctx.Config.Transport.GRPC.Port, err))
+			rollback()
+			return nil, fmt.Errorf("初始化 gRPC 服务失败，服务名称：%s，地址：%s:%d，错误信息：%w",
+				ctx.Config.Name, ctx.Config.Host, ctx.Config.Transport.GRPC.Port, err)
 		}
-		if err := ctx.Config.Save(); err != nil {
-			panic("初始化服务器异常，服务名称：" + ctx.Config.Name + "，错误信息：" + err.Error())
+		servers := ctx.GetServers()
+		if len(servers) > 1 {
+			constructed = append(constructed, servers[1:]...)
+		}
+		if err := own.persistConfig(ctx.Config); err != nil {
+			rollback()
+			return nil, fmt.Errorf("初始化服务器异常，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
 		htmls.AddServiceRouter(ctx.Router)
 	}
+	return constructed, nil
 }
 func (own *WebServer) serverArgs() {
 	parentServer := flag.String("server", "", "主服务器地址,当前服务器的父服务器地址,如果是根服务器，则不需要此参数")
@@ -465,38 +536,72 @@ func (own *WebServer) newInternalServer(ctx *router.ServiceContext) error {
 	ctx.Config.Transport.GRPC.Port = boundPort
 	ctx.SetGRPCServer(server)
 
-	if own.SocketPort > 0 && transportUsesProtocol(ctx.Config.Transport, "socket") {
+	if own.SocketPort > 0 {
 		ss := socket.NewServer(ctx)
 		ctx.SetSocketServer(ss)
 	}
 	return nil
 }
 
-func grpcPortOverride(base int, dataCenterID uint) (int, error) {
+func grpcPortOverride(base, index int) (int, error) {
 	if base == 0 {
 		return 0, nil
 	}
-	offset := int(dataCenterID)
-	if offset < 1 {
-		offset = 1
+	if index < 0 {
+		return 0, fmt.Errorf("gRPC port index must be non-negative, got %d", index)
 	}
-	port := base + offset - 1
+	port := base + index
 	if port < 1 || port > 65535 {
-		return 0, fmt.Errorf("gRPC port override %d with data center %d is outside 1..65535", base, dataCenterID)
+		return 0, fmt.Errorf("gRPC port override %d with index %d is outside 1..65535", base, index)
 	}
 	return port, nil
 }
 
-func transportUsesProtocol(cfg config.TransportConfig, protocol string) bool {
-	if cfg.Internal == protocol {
-		return true
+func precomputeServicePorts(contexts []*router.ServiceContext, grpcBase int) ([]*router.ServiceContext, error) {
+	ordered := append([]*router.ServiceContext(nil), contexts...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return strings.ToLower(ordered[i].Service.Name) < strings.ToLower(ordered[j].Service.Name)
+	})
+	used := make(map[int]string)
+	plannedGRPC := make(map[*router.ServiceContext]int, len(ordered))
+	reserve := func(port int, protocol, serviceName string) error {
+		if port == 0 {
+			return nil
+		}
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("%s port %d for service %s is outside 1..65535", protocol, port, serviceName)
+		}
+		if previous, ok := used[port]; ok {
+			return fmt.Errorf("duplicate %s port %d for service %s conflicts with %s", protocol, port, serviceName, previous)
+		}
+		used[port] = serviceName + " " + protocol
+		return nil
 	}
-	for _, fallback := range cfg.Fallback {
-		if fallback == protocol {
-			return true
+	for index, ctx := range ordered {
+		grpcPort, err := grpcPortOverride(grpcBase, index)
+		if err != nil {
+			return nil, err
+		}
+		if grpcPort != 0 {
+			plannedGRPC[ctx] = grpcPort
+		} else {
+			plannedGRPC[ctx] = ctx.Config.Transport.GRPC.Port
+		}
+		serviceName := ctx.Service.Name
+		if err := reserve(ctx.Config.Port, "HTTP", serviceName); err != nil {
+			return nil, err
+		}
+		if err := reserve(plannedGRPC[ctx], "gRPC", serviceName); err != nil {
+			return nil, err
+		}
+		if err := reserve(ctx.Config.SocketPort, "socket", serviceName); err != nil {
+			return nil, err
 		}
 	}
-	return false
+	for ctx, port := range plannedGRPC {
+		ctx.Config.Transport.GRPC.Port = port
+	}
+	return ordered, nil
 }
 
 var (

@@ -64,20 +64,20 @@ func TestWebServerStopsWhenGRPCRuntimeFails(t *testing.T) {
 
 func TestGRPCPortOverride(t *testing.T) {
 	tests := []struct {
-		name       string
-		base       int
-		dataCenter uint
-		want       int
-		wantErr    bool
+		name    string
+		base    int
+		index   int
+		want    int
+		wantErr bool
 	}{
-		{name: "zero keeps service config", base: 0, dataCenter: 2, want: 0},
-		{name: "explicit first service", base: 19090, dataCenter: 1, want: 19090},
-		{name: "explicit second service", base: 19090, dataCenter: 2, want: 19091},
-		{name: "overflow fails closed", base: 65535, dataCenter: 2, wantErr: true},
+		{name: "zero keeps service config", base: 0, index: 1, want: 0},
+		{name: "explicit first service", base: 19090, index: 0, want: 19090},
+		{name: "explicit second service", base: 19090, index: 1, want: 19091},
+		{name: "overflow fails closed", base: 65535, index: 1, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := grpcPortOverride(tt.base, tt.dataCenter)
+			got, err := grpcPortOverride(tt.base, tt.index)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("期望端口溢出错误")
@@ -89,6 +89,32 @@ func TestGRPCPortOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrecomputeServicePortsUsesStableServiceOrder(t *testing.T) {
+	alpha := newConcurrencyTestContext(&concurrencyTestService{name: "alpha", started: make(chan struct{}, 1)})
+	zulu := newConcurrencyTestContext(&concurrencyTestService{name: "zulu", started: make(chan struct{}, 1)})
+	alpha.Config.DataCenterID = 7
+	zulu.Config.DataCenterID = 7
+	alpha.Config.Port, zulu.Config.Port = 21001, 21002
+	alpha.Config.SocketPort, zulu.Config.SocketPort = 0, 0
+
+	ordered, err := precomputeServicePorts([]*router.ServiceContext{zulu, alpha}, 29090)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha", "zulu"}, []string{ordered[0].Service.Name, ordered[1].Service.Name})
+	require.Equal(t, 29090, alpha.Config.Transport.GRPC.Port)
+	require.Equal(t, 29091, zulu.Config.Transport.GRPC.Port)
+}
+
+func TestPrecomputeServicePortsRejectsDuplicatesBeforeListening(t *testing.T) {
+	first := newConcurrencyTestContext(&concurrencyTestService{name: "dup-a", started: make(chan struct{}, 1)})
+	second := newConcurrencyTestContext(&concurrencyTestService{name: "dup-b", started: make(chan struct{}, 1)})
+	first.Config.Port, second.Config.Port = 22001, 22002
+	first.Config.Transport.GRPC.Port = 29090
+	second.Config.Transport.GRPC.Port = 29090
+
+	_, err := precomputeServicePorts([]*router.ServiceContext{second, first}, 0)
+	require.ErrorContains(t, err, "duplicate gRPC port 29090")
 }
 
 func TestNewInternalServerFailsClosedWhenMTLSFilesAreMissing(t *testing.T) {

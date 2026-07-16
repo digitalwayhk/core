@@ -2,6 +2,7 @@ package cluster_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,72 @@ import (
 type membershipRegistry struct {
 	heartbeat  func(context.Context, string) error
 	deregister func(context.Context, string) error
+}
+
+func TestMembershipManagerStopRetriesAndPreservesError(t *testing.T) {
+	wantErr := errors.New("redis unavailable")
+	var calls atomic.Int32
+	registry := &membershipRegistry{deregister: func(context.Context, string) error {
+		calls.Add(1)
+		return wantErr
+	}}
+	manager := cluster.NewMembershipManager(registry, "node-retry", time.Hour,
+		cluster.WithDeregisterRetry(3, 0))
+	manager.Start(context.Background())
+
+	first := manager.Stop(context.Background())
+	second := manager.Stop(context.Background())
+
+	require.ErrorIs(t, first, wantErr)
+	require.ErrorIs(t, second, wantErr)
+	assert.Equal(t, int32(3), calls.Load())
+}
+
+func TestMembershipManagerStopHonorsContext(t *testing.T) {
+	entered := make(chan struct{})
+	registry := &membershipRegistry{deregister: func(ctx context.Context, _ string) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	manager := cluster.NewMembershipManager(registry, "node-timeout", time.Hour,
+		cluster.WithDeregisterRetry(3, 0))
+	manager.Start(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- manager.Stop(ctx) }()
+	<-entered
+	cancel()
+
+	require.ErrorIs(t, <-result, context.Canceled)
+}
+
+func TestMembershipManagerConcurrentStopsShareFailure(t *testing.T) {
+	wantErr := errors.New("deregister unavailable")
+	var calls atomic.Int32
+	registry := &membershipRegistry{deregister: func(context.Context, string) error {
+		calls.Add(1)
+		return wantErr
+	}}
+	manager := cluster.NewMembershipManager(registry, "node-concurrent-error", time.Hour,
+		cluster.WithDeregisterRetry(3, 0))
+	manager.Start(context.Background())
+
+	results := make(chan error, 16)
+	var stopped sync.WaitGroup
+	for range 16 {
+		stopped.Add(1)
+		go func() {
+			defer stopped.Done()
+			results <- manager.Stop(context.Background())
+		}()
+	}
+	stopped.Wait()
+	close(results)
+	for err := range results {
+		require.ErrorIs(t, err, wantErr)
+	}
+	assert.Equal(t, int32(3), calls.Load())
 }
 
 func (r *membershipRegistry) Register(context.Context, *cluster.NodeInfo) error { return nil }

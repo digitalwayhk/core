@@ -76,7 +76,7 @@ func (t *TransportConfig) ApplyDefaults() {
 
 // ApplyServerDefaults 根据服务端口和集群拓扑补充 gRPC 默认值。
 func (t *TransportConfig) ApplyServerDefaults(cluster ClusterConfig, httpPort int) {
-	if t.GRPC.Port == 0 && httpPort > 0 && httpPort <= 55535 {
+	if t.GRPC.Port == 0 && httpPort > 0 {
 		t.GRPC.Port = httpPort + 10000
 	}
 	if t.GRPC.Security.Mode != "" || t.GRPC.Security.hasConfiguredFields() {

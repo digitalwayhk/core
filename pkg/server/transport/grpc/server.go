@@ -140,7 +140,6 @@ func (s *Server) Serve() error {
 	s.stateMu.Unlock()
 	if !normalStop {
 		s.grpcSrv.Stop()
-		logx.Errorw("grpc_server_serve_failed", logx.Field("address", s.address), logx.Field("error", err))
 	}
 	s.stateMu.Lock()
 	s.completed = true

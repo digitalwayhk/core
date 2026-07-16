@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,6 +47,13 @@ type readyGRPCServer struct {
 
 func newReadyGRPCServer(recorder *grpcLifecycleRecorder) *readyGRPCServer {
 	return &readyGRPCServer{ready: make(chan struct{}), done: make(chan struct{}), recorder: recorder}
+}
+
+func newLifecycleServiceContext(name string) *router.ServiceContext {
+	cfg := config.NewServiceDefaultConfig(name, 0)
+	cfg.Cluster.Mode = "off"
+	cfg.MQ.Mode = "off"
+	return router.NewServiceContextWithConfig(&fakeService{name: name}, cfg)
 }
 
 func (s *readyGRPCServer) Start() {
@@ -117,7 +125,7 @@ func (p *orderedLifecycleProvider) Deregister(ctx context.Context, nodeID string
 func TestNodeRegistersOnlyAfterGRPCIsServing(t *testing.T) {
 	provider := &orderedLifecycleProvider{}
 	rpcServer := newReadyGRPCServer(nil)
-	sc := router.NewServiceContext(&fakeService{name: "sctest-grpc-ready-register"})
+	sc := newLifecycleServiceContext("sctest-grpc-ready-register")
 	sc.Config.Transport.GRPC.Port = 19090
 	sc.ClusterProvider = provider
 	sc.SetGRPCServer(rpcServer)
@@ -145,7 +153,7 @@ func TestServiceContextGRPCShutdownOrder(t *testing.T) {
 	recorder := &grpcLifecycleRecorder{}
 	provider := &orderedLifecycleProvider{recorder: recorder}
 	rpcServer := newReadyGRPCServer(recorder)
-	sc := router.NewServiceContext(&fakeService{name: "sctest-grpc-shutdown-order"})
+	sc := newLifecycleServiceContext("sctest-grpc-shutdown-order")
 	sc.ClusterProvider = provider
 	sc.SetGRPCServer(rpcServer)
 	rpcServer.MarkReady()
@@ -159,7 +167,7 @@ func TestServiceContextGRPCShutdownOrder(t *testing.T) {
 func TestServiceContextGRPCFailureRevokesDiscovery(t *testing.T) {
 	provider := &orderedLifecycleProvider{}
 	rpcServer := newReadyGRPCServer(nil)
-	sc := router.NewServiceContext(&fakeService{name: "sctest-grpc-runtime-failure"})
+	sc := newLifecycleServiceContext("sctest-grpc-runtime-failure")
 	sc.ClusterProvider = provider
 	sc.SetGRPCServer(rpcServer)
 	rpcServer.MarkReady()
@@ -171,4 +179,68 @@ func TestServiceContextGRPCFailureRevokesDiscovery(t *testing.T) {
 	require.Eventually(t, func() bool { return provider.deregisterCount.Load() == 1 }, time.Second, 5*time.Millisecond)
 	assert.ErrorIs(t, sc.RuntimeError(), wantErr)
 	assert.False(t, sc.IsRun())
+	require.Eventually(t, func() bool { return router.GetContext(sc.Service.Name) == nil }, time.Second, time.Millisecond)
+}
+
+func TestServiceContextNeverRegistersWhenReadyAndFailedDoneAreBothClosed(t *testing.T) {
+	provider := &orderedLifecycleProvider{}
+	rpcServer := newReadyGRPCServer(nil)
+	wantErr := errors.New("failed during startup")
+	rpcServer.Fail(wantErr)
+	rpcServer.MarkReady()
+	sc := newLifecycleServiceContext("sctest-grpc-ready-done-failed")
+	sc.ClusterProvider = provider
+	sc.SetGRPCServer(rpcServer)
+
+	sc.SetRunState(true)
+
+	assert.Zero(t, provider.registerCount.Load())
+	assert.ErrorIs(t, sc.RuntimeError(), wantErr)
+	require.Eventually(t, func() bool { return router.GetContext(sc.Service.Name) == nil }, time.Second, time.Millisecond)
+}
+
+func TestNormalServiceContextStopDoesNotPublishFailure(t *testing.T) {
+	provider := &orderedLifecycleProvider{}
+	rpcServer := newReadyGRPCServer(nil)
+	sc := newLifecycleServiceContext("sctest-grpc-normal-stop")
+	sc.ClusterProvider = provider
+	sc.SetGRPCServer(rpcServer)
+	rpcServer.MarkReady()
+	sc.SetRunState(true)
+
+	sc.SetRunState(false)
+	sc.SetRunState(false)
+
+	assert.Nil(t, sc.RuntimeError())
+	assert.Nil(t, sc.ShutdownError())
+	assert.Equal(t, int32(1), provider.deregisterCount.Load())
+	select {
+	case err := <-sc.Failure():
+		t.Fatalf("正常停止不得发布 Failure: %v", err)
+	default:
+	}
+}
+
+func TestManagedGRPCAndHTTPStopTriggersDoNotDeadlock(t *testing.T) {
+	provider := &orderedLifecycleProvider{}
+	rpcServer := newReadyGRPCServer(nil)
+	sc := newLifecycleServiceContext("sctest-grpc-dual-stop")
+	sc.ClusterProvider = provider
+	sc.SetGRPCServer(rpcServer)
+	rpcServer.MarkReady()
+	sc.SetRunState(true)
+	servers := sc.GetServers()
+	require.Len(t, servers, 1)
+
+	done := make(chan struct{}, 2)
+	go func() { servers[0].Stop(); done <- struct{}{} }()
+	go func() { sc.SetRunState(false); done <- struct{}{} }()
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("双触发 Stop 发生死锁")
+		}
+	}
+	assert.Equal(t, int32(1), provider.deregisterCount.Load())
 }

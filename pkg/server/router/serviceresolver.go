@@ -33,24 +33,41 @@ type resolverEntry struct {
 // ServiceResolver 把服务名解析为同进程 ServiceContext 或集群健康节点。
 // 它不拥有 ClusterProvider，只负责维护按目标服务划分的 Watch 快照。
 type ServiceResolver struct {
-	mu       sync.RWMutex
-	provider cluster.DiscoveryProvider
-	local    func(string) *ServiceContext
-	balancer cluster.LoadBalancer
-	entries  map[string]*resolverEntry
-	closed   bool
+	mu        sync.RWMutex
+	provider  cluster.DiscoveryProvider
+	local     func(string) *ServiceContext
+	balancer  cluster.LoadBalancer
+	entries   map[string]*resolverEntry
+	protocols map[string]struct{}
+	closed    bool
 }
 
-func NewServiceResolver(provider cluster.DiscoveryProvider, local func(string) *ServiceContext) *ServiceResolver {
+func NewServiceResolver(provider cluster.DiscoveryProvider, local func(string) *ServiceContext, protocols ...string) *ServiceResolver {
 	if local == nil {
 		local = func(string) *ServiceContext { return nil }
 	}
-	return &ServiceResolver{
+	resolver := &ServiceResolver{
 		provider: provider,
 		local:    local,
 		balancer: cluster.NewRoundRobinBalancer(),
 		entries:  make(map[string]*resolverEntry),
 	}
+	resolver.SetProtocols(protocols...)
+	return resolver
+}
+
+// SetProtocols 设置当前调用方允许使用的协议集合。空集合保持旧行为，允许所有过渡协议。
+func (r *ServiceResolver) SetProtocols(protocols ...string) {
+	allowed := make(map[string]struct{})
+	for _, protocol := range protocols {
+		protocol = strings.ToLower(strings.TrimSpace(protocol))
+		if protocol != "" {
+			allowed[protocol] = struct{}{}
+		}
+	}
+	r.mu.Lock()
+	r.protocols = allowed
+	r.mu.Unlock()
 }
 
 func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*ResolvedService, error) {
@@ -81,10 +98,11 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 	}
 	r.mu.RLock()
 	nodes := cloneResolverNodes(entry.nodes)
+	protocols := cloneProtocolSet(r.protocols)
 	r.mu.RUnlock()
 	healthy := make([]*cluster.NodeInfo, 0, len(nodes))
 	for _, node := range nodes {
-		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && (node.GRPCPort > 0 || node.Port > 0 || node.SocketPort > 0) {
+		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && nodeSupportsProtocols(node, protocols) {
 			healthy = append(healthy, node)
 		}
 	}
@@ -104,6 +122,30 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 		},
 		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort, node.SocketPort),
 	}, nil
+}
+
+func cloneProtocolSet(source map[string]struct{}) map[string]struct{} {
+	result := make(map[string]struct{}, len(source))
+	for protocol := range source {
+		result[protocol] = struct{}{}
+	}
+	return result
+}
+
+func nodeSupportsProtocols(node *cluster.NodeInfo, protocols map[string]struct{}) bool {
+	if len(protocols) == 0 {
+		return node.GRPCPort > 0 || node.Port > 0 || node.SocketPort > 0
+	}
+	if _, ok := protocols["grpc"]; ok && node.GRPCPort > 0 {
+		return true
+	}
+	if _, ok := protocols["http"]; ok && node.Port > 0 {
+		return true
+	}
+	if _, ok := protocols["socket"]; ok && node.SocketPort > 0 {
+		return true
+	}
+	return false
 }
 
 func serviceTransportEndpoints(address string, httpPort, grpcPort, socketPort int) transport.TransportEndpoints {

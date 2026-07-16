@@ -306,12 +306,28 @@ func TestTransportConfigApplyServerDefaultsSetsNonZeroGRPCPort(t *testing.T) {
 	assert.Equal(t, 18080, tr.GRPC.Port)
 }
 
-func TestTransportConfigApplyServerDefaultsKeepsAutomaticPortForUnsafeDerivation(t *testing.T) {
-	for _, httpPort := range []int{0, 60000} {
-		t.Run(fmt.Sprintf("http_%d", httpPort), func(t *testing.T) {
+func TestTransportConfigApplyServerDefaultsFailsClosedForUnsafeDerivation(t *testing.T) {
+	tests := []struct {
+		httpPort int
+		wantGRPC int
+		wantErr  bool
+	}{
+		{httpPort: 0, wantGRPC: 0},
+		{httpPort: 55535, wantGRPC: 65535},
+		{httpPort: 55536, wantGRPC: 65536, wantErr: true},
+		{httpPort: 65535, wantGRPC: 75535, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("http_%d", tt.httpPort), func(t *testing.T) {
 			var tr TransportConfig
-			tr.ApplyServerDefaults(ClusterConfig{Mode: "off", Provider: "local"}, httpPort)
-			assert.Zero(t, tr.GRPC.Port)
+			tr.ApplyServerDefaults(ClusterConfig{Mode: "off", Provider: "local"}, tt.httpPort)
+			assert.Equal(t, tt.wantGRPC, tr.GRPC.Port)
+			err := tr.Validate()
+			if tt.wantErr {
+				require.ErrorContains(t, err, "Transport.GRPC.Port")
+				return
+			}
+			require.NoError(t, err)
 		})
 	}
 }

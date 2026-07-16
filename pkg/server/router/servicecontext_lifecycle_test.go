@@ -15,23 +15,33 @@ import (
 )
 
 type lifecycleProvider struct {
-	registerCount   atomic.Int32
-	deregisterCount atomic.Int32
-	registerEntered chan struct{}
-	releaseRegister chan struct{}
-	registerOnce    sync.Once
-	registerErr     error
+	registerCount        atomic.Int32
+	deregisterCount      atomic.Int32
+	registerEntered      chan struct{}
+	releaseRegister      chan struct{}
+	registerOnce         sync.Once
+	registerErr          error
+	deregisterErr        error
+	registerContextAware bool
 }
 
 func (p *lifecycleProvider) Name() string { return "lifecycle-test" }
 
-func (p *lifecycleProvider) Register(context.Context, *cluster.NodeInfo) error {
+func (p *lifecycleProvider) Register(ctx context.Context, _ *cluster.NodeInfo) error {
 	p.registerCount.Add(1)
 	if p.registerEntered != nil {
 		p.registerOnce.Do(func() { close(p.registerEntered) })
 	}
 	if p.releaseRegister != nil {
-		<-p.releaseRegister
+		if p.registerContextAware {
+			select {
+			case <-p.releaseRegister:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		} else {
+			<-p.releaseRegister
+		}
 	}
 	return p.registerErr
 }
@@ -49,7 +59,46 @@ func TestServiceContext_RequiredClusterRegistrationFailureStopsStartup(t *testin
 
 func (p *lifecycleProvider) Deregister(context.Context, string) error {
 	p.deregisterCount.Add(1)
-	return nil
+	return p.deregisterErr
+}
+
+func TestServiceContextRegistrationUsesBoundedContext(t *testing.T) {
+	registerEntered := make(chan struct{})
+	provider := &lifecycleProvider{registerEntered: registerEntered, registerContextAware: true}
+	provider.releaseRegister = make(chan struct{})
+	sc := newLifecycleServiceContext("sctest-bounded-register")
+	sc.ClusterProvider = provider
+	sc.SetLifecycleTimeout(20 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		sc.SetRunState(true)
+		close(done)
+	}()
+	<-registerEntered
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("阻塞 Register 未受生命周期超时控制")
+	}
+	close(provider.releaseRegister)
+	sc.SetRunState(false)
+}
+
+func TestServiceContextPreservesDeregisterFailure(t *testing.T) {
+	wantErr := errors.New("deregister failed")
+	provider := &lifecycleProvider{deregisterErr: wantErr}
+	sc := newLifecycleServiceContext("sctest-deregister-error")
+	sc.ClusterProvider = provider
+	sc.SetLifecycleTimeout(200 * time.Millisecond)
+	sc.SetRunState(true)
+
+	sc.SetRunState(false)
+	sc.SetRunState(false)
+
+	require.ErrorIs(t, sc.ShutdownError(), wantErr)
+	assert.Equal(t, int32(3), provider.deregisterCount.Load())
+	assert.Nil(t, router.GetContext(sc.Service.Name), "注销失败也必须移除本地 terminated 实例")
 }
 
 func (p *lifecycleProvider) Heartbeat(context.Context, string) error { return nil }

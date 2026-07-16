@@ -84,9 +84,49 @@ type ServiceContext struct {
 	runtimeErrMu             sync.RWMutex
 	runtimeErr               error
 	runtimeFailure           chan error
+	lifecycleTimeout         time.Duration
+	shutdownErrMu            sync.RWMutex
+	shutdownErr              error
 }
 
 const grpcLifecycleTimeout = 5 * time.Second
+
+// SetLifecycleTimeout 配置服务注册和停止的有界等待时间。
+func (own *ServiceContext) SetLifecycleTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	own.lifecycleMu.Lock()
+	own.lifecycleTimeout = timeout
+	own.lifecycleMu.Unlock()
+}
+
+func (own *ServiceContext) lifecycleDuration() time.Duration {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.lifecycleTimeout > 0 {
+		return own.lifecycleTimeout
+	}
+	return grpcLifecycleTimeout
+}
+
+// ShutdownError 返回关闭期间首个未恢复错误；重复停止保持同一结果。
+func (own *ServiceContext) ShutdownError() error {
+	own.shutdownErrMu.RLock()
+	defer own.shutdownErrMu.RUnlock()
+	return own.shutdownErr
+}
+
+func (own *ServiceContext) recordShutdownError(err error) {
+	if err == nil {
+		return
+	}
+	own.shutdownErrMu.Lock()
+	if own.shutdownErr == nil {
+		own.shutdownErr = err
+	}
+	own.shutdownErrMu.Unlock()
+}
 
 type managedGRPCService struct {
 	owner  *ServiceContext
@@ -173,10 +213,6 @@ func (own *ServiceContext) superviseGRPC(server types.GRPCServerLifecycle) {
 			<-server.Done()
 			if err := server.Err(); err != nil {
 				own.setRuntimeError(err)
-				logx.Errorw("grpc_server_runtime_failed",
-					logx.Field("service", own.Service.Name),
-					logx.Field("error", err),
-				)
 				own.SetRunState(false)
 			}
 		}()
@@ -668,7 +704,8 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Field("error", err),
 		)
 	}
-	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext)
+	protocols := append([]string{con.Transport.Internal}, con.Transport.Fallback...)
+	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext, protocols...)
 	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
 		// Any error from BuildSelector means the user explicitly configured a
 		// transport protocol that cannot be built (e.g. quic, mq not yet implemented).
@@ -935,7 +972,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	}
 
 	if state {
-		readyCtx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+		readyCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 		readyErr := own.waitForGRPCReady(readyCtx, grpcServer)
 		cancel()
 		if readyErr != nil {
@@ -944,10 +981,6 @@ func (own *ServiceContext) SetRunState(state bool) {
 			if own.Config.Cluster.Mode == "on" {
 				panic(fmt.Sprintf("grpc: service %s failed before discovery registration: %v", own.Service.Name, readyErr))
 			}
-			logx.Errorw("grpc_server_not_ready",
-				logx.Field("service", own.Service.Name),
-				logx.Field("error", readyErr),
-			)
 			return
 		}
 		nodeID, node, interval := own.clusterMembershipConfig()
@@ -984,14 +1017,15 @@ func (own *ServiceContext) SetRunState(state bool) {
 			grpcServer.BeginShutdown()
 		}
 		if membership != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
-			membership.Stop(ctx)
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			own.recordShutdownError(membership.Stop(ctx))
 			cancel()
 			membership = nil
 		}
 		if grpcServer != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 			if err := grpcServer.StopContext(ctx); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("grpc_server_stop_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("error", err),
@@ -1000,8 +1034,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 			cancel()
 		}
 		if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
-			ctx, cancel := context.WithTimeout(context.Background(), grpcLifecycleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 			if err := stopper.Stop(ctx); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("transport_client_pool_stop_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("error", err),
@@ -1181,7 +1216,9 @@ func (own *ServiceContext) startMembership(
 	node *cluster.NodeInfo,
 	interval time.Duration,
 ) (*cluster.MembershipManager, error) {
-	if err := provider.Register(context.Background(), node); err != nil {
+	registerCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	defer cancel()
+	if err := provider.Register(registerCtx, node); err != nil {
 		return nil, fmt.Errorf("register node %s: %w", node.ID, err)
 	}
 	membership := cluster.NewMembershipManager(provider, node.ID, interval)

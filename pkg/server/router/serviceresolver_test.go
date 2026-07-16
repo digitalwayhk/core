@@ -165,6 +165,40 @@ func TestResolverAcceptsSocketOnlyNodeDuringMigration(t *testing.T) {
 	assert.Equal(t, "orders.internal:18080", resolved.Endpoints.Socket)
 }
 
+func TestResolverFiltersMixedNodesByAllowedProtocols(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	nodes := []*cluster.NodeInfo{
+		{ID: "orders-grpc", ServiceName: "orders", DataCenterID: 1, MachineID: 21, Address: "grpc", GRPCPort: 19090},
+		{ID: "orders-http", ServiceName: "orders", DataCenterID: 1, MachineID: 22, Address: "http", Port: 8080},
+		{ID: "orders-socket", ServiceName: "orders", DataCenterID: 1, MachineID: 23, Address: "socket", SocketPort: 18080},
+	}
+	for _, node := range nodes {
+		require.NoError(t, provider.Register(ctx, node))
+	}
+
+	grpcOnly := NewServiceResolver(provider, func(string) *ServiceContext { return nil }, "grpc")
+	defer grpcOnly.Close()
+	for range 6 {
+		resolved, err := grpcOnly.Resolve(ctx, "orders")
+		require.NoError(t, err)
+		assert.Equal(t, "orders-grpc", resolved.NodeID)
+	}
+
+	grpcHTTP := NewServiceResolver(provider, func(string) *ServiceContext { return nil }, "grpc", "http")
+	defer grpcHTTP.Close()
+	selected := make(map[string]bool)
+	for range 6 {
+		resolved, err := grpcHTTP.Resolve(ctx, "orders")
+		require.NoError(t, err)
+		selected[resolved.NodeID] = true
+		assert.NotEqual(t, "orders-socket", resolved.NodeID)
+	}
+	assert.Equal(t, map[string]bool{"orders-grpc": true, "orders-http": true}, selected)
+}
+
 func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()
