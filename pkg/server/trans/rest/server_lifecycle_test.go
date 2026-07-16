@@ -56,11 +56,16 @@ func TestServerStopClosesListener(t *testing.T) {
 
 func reserveTCPPort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
-	require.NoError(t, listener.Close())
-	return port
+	for port := 30000; port < 40000; port++ {
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		require.NoError(t, listener.Close())
+		return port
+	}
+	t.Fatal("未找到满足 gRPC 默认推导范围的 REST 测试端口")
+	return 0
 }
 
 func waitForTCP(t *testing.T, host string, port int, wantOpen bool) {

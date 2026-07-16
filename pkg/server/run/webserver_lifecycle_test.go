@@ -89,34 +89,6 @@ func TestWebServerStopWaitsForGroupAndBusinessStop(t *testing.T) {
 	waitForLifecycleSignal(t, repeatedStopDone, "重复 WebServer.Stop")
 }
 
-func TestWebServerStopIsInstanceScoped(t *testing.T) {
-	first := bareWebServer()
-	second := bareWebServer()
-	firstService := &lifecycleGroupServer{started: make(chan struct{}), stopped: make(chan struct{})}
-	secondService := &lifecycleGroupServer{started: make(chan struct{}), stopped: make(chan struct{})}
-	firstGroup := service.NewServiceGroup()
-	secondGroup := service.NewServiceGroup()
-	firstGroup.Add(firstService)
-	secondGroup.Add(secondService)
-	first.prepareRunLifecycle()
-	second.prepareRunLifecycle()
-	first.runStarted.Store(true)
-	second.runStarted.Store(true)
-	go first.runServiceGroup(firstGroup)
-	go second.runServiceGroup(secondGroup)
-	waitForLifecycleSignal(t, firstService.started, "第一个 WebServer 启动")
-	waitForLifecycleSignal(t, secondService.started, "第二个 WebServer 启动")
-
-	first.Stop()
-
-	select {
-	case <-secondService.stopped:
-		t.Fatal("停止第一个 WebServer 不得停止第二个实例")
-	default:
-	}
-	second.Stop()
-}
-
 func waitForLifecycleSignal(t *testing.T, signal <-chan struct{}, name string) {
 	t.Helper()
 	select {

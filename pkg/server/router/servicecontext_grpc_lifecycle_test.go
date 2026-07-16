@@ -104,6 +104,7 @@ type orderedLifecycleProvider struct {
 	lifecycleProvider
 	recorder *grpcLifecycleRecorder
 	lastNode atomic.Pointer[cluster.NodeInfo]
+	active   atomic.Bool
 }
 
 func (p *orderedLifecycleProvider) Register(ctx context.Context, node *cluster.NodeInfo) error {
@@ -112,14 +113,22 @@ func (p *orderedLifecycleProvider) Register(ctx context.Context, node *cluster.N
 	if p.recorder != nil {
 		p.recorder.add("register")
 	}
-	return p.lifecycleProvider.Register(ctx, node)
+	err := p.lifecycleProvider.Register(ctx, node)
+	if err == nil {
+		p.active.Store(true)
+	}
+	return err
 }
 
 func (p *orderedLifecycleProvider) Deregister(ctx context.Context, nodeID string) error {
 	if p.recorder != nil {
 		p.recorder.add("deregister")
 	}
-	return p.lifecycleProvider.Deregister(ctx, nodeID)
+	err := p.lifecycleProvider.Deregister(ctx, nodeID)
+	if err == nil {
+		p.active.Store(false)
+	}
+	return err
 }
 
 func TestNodeRegistersOnlyAfterGRPCIsServing(t *testing.T) {
@@ -197,6 +206,42 @@ func TestServiceContextNeverRegistersWhenReadyAndFailedDoneAreBothClosed(t *test
 	assert.Zero(t, provider.registerCount.Load())
 	assert.ErrorIs(t, sc.RuntimeError(), wantErr)
 	require.Eventually(t, func() bool { return router.GetContext(sc.Service.Name) == nil }, time.Second, time.Millisecond)
+}
+
+func TestServiceContextRevokesRegistrationWhenGRPCFailsBeforeRegisterReturns(t *testing.T) {
+	provider := &orderedLifecycleProvider{}
+	provider.registerEntered = make(chan struct{})
+	provider.releaseRegister = make(chan struct{})
+	rpcServer := newReadyGRPCServer(nil)
+	sc := newLifecycleServiceContext("sctest-grpc-register-race")
+	sc.ClusterProvider = provider
+	sc.SetGRPCServer(rpcServer)
+	rpcServer.MarkReady()
+
+	started := make(chan struct{})
+	go func() {
+		sc.SetRunState(true)
+		close(started)
+	}()
+	<-provider.registerEntered
+	wantErr := errors.New("grpc failed while register was in flight")
+	rpcServer.Fail(wantErr)
+	close(provider.releaseRegister)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Register 返回后启动未结束")
+	}
+
+	require.Eventually(t, func() bool { return provider.deregisterCount.Load() == 1 }, time.Second, time.Millisecond)
+	assert.False(t, provider.active.Load(), "竞态撤销后发现记录必须为空")
+	assert.False(t, sc.IsRun())
+	assert.ErrorIs(t, sc.RuntimeError(), wantErr)
+	select {
+	case state := <-sc.StateChan:
+		assert.False(t, state, "gRPC 已失败时不得发布运行态")
+	default:
+	}
 }
 
 func TestNormalServiceContextStopDoesNotPublishFailure(t *testing.T) {

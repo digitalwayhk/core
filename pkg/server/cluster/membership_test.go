@@ -45,7 +45,7 @@ func TestMembershipManagerStopHonorsContext(t *testing.T) {
 		return ctx.Err()
 	}}
 	manager := cluster.NewMembershipManager(registry, "node-timeout", time.Hour,
-		cluster.WithDeregisterRetry(3, 0))
+		cluster.WithDeregisterRetry(3, 0), cluster.WithDeregisterTimeout(50*time.Millisecond))
 	manager.Start(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
@@ -54,6 +54,9 @@ func TestMembershipManagerStopHonorsContext(t *testing.T) {
 	cancel()
 
 	require.ErrorIs(t, <-result, context.Canceled)
+	require.Eventually(t, func() bool {
+		return errors.Is(manager.Stop(context.Background()), context.DeadlineExceeded)
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestMembershipManagerConcurrentStopsShareFailure(t *testing.T) {
@@ -82,6 +85,46 @@ func TestMembershipManagerConcurrentStopsShareFailure(t *testing.T) {
 		require.ErrorIs(t, err, wantErr)
 	}
 	assert.Equal(t, int32(3), calls.Load())
+}
+
+func TestMembershipManagerStopDeadlineDoesNotPoisonSharedResult(t *testing.T) {
+	heartbeatEntered := make(chan struct{})
+	releaseHeartbeat := make(chan struct{})
+	deregisterEntered := make(chan struct{})
+	releaseDeregister := make(chan struct{})
+	wantErr := errors.New("final deregister failure")
+	var heartbeatOnce sync.Once
+	var deregisterOnce sync.Once
+	registry := &membershipRegistry{
+		heartbeat: func(context.Context, string) error {
+			heartbeatOnce.Do(func() { close(heartbeatEntered) })
+			<-releaseHeartbeat
+			return nil
+		},
+		deregister: func(context.Context, string) error {
+			deregisterOnce.Do(func() { close(deregisterEntered) })
+			<-releaseDeregister
+			return wantErr
+		},
+	}
+	manager := cluster.NewMembershipManager(registry, "node-deadlines", time.Nanosecond,
+		cluster.WithDeregisterRetry(1, 0))
+	manager.Start(context.Background())
+	<-heartbeatEntered
+
+	shortCtx, cancel := context.WithCancel(context.Background())
+	shortResult := make(chan error, 1)
+	go func() { shortResult <- manager.Stop(shortCtx) }()
+	cancel()
+	require.ErrorIs(t, <-shortResult, context.Canceled)
+
+	close(releaseHeartbeat)
+	<-deregisterEntered
+	longResult := make(chan error, 1)
+	go func() { longResult <- manager.Stop(context.Background()) }()
+	close(releaseDeregister)
+	require.ErrorIs(t, <-longResult, wantErr)
+	require.ErrorIs(t, manager.Stop(context.Background()), wantErr)
 }
 
 func (r *membershipRegistry) Register(context.Context, *cluster.NodeInfo) error { return nil }

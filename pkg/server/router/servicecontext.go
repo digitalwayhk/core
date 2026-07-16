@@ -72,6 +72,7 @@ type ServiceContext struct {
 	CasdoorClients           *casdoorauth.ClientSet          `json:"-"`
 	AuthRevocationManager    *authstate.Manager              `json:"-"`
 	ClusterProvider          cluster.DiscoveryProvider       `json:"-"`
+	localFallbackProvider    cluster.DiscoveryProvider       `json:"-"`
 	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
 	ServiceResolver          *ServiceResolver                `json:"-"`
 	ownsClusterProvider      bool
@@ -213,6 +214,8 @@ func (own *ServiceContext) superviseGRPC(server types.GRPCServerLifecycle) {
 			<-server.Done()
 			if err := server.Err(); err != nil {
 				own.setRuntimeError(err)
+			}
+			if own.RuntimeError() != nil {
 				own.SetRunState(false)
 			}
 		}()
@@ -677,6 +680,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		sc.CasdoorEventHookProvider = provider
 	}
 	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
+	sc.localFallbackProvider = processLocalRegistry
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{
 		SubscriberID: sc.Service.Name,
@@ -986,20 +990,50 @@ func (own *ServiceContext) SetRunState(state bool) {
 		nodeID, node, interval := own.clusterMembershipConfig()
 		if provider != nil && membership == nil {
 			var err error
-			membership, err = own.startMembership(provider, node, interval)
+			membership, err = own.startMembership(provider, node, interval, grpcServer)
 			if err != nil {
-				own.isStart.Store(false)
-				if own.Config.Cluster.Mode == "on" {
-					panic(fmt.Sprintf("cluster: required node registration failed: %v", err))
+				if own.Config.Cluster.Mode == "auto" && provider != own.localFallback() {
+					failedProvider := provider
+					provider = own.localFallback()
+					logx.Infow("cluster_degraded",
+						logx.Field("service", own.Service.Name),
+						logx.Field("provider", failedProvider.Name()),
+						logx.Field("fallback_provider", provider.Name()),
+						logx.Field("error", err),
+					)
+					membership, err = own.startMembership(provider, node, interval, grpcServer)
+					if err == nil {
+						own.lifecycleMu.Lock()
+						own.ClusterProvider = provider
+						own.ownsClusterProvider = false
+						own.ClusterSwitcher = cluster.NewClusterSwitcher(provider, own.Service.Name)
+						if own.ServiceResolver != nil {
+							own.ServiceResolver.SetProvider(provider)
+						}
+						own.lifecycleMu.Unlock()
+						if ownsClusterProvider {
+							if closeErr := failedProvider.Close(); closeErr != nil {
+								logx.Errorw("cluster_provider_close_failed",
+									logx.Field("service", own.Service.Name),
+									logx.Field("provider", failedProvider.Name()),
+									logx.Field("error", closeErr),
+								)
+							}
+						}
+					}
 				}
-				logx.Infow("cluster_degraded",
-					logx.Field("service", own.Service.Name),
-					logx.Field("provider", provider.Name()),
-					logx.Field("error", err),
-				)
+				if err != nil {
+					startupErr := fmt.Errorf("cluster registration failed for service %s using provider %s: %w",
+						own.Service.Name, provider.Name(), err)
+					own.failStartup(startupErr, grpcServer)
+					if own.Config.Cluster.Mode == "on" {
+						panic(startupErr)
+					}
+					return
+				}
 			}
 		}
-		if provider != nil && broker == nil {
+		if provider != nil && membership != nil && broker == nil {
 			broker = cluster.NewCrossNodeNoticeBroker(provider, own.Service.Name, nodeID)
 			if own.TransportSelector != nil {
 				broker.SetSender(own.makeCrossNodeSender())
@@ -1133,33 +1167,33 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	}
 
 	own.lifecycleMu.Lock()
-	own.ClusterProvider = newProvider
-	own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
-	if own.ServiceResolver != nil {
-		own.ServiceResolver.SetProvider(newProvider)
-	}
 	running := own.isStart.Load()
 	membership := own.membership
 	broker := own.CrossNodeBroker
-	if running {
-		own.membership = nil
-		own.CrossNodeBroker = nil
-	}
+	nodeID := own.nodeID
 	own.lifecycleMu.Unlock()
 	if !running {
+		own.lifecycleMu.Lock()
+		own.ClusterProvider = newProvider
+		own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
+		if own.ServiceResolver != nil {
+			own.ServiceResolver.SetProvider(newProvider)
+		}
+		own.lifecycleMu.Unlock()
 		return nil
 	}
 
 	if membership != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		membership.Stop(stopCtx)
+		stopCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		stopErr := membership.Stop(stopCtx)
 		cancel()
-	}
-	if broker != nil {
-		types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
-		drainCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		broker.DrainAndStop(drainCtx)
-		cancel()
+		if stopErr != nil {
+			err := fmt.Errorf("switch discovery provider for service %s node %s from %s to %s: stop old membership: %w",
+				own.Service.Name, nodeID, providerName(oldProvider), providerName(newProvider), stopErr)
+			own.setRuntimeError(err)
+			own.isStart.Store(false)
+			return err
+		}
 	}
 
 	nodeID, node, interval := own.clusterMembershipConfig()
@@ -1167,23 +1201,47 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	var newBroker *cluster.CrossNodeNoticeBroker
 	if newProvider != nil {
 		var err error
-		newMembership, err = own.startMembership(newProvider, node, interval)
+		newMembership, err = own.startMembership(newProvider, node, interval, own.grpcServer)
 		if err != nil {
-			return err
+			switchErr := fmt.Errorf("switch discovery provider for service %s node %s from %s to %s: register new membership: %w",
+				own.Service.Name, nodeID, providerName(oldProvider), providerName(newProvider), err)
+			own.setRuntimeError(switchErr)
+			own.isStart.Store(false)
+			return switchErr
 		}
 		newBroker = cluster.NewCrossNodeNoticeBroker(newProvider, own.Service.Name, nodeID)
 		if own.TransportSelector != nil {
 			newBroker.SetSender(own.makeCrossNodeSender())
 		}
+	}
+	if broker != nil {
+		types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
+		drainCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		broker.DrainAndStop(drainCtx)
+		cancel()
+	}
+	if newBroker != nil {
 		types.SetCrossNodeForwarderForService(own.Service.Name, newBroker)
 	}
 
 	own.lifecycleMu.Lock()
+	own.ClusterProvider = newProvider
+	own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
+	if own.ServiceResolver != nil {
+		own.ServiceResolver.SetProvider(newProvider)
+	}
 	own.nodeID = nodeID
 	own.membership = newMembership
 	own.CrossNodeBroker = newBroker
 	own.lifecycleMu.Unlock()
 	return nil
+}
+
+func providerName(provider cluster.DiscoveryProvider) string {
+	if provider == nil {
+		return "off"
+	}
+	return provider.Name()
 }
 
 func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
@@ -1215,15 +1273,69 @@ func (own *ServiceContext) startMembership(
 	provider cluster.DiscoveryProvider,
 	node *cluster.NodeInfo,
 	interval time.Duration,
+	grpcServer types.GRPCServerLifecycle,
 ) (*cluster.MembershipManager, error) {
 	registerCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 	defer cancel()
+	registerDone := make(chan struct{})
+	if grpcServer != nil {
+		go func() {
+			select {
+			case <-grpcServer.Done():
+				cancel()
+			case <-registerDone:
+			}
+		}()
+	}
 	if err := provider.Register(registerCtx, node); err != nil {
+		close(registerDone)
 		return nil, fmt.Errorf("register node %s: %w", node.ID, err)
+	}
+	close(registerDone)
+	if grpcServer != nil {
+		select {
+		case <-grpcServer.Done():
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			cleanupErr := provider.Deregister(cleanupCtx, node.ID)
+			cleanupCancel()
+			serveErr := grpcServer.Err()
+			if serveErr == nil {
+				serveErr = errors.New("grpc server stopped during discovery registration")
+			}
+			if cleanupErr != nil && !errors.Is(cleanupErr, cluster.ErrNodeNotFound) {
+				return nil, errors.Join(serveErr, fmt.Errorf("revoke node %s: %w", node.ID, cleanupErr))
+			}
+			return nil, serveErr
+		default:
+		}
 	}
 	membership := cluster.NewMembershipManager(provider, node.ID, interval)
 	membership.Start(context.Background())
 	return membership, nil
+}
+
+func (own *ServiceContext) localFallback() cluster.DiscoveryProvider {
+	if own.localFallbackProvider != nil {
+		return own.localFallbackProvider
+	}
+	return processLocalRegistry
+}
+
+func (own *ServiceContext) failStartup(err error, grpcServer types.GRPCServerLifecycle) {
+	own.setRuntimeError(err)
+	own.isStart.Store(false)
+	if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		own.recordShutdownError(stopper.Stop(ctx))
+		cancel()
+	}
+	if grpcServer == nil {
+		return
+	}
+	grpcServer.BeginShutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	_ = grpcServer.StopContext(ctx)
+	cancel()
 }
 
 func (own *ServiceContext) IsRun() bool {

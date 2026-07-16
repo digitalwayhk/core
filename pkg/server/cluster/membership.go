@@ -12,16 +12,19 @@ import (
 // MembershipManager sends heartbeats for a registered node and handles
 // graceful deregistration on shutdown.
 type MembershipManager struct {
-	registry   ClusterRegistry
-	nodeID     string
-	interval   time.Duration
-	stopCh     chan struct{}
-	doneCh     chan struct{}
-	startOnce  sync.Once
-	stopOnce   sync.Once
-	stopErr    error
-	retries    int
-	retryDelay time.Duration
+	registry    ClusterRegistry
+	nodeID      string
+	interval    time.Duration
+	stopCh      chan struct{}
+	doneCh      chan struct{}
+	startOnce   sync.Once
+	stopOnce    sync.Once
+	stopDone    chan struct{}
+	stopErrMu   sync.RWMutex
+	stopErr     error
+	retries     int
+	retryDelay  time.Duration
+	stopTimeout time.Duration
 }
 
 // MembershipOption 调整成员注销策略。
@@ -37,16 +40,28 @@ func WithDeregisterRetry(attempts int, delay time.Duration) MembershipOption {
 	}
 }
 
+// WithDeregisterTimeout limits the shared deregistration operation. Each
+// Stop caller may use a shorter context without cancelling the shared cleanup.
+func WithDeregisterTimeout(timeout time.Duration) MembershipOption {
+	return func(manager *MembershipManager) {
+		if timeout > 0 {
+			manager.stopTimeout = timeout
+		}
+	}
+}
+
 // NewMembershipManager creates a manager that heartbeats every interval.
 func NewMembershipManager(registry ClusterRegistry, nodeID string, interval time.Duration, options ...MembershipOption) *MembershipManager {
 	manager := &MembershipManager{
-		registry:   registry,
-		nodeID:     nodeID,
-		interval:   interval,
-		stopCh:     make(chan struct{}),
-		doneCh:     make(chan struct{}),
-		retries:    3,
-		retryDelay: 20 * time.Millisecond,
+		registry:    registry,
+		nodeID:      nodeID,
+		interval:    interval,
+		stopCh:      make(chan struct{}),
+		doneCh:      make(chan struct{}),
+		stopDone:    make(chan struct{}),
+		retries:     3,
+		retryDelay:  20 * time.Millisecond,
+		stopTimeout: 5 * time.Second,
 	}
 	for _, option := range options {
 		option(manager)
@@ -73,17 +88,27 @@ func (m *MembershipManager) Stop(ctx context.Context) error {
 	m.startOnce.Do(func() { close(m.doneCh) })
 	m.stopOnce.Do(func() {
 		close(m.stopCh)
-		m.stopErr = m.deregister(ctx)
+		go func() {
+			<-m.doneCh
+			stopCtx, cancel := context.WithTimeout(context.Background(), m.stopTimeout)
+			err := m.deregister(stopCtx)
+			cancel()
+			m.stopErrMu.Lock()
+			m.stopErr = err
+			m.stopErrMu.Unlock()
+			close(m.stopDone)
+		}()
 	})
 
 	select {
-	case <-m.doneCh:
+	case <-m.stopDone:
+		m.stopErrMu.RLock()
+		err := m.stopErr
+		m.stopErrMu.RUnlock()
+		return err
 	case <-ctx.Done():
-		if m.stopErr == nil {
-			m.stopErr = ctx.Err()
-		}
+		return ctx.Err()
 	}
-	return m.stopErr
 }
 
 func (m *MembershipManager) deregister(ctx context.Context) error {

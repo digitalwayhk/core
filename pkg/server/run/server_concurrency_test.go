@@ -117,6 +117,29 @@ func TestPrecomputeServicePortsRejectsDuplicatesBeforeListening(t *testing.T) {
 	require.ErrorContains(t, err, "duplicate gRPC port 29090")
 }
 
+func TestPrecomputeServicePortsIgnoresDisabledSocketPort(t *testing.T) {
+	ctx := newConcurrencyTestContext(&concurrencyTestService{name: "disabled-socket", started: make(chan struct{}, 1)})
+	ctx.Config.Port = 21080
+	ctx.Config.Transport.GRPC.Port = 31080
+	ctx.Config.SocketPort = 31080
+	ctx.Config.Transport.Internal = "grpc"
+	ctx.Config.Transport.Fallback = nil
+
+	_, err := precomputeServicePorts([]*router.ServiceContext{ctx}, 0)
+	require.NoError(t, err, "未启用 Socket 时不应预留其遗留端口")
+}
+
+func TestPrecomputeServicePortsRejectsEnabledSocketGRPCConflict(t *testing.T) {
+	ctx := newConcurrencyTestContext(&concurrencyTestService{name: "enabled-socket-conflict", started: make(chan struct{}, 1)})
+	ctx.Config.Port = 21081
+	ctx.Config.Transport.GRPC.Port = 31081
+	ctx.Config.SocketPort = 31081
+	ctx.Config.Transport.Fallback = []string{"socket"}
+
+	_, err := precomputeServicePorts([]*router.ServiceContext{ctx}, 0)
+	require.ErrorContains(t, err, "duplicate socket port 31081")
+}
+
 func TestNewInternalServerFailsClosedWhenMTLSFilesAreMissing(t *testing.T) {
 	service := &concurrencyTestService{name: "grpc-mtls-missing", started: make(chan struct{}, 1)}
 	ctx := newConcurrencyTestContext(service)

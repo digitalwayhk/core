@@ -116,7 +116,7 @@ func TestInitializeServersRollsBackSecondServiceFailures(t *testing.T) {
 	}
 }
 
-func TestSocketOverrideKeepsDefaultGRPCServer(t *testing.T) {
+func TestExplicitSocketOverrideKeepsDefaultGRPCServer(t *testing.T) {
 	ctx := newRollbackContext("socket-with-default-grpc")
 	server := bareWebServer()
 	server.SocketPort = 25001
@@ -133,42 +133,79 @@ func TestSocketOverrideKeepsDefaultGRPCServer(t *testing.T) {
 	}
 }
 
-func TestGRPCRuntimeFailureStopsOnlyOwningWebServer(t *testing.T) {
-	firstWeb := bareWebServer()
-	secondWeb := bareWebServer()
-	firstContext := newRollbackContext("runtime-owner-a")
-	secondContext := newRollbackContext("runtime-owner-b")
+func TestDefaultGRPCDoesNotConstructSocketServer(t *testing.T) {
+	ctx := newRollbackContext("grpc-without-default-socket")
+	ctx.Config.Port = 8080
+	ctx.Config.Transport.GRPC.Port = 18080
+	server := bareWebServer()
+	server.saveConfig = func(*config.ServerConfig) error { return nil }
+
+	constructed, err := server.initializeServers([]*router.ServiceContext{ctx})
+	require.NoError(t, err)
+	require.Len(t, ctx.GetServers(), 2, "默认只应构造 HTTP 与 gRPC")
+	require.Zero(t, ctx.Config.SocketPort)
+	for index := len(constructed) - 1; index >= 0; index-- {
+		constructed[index].Stop()
+	}
+}
+
+func TestSocketProtocolUsesConfiguredPort(t *testing.T) {
+	ctx := newRollbackContext("configured-socket-fallback")
+	ctx.Config.SocketPort = 25002
+	ctx.Config.Transport.Fallback = []string{"socket"}
+	server := bareWebServer()
+	server.saveConfig = func(*config.ServerConfig) error { return nil }
+
+	constructed, err := server.initializeServers([]*router.ServiceContext{ctx})
+	require.NoError(t, err)
+	require.Len(t, ctx.GetServers(), 3, "配置 socket fallback 时应构造 Socket")
+	for index := len(constructed) - 1; index >= 0; index-- {
+		constructed[index].Stop()
+	}
+}
+
+func TestGRPCRuntimeFailureStopsProcessServiceGroup(t *testing.T) {
+	webServer := bareWebServer()
+	failingContext := newRollbackContext("runtime-process-failure")
+	peerContext := newRollbackContext("runtime-process-peer")
 	failing := newFailingGRPCLifecycle()
-	firstContext.SetGRPCServer(failing)
-	secondGRPC, err := grpctransport.NewServer("127.0.0.1:0", secondContext.Config.Transport.GRPC,
+	failingContext.SetGRPCServer(failing)
+	peerGRPC, err := grpctransport.NewServer("127.0.0.1:0", peerContext.Config.Transport.GRPC,
 		func(context.Context, *types.PayLoad) ([]byte, error) { return nil, nil })
 	require.NoError(t, err)
-	secondContext.SetGRPCServer(secondGRPC)
-	firstWeb.AddServiceContext(firstContext)
-	secondWeb.AddServiceContext(secondContext)
+	peerContext.SetGRPCServer(peerGRPC)
+	webServer.AddServiceContext(failingContext)
+	webServer.AddServiceContext(peerContext)
 
-	firstGroup := service.NewServiceGroup()
-	firstGroup.Add(firstContext.GetServers()[0])
-	secondGroup := service.NewServiceGroup()
-	secondGroup.Add(secondContext.GetServers()[0])
-	firstWeb.prepareRunLifecycle()
-	secondWeb.prepareRunLifecycle()
-	firstWeb.runStarted.Store(true)
-	secondWeb.runStarted.Store(true)
-	go firstWeb.runServiceGroup(firstGroup)
-	go secondWeb.runServiceGroup(secondGroup)
+	group := service.NewServiceGroup()
+	group.Add(failingContext.GetServers()[0])
+	group.Add(peerContext.GetServers()[0])
+	webServer.prepareRunLifecycle()
+	webServer.runStarted.Store(true)
+	go webServer.runServiceGroup(group)
 	select {
-	case <-secondGRPC.Ready():
+	case <-peerGRPC.Ready():
 	case <-time.After(time.Second):
-		t.Fatal("第二个 gRPC 服务未就绪")
+		t.Fatal("同组 peer gRPC 服务未就绪")
+	}
+	select {
+	case <-webServer.runReady:
+	case <-time.After(time.Second):
+		t.Fatal("ServiceGroup 未进入运行态")
 	}
 
-	failing.Fail(errors.New("injected runtime failure"))
-	require.Eventually(t, firstWeb.stopped.Load, time.Second, time.Millisecond)
-	require.False(t, secondWeb.stopped.Load())
-	assertStandardHealthServing(t, secondGRPC.Address())
-
-	secondWeb.Stop()
+	failing.Fail(errors.New("injected process runtime failure"))
+	require.Eventually(t, webServer.stopped.Load, time.Second, time.Millisecond)
+	select {
+	case <-peerGRPC.Done():
+	case <-time.After(time.Second):
+		t.Fatal("进程级 shutdown 未停止同组 peer gRPC")
+	}
+	select {
+	case <-webServer.runDone:
+	case <-time.After(time.Second):
+		t.Fatal("进程级 shutdown 后 ServiceGroup 未退出")
+	}
 }
 
 func TestWebServerStartFailureClosesLifecycleAndStopReturns(t *testing.T) {

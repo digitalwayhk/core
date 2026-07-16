@@ -82,27 +82,31 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 			DeregisterCriticalServiceAfter: consulCheckDeregisterCritical,
 		},
 	}
-	if err := c.client.Agent().ServiceRegister(svc); err != nil {
+	registerOpts := consulapi.ServiceRegisterOpts{}.WithContext(ctx)
+	if err := c.client.Agent().ServiceRegisterOpts(svc, registerOpts); err != nil {
 		return fmt.Errorf("consul: register service: %w", err)
 	}
 	// Cache nodeID→serviceName for O(1) lookup in Heartbeat/Deregister/Get.
 	c.nodeServices.Store(node.ID, node.ServiceName)
 	// Mark passing immediately.
 	checkID := "service:" + svc.ID
-	return c.client.Agent().UpdateTTL(checkID, "registered", consulapi.HealthPassing)
+	return c.client.Agent().UpdateTTLOpts(checkID, "registered", consulapi.HealthPassing,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 }
 
 // Deregister removes the node from Consul.
-func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
+func (c *ConsulProvider) Deregister(ctx context.Context, nodeID string) error {
 	svcName := c.serviceNameForNode(nodeID)
-	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
+	query := (&consulapi.QueryOptions{}).WithContext(ctx)
+	entries, _, err := c.client.Health().Service(svcName, "", false, query)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if e.Service.Meta["node_id"] == nodeID {
 			c.nodeServices.Delete(nodeID)
-			return c.client.Agent().ServiceDeregister(e.Service.ID)
+			return c.client.Agent().ServiceDeregisterOpts(e.Service.ID,
+				(&consulapi.QueryOptions{}).WithContext(ctx))
 		}
 	}
 	return ErrNodeNotFound
@@ -111,23 +115,26 @@ func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
 // Heartbeat updates the TTL health check to passing.
 func (c *ConsulProvider) Heartbeat(ctx context.Context, nodeID string) error {
 	svcName := c.serviceNameForNode(nodeID)
-	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
+	entries, _, err := c.client.Health().Service(svcName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if e.Service.Meta["node_id"] == nodeID {
 			checkID := "service:" + e.Service.ID
-			return c.client.Agent().UpdateTTL(checkID, "heartbeat", consulapi.HealthPassing)
+			return c.client.Agent().UpdateTTLOpts(checkID, "heartbeat", consulapi.HealthPassing,
+				(&consulapi.QueryOptions{}).WithContext(ctx))
 		}
 	}
 	return ErrNodeNotFound
 }
 
 // Get returns the NodeInfo for the given nodeID.
-func (c *ConsulProvider) Get(_ context.Context, nodeID string) (*NodeInfo, error) {
+func (c *ConsulProvider) Get(ctx context.Context, nodeID string) (*NodeInfo, error) {
 	svcName := c.serviceNameForNode(nodeID)
-	entries, _, err := c.client.Health().Service(svcName, "", false, nil)
+	entries, _, err := c.client.Health().Service(svcName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +156,9 @@ func (c *ConsulProvider) serviceNameForNode(nodeID string) string {
 }
 
 // List returns nodes for the given service, optionally filtered by status.
-func (c *ConsulProvider) List(_ context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
-	entries, _, err := c.client.Health().Service(serviceName, "", false, nil)
+func (c *ConsulProvider) List(ctx context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
+	entries, _, err := c.client.Health().Service(serviceName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("consul: list service %s: %w", serviceName, err)
 	}
@@ -188,7 +196,16 @@ func (c *ConsulProvider) Watch(ctx context.Context, serviceName string, onChange
 			opts = opts.WithContext(ctx)
 			entries, meta, err := c.client.Health().Service(serviceName, "", false, opts)
 			if err != nil {
-				time.Sleep(time.Second)
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-done:
+					timer.Stop()
+					return
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 				continue
 			}
 			if meta.LastIndex > lastIndex {
