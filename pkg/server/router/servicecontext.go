@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +57,7 @@ type ServiceContext struct {
 	serverOption             *types.ServerOption
 	serverOptionMu           sync.RWMutex
 	TransportSelector        transport.TransportSelector     `json:"-"`
+	TransportStats           *transport.Stats                `json:"-"`
 	MQManager                *mq.MQManager                   `json:"-"`
 	EventStream              *event.Stream                   `json:"-"`
 	EventBridge              *event.MQBridge                 `json:"-"`
@@ -572,6 +572,10 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		// This is a hard misconfiguration — prevent silent fallback to legacy HTTP.
 		panic(fmt.Sprintf("transport: init failed: %v", selErr))
 	} else if sel != nil {
+		sc.TransportStats = &transport.Stats{}
+		if defaultSelector, ok := sel.(*transport.DefaultSelector); ok {
+			defaultSelector.SetStats(sc.TransportStats)
+		}
 		sc.TransportSelector = sel
 	}
 	{
@@ -1380,10 +1384,8 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	if local := GetContext(payload.TargetService); local != nil {
 		return own.dispatchLocal(payload, local)
 	}
-	if payload.TargetAddress == "" {
-		if own.ServiceResolver == nil {
-			return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
-		}
+	var endpoints transport.TransportEndpoints
+	if own.ServiceResolver != nil {
 		resolved, err := own.ServiceResolver.Resolve(ctx, payload.TargetService)
 		if err != nil {
 			return nil, err
@@ -1391,8 +1393,14 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		payload.TargetAddress = resolved.Info.TargetAddress
 		payload.TargetPort = resolved.Info.TargetPort
 		payload.TargetSocketPort = resolved.Info.TargetSocketPort
+		endpoints = resolved.Endpoints
+	} else if payload.TargetAddress != "" {
+		// 直接指定地址的旧调用只具备 HTTP 端点；gRPC 端点必须来自服务发现。
+		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0)
+	} else {
+		return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
 	}
-	return own.sendPayload(ctx, payload)
+	return own.sendPayload(ctx, payload, endpoints)
 }
 
 func (own *ServiceContext) dispatchLocal(payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
@@ -1415,61 +1423,22 @@ func (own *ServiceContext) dispatchLocal(payload *types.PayLoad, target *Service
 	return json.Marshal(response)
 }
 
-// sendPayload dispatches a payload. When a TransportSelector is configured,
-// the transport chain is retried with exponential backoff; on exhaustion the
-// legacy HTTP path is tried once as a final fallback. Without a
-// TransportSelector, the legacy path is called exactly once (no retry) to
-// avoid duplicating non-idempotent operations.
-func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+// sendPayload 在发送前完成协议选择和健康预检。MaxRetries 只作用于预检；
+// 一旦 Transport.Send 开始，无论结果是否确定，都不会重试或切换协议。
+func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad, endpoints transport.TransportEndpoints) ([]byte, error) {
 	if own.TransportSelector != nil {
-		target := payload.TargetAddress
-		if payload.TargetPort > 0 {
-			target = target + ":" + strconv.Itoa(payload.TargetPort)
-		}
 		maxRetries := own.Config.Transport.MaxRetries
 		if maxRetries <= 0 {
 			maxRetries = 1
 		}
-		retryDelay := own.Config.Transport.RetryDelay
-
-		var lastErr error
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
-			if err == nil {
-				return result, nil
-			}
-			lastErr = err
-			logx.Debugw("transport_retry",
-				logx.Field("service", own.Service.Name),
-				logx.Field("target_service", payload.TargetService),
-				logx.Field("attempt", attempt+1),
-				logx.Field("max_attempts", maxRetries),
-				logx.Field("error", err),
-			)
-
-			if attempt < maxRetries-1 && retryDelay > 0 {
-				sleepDuration := retryDelay * time.Duration(1<<attempt)
-				if sleepDuration > 5*time.Second {
-					sleepDuration = 5 * time.Second
-				}
-				timer := time.NewTimer(sleepDuration)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return nil, ctx.Err()
-				case <-timer.C:
-				}
-			}
-		}
-		// All transport retries exhausted; one-shot legacy HTTP fallback.
-		logx.Infow("transport_fallback",
-			logx.Field("service", own.Service.Name),
-			logx.Field("target_service", payload.TargetService),
-			logx.Field("attempts", maxRetries),
-			logx.Field("fallback_transport", "legacy_http"),
-			logx.Field("error", lastErr),
+		selection, err := transport.SelectWithRetry(
+			ctx, own.TransportSelector, payload, endpoints,
+			maxRetries, own.Config.Transport.RetryDelay,
 		)
-		return own.Service.CallService(payload)
+		if err != nil {
+			return nil, err
+		}
+		return transport.SendSelection(ctx, own.TransportSelector, selection, payload)
 	}
 	// No TransportSelector: one-shot legacy path, no retry.
 	return own.Service.CallService(payload)
@@ -1478,23 +1447,29 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 // makeCrossNodeSender creates a cross-node sender that routes through
 // the configured TransportSelector when available.
 func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
-	return func(ctx context.Context, target string, data []byte, path string) ([]byte, error) {
-		host, portStr, err := net.SplitHostPort(target)
-		if err != nil {
-			host = target
-			portStr = "80"
-		}
-		port, _ := strconv.Atoi(portStr)
+	return func(ctx context.Context, target *cluster.NodeInfo, data []byte, path string) ([]byte, error) {
 		payload := &types.PayLoad{
-			TargetAddress: host,
-			TargetPort:    port,
+			TargetAddress: target.Address,
+			TargetPort:    target.Port,
 			TargetPath:    path,
 			Data:          data,
 			HttpMethod:    "POST",
 			Auth:          true,
 			SourceService: own.Service.Name,
 		}
-		return transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
+		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort)
+		attempts := own.Config.Transport.MaxRetries
+		if attempts <= 0 {
+			attempts = 1
+		}
+		selection, err := transport.SelectWithRetry(
+			ctx, own.TransportSelector, payload, endpoints,
+			attempts, own.Config.Transport.RetryDelay,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return transport.SendSelection(ctx, own.TransportSelector, selection, payload)
 	}
 }
 

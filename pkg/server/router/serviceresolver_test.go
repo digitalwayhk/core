@@ -31,8 +31,8 @@ func (t *resolverTestTransport) Send(_ context.Context, payload *types.PayLoad, 
 
 type resolverTestSelector struct{ transport *resolverTestTransport }
 
-func (s *resolverTestSelector) Select(context.Context, *types.PayLoad, string) (transport.Transport, error) {
-	return s.transport, nil
+func (s *resolverTestSelector) Select(_ context.Context, _ *types.PayLoad, endpoints transport.TransportEndpoints) (transport.Selection, error) {
+	return transport.Selection{Transport: s.transport, Endpoint: endpoints.HTTP}, nil
 }
 
 func TestServiceResolverPrefersLocalContext(t *testing.T) {
@@ -99,7 +99,7 @@ func TestRequestGetTargetServerInfoUsesServiceResolver(t *testing.T) {
 	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
 		ID: "orders-remote", ServiceName: "orders",
 		DataCenterID: 1, MachineID: 3,
-		Address: "orders.internal", Port: 8080, SocketPort: 18080,
+		Address: "orders.internal", Port: 8080, SocketPort: 18080, GRPCPort: 19090,
 	}))
 	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
 	defer resolver.Close()
@@ -109,6 +109,25 @@ func TestRequestGetTargetServerInfoUsesServiceResolver(t *testing.T) {
 	require.NotNil(t, target)
 	assert.Equal(t, "orders.internal", target.TargetAddress)
 	assert.Equal(t, 18080, target.TargetSocketPort)
+	assert.Equal(t, 19090, target.TargetGRPCPort)
+}
+
+func TestResolverReturnsProtocolSpecificEndpoints(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
+		ID: "orders-protocol-specific", ServiceName: "orders",
+		DataCenterID: 1, MachineID: 9,
+		Address: "orders.internal", Port: 8080, GRPCPort: 19090,
+	}))
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+
+	resolved, err := resolver.Resolve(context.Background(), "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "orders.internal:19090", resolved.Endpoints.GRPC)
+	assert.Equal(t, "http://orders.internal:8080", resolved.Endpoints.HTTP)
 }
 
 func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing.T) {

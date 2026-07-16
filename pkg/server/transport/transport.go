@@ -33,7 +33,7 @@ type Transport interface {
 // TransportSelector chooses the most appropriate Transport for a given call,
 // applying fallback logic when the primary transport is unavailable.
 type TransportSelector interface {
-	// Select returns the best Transport for the payload + target, or an error
+	// Select returns the best protocol-specific selection, or an error
 	// when no healthy transport is available.
-	Select(ctx context.Context, payload *types.PayLoad, target string) (Transport, error)
+	Select(ctx context.Context, payload *types.PayLoad, endpoints TransportEndpoints) (Selection, error)
 }

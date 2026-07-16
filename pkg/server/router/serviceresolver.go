@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -15,9 +19,10 @@ var ErrTargetServiceUnavailable = errors.New("target service unavailable")
 
 // ResolvedService 是一次服务解析得到的不可变目标快照。
 type ResolvedService struct {
-	Info   *types.TargetInfo
-	Local  *ServiceContext
-	NodeID string
+	Info      *types.TargetInfo
+	Endpoints transport.TransportEndpoints
+	Local     *ServiceContext
+	NodeID    string
 }
 
 type resolverEntry struct {
@@ -58,12 +63,15 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 		if local.Config.Cluster.AdvertiseAddress != "" {
 			address = local.Config.Cluster.AdvertiseAddress
 		}
+		grpcPort := local.Config.Transport.GRPC.Port
 		return &ResolvedService{
 			Local: local,
 			Info: &types.TargetInfo{
 				TargetAddress: address, TargetService: serviceName,
 				TargetPort: local.Config.Port, TargetSocketPort: local.Config.SocketPort,
+				TargetGRPCPort: grpcPort,
 			},
+			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort),
 		}, nil
 	}
 
@@ -76,7 +84,7 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 	r.mu.RUnlock()
 	healthy := make([]*cluster.NodeInfo, 0, len(nodes))
 	for _, node := range nodes {
-		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && (node.SocketPort > 0 || node.Port > 0) {
+		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && (node.GRPCPort > 0 || node.Port > 0) {
 			healthy = append(healthy, node)
 		}
 	}
@@ -92,8 +100,22 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 		Info: &types.TargetInfo{
 			TargetAddress: node.Address, TargetService: serviceName,
 			TargetPort: node.Port, TargetSocketPort: node.SocketPort,
+			TargetGRPCPort: node.GRPCPort,
 		},
+		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort),
 	}, nil
+}
+
+func serviceTransportEndpoints(address string, httpPort, grpcPort int) transport.TransportEndpoints {
+	var endpoints transport.TransportEndpoints
+	if grpcPort > 0 {
+		endpoints.GRPC = net.JoinHostPort(address, strconv.Itoa(grpcPort))
+	}
+	if httpPort > 0 {
+		endpoint := &url.URL{Scheme: "http", Host: net.JoinHostPort(address, strconv.Itoa(httpPort))}
+		endpoints.HTTP = endpoint.String()
+	}
+	return endpoints
 }
 
 func (r *ServiceResolver) ensureEntry(ctx context.Context, serviceName string) (*resolverEntry, error) {

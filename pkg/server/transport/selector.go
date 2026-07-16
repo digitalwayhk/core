@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
-	"fmt"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -16,6 +16,7 @@ var ErrNoTransport = errors.New("transport: no healthy transport available")
 type DefaultSelector struct {
 	primary  Transport
 	fallback []Transport
+	stats    *Stats
 }
 
 // NewDefaultSelector creates a selector with a primary and optional fallbacks.
@@ -23,30 +24,76 @@ func NewDefaultSelector(primary Transport, fallback ...Transport) *DefaultSelect
 	return &DefaultSelector{primary: primary, fallback: fallback}
 }
 
+// SetStats 注入当前 ServiceContext 独占的指标收集器。
+func (s *DefaultSelector) SetStats(stats *Stats) {
+	s.stats = stats
+}
+
 // Select returns the first healthy Transport that supports the payload / target.
 // It tries the primary first, then each fallback in order.
-func (s *DefaultSelector) Select(ctx context.Context, payload *types.PayLoad, target string) (Transport, error) {
+func (s *DefaultSelector) Select(ctx context.Context, payload *types.PayLoad, endpoints TransportEndpoints) (Selection, error) {
 	candidates := append([]Transport{s.primary}, s.fallback...)
-	for _, t := range candidates {
+	for index, t := range candidates {
 		if t == nil {
 			continue
 		}
-		if !t.Supports(ctx, payload, target) {
+		endpoint := endpoints.For(t.Name())
+		if endpoint == "" {
 			continue
 		}
-		if err := t.Health(ctx, target); err == nil {
-			return t, nil
+		if !t.Supports(ctx, payload, endpoint) {
+			continue
+		}
+		if err := t.Health(ctx, endpoint); err == nil {
+			s.stats.recordSelection(t.Name(), index > 0)
+			return Selection{Transport: t, Endpoint: endpoint}, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: target=%s", ErrNoTransport, target)
+	return Selection{}, ErrNoTransport
 }
 
-// SendWithFallback sends a payload using the selector, automatically retrying
-// through the fallback chain on transport errors.
-func SendWithFallback(ctx context.Context, sel TransportSelector, payload *types.PayLoad, target string) ([]byte, error) {
-	t, err := sel.Select(ctx, payload, target)
+// SelectWithRetry 只重试发送前的协议选择和健康检查。
+// attempts 小于 1 时按一次处理；等待过程响应 context 取消。
+func SelectWithRetry(ctx context.Context, sel TransportSelector, payload *types.PayLoad, endpoints TransportEndpoints, attempts int, delay time.Duration) (Selection, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		selection, err := sel.Select(ctx, payload, endpoints)
+		if err == nil {
+			return selection, nil
+		}
+		lastErr = err
+		if attempt == attempts-1 || delay <= 0 {
+			continue
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Selection{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return Selection{}, lastErr
+}
+
+// Send 在发送前选择一次协议，并且只调用一次已选 Transport.Send。
+// Send 返回任何错误时都不会重新选择协议或重放请求。
+func Send(ctx context.Context, sel TransportSelector, payload *types.PayLoad, endpoints TransportEndpoints) ([]byte, error) {
+	selection, err := sel.Select(ctx, payload, endpoints)
 	if err != nil {
 		return nil, err
 	}
-	return t.Send(ctx, payload, target)
+	return SendSelection(ctx, sel, selection, payload)
+}
+
+// SendSelection 执行一次已经完成预检的选择结果并记录发送结果。
+func SendSelection(ctx context.Context, sel TransportSelector, selection Selection, payload *types.PayLoad) ([]byte, error) {
+	result, err := selection.Transport.Send(ctx, payload, selection.Endpoint)
+	if selector, ok := sel.(*DefaultSelector); ok {
+		selector.stats.recordSend(err)
+	}
+	return result, err
 }

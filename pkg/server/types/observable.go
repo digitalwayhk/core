@@ -44,6 +44,7 @@ type TargetInfo struct {
 	TargetService    string
 	TargetPort       int
 	TargetSocketPort int
+	TargetGRPCPort   int
 	TargetPath       string
 	TargetToken      string //目标服务的token
 }
