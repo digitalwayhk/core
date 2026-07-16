@@ -10,6 +10,7 @@ import (
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
 	callapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/call"
+	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
@@ -28,9 +29,31 @@ type Service struct {
 
 func (*Service) ServiceName() string { return contract.SupplierServiceName }
 func (*Service) Routers() []servertypes.IRouter {
-	return []servertypes.IRouter{
+	routers := []servertypes.IRouter{
 		&publicapi.GetProducts{}, &callapi.GetProductSnapshot{}, &privateapi.AddProduct{}, &privateapi.SetProduct{}, &privateapi.GetMyProducts{}, &privateapi.GetOrders{},
 	}
+	routers = append(routers, manageapi.NewSupplierManage().Routers()...)
+	routers = append(routers, manageapi.NewProductManage().Routers()...)
+	return routers
+}
+
+// OnAuthRequest 只允许固定平台管理员访问 Manage；普通供应商只访问 Private。
+func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestArgs) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	uid := strings.TrimSpace(args.Identity.UID)
+	switch args.PathType {
+	case servertypes.ManageType:
+		if uid != contract.PlatformAdminUserID {
+			return contract.ErrForbidden
+		}
+	case servertypes.PrivateType:
+		if uid == "" || uid == contract.PlatformAdminUserID {
+			return contract.ErrForbidden
+		}
+	}
+	return nil
 }
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 

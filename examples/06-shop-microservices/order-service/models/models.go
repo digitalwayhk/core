@@ -240,6 +240,61 @@ func (o *Order) UpdateWith(a persistencetypes.IDataAction) error {
 }
 func (o *Order) DeleteWith(a persistencetypes.IDataAction) error { return a.Delete(o) }
 
+func ListPaymentTypes(enabledOnly bool) ([]*PaymentType, error) {
+	if err := ensureWith(dataAction(), NewPaymentType()); err != nil {
+		return nil, err
+	}
+	var items []*PaymentType
+	q := search(NewPaymentType(), 100)
+	if enabledOnly {
+		q.AddWhereN("Enabled", true)
+	}
+	err := dataAction().Load(q, &items)
+	return items, err
+}
+func SavePaymentType(item *PaymentType) error {
+	item.Name = strings.TrimSpace(item.Name)
+	item.Code = strings.ToLower(strings.TrimSpace(item.Code))
+	if item.Name == "" || item.Code == "" {
+		return errors.New("支付类型名称和编码不能为空")
+	}
+	if item.Hashcode == "" {
+		item.SetHashcode(item.GetHash())
+		return dataAction().Insert(item)
+	}
+	item.SetUpdatedAt(time.Now().UTC())
+	return dataAction().Update(item)
+}
+func FindPaymentType(id uint) (*PaymentType, error) {
+	if err := ensureWith(dataAction(), NewPaymentType()); err != nil {
+		return nil, err
+	}
+	var items []*PaymentType
+	q := search(NewPaymentType(), 1)
+	q.AddWhereN("ID", id)
+	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+func (p *PaymentRecord) InsertWith(a persistencetypes.IDataAction) error { return a.Insert(p) }
+func FindPaymentRecord(id uint) (*PaymentRecord, error) {
+	if err := ensureWith(dataAction(), NewPaymentRecord()); err != nil {
+		return nil, err
+	}
+	var items []*PaymentRecord
+	q := search(NewPaymentRecord(), 1)
+	q.AddWhereN("ID", id)
+	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+func (p *PaymentRecord) UpdateWith(a persistencetypes.IDataAction) error {
+	p.SetUpdatedAt(time.Now().UTC())
+	return a.Update(p)
+}
+
 func NewOutboxRecord(eventID, eventType, subject string, payload interface{}) (*Outbox, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {

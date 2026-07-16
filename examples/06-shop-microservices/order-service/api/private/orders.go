@@ -91,6 +91,27 @@ type DeleteOrder struct {
 	OrderID uint `json:"orderID"`
 }
 
+// CreatePayment 为当前用户的未支付订单创建支付流水。
+type CreatePayment struct {
+	OrderID       uint `json:"orderID"`
+	PaymentTypeID uint `json:"paymentTypeID"`
+}
+
+func (c *CreatePayment) Parse(req servertypes.IRequest) error { return req.Bind(c) }
+func (c *CreatePayment) Validation(req servertypes.IRequest) error {
+	if c.OrderID == 0 || c.PaymentTypeID == 0 {
+		return errors.New("订单和支付类型不能为空")
+	}
+	_, err := identity(req)
+	return err
+}
+func (c *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
+	uid, _ := identity(req)
+	return business.CreatePayment(uid, c.OrderID, c.PaymentTypeID, req.NewID(), strconv.FormatUint(uint64(req.NewID()), 10))
+}
+func (*CreatePayment) GetResponse() interface{}              { return &orderdto.PaymentRecord{} }
+func (c *CreatePayment) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(c) }
+
 func (d *DeleteOrder) Parse(req servertypes.IRequest) error { return req.Bind(d) }
 func (d *DeleteOrder) Validation(req servertypes.IRequest) error {
 	if d.OrderID == 0 {

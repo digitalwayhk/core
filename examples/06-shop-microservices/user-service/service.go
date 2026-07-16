@@ -24,7 +24,7 @@ type Service struct {
 
 func (*Service) ServiceName() string { return contract.UserServiceName }
 func (*Service) Routers() []servertypes.IRouter {
-	return []servertypes.IRouter{&publicapi.GetProducts{}, &privateapi.AddAddress{}, &privateapi.GetAddresses{}, &privateapi.DeleteAddress{}, &privateapi.AddOrder{}, &privateapi.GetOrders{}, &privateapi.DeleteOrder{}}
+	return []servertypes.IRouter{&publicapi.GetProducts{}, &publicapi.GetPaymentTypes{}, &privateapi.AddAddress{}, &privateapi.GetAddresses{}, &privateapi.DeleteAddress{}, &privateapi.AddOrder{}, &privateapi.GetOrders{}, &privateapi.DeleteOrder{}, &privateapi.CreatePayment{}}
 }
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error {

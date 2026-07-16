@@ -3,7 +3,9 @@ package orderservice
 import (
 	"context"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
+	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/private"
+	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -19,7 +21,11 @@ type Service struct {
 
 func (*Service) ServiceName() string { return contract.OrderServiceName }
 func (*Service) Routers() []servertypes.IRouter {
-	return []servertypes.IRouter{&privateapi.CreateOrder{}, &privateapi.GetUserOrders{}, &privateapi.GetSupplierOrders{}, &privateapi.DeleteOrder{}}
+	routers := []servertypes.IRouter{&publicapi.GetPaymentTypes{}, &privateapi.CreateOrder{}, &privateapi.GetUserOrders{}, &privateapi.GetSupplierOrders{}, &privateapi.DeleteOrder{}, &privateapi.CreatePayment{}, &manageapi.ConfirmPayment{}}
+	routers = append(routers, manageapi.NewPaymentTypeManage().Routers()...)
+	routers = append(routers, manageapi.NewOrderManage().Routers()...)
+	routers = append(routers, manageapi.NewPaymentRecordManage().Routers()...)
+	return routers
 }
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 func (s *Service) Start() {

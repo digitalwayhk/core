@@ -67,3 +67,27 @@ func TestDeleteOrderRejectsOtherUserAndWritesOutboxAtomically(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, pending, len(before)+2)
 }
+
+func TestPaymentRequiresEnabledTypeAndKeepsStateTransaction(t *testing.T) {
+	paymentType := models.NewPaymentType()
+	paymentType.SetID(3001)
+	paymentType.Name = "测试支付"
+	paymentType.Code = "test-pay"
+	paymentType.Enabled = true
+	require.NoError(t, models.SavePaymentType(paymentType))
+	product := supplierdto.ProductSnapshot{ProductID: 28, SupplierID: "supplier-pay", ProductName: "支付商品", UnitPrice: decimal.NewFromInt(20)}
+	address := userdto.AddressSnapshot{AddressID: 29, Recipient: "用户 C"}
+	created, err := CreateOrder(3002, "buyer-pay", "request-pay", "event-create-pay", product, address, 2)
+	require.NoError(t, err)
+	record, err := CreatePayment("buyer-pay", created.ID, paymentType.ID, 3003, "event-payment")
+	require.NoError(t, err)
+	assert.Equal(t, models.PaymentStatusProcessing, record.Status)
+	paid, err := ConfirmPayment(record.ID, "event-paid")
+	require.NoError(t, err)
+	assert.Equal(t, models.PaymentStatusPaid, paid.PaymentStatus)
+	_, err = DeleteOrCancel("buyer-pay", created.ID, "event-cancel-paid")
+	require.NoError(t, err)
+	stored, err := models.FindOrder(created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.OrderStatusCancelled, stored.Status)
+}
