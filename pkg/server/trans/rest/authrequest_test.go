@@ -3,6 +3,8 @@ package rest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +41,36 @@ func TestInternalJWTAuthorizeDoesNotLogToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, response.Code)
 	require.NotContains(t, output.String(), rawToken)
 	require.NotContains(t, output.String(), "Authorization")
+}
+
+func TestInternalJWTAuthorizePassesTrustedVerifiedIdentity(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	identity := types.AuthIdentity{
+		UID: "user-1", Username: "用户一", AuthType: types.AuthTypeUser,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "alice", Generation: 3,
+	}
+	request := authenticatedRequest(t, sc.Config.Auth.AccessSecret, identity)
+	recorder := httptest.NewRecorder()
+	called := false
+	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(_ http.ResponseWriter, verifiedRequest *http.Request) {
+			called = true
+			verifiedRequest.Header.Del("Authorization")
+			actualIdentity, claims, err := verifiedRequestIdentity(
+				verifiedRequest, sc, types.AuthTypeUser, authModeInternalJWT,
+			)
+			require.NoError(t, err)
+			require.Equal(t, identity.UID, actualIdentity.UID)
+			require.Equal(t, identity.ProviderSubject, actualIdentity.ProviderSubject)
+			require.Equal(t, identity.Generation, actualIdentity.Generation)
+			require.Equal(t, identity.UID, claims["uid"])
+		}),
+	)
+
+	handler.ServeHTTP(recorder, request)
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
@@ -181,6 +213,48 @@ func TestAuthRequestHookFailureContract(t *testing.T) {
 			require.NotContains(t, recorder.Body.String(), "secret")
 		})
 	}
+}
+
+func TestAuthRequestDeniedLogContainsRedactedIdentityDigest(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() {
+		logx.SetWriter(previous)
+		logx.Reset()
+	})
+
+	sc := authRequestServiceContext(authRequestHookFunc(func(context.Context, types.AuthRequestArgs) error {
+		return types.NewPublicError(types.ErrorKindForbidden, 40321, "账户已冻结", nil)
+	}))
+	manager, err := authstate.NewManager("auth-request-log-test", config.AuthRevocationConfig{
+		Mode: config.AuthRevocationModeLocal, BadgerPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	sc.AuthRevocationManager = manager
+	identity := types.AuthIdentity{
+		UID: "sensitive-user-id", Username: "敏感用户名", AuthType: types.AuthTypeUser,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "sensitive-subject",
+	}
+	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		authRequestHandler(sc, authRequestRouterInfo(types.PrivateType), types.AuthTypeUser, authModeInternalJWT,
+			http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("拒绝请求不得进入Router") })),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, authenticatedRequest(t, sc.Config.Auth.AccessSecret, identity))
+
+	sum := sha256.Sum256([]byte("auth-request-test|auth|casdoor|sensitive-subject"))
+	expectedDigest := hex.EncodeToString(sum[:8])
+	logOutput := output.String()
+	require.Contains(t, logOutput, "auth_type")
+	require.Contains(t, logOutput, string(types.AuthTypeUser))
+	require.Contains(t, logOutput, "identity_hash")
+	require.Contains(t, logOutput, expectedDigest)
+	require.NotContains(t, logOutput, identity.UID)
+	require.NotContains(t, logOutput, identity.Username)
+	require.NotContains(t, logOutput, identity.ProviderSubject)
 }
 
 type authRequestHookFunc func(context.Context, types.AuthRequestArgs) error

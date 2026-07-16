@@ -29,23 +29,21 @@ func TestTokenParseRequiresExplicitClient(t *testing.T) {
 	require.ErrorIs(t, err, ErrClientRequired)
 }
 
-func TestExplicitClientAuthHandlerUsesProvidedDomain(t *testing.T) {
+func TestExplicitClientAuthHandlerFailsClosedForRawCasdoorToken(t *testing.T) {
 	client := &fakeClient{claims: &casdoorsdk.Claims{User: casdoorsdk.User{Id: "user-1", Name: "alice"}}}
 	domain := &DomainClient{client: client, organization: "org", application: "app"}
 	called := false
-	handler := NewAuthHandler(domain, func(_ http.ResponseWriter, request *http.Request) {
-		called = true
-		require.Contains(t, request.Header.Get("Casdoor-User-Json"), "user-1")
-	})
+	handler := NewAuthHandler(domain, func(http.ResponseWriter, *http.Request) { called = true })
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
-	require.True(t, called)
-	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "token", client.parsedToken)
+	require.False(t, called)
+	require.Equal(t, http.StatusUnauthorized, response.Code)
+	require.Equal(t, "authentication failed\n", response.Body.String())
+	require.Empty(t, client.parsedToken)
 }
 
 type fakeClient struct {

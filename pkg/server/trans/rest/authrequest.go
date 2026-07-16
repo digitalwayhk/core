@@ -2,6 +2,8 @@ package rest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
@@ -15,6 +17,13 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"go.opentelemetry.io/otel/trace"
 )
+
+type verifiedAccessContextKey struct{}
+
+type verifiedAccessContext struct {
+	identity types.AuthIdentity
+	claims   map[string]interface{}
+}
 
 // authRequestHandler 在认证中间件已经验证签名后，执行框架用途隔离、撤销校验和业务授权 Hook。
 func authRequestHandler(
@@ -33,7 +42,7 @@ func authRequestHandler(
 		manager, hook, active := sc.GetAuthRequestRuntime()
 		if !active {
 			contract := types.ResolvePublicError(requestAuthenticationError(errors.New("service authentication is closing")))
-			logAuthRequestDenied(sc, info, contract)
+			logAuthRequestDenied(sc, info, authType, types.AuthIdentity{}, contract)
 			writePublicErrorContract(w, contract)
 			return
 		}
@@ -51,7 +60,7 @@ func authRequestHandler(
 		}
 		if err != nil {
 			contract := types.ResolvePublicError(err)
-			logAuthRequestDenied(sc, info, contract)
+			logAuthRequestDenied(sc, info, authType, identity, contract)
 			writePublicErrorContract(w, contract)
 			return
 		}
@@ -82,32 +91,14 @@ func verifiedRequestIdentity(
 		return identity, map[string]interface{}{"uid": uid, "uname": username}, nil
 	}
 
-	secret, err := accessSecretForRequest(sc, authType)
-	if err != nil {
-		return types.AuthIdentity{}, nil, requestAuthenticationError(err)
-	}
-	token, ok := bearerAccessToken(r.Header.Get("Authorization"))
+	verified, ok := r.Context().Value(verifiedAccessContextKey{}).(verifiedAccessContext)
 	if !ok {
-		return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("access token missing"))
+		return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("verified access identity missing"))
 	}
-	verified, err := safe.ValidateAccessToken(token, secret, authType, time.Now().UTC())
-	if err != nil {
-		return types.AuthIdentity{}, nil, requestAuthenticationError(err)
+	if verified.identity.AuthType != authType || strings.TrimSpace(verified.identity.UID) == "" {
+		return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("verified access identity invalid"))
 	}
-	return verified.Identity, types.CloneAuthClaims(verified.Claims), nil
-}
-
-func accessSecretForRequest(sc *router.ServiceContext, authType types.AuthType) (string, error) {
-	switch authType {
-	case types.AuthTypeUser:
-		return sc.Config.Auth.AccessSecret, nil
-	case types.AuthTypeManage:
-		return sc.Config.ManageAuth.AccessSecret, nil
-	case types.AuthTypeServerManage:
-		return sc.Config.ServerManageAuth.AccessSecret, nil
-	default:
-		return "", errors.New("authentication type invalid")
-	}
+	return verified.identity, types.CloneAuthClaims(verified.claims), nil
 }
 
 func bearerAccessToken(header string) (string, bool) {
@@ -142,6 +133,10 @@ func internalJWTAuthorize(secret string, authType types.AuthType, next http.Hand
 		for key, value := range verified.Claims {
 			ctx = context.WithValue(ctx, key, value)
 		}
+		ctx = context.WithValue(ctx, verifiedAccessContextKey{}, verifiedAccessContext{
+			identity: verified.Identity,
+			claims:   types.CloneAuthClaims(verified.Claims),
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -240,7 +235,13 @@ func requestAuthenticationError(cause error) error {
 	return types.NewPublicError(types.ErrorKindUnauthenticated, types.PublicCodeUnauthenticated, "authentication failed", cause)
 }
 
-func logAuthRequestDenied(sc *router.ServiceContext, info *types.RouterInfo, contract types.PublicErrorContract) {
+func logAuthRequestDenied(
+	sc *router.ServiceContext,
+	info *types.RouterInfo,
+	authType types.AuthType,
+	identity types.AuthIdentity,
+	contract types.PublicErrorContract,
+) {
 	serviceName := ""
 	path := ""
 	if sc != nil && sc.Service != nil {
@@ -249,9 +250,35 @@ func logAuthRequestDenied(sc *router.ServiceContext, info *types.RouterInfo, con
 	if info != nil {
 		path = info.GetPath()
 	}
+	identityHash := authRequestIdentityHash(serviceName, authType, identity)
+	if identityHash != "" {
+		logx.Infow("auth_request_denied",
+			logx.Field("service", serviceName),
+			logx.Field("route", path),
+			logx.Field("auth_type", authType),
+			logx.Field("identity_hash", identityHash),
+			logx.Field("code", contract.Code),
+		)
+		return
+	}
 	logx.Infow("auth_request_denied",
 		logx.Field("service", serviceName),
 		logx.Field("route", path),
+		logx.Field("auth_type", authType),
 		logx.Field("code", contract.Code),
 	)
+}
+
+func authRequestIdentityHash(serviceName string, authType types.AuthType, identity types.AuthIdentity) string {
+	subject := strings.TrimSpace(identity.ProviderSubject)
+	if subject == "" {
+		subject = strings.TrimSpace(identity.UID)
+	}
+	if subject == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		serviceName, string(authType), identity.Provider, subject,
+	}, "|")))
+	return hex.EncodeToString(sum[:8])
 }
