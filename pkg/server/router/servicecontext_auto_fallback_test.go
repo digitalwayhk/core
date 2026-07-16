@@ -184,6 +184,30 @@ func TestServiceContextAutoFallbackContinuesAfterSecondCleanupSucceeds(t *testin
 	sc.SetRunState(false)
 }
 
+func TestServiceContextAutoFallbackAcceptsSecondCleanupNodeNotFound(t *testing.T) {
+	external := &autoFallbackProvider{
+		name: "consul",
+		registerErr: &cluster.RegistrationError{
+			Cause:       errors.New("registration compensation result lost"),
+			Compensated: false,
+		},
+		deregisterErr:    cluster.ErrNodeNotFound,
+		recordOnRegister: true,
+	}
+	local := &autoFallbackProvider{name: "local"}
+	sc := newAutoFallbackContext(t, "second-cleanup-not-found")
+	sc.ClusterProvider = external
+	sc.localFallbackProvider = local
+	sc.ServiceResolver.SetProvider(external)
+
+	sc.SetRunState(true)
+	require.True(t, sc.IsRun())
+	assert.Equal(t, int32(1), external.deregisterCount.Load())
+	assert.Equal(t, int32(1), local.registerCount.Load())
+	require.Same(t, local, sc.ClusterProvider)
+	sc.SetRunState(false)
+}
+
 func TestServiceContextAutoFallbackUsesConsulCompensationWithoutDoubleDeregister(t *testing.T) {
 	consulServer, deregisterCount := newFailingTTLConsulServer(t, false)
 	provider, err := cluster.NewConsulProvider(consulServer.URL)

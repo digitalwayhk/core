@@ -25,18 +25,25 @@ type providerMigration struct {
 	pending     DiscoveryProvider
 }
 
+// ProviderSwitchShutdown is an optional switcher capability used by service
+// shutdown to abort an active migration and release its pending provider.
+type ProviderSwitchShutdown interface {
+	Shutdown(ctx context.Context) error
+}
+
 // clusterSwitcher 负责在两个 DiscoveryProvider 之间完成可对账的迁移。
 type clusterSwitcher struct {
-	opMu        sync.Mutex
-	mu          sync.RWMutex
-	current     DiscoveryProvider
-	pending     DiscoveryProvider
-	retired     DiscoveryProvider
-	inProgress  bool
-	switchedAt  time.Time
-	serviceName string
-	migration   *providerMigration
-	closeFlight *providerCloseFlight
+	opMu               sync.Mutex
+	mu                 sync.RWMutex
+	current            DiscoveryProvider
+	pending            DiscoveryProvider
+	retired            DiscoveryProvider
+	inProgress         bool
+	switchedAt         time.Time
+	serviceName        string
+	migration          *providerMigration
+	closeFlight        *providerCloseFlight
+	pendingCloseFlight *providerCloseFlight
 }
 
 type providerCloseFlight struct {
@@ -236,6 +243,9 @@ func (s *clusterSwitcher) closeRetiredProvider(flight *providerCloseFlight) {
 func (s *clusterSwitcher) Rollback(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	migration, _, pending, err := s.migrationSnapshot()
 	if err != nil {
@@ -244,18 +254,83 @@ func (s *clusterSwitcher) Rollback(ctx context.Context) error {
 	if err := stopProviderMigration(ctx, migration); err != nil {
 		return err
 	}
+	if err := s.closePendingProvider(ctx, pending); err != nil {
+		return err
+	}
+	return s.clearMigration(migration)
+}
 
+// Shutdown aborts an active migration and closes its pending provider. Calling
+// it without a migration, or again after successful cleanup, is a no-op.
+func (s *clusterSwitcher) Shutdown(ctx context.Context) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.mu.RLock()
+	migration := s.migration
+	pending := s.pending
+	inProgress := s.inProgress
+	s.mu.RUnlock()
+	if !inProgress || migration == nil || pending == nil {
+		return nil
+	}
+	if err := stopProviderMigration(ctx, migration); err != nil {
+		return err
+	}
+	if err := s.closePendingProvider(ctx, pending); err != nil {
+		return err
+	}
+	return s.clearMigration(migration)
+}
+
+func (s *clusterSwitcher) clearMigration(migration *providerMigration) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.migration != migration {
-		s.mu.Unlock()
 		return errors.New("cluster switcher: 迁移代次已变更")
 	}
 	s.pending = nil
 	s.inProgress = false
 	s.migration = nil
-	s.mu.Unlock()
+	return nil
+}
 
-	if err := pending.Close(); err != nil {
+func (s *clusterSwitcher) closePendingProvider(ctx context.Context, pending DiscoveryProvider) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("cluster switcher: 关闭 pending Provider %s 前 context 已结束: %w", pending.Name(), err)
+	}
+	if closer, ok := pending.(ContextCloser); ok {
+		if err := closer.CloseContext(ctx); err != nil {
+			return fmt.Errorf("cluster switcher: 关闭 pending Provider %s 失败: %w", pending.Name(), err)
+		}
+		return nil
+	}
+
+	flight := s.pendingCloseFlight
+	if flight == nil {
+		flight = &providerCloseFlight{provider: pending, done: make(chan struct{})}
+		s.pendingCloseFlight = flight
+		go func() {
+			flight.err = pending.Close()
+			close(flight.done)
+		}()
+	}
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("cluster switcher: 等待 pending Provider %s 关闭失败: %w", pending.Name(), ctx.Err())
+	case <-flight.done:
+	}
+	err := flight.err
+	if s.pendingCloseFlight == flight {
+		s.pendingCloseFlight = nil
+	}
+	if err != nil {
 		return fmt.Errorf("cluster switcher: 关闭 pending Provider %s 失败: %w", pending.Name(), err)
 	}
 	return nil

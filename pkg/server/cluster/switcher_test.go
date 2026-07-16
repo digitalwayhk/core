@@ -47,6 +47,29 @@ type contextCloseProvider struct {
 	closeContextCount atomic.Int32
 }
 
+type rollbackContextProvider struct {
+	cluster.DiscoveryProvider
+	closeCount        atomic.Int32
+	closeContextCount atomic.Int32
+	failFirst         atomic.Bool
+}
+
+func (p *rollbackContextProvider) Close() error {
+	p.closeCount.Add(1)
+	return errors.New("不应调用普通 Close")
+}
+
+func (p *rollbackContextProvider) CloseContext(ctx context.Context) error {
+	p.closeContextCount.Add(1)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if p.failFirst.CompareAndSwap(true, false) {
+		return errors.New("模拟首次关闭失败")
+	}
+	return p.DiscoveryProvider.Close()
+}
+
 func (p *contextCloseProvider) Close() error {
 	p.closeCount.Add(1)
 	return errors.New("不应调用普通 Close")
@@ -205,6 +228,31 @@ func TestClusterSwitcher_FinalizePrefersContextCloser(t *testing.T) {
 	assert.Zero(t, old.closeCount.Load())
 	assert.Equal(t, int32(1), old.closeContextCount.Load())
 	_ = pending.Close()
+}
+
+func TestClusterSwitcher_RollbackCloseFailureKeepsPendingRetryable(t *testing.T) {
+	current := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	pendingBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	pending := &rollbackContextProvider{DiscoveryProvider: pendingBase}
+	pending.failFirst.Store(true)
+	switcher := cluster.NewClusterSwitcher(current, "svc")
+	require.NoError(t, switcher.Begin(context.Background(), pending))
+
+	require.Error(t, switcher.Rollback(context.Background()))
+	require.NoError(t, switcher.Rollback(context.Background()), "pending 关闭失败后必须保留可重试状态")
+	assert.Zero(t, pending.closeCount.Load(), "Rollback 应优先使用 ContextCloser")
+	assert.Equal(t, int32(2), pending.closeContextCount.Load())
+	_ = current.Close()
+}
+
+func TestClusterSwitcher_ShutdownWithoutMigrationIsIdempotent(t *testing.T) {
+	current := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(current, "svc")
+	shutdown := switcher.(interface{ Shutdown(context.Context) error })
+
+	require.NoError(t, shutdown.Shutdown(context.Background()))
+	require.NoError(t, shutdown.Shutdown(context.Background()))
+	_ = current.Close()
 }
 
 func TestClusterSwitcher_BeginMigratesOnlyScopedServiceNodes(t *testing.T) {

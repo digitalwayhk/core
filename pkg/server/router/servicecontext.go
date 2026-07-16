@@ -932,6 +932,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		}
 	}
 	provider := own.ClusterProvider
+	switcher := own.ClusterSwitcher
 	membership := own.membership
 	broker := own.CrossNodeBroker
 	mqManager := own.MQManager
@@ -1052,6 +1053,11 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.lifecycleMu.Unlock()
 		own.superviseGRPC(grpcServer)
 	} else {
+		if shutdown, ok := switcher.(cluster.ProviderSwitchShutdown); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			own.recordShutdownError(shutdown.Shutdown(ctx))
+			cancel()
+		}
 		if grpcServer != nil {
 			grpcServer.BeginShutdown()
 		}
@@ -1158,6 +1164,10 @@ func (own *ServiceContext) SetRunState(state bool) {
 func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	own.beginLifecycleOperation()
 	defer own.endLifecycleOperation()
+	return own.syncProviderAfterSwitch()
+}
+
+func (own *ServiceContext) syncProviderAfterSwitch() error {
 
 	own.lifecycleMu.Lock()
 	switcher := own.ClusterSwitcher
@@ -1240,6 +1250,101 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	own.CrossNodeBroker = newBroker
 	own.lifecycleMu.Unlock()
 	return nil
+}
+
+// BeginProviderSwitch starts a provider migration inside the service lifecycle
+// boundary. A target not accepted by Begin is closed before this method returns.
+func (own *ServiceContext) BeginProviderSwitch(ctx context.Context, to cluster.DiscoveryProvider) error {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return closeRejectedSwitchTarget(to, errors.New("cluster: service context is terminated"))
+	}
+	if switcher == nil {
+		return closeRejectedSwitchTarget(to, errors.New("cluster: switcher not initialised"))
+	}
+	return beginProviderSwitch(ctx, switcher, to)
+}
+
+// CompleteProviderSwitch promotes, synchronizes, and finalizes a provider
+// migration as one lifecycle operation, so shutdown cannot interleave.
+func (own *ServiceContext) CompleteProviderSwitch(ctx context.Context) error {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	running := own.isStart.Load()
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return errors.New("cluster: service context is terminated")
+	}
+	if switcher == nil {
+		return errors.New("cluster: switcher not initialised")
+	}
+	if transaction, ok := switcher.(cluster.ProviderSwitchTransaction); ok {
+		if err := transaction.Promote(ctx); err != nil {
+			return err
+		}
+		if err := own.syncProviderAfterSwitch(); err != nil {
+			return err
+		}
+		return transaction.Finalize(ctx)
+	}
+	if running {
+		return errors.New("cluster: running provider switch requires transactional switcher")
+	}
+	if err := switcher.Complete(ctx); err != nil {
+		return err
+	}
+	return own.syncProviderAfterSwitch()
+}
+
+// RollbackProviderSwitch serializes a management rollback with service
+// startup and shutdown.
+func (own *ServiceContext) RollbackProviderSwitch(ctx context.Context) error {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return errors.New("cluster: service context is terminated")
+	}
+	if switcher == nil {
+		return errors.New("cluster: switcher not initialised")
+	}
+	return switcher.Rollback(ctx)
+}
+
+func beginProviderSwitch(
+	ctx context.Context,
+	switcher cluster.ProviderSwitcher,
+	to cluster.DiscoveryProvider,
+) error {
+	err := switcher.Begin(ctx, to)
+	if err == nil {
+		return nil
+	}
+	return closeRejectedSwitchTarget(to, err)
+}
+
+func closeRejectedSwitchTarget(to cluster.DiscoveryProvider, beginErr error) error {
+	if to == nil {
+		return beginErr
+	}
+	if closeErr := to.Close(); closeErr != nil {
+		return errors.Join(beginErr, fmt.Errorf("cluster: close rejected target provider %s: %w", to.Name(), closeErr))
+	}
+	return beginErr
 }
 
 func providerName(provider cluster.DiscoveryProvider) string {

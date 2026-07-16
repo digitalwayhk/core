@@ -114,28 +114,11 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		err = sc.ClusterSwitcher.Begin(ctx, to)
+		err = sc.BeginProviderSwitch(ctx, to)
 	case "complete":
-		if transaction, ok := sc.ClusterSwitcher.(cluster.ProviderSwitchTransaction); ok {
-			err = transaction.Promote(ctx)
-			if err == nil {
-				err = sc.SyncProviderAfterSwitch()
-			}
-			if err == nil {
-				err = transaction.Finalize(ctx)
-			}
-		} else {
-			if sc.IsRun() {
-				err = fmt.Errorf("cluster: running provider switch requires transactional switcher")
-				break
-			}
-			err = sc.ClusterSwitcher.Complete(ctx)
-			if err == nil {
-				err = sc.SyncProviderAfterSwitch()
-			}
-		}
+		err = sc.CompleteProviderSwitch(ctx)
 	case "rollback":
-		err = sc.ClusterSwitcher.Rollback(ctx)
+		err = sc.RollbackProviderSwitch(ctx)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", c.Action)
 	}
