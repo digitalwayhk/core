@@ -14,7 +14,7 @@
 1. 自定义 Socket 每次请求建立一次 TCP 连接，使用 JSON 与自定义长度帧，连接复用、健康检查、TLS、标准生态工具和可观测性均弱于 gRPC。
 2. gRPC 客户端已经复用连接，但 Server 尚未接入 `WebServer` 生命周期，服务发现也没有把已有的 `NodeInfo.GRPCPort` 解析为调用目标。
 3. 当前选择器把 HTTP 端口作为所有协议的健康检查目标。Socket 可能检查错误端口后退回 HTTP，因此“调用成功”不能证明实际使用了 Socket。
-4. 当前 gRPC 使用明文凭证和自定义 Health RPC，不满足生产服务间通信的身份校验与标准探针要求。
+4. 当前 gRPC 使用明文凭证和自定义 Health RPC，也没有复用已锁定的 go-zero `zrpc` 客户端能力，不满足生产服务间通信的身份校验与标准探针要求。
 5. 示例 06 强制配置 Socket，无法演示计划中的生产默认 gRPC 路径。
 
 继续维护自定义 Socket 会让框架承担重复协议、重复生命周期和重复测试成本，而它没有提供 gRPC 或 HTTP 不具备的独特能力。因此本设计补齐 gRPC 后直接删除 Socket，不设置废弃期。
@@ -22,17 +22,20 @@
 ## 目标
 
 1. gRPC 成为生产和测试中的默认同步内部传输。
-2. 补齐 gRPC Server 启停、服务发现、连接池关闭、TLS、标准健康检查和协议级集成测试。
-3. HTTP 保留为显式配置的同步备用协议。
-4. EventBridge/MQ 继续承担异步事件，不伪装成同步 RPC 的透明备用通道。
-5. 从 Core 的代码、配置、协议、测试和文档中完整删除自定义 Socket。
-6. 示例 06 同进程和三进程部署都能证明请求实际经过 gRPC，而不是因回退而“假绿”。
+2. 优先复用 go-zero `zrpc` 的客户端、超时、熔断、追踪、指标和负载均衡能力，只为 Core 独立 ServiceContext 生命周期保留必要的薄适配层。
+3. 补齐 gRPC Server 启停、服务发现、连接池关闭、安全传输、标准健康检查和协议级集成测试。
+4. HTTP 保留为显式配置的同步备用协议。
+5. EventBridge/MQ 继续承担异步事件，不伪装成同步 RPC 的透明备用通道。
+6. 从 Core 的代码、配置、协议、测试和文档中完整删除自定义 Socket。
+7. 示例 06 同进程和三进程部署都能证明请求实际经过 gRPC，而不是因回退而“假绿”。
 
 ## 非目标
 
 - 不修改 `futures` 仓库。
 - 不引入 NATS JetStream 作为本次同步调用传输。
 - 不把业务 API 改造成逐路由 protobuf 服务；本次继续使用统一的 Core gRPC envelope。
+- 不用 zrpc 自带 etcd 发现替换 Core 的 `ClusterProvider`、MachineID、节点状态和 Redis/Consul 发现契约。
+- 不复制或导入 go-zero 的 `internal` 包；只有公开 API 与 Core 生命周期契约匹配时才复用。
 - 不同时重构 QUIC、WebSocket、EventBridge 或业务路由协议。
 - 不为已确认无独特价值的 Socket 增加适配器、兼容层或废弃登记期。
 
@@ -50,7 +53,24 @@
 
 默认配置为 `Internal: grpc`。`Fallback` 默认不再包含 Socket，也不隐式加入 HTTP；需要 HTTP 备用时必须显式写入 `Fallback: [http]`。这样配置能准确表达部署能力，避免调用方误以为所有服务都具备安全可用的备用协议。
 
-### 2. 协议专属端点
+### 2. go-zero zrpc 复用边界
+
+项目锁定 `github.com/zeromicro/go-zero v1.10.2` 和 `google.golang.org/grpc v1.80.0`。实现以该版本源码为准，不直接照搬较新 go-zero 文档中的配置字段。
+
+| 能力 | 决策 | 原因 |
+| --- | --- | --- |
+| zrpc Client | 复用 | 使用 `zrpc.NewClient` 的 direct endpoint 模式，获得连接、超时、熔断、追踪、指标和客户端中间件 |
+| zrpc P2C/服务发现 | 部分复用 | 单目标连接可复用客户端能力；节点选择继续由 Core `ClusterProvider + ServiceResolver` 负责，避免出现第二套发现权威 |
+| zrpc Server | 本次不直接接管 | v1.10.2 的实际停止依赖进程级 `proc`，公开 `RpcServer.Stop()` 不能独立停止某个 listener，不满足 ServiceContext 独立关闭和同名重建契约 |
+| grpc.Server | 保留薄封装 | 只负责每个 ServiceContext 的 listener、注册、标准 health 和可控 `GracefulStop/Stop`，不重造连接协议或业务 RPC 框架 |
+| TLS credentials | 复用标准接口 | 客户端通过 `zrpc.WithTransportCredentials`；服务端通过 `grpc.Creds`，不自定义加密协议 |
+| gRPC health | 复用 grpc-go 官方实现 | 删除 Core 私有 Health RPC，直接注册 `grpc_health_v1` |
+
+Core 按 endpoint 缓存 `zrpc.Client`，调用使用其 `Conn()` 创建现有 protobuf client；ServiceContext 关闭时逐个关闭底层 `grpc.ClientConn`。不得同时保留当前自建 gRPC Client pool 与 zrpc Client pool。
+
+服务端薄封装是明确的生命周期适配，不是第二套 RPC 框架。若未来锁定的 go-zero 版本公开支持单个 `RpcServer` 独立优雅停止，并能通过测试满足 ServiceContext 重建契约，才可再把服务端完全迁入 zrpc。
+
+### 3. 协议专属端点
 
 `ServiceResolver` 返回同一服务实例的 HTTP 与 gRPC 端点。传输不得再共享一个 `host:port` 字符串：
 
@@ -60,7 +80,7 @@
 
 选择器按候选协议取得各自端点，再执行 `Supports` 和健康检查。目标端口缺失、协议未配置或健康检查失败时，才可在发送前选择下一个显式备用协议。
 
-### 3. 回退与重试语义
+### 4. 回退与重试语义
 
 自动回退只发生在请求尚未交给远端处理之前：
 
@@ -72,7 +92,7 @@
 
 同理，`MaxRetries` 只允许用于明确的发送前连接建立失败，或由业务显式声明可重试的幂等调用；本次实施不得保留“所有网络错误统一重试”的模糊语义。业务级幂等键仍是写操作抵御调用方重试的最后保障。
 
-### 4. gRPC Server 生命周期
+### 5. gRPC Server 生命周期
 
 每个 `ServiceContext` 拥有自己的 gRPC Server，不使用进程级可变单例：
 
@@ -84,18 +104,18 @@
 
 重复 `Start`、重复 `Stop` 和启动中途失败都必须幂等收口，不得泄漏 listener、goroutine 或连接。
 
-### 5. gRPC 端口
+### 6. gRPC 端口
 
 `Transport.GRPC.Port` 改为真正可配置，不再限制为固定 `19090`。默认值按服务 HTTP 端口派生为 `ServerConfig.Port + 10000`，便于同进程多服务和本地调试；显式配置优先。
 
 服务发现中的 `NodeInfo.GRPCPort` 成为唯一远端 gRPC 端口事实。删除 `ServerConfig.SocketPort`、`NodeInfo.SocketPort` 以及所有 `SourceSocketPort`、`TargetSocketPort` 字段后，不再通过 Socket 端口间接表达内部监听地址。
 
-### 6. TLS 与身份校验
+### 7. 安全传输与身份校验
 
 `Transport.GRPC` 增加 TLS 配置：
 
 ```text
-TLS.Mode       = insecure | tls | mtls
+Security.Mode  = insecure | tls | mtls | mesh
 TLS.CAFile     = 信任根证书
 TLS.CertFile   = 当前服务证书
 TLS.KeyFile    = 当前服务私钥
@@ -104,15 +124,19 @@ TLS.ServerName = 可选的服务端证书名称覆盖
 
 规则如下：
 
-- `Cluster.Mode=off` 或 `Cluster.Provider=local` 时，未配置 `TLS.Mode` 的缺省值为 `insecure`，仅用于本机开发和不跨主机的测试；也可以显式改为 `tls` 或 `mtls`。
-- `Cluster.Provider=redis|etcd|consul` 时，未配置 `TLS.Mode` 的缺省值为 `mtls`，且必须提供 CA、证书和私钥，否则启动失败。
+- gRPC 协议本身不强制证书，但跨主机生产通信必须存在可验证的加密身份层，不能把“私有局域网”视为安全边界。
+- `Cluster.Mode=off` 或 `Cluster.Provider=local` 时，未配置 `Security.Mode` 的缺省值为 `insecure`，仅用于本机开发和不跨主机的测试；也可以显式改为 `tls` 或 `mtls`。
+- `Cluster.Provider=redis|etcd|consul` 时，未配置 `Security.Mode` 的缺省值为 `mtls`，且必须提供 CA、证书和私钥，否则启动失败。
 - `tls` 只验证服务端，可用于受控迁移，但不能作为生产多服务示例的最终配置。
 - `mtls` 服务端校验客户端证书，客户端校验服务端证书；证书名称不匹配、过期或不受信均 fail closed。
+- `mesh` 表示加密和双向工作负载身份由服务网格、sidecar 或等价基础设施提供。该模式不要求应用加载证书文件，但必须显式配置；部署必须用网络策略阻止绕过代理直连明文 listener。
 - 不允许从 `mtls` 自动降级为 `insecure`。
+
+因此，“生产必须安全”不等于“应用进程必须自己保存证书文件”。应用 mTLS 和服务网格 mTLS 都是合格方案；纯明文跨主机 gRPC 不是。
 
 示例 06 的三进程集成测试在临时目录生成测试 CA 与每个服务的证书，Docker 示例通过只读挂载注入证书。证书、私钥和测试生成物不提交到仓库。
 
-### 7. 标准健康检查
+### 8. 标准健康检查
 
 删除 `CoreTransport.Health`、`HealthRequest` 和 `HealthResponse`，改用 `google.golang.org/grpc/health/grpc_health_v1`：
 
@@ -123,13 +147,13 @@ TLS.ServerName = 可选的服务端证书名称覆盖
 
 这使 Docker、Kubernetes、`grpc_health_probe` 和其他标准工具无需理解 Core 私有协议。
 
-### 8. gRPC envelope
+### 9. gRPC envelope
 
 本次保留统一 `CoreTransport.Call`，继续承载路由路径、认证上下文和 JSON 数据。同步删除 envelope 中所有 Socket 端口字段，并且不新增 `SourceGRPCPort` 或 `TargetGRPCPort`：HTTP/gRPC 端点只存在于 `ServiceResolver` 的解析结果和传输调用上下文，不进入业务 payload。
 
 远端业务错误继续以框架公开错误契约返回，不把原始内部错误文本写入响应。传输错误使用 gRPC status code 表达；业务错误与传输错误不得混为同一个字符串字段。
 
-### 9. 可观测性
+### 10. 可观测性
 
 gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运维判断实际协议：
 
@@ -170,10 +194,11 @@ gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运
 
 ### 单元测试
 
-- Transport 配置默认值、端口派生和跨字段 TLS 校验。
+- Transport 配置默认值、端口派生以及 `insecure/tls/mtls/mesh` 跨字段校验。
 - Resolver 为每种协议返回正确端点，缺失 `GRPCPort` 时不借用 HTTP 端口。
 - Selector 只在发送前失败时选择 HTTP，发送后不透明回退。
-- gRPC 连接池并发复用、关闭和重复关闭。
+- zrpc Client 按 endpoint 并发复用、关闭和重复关闭；断言没有并存的自建 Client pool。
+- zrpc direct endpoint 使用 Core Resolver 的结果，不启动 zrpc 自带 etcd 发现。
 - Server 启动失败、健康状态切换、GracefulStop 超时与强制 Stop。
 - protobuf 映射不再包含 Socket 字段，业务/传输错误边界保持安全。
 
@@ -181,6 +206,7 @@ gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运
 
 - 使用临时 CA、服务端证书和客户端证书完成一次真实 mTLS 调用。
 - 无客户端证书、错误 CA、错误 ServerName、过期证书均拒绝。
+- `mesh` 配置不要求应用证书文件，但必须显式选择；测试只验证配置和明文边界，不伪装已经运行真实服务网格。
 - 标准 health `SERVING`/`NOT_SERVING` 状态可观察。
 - 并发调用复用连接；关闭后无 listener、goroutine 和连接泄漏。
 - gRPC 调用计数大于零，HTTP 备用计数为零。
@@ -204,8 +230,8 @@ gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运
 
 这是明确批准的一次性破坏性删除，不走长期废弃流程，但仍必须留下可审计迁移证据：
 
-1. 更新 API 兼容基线和配置能力矩阵。
-2. 在 `CHANGELOG.md` 的 `Unreleased / Removed` 记录 Socket 删除，在 `Changed` 记录 gRPC 默认传输和 mTLS 要求。
+1. 更新 API 兼容基线、配置能力矩阵和 `GO_ZERO_REUSE_AUDIT.md`，把 zrpc 从“暂无迁移动机”改为本设计的选择性复用结论。
+2. 在 `CHANGELOG.md` 的 `Unreleased / Removed` 记录 Socket 删除，在 `Changed` 记录 gRPC 默认传输和生产安全传输要求。
 3. 增加破坏性变更批准记录，列出删除的 Go API、配置字段、命令行参数和 protobuf 字段。
 4. 提供迁移表：`SocketPort -> Transport.GRPC.Port`、`socket -> grpc`、Socket 健康检查 -> 标准 gRPC health。
 5. Core 合并前只读核对 `futures` 中 13 份历史/本地 JSON 的 `SocketPort`。未知字段若被容忍，记录清理建议；若不被容忍，Core 变更不得伪装可直接升级。
@@ -214,7 +240,7 @@ gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运
 
 本设计应拆成可独立验证的小节，但删除动作必须在同一最终发布候选中闭环：
 
-1. 先补齐 gRPC Server、TLS、健康检查和端点解析。
+1. 先接入 zrpc Client，补齐 gRPC Server 薄生命周期适配、安全传输、健康检查和端点解析。
 2. 再把示例 06 与协议测试切到 gRPC，并用计数证明没有 HTTP 假回退。
 3. 最后删除 Socket 全表面，更新兼容基线和发布文档。
 
@@ -223,7 +249,8 @@ gRPC Server 和 Client 至少提供以下稳定事件或计数，供测试与运
 ## 完成定义
 
 - gRPC 是默认同步内部传输，HTTP 仅为显式备用。
-- 非本地发现模式强制 mTLS，错误证书 fail closed。
+- 客户端只使用 zrpc Client pool；Core Resolver 仍是节点发现和选择的唯一权威。
+- 跨主机生产必须使用应用 mTLS 或显式 `mesh` 安全模式；错误证书 fail closed，纯明文跨主机配置不被默许。
 - `WebServer` 完整管理 gRPC Server 与客户端池生命周期。
 - `NodeInfo.GRPCPort` 从注册、发现、解析到调用全链路生效。
 - 标准 `grpc_health_v1` 替代私有 Health RPC。
