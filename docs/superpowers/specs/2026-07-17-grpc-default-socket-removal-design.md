@@ -115,18 +115,18 @@ Core 按 endpoint 缓存 `zrpc.Client`，调用使用其 `Conn()` 创建现有 p
 `Transport.GRPC` 增加 TLS 配置：
 
 ```text
-Security.Mode  = insecure | tls | mtls | mesh
-TLS.CAFile     = 信任根证书
-TLS.CertFile   = 当前服务证书
-TLS.KeyFile    = 当前服务私钥
-TLS.ServerName = 可选的服务端证书名称覆盖
+GRPC.Security.Mode       = insecure | tls | mtls | mesh
+GRPC.Security.CAFile     = 信任根证书
+GRPC.Security.CertFile   = 当前服务证书
+GRPC.Security.KeyFile    = 当前服务私钥
+GRPC.Security.ServerName = 可选的服务端证书名称覆盖
 ```
 
 规则如下：
 
 - gRPC 协议本身不强制证书，但跨主机生产通信必须存在可验证的加密身份层，不能把“私有局域网”视为安全边界。
-- `Cluster.Mode=off` 或 `Cluster.Provider=local` 时，未配置 `Security.Mode` 的缺省值为 `insecure`，仅用于本机开发和不跨主机的测试；也可以显式改为 `tls` 或 `mtls`。
-- `Cluster.Provider=redis|etcd|consul` 时，未配置 `Security.Mode` 的缺省值为 `mtls`，且必须提供 CA、证书和私钥，否则启动失败。
+- `Cluster.Mode=off` 或 `Cluster.Provider=local` 时，未配置 `GRPC.Security.Mode` 的缺省值为 `insecure`，仅用于本机开发和不跨主机的测试；也可以显式改为 `tls` 或 `mtls`。
+- `Cluster.Provider=redis|etcd|consul` 时，未配置 `GRPC.Security.Mode` 的缺省值为 `mtls`，且必须提供 CA、证书和私钥，否则启动失败。
 - `tls` 只验证服务端，可用于受控迁移，但不能作为生产多服务示例的最终配置。
 - `mtls` 服务端校验客户端证书，客户端校验服务端证书；证书名称不匹配、过期或不受信均 fail closed。
 - `mesh` 表示加密和双向工作负载身份由服务网格、sidecar 或等价基础设施提供。该模式不要求应用加载证书文件，但必须显式配置；部署必须用网络策略阻止绕过代理直连明文 listener。
