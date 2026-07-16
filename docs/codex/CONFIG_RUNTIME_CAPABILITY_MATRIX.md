@@ -102,9 +102,9 @@
 | `ServerConfig.MelodyConfigPath` | supported | Melody global config | 非空时 ReloadExternalConfigs 加载 |
 | `ServerConfig.Cluster` | supported | ServiceContext | ApplyDefaults/Validate 并构造 cluster runtime |
 | `ServerConfig.Cluster.Mode` | supported | ServiceContext | 决定不创建、自动或强制 cluster runtime |
-| `ServerConfig.Cluster.Provider` | supported | cluster factory | 选择 local/etcd/consul provider，未知值拒绝 |
+| `ServerConfig.Cluster.Provider` | supported | cluster factory | 选择 local/etcd/consul/redis provider，未知值拒绝 |
 | `ServerConfig.Cluster.NodeName` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.Cluster.AdvertiseAddress` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
+| `ServerConfig.Cluster.AdvertiseAddress` | supported | membership runtime | 非空时作为服务发现广播地址，监听地址仍由 RunIp/Host 决定 |
 | `ServerConfig.Cluster.HeartbeatInterval` | supported | membership runtime | heartbeat ticker 构造消费 |
 | `ServerConfig.Cluster.HeartbeatTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
 | `ServerConfig.Cluster.SuspectTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
@@ -133,6 +133,11 @@
 | `ServerConfig.Cluster.Providers.Consul.Address` | supported | ConsulProvider | Consul client 构造消费 |
 | `ServerConfig.Cluster.Providers.Consul.Prefix` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
 | `ServerConfig.Cluster.Providers.Consul.TTL` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
+| `ServerConfig.Cluster.Providers.Redis` | supported | RedisProvider | factory 透传 Redis 连接、前缀和租约配置并关闭 client |
+| `ServerConfig.Cluster.Providers.Redis.Addr` | supported | RedisProvider | Redis client 构造消费，强制模式缺失时拒绝 |
+| `ServerConfig.Cluster.Providers.Redis.DB` | supported | RedisProvider | Redis DB 选择消费 |
+| `ServerConfig.Cluster.Providers.Redis.Prefix` | supported | RedisProvider | 节点、槽位、服务索引和 Watch Stream 键前缀 |
+| `ServerConfig.Cluster.Providers.Redis.TTL` | supported | RedisProvider | 节点、索引和 MachineID 槽位租约时长 |
 | `ServerConfig.Transport` | supported | ServiceContext | ApplyDefaults/Validate 并构造 TransportSelector |
 | `ServerConfig.Transport.Internal` | supported | TransportSelector | grpc/http/socket 主协议选择，未实现值拒绝 |
 | `ServerConfig.Transport.Fallback` | supported | TransportSelector | grpc/http/socket 降级顺序，未实现值拒绝 |

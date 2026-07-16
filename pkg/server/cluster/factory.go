@@ -46,6 +46,25 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 			return sharedLocal, nil
 		}
 		return p, nil
+	case "redis":
+		p, err := NewRedisProvider(
+			cfg.Providers.Redis.Addr,
+			cfg.Providers.Redis.DB,
+			cfg.Providers.Redis.Prefix,
+			cfg.Providers.Redis.TTL,
+		)
+		if err != nil {
+			if cfg.Mode == "on" {
+				return nil, fmt.Errorf("cluster: redis required but unavailable: %w", err)
+			}
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "redis"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
+			return sharedLocal, nil
+		}
+		return p, nil
 	default:
 		return nil, fmt.Errorf("cluster: unknown provider %q", cfg.Provider)
 	}

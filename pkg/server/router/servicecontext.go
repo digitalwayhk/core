@@ -805,7 +805,19 @@ func (own *ServiceContext) SetRunState(state bool) {
 	if state {
 		nodeID, node, interval := own.clusterMembershipConfig()
 		if provider != nil && membership == nil {
-			membership = own.startMembership(provider, node, interval)
+			var err error
+			membership, err = own.startMembership(provider, node, interval)
+			if err != nil {
+				own.isStart.Store(false)
+				if own.Config.Cluster.Mode == "on" {
+					panic(fmt.Sprintf("cluster: required node registration failed: %v", err))
+				}
+				logx.Infow("cluster_degraded",
+					logx.Field("service", own.Service.Name),
+					logx.Field("provider", provider.Name()),
+					logx.Field("error", err),
+				)
+			}
 		}
 		if provider != nil && broker == nil {
 			broker = cluster.NewCrossNodeNoticeBroker(provider, own.Service.Name, nodeID)
@@ -931,7 +943,11 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 	var newMembership *cluster.MembershipManager
 	var newBroker *cluster.CrossNodeNoticeBroker
 	if newProvider != nil {
-		newMembership = own.startMembership(newProvider, node, interval)
+		var err error
+		newMembership, err = own.startMembership(newProvider, node, interval)
+		if err != nil {
+			return err
+		}
 		newBroker = cluster.NewCrossNodeNoticeBroker(newProvider, own.Service.Name, nodeID)
 		if own.TransportSelector != nil {
 			newBroker.SetSender(own.makeCrossNodeSender())
@@ -950,12 +966,16 @@ func (own *ServiceContext) SyncProviderAfterSwitch() error {
 func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
 	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
 		own.Config.DataCenterID, own.Config.MachineID)
+	address := own.Config.RunIp
+	if own.Config.Cluster.AdvertiseAddress != "" {
+		address = own.Config.Cluster.AdvertiseAddress
+	}
 	node := &cluster.NodeInfo{
 		ID:           nodeID,
 		ServiceName:  own.Service.Name,
 		DataCenterID: int64(own.Config.DataCenterID),
 		MachineID:    int64(own.Config.MachineID),
-		Address:      own.Config.RunIp,
+		Address:      address,
 		Port:         own.Config.Port,
 		SocketPort:   own.Config.SocketPort,
 		Weight:       1,
@@ -971,14 +991,13 @@ func (own *ServiceContext) startMembership(
 	provider cluster.DiscoveryProvider,
 	node *cluster.NodeInfo,
 	interval time.Duration,
-) *cluster.MembershipManager {
+) (*cluster.MembershipManager, error) {
 	if err := provider.Register(context.Background(), node); err != nil {
-		logx.Errorf("cluster: register node %s: %v", node.ID, err)
-		return nil
+		return nil, fmt.Errorf("register node %s: %w", node.ID, err)
 	}
 	membership := cluster.NewMembershipManager(provider, node.ID, interval)
 	membership.Start(context.Background())
-	return membership
+	return membership, nil
 }
 
 func (own *ServiceContext) IsRun() bool {

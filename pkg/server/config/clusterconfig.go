@@ -14,6 +14,7 @@ const (
 	DefaultClusterProviderTTL           = 10 * time.Second
 	DefaultClusterEtcdPrefix            = "/core/cluster"
 	DefaultClusterConsulPrefix          = "digitalway-core"
+	DefaultClusterRedisPrefix           = "core:discovery"
 )
 
 // ClusterConfig 集群配置。Mode=off 时单机运行，Mode=auto 时自动检测，Mode=on 时强制进入集群流程。
@@ -78,6 +79,15 @@ type ClusterInstanceShardConfig struct {
 type ClusterProviderConfig struct {
 	Etcd   EtcdProviderConfig   `json:",optional"`
 	Consul ConsulProviderConfig `json:",optional"`
+	Redis  RedisProviderConfig  `json:",optional"`
+}
+
+// RedisProviderConfig 配置使用 Redis 键租约和 Stream 事件的服务发现 Provider。
+type RedisProviderConfig struct {
+	Addr   string        `json:",optional"`
+	DB     int           `json:",optional"`
+	Prefix string        `json:",optional"`
+	TTL    time.Duration `json:",optional"`
 }
 
 // EtcdProviderConfig etcd 连接配置。
@@ -144,6 +154,12 @@ func (c *ClusterConfig) ApplyDefaults() {
 	if c.Providers.Consul.TTL == 0 {
 		c.Providers.Consul.TTL = DefaultClusterProviderTTL
 	}
+	if c.Providers.Redis.Prefix == "" {
+		c.Providers.Redis.Prefix = DefaultClusterRedisPrefix
+	}
+	if c.Providers.Redis.TTL == 0 {
+		c.Providers.Redis.TTL = DefaultClusterProviderTTL
+	}
 }
 
 // Validate 校验 ClusterConfig 中的字段合法性。
@@ -157,9 +173,9 @@ func (c *ClusterConfig) Validate() error {
 		return nil
 	}
 	switch c.Provider {
-	case "local", "etcd", "consul":
+	case "local", "etcd", "consul", "redis":
 	default:
-		return fmt.Errorf("cluster.provider=%q is invalid; use local, etcd, or consul", c.Provider)
+		return fmt.Errorf("cluster.provider=%q is invalid; use local, etcd, consul, or redis", c.Provider)
 	}
 	if c.Mode == "on" && c.Provider == "etcd" && len(c.Providers.Etcd.Endpoints) == 0 {
 		return errors.New("cluster.providers.etcd.endpoints is required when provider=etcd and mode=on")
@@ -167,12 +183,12 @@ func (c *ClusterConfig) Validate() error {
 	if c.Mode == "on" && c.Provider == "consul" && c.Providers.Consul.Address == "" {
 		return errors.New("cluster.providers.consul.address is required when provider=consul and mode=on")
 	}
+	if c.Mode == "on" && c.Provider == "redis" && c.Providers.Redis.Addr == "" {
+		return errors.New("cluster.providers.redis.addr is required when provider=redis and mode=on")
+	}
 
 	if c.NodeName != "" {
 		return fmt.Errorf("cluster.nodeName=%q is not implemented; remove this field", c.NodeName)
-	}
-	if c.AdvertiseAddress != "" {
-		return fmt.Errorf("cluster.advertiseAddress=%q is not implemented; remove this field", c.AdvertiseAddress)
 	}
 	if err := requireZeroOrDefaultDuration("cluster.heartbeatTimeout", c.HeartbeatTimeout, DefaultClusterHeartbeatTimeout); err != nil {
 		return err

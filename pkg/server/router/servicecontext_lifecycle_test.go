@@ -2,6 +2,7 @@ package router_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ type lifecycleProvider struct {
 	registerEntered chan struct{}
 	releaseRegister chan struct{}
 	registerOnce    sync.Once
+	registerErr     error
 }
 
 func (p *lifecycleProvider) Name() string { return "lifecycle-test" }
@@ -31,7 +33,18 @@ func (p *lifecycleProvider) Register(context.Context, *cluster.NodeInfo) error {
 	if p.releaseRegister != nil {
 		<-p.releaseRegister
 	}
-	return nil
+	return p.registerErr
+}
+
+func TestServiceContext_RequiredClusterRegistrationFailureStopsStartup(t *testing.T) {
+	provider := &lifecycleProvider{registerErr: errors.New("redis unavailable")}
+	sc := router.NewServiceContext(&fakeService{name: "sctest-required-cluster-register"})
+	sc.Config.Cluster.Mode = "on"
+	sc.ClusterProvider = provider
+
+	assert.Panics(t, func() { sc.SetRunState(true) })
+	assert.False(t, sc.IsRun())
+	assert.Equal(t, int32(1), provider.registerCount.Load())
 }
 
 func (p *lifecycleProvider) Deregister(context.Context, string) error {

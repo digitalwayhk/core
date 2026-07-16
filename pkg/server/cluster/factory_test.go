@@ -59,6 +59,24 @@ func TestBuildProvider_ModeOnReturnsError(t *testing.T) {
 	assert.Nil(t, provider)
 }
 
+func TestBuildProvider_ModeOnRedisUnavailableReturnsError(t *testing.T) {
+	sharedLocal := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	provider, err := cluster.BuildProvider(&config.ClusterConfig{
+		Mode:     "on",
+		Provider: "redis",
+		Providers: config.ClusterProviderConfig{
+			Redis: config.RedisProviderConfig{
+				Addr:   "127.0.0.1:0",
+				Prefix: "core:test:unavailable",
+				TTL:    time.Second,
+			},
+		},
+	}, sharedLocal)
+	require.Error(t, err)
+	assert.Nil(t, provider)
+	assert.Contains(t, err.Error(), "redis")
+}
+
 // TestBuildProvider_ModeOnEtcdEmptyEndpoints verifies that Mode=on with an
 // external provider that has no endpoints returns an error (not a silent fallback).
 func TestBuildProvider_ModeOnEtcdEmptyEndpoints(t *testing.T) {

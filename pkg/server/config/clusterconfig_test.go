@@ -141,7 +141,6 @@ func TestClusterConfigValidate_RejectedErrorsIncludeValue(t *testing.T) {
 		{name: "mode", configure: func(c *ClusterConfig) { c.Mode = "legacy" }, want: `"legacy"`},
 		{name: "provider", configure: func(c *ClusterConfig) { c.Provider = "zookeeper" }, want: `"zookeeper"`},
 		{name: "node name", configure: func(c *ClusterConfig) { c.NodeName = "node-a" }, want: `"node-a"`},
-		{name: "advertise address", configure: func(c *ClusterConfig) { c.AdvertiseAddress = "10.0.0.8" }, want: `"10.0.0.8"`},
 		{name: "auto machine id", configure: func(c *ClusterConfig) { c.Claim.AutoMachineID = true }, want: "true"},
 		{name: "discovery seeds", configure: func(c *ClusterConfig) { c.Discovery.Seeds = []string{"node-a:9000"} }, want: "node-a:9000"},
 		{name: "shard policy", configure: func(c *ClusterConfig) { c.Shard.MissingKeyPolicy = "average" }, want: `"average"`},
@@ -172,7 +171,6 @@ func TestClusterConfigValidate_UnimplementedClusterFields(t *testing.T) {
 		fieldPath string
 	}{
 		{name: "node name", configure: func(c *ClusterConfig) { c.NodeName = "node-a" }, fieldPath: "cluster.nodeName"},
-		{name: "advertise address", configure: func(c *ClusterConfig) { c.AdvertiseAddress = "127.0.0.1:9000" }, fieldPath: "cluster.advertiseAddress"},
 		{name: "auto machine id", configure: func(c *ClusterConfig) { c.Claim.AutoMachineID = true }, fieldPath: "cluster.claim.autoMachineID"},
 		{name: "auto data center id", configure: func(c *ClusterConfig) { c.Claim.AutoDataCenterID = true }, fieldPath: "cluster.claim.autoDataCenterID"},
 		{name: "expand data center conflict", configure: func(c *ClusterConfig) { c.Claim.ConflictPolicy = "expand-data-center-id" }, fieldPath: "cluster.claim.conflictPolicy"},
