@@ -125,6 +125,10 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 				err = transaction.Finalize(ctx)
 			}
 		} else {
+			if sc.IsRun() {
+				err = fmt.Errorf("cluster: running provider switch requires transactional switcher")
+				break
+			}
 			err = sc.ClusterSwitcher.Complete(ctx)
 			if err == nil {
 				err = sc.SyncProviderAfterSwitch()

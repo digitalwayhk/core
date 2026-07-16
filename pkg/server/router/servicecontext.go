@@ -1333,7 +1333,7 @@ func (own *ServiceContext) cleanupFailedRegistration(
 	err := provider.Deregister(cleanupCtx, nodeID)
 	if registrationErr != nil {
 		if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
-			return fmt.Errorf("cluster registration compensation was not confirmed: %w", registerErr)
+			return nil
 		}
 		return errors.Join(
 			fmt.Errorf("cluster registration compensation was not confirmed: %w", registerErr),

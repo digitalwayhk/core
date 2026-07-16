@@ -417,6 +417,24 @@ func TestClusterSwitchProvider_CompleteKeepsLegacySwitcherCompatible(t *testing.
 	_ = newProvider.Close()
 }
 
+func TestClusterSwitchProvider_RunningContextRejectsLegacySwitcher(t *testing.T) {
+	const svcName = "manage-test-running-legacy-complete"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	newProvider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	switcher := &legacyManageSwitcher{current: newProvider}
+	sc.ClusterSwitcher = switcher
+	sc.SetRunState(true)
+	t.Cleanup(func() {
+		sc.SetRunState(false)
+		_ = newProvider.Close()
+	})
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.EqualError(t, err, "cluster: running provider switch requires transactional switcher")
+	assert.Nil(t, result)
+	assert.Zero(t, switcher.completeCount, "拒绝运行态旧切换器时不得先关闭旧 provider")
+}
+
 func TestClusterSwitchProvider_UsesBoundedOperationContext(t *testing.T) {
 	const svcName = "manage-test-bounded-context"
 	sc := router.NewServiceContext(&fakeManageSvc{svcName})
