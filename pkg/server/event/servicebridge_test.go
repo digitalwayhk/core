@@ -153,6 +153,7 @@ func TestServiceEventBridgeHandlerPanicDoesNotStopControlWorker(t *testing.T) {
 type fakeExternalEventAdapter struct {
 	subscribeCalls atomic.Int32
 	publishErr     error
+	reliableID     string
 }
 
 func (a *fakeExternalEventAdapter) Publish(context.Context, string, *event.Envelope) error {
@@ -160,6 +161,10 @@ func (a *fakeExternalEventAdapter) Publish(context.Context, string, *event.Envel
 }
 func (a *fakeExternalEventAdapter) Subscribe(context.Context, string) (func(), error) {
 	a.subscribeCalls.Add(1)
+	return func() {}, nil
+}
+func (a *fakeExternalEventAdapter) SubscribeReliable(_ context.Context, _, subscriberID string) (func(), error) {
+	a.reliableID = subscriberID
 	return func() {}, nil
 }
 
@@ -172,6 +177,20 @@ func TestServiceEventBridgeSubscribesThroughExternalAdapter(t *testing.T) {
 	require.NoError(t, err)
 	cancel()
 	assert.Equal(t, int32(1), adapter.subscribeCalls.Load())
+}
+
+func TestServiceEventBridgeReliableSubscriptionUsesLogicalServiceName(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID: "user-service",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	adapter := &fakeExternalEventAdapter{}
+	bridge.SetExternalPublisher(adapter)
+
+	cancel, err := bridge.SubscribeExternalControl(context.Background(), "order.changed")
+	require.NoError(t, err)
+	cancel()
+	assert.Equal(t, "user-service", adapter.reliableID)
 }
 
 func TestServiceEventBridgeControlWaitsForLocalDeliveryAndPropagatesExternalFailure(t *testing.T) {

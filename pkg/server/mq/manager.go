@@ -143,3 +143,22 @@ func (m *MQManager) Subscribe(ctx context.Context, subject string, handler func(
 	}
 	return m.current.Subscribe(ctx, subject, handler)
 }
+
+// SubscribeReliable 仅在当前 Provider 明确实现 ReliableMQProvider 时启用。
+func (m *MQManager) SubscribeReliable(
+	ctx context.Context,
+	subject string,
+	options ReliableSubscribeOptions,
+	handler func(*Message) error,
+) (func(), error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
+		return nil, ErrNotConnected
+	}
+	provider, ok := m.current.(ReliableMQProvider)
+	if !ok {
+		return nil, ErrReliableSubscribeUnsupported
+	}
+	return provider.SubscribeReliable(ctx, subject, options, handler)
+}

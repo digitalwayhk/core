@@ -162,7 +162,9 @@ func (own *ServiceContext) EnableEventBridge() {
 		own.EventStream = event.NewStream()
 	}
 	if own.ServiceEventBridge == nil {
-		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{})
+		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{
+			SubscriberID: own.Service.Name,
+		})
 	}
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
 	own.ServiceEventBridge.SetExternalPublisher(own.EventBridge)
@@ -533,7 +535,9 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	}
 	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
 	sc.EventStream = event.NewStream()
-	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{})
+	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{
+		SubscriberID: sc.Service.Name,
+	})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 
 	// Phase 4: claim a unique MachineID in the process-local registry before

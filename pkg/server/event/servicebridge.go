@@ -41,11 +41,18 @@ type ExternalSubscriber interface {
 	Subscribe(ctx context.Context, subject string) (func(), error)
 }
 
+// ReliableExternalSubscriber 只在控制事件需要成功后确认时使用。
+// subscriberID 是稳定的逻辑服务名，同服务的多个实例共享一个消费组。
+type ReliableExternalSubscriber interface {
+	SubscribeReliable(ctx context.Context, subject, subscriberID string) (func(), error)
+}
+
 type ServiceEventBridgeOptions struct {
 	ObserverQueueSize     int
 	ControlQueueSize      int
 	ControlShards         int
 	ControlEnqueueTimeout time.Duration
+	SubscriberID          string
 }
 
 type controlEvent struct {
@@ -72,6 +79,8 @@ type ServiceEventBridge struct {
 	externalMu           sync.RWMutex
 	external             ExternalPublisher
 	subscriber           ExternalSubscriber
+	reliableSubscriber   ReliableExternalSubscriber
+	subscriberID         string
 	dropped              atomic.Uint64
 	controlQueueTimeouts atomic.Uint64
 }
@@ -98,6 +107,7 @@ func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *S
 		observerQueue:  make(chan PublishRequest, options.ObserverQueueSize),
 		controlQueues:  make([]chan controlEvent, options.ControlShards),
 		controlTimeout: options.ControlEnqueueTimeout,
+		subscriberID:   options.SubscriberID,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -125,6 +135,7 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.externalMu.Lock()
 	b.external = publisher
 	b.subscriber, _ = publisher.(ExternalSubscriber)
+	b.reliableSubscriber, _ = publisher.(ReliableExternalSubscriber)
 	b.externalMu.Unlock()
 }
 
@@ -133,6 +144,15 @@ func (b *ServiceEventBridge) Subscribe(eventType string, handler Handler) (func(
 		return nil, ErrServiceEventBridgeClosed
 	}
 	return b.stream.Subscribe(eventType, handler)
+}
+
+// SubscribeControl 注册控制事件处理器。处理器错误会沿可靠外部订阅链返回，
+// 使消息保留在 pending 中等待重试，而不是提前确认。
+func (b *ServiceEventBridge) SubscribeControl(eventType string, handler ControlHandler) (func(), error) {
+	if b == nil || b.closed.Load() {
+		return nil, ErrServiceEventBridgeClosed
+	}
+	return b.stream.SubscribeControl(eventType, handler)
 }
 
 // SubscribeExternal 将指定主题交给已装配的外部事件适配器订阅。控制事件依赖
@@ -148,6 +168,21 @@ func (b *ServiceEventBridge) SubscribeExternal(ctx context.Context, subject stri
 		return nil, ErrExternalProviderUnavailable
 	}
 	return subscriber.Subscribe(ctx, subject)
+}
+
+// SubscribeExternalControl 建立需要成功处理后才 ACK 的跨服务控制事件订阅。
+func (b *ServiceEventBridge) SubscribeExternalControl(ctx context.Context, subject string) (func(), error) {
+	if b == nil || b.closed.Load() {
+		return nil, ErrServiceEventBridgeClosed
+	}
+	b.externalMu.RLock()
+	subscriber := b.reliableSubscriber
+	subscriberID := b.subscriberID
+	b.externalMu.RUnlock()
+	if subscriber == nil || subscriberID == "" {
+		return nil, ErrExternalProviderUnavailable
+	}
+	return subscriber.SubscribeReliable(ctx, subject, subscriberID)
 }
 
 func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest) error {

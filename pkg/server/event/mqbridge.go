@@ -51,3 +51,15 @@ func (b *MQBridge) Subscribe(ctx context.Context, subject string) (cancel func()
 		}
 	})
 }
+
+// SubscribeReliable 使用逻辑服务名作为 consumer group，只有全部控制 Handler
+// 成功后 Redis Provider 才确认消息。
+func (b *MQBridge) SubscribeReliable(ctx context.Context, subject, subscriberID string) (func(), error) {
+	return b.manager.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{Group: subscriberID}, func(msg *mq.Message) error {
+		env := &Envelope{}
+		if err := json.Unmarshal(msg.Data, env); err != nil {
+			return err
+		}
+		return b.stream.PublishControl(ctx, env)
+	})
+}

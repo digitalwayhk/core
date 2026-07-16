@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -11,16 +12,43 @@ import (
 // Handler is a function that processes a received event envelope.
 type Handler func(env *Envelope)
 
+// ControlHandler 返回错误时，外部可靠消费不得 ACK 当前消息。
+type ControlHandler func(env *Envelope) error
+
 // Stream is a simple in-process event bus that fans out events to registered handlers.
 // It is used when no external MQ provider is configured (mode=off or auto without connectivity).
 type Stream struct {
 	mu       sync.RWMutex
 	handlers map[string][]Handler // keyed by event Type
+	controls map[string][]ControlHandler
 }
 
 // NewStream returns an initialised local event stream.
 func NewStream() *Stream {
-	return &Stream{handlers: make(map[string][]Handler)}
+	return &Stream{handlers: make(map[string][]Handler), controls: make(map[string][]ControlHandler)}
+}
+
+// SubscribeControl 注册必须成功处理后才能确认的控制事件 Handler。
+func (s *Stream) SubscribeControl(eventType string, handler ControlHandler) (func(), error) {
+	if handler == nil {
+		return nil, errors.New("event control handler is nil")
+	}
+	s.mu.Lock()
+	s.controls[eventType] = append(s.controls[eventType], handler)
+	key := fmt.Sprintf("%p", handler)
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		list := s.controls[eventType]
+		updated := make([]ControlHandler, 0, len(list))
+		for _, current := range list {
+			if fmt.Sprintf("%p", current) != key {
+				updated = append(updated, current)
+			}
+		}
+		s.controls[eventType] = updated
+		s.mu.Unlock()
+	}, nil
 }
 
 // Subscribe registers handler to be called for events of the given type.
@@ -67,6 +95,30 @@ func (s *Stream) Publish(_ context.Context, env *Envelope) error {
 		}()
 	}
 	return nil
+}
+
+// PublishControl 同步执行全部控制 Handler，并返回聚合错误。
+func (s *Stream) PublishControl(_ context.Context, env *Envelope) error {
+	if env == nil {
+		return nil
+	}
+	s.mu.RLock()
+	handlers := append([]ControlHandler(nil), s.controls[env.Type]...)
+	s.mu.RUnlock()
+	var failures []error
+	for _, handler := range handlers {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					failures = append(failures, fmt.Errorf("event control handler panic: %v", recovered))
+				}
+			}()
+			if err := handler(env); err != nil {
+				failures = append(failures, err)
+			}
+		}()
+	}
+	return errors.Join(failures...)
 }
 
 // SubscriberCount 返回指定事件类型当前的本地订阅者数量。
