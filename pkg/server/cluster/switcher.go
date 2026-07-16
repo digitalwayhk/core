@@ -31,6 +31,7 @@ type clusterSwitcher struct {
 	mu          sync.RWMutex
 	current     DiscoveryProvider
 	pending     DiscoveryProvider
+	retired     DiscoveryProvider
 	inProgress  bool
 	switchedAt  time.Time
 	serviceName string
@@ -59,7 +60,11 @@ func (s *clusterSwitcher) Begin(ctx context.Context, to DiscoveryProvider) error
 		return ErrMigrationInProgress
 	}
 	current := s.current
+	retired := s.retired
 	s.mu.RUnlock()
+	if retired != nil {
+		return errors.New("cluster switcher: 旧 Provider 尚未完成关闭")
+	}
 	if current == nil {
 		return ErrNotStarted
 	}
@@ -110,7 +115,8 @@ func (s *clusterSwitcher) Begin(ctx context.Context, to DiscoveryProvider) error
 	return nil
 }
 
-// Complete 停止对账 worker，提升 pending Provider，并关闭旧 Provider。
+// Complete 停止对账 worker并提升 pending Provider。旧 Provider 会保留到
+// ServiceContext 完成 membership 切换后，再由 Finalize 关闭。
 func (s *clusterSwitcher) Complete(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -129,15 +135,41 @@ func (s *clusterSwitcher) Complete(ctx context.Context) error {
 		return errors.New("cluster switcher: 迁移代次已变更")
 	}
 	s.current = pending
+	s.retired = old
 	s.pending = nil
 	s.inProgress = false
 	s.migration = nil
 	s.switchedAt = time.Now()
 	s.mu.Unlock()
 
-	if err := old.Close(); err != nil {
-		return fmt.Errorf("cluster switcher: 关闭旧 Provider %s 失败: %w", old.Name(), err)
+	return nil
+}
+
+// Finalize closes the provider retired by Complete. Successful calls are
+// idempotent; failures retain the retired provider for diagnosis or retry.
+func (s *clusterSwitcher) Finalize(ctx context.Context) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("cluster switcher: 关闭旧 Provider 前 context 已结束: %w", err)
+	}
+	s.mu.RLock()
+	retired := s.retired
+	s.mu.RUnlock()
+	if retired == nil {
+		return nil
+	}
+	if err := retired.Close(); err != nil {
+		return fmt.Errorf("cluster switcher: 关闭旧 Provider %s 失败: %w", retired.Name(), err)
+	}
+	s.mu.Lock()
+	if s.retired == retired {
+		s.retired = nil
+	}
+	s.mu.Unlock()
 	return nil
 }
 

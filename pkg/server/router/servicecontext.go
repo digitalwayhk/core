@@ -994,14 +994,19 @@ func (own *ServiceContext) SetRunState(state bool) {
 			if err != nil {
 				if own.Config.Cluster.Mode == "auto" && provider != own.localFallback() {
 					failedProvider := provider
-					provider = own.localFallback()
-					logx.Infow("cluster_degraded",
-						logx.Field("service", own.Service.Name),
-						logx.Field("provider", failedProvider.Name()),
-						logx.Field("fallback_provider", provider.Name()),
-						logx.Field("error", err),
-					)
-					membership, err = own.startMembership(provider, node, interval, grpcServer)
+					registerErr := err
+					if cleanupErr := own.cleanupFailedRegistration(failedProvider, node.ID); cleanupErr != nil {
+						err = errors.Join(registerErr, cleanupErr)
+					} else {
+						provider = own.localFallback()
+						logx.Infow("cluster_degraded",
+							logx.Field("service", own.Service.Name),
+							logx.Field("provider", failedProvider.Name()),
+							logx.Field("fallback_provider", provider.Name()),
+							logx.Field("error", registerErr),
+						)
+						membership, err = own.startMembership(provider, node, interval, grpcServer)
+					}
 					if err == nil {
 						own.lifecycleMu.Lock()
 						own.ClusterProvider = provider
@@ -1312,6 +1317,17 @@ func (own *ServiceContext) startMembership(
 	membership := cluster.NewMembershipManager(provider, node.ID, interval)
 	membership.Start(context.Background())
 	return membership, nil
+}
+
+func (own *ServiceContext) cleanupFailedRegistration(provider cluster.DiscoveryProvider, nodeID string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	defer cancel()
+	err := provider.Deregister(cleanupCtx, nodeID)
+	if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
+		return nil
+	}
+	return fmt.Errorf("cleanup failed cluster registration for node %s using provider %s: %w",
+		nodeID, provider.Name(), err)
 }
 
 func (own *ServiceContext) localFallback() cluster.DiscoveryProvider {

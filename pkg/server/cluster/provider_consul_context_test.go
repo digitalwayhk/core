@@ -2,16 +2,140 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	consulapi "github.com/hashicorp/consul/api"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConsulProviderMetadataRoundTripIncludesTransportPorts(t *testing.T) {
+	var mu sync.RWMutex
+	var registered *consulapi.AgentServiceRegistration
+	var index atomic.Uint64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/agent/service/register":
+			var service consulapi.AgentServiceRegistration
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&service))
+			mu.Lock()
+			registered = &service
+			mu.Unlock()
+			index.Add(1)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/check/update/"):
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/v1/health/service/orders"):
+			mu.RLock()
+			service := registered
+			mu.RUnlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Consul-Index", strconv.FormatUint(index.Load(), 10))
+			if service == nil {
+				_, _ = fmt.Fprint(w, "[]")
+				return
+			}
+			entry := []*consulapi.ServiceEntry{{
+				Service: &consulapi.AgentService{
+					ID: service.ID, Service: service.Name, Address: service.Address,
+					Port: service.Port, Meta: service.Meta,
+				},
+				Checks: consulapi.HealthChecks{{Status: consulapi.HealthPassing}},
+			}}
+			require.NoError(t, json.NewEncoder(w).Encode(entry))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	provider, err := NewConsulProvider(server.URL)
+	require.NoError(t, err)
+	node := &NodeInfo{
+		ID: "orders-node", ServiceName: "orders", Address: "orders.internal",
+		Port: 8080, GRPCPort: 19090, SocketPort: 18080,
+		DataCenterID: 2, MachineID: 7, Weight: 3,
+	}
+	require.NoError(t, provider.Register(context.Background(), node))
+
+	listed, err := provider.List(context.Background(), "orders", NodeStatusRunning)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assertConsulTransportMetadata(t, listed[0])
+	got, err := provider.Get(context.Background(), node.ID)
+	require.NoError(t, err)
+	assertConsulTransportMetadata(t, got)
+
+	watchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan []*NodeInfo, 1)
+	stopWatch, err := provider.Watch(watchCtx, "orders", func(nodes []*NodeInfo) {
+		select {
+		case updates <- nodes:
+		default:
+		}
+	})
+	require.NoError(t, err)
+	defer stopWatch()
+	select {
+	case nodes := <-updates:
+		require.Len(t, nodes, 1)
+		assertConsulTransportMetadata(t, nodes[0])
+	case <-time.After(time.Second):
+		t.Fatal("Consul Watch 未返回带传输端口的节点")
+	}
+}
+
+func assertConsulTransportMetadata(t *testing.T, node *NodeInfo) {
+	t.Helper()
+	assert.Equal(t, 19090, node.GRPCPort)
+	assert.Equal(t, 18080, node.SocketPort)
+	assert.Equal(t, int64(2), node.DataCenterID)
+	assert.Equal(t, int64(7), node.MachineID)
+	assert.Equal(t, 3, node.Weight)
+}
+
+func TestConsulProviderRegisterCleansRemoteEntryWhenTTLUpdateFails(t *testing.T) {
+	var registered atomic.Bool
+	var deregistered atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/health/service/"):
+			_, _ = fmt.Fprint(w, "[]")
+		case r.URL.Path == "/v1/agent/service/register":
+			registered.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/v1/agent/check/update/"):
+			http.Error(w, "ttl failed", http.StatusInternalServerError)
+		case r.URL.Path == "/v1/agent/service/deregister/orders-node":
+			deregistered.Store(true)
+			registered.Store(false)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	provider, err := NewConsulProvider(server.URL)
+	require.NoError(t, err)
+
+	err = provider.Register(context.Background(), &NodeInfo{ID: "node", ServiceName: "orders"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ttl")
+	assert.True(t, deregistered.Load(), "TTL 更新失败后必须补偿注销远端服务")
+	assert.False(t, registered.Load(), "TTL 更新失败后不得留下远端服务记录")
+	_, cached := provider.nodeServices.Load("node")
+	assert.False(t, cached, "TTL 更新失败后必须删除本地 nodeServices 映射")
+}
 
 func TestConsulProviderOperationsHonorContext(t *testing.T) {
 	tests := []struct {

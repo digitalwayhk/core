@@ -24,6 +24,16 @@ type switcherTestProvider struct {
 	registerOnce     sync.Once
 }
 
+type closeTrackingProvider struct {
+	cluster.DiscoveryProvider
+	closeCount atomic.Int32
+}
+
+func (p *closeTrackingProvider) Close() error {
+	p.closeCount.Add(1)
+	return p.DiscoveryProvider.Close()
+}
+
 func (p *switcherTestProvider) List(
 	ctx context.Context,
 	serviceName string,
@@ -74,6 +84,26 @@ func TestClusterSwitcher_CompletePromotesPendingProvider(t *testing.T) {
 
 	assert.Same(t, provB, switcher.Current())
 	assert.Equal(t, provB.Name(), switcher.Current().Name())
+}
+
+func TestClusterSwitcher_CompleteDefersOldCloseUntilFinalize(t *testing.T) {
+	ctx := context.Background()
+	oldBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	old := &closeTrackingProvider{DiscoveryProvider: oldBase}
+	pending := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(old, "svc")
+	require.NoError(t, switcher.Begin(ctx, pending))
+	require.NoError(t, switcher.Complete(ctx))
+	assert.Same(t, pending, switcher.Current())
+	assert.Zero(t, old.closeCount.Load(), "Complete 只提升 pending，不得提前关闭旧 provider")
+
+	finalizer, ok := switcher.(cluster.ProviderSwitchFinalizer)
+	require.True(t, ok)
+	require.NoError(t, finalizer.Finalize(ctx))
+	assert.Equal(t, int32(1), old.closeCount.Load())
+	require.NoError(t, finalizer.Finalize(ctx), "Finalize 必须幂等")
+	assert.Equal(t, int32(1), old.closeCount.Load())
+	_ = pending.Close()
 }
 
 func TestClusterSwitcher_BeginMigratesOnlyScopedServiceNodes(t *testing.T) {

@@ -3,6 +3,8 @@ package manage_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,56 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type manageSwitchFinalizer struct {
+	current     cluster.DiscoveryProvider
+	completeErr error
+	rollbackErr error
+	finalizeErr error
+	finalized   int
+}
+
+func (s *manageSwitchFinalizer) Current() cluster.DiscoveryProvider { return s.current }
+func (*manageSwitchFinalizer) Begin(context.Context, cluster.DiscoveryProvider) error {
+	return nil
+}
+func (s *manageSwitchFinalizer) Complete(context.Context) error { return s.completeErr }
+func (s *manageSwitchFinalizer) Rollback(context.Context) error { return s.rollbackErr }
+func (s *manageSwitchFinalizer) Finalize(context.Context) error {
+	s.finalized++
+	return s.finalizeErr
+}
+
+type orderedManageProvider struct {
+	cluster.DiscoveryProvider
+	mu            sync.Mutex
+	events        []string
+	deregisterErr error
+}
+
+func (p *orderedManageProvider) Deregister(ctx context.Context, nodeID string) error {
+	p.mu.Lock()
+	p.events = append(p.events, "deregister")
+	err := p.deregisterErr
+	p.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return p.DiscoveryProvider.Deregister(ctx, nodeID)
+}
+
+func (p *orderedManageProvider) Close() error {
+	p.mu.Lock()
+	p.events = append(p.events, "close")
+	p.mu.Unlock()
+	return p.DiscoveryProvider.Close()
+}
+
+func (p *orderedManageProvider) eventSnapshot() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.events...)
+}
 
 // mockRequest is a minimal types.IRequest implementation for manage API tests.
 // It provides the service name and JSON-binds a preset body into target structs.
@@ -219,6 +271,91 @@ func TestClusterSwitchProvider_PreseededBegin_CompleteSucceeds(t *testing.T) {
 	// should now point to the newly promoted provider.
 	assert.Same(t, newProvider, sc.ClusterProvider,
 		"ClusterProvider should be updated to newProvider after complete")
+}
+
+func TestClusterSwitchProvider_CompleteDeregistersOldMembershipBeforeClosingProvider(t *testing.T) {
+	const svcName = "manage-test-complete-order"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	oldBase := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	oldBase.Start()
+	old := &orderedManageProvider{DiscoveryProvider: oldBase}
+	pending := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	pending.Start()
+	sc.ClusterProvider = old
+	sc.ClusterSwitcher = cluster.NewClusterSwitcher(old, svcName)
+	sc.ServiceResolver.SetProvider(old)
+	sc.SetRunState(true)
+	t.Cleanup(func() { sc.SetRunState(false) })
+	require.NoError(t, sc.ClusterSwitcher.Begin(context.Background(), pending))
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.(*manage.ClusterSwitchProvider).Result)
+	events := old.eventSnapshot()
+	require.Contains(t, events, "deregister")
+	require.Contains(t, events, "close")
+	assert.Less(t, indexOf(events, "deregister"), indexOf(events, "close"),
+		"旧 membership 必须先注销，再关闭旧 provider")
+}
+
+func TestClusterSwitchProvider_CompleteSyncFailureDoesNotReturnOKOrFinalize(t *testing.T) {
+	const svcName = "manage-test-complete-sync-error"
+	wantErr := errors.New("old deregister failed")
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	oldBase := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	oldBase.Start()
+	old := &orderedManageProvider{DiscoveryProvider: oldBase, deregisterErr: wantErr}
+	newProvider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	newProvider.Start()
+	switcher := &manageSwitchFinalizer{current: newProvider}
+	sc.ClusterProvider = old
+	sc.ClusterSwitcher = switcher
+	sc.ServiceResolver.SetProvider(old)
+	sc.SetRunState(true)
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.ErrorIs(t, err, wantErr)
+	assert.Nil(t, result)
+	assert.Zero(t, switcher.finalized, "运行时同步失败不得关闭旧 provider")
+
+	old.mu.Lock()
+	old.deregisterErr = nil
+	old.mu.Unlock()
+	sc.SetRunState(false)
+	_ = newProvider.Close()
+}
+
+func TestClusterSwitchProvider_CompleteFinalizeFailureDoesNotReturnOK(t *testing.T) {
+	const svcName = "manage-test-complete-finalize-error"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	wantErr := errors.New("old close failed")
+	switcher := &manageSwitchFinalizer{current: sc.ClusterProvider, finalizeErr: wantErr}
+	sc.ClusterSwitcher = switcher
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "complete"}).Do(&mockRequest{serviceName: svcName})
+	require.ErrorIs(t, err, wantErr)
+	assert.Nil(t, result)
+	assert.Equal(t, 1, switcher.finalized)
+}
+
+func TestClusterSwitchProvider_RollbackFailureDoesNotReturnOK(t *testing.T) {
+	const svcName = "manage-test-rollback-error"
+	sc := router.NewServiceContext(&fakeManageSvc{svcName})
+	wantErr := errors.New("rollback failed")
+	sc.ClusterSwitcher = &manageSwitchFinalizer{current: sc.ClusterProvider, rollbackErr: wantErr}
+
+	result, err := (&manage.ClusterSwitchProvider{Action: "rollback"}).Do(&mockRequest{serviceName: svcName})
+	require.ErrorIs(t, err, wantErr)
+	assert.Nil(t, result)
+}
+
+func indexOf(values []string, target string) int {
+	for index, value := range values {
+		if value == target {
+			return index
+		}
+	}
+	return -1
 }
 
 // TestClusterSwitchProvider_PreseededBegin_RollbackSucceeds verifies that after

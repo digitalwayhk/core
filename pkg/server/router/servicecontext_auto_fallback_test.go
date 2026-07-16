@@ -24,20 +24,28 @@ func (*autoFallbackService) Routers() []types.IRouter               { return nil
 func (*autoFallbackService) SubscribeRouters() []*types.ObserveArgs { return nil }
 
 type autoFallbackProvider struct {
-	name            string
-	registerErr     error
-	deregisterErr   error
-	registerCount   atomic.Int32
-	deregisterCount atomic.Int32
+	name             string
+	registerErr      error
+	deregisterErr    error
+	registerCount    atomic.Int32
+	deregisterCount  atomic.Int32
+	recordOnRegister bool
+	registered       atomic.Bool
 }
 
 func (p *autoFallbackProvider) Name() string { return p.name }
 func (p *autoFallbackProvider) Register(context.Context, *cluster.NodeInfo) error {
 	p.registerCount.Add(1)
+	if p.recordOnRegister || p.registerErr == nil {
+		p.registered.Store(true)
+	}
 	return p.registerErr
 }
 func (p *autoFallbackProvider) Deregister(context.Context, string) error {
 	p.deregisterCount.Add(1)
+	if p.deregisterErr == nil || errors.Is(p.deregisterErr, cluster.ErrNodeNotFound) {
+		p.registered.Store(false)
+	}
 	return p.deregisterErr
 }
 
@@ -127,6 +135,47 @@ func TestServiceContextAutoRegisterFailureFallsBackToLocalProvider(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	sc.SetRunState(false)
+}
+
+func TestServiceContextAutoFallbackCleansPartiallyRegisteredProvider(t *testing.T) {
+	external := &autoFallbackProvider{
+		name: "redis", registerErr: errors.New("register response lost"), recordOnRegister: true,
+	}
+	local := &autoFallbackProvider{name: "local"}
+	sc := newAutoFallbackContext(t, "partial-register-cleanup")
+	sc.ClusterProvider = external
+	sc.localFallbackProvider = local
+	sc.ServiceResolver.SetProvider(external)
+
+	sc.SetRunState(true)
+	require.True(t, sc.IsRun())
+	assert.False(t, external.registered.Load(), "切换本地前必须清理外部 provider 的半成功记录")
+	assert.Equal(t, int32(1), external.deregisterCount.Load())
+	assert.Equal(t, int32(1), local.registerCount.Load())
+	require.Same(t, local, sc.ClusterProvider)
+	sc.SetRunState(false)
+}
+
+func TestServiceContextAutoFallbackFailsClosedWhenPartialRegistrationCleanupFails(t *testing.T) {
+	registerErr := errors.New("register response lost")
+	cleanupErr := errors.New("cleanup unavailable")
+	external := &autoFallbackProvider{
+		name: "redis", registerErr: registerErr, deregisterErr: cleanupErr, recordOnRegister: true,
+	}
+	local := &autoFallbackProvider{name: "local"}
+	sc := newAutoFallbackContext(t, "partial-register-cleanup-failure")
+	sc.ClusterProvider = external
+	sc.localFallbackProvider = local
+	sc.ServiceResolver.SetProvider(external)
+
+	sc.SetRunState(true)
+	require.False(t, sc.IsRun())
+	require.ErrorIs(t, sc.RuntimeError(), registerErr)
+	require.ErrorIs(t, sc.RuntimeError(), cleanupErr)
+	assert.True(t, external.registered.Load(), "清理失败时应保留外部残留事实供诊断")
+	assert.Equal(t, int32(1), external.deregisterCount.Load())
+	assert.Zero(t, local.registerCount.Load(), "清理失败不得继续注册本地 provider")
+	assert.Same(t, external, sc.ClusterProvider)
 }
 
 func TestServiceContextAutoFallbackFailureStopsStartup(t *testing.T) {

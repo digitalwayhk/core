@@ -9,7 +9,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // ---- ClusterStatus ----
@@ -118,17 +117,15 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 	case "complete":
 		err = sc.ClusterSwitcher.Complete(ctx)
 		if err == nil {
-			if syncErr := sc.SyncProviderAfterSwitch(); syncErr != nil {
-				logx.Errorf("cluster: sync provider after complete: %v", syncErr)
+			err = sc.SyncProviderAfterSwitch()
+		}
+		if err == nil {
+			if finalizer, ok := sc.ClusterSwitcher.(cluster.ProviderSwitchFinalizer); ok {
+				err = finalizer.Finalize(ctx)
 			}
 		}
 	case "rollback":
 		err = sc.ClusterSwitcher.Rollback(ctx)
-		if err == nil {
-			if syncErr := sc.SyncProviderAfterSwitch(); syncErr != nil {
-				logx.Errorf("cluster: sync provider after rollback: %v", syncErr)
-			}
-		}
 	default:
 		return nil, fmt.Errorf("unknown action: %s", c.Action)
 	}

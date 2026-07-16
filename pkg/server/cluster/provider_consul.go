@@ -3,7 +3,10 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ const consulServicePrefix = "core-cluster"
 const consulCheckInterval = "10s"
 const consulCheckTimeout = "3s"
 const consulCheckDeregisterCritical = "30s"
+const consulCleanupTimeout = 3 * time.Second
 
 // ConsulProvider implements DiscoveryProvider using HashiCorp Consul.
 // Each node is registered as a Consul service entry:
@@ -90,8 +94,19 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 	c.nodeServices.Store(node.ID, node.ServiceName)
 	// Mark passing immediately.
 	checkID := "service:" + svc.ID
-	return c.client.Agent().UpdateTTLOpts(checkID, "registered", consulapi.HealthPassing,
-		(&consulapi.QueryOptions{}).WithContext(ctx))
+	if ttlErr := c.client.Agent().UpdateTTLOpts(checkID, "registered", consulapi.HealthPassing,
+		(&consulapi.QueryOptions{}).WithContext(ctx)); ttlErr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), consulCleanupTimeout)
+		cleanupErr := c.client.Agent().ServiceDeregisterOpts(svc.ID,
+			(&consulapi.QueryOptions{}).WithContext(cleanupCtx))
+		cancel()
+		c.nodeServices.Delete(node.ID)
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("consul: cleanup service after ttl failure: %w", cleanupErr)
+		}
+		return errors.Join(fmt.Errorf("consul: update ttl after register: %w", ttlErr), cleanupErr)
+	}
+	return nil
 }
 
 // Deregister removes the node from Consul.
@@ -250,9 +265,38 @@ func consulEntryToNode(e *consulapi.ServiceEntry) *NodeInfo {
 			if v, ok := m["weight"].(float64); ok {
 				node.Weight = int(v)
 			}
+			if v, ok := consulMetadataPort(m["grpc_port"]); ok {
+				node.GRPCPort = v
+			}
+			if v, ok := consulMetadataPort(m["socket_port"]); ok {
+				node.SocketPort = v
+			}
 		}
 	}
 	return node
+}
+
+func consulMetadataPort(value interface{}) (int, bool) {
+	var port int64
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || typed != math.Trunc(typed) {
+			return 0, false
+		}
+		port = int64(typed)
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		port = parsed
+	default:
+		return 0, false
+	}
+	if port <= 0 || port > 65535 {
+		return 0, false
+	}
+	return int(port), true
 }
 
 func consulServiceID(serviceName, nodeID string) string {

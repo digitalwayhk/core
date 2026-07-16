@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,19 +13,20 @@ import (
 // MembershipManager sends heartbeats for a registered node and handles
 // graceful deregistration on shutdown.
 type MembershipManager struct {
-	registry    ClusterRegistry
-	nodeID      string
-	interval    time.Duration
-	stopCh      chan struct{}
-	doneCh      chan struct{}
-	startOnce   sync.Once
-	stopOnce    sync.Once
-	stopDone    chan struct{}
-	stopErrMu   sync.RWMutex
-	stopErr     error
-	retries     int
-	retryDelay  time.Duration
-	stopTimeout time.Duration
+	registry        ClusterRegistry
+	nodeID          string
+	interval        time.Duration
+	stopCh          chan struct{}
+	doneCh          chan struct{}
+	startOnce       sync.Once
+	stopOnce        sync.Once
+	stopDone        chan struct{}
+	stopErrMu       sync.RWMutex
+	stopErr         error
+	retries         int
+	retryDelay      time.Duration
+	stopTimeout     time.Duration
+	heartbeatCancel context.CancelFunc
 }
 
 // MembershipOption 调整成员注销策略。
@@ -72,9 +74,14 @@ func NewMembershipManager(registry ClusterRegistry, nodeID string, interval time
 // Start begins sending heartbeats in a background goroutine.
 func (m *MembershipManager) Start(ctx context.Context) {
 	m.startOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		heartbeatCtx, cancel := context.WithCancel(ctx)
+		m.heartbeatCancel = cancel
 		go func() {
 			defer close(m.doneCh)
-			m.run(ctx)
+			m.run(heartbeatCtx)
 		}()
 	})
 }
@@ -88,11 +95,16 @@ func (m *MembershipManager) Stop(ctx context.Context) error {
 	m.startOnce.Do(func() { close(m.doneCh) })
 	m.stopOnce.Do(func() {
 		close(m.stopCh)
+		if m.heartbeatCancel != nil {
+			m.heartbeatCancel()
+		}
 		go func() {
-			<-m.doneCh
 			stopCtx, cancel := context.WithTimeout(context.Background(), m.stopTimeout)
-			err := m.deregister(stopCtx)
-			cancel()
+			defer cancel()
+
+			workerErr := m.waitWorker(stopCtx)
+			deregisterErr := m.deregisterBounded(stopCtx)
+			err := errors.Join(workerErr, deregisterErr)
 			m.stopErrMu.Lock()
 			m.stopErr = err
 			m.stopErrMu.Unlock()
@@ -108,6 +120,34 @@ func (m *MembershipManager) Stop(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (m *MembershipManager) waitWorker(stopCtx context.Context) error {
+	waitBudget := m.stopTimeout / 2
+	if waitBudget <= 0 {
+		waitBudget = m.stopTimeout
+	}
+	timer := time.NewTimer(waitBudget)
+	defer timer.Stop()
+	select {
+	case <-m.doneCh:
+		return nil
+	case <-timer.C:
+		return errors.New("cluster membership: heartbeat worker stop timed out")
+	case <-stopCtx.Done():
+		return fmt.Errorf("cluster membership: heartbeat worker stop: %w", stopCtx.Err())
+	}
+}
+
+func (m *MembershipManager) deregisterBounded(ctx context.Context) error {
+	result := make(chan error, 1)
+	go func() { result <- m.deregister(ctx) }()
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("cluster membership: deregister %s: %w", m.nodeID, ctx.Err())
 	}
 }
 

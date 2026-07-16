@@ -30,17 +30,17 @@ type NodeInfo struct {
 	// ID is globally unique, e.g. "<service>-<datacenter>-<machine>-<pid>"
 	ID string `json:"id"`
 
-	ServiceName   string     `json:"service_name"`
-	DataCenterID  int64      `json:"datacenter_id"`
-	MachineID     int64      `json:"machine_id"`
-	Address       string     `json:"address"`
-	Port          int        `json:"port"`
-	SocketPort    int        `json:"socket_port,omitempty"`
-	GRPCPort      int        `json:"grpc_port,omitempty"`
-	Status        NodeStatus `json:"status"`
-	Weight        int        `json:"weight"`       // for weighted balancing; default 1
-	RegisteredAt  time.Time  `json:"registered_at"`
-	LastHeartbeat time.Time  `json:"last_heartbeat"`
+	ServiceName   string            `json:"service_name"`
+	DataCenterID  int64             `json:"datacenter_id"`
+	MachineID     int64             `json:"machine_id"`
+	Address       string            `json:"address"`
+	Port          int               `json:"port"`
+	SocketPort    int               `json:"socket_port,omitempty"`
+	GRPCPort      int               `json:"grpc_port,omitempty"`
+	Status        NodeStatus        `json:"status"`
+	Weight        int               `json:"weight"` // for weighted balancing; default 1
+	RegisteredAt  time.Time         `json:"registered_at"`
+	LastHeartbeat time.Time         `json:"last_heartbeat"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
@@ -90,9 +90,17 @@ type ProviderSwitcher interface {
 	// Begin starts the migration to the new provider.
 	Begin(ctx context.Context, to DiscoveryProvider) error
 
-	// Complete finalises the migration and shuts down the old provider.
+	// Complete promotes the pending provider. The old provider remains open
+	// until an optional ProviderSwitchFinalizer closes it after runtime sync.
 	Complete(ctx context.Context) error
 
 	// Rollback aborts and reverts to the old provider.
 	Rollback(ctx context.Context) error
+}
+
+// ProviderSwitchFinalizer completes the second phase of a provider switch.
+// It is intentionally separate from ProviderSwitcher so existing custom
+// switchers and test fakes remain source compatible.
+type ProviderSwitchFinalizer interface {
+	Finalize(ctx context.Context) error
 }

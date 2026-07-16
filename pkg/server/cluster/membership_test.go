@@ -260,3 +260,53 @@ func TestMembershipManager_StopWaitsForWorker(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 }
+
+func TestMembershipManager_StopIsBoundedWhenHeartbeatIgnoresContext(t *testing.T) {
+	heartbeatStarted := make(chan struct{})
+	blockForever := make(chan struct{})
+	var heartbeatOnce sync.Once
+	var deregisterCount atomic.Int32
+	registry := &membershipRegistry{
+		heartbeat: func(context.Context, string) error {
+			heartbeatOnce.Do(func() { close(heartbeatStarted) })
+			<-blockForever
+			return nil
+		},
+		deregister: func(context.Context, string) error {
+			deregisterCount.Add(1)
+			return nil
+		},
+	}
+	manager := cluster.NewMembershipManager(registry, "node-stuck-heartbeat", time.Nanosecond,
+		cluster.WithDeregisterRetry(1, 0),
+		cluster.WithDeregisterTimeout(80*time.Millisecond))
+	manager.Start(context.Background())
+	<-heartbeatStarted
+
+	startedAt := time.Now()
+	results := make(chan error, 8)
+	var waiters sync.WaitGroup
+	for range 8 {
+		waiters.Add(1)
+		go func() {
+			defer waiters.Done()
+			results <- manager.Stop(context.Background())
+		}()
+	}
+	waiters.Wait()
+	close(results)
+
+	assert.Less(t, time.Since(startedAt), 300*time.Millisecond, "Membership Stop 必须受共享总上限约束")
+	assert.Equal(t, int32(1), deregisterCount.Load(), "心跳 worker 卡住时仍必须尝试注销一次")
+	var first error
+	for err := range results {
+		require.Error(t, err, "心跳 worker 未退出必须记录终态错误")
+		if first == nil {
+			first = err
+			continue
+		}
+		assert.Equal(t, first.Error(), err.Error(), "所有 Stop 等待者必须观察同一共享注销结果")
+	}
+
+	close(blockForever)
+}
