@@ -20,6 +20,16 @@ type retryRecordingTransport struct {
 	sendErr     error
 }
 
+type cancelingSuccessfulSelector struct {
+	cancel    context.CancelFunc
+	transport transport.Transport
+}
+
+func (s *cancelingSuccessfulSelector) Select(context.Context, *types.PayLoad, transport.TransportEndpoints) (transport.Selection, error) {
+	s.cancel()
+	return transport.Selection{Transport: s.transport, Endpoint: "orders:19090"}, nil
+}
+
 func (t *retryRecordingTransport) Name() string              { return t.name }
 func (*retryRecordingTransport) Start(context.Context) error { return nil }
 func (*retryRecordingTransport) Stop(context.Context) error  { return nil }
@@ -73,4 +83,16 @@ func TestSelectWithRetryReturnsPreCanceledContextImmediately(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Zero(t, grpcTransport.healthCalls.Load())
+}
+
+func TestSelectWithRetryRejectsSelectionWhenContextCanceledBeforeReturn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	grpcTransport := &retryRecordingTransport{name: "grpc"}
+	selector := &cancelingSuccessfulSelector{cancel: cancel, transport: grpcTransport}
+
+	_, err := transport.SelectWithRetry(ctx, selector, &types.PayLoad{},
+		transport.TransportEndpoints{GRPC: "orders:19090"}, 3, 0)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, grpcTransport.sendCalls.Load())
 }

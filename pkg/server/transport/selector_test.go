@@ -17,6 +17,7 @@ type mockTransport struct {
 	name          string
 	supports      bool
 	healthErr     error
+	healthHook    func()
 	sendResult    []byte
 	sendErr       error
 	sendCalls     atomic.Int32
@@ -36,6 +37,9 @@ func (m *mockTransport) Supports(_ context.Context, _ *types.PayLoad, _ string) 
 func (m *mockTransport) Health(_ context.Context, target string) error {
 	m.healthCalls.Add(1)
 	m.healthTarget = target
+	if m.healthHook != nil {
+		m.healthHook()
+	}
 	return m.healthErr
 }
 
@@ -121,6 +125,44 @@ func TestDefaultSelectorSkipsTransportWithEmptyProtocolEndpoint(t *testing.T) {
 	assert.Zero(t, grpcTransport.sendCalls.Load())
 }
 
+func TestDefaultSelectorStopsBeforeFallbackWhenPrimaryHealthCancelsContext(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		selectFn func(context.Context, transport.TransportSelector, *types.PayLoad, transport.TransportEndpoints) (transport.Selection, error)
+	}{
+		{
+			name: "Select",
+			selectFn: func(ctx context.Context, selector transport.TransportSelector, payload *types.PayLoad, endpoints transport.TransportEndpoints) (transport.Selection, error) {
+				return selector.Select(ctx, payload, endpoints)
+			},
+		},
+		{
+			name: "SelectWithRetry",
+			selectFn: func(ctx context.Context, selector transport.TransportSelector, payload *types.PayLoad, endpoints transport.TransportEndpoints) (transport.Selection, error) {
+				return transport.SelectWithRetry(ctx, selector, payload, endpoints, 3, 0)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			primary := &mockTransport{
+				name: "grpc", supports: true, healthErr: context.Canceled, healthHook: cancel,
+			}
+			fallback := &mockTransport{name: "http", supports: true}
+			selector := transport.NewDefaultSelector(primary, fallback)
+
+			_, err := test.selectFn(ctx, selector, &types.PayLoad{}, transport.TransportEndpoints{
+				GRPC: "orders:19090", HTTP: "http://orders:8080",
+			})
+
+			require.ErrorIs(t, err, context.Canceled)
+			assert.Zero(t, fallback.supportsCalls.Load())
+			assert.Zero(t, fallback.healthCalls.Load())
+			assert.Zero(t, fallback.sendCalls.Load())
+		})
+	}
+}
+
 func TestDefaultSelector_ErrorWhenAllUnhealthy(t *testing.T) {
 	primary := &mockTransport{name: "grpc", supports: true, healthErr: errors.New("refused")}
 	fallback := &mockTransport{name: "http", supports: true, healthErr: errors.New("timeout")}
@@ -202,4 +244,21 @@ func TestSelectorStatsAreIsolatedBetweenServiceContexts(t *testing.T) {
 
 	assert.Equal(t, transport.StatsSnapshot{GRPCSelected: 1, SendSuccess: 1}, firstStats.Snapshot())
 	assert.Equal(t, transport.StatsSnapshot{}, secondStats.Snapshot())
+}
+
+func TestSendSelectionDoesNotSendOrRecordFailureAfterContextCanceled(t *testing.T) {
+	grpcTransport := &mockTransport{name: "grpc", supports: true}
+	stats := &transport.Stats{}
+	selector := transport.NewDefaultSelector(grpcTransport)
+	selector.SetStats(stats)
+	ctx, cancel := context.WithCancel(context.Background())
+	selection, err := selector.Select(ctx, &types.PayLoad{}, transport.TransportEndpoints{GRPC: "orders:19090"})
+	require.NoError(t, err)
+	cancel()
+
+	_, err = transport.SendSelection(ctx, selector, selection, &types.PayLoad{})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, grpcTransport.sendCalls.Load())
+	assert.Equal(t, transport.StatsSnapshot{GRPCSelected: 1}, stats.Snapshot())
 }

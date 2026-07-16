@@ -34,6 +34,9 @@ func (s *DefaultSelector) SetStats(stats *Stats) {
 func (s *DefaultSelector) Select(ctx context.Context, payload *types.PayLoad, endpoints TransportEndpoints) (Selection, error) {
 	candidates := append([]Transport{s.primary}, s.fallback...)
 	for index, t := range candidates {
+		if err := ctx.Err(); err != nil {
+			return Selection{}, err
+		}
 		if t == nil {
 			continue
 		}
@@ -44,7 +47,11 @@ func (s *DefaultSelector) Select(ctx context.Context, payload *types.PayLoad, en
 		if !t.Supports(ctx, payload, endpoint) {
 			continue
 		}
-		if err := t.Health(ctx, endpoint); err == nil {
+		healthErr := t.Health(ctx, endpoint)
+		if err := ctx.Err(); err != nil {
+			return Selection{}, err
+		}
+		if healthErr == nil {
 			s.stats.recordSelection(t.Name(), index > 0)
 			return Selection{Transport: t, Endpoint: endpoint}, nil
 		}
@@ -64,6 +71,9 @@ func SelectWithRetry(ctx context.Context, sel TransportSelector, payload *types.
 			return Selection{}, err
 		}
 		selection, err := sel.Select(ctx, payload, endpoints)
+		if contextErr := ctx.Err(); contextErr != nil {
+			return Selection{}, contextErr
+		}
 		if err == nil {
 			return selection, nil
 		}
@@ -94,6 +104,9 @@ func Send(ctx context.Context, sel TransportSelector, payload *types.PayLoad, en
 
 // SendSelection 执行一次已经完成预检的选择结果并记录发送结果。
 func SendSelection(ctx context.Context, sel TransportSelector, selection Selection, payload *types.PayLoad) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result, err := selection.Transport.Send(ctx, payload, selection.Endpoint)
 	if selector, ok := sel.(*DefaultSelector); ok {
 		selector.stats.recordSend(err)
