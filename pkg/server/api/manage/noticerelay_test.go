@@ -45,9 +45,13 @@ func TestSyncSubscriptionUsesServiceScopedBroker(t *testing.T) {
 		types.SetCrossNodeForwarder(nil)
 	})
 
-	forwarded := make(chan string, 1)
-	scopedBroker.SetSender(func(_ context.Context, _ string, _ []byte, path string) ([]byte, error) {
-		forwarded <- path
+	type forwardedCall struct {
+		node *cluster.NodeInfo
+		path string
+	}
+	forwarded := make(chan forwardedCall, 1)
+	scopedBroker.SetSender(func(_ context.Context, node *cluster.NodeInfo, _ []byte, path string) ([]byte, error) {
+		forwarded <- forwardedCall{node: node, path: path}
 		return nil, nil
 	})
 
@@ -62,8 +66,11 @@ func TestSyncSubscriptionUsesServiceScopedBroker(t *testing.T) {
 
 	scopedBroker.ForwardNotice(context.Background(), api.RoutePath, api.Hash, "order")
 	select {
-	case path := <-forwarded:
-		require.Equal(t, "/api/servermanage/ws/notice", path)
+	case call := <-forwarded:
+		require.Equal(t, "127.0.0.1", call.node.Address)
+		require.Equal(t, 18080, call.node.Port)
+		require.Zero(t, call.node.GRPCPort)
+		require.Equal(t, "/api/servermanage/ws/notice", call.path)
 	case <-time.After(2 * time.Second):
 		t.Fatal("服务作用域 broker 未收到订阅同步")
 	}

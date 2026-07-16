@@ -14,23 +14,27 @@ import (
 
 // mockTransport is a test double for transport.Transport.
 type mockTransport struct {
-	name         string
-	supports     bool
-	healthErr    error
-	sendResult   []byte
-	sendErr      error
-	sendCalls    atomic.Int32
-	target       string
-	healthTarget string
+	name          string
+	supports      bool
+	healthErr     error
+	sendResult    []byte
+	sendErr       error
+	sendCalls     atomic.Int32
+	supportsCalls atomic.Int32
+	healthCalls   atomic.Int32
+	target        string
+	healthTarget  string
 }
 
 func (m *mockTransport) Name() string                  { return m.name }
 func (m *mockTransport) Start(_ context.Context) error { return nil }
 func (m *mockTransport) Stop(_ context.Context) error  { return nil }
 func (m *mockTransport) Supports(_ context.Context, _ *types.PayLoad, _ string) bool {
+	m.supportsCalls.Add(1)
 	return m.supports
 }
 func (m *mockTransport) Health(_ context.Context, target string) error {
+	m.healthCalls.Add(1)
 	m.healthTarget = target
 	return m.healthErr
 }
@@ -74,6 +78,47 @@ func TestDefaultSelector_FallbackWhenPrimaryNotSupported(t *testing.T) {
 	chosen, err := sel.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{HTTP: "http://target"})
 	require.NoError(t, err)
 	assert.Equal(t, "http", chosen.Transport.Name())
+}
+
+func TestDefaultSelectorSelectsSocketPrimaryDuringMigration(t *testing.T) {
+	socketTransport := &mockTransport{name: "socket", supports: true}
+	selector := transport.NewDefaultSelector(socketTransport)
+
+	selection, err := selector.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
+		Socket: "orders:18080",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "socket", selection.Transport.Name())
+	assert.Equal(t, "orders:18080", selection.Endpoint)
+}
+
+func TestDefaultSelectorFallsBackToSocketDuringMigration(t *testing.T) {
+	grpcTransport := &mockTransport{name: "grpc", supports: true, healthErr: errors.New("unhealthy")}
+	socketTransport := &mockTransport{name: "socket", supports: true}
+	selector := transport.NewDefaultSelector(grpcTransport, socketTransport)
+
+	selection, err := selector.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
+		GRPC: "orders:19090", Socket: "orders:18080",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "socket", selection.Transport.Name())
+	assert.Equal(t, "orders:18080", selection.Endpoint)
+}
+
+func TestDefaultSelectorSkipsTransportWithEmptyProtocolEndpoint(t *testing.T) {
+	grpcTransport := &mockTransport{name: "grpc", supports: true}
+	selector := transport.NewDefaultSelector(grpcTransport)
+
+	_, err := selector.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
+		HTTP: "http://orders:8080",
+	})
+
+	require.ErrorIs(t, err, transport.ErrNoTransport)
+	assert.Zero(t, grpcTransport.supportsCalls.Load())
+	assert.Zero(t, grpcTransport.healthCalls.Load())
+	assert.Zero(t, grpcTransport.sendCalls.Load())
 }
 
 func TestDefaultSelector_ErrorWhenAllUnhealthy(t *testing.T) {
@@ -142,4 +187,19 @@ func TestSelectorStatsAreScopedAndLowCardinality(t *testing.T) {
 		SendFailure:  1,
 		HTTPFallback: 1,
 	}, stats.Snapshot())
+}
+
+func TestSelectorStatsAreIsolatedBetweenServiceContexts(t *testing.T) {
+	firstStats := &transport.Stats{}
+	firstSelector := transport.NewDefaultSelector(&mockTransport{name: "grpc", supports: true})
+	firstSelector.SetStats(firstStats)
+	secondStats := &transport.Stats{}
+	secondSelector := transport.NewDefaultSelector(&mockTransport{name: "http", supports: true})
+	secondSelector.SetStats(secondStats)
+
+	_, err := transport.Send(context.Background(), firstSelector, &types.PayLoad{}, transport.TransportEndpoints{GRPC: "orders:19090"})
+	require.NoError(t, err)
+
+	assert.Equal(t, transport.StatsSnapshot{GRPCSelected: 1, SendSuccess: 1}, firstStats.Snapshot())
+	assert.Equal(t, transport.StatsSnapshot{}, secondStats.Snapshot())
 }

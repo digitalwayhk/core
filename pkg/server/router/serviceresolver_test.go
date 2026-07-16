@@ -130,6 +130,41 @@ func TestResolverReturnsProtocolSpecificEndpoints(t *testing.T) {
 	assert.Equal(t, "http://orders.internal:8080", resolved.Endpoints.HTTP)
 }
 
+func TestResolverDoesNotBorrowHTTPPortWhenGRPCPortIsMissing(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
+		ID: "orders-http-only", ServiceName: "orders",
+		DataCenterID: 1, MachineID: 10,
+		Address: "orders.internal", Port: 8080,
+	}))
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+
+	resolved, err := resolver.Resolve(context.Background(), "orders")
+	require.NoError(t, err)
+	assert.Empty(t, resolved.Endpoints.GRPC)
+	assert.Equal(t, "http://orders.internal:8080", resolved.Endpoints.HTTP)
+}
+
+func TestResolverAcceptsSocketOnlyNodeDuringMigration(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
+		ID: "orders-socket-only", ServiceName: "orders",
+		DataCenterID: 1, MachineID: 11,
+		Address: "orders.internal", SocketPort: 18080,
+	}))
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+
+	resolved, err := resolver.Resolve(context.Background(), "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "orders.internal:18080", resolved.Endpoints.Socket)
+}
+
 func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()

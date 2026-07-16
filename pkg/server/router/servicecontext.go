@@ -1396,7 +1396,7 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		endpoints = resolved.Endpoints
 	} else if payload.TargetAddress != "" {
 		// 直接指定地址的旧调用只具备 HTTP 端点；gRPC 端点必须来自服务发现。
-		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0)
+		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0, payload.TargetSocketPort)
 	} else {
 		return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
 	}
@@ -1449,15 +1449,17 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
 	return func(ctx context.Context, target *cluster.NodeInfo, data []byte, path string) ([]byte, error) {
 		payload := &types.PayLoad{
-			TargetAddress: target.Address,
-			TargetPort:    target.Port,
-			TargetPath:    path,
-			Data:          data,
-			HttpMethod:    "POST",
-			Auth:          true,
-			SourceService: own.Service.Name,
+			TargetAddress:    target.Address,
+			TargetPort:       target.Port,
+			TargetSocketPort: target.SocketPort,
+			TargetPath:       path,
+			Data:             data,
+			Instance:         json.RawMessage(data),
+			HttpMethod:       "POST",
+			Auth:             true,
+			SourceService:    own.Service.Name,
 		}
-		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort)
+		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort, target.SocketPort)
 		attempts := own.Config.Transport.MaxRetries
 		if attempts <= 0 {
 			attempts = 1

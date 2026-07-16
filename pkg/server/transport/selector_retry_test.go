@@ -61,3 +61,16 @@ func TestSendAfterSelectWithRetryIsNeverRetried(t *testing.T) {
 	assert.Equal(t, int32(1), grpcTransport.healthCalls.Load())
 	assert.Equal(t, int32(1), grpcTransport.sendCalls.Load())
 }
+
+func TestSelectWithRetryReturnsPreCanceledContextImmediately(t *testing.T) {
+	grpcTransport := &retryRecordingTransport{name: "grpc", healthErr: errors.New("unhealthy")}
+	selector := transport.NewDefaultSelector(grpcTransport)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := transport.SelectWithRetry(ctx, selector, &types.PayLoad{},
+		transport.TransportEndpoints{GRPC: "orders:19090"}, 100, 0)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, grpcTransport.healthCalls.Load())
+}

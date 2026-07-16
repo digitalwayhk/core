@@ -71,7 +71,7 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 				TargetPort: local.Config.Port, TargetSocketPort: local.Config.SocketPort,
 				TargetGRPCPort: grpcPort,
 			},
-			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort),
+			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort, local.Config.SocketPort),
 		}, nil
 	}
 
@@ -84,7 +84,7 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 	r.mu.RUnlock()
 	healthy := make([]*cluster.NodeInfo, 0, len(nodes))
 	for _, node := range nodes {
-		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && (node.GRPCPort > 0 || node.Port > 0) {
+		if node != nil && node.Status == cluster.NodeStatusRunning && node.Address != "" && (node.GRPCPort > 0 || node.Port > 0 || node.SocketPort > 0) {
 			healthy = append(healthy, node)
 		}
 	}
@@ -102,11 +102,11 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 			TargetPort: node.Port, TargetSocketPort: node.SocketPort,
 			TargetGRPCPort: node.GRPCPort,
 		},
-		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort),
+		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort, node.SocketPort),
 	}, nil
 }
 
-func serviceTransportEndpoints(address string, httpPort, grpcPort int) transport.TransportEndpoints {
+func serviceTransportEndpoints(address string, httpPort, grpcPort, socketPort int) transport.TransportEndpoints {
 	var endpoints transport.TransportEndpoints
 	if grpcPort > 0 {
 		endpoints.GRPC = net.JoinHostPort(address, strconv.Itoa(grpcPort))
@@ -114,6 +114,9 @@ func serviceTransportEndpoints(address string, httpPort, grpcPort int) transport
 	if httpPort > 0 {
 		endpoint := &url.URL{Scheme: "http", Host: net.JoinHostPort(address, strconv.Itoa(httpPort))}
 		endpoints.HTTP = endpoint.String()
+	}
+	if socketPort > 0 {
+		endpoints.Socket = net.JoinHostPort(address, strconv.Itoa(socketPort))
 	}
 	return endpoints
 }

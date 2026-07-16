@@ -60,6 +60,9 @@ func SelectWithRetry(ctx context.Context, sel TransportSelector, payload *types.
 	}
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return Selection{}, err
+		}
 		selection, err := sel.Select(ctx, payload, endpoints)
 		if err == nil {
 			return selection, nil
