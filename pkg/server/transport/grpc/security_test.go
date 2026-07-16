@@ -152,6 +152,121 @@ func TestGRPCTransport_RejectsCertificateSignedByDifferentValidCA(t *testing.T) 
 	}
 }
 
+func TestServerSecurity_InsecureAndMeshDoNotAddApplicationCredentials(t *testing.T) {
+	for _, mode := range []string{"insecure", "mesh"} {
+		t.Run(mode, func(t *testing.T) {
+			options, err := serverSecurityOptions(config.GRPCSecurityConfig{Mode: mode})
+			require.NoError(t, err)
+			assert.Empty(t, options)
+		})
+	}
+}
+
+func TestServerSecurity_RejectsInvalidFilesDuringConstruction(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.pem")
+
+	server, err := NewServer("127.0.0.1:0", config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+		Mode: "tls", CertFile: missing, KeyFile: missing,
+	}}, echoHandler)
+	require.ErrorContains(t, err, "Transport.GRPC.Security.CertFile")
+	assert.Nil(t, server)
+
+	files := createTestCertificateFiles(t)
+	server, err = NewServer("127.0.0.1:0", config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+		Mode: "tls", CertFile: files.serverCertFile, KeyFile: missing,
+	}}, echoHandler)
+	require.ErrorContains(t, err, "Transport.GRPC.Security.KeyFile")
+	assert.Nil(t, server)
+
+	badCA := filepath.Join(dir, "bad-ca.pem")
+	require.NoError(t, os.WriteFile(badCA, []byte("not a certificate"), 0o600))
+	server, err = NewServer("127.0.0.1:0", config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+		Mode: "mtls", CAFile: badCA, CertFile: files.serverCertFile, KeyFile: files.serverKeyFile,
+	}}, echoHandler)
+	require.ErrorContains(t, err, "Transport.GRPC.Security.CAFile")
+	assert.Nil(t, server)
+}
+
+func TestServerTLS_HandshakeAndTrustFailures(t *testing.T) {
+	serverFiles := createTestCertificateFiles(t)
+	otherFiles := createTestCertificateFiles(t)
+	server, startResult := startConfiguredServer(t, config.GRPCSecurityConfig{
+		Mode: "tls", CertFile: serverFiles.serverCertFile, KeyFile: serverFiles.serverKeyFile,
+	})
+	defer func() {
+		server.Stop()
+		require.NoError(t, <-startResult)
+	}()
+
+	for _, tc := range []struct {
+		name       string
+		caFile     string
+		serverName string
+		wantError  bool
+	}{
+		{name: "valid", caFile: serverFiles.caFile, serverName: "core.test"},
+		{name: "wrong-server-name", caFile: serverFiles.caFile, serverName: "wrong.test", wantError: true},
+		{name: "wrong-ca", caFile: otherFiles.caFile, serverName: "core.test", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+				Mode: "tls", CAFile: tc.caFile, CertFile: serverFiles.clientCertFile,
+				KeyFile: serverFiles.clientKeyFile, ServerName: tc.serverName,
+			}})
+			defer transport.Stop(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			err := transport.Health(ctx, server.Address())
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestServerMTLS_RequiresAndAcceptsClientCertificate(t *testing.T) {
+	files := createTestCertificateFiles(t)
+	server, startResult := startConfiguredServer(t, config.GRPCSecurityConfig{
+		Mode: "mtls", CAFile: files.caFile, CertFile: files.serverCertFile, KeyFile: files.serverKeyFile,
+	})
+	defer func() {
+		server.Stop()
+		require.NoError(t, <-startResult)
+	}()
+
+	rootCAs, err := loadRequiredCertPool(files.caFile)
+	require.NoError(t, err)
+	withoutCertificate, err := googlegrpc.NewClient(server.Address(), googlegrpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+		MinVersion: tls.VersionTLS12, RootCAs: rootCAs, ServerName: "core.test",
+	})))
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, err = grpc_health_v1.NewHealthClient(withoutCertificate).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+	cancel()
+	require.Error(t, err)
+	require.NoError(t, withoutCertificate.Close())
+
+	withCertificate := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+		Mode: "mtls", CAFile: files.caFile, CertFile: files.clientCertFile,
+		KeyFile: files.clientKeyFile, ServerName: "core.test",
+	}})
+	defer withCertificate.Stop(context.Background())
+	require.NoError(t, withCertificate.Health(context.Background(), server.Address()))
+}
+
+func startConfiguredServer(t *testing.T, security config.GRPCSecurityConfig) (*Server, <-chan error) {
+	t.Helper()
+	server, err := NewServer("127.0.0.1:0", config.GRPCTransportConfig{Security: security}, echoHandler)
+	require.NoError(t, err)
+	result := make(chan error, 1)
+	go func() { result <- server.Start() }()
+	waitReady(t, server)
+	return server, result
+}
+
 func TestGRPCTransport_ConcurrentInitializationCallsFactoryOnce(t *testing.T) {
 	const workers = 100
 	transport := New(config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{Mode: "insecure"}})

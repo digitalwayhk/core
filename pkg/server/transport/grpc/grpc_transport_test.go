@@ -25,17 +25,21 @@ import (
 // startTestServer registers a minimal CoreTransport gRPC server on a random port.
 func startTestServer(t *testing.T, handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error)) (addr string, stop func()) {
 	t.Helper()
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	srv, err := grpctransport.NewServer("127.0.0.1:0", config.GRPCTransportConfig{
+		Security: config.GRPCSecurityConfig{Mode: "insecure"},
+	}, handler)
 	require.NoError(t, err)
-
-	srv := grpctransport.NewServer(0, handler)
-	grpcSrv := grpc.NewServer()
-	pb.RegisterCoreTransportServer(grpcSrv, srv)
-	healthServer := health.NewServer()
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	grpc_health_v1.RegisterHealthServer(grpcSrv, healthServer)
-	go grpcSrv.Serve(lis)
-	return lis.Addr().String(), grpcSrv.GracefulStop
+	result := make(chan error, 1)
+	go func() { result <- srv.Start() }()
+	select {
+	case <-srv.Ready():
+	case <-time.After(time.Second):
+		t.Fatal("gRPC test server did not become ready")
+	}
+	return srv.Address(), func() {
+		srv.Stop()
+		require.NoError(t, <-result)
+	}
 }
 
 func newInsecureTransport() *grpctransport.GRPCTransport {
