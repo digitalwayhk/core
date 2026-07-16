@@ -7,7 +7,7 @@ description: 当任务涉及 github.com/digitalwayhk/core 的服务、IRouter、
 
 ## 开始前
 
-Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`examples/01-simple-shop` 是最简平台应用的标准样例，覆盖模型、持久化、DTO、Manage/Public/Private API、认证、WebSocket、服务组合与真实集成测试。`examples/02-shop-payment` 是进阶业务样例，覆盖 API -> business -> models 分层、跨模型事务、支付状态机、Manage hook、自定义命令和支付结果 WebSocket。创建或审查普通业务服务时先核对第一个样例；涉及业务编排或受控后台命令时再核对第二个样例。不要从已删除的 Copilot skill、旧文档或记忆恢复行为。
+Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`examples/01-simple-shop` 是最简平台应用的标准样例，覆盖模型、持久化、DTO、Manage/Public/Private API、认证、WebSocket、服务组合与真实集成测试。`examples/02-shop-payment` 是进阶业务样例，覆盖 API -> business -> models 分层、跨模型事务、支付状态机、Manage hook、自定义命令和支付结果 WebSocket。`examples/05-shop-casdoor-rbac` 是身份生命周期样例，覆盖 Auth/Manage 双 Casdoor 域、三类认证 Hook、撤销与幂等审计。创建或审查普通业务服务时先核对第一个样例；涉及业务编排或受控后台命令时再核对第二个样例；涉及 Casdoor 登录和业务授权时核对第五个样例。不要从已删除的 Copilot skill、旧文档或记忆恢复行为。
 
 按任务读取：
 
@@ -17,6 +17,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`exampl
 - 标准集成测试公共能力：`examples/integration/helpers.go`
 - 最简平台应用集成测试模板：`examples/integration/01-simple-shop`
 - 业务状态机集成测试模板：`examples/integration/02-shop-payment`
+- Casdoor 双域与三 Hook 样例：`examples/05-shop-casdoor-rbac`
+- Fake Casdoor 真实登录集成测试模板：`examples/integration/05-shop-casdoor-rbac`
 - 场景与成熟度：`docs/codex/FRAMEWORK_USAGE_GUIDE.md`
 - 配置能力：`docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`
 - 日志与错误：`docs/codex/LOGGING_AUDIT_AND_STANDARD.md`
@@ -40,6 +42,10 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`exampl
 | Manage hook 与自定义命令 | `api/manage/productmanage.go`、`paymenttypemanage.go`、`paymentrecord_commands.go` |
 | 支付状态 WebSocket | `api/private/getorders.go`、`api/private/common.go` |
 | 进阶真实进程集成测试 | `examples/integration/02-shop-payment` |
+| Auth/Manage 双 Casdoor 域 | `examples/05-shop-casdoor-rbac/README.md`、`auth_hooks.go` |
+| 签发、请求、身份事件三 Hook | `examples/05-shop-casdoor-rbac/auth_hooks.go` |
+| 身份事件幂等审计 | `examples/05-shop-casdoor-rbac/business/identityevent.go`、`api/manage/identityeventmanage.go` |
+| Fake Casdoor 真实 OAuth/Callback/Webhook | `examples/integration/05-shop-casdoor-rbac` |
 
 ## 核心决策
 
@@ -63,7 +69,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。`exampl
 1. 普通平台服务先读 `examples/01-simple-shop`；涉及业务层、跨模型事务、状态机或 Manage 自定义命令时再读 `examples/02-shop-payment`。
 2. 先写失败测试，再做最小实现；不绕过 ServiceContext，Manage 不绕过 ModelList，普通 API 不绕过模型持久化方法。
 3. 为服务创建集成测试时，复用 `examples/integration/helpers.go`，并以 `examples/integration/01-simple-shop` 为目录模板：每个 API/command 一个子测试，按 Manage/Public/Private 分文件，同时保留 `TestManageAPIs`、`TestPublicAPIs`、`TestPrivateAPIs` 整组入口。
-4. 集成测试必须启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP、内建 TestToken 和真实 WebSocket；测试结束必须关闭进程并清理临时目录。
+4. 集成测试必须启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP 和真实 WebSocket；普通业务测试使用内建 TestToken，认证生命周期测试使用示例 05 的 Fake Casdoor 模板。测试结束必须关闭进程并清理临时目录。
 5. 对外部能力同时检查 config Validate、factory、真实启动链、lifecycle owner 和 integration gate。
 6. 运行 `gofmt`、定向测试、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 race/CI gate。
 7. Casdoor 生命周期改动必须运行 `./scripts/test.sh security`；共享 Redis 测试只通过 `CORE_TEST_REDIS_ADDR=... ./scripts/test.sh integration-casdoor-auth` 显式开启。

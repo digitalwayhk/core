@@ -87,6 +87,8 @@ Manage 扩展遵循以下顺序：
 
 支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
 
+Casdoor 双域和业务授权以 `examples/05-shop-casdoor-rbac` 为标准样例：`ShopService` 同时实现签发前 `IAuthHookProvider`、Router 前 `IAuthRequestHookProvider` 和撤销事实落地后 `ICasdoorEventHookProvider`。Auth 域只签发普通用户角色，Manage 域只签发管理员角色；角色由已验证 `AuthType` 派生，不接受请求字段或 Casdoor 自定义字符串直接决定。集成测试模板位于 `examples/integration/05-shop-casdoor-rbac`，使用本地 Fake Casdoor 真实经过域配置、OAuth callback、Refresh、REST、WebSocket 和 Webhook，不使用 TestToken 代替身份生命周期验证。
+
 ## 路由基础契约
 
 ### 无依赖服务契约
@@ -431,7 +433,7 @@ CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主
 - `WriteWebSocket`、`ReadWebSocket`、`StreamWebSocket`：使用真实 WebSocket 协议测试订阅和事件。
 - `Stop`：关闭进程并清理临时目录。
 
-不要在每个服务里重新实现进程管理、端口分配、TestToken、HTTP 信封或 WebSocket 通信。
+不要在每个服务里重新实现进程管理、端口分配、TestToken、HTTP 信封或 WebSocket 通信。只有当验收目标本身是 Casdoor 登录、刷新、撤销或 Webhook 时，才以 `examples/integration/05-shop-casdoor-rbac` 为模板，在服务专属 Suite 中用 Fake Casdoor callback 覆盖 `TokenFor`；该测试不得回退到 TestToken。
 
 ### 服务专属 Suite
 

@@ -1,50 +1,69 @@
-# 商城模型与 Manage 继承示例
+# Casdoor 双域认证与商城权限示例
 
-`05-shop-casdoor-rbac` 是独立完整应用，演示如何在 Digitalway Core 服务中为模型和 Manage 建立职责清晰的继承层，同时保留商品、订单、支付和 WebSocket 业务闭环。
+`05-shop-casdoor-rbac` 在示例 03 的模型、Manage 继承、订单、支付和 WebSocket 业务上，演示完整的 Casdoor 登录与双认证域权限隔离。本目录是独立应用，不需要引用示例 03。
 
-## 继承结构
+## 权限矩阵
 
-```text
-entity.Model                 manage.ManageService[T]
-└── ShopModel                └── ShopManage[T]
-    ├── BaseDataModel            ├── BaseDataManage[T]
-    │   ├── Product              │   ├── ProductManage
-    │   ├── Supplier             │   ├── SupplierManage
-    │   └── PaymentType          │   └── PaymentTypeManage
-    └── BusinessModel            └── BusinessManage[T]
-        ├── Order                    ├── OrderManage
-        └── PaymentRecord            └── PaymentRecordManage
-```
+| 能力 | 匿名 | 普通用户 Auth Token | 管理员 Manage Token |
+| --- | --- | --- | --- |
+| 查询商品、供应商、支付类型 | 允许 | 允许 | 允许 |
+| 下单、本人订单、支付、删除或撤销 | 拒绝 | 允许 | 拒绝 |
+| 基础数据 CRUD 与启禁用 | 拒绝 | 拒绝 | 允许 |
+| 订单、支付流水、身份事件后台查询 | 拒绝 | 拒绝 | 允许 |
+| 确认支付等受控后台命令 | 拒绝 | 拒绝 | 允许 |
 
-每层 Manage 都接收最终具体 owner。具体 hook 先显式调用父级 hook，再追加自己的业务规则；Go 嵌入本身不提供虚方法分派。
+Auth 与 Manage 必须使用不同的 Casdoor Client、Access Secret、Refresh Secret 和 Webhook Secret。Auth Token 不能访问 Manage API，Manage Token 也不能访问 Private API。
 
-## 业务能力
+## 三个认证 Hook
 
-- 商品、供应商和支付类型共享 Code、Name、Enabled、Description。
-- 基础资料新增后默认禁用，只能通过继承得到的启用、禁用命令改变状态。
-- 供应商管理页展示只读商品子表，商品写入统一经过 ProductManage。
-- 禁用供应商不修改商品状态，但商品立即从 Public 查询消失且不能下单。
-- 订单保存商品、供应商和价格快照。
-- 订单与支付流水共享业务模型状态能力，具体类型负责强类型转换和中文显示。
-- 支付失败、重试、确认、退款和用户隔离 WebSocket 与第二个示例保持一致。
+`ShopService` 直接展示三个 Hook 的不同职责：
 
-## 分层
+- `OnAuth`：在签发 Access Token 前，按已验证 `AuthType` 注入 `role` 和 `shop_scope`。角色不接受客户端传入。
+- `OnAuthRequest`：在验签和撤销校验后、Router 前，同时核对认证域、角色、scope 和路由类型。
+- `OnCasdoorEvent`：在撤销事实已持久化后，幂等写入只读身份审计表。审计记录不保存 Token、Header、Claims 或原始 Webhook。
 
-```text
-api/public|private|manage -> business -> models -> IDataAction
-```
-
-Public/Private 返回独立 DTO。SQLite 只在 models 的数据访问组合根选择，事务通过克隆的 `IDataAction` 隔离。
+`IdentityEventManage` 只暴露 `View` 和 `Search`，不允许通用 Add、Edit 或 Remove 绕过事件 Hook。
 
 ## 运行
+
+首次启动：
 
 ```bash
 go run ./examples/05-shop-casdoor-rbac/main -view 0
 ```
 
-首次运行由框架自动生成 `server.json` 和 `casdoorrbacshop.json`，示例不提交运行时配置。
+框架会先自动生成 `etc/server.json` 和 `etc/casdoorrbacshop.json`。停止服务后，在 `casdoorrbacshop.json` 中分别配置：
 
-## 测试
+- `Auth.AccessSecret` / `Auth.RefreshSecret` / `Auth.CasDoor`：普通用户域。
+- `ManageAuth.AccessSecret` / `ManageAuth.RefreshSecret` / `ManageAuth.CasDoor`：管理员域。
+- `AuthRevocation.Mode=local` 和应用专属 `BadgerPath`：单实例撤销权威。
+
+两个 Casdoor YAML 都使用以下结构，但字段值必须独立：
+
+```yaml
+certificate: |-
+  -----BEGIN PUBLIC KEY-----
+  ...
+  -----END PUBLIC KEY-----
+server:
+  endpoint: https://casdoor.example.com
+  client_id: shop-auth-or-manage-client
+  client_secret: replace-with-domain-client-secret
+  organization: shop-auth-or-manage-org
+  application: shop-auth-or-manage-app
+  frontend_url: https://casdoor.example.com
+```
+
+前端先请求 `/api/casdoor?type=auth|manage` 获取域配置，然后将 OAuth code 传给 `/api/casdoor/callback`。Webhook 固定使用 `/api/casdoor/webhook?type=auth|manage` 和对应域的 Bearer Secret。
+
+## 集成测试
+
+`examples/integration/05-shop-casdoor-rbac` 启动真实示例进程和本地 Fake Casdoor，完整经过：
+
+- `/api/casdoor` 域配置、OAuth callback、Access/Refresh Token。
+- Public、Private、Manage 全部商城 API 和订单 WebSocket。
+- Auth/Manage 串域拒绝、客户端角色伪造拒绝。
+- logout Webhook、旧 Token 失效和幂等身份审计。
 
 ```bash
 go test -race ./examples/05-shop-casdoor-rbac/... -count=1
@@ -52,4 +71,4 @@ go test -race ./examples/integration/05-shop-casdoor-rbac -count=1 -timeout=15m
 go vet ./examples/05-shop-casdoor-rbac/... ./examples/integration/05-shop-casdoor-rbac
 ```
 
-完整设计见 `docs/superpowers/specs/2026-07-14-shop-casdoor-rbac-example-design.md`。
+完整设计见 `docs/superpowers/specs/2026-07-16-shop-casdoor-rbac-example-design.md`。
