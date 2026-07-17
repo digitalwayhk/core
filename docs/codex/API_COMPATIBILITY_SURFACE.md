@@ -65,7 +65,7 @@
 
 ## 已批准的破坏性删除
 
-自定义内部 Socket 的 Go API、配置、flag、payload 字段和实现包已按 `socket-to-grpc-v1` 批准直接删除，不进入长期 Deprecated 状态。该候选只能作为 MAJOR 发布；公共 API 基线的对应删除必须与 [GRPC_TRANSPORT_MIGRATION.md](GRPC_TRANSPORT_MIGRATION.md)、`BREAKING_CHANGE_APPROVAL.md` 和消费方 smoke 一起审查。WebSocket 与 Unix socket 不在删除范围。
+自定义内部 Socket 的 Go API、配置、flag、payload 字段和实现包，以及为 gRPC 端点选择与安全关闭而调整的 TransportSelector、CrossNodeSender、GetServers、MembershipManager 生命周期签名，已按 `socket-to-grpc-v1` 批准直接变更，不进入长期 Deprecated 状态。该候选只能作为 MAJOR 发布；公共 API 基线必须与 [GRPC_TRANSPORT_MIGRATION.md](GRPC_TRANSPORT_MIGRATION.md)、`BREAKING_CHANGE_APPROVAL.md` 和消费方 smoke 一起审查。WebSocket 与 Unix socket 不在删除范围。
 
 ## 数据与生命周期
 

@@ -92,9 +92,18 @@ if grep -Eiq 'BREAKING([ :]|$)' "$unreleased_file" || grep -Fq '破坏性' "$unr
 fi
 
 if [[ "$mode" == "--release" ]]; then
-  : "${CORE_RELEASE_VERSION:?--release 需要 CORE_RELEASE_VERSION=vX.Y.Z}"
-  [[ "$CORE_RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本格式无效: $CORE_RELEASE_VERSION" >&2; exit 1; }
-  test -z "$(git status --porcelain)" || { echo "正式发布要求工作区干净" >&2; exit 1; }
+	: "${CORE_RELEASE_VERSION:?--release 需要 CORE_RELEASE_VERSION=vX.Y.Z}"
+	[[ "$CORE_RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本格式无效: $CORE_RELEASE_VERSION" >&2; exit 1; }
+	if grep -Fq 'socket-to-grpc-v1' docs/codex/BREAKING_CHANGE_APPROVAL.md; then
+		major="${CORE_RELEASE_VERSION#v}"
+		major="${major%%.*}"
+		(( major >= 1 )) || { echo "socket-to-grpc-v1 必须发布为 MAJOR 版本" >&2; exit 1; }
+		if grep -Fq 'blocked-by-consumer-verification' docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md; then
+			echo "消费方验证仍阻断正式发布" >&2
+			exit 1
+		fi
+	fi
+	test -z "$(git status --porcelain)" || { echo "正式发布要求工作区干净" >&2; exit 1; }
   if git rev-parse -q --verify "refs/tags/$CORE_RELEASE_VERSION" >/dev/null; then
     echo "tag 已存在，禁止重写: $CORE_RELEASE_VERSION" >&2
     exit 1

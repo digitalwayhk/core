@@ -40,6 +40,9 @@
 2. 删除 `ServerConfig.SocketPort`、`Transport.Socket`、`NodeInfo.SocketPort` 及 payload/observe/attach 的 Socket 端口字段。
 3. `SetAttachService` 改为三参数；旧源码必须迁移到 `ClusterProvider + ServiceResolver`，不保留 Socket 兼容 shim。
 4. 内部同步传输默认改为 gRPC；HTTP 仅作为显式发送前备用，EventBridge/WebSocket 不承担同步调用。
+5. `Transport`/`TransportSelector.Select` 改为 context + 协议端点的 `Selection` 契约；删除 `SendWithFallback`，调用方改用 `SelectWithRetry`、`SendSelection` 或 `Send`。
+6. `CrossNodeSender` 从地址字符串改为接收完整 `*NodeInfo`，由发送器选择 `GRPCPort`；`ServiceContext.GetServers` 返回 go-zero `service.Service` 以统一 HTTP、gRPC 和扩展服务生命周期。
+7. `MembershipManager.Stop` 返回关闭错误，构造器接受 `MembershipOption`；该类型不再承诺可比较，以支持注销重试与有界关闭状态。
 
 ## 安全、迁移与回滚
 
@@ -55,3 +58,4 @@
 - `examples/integration/06-shop-microservices-three-process` 的 gRPC 调用计数与 HTTP 零调用证明
 - `./scripts/test.sh release-contract`
 - `./scripts/ci.sh required/contracts`
+- 锁定 apidiff 对旧/新基线的报告必须只包含本批准范围内的上述不兼容项。

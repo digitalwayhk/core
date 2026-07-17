@@ -13,6 +13,11 @@
 | Socket ping/自定义健康包 | `grpc_health_v1.Check` | 使用标准 `SERVING/NOT_SERVING` 探针 |
 | 明文私网 Socket | `mtls` 或 `mesh` | 外部 Redis/Consul 发现默认要求可验证身份层 |
 | Socket payload 地址/端口字段 | 逻辑 `TargetService` + `ServiceResolver` | 调用方不保存节点地址，Resolver 是唯一端点权威 |
+| `TransportSelector.Select(ctx,payload,target)` | `Select(ctx,payload,TransportEndpoints) -> Selection` | 协议与端点绑定，健康检查和发送不能选到不同目标 |
+| `SendWithFallback` | `SelectWithRetry` + `SendSelection` 或 `Send` | 只在发送前切换协议，发送后不重试 |
+| `CrossNodeSender(ctx,address,...)` | `CrossNodeSender(ctx,*NodeInfo,...)` | 发送器读取目标 `GRPCPort` 和服务身份 |
+| `ServiceContext.GetServers() []IRunServer` | `[]service.Service` | HTTP、gRPC 与扩展服务统一进入 go-zero ServiceGroup 生命周期 |
+| `MembershipManager.Stop(ctx)` | `Stop(ctx) error` | 注销/关闭失败可观测；构造器可用 `MembershipOption` 配置有界关闭 |
 
 旧 JSON 中的顶层 `SocketPort` 和 `Transport.Socket` 会在读取前被迁移器删除，其他未知字段保持不变；迁移是幂等的。`Transport.Internal=socket` 或 `Fallback` 中的 `socket` 不会被猜测改写，启动会 fail closed，部署者必须按实际拓扑明确改为 `grpc` 或 `http`。
 
@@ -71,5 +76,7 @@ Redis、Consul 等跨主机发现使用 `mtls`，为每个服务签发包含稳�
 3. 运行 gRPC health、错误 CA、错误服务名和 HTTP fallback 负向测试。
 4. 使用消费方精确提交或 tag 运行编译与行为 smoke；旧源码引用 Socket Go API 时必须先改代码。
 5. 回滚需要同时回滚 Core 版本和服务配置；不得让旧 Socket 节点与只支持 gRPC/HTTP 的新节点混跑。
+
+源码迁移还必须处理公共 Transport 和 Membership 生命周期签名；完整批准范围见 `docs/codex/BREAKING_CHANGE_APPROVAL.md`，不能只删除配置中的 `SocketPort` 就认为升级完成。
 
 实现与验证提交链为 `3020f99..12ca575`。最终发布还必须通过 `./scripts/test.sh release-contract` 和消费方矩阵门禁。

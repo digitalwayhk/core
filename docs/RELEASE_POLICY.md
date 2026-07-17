@@ -20,9 +20,9 @@
 
 ```bash
 ./scripts/test.sh release-contract
-CORE_RELEASE_VERSION=v0.0.248 ./scripts/release-check.sh --release
-git tag -a v0.0.248 -m "core v0.0.248"
-git push origin v0.0.248
+CORE_RELEASE_VERSION=v1.0.0 ./scripts/release-check.sh --release
+git tag -a v1.0.0 -m "core v1.0.0"
+git push origin v1.0.0
 ```
 
 最后两条命令必须由发布负责人人工执行。发布脚本只读检查。
@@ -31,6 +31,7 @@ git push origin v0.0.248
 
 - 代码回滚到上一稳定 tag，并重新运行 `release-contract`。
 - 下游将 `go.mod` 锁回上一 tag/精确 commit，执行各自 smoke 后再部署。
+- 涉及内部传输切换时，按 `docs/codex/GRPC_TRANSPORT_MIGRATION.md` 同时回滚 Core、配置和启动参数，禁止新旧节点混跑。
 - 不移动或重写已发布 tag；错误版本发布新 PATCH 修复并在 changelog 记录。
 
 ## 责任边界

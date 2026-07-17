@@ -66,6 +66,26 @@ expect_failure() {
   fi
 }
 
+prepare_release_fixture() {
+	local fixture="$1"
+	(cd "$fixture" &&
+		git init -q &&
+		git config user.name "release-check-test" &&
+		git config user.email "release-check@example.invalid" &&
+		git add . &&
+		git commit -qm "fixture")
+}
+
+expect_release_failure() {
+	local fixture="$1"
+	local version="$2"
+	local label="$3"
+	prepare_release_fixture "$fixture"
+	if (cd "$fixture" && CORE_RELEASE_VERSION="$version" ./scripts/release-check.sh --release >/dev/null 2>&1); then
+		fail "$label 应被正式发布门禁拒绝"
+	fi
+}
+
 valid="$(create_fixture valid)"
 (cd "$valid" && ./scripts/release-check.sh --candidate >/dev/null) || fail "有效 fixture 应通过"
 
@@ -122,5 +142,32 @@ cat >"$breaking_approved/docs/codex/BREAKING_CHANGE_APPROVAL.md" <<'EOF'
 Owner 已批准本次发布候选变更。
 EOF
 (cd "$breaking_approved" && ./scripts/release-check.sh --candidate >/dev/null) || fail "带批准文件的破坏性变化应通过"
+
+direct_minor="$(create_fixture direct-minor)"
+cat >"$direct_minor/docs/codex/BREAKING_CHANGE_APPROVAL.md" <<'EOF'
+# 破坏性变化批准
+
+- 变更 ID：`socket-to-grpc-v1`
+EOF
+expect_release_failure "$direct_minor" "v0.1.0" "Socket 直接删除使用 MINOR"
+
+blocked_consumer="$(create_fixture blocked-consumer)"
+cat >"$blocked_consumer/docs/codex/BREAKING_CHANGE_APPROVAL.md" <<'EOF'
+# 破坏性变化批准
+
+- 变更 ID：`socket-to-grpc-v1`
+EOF
+printf '\nblocked-by-consumer-verification\n' >>"$blocked_consumer/docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md"
+(cd "$blocked_consumer" && ./scripts/release-check.sh --candidate >/dev/null) || fail "开发期 candidate 允许保留显式消费方阻断"
+expect_release_failure "$blocked_consumer" "v1.0.0" "消费方证据未写回"
+
+direct_major="$(create_fixture direct-major)"
+cat >"$direct_major/docs/codex/BREAKING_CHANGE_APPROVAL.md" <<'EOF'
+# 破坏性变化批准
+
+- 变更 ID：`socket-to-grpc-v1`
+EOF
+prepare_release_fixture "$direct_major"
+(cd "$direct_major" && CORE_RELEASE_VERSION=v1.0.0 ./scripts/release-check.sh --release >/dev/null) || fail "无消费方阻断的 MAJOR 应通过正式发布门禁"
 
 echo "发布检查 shell 契约测试通过"
