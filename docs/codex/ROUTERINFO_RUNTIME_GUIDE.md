@@ -10,6 +10,29 @@
 
 同名 ServiceContext 只有在规范化配置指纹一致且原实例仍活动时才能复用。配置不同会 fail closed；服务关闭后按实例身份注销，后续可重新创建，不会取得旧缓存、事件或 WebSocket 状态。
 
+## 可信内部调用方
+
+内部专用路由仍使用 Public 的序列化和服务发现能力，但必须用 `router.WithInternalCallers(...)` 声明允许的逻辑服务名。注册完成后白名单随 RouterInfo 一起冻结，`GetInternalCallers()` 返回防御性副本；OpenAPI 路由扩展字段 `x-internal-callers` 用于兼容性审计，不表示浏览器可以直接调用。
+
+```go
+func (g *GetProducts) RouterInfo() *types.RouterInfo {
+	return router.DefaultRouterInfoWithOptions(g,
+		router.WithInternalCallers("shop-user", "shop-order"),
+	)
+}
+```
+
+框架在 `Parse`、`Validation`、`Do` 之前执行统一授权：
+
+| 调用路径 | 可信身份来源 | 能否访问受限路由 |
+| --- | --- | --- |
+| 同进程 `req.CallService` | 发起调用的 Source `ServiceContext.ServiceName()` | 名称在白名单时允许 |
+| 远程 gRPC/mTLS | 已验证客户端证书 SAN，且必须等于载荷声明的 `SourceService` | 名称在白名单时允许 |
+| 普通 HTTP | 无内部身份 | 拒绝 |
+| 伪造 Header、请求字段或 `SourceService` | 调用方自报值不是信任来源 | 拒绝 |
+
+因此 `SourceService` 只是待验证声明。业务 Router 不读取或写入可信身份；只有框架同进程边界或经过 mTLS 验证的 gRPC Server 可以注入。拒绝必须发生在任何参数解析和业务副作用之前。
+
 ## IRouter 请求实例
 
 `IRouter` 是请求级对象。每次执行依次调用：

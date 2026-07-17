@@ -1,70 +1,113 @@
-# 示例 06：Redis 多服务商城
+# 示例 06：可信内部调用的多服务商城
 
-本示例把单体商城拆分为 User、Supplier、Order 三个独立服务，用一个 Redis 同时提供服务发现和 Redis Streams EventBridge。身份使用框架 TestToken，不引入 Casdoor，便于聚焦服务边界、调用和协同。
+本示例把商城拆成 `shop-user`、`shop-supplier`、`shop-order` 三个服务，演示统一 Manage Hook、受限 Public、买家 Private、Redis 发现、gRPC/mTLS、可靠事件、缓存主动失效和本地永久投影。身份由 TestToken 模拟，重点是服务边界，不是第三方登录。
 
-## 服务边界
+## 三类使用者与服务边界
 
-| 服务 | 权威数据 | 外部职责 |
+| 使用者 | 入口 | 可以做什么 |
 | --- | --- | --- |
-| `shop-user` | 用户、本人地址 | 买家唯一入口，组装商品、订单和支付 facade |
-| `shop-supplier` | 供应商、商品 | 供应商管理本人商品，查询本人商品订单 |
-| `shop-order` | 订单、支付类型、支付流水、Outbox | 保存下单快照，执行幂等下单和支付状态机 |
+| 普通用户 | `shop-user` | 注册后维护本人资料和地址；查询供应商、商品、支付类型；下单、撤单、支付、查询本人订单 |
+| 供应商用户 | `shop-supplier` | 注册后维护本人供应商资料和商品、上下架商品、查询本人订单及状态 |
+| 平台管理员 | User/Supplier/Order 的 Manage | 管理用户、供应商、商品和支付类型；查询及驱动订单、支付状态 |
 
-User/Supplier 不复制订单权威副本；查询始终同步调用 Order Service。Order 下单时同步调用 Supplier Service，并冻结商品、供应商、价格和收货地址快照。
+三个服务各自拥有事实：
 
-## 目录与依赖
+| 服务 | 权威数据 | 对外边界 |
+| --- | --- | --- |
+| `shop-user` | `User`、`Address` | 面向普通用户的唯一业务入口；公开 facade、买家 Private、User/Address Manage、唯一订单 WebSocket |
+| `shop-supplier` | `Supplier`、`Product`、本地 `SupplierOrder` 投影 | Supplier/Product/Order Manage；仅供内部服务调用的供应商和商品 Public；没有 Private |
+| `shop-order` | `Order`、`PaymentType`、`PaymentRecord`、Outbox | 管理员 Manage；仅允许 `shop-user` 调用的五个 Public；没有 Private、WebSocket，部署时不暴露 HTTP 端口 |
 
-```text
-contract                 # 无业务依赖的服务名、事件名和稳定错误
-dto/{user,supplier,order,event}
-                         # 跨服务共用 JSON 契约，不引用 Model
-user-service             # API -> models，facade 不保存订单副本
-supplier-service         # API -> business -> models
-order-service            # API -> business -> models，事务内同写 Outbox
-runtime                  # 无业务模型的通用 Outbox worker
-main/{all-in-one,user,supplier,order}
-deploy                   # 三进程 Docker Compose
-```
+跨服务业务 ID 都是数字。`AuthUserID` 只保存在 User/Supplier 本地，用于把登录身份映射为数字 `UserID`/`SupplierID`；DTO、事件和服务间调用不传播认证字符串。
 
-`supplier-service/api/call` 中的类型是 Supplier Service 真实注册的目标 API，只为解决 Go 包依赖分层，不是另一套 client。它不保存地址、连接、重试或序列化逻辑。调用方直接构造该 API，`req.CallService` 根据 `router.WithServiceName` 声明的稳定服务名调用 ServiceResolver。
+## 路由矩阵
 
-## 同步调用
+| 服务 | 路由类型 | 能力 | 调用者 |
+| --- | --- | --- | --- |
+| User | Manage | User 查看/查询/编辑/禁用；Address 完整 CRUD | 本人由 Hook 自动限域；管理员可跨用户管理 |
+| User | Public facade | `GetSuppliers`、`GetProducts`、`GetPaymentTypes` | 外部普通用户；内部再调用事实服务 |
+| User | Private | `AddOrder`、`GetOrders`、`CancelOrder`、`CreatePayment` | 已认证且已建立本地 User 的普通用户 |
+| Supplier | Manage | Supplier 查看/查询/编辑/删除/禁用；Product CRUD/上下架；Order 只读 | 供应商由 Hook 自动限域；管理员可跨供应商管理 |
+| Supplier | 受限 Public | `GetSuppliers`、`GetProducts` | 前者只允许 `shop-user`；后者允许 `shop-user`、`shop-order` |
+| Order | Manage | PaymentType CRUD/启停；Order、PaymentRecord 查询及受控状态命令 | 仅平台管理员 |
+| Order | 受限 Public | `CreateOrder`、`CancelOrder`、`CreatePayment`、`GetOrders`、`GetPaymentTypes` | 仅 `shop-user` |
+
+Manage 不拆成“自管理 API”和“平台管理 API”。同一个 `ManageService` 通过 `SearchBefore`、`DoBefore` 等 Hook，根据可信身份自动添加 owner 条件、冻结归属字段并校验操作权限。供应商被禁用后仍可查看，但不能修改；只有管理员能禁用或重新启用供应商。商品可由所属供应商或管理员上下架。
+
+已被订单引用的供应商和商品不能删除。删除 Hook 只查询 Supplier 服务本地、永久保存的 `SupplierOrder`，不在删除事务中同步调用 Order 服务。供应商订单 Manage 只有 View/Search，供应商只能看到自己的投影，管理员可以查看全部。
+
+## 受限 Public 与可信调用方
+
+Public 表示路由使用公共序列化契约，不等于允许互联网直接访问。内部专用 Public 必须声明调用方白名单：
 
 ```go
-response, err := req.CallService(&orderapi.CreateOrder{
-    ProductID: productID,
-    Quantity: quantity,
-    IdempotencyKey: key,
-    Address: snapshot,
-})
+func (g *GetProducts) RouterInfo() *types.RouterInfo {
+	return router.DefaultRouterInfoWithOptions(g,
+		router.WithServiceName("shop-supplier"),
+		router.WithPath("/api/shop-supplier/getproducts"),
+		router.WithInternalCallers("shop-user", "shop-order"),
+	)
+}
 ```
 
-- Resolver 先查同进程 ServiceContext，未命中再查 Redis ClusterProvider。
-- 远程同步调用使用 gRPC；三进程配置启用应用层 mTLS，不经最终用户 WebSocket。
-- 写请求只发送一次；User 生成 IdempotencyKey，Order 用唯一约束返回同一订单。
-- 无健康节点或 Redis 不可用时 fail closed，不回退 `AttachServices`。
+校验发生在 `Parse`、`Validation`、`Do` 之前：
 
-## 可靠事件
+- 同进程调用的可信身份来自发起调用的 Source `ServiceContext`。
+- 跨进程调用的 `SourceService` 只是声明；只有客户端证书的已验证 mTLS SAN 与该声明一致时，框架才注入可信身份。
+- 普通 HTTP 请求没有内部服务身份，即使知道 URL 或伪造 Header 也会被拒绝。
+- `insecure` 只用于 all-in-one 本地调试；远程受限路由必须使用 mTLS，或由独立实现提供等价且可验证的 mesh 身份。
 
-1. 业务事实与 Outbox 在同一 SQLite 事务中写入。
-2. Outbox worker 只在 `ServiceEventBridge.Publish` 成功后标记已发布。
-3. Redis Streams 消费组使用逻辑服务名：同服务多实例竞争，不同服务各收一份。
-4. `ControlHandler` 成功后才 ACK；失败消息留在 pending，由同组存活消费者超时认领。
-5. 消费方以 EventID 写 Inbox，重复投递不重复执行缓存失效或 WebSocket 通知。
-6. User/Supplier 的外部控制主题必须全部订阅成功；任一主题失败会撤销本轮已建立订阅、记录 `service_external_control_subscribe_failed` 并终止服务，禁止部分启用。
+调用方直接构造事实服务注册的 Public API，再使用 `req.CallService`；代码中不建立保存地址、连接或重试状态的 client，也不设置第二套 `api/call` 目录。
 
-WebSocket 只面向最终买家和供应商。User 按 Token UID 过滤，Supplier 按 Token 映射的 SupplierID 过滤；未在线用户不积压观察通知。
+## 下单、撤单和支付
 
-## 缓存与本地存储
+买家调用 `AddOrder` 时必须提供 `requestID`。User 服务把它规范化为 `{UserID}:{requestID}` 后传给 Order；Order 保存请求指纹并用唯一约束收敛并发重试：相同请求返回同一订单，不同请求内容复用同一 key 会失败。
 
-- User 的商品 facade 使用 30 秒路由缓存，缓存键包含全部查询条件；`ProductChanged` 和 `SupplierChanged` 都通过 EventBridge 立即清理全部商品查询缓存。
-- User 和 Supplier 的订单查询使用 10 秒路由缓存，缓存键只来自 Token 解析后的可信身份；`OrderChanged` 和 `PaymentChanged` 到达后清理订单缓存并通知对应 WebSocket 会话。
-- 没有可靠失效事件的支付类型查询不启用缓存，避免为了命中率引入不可解释的陈旧窗口。
-- 每个进程在创建 WebServer 前初始化自己拥有的 SQLite 表。初始化后保存一个稳定的 SQLite 克隆模板，请求、事务与 Outbox worker 均从模板创建独立适配器，避免与 Manage 使用的全局适配器共享事务状态或可变路径字段。
+Order 创建时同步读取已启用商品和供应商，随后在同一事务中保存：
 
-这些策略只优化 facade 读路径，不改变 User/Supplier 同步读取事实服务的权威边界；Redis 也不保存业务权威模型。
+- 数字 User/Supplier/Product/Address ID；
+- 供应商、商品、单价、数量和收货地址快照；
+- 初始订单状态与 `OrderRevision`；
+- 完整快照 `OrderCreated` Outbox 事件。
 
-## 启动
+撤单不删除订单事实。未支付订单进入取消状态；已支付订单进入退款流程。支付尝试使用稳定字符串 `PaymentID`，重复处理中请求不会创建第二条流水。订单、支付变更分别发布 `OrderStatusChanged`、`PaymentChanged`；支付类型变更发布 `PaymentTypeChanged`。
+
+## 可靠事件与永久投影
+
+1. 业务事实和 Outbox 在同一 SQLite 事务中提交。
+2. Worker 只在 `ServiceEventBridge.Publish` 成功后标记事件已发布。
+3. Redis Streams 以逻辑服务名作为消费组：同服务实例竞争，不同服务各消费一份。
+4. Handler 成功后才 ACK；失败消息留在 pending，供存活消费者认领。
+5. User/Supplier 先以 `EventID` 写 Inbox，再执行副作用，重复投递不会重复处理。
+6. Supplier 按 `OrderID` 幂等 upsert `SupplierOrder`，并保留最新 `OrderRevision`；该永久投影同时服务供应商订单查询和删除保护。
+7. User 消费订单事件后，只失效对应数字 `UserID` 的订单缓存，并通知该用户的 WebSocket。
+
+## 缓存
+
+| 读路径 | TTL | 主动失效 |
+| --- | ---: | --- |
+| Supplier 内部供应商/商品 Public | 30 秒 | Supplier/Product 事务提交后本地失效 |
+| User 供应商/商品 facade | 30 秒 | `SupplierChanged`、`ProductChanged` |
+| Order 支付类型 Public | 30 秒 | PaymentType 事务提交后本地失效 |
+| User 支付类型 facade | 30 秒 | `PaymentTypeChanged` |
+| User 本人订单 Private | 10 秒 | 对应用户的 Order/Payment 事件 |
+
+缓存键包含全部查询条件；认证读路径的身份只能来自 Token 映射后的数字 ID。缓存只是可重建副本，Redis 不保存业务权威模型。
+
+## 目录
+
+```text
+contract                         # 稳定服务名、事件名和错误
+dto/{user,supplier,order,event}  # 跨服务 JSON 契约，不引用持久化 Model
+user-service                     # User/Address Manage、外部 facade、买家 Private
+supplier-service                 # Supplier/Product/Order Manage、内部 Public、永久投影
+order-service                    # 内部 Public、管理员 Manage、订单/支付事实与 Outbox
+runtime                          # 通用 Outbox worker 和外部控制订阅
+main/{all-in-one,user,supplier,order}
+deploy                           # 三进程 Docker Compose 与证书挂载说明
+```
+
+## 运行模式
 
 先启动 Redis：
 
@@ -79,55 +122,36 @@ SHOP_REDIS_ADDR=127.0.0.1:6379 \
 go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -grpc 38080 -view 0
 ```
 
-`all-in-one` 使用 local provider 和 `insecure` gRPC，Redis 仅承载 EventBridge。它只用于本地断点和快速阅读，不提供故障隔离、独立扩容或进程级资源隔离。显式 `-grpc 38080` 为框架 `server` 与三个业务 ServiceContext 分配 `38080..38083`，避免与常见的本机 `18080` 端口冲突。
+all-in-one 使用本地 Resolver 和 `insecure` gRPC，只用于开发。可信调用方仍由 Source `ServiceContext` 注入，不允许用 HTTP 假冒。
 
-三进程部署演示：
+三进程部署：
 
 ```bash
 docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml up --build
 ```
 
-Compose 只映射 User `18081` 和 Supplier `18082` HTTP 端口。Order HTTP 和所有 gRPC 端口只在 Docker 网络中可见。Redis 发现使用 `core:discovery:*`，事件使用 `core:event:*`。启动前必须通过部署密钥系统向 `deploy/certs` 注入 CA 和三个服务身份；Compose 仅以只读方式挂载该目录，仓库不包含证书或私钥。
+| 进程 | 实际业务 HTTP | 内部 gRPC | 宿主机暴露 |
+| --- | ---: | ---: | --- |
+| User | 18081 | 28081 | 18081 |
+| Supplier | 18082 | 28082 | 18082 |
+| Order | 18083 | 28083 | 不暴露 |
 
-端口由框架按“命令行 `-p` 基准端口 + DataCenterID - 1”解析，示例固定映射如下，部署时必须成组修改，不能只改 Compose 的 `ports`：
-
-| 进程 | `-p` 基准端口 | DataCenterID | 实际业务 HTTP | 内部 gRPC | 宿主机暴露 |
-| --- | ---: | ---: | ---: | ---: | --- |
-| User | 18080 | 2 | 18081 | 28081 | 18081 |
-| Supplier | 18081 | 2 | 18082 | 28082 | 18082 |
-| Order | 18082 | 2 | 18083 | 28083 | 不暴露 |
-
-同进程入口为了让三个 ServiceContext 的 MachineID 空间保持独立，使用 DataCenterID `2/3/4`，业务 HTTP 仍固定为 `18081/18082/18083`。生产配置应从统一配置源生成这些参数，避免手工分别维护命令、DataCenterID 和端口映射。
-
-## gRPC 生产安全
-
-- 应用层 mTLS：`Transport.GRPC.Security.Mode=mtls`，由密钥系统注入 CA、服务证书和私钥。Compose 展示的是这种模式。
-- 服务身份：`Transport.GRPC.Security.ServerName={service}` 使客户端按每次调用的逻辑目标服务名校验证书；三进程证书分别必须包含 `shop-user`、`shop-supplier`、`shop-order` SAN，不得用共享 `localhost` 身份代替服务身份。
-- 服务网格：`Transport.GRPC.Security.Mode=mesh`，应用不读取证书文件，mTLS 身份、加密和证书轮换由 sidecar 与网格控制面负责。
-- 即使 gRPC 只暴露在私网，`insecure` 也不是生产安全方案；它只用于 all-in-one 本地调试。
-
-三进程配置的 `Transport.Internal` 固定为 `grpc`，`Transport.Fallback` 为空。本机管理路由 `/api/servermanage/transportstats` 返回请求所属 ServiceContext 的结构化传输计数；默认未授权请求仅允许 loopback，RFC1918 私网地址也会被拒绝。集成测试比较 UAT 前后快照，不解析日志。
+Compose 通过 Redis 发现服务，并把 `deploy/certs` 只读挂载到 `/run/secrets/shop-grpc`。三个证书必须由同一 CA 签发，允许客户端和服务端认证，并分别包含 `shop-user`、`shop-supplier`、`shop-order` DNS SAN。仓库不提交证书或私钥。
 
 ## 验收
 
 ```bash
-# 模型、业务、路由和 Outbox/Inbox
+# 模型、业务、路由、Outbox/Inbox
 go test -race ./examples/06-shop-microservices/... -count=1
 
-# 同进程真实 HTTP/WebSocket/Redis
-SHOP_REDIS_ADDR=127.0.0.1:6379 \
+# 同进程真实 HTTP、Manage、Private、WebSocket 与服务间调用
 go test -race ./examples/integration/06-shop-microservices -count=1 -timeout=15m
 
-# 最终用户活动 UAT：商品快照、订单归属、支付与供应商视图
-SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go test -race ./examples/integration/06-shop-microservices \
-  -run TestUATBuyerOrderLifecycle -count=1 -timeout=15m
-
-# 三个独立 race 进程、Redis 发现、mTLS gRPC 和真实传输计数
-SHOP_REDIS_ADDR=127.0.0.1:6379 \
+# 三进程 Redis 发现、mTLS、gRPC 传输计数及错误证书拒绝
 go test -race ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=15m
+
+# 部署结构；输出中 order 不得有 ports
+docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml config
 ```
 
-集成测试不写 `AttachServices`，因此绿灯可以直接证明新 Resolver 链路已生效。
-
-UAT 聚焦用户活动产生的业务事实，不替代 API 矩阵测试：它会在下单后修改商品价格，确认订单仍保留下单价格快照；随后验证支付确认和已支付订单撤销能通过 EventBridge 主动失效缓存，并在买家与供应商视图中收敛到同一状态，同时确保其他用户看不到该订单。
+同进程和三进程测试都经过真实 `ServiceContext`/`ServiceResolver`。三进程测试还断言 User→Order、Order→Supplier 的 gRPC 计数增长、HTTP 计数为零，并拒绝错误 PKI。

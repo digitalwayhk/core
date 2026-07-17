@@ -47,3 +47,9 @@ go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
 配置扫描发现 `docker/local/etc` 下 13 份 JSON 仍含顶层 `SocketPort`。通过 Core `ReadConfig` 加载临时 `gateway.json` 副本时，`migrateConfig` 会先移除已废弃的 Socket 字段；随后 `conf.MustLoad` 因既有 `Telemetry.Batcher=jaeger` 不属于 go-zero 当前允许值而 fail closed。该失败不是本次 Socket 删除引入，但会阻止消费方原样升级。futures 需先选择当前受支持的 telemetry exporter 并更新这些配置，再复跑迁移后的完整配置 smoke。
 
 因此正式发布状态仍为 `blocked-by-consumer-verification`，不得 tag 或发布；Core 开发期 `--candidate`、源码 smoke 与本次 gRPC 实现验收可以通过。阻断解除必须记录 futures 配置迁移提交和复跑结果。
+
+## 可信内部调用方的消费方迁移
+
+采用 `router.WithInternalCallers` 后，受限 Public 的 HTTP 直连不再是兼容调用方式。消费方应直接构造目标服务注册的 API，通过 `req.CallService` 进入 Core Resolver：同进程由源 ServiceContext 提供身份，跨进程由 mTLS 客户端证书 SAN 绑定 `SourceService`。不得通过 Header、请求字段、静态地址 client 或仅自报服务名绕过。
+
+消费方 smoke 至少覆盖：允许服务成功、错误服务在 Parse 前拒绝、普通 HTTP 拒绝、无证书/错误 SAN 拒绝，以及重试写请求具备业务 `requestID` 幂等。该变化是加性的安全能力；一旦现有路由增加白名单，HTTP 可达性会收紧，必须随迁移说明和路由兼容快照一起发布。

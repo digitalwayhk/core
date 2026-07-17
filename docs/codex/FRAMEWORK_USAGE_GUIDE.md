@@ -27,6 +27,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 跨节点 WebSocket | ClusterProvider、CrossNodeNoticeBroker | `ROUTERINFO_RUNTIME_GUIDE.md` | 集群 `on/auto`；节点地址可达 | `go test -race ./pkg/server/cluster ./pkg/server/types` | Conditional |
 | 配置 profile | `ServerConfig.ApplyDefaults/Validate` | 配置能力矩阵 | 显式环境/profile | `./scripts/test.sh config-contract` | Stable |
 | 内部传输选择 | `transport.BuildSelector` | 配置能力矩阵 | http/grpc/socket；QUIC/MQ transport 被拒绝 | `./scripts/test.sh config-contract` | Conditional |
+| 受限内部 Public | `router.WithInternalCallers`、`req.CallService` | `examples/06-shop-microservices` | 同进程 ServiceContext；跨进程必须有可验证 mTLS 身份 | `./scripts/test.sh integration-shop-microservices` | Stable |
 | 本地集群 | LocalProvider | 配置能力矩阵 | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
 | etcd/Consul 集群 | Etcd/Consul Provider | 外部依赖集成文档 | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
 | MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams 或 NATS JetStream；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker` | Conditional |
@@ -62,6 +63,10 @@ RouterInfo 所有权、IRouter 对象池、缓存层级、EventBridge 和 WebSoc
 ```text
 /api/servermanage/{structNameLower}
 ```
+
+Public 只描述路由契约，不天然表示互联网可访问。只供其他服务调用的 Public 应声明 `router.WithInternalCallers("service-a", ...)`。同进程身份来自源 ServiceContext；远程身份必须由已验证 mTLS 客户端证书 SAN 绑定到 `SourceService`。普通 HTTP、伪造字段和未验证的远程身份会在 Parse 前失败。调用方直接构造目标服务已注册 API 并使用 `req.CallService`，不要另建地址型 client 或 `api/call` 副本。
+
+示例 06 的 Supplier 用统一 Manage Hook 同时处理供应商本人和管理员：Search Hook 限定 owner，Do Hook 冻结归属并检查禁用状态。Order 可靠事件在 Supplier 本地形成永久 `SupplierOrder`，删除保护只查询本地引用，不在 Hook 中跨服务查询。
 
 ## 模型选择
 

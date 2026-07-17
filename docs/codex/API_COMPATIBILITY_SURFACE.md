@@ -19,6 +19,7 @@
 | `pkg/server/config.ServerConfig` 及项目自有子配置 | Stable（按能力矩阵） | server/config | 服务配置、默认化和启动校验 | 任务 14 配置矩阵与 `config-contract` |
 | `pkg/server/event` 的 EventBus、EventStream 与 Bridge 入口 | Stable（按能力矩阵） | server/event | 进程内事件与受支持 MQ 事件流 | event 单元测试与任务 14 生命周期测试 |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
+| `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
@@ -39,6 +40,7 @@
 | 表面 | 级别 | 契约 | 证据 |
 | --- | --- | --- | --- |
 | 普通 public/private 路由 | Stable | `/api/{service}/{router}`；private 要求认证 | `router.DefaultRouterInfo`、`examples/01-simple-shop` 集成测试 |
+| 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；OpenAPI `x-internal-callers` |
 | Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}` | `service/manage.RouterInfo`、CRUD 测试 |
 | ServerManage | Stable | `/api/servermanage/{router}`，注册时按服务重写 | server API 与 `TestToken` 文档 |
 | 路由元数据 | Stable | method、path、pathType、auth、service | `internal/compat/testdata/routes.golden.json` |

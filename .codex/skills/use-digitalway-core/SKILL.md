@@ -20,7 +20,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 模型和 Manage 继承 | `examples/03-shop-inheritance` | Shop/BaseData/Business 多层模型、Manage Hook 继承、只读子表、联合有效性 |
 | 性能优化 | `examples/04-shop-performance` | RouterInfo L1/L2/L3、EventBridge 主动失效、SingleFlight、Badger 可靠本地写、Group Commit、基准与分位数 |
 | Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
-| Redis 多服务 | `examples/06-shop-microservices` | 三服务边界、共享 DTO、Redis 发现、默认 gRPC、mTLS、CallService、可靠 EventBridge、Outbox/Inbox、同进程/三进程测试 |
+| Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
 
 对应真实进程测试位于 `examples/integration/01-simple-shop`至 `05-shop-casdoor-rbac`，多服务还必须同时参考 `examples/integration/06-shop-microservices` 和 `06-shop-microservices-three-process`；通用进程、HTTP、TestToken 和 WebSocket 能力只复用 `examples/integration/helpers.go`。
 
@@ -68,6 +68,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`，也不启用第二套 zrpc 服务发现。
 15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
+17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。
+18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
 
 ## 工作流
 
@@ -83,6 +85,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
+- 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
 - 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。

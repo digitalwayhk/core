@@ -70,6 +70,14 @@ Redis、Consul 等跨主机发现使用 `mtls`，为每个服务签发包含稳�
 - 每个 ServiceContext 拥有独立 gRPC listener、标准 health 和有界关闭；关闭顺序为 `NOT_SERVING -> 注销发现 -> GracefulStop/Stop -> 关闭 zrpc Client pool`。
 - EventBridge 处理内部异步事件；WebSocket 只面向最终外部用户，二者都不是同步 RPC 备用协议。
 
+## 远程调用方身份
+
+受限 Public 不能只信任 gRPC 载荷中的 `SourceService`。该字段是调用方声明，服务端必须从已完成双向验证的 TLS peer 中读取客户端证书身份，并要求逻辑服务名与客户端证书的 mTLS SAN 完全一致，之后才把身份交给 `WithInternalCallers` 白名单校验。
+
+缺少客户端证书、证书未通过 CA 验证、SAN 不匹配、只修改 `SourceService`、普通 HTTP 直连，都会在目标 Router 的 `Parse` 之前失败。`insecure` 远程调用不能满足此信任条件。`mesh` 只有在应用接入了可验证且不可由请求伪造的工作负载身份时，才可为受限路由提供等价信任；仅声明由 sidecar 加密并不自动注入调用方身份。
+
+同进程调用不经过证书校验，可信身份直接来自源 `ServiceContext`，但仍执行同一白名单。示例 06 同时用 all-in-one 和三进程 mTLS 测试证明两条路径。
+
 ## 升级与回滚
 
 1. 跨主机部署先准备并验证 mTLS 证书或 mesh 身份层；默认 `mtls` 缺少 CA/证书/私钥时会 fail closed，远程拓扑不得临时改用 `insecure`。
