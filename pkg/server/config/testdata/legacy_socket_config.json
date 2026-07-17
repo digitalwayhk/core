@@ -29,7 +29,7 @@
   "Profiling": {"AuthPassword": "", "AuthUser": "", "CheckInterval": "0s", "CpuThreshold": 0, "Name": "", "ProfileType": {"Block": false, "CPU": false, "Goroutines": false, "Logger": false, "Memory": false, "Mutex": false}, "ProfilingDuration": "0s", "ServerAddr": "", "UploadRate": "0s"},
   "Prometheus": {"Host": "", "Path": "", "Port": 0},
   "RemoteAccessManageAPI": false,
-  "RouteCache": {"L1": {"Limit": 0, "MaxBytes": 0, "MaxEntries": 0, "MaxValueBytes": 1048576}, "L2": {"CorruptionPolicy": "fail", "Enable": false, "MaxBytes": 536870912, "Path": ""}, "Mode": "local", "Redis": {"Addr": "", "DB": 0, "OnUnavailable": "fail", "Password": "", "Prefix": "digitalway:routecache"}, "TTL": "10s"},
+  "RouteCache": {"L1": {"Limit": 10000, "MaxBytes": 0, "MaxEntries": 0, "MaxValueBytes": 1048576}, "L2": {"CorruptionPolicy": "fail", "Enable": false, "MaxBytes": 536870912, "Path": ""}, "Mode": "local", "Redis": {"Addr": "", "DB": 0, "OnUnavailable": "fail", "Password": "", "Prefix": "digitalway:routecache"}, "TTL": "10s"},
   "RunIp": "127.0.0.1",
   "ServerManageAuth": {"AccessExpire": 86400, "AccessSecret": "legacy-server-manage-access", "CasDoor": {"Enable": false, "WebhookSecret": "", "YamlFilePath": ""}, "Logto": {"Enable": false, "ExpectedAudience": "", "Issuer": ""}, "RefreshExpire": 0, "RefreshSecret": ""},
   "Shutdown": {"WaitTime": "0s", "WrapUpTime": "0s"},

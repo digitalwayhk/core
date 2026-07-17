@@ -206,25 +206,20 @@ func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
 			}
 			if cfg.Address != "" && cfg.Port != 0 {
 				ctx.SetAttachServiceAddress(cfg.Name)
-				err := ctx.RegisterObserve(&public.Observe{})
-				if err != nil {
-					logx.Errorw("service_dependency_link_failed",
-						logx.Field("service", ctx.Service.Name),
-						logx.Field("dependency", cfg.Name),
-						logx.Field("error", err),
-					)
-				} else {
-					logx.Infow("service_dependency_linked",
-						logx.Field("service", ctx.Service.Name),
-						logx.Field("dependency", cfg.Name),
-					)
-				}
-			} else {
-				logx.Errorw("service_dependency_address_missing",
-					logx.Field("service", ctx.Service.Name),
-					logx.Field("dependency", cfg.Name),
-				)
 			}
+		}
+		if err := ctx.RegisterObserve(&public.Observe{}); err != nil {
+			logx.Errorw("service_dependency_link_failed",
+				logx.Field("service", ctx.Service.Name),
+				logx.Field("error", err),
+			)
+			continue
+		}
+		for _, cfg := range ctx.Config.AttachServices {
+			logx.Infow("service_dependency_linked",
+				logx.Field("service", ctx.Service.Name),
+				logx.Field("dependency", cfg.Name),
+			)
 		}
 	}
 }

@@ -24,8 +24,8 @@
 
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
-| Internal/Fallback 的 grpc、http、socket；MaxRetries/RetryDelay；gRPC message size | selector、ServiceContext retry、gRPC transport 消费；自定义 MaxRecv/MaxSend 经 ApplyDefaults 保持不变 | ServiceContext/TransportSelector | supported |
-| Internal/Fallback 的 quic、mq；HTTP/Socket/GRPC Enable；QUIC 配置 | 非默认启用时 Validate 明确失败；false/空值只是 inactive 默认 | 无 | rejected |
+| Internal/Fallback 的 grpc、http；MaxRetries/RetryDelay；gRPC message size | selector、ServiceContext retry、gRPC transport 消费；自定义 MaxRecv/MaxSend 经 ApplyDefaults 保持不变 | ServiceContext/TransportSelector | supported |
+| Internal/Fallback 的 quic、mq；HTTP Enable；QUIC 配置 | 非默认启用时 Validate 明确失败；false/空值只是 inactive 默认 | 无 | rejected |
 | GRPC Port | 仅 0 或固定默认 19090 可通过，自定义端口返回 not configurable；19090 是旧配置兼容默认，selector 不消费 | 无可配置端口 owner | rejected |
 
 ## MQ 与 Event

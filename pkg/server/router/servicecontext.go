@@ -1548,9 +1548,14 @@ func (own *ServiceContext) SetHttpServer(server types.IRunServer) {
 	own.Service.HttpServer = server
 }
 func (own *ServiceContext) GetServers() []service.Service {
-	items := make([]service.Service, 0, 2)
+	items := make([]service.Service, 0, 2+len(own.Service.GetInternalServers()))
 	if own.Service.HttpServer != nil {
 		items = append(items, own.Service.HttpServer)
+	}
+	for _, server := range own.Service.GetInternalServers() {
+		if server != nil {
+			items = append(items, server)
+		}
 	}
 	if own.grpcServer != nil {
 		items = append(items, &managedGRPCService{owner: own, server: own.grpcServer})

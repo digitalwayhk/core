@@ -23,8 +23,9 @@ type Service struct {
 	Routers          []IRouter `json:"-"`
 	SubscribeRouters []*ObserveArgs
 	AttachService    map[string]*ServiceAttach
-	HttpServer       IRunServer  `json:"-"`
-	Instance         interface{} `json:"-"`
+	HttpServer       IRunServer   `json:"-"`
+	internalServer   []IRunServer `json:"-"`
+	Instance         interface{}  `json:"-"`
 }
 
 func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
@@ -47,6 +48,20 @@ func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
 	var txt []byte
 	txt, err = own.HttpServer.Send(payload)
 	return txt, err
+}
+
+// AddInternalServer 注册由 ServiceContext 统一管理的协议扩展服务。
+// 自定义实现必须遵守 IRunServer 生命周期；该入口不代表已删除的 Socket 传输。
+func (own *Service) AddInternalServer(server IRunServer) {
+	if own.internalServer == nil {
+		own.internalServer = make([]IRunServer, 0)
+	}
+	own.internalServer = append(own.internalServer, server)
+}
+
+// GetInternalServers 返回已注册的协议扩展服务。
+func (own *Service) GetInternalServers() []IRunServer {
+	return own.internalServer
 }
 
 // ServiceAttach 附加引用的服务(通过订阅或CallService加载)
