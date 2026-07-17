@@ -294,7 +294,12 @@ func (s *clusterSwitcher) Shutdown(ctx context.Context, active DiscoveryProvider
 			return nil
 		}
 		if err := s.closeProvider(ctx, label, provider, flight); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return err
+			}
+			if retryErr := s.closeProvider(ctx, label, provider, flight); retryErr != nil {
+				return errors.Join(err, retryErr)
+			}
 		}
 		closed[provider] = struct{}{}
 		return nil

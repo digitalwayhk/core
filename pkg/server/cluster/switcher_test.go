@@ -41,6 +41,24 @@ type retryCloseProvider struct {
 	block      <-chan struct{}
 }
 
+type delayedRetryCloseProvider struct {
+	cluster.DiscoveryProvider
+	closeCount atomic.Int32
+	started    chan struct{}
+	release    chan struct{}
+	firstDone  chan struct{}
+}
+
+func (p *delayedRetryCloseProvider) Close() error {
+	if p.closeCount.Add(1) == 1 {
+		close(p.started)
+		<-p.release
+		close(p.firstDone)
+		return errors.New("模拟异步关闭失败")
+	}
+	return p.DiscoveryProvider.Close()
+}
+
 type contextCloseProvider struct {
 	cluster.DiscoveryProvider
 	closeCount        atomic.Int32
@@ -366,6 +384,37 @@ func TestClusterSwitcher_ShutdownAfterFinalizeFailureClosesRetiredOnly(t *testin
 	assert.Equal(t, int32(2), retired.closeCount.Load())
 	assert.Zero(t, active.closeCount.Load())
 	_ = activeBase.Close()
+}
+
+func TestClusterSwitcher_ShutdownRetriesFailedFinalizeFlight(t *testing.T) {
+	retiredBase := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	retired := &delayedRetryCloseProvider{
+		DiscoveryProvider: retiredBase,
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+		firstDone:         make(chan struct{}),
+	}
+	active := cluster.NewLocalProvider(time.Second, time.Second, time.Second)
+	switcher := cluster.NewClusterSwitcher(retired, "svc")
+	transaction := switcher.(cluster.ProviderSwitchTransaction)
+	require.NoError(t, switcher.Begin(context.Background(), active))
+	require.NoError(t, transaction.Promote(context.Background()))
+
+	finalizeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	finalizeDone := make(chan error, 1)
+	go func() { finalizeDone <- transaction.Finalize(finalizeCtx) }()
+	<-retired.started
+	require.ErrorIs(t, <-finalizeDone, context.DeadlineExceeded)
+	close(retired.release)
+	<-retired.firstDone
+
+	shutdown := switcher.(interface {
+		Shutdown(context.Context, cluster.DiscoveryProvider) error
+	})
+	require.NoError(t, shutdown.Shutdown(context.Background(), active))
+	assert.Equal(t, int32(2), retired.closeCount.Load())
+	_ = active.Close()
 }
 
 func TestClusterSwitcher_BeginMigratesOnlyScopedServiceNodes(t *testing.T) {
