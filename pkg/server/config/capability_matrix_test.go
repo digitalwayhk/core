@@ -31,17 +31,8 @@ func TestCapabilityMatrixExactlyMatchesProjectServerConfigFields(t *testing.T) {
 	codePaths := projectConfigFieldPaths(reflect.TypeOf(ServerConfig{}), "ServerConfig")
 	matrixPaths := sortedMatrixPaths(entries)
 	missing, stale := sortedPathDifference(codePaths, matrixPaths), sortedPathDifference(matrixPaths, codePaths)
-	// Task 9 owns the capability-matrix documentation update. Until then, keep
-	// the allowed Task 1 schema delta exact so unrelated drift still fails.
-	assert.Equal(t, []string{
-		"ServerConfig.Transport.GRPC.Security",
-		"ServerConfig.Transport.GRPC.Security.CAFile",
-		"ServerConfig.Transport.GRPC.Security.CertFile",
-		"ServerConfig.Transport.GRPC.Security.KeyFile",
-		"ServerConfig.Transport.GRPC.Security.Mode",
-		"ServerConfig.Transport.GRPC.Security.ServerName",
-	}, missing, "能力矩阵缺失字段超出 Task 1 过渡范围: %v", missing)
-	assert.Equal(t, []string{"ServerConfig.Transport.GRPC.Enable"}, stale, "能力矩阵陈旧字段超出 Task 1 过渡范围: %v", stale)
+	assert.Empty(t, missing, "能力矩阵缺失字段: %v", missing)
+	assert.Empty(t, stale, "能力矩阵含陈旧字段: %v", stale)
 }
 
 func TestParseCapabilityMatrixRejectsInvalidMachineChecklist(t *testing.T) {

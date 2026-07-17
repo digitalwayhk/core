@@ -152,6 +152,12 @@
 | `ServerConfig.Transport.GRPC.Port` | supported | gRPC server、NodeInfo、ServiceResolver | 0 按 HTTP Port 派生；显式值允许 1..65535 |
 | `ServerConfig.Transport.GRPC.MaxRecvMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.Transport.GRPC.MaxSendMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
+| `ServerConfig.Transport.GRPC.Security` | supported | gRPC client/server | 按 Mode 构造标准 transport credentials 或委托 mesh |
+| `ServerConfig.Transport.GRPC.Security.Mode` | supported | TransportConfig.Validate、gRPC client/server | insecure/tls/mtls/mesh；外部发现默认 mtls |
+| `ServerConfig.Transport.GRPC.Security.CAFile` | supported | gRPC client/server TLS | tls/mtls 加载 CA；缺失或无效时启动失败 |
+| `ServerConfig.Transport.GRPC.Security.CertFile` | supported | gRPC client/server TLS | mtls 加载服务证书；缺失或无效时启动失败 |
+| `ServerConfig.Transport.GRPC.Security.KeyFile` | supported | gRPC client/server TLS | mtls 加载私钥；缺失或无效时启动失败 |
+| `ServerConfig.Transport.GRPC.Security.ServerName` | supported | zrpc client TLS | 固定名称或 `{service}` 动态目标服务名校验 |
 | `ServerConfig.RouteCache` | supported | ServiceContext | 规范化配置并创建服务级 RouteCacheManager |
 | `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | off/local 可用；shared 要求 Redis 与 EventBridge 外部失效订阅同时就绪 |
 | `ServerConfig.RouteCache.TTL` | supported | RouteCacheManager | 作为路由未显式指定时的默认 TTL |
