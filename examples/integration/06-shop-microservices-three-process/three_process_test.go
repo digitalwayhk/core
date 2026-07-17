@@ -10,13 +10,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
-	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
 	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
@@ -40,7 +41,6 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	require.NoError(t, err)
 	defer order.Stop()
 	waitProcessReady(t, user, "/api/shop-user/getproducts")
-	waitProcessReady(t, supplier, "/api/shop-supplier/getproducts")
 	grpcPorts := []int{
 		readServiceGRPCPort(t, user, "shop-user"),
 		readServiceGRPCPort(t, supplier, "shop-supplier"),
@@ -62,20 +62,36 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 		require.Zero(t, before[index].Transport.HTTPSelected)
 	}
 
-	supplierToken := supplier.TokenFor(t, "supplier-remote", 0)
-	createdProduct := supplier.RequestJSON(t, http.MethodPost, "/api/shop-supplier/addproduct", supplierToken, map[string]interface{}{"name": "远程商品", "code": "remote-product", "price": "9.90"})
+	supplierToken := supplier.TokenFor(t, "supplier-remote", 1)
+	createdProduct := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/add", supplierToken, map[string]interface{}{"name": "远程商品", "code": "remote-product", "price": "9.90"})
 	require.True(t, createdProduct.Success, createdProduct.ErrorMessage)
-	var product supplierdto.Product
-	require.NoError(t, json.Unmarshal(createdProduct.Data, &product))
-	updated := supplier.RequestJSON(t, http.MethodPost, "/api/shop-supplier/setproduct", supplierToken, map[string]interface{}{"productID": product.ID, "enabled": true})
+	var productRaw struct {
+		ID         string `json:"id"`
+		SupplierID uint   `json:"supplierID"`
+		Name       string `json:"name"`
+		Code       string `json:"code"`
+		Price      string `json:"price"`
+	}
+	require.NoError(t, json.Unmarshal(createdProduct.Data, &productRaw))
+	productID, err := strconv.ParseUint(productRaw.ID, 10, 64)
+	require.NoError(t, err)
+	product := supplierdto.Product{ID: uint(productID), SupplierID: productRaw.SupplierID, Name: productRaw.Name, Code: productRaw.Code, Price: decimal.RequireFromString(productRaw.Price)}
+	updated := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/setproductenabled", supplierToken, map[string]interface{}{"id": productRaw.ID, "enabled": true})
 	require.True(t, updated.Success, updated.ErrorMessage)
 
+	userManageToken := user.TokenFor(t, "buyer-remote", 1)
 	userToken := user.TokenFor(t, "buyer-remote", 0)
-	createdAddress := user.RequestJSON(t, http.MethodPost, "/api/shop-user/addaddress", userToken, map[string]interface{}{"recipient": "远程用户", "detail": "2 号"})
+	createdAddress := user.RequestJSON(t, http.MethodPost, "/api/manage/shop-user/addressmanage/add", userManageToken, map[string]interface{}{"recipient": "远程用户", "detail": "2 号"})
 	require.True(t, createdAddress.Success, createdAddress.ErrorMessage)
-	var address userdto.Address
-	require.NoError(t, json.Unmarshal(createdAddress.Data, &address))
-	createdOrder := user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", userToken, map[string]interface{}{"productID": product.ID, "quantity": 3, "addressID": address.ID})
+	var addressRaw struct {
+		ID        string `json:"id"`
+		Recipient string `json:"recipient"`
+		Detail    string `json:"detail"`
+	}
+	require.NoError(t, json.Unmarshal(createdAddress.Data, &addressRaw))
+	addressID, err := strconv.ParseUint(addressRaw.ID, 10, 64)
+	require.NoError(t, err)
+	createdOrder := user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", userToken, map[string]interface{}{"requestID": "remote-request-1", "productID": product.ID, "quantity": 3, "addressID": addressID})
 	if !createdOrder.Success {
 		for index, process := range processes {
 			t.Logf("process %d transport stats: %+v", index, process.TransportStats(t))
@@ -87,7 +103,7 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	require.True(t, createdOrder.Success, createdOrder.ErrorMessage)
 	var result orderdto.Order
 	require.NoError(t, json.Unmarshal(createdOrder.Data, &result))
-	assert.Equal(t, "supplier-remote", result.Product.SupplierID)
+	assert.Equal(t, product.SupplierID, result.Product.SupplierID)
 	assert.Equal(t, 3, result.Quantity)
 
 	after := make([]integration.TransportStatsSnapshot, len(processes))

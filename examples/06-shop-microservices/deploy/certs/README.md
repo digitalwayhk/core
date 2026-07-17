@@ -1,10 +1,8 @@
-# gRPC certificate mount
+# gRPC 证书挂载目录
 
-This directory is a mount point, not a certificate store. Do not commit CA
-keys, service private keys, or issued certificates.
+此目录只是部署挂载点，不是证书仓库。禁止提交 CA 私钥、服务私钥或已签发证书。
 
-Before starting the Compose example, provision these files through the
-deployment secret manager:
+启动 Compose 示例前，应通过部署密钥管理器提供以下文件：
 
 ```text
 ca.crt
@@ -16,13 +14,10 @@ shop-order.crt
 shop-order.key
 ```
 
-Service certificates must be signed by `ca.crt`, permit both server and client
-authentication, and include their logical service name (`shop-user`,
-`shop-supplier`, or `shop-order`) as a DNS SAN. The `{service}` server-name mode
-verifies that per-call identity; a shared `localhost` SAN is not a substitute.
-Keep private keys mode `0600` and certificates mode `0644`. Compose
-mounts the directory read-only at `/run/secrets/shop-grpc`.
+服务证书必须由 `ca.crt` 签发，同时允许服务端和客户端认证，并把逻辑服务名
+（`shop-user`、`shop-supplier` 或 `shop-order`）写入 DNS SAN。`{service}`
+服务器名称模式会逐次调用校验该身份；共享的 `localhost` SAN 不能替代逻辑服务名。
 
-Production deployments should inject short-lived identities from their secret
-manager or use service-mesh mode. The repository intentionally contains no
-usable certificate or private key.
+私钥权限应为 `0600`，证书权限应为 `0644`。Compose 会把本目录只读挂载到
+`/run/secrets/shop-grpc`。生产环境应通过密钥管理器注入短期身份，或使用能够提供
+等价双向身份验证的 service mesh；仓库不会提供任何可直接使用的证书或私钥。
