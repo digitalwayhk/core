@@ -30,10 +30,11 @@ var (
 
 type Supplier struct {
 	*entity.Model
-	UserID  string `gorm:"not null;uniqueIndex" json:"userID"`
-	Name    string `gorm:"not null" json:"name"`
-	Code    string `gorm:"not null;uniqueIndex" json:"code"`
-	Enabled bool   `json:"enabled"`
+	AuthUserID  string `gorm:"not null;uniqueIndex" json:"-"`
+	Name        string `gorm:"not null;uniqueIndex" json:"name"`
+	Code        string `gorm:"not null;uniqueIndex" json:"code"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 func NewSupplier() *Supplier { return &Supplier{Model: entity.NewModel()} }
@@ -45,14 +46,14 @@ func (s *Supplier) NewModel() {
 func (*Supplier) GetLocalDBName() string  { return databaseName }
 func (*Supplier) GetRemoteDBName() string { return databaseName }
 func (s *Supplier) GetHash() string {
-	return utils.HashCodes(strings.ToLower(strings.TrimSpace(s.UserID)))
+	return utils.HashCodes(strings.ToLower(strings.TrimSpace(s.AuthUserID)))
 }
 
 type Product struct {
 	*entity.Model
-	SupplierID string          `gorm:"not null;index" json:"supplierID"`
+	SupplierID uint            `gorm:"not null;index:idx_product_supplier_code,unique" json:"supplierID"`
 	Name       string          `gorm:"not null" json:"name"`
-	Code       string          `gorm:"not null;uniqueIndex" json:"code"`
+	Code       string          `gorm:"not null;index:idx_product_supplier_code,unique" json:"code"`
 	Price      decimal.Decimal `json:"price"`
 	Enabled    bool            `json:"enabled"`
 }
@@ -66,7 +67,7 @@ func (p *Product) NewModel() {
 func (*Product) GetLocalDBName() string  { return databaseName }
 func (*Product) GetRemoteDBName() string { return databaseName }
 func (p *Product) GetHash() string {
-	return utils.HashCodes(strings.ToLower(strings.TrimSpace(p.Code)))
+	return utils.HashCodes(strconv.FormatUint(uint64(p.SupplierID), 10), strings.ToLower(strings.TrimSpace(p.Code)))
 }
 
 // Outbox 与商品事实同事务写入，发布成功后才标记完成。
@@ -137,7 +138,7 @@ func ensureWith(a persistencetypes.IDataAction, model interface{}) error {
 func EnsureStorage() error {
 	storageOnce.Do(func() {
 		action := baseAction()
-		for _, model := range []interface{}{NewSupplier(), NewProduct(), NewOutbox(), NewInbox()} {
+		for _, model := range []interface{}{NewSupplier(), NewProduct(), NewSupplierOrder(), NewOutbox(), NewInbox()} {
 			if err := ensureWith(action, model); err != nil {
 				storageErr = err
 				return
@@ -187,8 +188,8 @@ func RunTransaction(operation func(persistencetypes.IDataAction) error) (err err
 }
 
 func (s *Supplier) Save() error {
-	s.UserID, s.Name, s.Code = strings.TrimSpace(s.UserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
-	if s.UserID == "" || s.Name == "" || s.Code == "" {
+	s.AuthUserID, s.Name, s.Code = strings.TrimSpace(s.AuthUserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
+	if s.AuthUserID == "" || s.Name == "" || s.Code == "" {
 		return errors.New("供应商身份、名称和编码不能为空")
 	}
 	s.SetHashcode(s.GetHash())
@@ -200,8 +201,8 @@ func (s *Supplier) Save() error {
 }
 
 func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
-	s.UserID, s.Name, s.Code = strings.TrimSpace(s.UserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
-	if s.UserID == "" || s.Name == "" || s.Code == "" {
+	s.AuthUserID, s.Name, s.Code = strings.TrimSpace(s.AuthUserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
+	if s.AuthUserID == "" || s.Name == "" || s.Code == "" {
 		return errors.New("供应商身份、名称和编码不能为空")
 	}
 	s.SetHashcode(s.GetHash())
@@ -209,13 +210,13 @@ func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
 	return action.Update(s)
 }
 
-func FindSupplier(userID string) (*Supplier, error) {
+func FindSupplier(authUserID string) (*Supplier, error) {
 	if err := ensureWith(dataAction(), NewSupplier()); err != nil {
 		return nil, err
 	}
 	var items []*Supplier
 	q := search(NewSupplier(), 1)
-	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	q.AddWhereN("AuthUserID", strings.TrimSpace(authUserID))
 	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
 		return nil, err
 	}
@@ -236,8 +237,8 @@ func FindSupplierByID(id uint) (*Supplier, error) {
 }
 
 func (p *Product) InsertWith(a persistencetypes.IDataAction) error {
-	p.Name, p.Code, p.SupplierID = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code)), strings.TrimSpace(p.SupplierID)
-	if p.Name == "" || p.Code == "" || p.SupplierID == "" || !p.Price.GreaterThan(decimal.Zero) {
+	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
+	if p.Name == "" || p.Code == "" || p.SupplierID == 0 || !p.Price.GreaterThan(decimal.Zero) {
 		return errors.New("商品名称、编码、供应商和正数价格不能为空")
 	}
 	p.SetHashcode(p.GetHash())
@@ -326,17 +327,17 @@ func ProcessInbox(eventID, eventType string, operation func() error) error {
 	return dataAction().Insert(item)
 }
 
-func ProductChangedPayload(eventID, supplierID string, productID uint, action string) eventdto.ProductChanged {
+func ProductChangedPayload(eventID string, supplierID, productID uint, action string) eventdto.ProductChanged {
 	return eventdto.ProductChanged{Metadata: eventdto.Metadata{
-		EventID: eventID, Version: 1, EventType: "shop.product.changed", OccurredAt: time.Now().UTC(),
+		EventID: eventID, SchemaVersion: 1, EventType: "shop.product.changed", OccurredAt: time.Now().UTC(),
 		SourceService: "shop-supplier", AggregateID: eventID,
 	}, SupplierID: supplierID, ProductID: productID, Action: action}
 }
 
-func SupplierChangedPayload(eventID, supplierID, action string) eventdto.SupplierChanged {
+func SupplierChangedPayload(eventID string, supplierID uint, action string) eventdto.SupplierChanged {
 	return eventdto.SupplierChanged{Metadata: eventdto.Metadata{
-		EventID: eventID, Version: 1, EventType: "shop.supplier.changed", OccurredAt: time.Now().UTC(),
-		SourceService: "shop-supplier", AggregateID: supplierID,
+		EventID: eventID, SchemaVersion: 1, EventType: "shop.supplier.changed", OccurredAt: time.Now().UTC(),
+		SourceService: "shop-supplier", AggregateID: strconv.FormatUint(uint64(supplierID), 10),
 	}, SupplierID: supplierID, Action: action}
 }
 

@@ -12,12 +12,14 @@ import (
 
 func TestSupplierOwnsProductAndOutboxFacts(t *testing.T) {
 	utils.TESTPATH = t.TempDir()
-	_, err := EnsureSupplier("supplier-a", "供应商 A")
+	supplierA, err := EnsureSupplier("supplier-a", "供应商 A")
 	require.NoError(t, err)
-	_, err = EnsureSupplier("supplier-b", "供应商 B")
+	supplierB, err := EnsureSupplier("supplier-b", "供应商 B")
 	require.NoError(t, err)
+	require.NotZero(t, supplierA.ID)
+	require.NotZero(t, supplierB.ID)
 
-	product, err := CreateProduct("supplier-a", "测试商品", "product-a", decimal.NewFromInt(12), 1001, "event-create")
+	product, err := CreateProduct(supplierA.ID, "测试商品", "product-a", decimal.NewFromInt(12), 1001, "event-create")
 	require.NoError(t, err)
 	assert.False(t, product.Enabled)
 	_, err = ProductSnapshot(product.ID)
@@ -25,16 +27,16 @@ func TestSupplierOwnsProductAndOutboxFacts(t *testing.T) {
 
 	enabled := true
 	price := decimal.NewFromInt(18)
-	_, err = UpdateOwnedProduct("supplier-b", product.ID, &price, &enabled, "event-forbidden")
+	_, err = UpdateOwnedProduct(supplierB.ID, product.ID, &price, &enabled, "event-forbidden")
 	require.ErrorContains(t, err, "无权")
-	updated, err := UpdateOwnedProduct("supplier-a", product.ID, &price, &enabled, "event-update")
+	updated, err := UpdateOwnedProduct(supplierA.ID, product.ID, &price, &enabled, "event-update")
 	require.NoError(t, err)
 	assert.True(t, updated.Enabled)
 	assert.True(t, updated.Price.Equal(price))
 
 	snapshot, err := ProductSnapshot(product.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "supplier-a", snapshot.SupplierID)
+	assert.Equal(t, supplierA.ID, snapshot.SupplierID)
 	assert.True(t, snapshot.UnitPrice.Equal(price))
 
 	pending, err := models.PendingOutbox()

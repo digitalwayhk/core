@@ -18,12 +18,13 @@ func ProductResponse(item *models.Product) *supplierdto.Product {
 	if item == nil {
 		return nil
 	}
-	supplier, _ := models.FindSupplier(item.SupplierID)
-	name := ""
+	supplier, _ := models.FindSupplierByID(item.SupplierID)
+	name, code := "", ""
 	if supplier != nil {
 		name = supplier.Name
+		code = supplier.Code
 	}
-	return &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, SupplierName: name, Name: item.Name, Code: item.Code, Price: item.Price, Enabled: item.Enabled}
+	return &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, SupplierCode: code, SupplierName: name, Name: item.Name, Code: item.Code, Price: item.Price, Enabled: item.Enabled}
 }
 
 func EnsureSupplier(userID, name string) (*models.Supplier, error) {
@@ -40,7 +41,7 @@ func EnsureSupplier(userID, name string) (*models.Supplier, error) {
 		return item, err
 	}
 	item = models.NewSupplier()
-	item.UserID, item.Name, item.Code, item.Enabled = userID, strings.TrimSpace(name), "supplier-"+strings.ToLower(userID), true
+	item.AuthUserID, item.Name, item.Code, item.Enabled = userID, strings.TrimSpace(name), "supplier-"+strings.ToLower(userID), true
 	if item.Name == "" {
 		item.Name = userID
 	}
@@ -54,7 +55,7 @@ func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models
 	}
 	item.Name = strings.TrimSpace(name)
 	item.Enabled = enabled
-	payload := models.SupplierChangedPayload(eventID, item.UserID, "updated")
+	payload := models.SupplierChangedPayload(eventID, item.ID, "updated")
 	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
 	if err != nil {
 		return nil, err
@@ -68,8 +69,8 @@ func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models
 	return item, err
 }
 
-func CreateProduct(ownerID, name, code string, price decimal.Decimal, id uint, eventID string) (*models.Product, error) {
-	supplier, err := models.FindSupplier(ownerID)
+func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id uint, eventID string) (*models.Product, error) {
+	supplier, err := models.FindSupplierByID(ownerID)
 	if err != nil || supplier == nil || !supplier.Enabled {
 		return nil, errors.New("供应商不存在或已禁用")
 	}
@@ -96,15 +97,15 @@ func ProductSnapshot(id uint) (*supplierdto.ProductSnapshot, error) {
 	if err != nil || product == nil || !product.Enabled {
 		return nil, errors.New("商品不存在或未上架")
 	}
-	supplier, err := models.FindSupplier(product.SupplierID)
+	supplier, err := models.FindSupplierByID(product.SupplierID)
 	if err != nil || supplier == nil || !supplier.Enabled {
 		return nil, errors.New("供应商不存在或已禁用")
 	}
-	return &supplierdto.ProductSnapshot{ProductID: product.ID, SupplierID: product.SupplierID, SupplierName: supplier.Name,
+	return &supplierdto.ProductSnapshot{ProductID: product.ID, SupplierID: product.SupplierID, SupplierCode: supplier.Code, SupplierName: supplier.Name,
 		ProductCode: product.Code, ProductName: product.Name, UnitPrice: product.Price}, nil
 }
 
-func OwnedProducts(ownerID string) ([]*supplierdto.Product, error) {
+func OwnedProducts(ownerID uint) ([]*supplierdto.Product, error) {
 	items, err := models.ListProducts()
 	if err != nil {
 		return nil, err
@@ -118,7 +119,7 @@ func OwnedProducts(ownerID string) ([]*supplierdto.Product, error) {
 	return result, nil
 }
 
-func UpdateOwnedProduct(ownerID string, id uint, price *decimal.Decimal, enabled *bool, eventID string) (*supplierdto.Product, error) {
+func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *bool, eventID string) (*supplierdto.Product, error) {
 	item, err := models.FindProduct(id)
 	if err != nil || item == nil || item.SupplierID != ownerID {
 		return nil, errors.New("商品不存在或无权操作")
@@ -146,22 +147,22 @@ func UpdateOwnedProduct(ownerID string, id uint, price *decimal.Decimal, enabled
 	return ProductResponse(item), err
 }
 
-func AvailableProducts(name, code, supplierID string) ([]*supplierdto.Product, error) {
+func AvailableProducts(name, code string, supplierID uint) ([]*supplierdto.Product, error) {
 	items, err := models.ListProducts()
 	if err != nil {
 		return nil, err
 	}
 	result := make([]*supplierdto.Product, 0, len(items))
 	for _, item := range items {
-		if item == nil || !item.Enabled || (supplierID != "" && item.SupplierID != supplierID) ||
+		if item == nil || !item.Enabled || (supplierID != 0 && item.SupplierID != supplierID) ||
 			(code != "" && !strings.EqualFold(item.Code, code)) || (name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name))) {
 			continue
 		}
-		supplier, findErr := models.FindSupplier(item.SupplierID)
+		supplier, findErr := models.FindSupplierByID(item.SupplierID)
 		if findErr != nil || supplier == nil || !supplier.Enabled {
 			continue
 		}
-		result = append(result, &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, SupplierName: supplier.Name,
+		result = append(result, &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, SupplierCode: supplier.Code, SupplierName: supplier.Name,
 			Name: item.Name, Code: item.Code, Price: item.Price, Enabled: item.Enabled})
 	}
 	return result, nil
