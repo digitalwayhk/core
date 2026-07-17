@@ -2,8 +2,9 @@
 package user
 
 type User struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      uint   `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
 }
 
 type Address struct {

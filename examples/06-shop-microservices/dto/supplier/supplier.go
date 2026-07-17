@@ -4,15 +4,17 @@ package supplier
 import "github.com/shopspring/decimal"
 
 type Supplier struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Code    string `json:"code"`
-	Enabled bool   `json:"enabled"`
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type Product struct {
 	ID           uint            `json:"id"`
-	SupplierID   string          `json:"supplierID"`
+	SupplierID   uint            `json:"supplierID"`
+	SupplierCode string          `json:"supplierCode"`
 	SupplierName string          `json:"supplierName"`
 	Name         string          `json:"name"`
 	Code         string          `json:"code"`
@@ -23,7 +25,8 @@ type Product struct {
 // ProductSnapshot 是 Order Service 下单时保存的商品事实。
 type ProductSnapshot struct {
 	ProductID    uint            `json:"productID"`
-	SupplierID   string          `json:"supplierID"`
+	SupplierID   uint            `json:"supplierID"`
+	SupplierCode string          `json:"supplierCode"`
 	SupplierName string          `json:"supplierName"`
 	ProductCode  string          `json:"productCode"`
 	ProductName  string          `json:"productName"`
