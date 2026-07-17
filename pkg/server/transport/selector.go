@@ -66,7 +66,12 @@ func (s *DefaultSelector) Select(ctx context.Context, payload *types.PayLoad, en
 		if !t.Supports(ctx, payload, endpoint) {
 			continue
 		}
-		healthErr := t.Health(ctx, endpoint)
+		healthErr := error(nil)
+		if contextual, ok := t.(PayloadHealthTransport); ok {
+			healthErr = contextual.HealthPayload(ctx, payload, endpoint)
+		} else {
+			healthErr = t.Health(ctx, endpoint)
+		}
 		if err := ctx.Err(); err != nil {
 			return Selection{}, err
 		}

@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// GRPCServerNameTargetService makes the gRPC client verify the server
+// certificate against PayLoad.TargetService for service-discovered calls.
+const GRPCServerNameTargetService = "{service}"
+
 // TransportConfig 内部传输配置。Internal 指定首选协议，Fallback 为降级顺序。
 type TransportConfig struct {
 	Internal   string                `json:",optional"` // grpc | http | socket | quic | mq

@@ -186,11 +186,6 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 	}
 	cleanup := func() { _ = os.RemoveAll(rootDir) }
 
-	basePort, err := reservePortRange(options.ServiceCount)
-	if err != nil {
-		cleanup()
-		return nil, err
-	}
 	binary := filepath.Join(rootDir, options.BinaryName)
 	buildArgs := []string{"build"}
 	if !options.DisableRace {
@@ -202,6 +197,14 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 	if output, buildErr := build.CombinedOutput(); buildErr != nil {
 		cleanup()
 		return nil, fmt.Errorf("构建示例失败: %w\n%s", buildErr, output)
+	}
+	// Build first, then reserve ports immediately before process start. The child
+	// cannot inherit these listeners, so this minimizes (but cannot eliminate)
+	// the probe-to-bind window.
+	basePort, err := reservePortRange(options.ServiceCount)
+	if err != nil {
+		cleanup()
+		return nil, err
 	}
 	grpcBasePort, err := reserveNonOverlappingPortRange(options.GRPCServiceCount, basePort, options.ServiceCount)
 	if err != nil {

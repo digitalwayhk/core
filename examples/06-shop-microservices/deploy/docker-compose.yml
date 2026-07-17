@@ -16,7 +16,7 @@ services:
       SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
       SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-user.crt
       SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-user.key
-      SHOP_GRPC_SERVER_NAME: localhost
+      SHOP_GRPC_SERVER_NAME: "{service}"
     volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     ports: ["18081:18081"]
     depends_on: {redis: {condition: service_healthy}}
@@ -29,7 +29,7 @@ services:
       SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
       SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-supplier.crt
       SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-supplier.key
-      SHOP_GRPC_SERVER_NAME: localhost
+      SHOP_GRPC_SERVER_NAME: "{service}"
     volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     ports: ["18082:18082"]
     depends_on: {redis: {condition: service_healthy}}
@@ -42,6 +42,6 @@ services:
       SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
       SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
       SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
-      SHOP_GRPC_SERVER_NAME: localhost
+      SHOP_GRPC_SERVER_NAME: "{service}"
     volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     depends_on: {redis: {condition: service_healthy}}

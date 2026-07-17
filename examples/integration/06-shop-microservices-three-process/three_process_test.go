@@ -53,6 +53,7 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	for index, serviceName := range []string{"shop-user", "shop-supplier", "shop-order"} {
 		assertGRPCHealthServing(t, grpcPorts[index], serviceName, pki)
 	}
+	assertGRPCHealthFails(t, grpcPorts[0], "shop-order", pki)
 	processes := []*integration.Suite{user, supplier, order}
 	before := make([]integration.TransportStatsSnapshot, len(processes))
 	for index, process := range processes {
@@ -99,7 +100,8 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 		grpcDelta += after[index].Transport.GRPCSelected - before[index].Transport.GRPCSelected
 		httpDelta += after[index].Transport.HTTPSelected - before[index].Transport.HTTPSelected
 		require.Zero(t, after[index].Transport.HTTPSelected)
-		require.Equal(t, before[index].Transport.SendFailure, after[index].Transport.SendFailure)
+		require.Zero(t, before[index].Transport.SendFailure)
+		require.Zero(t, after[index].Transport.SendFailure)
 	}
 	require.Positive(t, grpcDelta)
 	require.Zero(t, httpDelta)
@@ -142,7 +144,7 @@ func processEnvironment(pki *integration.GRPCTestPKI, serviceName string) map[st
 		"SHOP_GRPC_CA_FILE":     pki.CAFile,
 		"SHOP_GRPC_CERT_FILE":   identity.CertFile,
 		"SHOP_GRPC_KEY_FILE":    identity.KeyFile,
-		"SHOP_GRPC_SERVER_NAME": "localhost",
+		"SHOP_GRPC_SERVER_NAME": "{service}",
 	}
 }
 

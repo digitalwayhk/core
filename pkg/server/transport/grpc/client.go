@@ -42,10 +42,12 @@ type GRPCTransport struct {
 	lifecycleMu sync.RWMutex
 	stopped     bool
 
-	securityOnce sync.Once
-	securityOpts []zrpc.ClientOption
-	securityErr  error
-	newClient    zrpcClientFactory
+	newClient zrpcClientFactory
+}
+
+type clientPoolKey struct {
+	endpoint   string
+	serverName string
 }
 
 // New returns a gRPC transport configured with the framework transport contract.
@@ -109,7 +111,11 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	client, err := g.getClient(target)
+	serverName, err := g.serverName(payload)
+	if err != nil {
+		return nil, err
+	}
+	client, err := g.getClient(target, serverName)
 	if err != nil {
 		return nil, err
 	}
@@ -129,10 +135,28 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 
 // Health uses the standard gRPC health protocol and only accepts SERVING.
 func (g *GRPCTransport) Health(ctx context.Context, target string) error {
+	serverName, err := g.serverName(nil)
+	if err != nil {
+		return err
+	}
+	return g.health(ctx, target, serverName)
+}
+
+// HealthPayload verifies the target using the service identity carried by the
+// payload when Security.ServerName is configured as {service}.
+func (g *GRPCTransport) HealthPayload(ctx context.Context, payload *coretypes.PayLoad, target string) error {
+	serverName, err := g.serverName(payload)
+	if err != nil {
+		return err
+	}
+	return g.health(ctx, target, serverName)
+}
+
+func (g *GRPCTransport) health(ctx context.Context, target, serverName string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	client, err := g.getClient(target)
+	client, err := g.getClient(target, serverName)
 	if err != nil {
 		return err
 	}
@@ -146,36 +170,47 @@ func (g *GRPCTransport) Health(ctx context.Context, target string) error {
 	return nil
 }
 
-func (g *GRPCTransport) getClient(endpoint string) (zrpc.Client, error) {
+func (g *GRPCTransport) getClient(endpoint string, serverNames ...string) (zrpc.Client, error) {
 	if strings.TrimSpace(endpoint) == "" {
 		return nil, errEmptyEndpoint
+	}
+	serverName := ""
+	if len(serverNames) > 0 {
+		serverName = serverNames[0]
 	}
 	g.lifecycleMu.RLock()
 	defer g.lifecycleMu.RUnlock()
 	if g.stopped {
 		return nil, errTransportStopped
 	}
-	if cached, ok := g.pool.Load(endpoint); ok {
+	key := clientPoolKey{endpoint: endpoint, serverName: serverName}
+	if cached, ok := g.pool.Load(key); ok {
 		return cached.(zrpc.Client), nil
 	}
-	result := <-g.initializeClient(endpoint)
+	result := <-g.initializeClient(endpoint, serverName)
 	if result.Err != nil {
 		return nil, result.Err
 	}
 	return result.Val.(zrpc.Client), nil
 }
 
-func (g *GRPCTransport) initializeClient(endpoint string) <-chan singleflight.Result {
-	return g.init.DoChan(endpoint, func() (any, error) {
-		if cached, ok := g.pool.Load(endpoint); ok {
+func (g *GRPCTransport) initializeClient(endpoint string, serverNames ...string) <-chan singleflight.Result {
+	serverName := ""
+	if len(serverNames) > 0 {
+		serverName = serverNames[0]
+	}
+	key := clientPoolKey{endpoint: endpoint, serverName: serverName}
+	flightKey := key.endpoint + "\x00" + key.serverName
+	return g.init.DoChan(flightKey, func() (any, error) {
+		if cached, ok := g.pool.Load(key); ok {
 			return cached.(zrpc.Client), nil
 		}
-		options, err := g.clientOptions()
+		options, err := g.clientOptions(key.serverName)
 		if err != nil {
 			return nil, err
 		}
 		rpcConf := zrpc.RpcClientConf{
-			Endpoints: []string{endpoint},
+			Endpoints: []string{key.endpoint},
 			NonBlock:  true,
 			Timeout:   defaultRPCTimeout.Milliseconds(),
 			Middlewares: zrpc.ClientMiddlewaresConf{
@@ -186,7 +221,7 @@ func (g *GRPCTransport) initializeClient(endpoint string) <-chan singleflight.Re
 		if err != nil {
 			return nil, err
 		}
-		actual, loaded := g.pool.LoadOrStore(endpoint, client)
+		actual, loaded := g.pool.LoadOrStore(key, client)
 		if loaded {
 			_ = client.Conn().Close()
 			return actual.(zrpc.Client), nil
@@ -195,15 +230,28 @@ func (g *GRPCTransport) initializeClient(endpoint string) <-chan singleflight.Re
 	})
 }
 
-func (g *GRPCTransport) clientOptions() ([]zrpc.ClientOption, error) {
-	g.securityOnce.Do(func() {
-		g.securityOpts, g.securityErr = clientSecurityOptions(g.config.Security)
-		g.securityOpts = append(g.securityOpts, zrpc.WithDialOption(googlegrpc.WithDefaultCallOptions(
-			googlegrpc.MaxCallRecvMsgSize(g.config.MaxRecvMsgSize),
-			googlegrpc.MaxCallSendMsgSize(g.config.MaxSendMsgSize),
-		)))
-	})
-	return g.securityOpts, g.securityErr
+func (g *GRPCTransport) clientOptions(serverName string) ([]zrpc.ClientOption, error) {
+	security := g.config.Security
+	security.ServerName = serverName
+	options, err := clientSecurityOptions(security)
+	if err != nil {
+		return nil, err
+	}
+	return append(options, zrpc.WithDialOption(googlegrpc.WithDefaultCallOptions(
+		googlegrpc.MaxCallRecvMsgSize(g.config.MaxRecvMsgSize),
+		googlegrpc.MaxCallSendMsgSize(g.config.MaxSendMsgSize),
+	))), nil
+}
+
+func (g *GRPCTransport) serverName(payload *coretypes.PayLoad) (string, error) {
+	serverName := strings.TrimSpace(g.config.Security.ServerName)
+	if serverName != config.GRPCServerNameTargetService {
+		return serverName, nil
+	}
+	if payload == nil || strings.TrimSpace(payload.TargetService) == "" {
+		return "", errors.New("grpc: target service is required for service identity verification")
+	}
+	return strings.TrimSpace(payload.TargetService), nil
 }
 
 func payloadToPB(p *coretypes.PayLoad) (*pb.PayloadRequest, error) {

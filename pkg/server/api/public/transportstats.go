@@ -2,6 +2,7 @@ package public
 
 import (
 	"errors"
+	"net"
 
 	"github.com/digitalwayhk/core/pkg/server/api"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -23,7 +24,17 @@ type TransportStatsResponse struct {
 func (*TransportStats) Parse(types.IRequest) error { return nil }
 
 func (own *TransportStats) Validation(req types.IRequest) error {
-	return own.ServerArgs.Validation(req)
+	context := router.GetContext(req.ServiceName())
+	if context != nil {
+		if option := context.GetServerOption(); option != nil && option.RemoteAccessManageAPI {
+			return nil
+		}
+	}
+	ip := net.ParseIP(req.GetClientIP())
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("transport stats are only available from loopback")
+	}
+	return nil
 }
 
 func (*TransportStats) Do(req types.IRequest) (interface{}, error) {

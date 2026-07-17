@@ -17,8 +17,10 @@ shop-order.key
 ```
 
 Service certificates must be signed by `ca.crt`, permit both server and client
-authentication, and include the service DNS name plus the configured gRPC
-server name. Keep private keys mode `0600` and certificates mode `0644`. Compose
+authentication, and include their logical service name (`shop-user`,
+`shop-supplier`, or `shop-order`) as a DNS SAN. The `{service}` server-name mode
+verifies that per-call identity; a shared `localhost` SAN is not a substitute.
+Keep private keys mode `0600` and certificates mode `0644`. Compose
 mounts the directory read-only at `/run/secrets/shop-grpc`.
 
 Production deployments should inject short-lived identities from their secret

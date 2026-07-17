@@ -42,12 +42,16 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 	cfg.Cluster.AdvertiseAddress = AdvertiseAddress()
 	cfg.Cluster.HeartbeatInterval = time.Second
 	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: "core:discovery", TTL: 5 * time.Second}
+	serverName := strings.TrimSpace(os.Getenv("SHOP_GRPC_SERVER_NAME"))
+	if serverName == "" {
+		serverName = config.GRPCServerNameTargetService
+	}
 	cfg.Transport.GRPC.Security = config.GRPCSecurityConfig{
 		Mode:       "mtls",
 		CAFile:     strings.TrimSpace(os.Getenv("SHOP_GRPC_CA_FILE")),
 		CertFile:   strings.TrimSpace(os.Getenv("SHOP_GRPC_CERT_FILE")),
 		KeyFile:    strings.TrimSpace(os.Getenv("SHOP_GRPC_KEY_FILE")),
-		ServerName: strings.TrimSpace(os.Getenv("SHOP_GRPC_SERVER_NAME")),
+		ServerName: serverName,
 	}
 	cfg.ApplyDefaults()
 	return cfg

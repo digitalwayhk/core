@@ -30,6 +30,13 @@ type Transport interface {
 	Health(ctx context.Context, target string) error
 }
 
+// PayloadHealthTransport optionally performs a health check with the same
+// payload context that will be used by Send. gRPC uses it for target-service
+// certificate identity verification while legacy transports keep Health.
+type PayloadHealthTransport interface {
+	HealthPayload(ctx context.Context, payload *types.PayLoad, target string) error
+}
+
 // TransportSelector chooses the most appropriate Transport for a given call,
 // applying fallback logic when the primary transport is unavailable.
 type TransportSelector interface {

@@ -43,6 +43,26 @@ func TestTransportStatsRejectsUnauthorisedRemoteAccess(t *testing.T) {
 	require.Error(t, (&TransportStats{}).Validation(request))
 }
 
+func TestTransportStatsRejectsUnauthorisedPrivateNetworkAccess(t *testing.T) {
+	for _, clientIP := range []string{"10.0.0.8", "172.16.1.8", "192.168.1.8", "169.254.1.8"} {
+		t.Run(clientIP, func(t *testing.T) {
+			request := &transportStatsRequest{
+				publicRateLimitRequest: &publicRateLimitRequest{clientIP: clientIP, serviceName: "missing-service"},
+				service:                &router.ServiceContext{},
+			}
+			require.Error(t, (&TransportStats{}).Validation(request))
+		})
+	}
+}
+
+func TestTransportStatsAllowsLoopback(t *testing.T) {
+	request := &transportStatsRequest{
+		publicRateLimitRequest: &publicRateLimitRequest{clientIP: "127.0.0.1", serviceName: "missing-service"},
+		service:                &router.ServiceContext{},
+	}
+	require.NoError(t, (&TransportStats{}).Validation(request))
+}
+
 func TestTransportStatsRouteIsLocalServerManageEndpoint(t *testing.T) {
 	info := (&TransportStats{}).RouterInfo()
 	require.Equal(t, "/api/servermanage/transportstats", info.GetPath())

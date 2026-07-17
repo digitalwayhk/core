@@ -102,10 +102,11 @@ Compose 只映射 User `18081` 和 Supplier `18082` HTTP 端口。Order HTTP 和
 ## gRPC 生产安全
 
 - 应用层 mTLS：`Transport.GRPC.Security.Mode=mtls`，由密钥系统注入 CA、服务证书和私钥。Compose 展示的是这种模式。
+- 服务身份：`Transport.GRPC.Security.ServerName={service}` 使客户端按每次调用的逻辑目标服务名校验证书；三进程证书分别必须包含 `shop-user`、`shop-supplier`、`shop-order` SAN，不得用共享 `localhost` 身份代替服务身份。
 - 服务网格：`Transport.GRPC.Security.Mode=mesh`，应用不读取证书文件，mTLS 身份、加密和证书轮换由 sidecar 与网格控制面负责。
 - 即使 gRPC 只暴露在私网，`insecure` 也不是生产安全方案；它只用于 all-in-one 本地调试。
 
-三进程配置的 `Transport.Internal` 固定为 `grpc`，`Transport.Fallback` 为空。本机管理路由 `/api/servermanage/transportstats` 返回请求所属 ServiceContext 的结构化传输计数；默认未授权请求仅允许本机访问。集成测试比较 UAT 前后快照，不解析日志。
+三进程配置的 `Transport.Internal` 固定为 `grpc`，`Transport.Fallback` 为空。本机管理路由 `/api/servermanage/transportstats` 返回请求所属 ServiceContext 的结构化传输计数；默认未授权请求仅允许 loopback，RFC1918 私网地址也会被拒绝。集成测试比较 UAT 前后快照，不解析日志。
 
 ## 验收
 
