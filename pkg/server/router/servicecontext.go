@@ -1808,10 +1808,15 @@ func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse
 }
 func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	res := &Response{}
+	ctx := context.Background()
+	if payload != nil && own != nil && own.Service != nil {
+		payload.SourceService = own.Service.Name
+		ctx = types.ContextWithTrustedInternalCaller(ctx, own.Service.Name)
+	}
 	if callback != nil {
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
-			values, err := own.invokePayload(context.Background(), payload)
+			values, err := own.invokePayload(ctx, payload)
 			if err != nil {
 				for _, ecb := range errcallback {
 					res.err = err
@@ -1828,7 +1833,7 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 			callback[0](res)
 		}
 	} else {
-		values, err := own.invokePayload(context.Background(), payload)
+		values, err := own.invokePayload(ctx, payload)
 		if err != nil {
 			logx.Errorw("service_call_failed",
 				logx.Field("service", own.Service.Name),
@@ -1860,7 +1865,7 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		return nil, fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
 	if local := GetContext(payload.TargetService); local != nil {
-		return own.dispatchLocal(payload, local)
+		return own.dispatchLocal(ctx, payload, local)
 	}
 	var endpoints transport.TransportEndpoints
 	if own.ServiceResolver != nil {
@@ -1880,7 +1885,7 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	return own.sendPayload(ctx, payload, endpoints)
 }
 
-func (own *ServiceContext) dispatchLocal(payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
+func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
 	if target == nil || target.Router == nil {
 		return nil, fmt.Errorf("%w: service=%s", ErrTargetServiceUnavailable, payload.TargetService)
 	}
@@ -1891,6 +1896,12 @@ func (own *ServiceContext) dispatchLocal(payload *types.PayLoad, target *Service
 	req := ToRequest(payload)
 	if req == nil {
 		return nil, fmt.Errorf("%w: request context for %s", ErrTargetServiceUnavailable, payload.TargetService)
+	}
+	if caller, trusted := types.TrustedInternalCallerFromContext(ctx); trusted {
+		req = requestWithTrustedInternalCaller(req, caller)
+	}
+	if err := info.AuthorizeInternalCaller(req); err != nil {
+		return nil, err
 	}
 	api, err := info.ParseNew(payload.Instance)
 	if err != nil {

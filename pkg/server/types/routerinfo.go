@@ -450,6 +450,9 @@ func (own *RouterInfo) GetPoolSize() int {
 //	}
 func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	own.assertMetadataFrozen()
+	if err := own.AuthorizeInternalCaller(req); err != nil {
+		return req.NewResponse(nil, err)
+	}
 	api := own.New()
 	delegated := false
 	// 🔧 使用 defer 确保对象回收，并通过具名返回值在 panic 时返回错误响应
@@ -492,6 +495,9 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 		own.putRouter(api)
 	}()
 	own.assertMetadataFrozen()
+	if err := own.AuthorizeInternalCaller(req); err != nil {
+		return req.NewResponse(nil, err)
+	}
 	// 🆕 记录请求开始
 	recordEnd := own.recordRequestStart()
 	startTime := time.Now()
