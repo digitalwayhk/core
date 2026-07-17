@@ -26,6 +26,7 @@
 | `service/manage.ManageService`、标准 CRUD、hook、`Operation` | Stable | service/manage | 管理后台 CRUD 与自定义操作 | `service/manage/crud_test.go`、`examples/01-simple-shop` |
 | `service/manage/view` 的 ViewModel、FieldModel 与查询视图类型 | Stable | service/manage | Manage 元数据与管理前端契约 | Manage view/CRUD 测试与 apidiff 基线 |
 | Cluster、Transport、MQ 的已登记 factory/provider 入口 | Stable（按能力矩阵） | server runtime | 可插拔基础设施组装 | 任务 14 config-contract 与六包 race |
+| gRPC Client、Server 与标准 health 入口 | Stable（按能力矩阵） | server/transport | 默认内部同步调用、独立 ServiceContext 生命周期 | gRPC lifecycle/security/resolver 测试与示例 06 三进程测试 |
 | `ManageService.Req`、`SetReq`、`IRequestSet` | Deprecated | service/manage | 旧代码读取共享请求状态 | `service/manage/manageservice.go`、请求隔离回归测试 |
 | 进程级 `SetCrossNodeForwarder`、`GetCrossNodeForwarder` | Deprecated | server/types | 旧单服务跨节点转发 | `pkg/server/types/crossnode.go`；替代为 service-scoped API |
 | `router.TestResult` 变量 | Deprecated | server/router | 旧 OpenAPI 测试结果注入 | `SetTestResult/GetTestResult` 为并发安全替代入口 |
@@ -61,6 +62,10 @@
 - `supported` 值属于兼容表面；`rejected` 值只承诺在启动前返回可操作错误；`upstream` 字段遵循 go-zero 对应版本的契约。
 - `Cluster.Mode=off` 和 `MQ.Mode=off` 的旧字段保留规则属于迁移兼容，不代表关闭字段已获得运行时支持。
 - 配置 struct 或 tag 变化必须同时通过 `./scripts/test.sh config-contract`，不能在本文复制另一份字段表规避闭集门禁。
+
+## 已批准的破坏性删除
+
+自定义内部 Socket 的 Go API、配置、flag、payload 字段和实现包已按 `socket-to-grpc-v1` 批准直接删除，不进入长期 Deprecated 状态。该候选只能作为 MAJOR 发布；公共 API 基线的对应删除必须与 [GRPC_TRANSPORT_MIGRATION.md](GRPC_TRANSPORT_MIGRATION.md)、`BREAKING_CHANGE_APPROVAL.md` 和消费方 smoke 一起审查。WebSocket 与 Unix socket 不在删除范围。
 
 ## 数据与生命周期
 

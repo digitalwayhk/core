@@ -32,3 +32,7 @@ go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
 ```
 
 第一条运行基线稳定行为，第二条仍编译 services 根包以捕获 Go API 破坏。已知红行为测试不计为候选通过，也不伪装成已验证；其修复属于 futures owner。
+
+## gRPC MAJOR 候选约束
+
+`socket-to-grpc-v1` 删除公开 Go API，以上 2026-07-13 证据只能证明旧基线，不足以批准新候选。发布前必须在 futures 精确提交上以临时 `go.work` 指向候选 Core，执行 Socket 残留扫描、services 编译和稳定行为 smoke；证据由任务 10 写回本矩阵。在证据写回前，该 MAJOR 候选状态为 `blocked-by-consumer-verification`，不得 tag 或发布。

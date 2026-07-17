@@ -15,3 +15,5 @@
 | `ServerConfig.AttachServices`、`SetAttachService`、动态设置服务地址 API | `ClusterProvider` + `ServiceResolver` | v0.0.250 | v0.1.0 | server/router、server/config | 多服务调用方、旧静态部署 | `pkg/server/router/serviceresolver_test.go` |
 
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。
+
+自定义内部 Socket 表面不在本表登记长期废弃：它依据 `socket-to-grpc-v1` 的 MAJOR 变更批准直接删除，迁移见 `GRPC_TRANSPORT_MIGRATION.md`。这不改变本表其他条目的保留窗口。

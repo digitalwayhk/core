@@ -20,7 +20,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 模型和 Manage 继承 | `examples/03-shop-inheritance` | Shop/BaseData/Business 多层模型、Manage Hook 继承、只读子表、联合有效性 |
 | 性能优化 | `examples/04-shop-performance` | RouterInfo L1/L2/L3、EventBridge 主动失效、SingleFlight、Badger 可靠本地写、Group Commit、基准与分位数 |
 | Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
-| Redis 多服务 | `examples/06-shop-microservices` | 三服务边界、共享 DTO、Redis 发现、CallService、可靠 EventBridge、Outbox/Inbox、同进程/三进程测试 |
+| Redis 多服务 | `examples/06-shop-microservices` | 三服务边界、共享 DTO、Redis 发现、默认 gRPC、mTLS、CallService、可靠 EventBridge、Outbox/Inbox、同进程/三进程测试 |
 
 对应真实进程测试位于 `examples/integration/01-simple-shop`至 `05-shop-casdoor-rbac`，多服务还必须同时参考 `examples/integration/06-shop-microservices` 和 `06-shop-microservices-three-process`；通用进程、HTTP、TestToken 和 WebSocket 能力只复用 `examples/integration/helpers.go`。
 
@@ -43,6 +43,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | NATS JetStream 可靠写路径 | `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md` |
 | 性能、容量、RED/USE 和 SLO | `docs/codex/PERFORMANCE_SLO_BASELINE.md` |
 | go-zero 与成熟能力复用 | `docs/codex/GO_ZERO_REUSE_AUDIT.md` |
+| 自定义 Socket 升级到 gRPC | `docs/codex/GRPC_TRANSPORT_MIGRATION.md` |
 | 无用代码和架构债 | `docs/codex/DEAD_CODE_AUDIT.md`、`ARCHITECTURE_HARDENING.md` |
 | 公共 API、废弃和消费方兼容 | `docs/codex/API_COMPATIBILITY_SURFACE.md`、`DEPRECATION_REGISTER.md`、`CONSUMER_COMPATIBILITY_MATRIX.md` |
 | CI 和发布门禁 | `docs/codex/CI_QUALITY_GATE_MATRIX.md`、`docs/RELEASE_POLICY.md` |
@@ -57,15 +58,16 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 4. Manage CRUD 不绕过 ModelList；public/private 不直接依赖 GORM/SQLite；`IDataAction` 实现只在 models 边界选择。
 5. 模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料只能禁用，不能删除。
 6. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
-7. WebSocket 只面向最终外部用户；内部服务通信使用 TransportSelector/EventBridge。
+7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。
 8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。
 9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
 10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
 11. 优先复用 go-zero/成熟客户端；不支持的配置值 fail closed，不得伪装可用。
 12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump。
 13. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
-14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`。
+14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`，也不启用第二套 zrpc 服务发现。
 15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。
+16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 
 ## 工作流
 
@@ -80,6 +82,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - Manage owner 绑定错误、子类覆盖 Hook 却丢失必需父级规则，或用通用 CRUD 绕过状态机。
 - public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
+- 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
 - 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。
