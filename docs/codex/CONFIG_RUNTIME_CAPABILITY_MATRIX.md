@@ -26,7 +26,7 @@
 | --- | --- | --- | --- |
 | Internal/Fallback 的 grpc、http；MaxRetries/RetryDelay；gRPC message size | selector、ServiceContext retry、gRPC transport 消费；自定义 MaxRecv/MaxSend 经 ApplyDefaults 保持不变 | ServiceContext/TransportSelector | supported |
 | Internal/Fallback 的 quic、mq；HTTP Enable；QUIC 配置 | 非默认启用时 Validate 明确失败；false/空值只是 inactive 默认 | 无 | rejected |
-| GRPC Port | 仅 0 或固定默认 19090 可通过，自定义端口返回 not configurable；19090 是旧配置兼容默认，selector 不消费 | 无可配置端口 owner | rejected |
+| GRPC Port | 0 时按 HTTP 端口派生，显式值必须在 1..65535；节点通过 `NodeInfo.GRPCPort` 发布并由 Resolver 组装端点 | gRPC server 生命周期、ServiceResolver、TransportSelector | supported |
 
 ## MQ 与 Event
 

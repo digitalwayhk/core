@@ -4,9 +4,9 @@
 
 | 类别 | 已确认位置 | 风险 | 目标 |
 | --- | --- | --- | --- |
-| stdout/标准 logger | `utils`、`router`、`run`、`trans/rest`、`trans/socket`、QUIC | 绕过级别、字段、采集与脱敏 | 删除或改为结构化 `logx` |
+| stdout/标准 logger | `utils`、`router`、`run`、`trans/rest`、QUIC | 绕过级别、字段、采集与脱敏 | 删除或改为结构化 `logx` |
 | panic/fatal | QUIC、REST 启动路径及历史认证构造器 | 可复用库终止进程 | 返回错误或交给生命周期边界 |
-| payload/response/object dump | `servicecontext.go`、socket、ModelList、WebSocket | 泄露业务数据和凭据 | 仅记录类型、大小、目标和错误类别 |
+| payload/response/object dump | `servicecontext.go`、ModelList、WebSocket | 泄露业务数据和凭据 | 仅记录类型、大小、目标和错误类别 |
 | 原始 SQL/参数 | GORM、ClickHouse 查询日志 | 泄露数据值且高频 | 记录 operation/table/duration/error，不记录 SQL 文本和参数 |
 | 装饰图标/横幅 | Server、SQLite/MySQL、Badger、ClickHouse、WebSocket | 难检索、事件名不稳定 | 使用 ASCII `snake_case` 事件名 |
 | 重试/回退级别 | cluster、transport、persistence | 可恢复尝试被记为 error | attempt=debug，成功回退=info，耗尽=error |
