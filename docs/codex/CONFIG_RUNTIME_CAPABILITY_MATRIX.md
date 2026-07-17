@@ -138,8 +138,8 @@
 | `ServerConfig.Cluster.Providers.Redis.Prefix` | supported | RedisProvider | 节点、槽位、服务索引和 Watch Stream 键前缀 |
 | `ServerConfig.Cluster.Providers.Redis.TTL` | supported | RedisProvider | 节点、索引和 MachineID 槽位租约时长 |
 | `ServerConfig.Transport` | supported | ServiceContext | ApplyDefaults/Validate 并构造 TransportSelector |
-| `ServerConfig.Transport.Internal` | supported | TransportSelector | grpc/http/socket 主协议选择，未实现值拒绝 |
-| `ServerConfig.Transport.Fallback` | supported | TransportSelector | grpc/http/socket 降级顺序，未实现值拒绝 |
+| `ServerConfig.Transport.Internal` | supported | TransportSelector | grpc/http 主协议选择，其他值拒绝 |
+| `ServerConfig.Transport.Fallback` | supported | TransportSelector | grpc/http 降级顺序，其他值拒绝 |
 | `ServerConfig.Transport.MaxRetries` | supported | ServiceContext transport retry | 请求重试计数消费 |
 | `ServerConfig.Transport.RetryDelay` | supported | ServiceContext transport retry | 请求重试间隔消费 |
 | `ServerConfig.Transport.HTTP` | rejected | TransportConfig.Validate | Enable 容器不是协议选择入口，启用时拒绝 |
