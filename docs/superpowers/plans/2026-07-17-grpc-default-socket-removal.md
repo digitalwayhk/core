@@ -1,6 +1,6 @@
 # gRPC 默认内部传输与 Socket 删除实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **完成态说明：** 本计划已禁止启动子智能体。Task 1-9 下未勾选的 checkbox 是实施前 TDD 模板，不再表示当前状态；现行进度只以“完成记录”、真实提交链和 Task 10 验收证据为准。
 
 **Goal:** 优先复用 go-zero zrpc 与 grpc-go 成熟能力，把 gRPC 建成 Core 默认同步内部传输，完成安全传输、独立生命周期、服务发现和示例 06 验证后，一次性删除自定义 Socket。
 
@@ -12,7 +12,7 @@
 
 ## 完成记录
 
-任务 1-10 已按顺序实现、测试并提交。代码实现 tip 为 `3d6b888`；任务 10 仅补验收证据与外审交接。关键提交如下：
+任务 1-10 已按顺序实现、测试并提交。主要实现 tip 为 `3d6b888`；任务 10 内审继续修复了入站 gRPC listener 服务身份边界并补齐验收证据。关键提交如下：
 
 | 任务 | 提交 |
 | --- | --- |
@@ -25,7 +25,7 @@
 | 7 示例 06 | `9e25697`、`496da71`、`3552b62`、`12e8ca6` |
 | 8 删除 Socket | `1327726`、`d473573`、`758483d`、`016a816`、`12ca575` |
 | 9 发布治理 | `25bab39`、`dc1904e`、`028eed1`、`3d6b888` |
-| 10 总验收 | `20576e3`；Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
+| 10 总验收与内审修复 | `20576e3`、`666b56b`、`0e8e351`；Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
 
 进程级集成 suite 必须使用 `go test -p 1` 串行运行，避免两个真实多进程环境争用本机启动预算；不得通过放宽 WebSocket/UAT 断言掩盖并发资源争用。
 

@@ -6,7 +6,7 @@
 
 - 工作区：`/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex`
 - 起点：`6c07a03`（实施计划基线）
-- 终点：执行审查时当前 `HEAD`（实现代码 tip 为 `3d6b888`，其后只允许任务 10 证据/提示词提交）
+- 终点：执行审查时当前 `HEAD`（主要实现 tip 为 `3d6b888`；任务 10 内审发现并在 `0e8e351` 修复入站 listener 服务身份边界）
 - 命令：`git diff 6c07a03..HEAD`
 - 设计：`docs/superpowers/specs/2026-07-17-grpc-default-socket-removal-design.md`
 - 计划：`docs/superpowers/plans/2026-07-17-grpc-default-socket-removal.md`
@@ -27,6 +27,7 @@
 8. 旧 JSON 是否幂等删除 `SocketPort`、`Transport.Socket`、`Transport.GRPC.Enable` 并保留未知字段。
 9. EventBridge/Observe 是否只携带逻辑服务名并经过 Resolver，不得再依赖 Socket/静态地址。
 10. apidiff 不兼容项是否全部属于 `socket-to-grpc-v1` 批准：Socket 表面、Transport/Selector/Selection、SendWithFallback、CrossNodeSender、GetServers、MembershipManager、GRPC Enable。
+11. 入站 gRPC 的 `TargetService` 是否严格等于 listener 所属 `ServiceContext`，错误端口不得执行同进程其他服务或继续经过 Resolver 转发。
 
 ## 已执行证据
 
@@ -47,6 +48,18 @@ go test -race ./pkg/server/transport -run 'Fallback|Retry|Send' -count=20
 
 以上最终命令均退出 0。曾观察到两类测试基础设施现象，不能隐瞒：两个重型集成包并行时 WebSocket/UAT 的 5 秒预算被争用；一次端口探测到子进程 bind 的窗口发生临时端口占用。确认无残留进程后，`-p 1` 串行两套 suite 均通过。请评估是否需要把端口 reservation 竞态列为 P2。
 
+任务 10 内审修复 `0e8e351` 后另执行：
+
+```bash
+go test -race ./pkg/server/router -run 'TestGRPCInboundRejectsTargetForAnotherServiceBeforeResolving|TestGRPCInboundStatsAreIsolatedPerServiceContext' -count=20
+go test -race ./pkg/server/router ./pkg/server/transport/grpc -count=1
+go vet ./pkg/server/router ./pkg/server/transport/grpc
+./scripts/check-logging.sh
+./scripts/test.sh release-contract
+```
+
+以上命令均退出 0。新增测试同时覆盖直接入口和真实 gRPC listener，断言错误目标不会触发 `ServiceResolver`，且公网错误仍被脱敏。
+
 ## 消费方证据
 
 futures 精确提交：`e0bc32088b2125bb5d6e8880ef37c5b033541b5e`，Core 候选：`3d6b888`。
@@ -54,7 +67,7 @@ futures 精确提交：`e0bc32088b2125bb5d6e8880ef37c5b033541b5e`，Core 候选�
 - 临时 `go.work` 指向候选；gateway API、worker 稳定测试和 services 根包编译均通过。
 - Go 源码无旧 Socket API 使用。
 - 13 份 `docker/local/etc/*.json` 含旧 `SocketPort`。
-- 真实 `gateway.json` 临时副本加载在 Socket 迁移前因既有 `Telemetry.Batcher=jaeger` 被当前 go-zero 配置校验拒绝。
+- 真实 `gateway.json` 临时副本经 Core `ReadConfig` 先移除 Socket 字段，随后因既有 `Telemetry.Batcher=jaeger` 被当前 go-zero 配置校验拒绝。
 - 因此 Core 代码可以合并，但 v1.0.0 正式发布仍为 `blocked-by-consumer-verification`；不得把源码 smoke 说成完整消费方升级通过。
 
 ## 输出要求

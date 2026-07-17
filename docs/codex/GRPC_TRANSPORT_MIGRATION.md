@@ -72,11 +72,11 @@ Redis、Consul 等跨主机发现使用 `mtls`，为每个服务签发包含稳�
 
 ## 升级与回滚
 
-1. 先更新配置和启动参数，确保所有节点发布 `GRPCPort`。
-2. 为跨主机部署准备 mTLS 或 mesh 身份层。
+1. 跨主机部署先准备并验证 mTLS 证书或 mesh 身份层；默认 `mtls` 缺少 CA/证书/私钥时会 fail closed，远程拓扑不得临时改用 `insecure`。
+2. 更新 Core、Transport 配置和启动参数，确认所有候选节点能够发布正确的 `GRPCPort`。
 3. 运行 gRPC health、错误 CA、错误服务名和 HTTP fallback 负向测试。
-4. 使用消费方精确提交或 tag 运行编译与行为 smoke；旧源码引用 Socket Go API 时必须先改代码。
-5. 回滚需要同时回滚 Core 版本和服务配置；不得让旧 Socket 节点与只支持 gRPC/HTTP 的新节点混跑。
+4. 使用消费方精确提交或 tag 运行编译、真实配置加载和行为 smoke；旧源码引用 Socket Go API 时必须先改代码。
+5. 所有节点验证完成后统一切换；禁止新旧节点混跑。回滚必须同时回滚 Core 版本、身份材料和服务配置。
 
 源码迁移还必须处理公共 Transport 和 Membership 生命周期签名；完整批准范围见 `docs/codex/BREAKING_CHANGE_APPROVAL.md`，不能只删除配置中的 `SocketPort` 就认为升级完成。
 
