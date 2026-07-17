@@ -44,6 +44,6 @@ go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
 
 两条命令均退出 0。Go 源码扫描没有发现 `SocketPort`、`Transport.Socket`、`TargetSocketPort`、`SourceSocketPort` 或旧 `SetAttachService` 调用，因此源码编译迁移通过。
 
-配置扫描发现 `docker/local/etc` 下 13 份 JSON 仍含顶层 `SocketPort`。在临时副本加载 `gateway.json` 时，Core 在执行 Socket 迁移前因既有 `Telemetry.Batcher=jaeger` 不再属于 go-zero 当前允许值而 fail closed；该失败不是本次 Socket 删除引入，但会阻止消费方原样升级。futures 需先选择当前受支持的 telemetry exporter 并更新这些配置，再复跑真实配置 smoke。
+配置扫描发现 `docker/local/etc` 下 13 份 JSON 仍含顶层 `SocketPort`。通过 Core `ReadConfig` 加载临时 `gateway.json` 副本时，`migrateConfig` 会先移除已废弃的 Socket 字段；随后 `conf.MustLoad` 因既有 `Telemetry.Batcher=jaeger` 不属于 go-zero 当前允许值而 fail closed。该失败不是本次 Socket 删除引入，但会阻止消费方原样升级。futures 需先选择当前受支持的 telemetry exporter 并更新这些配置，再复跑迁移后的完整配置 smoke。
 
 因此正式发布状态仍为 `blocked-by-consumer-verification`，不得 tag 或发布；Core 开发期 `--candidate`、源码 smoke 与本次 gRPC 实现验收可以通过。阻断解除必须记录 futures 配置迁移提交和复跑结果。

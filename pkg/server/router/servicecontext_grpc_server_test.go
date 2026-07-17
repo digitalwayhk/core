@@ -78,6 +78,11 @@ func TestStoppingOneServiceContextReleasesOnlyItsGRPCPort(t *testing.T) {
 func TestGRPCInboundStatsAreIsolatedPerServiceContext(t *testing.T) {
 	firstContext, first := newGRPCLifecycleTestContext(t, "grpc-stats-first")
 	secondContext, _ := newGRPCLifecycleTestContext(t, "grpc-stats-second")
+	resolved := false
+	firstContext.ServiceResolver = NewServiceResolver(nil, func(string) *ServiceContext {
+		resolved = true
+		return nil
+	})
 	t.Cleanup(func() {
 		firstContext.SetRunState(false)
 		secondContext.SetRunState(false)
@@ -95,6 +100,28 @@ func TestGRPCInboundStatsAreIsolatedPerServiceContext(t *testing.T) {
 
 	assert.Equal(t, uint64(1), firstContext.TransportStats.Snapshot().InboundGRPC)
 	assert.Zero(t, secondContext.TransportStats.Snapshot().InboundGRPC)
+	assert.False(t, resolved, "错误 listener 上的请求不得查询或转发其他服务")
+}
+
+func TestGRPCInboundRejectsTargetForAnotherServiceBeforeResolving(t *testing.T) {
+	resolved := false
+	sc := &ServiceContext{
+		Service:        &types.Service{Name: "grpc-listener-owner"},
+		TransportStats: &transport.Stats{},
+	}
+	sc.ServiceResolver = NewServiceResolver(nil, func(string) *ServiceContext {
+		resolved = true
+		return nil
+	})
+
+	_, err := sc.HandleInternalPayload(context.Background(), &types.PayLoad{
+		TargetService: "another-service",
+		TargetPath:    "/api/private/query",
+	})
+
+	require.ErrorIs(t, err, ErrTargetServiceUnavailable)
+	assert.False(t, resolved, "错误 listener 上的请求不得查询或转发其他服务")
+	assert.Equal(t, uint64(1), sc.TransportStats.Snapshot().InboundGRPC)
 }
 
 func healthStatusNoFail(address string) grpc_health_v1.HealthCheckResponse_ServingStatus {

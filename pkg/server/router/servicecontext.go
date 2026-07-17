@@ -1566,6 +1566,9 @@ func (own *ServiceContext) GetServers() []service.Service {
 // HandleInternalPayload 是 gRPC 服务端调用业务路由的入口。
 func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
 	own.TransportStats.RecordInboundGRPC()
+	if payload != nil && (own.Service == nil || payload.TargetService != own.Service.Name) {
+		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
+	}
 	return own.invokePayload(ctx, payload)
 }
 func (own *ServiceContext) SetAttachServiceAddress(name string) error {
