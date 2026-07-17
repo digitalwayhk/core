@@ -194,10 +194,14 @@ func (s *Supplier) Save() error {
 	}
 	s.SetHashcode(s.GetHash())
 	if s.ID == 0 {
-		return dataAction().Insert(s)
+		return RunTransaction(func(action persistencetypes.IDataAction) error {
+			return action.Insert(s)
+		})
 	}
 	s.SetUpdatedAt(time.Now().UTC())
-	return dataAction().Update(s)
+	return RunTransaction(func(action persistencetypes.IDataAction) error {
+		return action.Update(s)
+	})
 }
 
 func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
@@ -312,7 +316,9 @@ func PendingOutbox() ([]*Outbox, error) {
 func MarkOutboxPublished(item *Outbox) error {
 	item.Published = true
 	item.SetUpdatedAt(time.Now().UTC())
-	return dataAction().Update(item)
+	return RunTransaction(func(action persistencetypes.IDataAction) error {
+		return action.Update(item)
+	})
 }
 
 var inboxMu sync.Mutex

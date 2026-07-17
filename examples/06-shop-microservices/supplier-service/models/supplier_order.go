@@ -143,33 +143,37 @@ func FindSupplierOrder(orderID uint) (*SupplierOrder, error) {
 }
 
 func DeleteProduct(item *Product) error {
-	var references []*SupplierOrder
-	query := search(NewSupplierOrder(), 1)
-	query.AddWhereN("ProductID", item.ID)
-	if err := dataAction().Load(query, &references); err != nil {
-		return err
-	}
-	if len(references) > 0 {
-		return contract.ErrResourceInUse
-	}
-	return dataAction().Delete(item)
+	return RunTransaction(func(action persistencetypes.IDataAction) error {
+		var references []*SupplierOrder
+		query := search(NewSupplierOrder(), 1)
+		query.AddWhereN("ProductID", item.ID)
+		if err := action.Load(query, &references); err != nil {
+			return err
+		}
+		if len(references) > 0 {
+			return contract.ErrResourceInUse
+		}
+		return action.Delete(item)
+	})
 }
 
 func DeleteSupplier(item *Supplier) error {
-	var products []*Product
-	productQuery := search(NewProduct(), 1)
-	productQuery.AddWhereN("SupplierID", item.ID)
-	if err := dataAction().Load(productQuery, &products); err != nil {
-		return err
-	}
-	var references []*SupplierOrder
-	orderQuery := search(NewSupplierOrder(), 1)
-	orderQuery.AddWhereN("SupplierID", item.ID)
-	if err := dataAction().Load(orderQuery, &references); err != nil {
-		return err
-	}
-	if len(products) > 0 || len(references) > 0 {
-		return contract.ErrResourceInUse
-	}
-	return dataAction().Delete(item)
+	return RunTransaction(func(action persistencetypes.IDataAction) error {
+		var products []*Product
+		productQuery := search(NewProduct(), 1)
+		productQuery.AddWhereN("SupplierID", item.ID)
+		if err := action.Load(productQuery, &products); err != nil {
+			return err
+		}
+		var references []*SupplierOrder
+		orderQuery := search(NewSupplierOrder(), 1)
+		orderQuery.AddWhereN("SupplierID", item.ID)
+		if err := action.Load(orderQuery, &references); err != nil {
+			return err
+		}
+		if len(products) > 0 || len(references) > 0 {
+			return contract.ErrResourceInUse
+		}
+		return action.Delete(item)
+	})
 }
