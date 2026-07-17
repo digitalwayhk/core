@@ -260,6 +260,12 @@ func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb
 		}
 	}()
 	payload := pbToPayload(req)
+	caller, callerErr := trustedCallerFromPeer(ctx, payload.SourceService)
+	if callerErr == nil {
+		ctx = coretypes.ContextWithTrustedInternalCaller(ctx, caller)
+	} else if errors.Is(callerErr, errCallerIdentityMismatch) {
+		return nil, status.Error(codes.Unauthenticated, "internal caller identity mismatch")
+	}
 	data, err := s.handler(ctx, payload)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "internal server error")
