@@ -9,6 +9,7 @@
 | `ServerConfig.SocketPort` | `ServerConfig.Transport.GRPC.Port` | `0` 按 HTTP 端口派生；显式值为 `1..65535`，并通过 `NodeInfo.GRPCPort` 进入发现链 |
 | `Transport.Internal=socket` | `Transport.Internal=grpc` | 客户端复用 go-zero `zrpc.Client`，服务端提供标准 gRPC health |
 | `Transport.Socket` | 删除 | 不再存在 Socket Enable；HTTP 备用必须写入 `Transport.Fallback` |
+| `Transport.GRPC.Enable` | `Transport.Internal=grpc` | Go 字段删除；旧 JSON 键由迁移器幂等删除 |
 | `-socket` | `-grpc` | 命令行参数是破坏性替换 |
 | Socket ping/自定义健康包 | `grpc_health_v1.Check` | 使用标准 `SERVING/NOT_SERVING` 探针 |
 | 明文私网 Socket | `mtls` 或 `mesh` | 外部 Redis/Consul 发现默认要求可验证身份层 |

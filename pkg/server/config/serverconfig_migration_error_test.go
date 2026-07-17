@@ -47,7 +47,7 @@ func TestReadConfigRemovesLegacySocketWithoutChangingGRPCDefaults(t *testing.T) 
 
 func TestMigrateConfigPreservesUnknownFieldsWhenRemovingSocket(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "config.json")
-	data := []byte(`{"SocketPort":18080,"FutureField":{"enabled":true},"Transport":{"Internal":"grpc","Socket":{"Enable":true},"FutureTransport":"keep"}}`)
+	data := []byte(`{"SocketPort":18080,"FutureField":{"enabled":true},"Transport":{"Internal":"grpc","Socket":{"Enable":true},"GRPC":{"Enable":true,"Port":19090},"FutureTransport":"keep"}}`)
 	require.NoError(t, os.WriteFile(file, data, 0o600))
 	require.NoError(t, migrateConfig(file))
 
@@ -60,6 +60,9 @@ func TestMigrateConfigPreservesUnknownFieldsWhenRemovingSocket(t *testing.T) {
 	transport := values["Transport"].(map[string]interface{})
 	assert.NotContains(t, transport, "Socket")
 	assert.Equal(t, "keep", transport["FutureTransport"])
+	grpc := transport["GRPC"].(map[string]interface{})
+	assert.NotContains(t, grpc, "Enable")
+	assert.Equal(t, float64(19090), grpc["Port"])
 }
 
 func TestMigrateConfigReturnsWriteFailure(t *testing.T) {

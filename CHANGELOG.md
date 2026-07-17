@@ -28,7 +28,7 @@
 ### Removed
 
 - 旧 Casdoor 回调路由 `/api/callback`；前端从 `/api/casdoor` 响应读取新回调地址。
-- 自定义内部 Socket 的两个实现包、`-socket` 参数、Socket 配置/发现/payload 字段及相关公开 Go API。WebSocket 与 Unix socket 不受影响。
+- 自定义内部 Socket 的两个实现包、`-socket` 参数、Socket 配置/发现/payload 字段、旧 `GRPCTransportConfig.Enable` 及相关公开 Go API。WebSocket 与 Unix socket 不受影响。
 
 ### Fixed
 

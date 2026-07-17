@@ -374,8 +374,8 @@ func migrateConfig(file string) error {
 	return nil
 }
 
-// migrateRemovedSocketConfig removes the retired internal Socket transport
-// while leaving unrelated and unknown user configuration untouched.
+// migrateRemovedSocketConfig removes retired transport selectors while leaving
+// unrelated and unknown user configuration untouched.
 func migrateRemovedSocketConfig(m map[string]interface{}) bool {
 	changed := false
 	if _, ok := m["SocketPort"]; ok {
@@ -386,6 +386,12 @@ func migrateRemovedSocketConfig(m map[string]interface{}) bool {
 		if _, ok := transportConfig["Socket"]; ok {
 			delete(transportConfig, "Socket")
 			changed = true
+		}
+		if grpcConfig, ok := transportConfig["GRPC"].(map[string]interface{}); ok {
+			if _, ok := grpcConfig["Enable"]; ok {
+				delete(grpcConfig, "Enable")
+				changed = true
+			}
 		}
 	}
 	return changed
