@@ -132,24 +132,6 @@ func UserOrders(userID uint) ([]*orderdto.Order, error) {
 	return result, nil
 }
 
-func SupplierOrders(supplierID uint) ([]*orderdto.SupplierOrder, error) {
-	items, err := models.ListOrders("SupplierID", supplierID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*orderdto.SupplierOrder, 0, len(items))
-	for _, item := range items {
-		dto := models.ToDTO(item)
-		result = append(result, &orderdto.SupplierOrder{
-			OrderID: dto.ID, OrderRevision: dto.OrderRevision, SupplierID: dto.SupplierID, ProductID: dto.ProductID,
-			SupplierCode: dto.Product.SupplierCode, SupplierName: dto.Product.SupplierName, ProductCode: dto.Product.ProductCode, ProductName: dto.Product.ProductName,
-			UnitPrice: dto.Product.UnitPrice, Quantity: dto.Quantity, TotalAmount: dto.TotalAmount, PaymentStatus: dto.PaymentStatus, OrderStatus: dto.OrderStatus,
-			Address: dto.Address, OrderCreatedAt: dto.CreatedAt, OrderUpdatedAt: dto.UpdatedAt,
-		})
-	}
-	return result, nil
-}
-
 func CancelOrder(userID, orderID uint, eventID string) (*orderdto.Order, error) {
 	var result *models.Order
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {

@@ -3,6 +3,8 @@ package compat
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,4 +49,53 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 	readme, err := os.ReadFile(filepath.Join(root, "examples/06-shop-microservices/README.md"))
 	require.NoError(t, err)
 	require.NotContains(t, string(readme), "supplier-service/api/call")
+}
+
+func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
+	root := repositoryRoot(t)
+	skill, err := os.ReadFile(filepath.Join(root, ".codex/skills/use-digitalway-core/references/core-backend-api.md"))
+	require.NoError(t, err)
+	require.NotContains(t, string(skill), "api/call 目标 API")
+
+	for _, service := range []string{"user-service", "supplier-service", "order-service"} {
+		modelRoot := filepath.Join(root, "examples/06-shop-microservices", service, "models")
+		for _, subdir := range []string{"common", "internal/store", "schema"} {
+			info, err := os.Stat(filepath.Join(modelRoot, subdir))
+			require.NoError(t, err, "%s 必须按 05 示例拆出 models/%s", service, subdir)
+			require.True(t, info.IsDir(), "%s models/%s 必须是目录", service, subdir)
+		}
+	}
+
+	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/main/supplier/main.go"), "IsWebSocket: true")
+	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/main/all-in-one/main.go"), "supplierservice.Service{}, &servertypes.ServerOption{IsWebSocket: true}")
+	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/order-service/business/order.go"), "func SupplierOrders(")
+}
+
+func TestExample06ProductionFilesAreSplitByStruct(t *testing.T) {
+	root := repositoryRoot(t)
+	structDecl := regexp.MustCompile(`(?m)^type\s+\w+\s+struct\b`)
+	err := filepath.WalkDir(filepath.Join(root, "examples/06-shop-microservices"), func(path string, entry os.DirEntry, err error) error {
+		require.NoError(t, err)
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		require.NoError(t, err)
+		if strings.Contains(rel, "/main/") {
+			return nil
+		}
+		contents, err := os.ReadFile(path)
+		require.NoError(t, err)
+		matches := structDecl.FindAll(contents, -1)
+		require.LessOrEqual(t, len(matches), 1, "%s 包含多个 struct，应按 struct 拆文件", rel)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func requireFileNotContains(t *testing.T, path, fragment string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NotContains(t, string(contents), fragment, path)
 }

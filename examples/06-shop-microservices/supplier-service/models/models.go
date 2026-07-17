@@ -11,13 +11,11 @@ import (
 	"time"
 
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/common"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
 )
-
-const databaseName = "shop-supplier"
 
 var (
 	actionOnce     sync.Once
@@ -28,86 +26,8 @@ var (
 	transactionMu  sync.Mutex
 )
 
-type Supplier struct {
-	*entity.Model
-	AuthUserID  string `gorm:"not null;uniqueIndex" json:"-"`
-	Name        string `gorm:"not null;uniqueIndex" json:"name"`
-	Code        string `gorm:"not null;uniqueIndex" json:"code"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
-}
-
-func NewSupplier() *Supplier { return &Supplier{Model: entity.NewModel()} }
-func (s *Supplier) NewModel() {
-	if s.Model == nil {
-		s.Model = entity.NewModel()
-	}
-}
-func (*Supplier) GetLocalDBName() string  { return databaseName }
-func (*Supplier) GetRemoteDBName() string { return databaseName }
-func (s *Supplier) GetHash() string {
-	return utils.HashCodes(strings.ToLower(strings.TrimSpace(s.AuthUserID)))
-}
-
-type Product struct {
-	*entity.Model
-	SupplierID uint            `gorm:"not null;index:idx_product_supplier_code,unique" json:"supplierID"`
-	Name       string          `gorm:"not null" json:"name"`
-	Code       string          `gorm:"not null;index:idx_product_supplier_code,unique" json:"code"`
-	Price      decimal.Decimal `json:"price"`
-	Enabled    bool            `json:"enabled"`
-}
-
-func NewProduct() *Product { return &Product{Model: entity.NewModel()} }
-func (p *Product) NewModel() {
-	if p.Model == nil {
-		p.Model = entity.NewModel()
-	}
-}
-func (*Product) GetLocalDBName() string  { return databaseName }
-func (*Product) GetRemoteDBName() string { return databaseName }
-func (p *Product) GetHash() string {
-	return utils.HashCodes(strconv.FormatUint(uint64(p.SupplierID), 10), strings.ToLower(strings.TrimSpace(p.Code)))
-}
-
-// Outbox 与商品事实同事务写入，发布成功后才标记完成。
-type Outbox struct {
-	*entity.Model
-	EventID   string `gorm:"not null;uniqueIndex" json:"eventID"`
-	EventType string `gorm:"not null;index" json:"eventType"`
-	Subject   string `gorm:"not null" json:"subject"`
-	Payload   []byte `gorm:"type:blob" json:"-"`
-	Published bool   `gorm:"index" json:"published"`
-}
-
-type Inbox struct {
-	*entity.Model
-	EventID   string `gorm:"not null;uniqueIndex"`
-	EventType string `gorm:"not null;index"`
-}
-
-func NewInbox() *Inbox { return &Inbox{Model: entity.NewModel()} }
-func (i *Inbox) NewModel() {
-	if i.Model == nil {
-		i.Model = entity.NewModel()
-	}
-}
-func (*Inbox) GetLocalDBName() string  { return databaseName }
-func (*Inbox) GetRemoteDBName() string { return databaseName }
-func (i *Inbox) GetHash() string       { return utils.HashCodes(i.EventID) }
-
-func NewOutbox() *Outbox { return &Outbox{Model: entity.NewModel()} }
-func (o *Outbox) NewModel() {
-	if o.Model == nil {
-		o.Model = entity.NewModel()
-	}
-}
-func (*Outbox) GetLocalDBName() string  { return databaseName }
-func (*Outbox) GetRemoteDBName() string { return databaseName }
-func (o *Outbox) GetHash() string       { return utils.HashCodes(o.EventID) }
-
 func baseAction() persistencetypes.IDataAction {
-	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
+	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(common.DatabaseName) })
 	return action
 }
 func dataAction() persistencetypes.IDataAction {

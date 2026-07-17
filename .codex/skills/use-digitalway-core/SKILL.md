@@ -28,8 +28,10 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 
 - 最简 CRUD 按 01 平铺 `models/api`；出现跨模型规则时增加无请求状态的 `business`。
 - 出现基础资料、交易业务或身份审计继承时，按 03/05 拆分 `common/basedata/transaction/identity`；根包只做兼容门面。
+- 示例 06 这类多服务也必须按 05 的方式拆每个服务内部目录：`models/common` 定义服务级基础模型和数据库名，`models/basedata` 放基础资料，`models/transaction` 或对应业务域放交易事实，`models/internal/store` 统一 `IDataAction`，`models/schema` 统一建表，根 `models` 只导出兼容别名。
 - `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
 - 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
+- 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件；同文件出现多个 struct 只允许紧密配套的小请求/响应/测试桩，并必须保持可读。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
 
 ## 现行指南索引
 
@@ -70,6 +72,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。
 18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
+19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName` 和数据库名；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名方法。
+20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
 
 ## 工作流
 
@@ -86,6 +90,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
 - 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
+- 在 skill、文档或代码注释里把示例 06 描述成 `api/call` 目标，或暗示需要复制调用 API。
+- 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者绕过服务级基础模型在具体模型重复声明数据库名。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
 - 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。

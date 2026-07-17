@@ -77,13 +77,17 @@ examples/05-shop-casdoor-rbac/
 examples/06-shop-microservices/
 ├── contract,dto                  # 无反向依赖的跨服务契约
 ├── user-service                 # 买家 facade 与地址权威
-├── supplier-service             # 供应商/商品权威与 api/call 目标 API
+├── supplier-service             # 供应商/商品权威与受限 Public API
 ├── order-service                # 订单/支付事实与 Outbox
 ├── runtime                      # 通用 Outbox worker
 └── main,deploy                  # 同进程调试和三进程部署
 ```
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
+
+示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务级基础模型和数据库名，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影和 Outbox/Inbox 等业务事实，`models/internal/store` 统一 `IDataAction` 和事务互斥，`models/schema` 统一建表，根 `models` 只做兼容别名和少量 facade。具体模型通过基础资料模型或业务事实模型继承服务级基础模型，自动获得 `GetLocalDBName/GetRemoteDBName`；不要在每个具体模型上重复声明库名。
+
+新增或重排文件默认按 struct 拆分：一个业务 struct 一个文件。多个模型、多个 Manage、多个 Router 或多个 DTO 不应聚在一个大文件里；只有紧密配套的小型测试桩或私有辅助结构可以与被测代码同文件。
 
 普通 CRUD 和简单 API 以 `01-simple-shop` 为准；出现以下任一需求时，以 `02-shop-payment` 为参考：
 

@@ -10,11 +10,6 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-type OutboxRecord struct {
-	ID                          uint
-	EventID, EventType, Subject string
-	Payload                     []byte
-}
 type LoadOutbox func() ([]OutboxRecord, error)
 type MarkPublished func(OutboxRecord) error
 

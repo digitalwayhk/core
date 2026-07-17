@@ -7,7 +7,7 @@ import (
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/common"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
@@ -15,7 +15,7 @@ import (
 
 // SupplierOrder 是订单可靠事件在 Supplier Service 内形成的永久只读投影。
 type SupplierOrder struct {
-	*entity.Model
+	*common.BusinessModel
 	OrderID        uint            `gorm:"not null;uniqueIndex"`
 	OrderRevision  uint64          `gorm:"not null"`
 	SupplierID     uint            `gorm:"not null;index"`
@@ -38,14 +38,14 @@ type SupplierOrder struct {
 	OrderUpdatedAt time.Time
 }
 
-func NewSupplierOrder() *SupplierOrder { return &SupplierOrder{Model: entity.NewModel()} }
+func NewSupplierOrder() *SupplierOrder {
+	return &SupplierOrder{BusinessModel: common.NewBusinessModel()}
+}
 func (s *SupplierOrder) NewModel() {
-	if s.Model == nil {
-		s.Model = entity.NewModel()
+	if s.BusinessModel == nil || s.SupplierServiceModel == nil || s.Model == nil {
+		s.BusinessModel = common.NewBusinessModel()
 	}
 }
-func (*SupplierOrder) GetLocalDBName() string  { return databaseName }
-func (*SupplierOrder) GetRemoteDBName() string { return databaseName }
 func (s *SupplierOrder) GetHash() string {
 	return utils.HashCodes(strconv.FormatUint(uint64(s.OrderID), 10))
 }

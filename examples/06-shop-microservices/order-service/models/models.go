@@ -15,13 +15,11 @@ import (
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models/common"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
 )
-
-const databaseName = "shop-order"
 
 const (
 	OrderStatusNormal = iota
@@ -47,105 +45,8 @@ var (
 	transactionMu  sync.Mutex
 )
 
-type Order struct {
-	*entity.Model
-	IdempotencyKey     string          `gorm:"not null;uniqueIndex" json:"idempotencyKey"`
-	RequestFingerprint string          `gorm:"not null" json:"-"`
-	OrderRevision      uint64          `gorm:"not null" json:"orderRevision"`
-	UserID             uint            `gorm:"not null;index" json:"userID"`
-	SupplierID         uint            `gorm:"not null;index" json:"supplierID"`
-	ProductID          uint            `gorm:"not null;index" json:"productID"`
-	SupplierCode       string          `json:"supplierCode"`
-	SupplierName       string          `json:"supplierName"`
-	ProductCode        string          `json:"productCode"`
-	ProductName        string          `json:"productName"`
-	UnitPrice          decimal.Decimal `json:"unitPrice"`
-	Quantity           int             `json:"quantity"`
-	TotalAmount        decimal.Decimal `json:"totalAmount"`
-	Recipient          string          `json:"recipient"`
-	Phone              string          `json:"phone"`
-	Region             string          `json:"region"`
-	AddressDetail      string          `json:"addressDetail"`
-	AddressID          uint            `json:"addressID"`
-	PaymentStatus      int             `json:"paymentStatus"`
-	CurrentPaymentID   string          `gorm:"index" json:"currentPaymentID"`
-	OrderStatus        int             `json:"orderStatus"`
-}
-
-func NewOrder() *Order {
-	return &Order{Model: entity.NewModel(), OrderStatus: OrderStatusNormal, PaymentStatus: PaymentStatusUnpaid}
-}
-func (o *Order) NewModel() {
-	if o.Model == nil {
-		o.Model = entity.NewModel()
-	}
-}
-func (*Order) GetLocalDBName() string  { return databaseName }
-func (*Order) GetRemoteDBName() string { return databaseName }
-func (o *Order) GetHash() string       { return utils.HashCodes(strings.TrimSpace(o.IdempotencyKey)) }
-
-type PaymentType struct {
-	*entity.Model
-	Name    string `gorm:"not null" json:"name"`
-	Code    string `gorm:"not null;uniqueIndex" json:"code"`
-	Enabled bool   `json:"enabled"`
-}
-
-func NewPaymentType() *PaymentType { return &PaymentType{Model: entity.NewModel(), Enabled: false} }
-func (p *PaymentType) NewModel() {
-	if p.Model == nil {
-		p.Model = entity.NewModel()
-	}
-}
-func (*PaymentType) GetLocalDBName() string  { return databaseName }
-func (*PaymentType) GetRemoteDBName() string { return databaseName }
-func (p *PaymentType) GetHash() string {
-	return utils.HashCodes(strings.ToLower(strings.TrimSpace(p.Code)))
-}
-
-type PaymentRecord struct {
-	*entity.Model
-	OrderID       uint            `gorm:"not null;index" json:"orderID"`
-	PaymentTypeID uint            `gorm:"not null;index" json:"paymentTypeID"`
-	Attempt       uint            `gorm:"not null;uniqueIndex:idx_payment_attempt" json:"attempt"`
-	PaymentID     string          `gorm:"not null;uniqueIndex;uniqueIndex:idx_payment_attempt" json:"paymentID"`
-	Amount        decimal.Decimal `json:"amount"`
-	Status        int             `json:"status"`
-}
-
-func NewPaymentRecord() *PaymentRecord { return &PaymentRecord{Model: entity.NewModel()} }
-func (p *PaymentRecord) NewModel() {
-	if p.Model == nil {
-		p.Model = entity.NewModel()
-	}
-}
-func (*PaymentRecord) GetLocalDBName() string  { return databaseName }
-func (*PaymentRecord) GetRemoteDBName() string { return databaseName }
-func (p *PaymentRecord) GetHash() string {
-	return utils.HashCodes(strconv.FormatUint(uint64(p.OrderID), 10), strconv.FormatUint(uint64(p.Attempt), 10), strings.TrimSpace(p.PaymentID))
-}
-
-type Outbox struct {
-	*entity.Model
-	EventID   string `gorm:"not null;uniqueIndex"`
-	EventType string `gorm:"not null;index"`
-	Subject   string `gorm:"not null"`
-	Payload   []byte `gorm:"type:blob"`
-	Published bool   `gorm:"index"`
-}
-
-func NewOutbox() *Outbox { return &Outbox{Model: entity.NewModel()} }
-func (o *Outbox) NewModel() {
-	if o.Model == nil {
-		o.Model = entity.NewModel()
-	}
-}
-func (*Outbox) GetLocalDBName() string  { return databaseName }
-func (*Outbox) GetRemoteDBName() string { return databaseName }
-func (o *Outbox) GetHash() string       { return utils.HashCodes(o.EventID) }
-
 func baseAction() persistencetypes.IDataAction {
-	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
+	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(common.DatabaseName) })
 	return action
 }
 

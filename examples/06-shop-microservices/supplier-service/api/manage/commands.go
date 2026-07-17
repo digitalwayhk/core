@@ -39,36 +39,3 @@ func (own *SetSupplierEnabled) Do(req servertypes.IRequest) (interface{}, error)
 }
 
 func (own *SetSupplierEnabled) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }
-
-// SetProductEnabled 是商品上下架的唯一写入口。
-type SetProductEnabled struct {
-	managepkg.Operation[models.Product]
-}
-
-func NewSetProductEnabled(owner interface{}) *SetProductEnabled {
-	return &SetProductEnabled{Operation: managepkg.NewOperation[models.Product](owner)}
-}
-
-func (own *SetProductEnabled) New(instance interface{}) servertypes.IRouter {
-	next := NewSetProductEnabled(nil)
-	next.Operation.New(instance)
-	return next
-}
-
-func (own *SetProductEnabled) Validation(servertypes.IRequest) error {
-	if own.Model == nil || own.Model.ID == 0 {
-		return contract.ErrResourceNotFound
-	}
-	return nil
-}
-
-func (own *SetProductEnabled) Do(req servertypes.IRequest) (interface{}, error) {
-	owner, ok := own.GetInstance().(*ProductManage)
-	if !ok {
-		return nil, contract.ErrForbidden
-	}
-	result, err, _ := owner.DoBefore(own, req)
-	return result, err
-}
-
-func (own *SetProductEnabled) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }

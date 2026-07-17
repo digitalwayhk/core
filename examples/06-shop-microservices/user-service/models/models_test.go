@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,20 @@ func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
 	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
 	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
 	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestInboxRetriesUnprocessedEvent(t *testing.T) {
+	var calls atomic.Int32
+	operation := func() error {
+		if calls.Add(1) == 1 {
+			return errors.New("temporary notification failure")
+		}
+		return nil
+	}
+	require.Error(t, ProcessInbox("event-retry", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("event-retry", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("event-retry", "shop.order.changed", operation))
+	assert.Equal(t, int32(2), calls.Load())
 }
 
 func TestAddressOwnershipUsesTrustedUser(t *testing.T) {

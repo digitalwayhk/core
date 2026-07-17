@@ -4,18 +4,15 @@ package models
 import (
 	"errors"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models/common"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 )
-
-const databaseName = "shop-user"
 
 var (
 	actionOnce     sync.Once
@@ -25,62 +22,8 @@ var (
 	storageErr     error
 )
 
-type User struct {
-	*entity.Model
-	AuthUserID string `gorm:"not null;uniqueIndex" json:"-"`
-	Name       string `gorm:"not null" json:"name"`
-	Enabled    bool   `gorm:"not null" json:"enabled"`
-}
-
-func NewUser() *User { return &User{Model: entity.NewModel()} }
-func (u *User) NewModel() {
-	if u.Model == nil {
-		u.Model = entity.NewModel()
-	}
-}
-func (*User) GetLocalDBName() string  { return databaseName }
-func (*User) GetRemoteDBName() string { return databaseName }
-func (u *User) GetHash() string       { return utils.HashCodes(strings.TrimSpace(u.AuthUserID)) }
-
-type Address struct {
-	*entity.Model
-	UserID    uint   `gorm:"not null;index" json:"userID"`
-	Recipient string `gorm:"not null" json:"recipient"`
-	Phone     string `json:"phone"`
-	Region    string `json:"region"`
-	Detail    string `json:"detail"`
-}
-
-type Inbox struct {
-	*entity.Model
-	EventID   string `gorm:"not null;uniqueIndex"`
-	EventType string `gorm:"not null;index"`
-}
-
-func NewInbox() *Inbox { return &Inbox{Model: entity.NewModel()} }
-func (i *Inbox) NewModel() {
-	if i.Model == nil {
-		i.Model = entity.NewModel()
-	}
-}
-func (*Inbox) GetLocalDBName() string  { return databaseName }
-func (*Inbox) GetRemoteDBName() string { return databaseName }
-func (i *Inbox) GetHash() string       { return utils.HashCodes(i.EventID) }
-
-func NewAddress() *Address { return &Address{Model: entity.NewModel()} }
-func (a *Address) NewModel() {
-	if a.Model == nil {
-		a.Model = entity.NewModel()
-	}
-}
-func (*Address) GetLocalDBName() string  { return databaseName }
-func (*Address) GetRemoteDBName() string { return databaseName }
-func (a *Address) GetHash() string {
-	return utils.HashCodes(strconv.FormatUint(uint64(a.UserID), 10), strings.TrimSpace(a.Recipient), strings.TrimSpace(a.Phone), strings.TrimSpace(a.Detail))
-}
-
 func baseAction() persistencetypes.IDataAction {
-	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(databaseName) })
+	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(common.DatabaseName) })
 	return action
 }
 func dataAction() persistencetypes.IDataAction {
@@ -267,13 +210,26 @@ func ProcessInbox(eventID, eventType string, operation func() error) error {
 		return err
 	}
 	if len(items) > 0 {
-		return nil
-	}
-	if err := operation(); err != nil {
-		return err
+		if items[0].Processed {
+			return nil
+		}
+		if err := operation(); err != nil {
+			return err
+		}
+		items[0].Processed = true
+		items[0].SetUpdatedAt(time.Now().UTC())
+		return dataAction().Update(items[0])
 	}
 	item := NewInbox()
 	item.EventID, item.EventType = eventID, eventType
 	item.SetHashcode(item.GetHash())
-	return dataAction().Insert(item)
+	if err := dataAction().Insert(item); err != nil {
+		return err
+	}
+	if err := operation(); err != nil {
+		return err
+	}
+	item.Processed = true
+	item.SetUpdatedAt(time.Now().UTC())
+	return dataAction().Update(item)
 }
