@@ -4,6 +4,7 @@ package models
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,9 @@ var (
 
 type User struct {
 	*entity.Model
-	UserID string `gorm:"not null;uniqueIndex" json:"userID"`
-	Name   string `gorm:"not null" json:"name"`
+	AuthUserID string `gorm:"not null;uniqueIndex" json:"-"`
+	Name       string `gorm:"not null" json:"name"`
+	Enabled    bool   `gorm:"not null" json:"enabled"`
 }
 
 func NewUser() *User { return &User{Model: entity.NewModel()} }
@@ -38,11 +40,11 @@ func (u *User) NewModel() {
 }
 func (*User) GetLocalDBName() string  { return databaseName }
 func (*User) GetRemoteDBName() string { return databaseName }
-func (u *User) GetHash() string       { return utils.HashCodes(strings.TrimSpace(u.UserID)) }
+func (u *User) GetHash() string       { return utils.HashCodes(strings.TrimSpace(u.AuthUserID)) }
 
 type Address struct {
 	*entity.Model
-	UserID    string `gorm:"not null;index" json:"userID"`
+	UserID    uint   `gorm:"not null;index" json:"userID"`
 	Recipient string `gorm:"not null" json:"recipient"`
 	Phone     string `json:"phone"`
 	Region    string `json:"region"`
@@ -74,7 +76,7 @@ func (a *Address) NewModel() {
 func (*Address) GetLocalDBName() string  { return databaseName }
 func (*Address) GetRemoteDBName() string { return databaseName }
 func (a *Address) GetHash() string {
-	return utils.HashCodes(strings.TrimSpace(a.UserID), strings.TrimSpace(a.Recipient), strings.TrimSpace(a.Phone), strings.TrimSpace(a.Detail))
+	return utils.HashCodes(strconv.FormatUint(uint64(a.UserID), 10), strings.TrimSpace(a.Recipient), strings.TrimSpace(a.Phone), strings.TrimSpace(a.Detail))
 }
 
 func baseAction() persistencetypes.IDataAction {
@@ -135,7 +137,7 @@ func EnsureUser(userID, name string) (*User, error) {
 	}
 	var items []*User
 	q := search(NewUser(), 1)
-	q.AddWhereN("UserID", userID)
+	q.AddWhereN("AuthUserID", userID)
 	if err := dataAction().Load(q, &items); err != nil {
 		return nil, err
 	}
@@ -152,40 +154,90 @@ func EnsureUser(userID, name string) (*User, error) {
 		name = userID
 	}
 	item := NewUser()
-	item.UserID, item.Name = userID, name
+	item.AuthUserID, item.Name, item.Enabled = userID, name, true
 	item.SetHashcode(item.GetHash())
 	return item, dataAction().Insert(item)
 }
 
+func FindUser(authUserID string) (*User, error) {
+	if err := ensure(NewUser()); err != nil {
+		return nil, err
+	}
+	var items []*User
+	query := search(NewUser(), 1)
+	query.AddWhereN("AuthUserID", strings.TrimSpace(authUserID))
+	if err := dataAction().Load(query, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+
+func FindUserByID(id uint) (*User, error) {
+	if err := ensure(NewUser()); err != nil {
+		return nil, err
+	}
+	var items []*User
+	query := search(NewUser(), 1)
+	query.AddWhereN("ID", id)
+	if err := dataAction().Load(query, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+
+func SaveUser(item *User) error {
+	item.AuthUserID, item.Name = strings.TrimSpace(item.AuthUserID), strings.TrimSpace(item.Name)
+	if item.AuthUserID == "" || item.Name == "" {
+		return errors.New("用户身份和名称不能为空")
+	}
+	item.SetHashcode(item.GetHash())
+	if item.CreatedAt == nil {
+		return dataAction().Insert(item)
+	}
+	item.SetUpdatedAt(time.Now().UTC())
+	return dataAction().Update(item)
+}
+
 func InsertAddress(item *Address) error {
-	item.UserID = strings.TrimSpace(item.UserID)
 	item.Recipient = strings.TrimSpace(item.Recipient)
-	if item.UserID == "" || item.Recipient == "" {
+	if item.UserID == 0 || item.Recipient == "" {
 		return errors.New("用户和收件人不能为空")
 	}
 	item.SetHashcode(item.GetHash())
 	return dataAction().Insert(item)
 }
-func FindOwnedAddress(userID string, id uint) (*Address, error) {
+func FindOwnedAddress(userID uint, id uint) (*Address, error) {
 	if err := ensure(NewAddress()); err != nil {
 		return nil, err
 	}
 	var items []*Address
 	q := search(NewAddress(), 1)
 	q.AddWhereN("ID", id)
-	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	q.AddWhereN("UserID", userID)
 	if err := dataAction().Load(q, &items); err != nil || len(items) == 0 {
 		return nil, err
 	}
 	return items[0], nil
 }
-func ListAddresses(userID string) ([]*Address, error) {
+func FindAddress(id uint) (*Address, error) {
+	if err := ensure(NewAddress()); err != nil {
+		return nil, err
+	}
+	var items []*Address
+	query := search(NewAddress(), 1)
+	query.AddWhereN("ID", id)
+	if err := dataAction().Load(query, &items); err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
+}
+func ListAddresses(userID uint) ([]*Address, error) {
 	if err := ensure(NewAddress()); err != nil {
 		return nil, err
 	}
 	var items []*Address
 	q := search(NewAddress(), 100)
-	q.AddWhereN("UserID", strings.TrimSpace(userID))
+	q.AddWhereN("UserID", userID)
 	err := dataAction().Load(q, &items)
 	return items, err
 }

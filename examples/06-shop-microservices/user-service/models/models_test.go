@@ -30,19 +30,30 @@ func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
 }
 
 func TestAddressOwnershipUsesTrustedUser(t *testing.T) {
-	_, err := EnsureUser("buyer-a", "用户 A")
+	user, err := EnsureUser("buyer-a", "用户 A")
 	require.NoError(t, err)
 	item := NewAddress()
 	item.SetID(1001)
-	item.UserID = "buyer-a"
+	item.UserID = user.ID
 	item.Recipient = "用户 A"
 	item.Detail = "1 号"
 	require.NoError(t, InsertAddress(item))
 
-	owned, err := FindOwnedAddress("buyer-a", item.ID)
+	owned, err := FindOwnedAddress(user.ID, item.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "1 号", owned.Detail)
-	foreign, err := FindOwnedAddress("buyer-b", item.ID)
+	foreign, err := FindOwnedAddress(user.ID+1, item.ID)
 	assert.Nil(t, foreign)
 	assert.NoError(t, err)
+}
+
+func TestEnsureUserMapsAuthIdentityToStableNumericID(t *testing.T) {
+	first, err := EnsureUser("auth-buyer-1", "Buyer")
+	require.NoError(t, err)
+	second, err := EnsureUser("auth-buyer-1", "Buyer")
+	require.NoError(t, err)
+	require.NotZero(t, first.ID)
+	require.Equal(t, first.ID, second.ID)
+	require.True(t, first.Enabled)
+	require.Equal(t, "auth-buyer-1", first.AuthUserID)
 }
