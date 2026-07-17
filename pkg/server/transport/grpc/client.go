@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -112,7 +113,11 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 	if err != nil {
 		return nil, err
 	}
-	resp, err := pb.NewCoreTransportClient(client.Conn()).Call(ctx, payloadToPB(payload))
+	request, err := payloadToPB(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := pb.NewCoreTransportClient(client.Conn()).Call(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +206,15 @@ func (g *GRPCTransport) clientOptions() ([]zrpc.ClientOption, error) {
 	return g.securityOpts, g.securityErr
 }
 
-func payloadToPB(p *coretypes.PayLoad) *pb.PayloadRequest {
+func payloadToPB(p *coretypes.PayLoad) (*pb.PayloadRequest, error) {
+	data := p.Data
+	if len(data) == 0 && p.Instance != nil {
+		var err error
+		data, err = json.Marshal(p.Instance)
+		if err != nil {
+			return nil, fmt.Errorf("grpc: encode payload instance: %w", err)
+		}
+	}
 	return &pb.PayloadRequest{
 		TraceId:       p.TraceID,
 		SourceService: p.SourceService,
@@ -212,8 +225,8 @@ func payloadToPB(p *coretypes.PayLoad) *pb.PayloadRequest {
 		UserName:      p.UserName,
 		ClientIp:      p.ClientIP,
 		Auth:          p.Auth,
-		Data:          p.Data,
+		Data:          data,
 		HttpMethod:    p.HttpMethod,
 		Token:         p.Token,
-	}
+	}, nil
 }

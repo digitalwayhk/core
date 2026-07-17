@@ -2,6 +2,7 @@ package grpc_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"sync"
@@ -100,6 +101,29 @@ func TestGRPCTransport_PayloadRoundTrip(t *testing.T) {
 	assert.Empty(t, received.TargetAddress)
 	assert.Zero(t, received.TargetPort)
 	assert.Zero(t, received.TargetSocketPort)
+}
+
+func TestGRPCTransport_TypeSafeInstanceRoundTrip(t *testing.T) {
+	type requestBody struct {
+		ProductID uint `json:"productID"`
+		Quantity  int  `json:"quantity"`
+	}
+	var decoded requestBody
+	addr, stop := startTestServer(t, func(_ context.Context, payload *coretypes.PayLoad) ([]byte, error) {
+		require.NoError(t, json.Unmarshal(payload.Data, &decoded))
+		require.IsType(t, json.RawMessage{}, payload.Instance)
+		return []byte("ok"), nil
+	})
+	defer stop()
+
+	transport := newInsecureTransport()
+	t.Cleanup(func() { _ = transport.Stop(context.Background()) })
+	data, err := transport.Send(context.Background(), &coretypes.PayLoad{
+		Instance: &requestBody{ProductID: 42, Quantity: 3},
+	}, addr)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("ok"), data)
+	assert.Equal(t, requestBody{ProductID: 42, Quantity: 3}, decoded)
 }
 
 func TestCoreTransportDescriptorExcludesPrivateHealthAndEndpointFields(t *testing.T) {

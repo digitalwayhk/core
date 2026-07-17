@@ -4,6 +4,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -285,6 +286,7 @@ func pbToPayload(req *pb.PayloadRequest) *coretypes.PayLoad {
 		ClientIP:      req.ClientIp,
 		Auth:          req.Auth,
 		Data:          req.Data,
+		Instance:      json.RawMessage(req.Data),
 		HttpMethod:    req.HttpMethod,
 		Token:         req.Token,
 	}
