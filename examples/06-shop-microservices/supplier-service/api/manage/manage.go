@@ -56,3 +56,19 @@ func (*ProductManage) ViewModel(model *view.ViewModel) {
 	model.Title = "商品查询"
 	model.AutoLoad = true
 }
+
+// OrderManage 只提供供应商订单投影的查询能力。
+type OrderManage struct {
+	*managepkg.ManageService[models.SupplierOrder]
+}
+
+func NewOrderManage() *OrderManage {
+	own := &OrderManage{}
+	own.ManageService = managepkg.NewManageService[models.SupplierOrder](own)
+	return own
+}
+func (o *OrderManage) Routers() []servertypes.IRouter { return []servertypes.IRouter{o.View, o.Search} }
+func (*OrderManage) ViewModel(model *view.ViewModel) {
+	model.Title = "供应商订单查询"
+	model.AutoLoad = true
+}

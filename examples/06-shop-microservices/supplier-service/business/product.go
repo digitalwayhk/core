@@ -12,7 +12,25 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func ProductListResponse() interface{} { return []*supplierdto.Product{} }
+func ProductListResponse() interface{}  { return []*supplierdto.Product{} }
+func SupplierListResponse() interface{} { return []*supplierdto.Supplier{} }
+
+func AvailableSuppliers(id uint, code, name string) ([]*supplierdto.Supplier, error) {
+	items, err := models.ListSuppliers()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*supplierdto.Supplier, 0, len(items))
+	for _, item := range items {
+		if item == nil || !item.Enabled || (id != 0 && item.ID != id) ||
+			(code != "" && !strings.EqualFold(item.Code, code)) ||
+			(name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name))) {
+			continue
+		}
+		result = append(result, &supplierdto.Supplier{ID: item.ID, Code: item.Code, Name: item.Name, Description: item.Description, Enabled: true})
+	}
+	return result, nil
+}
 
 func ProductResponse(item *models.Product) *supplierdto.Product {
 	if item == nil {
@@ -147,14 +165,14 @@ func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *
 	return ProductResponse(item), err
 }
 
-func AvailableProducts(name, code string, supplierID uint) ([]*supplierdto.Product, error) {
+func AvailableProducts(id uint, name, code string, supplierID uint) ([]*supplierdto.Product, error) {
 	items, err := models.ListProducts()
 	if err != nil {
 		return nil, err
 	}
 	result := make([]*supplierdto.Product, 0, len(items))
 	for _, item := range items {
-		if item == nil || !item.Enabled || (supplierID != 0 && item.SupplierID != supplierID) ||
+		if item == nil || !item.Enabled || (id != 0 && item.ID != id) || (supplierID != 0 && item.SupplierID != supplierID) ||
 			(code != "" && !strings.EqualFold(item.Code, code)) || (name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name))) {
 			continue
 		}

@@ -2,27 +2,54 @@ package public
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-// GetProducts 查询供应商和商品均启用的可售商品。
-type GetProducts struct{ Name, Code, SupplierID string }
+type GetProducts struct {
+	ID         uint   `json:"id"`
+	Name       string `json:"name"`
+	Code       string `json:"code"`
+	SupplierID uint   `json:"supplierID"`
+}
 
-// Parse 读取可选筛选条件，全部为空时返回全部可售商品。
 func (g *GetProducts) Parse(req servertypes.IRequest) error {
-	g.Name, g.Code, g.SupplierID = strings.TrimSpace(req.GetValue("name")), strings.TrimSpace(req.GetValue("code")), strings.TrimSpace(req.GetValue("supplierID"))
+	g.Name, g.Code = strings.TrimSpace(req.GetValue("name")), strings.TrimSpace(req.GetValue("code"))
+	for value, target := range map[string]*uint{"id": &g.ID, "supplierID": &g.SupplierID} {
+		text := strings.TrimSpace(req.GetValue(value))
+		if text == "" {
+			continue
+		}
+		parsed, err := strconv.ParseUint(text, 10, 64)
+		if err != nil {
+			return err
+		}
+		*target = uint(parsed)
+	}
 	return nil
 }
 func (*GetProducts) Validation(servertypes.IRequest) error { return nil }
 func (g *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
-	return business.AvailableProducts(g.Name, g.Code, g.SupplierID)
+	return business.AvailableProducts(g.ID, g.Name, g.Code, g.SupplierID)
 }
 func (*GetProducts) GetResponse() interface{} { return business.ProductListResponse() }
+func (g *GetProducts) GetCacheKey() string {
+	return utils.HashCodes(strconv.FormatUint(uint64(g.ID), 10), strings.ToLower(g.Name), strings.ToLower(g.Code), strconv.FormatUint(uint64(g.SupplierID), 10))
+}
 func (g *GetProducts) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithServiceName(contract.SupplierServiceName), router.WithPath("/api/"+contract.SupplierServiceName+"/getproducts"), router.WithMethod(http.MethodGet))
+	info := router.DefaultRouterInfoWithOptions(g,
+		router.WithServiceName(contract.SupplierServiceName),
+		router.WithPath("/api/"+contract.SupplierServiceName+"/getproducts"),
+		router.WithMethod(http.MethodGet),
+		router.WithInternalCallers(contract.UserServiceName, contract.OrderServiceName),
+	)
+	info.UseCache(30 * time.Second)
+	return info
 }

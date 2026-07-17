@@ -9,9 +9,7 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
-	callapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/call"
 	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/manage"
-	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
@@ -31,14 +29,15 @@ type Service struct {
 func (*Service) ServiceName() string { return contract.SupplierServiceName }
 func (*Service) Routers() []servertypes.IRouter {
 	routers := []servertypes.IRouter{
-		&publicapi.GetProducts{}, &callapi.GetProductSnapshot{}, &privateapi.AddProduct{}, &privateapi.SetProduct{}, &privateapi.GetMyProducts{}, &privateapi.GetOrders{},
+		&publicapi.GetSuppliers{}, &publicapi.GetProducts{},
 	}
 	routers = append(routers, manageapi.NewSupplierManage().Routers()...)
 	routers = append(routers, manageapi.NewProductManage().Routers()...)
+	routers = append(routers, manageapi.NewOrderManage().Routers()...)
 	return routers
 }
 
-// OnAuthRequest 只允许固定平台管理员访问 Manage；普通供应商只访问 Private。
+// OnAuthRequest 允许供应商和平台管理员进入统一 Manage，数据范围由 Hook 控制。
 func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestArgs) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -46,11 +45,7 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	uid := strings.TrimSpace(args.Identity.UID)
 	switch args.PathType {
 	case servertypes.ManageType:
-		if uid != contract.PlatformAdminUserID {
-			return servertypes.NewPublicError(servertypes.ErrorKindForbidden, servertypes.PublicCodeForbidden, "权限不足", contract.ErrForbidden)
-		}
-	case servertypes.PrivateType:
-		if uid == "" || uid == contract.PlatformAdminUserID {
+		if uid == "" {
 			return servertypes.NewPublicError(servertypes.ErrorKindForbidden, servertypes.PublicCodeForbidden, "权限不足", contract.ErrForbidden)
 		}
 	}
@@ -105,15 +100,15 @@ func (s *Service) Start() {
 		if err := json.Unmarshal(env.Data, payload); err != nil {
 			return err
 		}
-		return models.ProcessInbox(payload.EventID, payload.EventType, func() error { return privateapi.NotifyOrderChanged(payload) })
+		return models.ApplyOrderEvent(*payload)
 	}
-	for _, eventType := range []string{contract.EventOrderChanged, contract.EventPaymentChanged} {
+	for _, eventType := range []string{contract.EventOrderCreated, contract.EventOrderStatusChanged, contract.EventPaymentChanged} {
 		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, orderHandler); subscribeErr == nil {
 			s.cancels = append(s.cancels, cancel)
 		}
 	}
 	externalCancels, err := exampleruntime.SubscribeExternalControls(context.Background(), sc.ServiceEventBridge,
-		contract.SubjectOrderChanged, contract.SubjectPaymentChanged)
+		contract.SubjectOrderCreated, contract.SubjectOrderStatusChanged, contract.SubjectPaymentChanged)
 	if err != nil {
 		logx.Errorw("service_external_control_subscribe_failed", logx.Field("service", contract.SupplierServiceName), logx.Field("error", err))
 		panic(err)

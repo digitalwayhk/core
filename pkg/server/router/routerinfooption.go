@@ -1,6 +1,11 @@
 package router
 
-import "github.com/digitalwayhk/core/pkg/server/types"
+import (
+	"sort"
+	"strings"
+
+	"github.com/digitalwayhk/core/pkg/server/types"
+)
 
 // RouterInfoOption 只在创建尚未注册的 RouterInfo 时配置注册期元数据。
 // RouterInfo 已由 ServiceContext 注册并冻结时，DefaultRouterInfoWithOptions 和
@@ -64,7 +69,18 @@ func WithPathType(pathType types.ApiType) RouterInfoOption {
 // WithInternalCallers 声明只有列出的可信服务才能调用该路由。
 // 白名单在 RouterInfo 首次注册时规范化并冻结。
 func WithInternalCallers(serviceNames ...string) RouterInfoOption {
-	values := append([]string(nil), serviceNames...)
+	seen := make(map[string]struct{}, len(serviceNames))
+	for _, value := range serviceNames {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	values := make([]string, 0, len(seen))
+	for value := range seen {
+		values = append(values, value)
+	}
+	sort.Strings(values)
 	return routerInfoOptionFunc(func(info *types.RouterInfo) {
 		info.InternalCallers = values
 	})

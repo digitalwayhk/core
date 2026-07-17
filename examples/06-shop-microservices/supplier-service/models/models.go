@@ -236,6 +236,15 @@ func FindSupplierByID(id uint) (*Supplier, error) {
 	return items[0], nil
 }
 
+func ListSuppliers() ([]*Supplier, error) {
+	if err := ensureWith(dataAction(), NewSupplier()); err != nil {
+		return nil, err
+	}
+	var items []*Supplier
+	err := dataAction().Load(search(NewSupplier(), 1000), &items)
+	return items, err
+}
+
 func (p *Product) InsertWith(a persistencetypes.IDataAction) error {
 	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
 	if p.Name == "" || p.Code == "" || p.SupplierID == 0 || !p.Price.GreaterThan(decimal.Zero) {
