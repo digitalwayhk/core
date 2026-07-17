@@ -15,6 +15,7 @@ import (
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
 	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,8 +62,7 @@ func waitReady() error {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		user, eu := suites.user.DoJSON(http.MethodGet, "/api/shop-user/getproducts", "", nil)
-		supplier, es := suites.supplier.DoJSON(http.MethodGet, "/api/shop-supplier/getproducts", "", nil)
-		if eu == nil && es == nil && user.Success && supplier.Success {
+		if eu == nil && user.Success {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -71,27 +71,42 @@ func waitReady() error {
 }
 
 func addProduct(t *testing.T, supplierID string) (supplierdto.Product, string) {
-	token := suites.supplier.TokenFor(t, supplierID, 0)
-	created := suites.supplier.RequestJSON(t, http.MethodPost, "/api/shop-supplier/addproduct", token, map[string]interface{}{"name": "集成商品", "code": fmt.Sprintf("product-%d", time.Now().UnixNano()), "price": "12.50"})
+	token := suites.supplier.TokenFor(t, supplierID, 1)
+	created := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/add", token, map[string]interface{}{"name": "集成商品", "code": fmt.Sprintf("product-%d", time.Now().UnixNano()), "price": "12.50"})
 	require.True(t, created.Success, created.ErrorMessage)
-	var product supplierdto.Product
-	require.NoError(t, json.Unmarshal(created.Data, &product))
-	enabled := true
-	updated := suites.supplier.RequestJSON(t, http.MethodPost, "/api/shop-supplier/setproduct", token, map[string]interface{}{"productID": product.ID, "enabled": enabled})
+	var raw struct {
+		ID         string `json:"id"`
+		SupplierID uint   `json:"supplierID"`
+		Name, Code string
+		Price      string `json:"price"`
+		Enabled    bool   `json:"enabled"`
+	}
+	require.NoError(t, json.Unmarshal(created.Data, &raw))
+	id, err := strconv.ParseUint(raw.ID, 10, 64)
+	require.NoError(t, err)
+	product := supplierdto.Product{ID: uint(id), SupplierID: raw.SupplierID, Name: raw.Name, Code: raw.Code, Price: decimal.RequireFromString(raw.Price), Enabled: raw.Enabled}
+	updated := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/setproductenabled", token, map[string]interface{}{"id": raw.ID, "enabled": true})
 	require.True(t, updated.Success, updated.ErrorMessage)
-	require.NoError(t, json.Unmarshal(updated.Data, &product))
+	product.Enabled = true
 	return product, token
 }
 func addAddress(t *testing.T, userID string) (userdto.Address, string) {
+	manageToken := suites.user.TokenFor(t, userID, 1)
 	token := suites.user.TokenFor(t, userID, 0)
-	response := suites.user.RequestJSON(t, http.MethodPost, "/api/shop-user/addaddress", token, map[string]interface{}{"recipient": "集成用户", "phone": "10086", "region": "测试区", "detail": "1 号"})
+	response := suites.user.RequestJSON(t, http.MethodPost, "/api/manage/shop-user/addressmanage/add", manageToken, map[string]interface{}{"recipient": "集成用户", "phone": "10086", "region": "测试区", "detail": "1 号"})
 	require.True(t, response.Success, response.ErrorMessage)
-	var address userdto.Address
-	require.NoError(t, json.Unmarshal(response.Data, &address))
+	var raw struct {
+		ID                               string `json:"id"`
+		Recipient, Phone, Region, Detail string
+	}
+	require.NoError(t, json.Unmarshal(response.Data, &raw))
+	id, err := strconv.ParseUint(raw.ID, 10, 64)
+	require.NoError(t, err)
+	address := userdto.Address{ID: uint(id), Recipient: raw.Recipient, Phone: raw.Phone, Region: raw.Region, Detail: raw.Detail}
 	return address, token
 }
 func addOrder(t *testing.T, token string, productID, addressID uint) orderdto.Order {
-	response := suites.user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", token, map[string]interface{}{"productID": productID, "quantity": 2, "addressID": addressID})
+	response := suites.user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", token, map[string]interface{}{"requestID": fmt.Sprintf("request-%d", time.Now().UnixNano()), "productID": productID, "quantity": 2, "addressID": addressID})
 	require.True(t, response.Success, response.ErrorMessage)
 	var order orderdto.Order
 	require.NoError(t, json.Unmarshal(response.Data, &order))
@@ -111,7 +126,9 @@ func addPaymentType(t *testing.T, code string) orderdto.PaymentType {
 	require.NoError(t, json.Unmarshal(response.Data, &raw))
 	id, err := strconv.ParseUint(raw.ID, 10, 64)
 	require.NoError(t, err)
-	return orderdto.PaymentType{ID: uint(id), Name: raw.Name, Code: raw.Code, Enabled: raw.Enabled}
+	enabled := suites.order.RequestJSON(t, http.MethodPost, "/api/manage/shop-order/paymenttypemanage/setpaymenttypeenabled", admin, map[string]interface{}{"id": raw.ID, "enabled": true})
+	require.True(t, enabled.Success, enabled.ErrorMessage)
+	return orderdto.PaymentType{ID: uint(id), Name: raw.Name, Code: raw.Code, Enabled: true}
 }
 func connectAndSubscribe(t *testing.T, suite *integration.Suite, token, channel string) *websocket.Conn {
 	connection, _, err := websocket.DefaultDialer.Dial(suite.WebSocketURL, nil)
