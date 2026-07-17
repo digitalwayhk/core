@@ -73,6 +73,12 @@ func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
 			require.True(t, info.IsDir(), "%s api/manage/%s 必须是目录", service, subdir)
 		}
 		requireOnlyFacadeGoFiles(t, manageRoot, "manage.go")
+		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "type ServiceManage")
+		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "NewHookedManageService")
+		requireFileContains(t, filepath.Join(manageRoot, "basedata", "base_data_manage.go"), "type BaseDataManage")
+		requireFileContains(t, filepath.Join(manageRoot, "transaction", "transaction_manage.go"), "type TransactionManage")
+		requireConcreteManageUsesLocalBase(t, filepath.Join(manageRoot, "basedata"), "BaseDataManage")
+		requireConcreteManageUsesLocalBase(t, filepath.Join(manageRoot, "transaction"), "TransactionManage")
 	}
 
 	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/main/supplier/main.go"), "IsWebSocket: true")
@@ -102,6 +108,13 @@ func TestExample06ProductionFilesAreSplitByStruct(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func requireFileContains(t *testing.T, path, fragment string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(contents), fragment, path)
+}
+
 func requireFileNotContains(t *testing.T, path, fragment string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)
@@ -118,5 +131,25 @@ func requireOnlyFacadeGoFiles(t *testing.T, dir, facade string) {
 			continue
 		}
 		require.Equal(t, facade, entry.Name(), "%s 根目录只允许保留 %s，业务实现必须进入语义子目录", dir, facade)
+	}
+}
+
+func requireConcreteManageUsesLocalBase(t *testing.T, dir, baseName string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_manage.go") {
+			continue
+		}
+		if entry.Name() == "base_data_manage.go" || entry.Name() == "transaction_manage.go" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		contents, err := os.ReadFile(path)
+		require.NoError(t, err)
+		text := string(contents)
+		require.NotContains(t, text, "*managepkg.ManageService", "%s 不能直接嵌入 ManageService，必须先继承本服务 %s", path, baseName)
+		require.Contains(t, text, "*"+baseName, "%s 必须继承本目录的 %s", path, baseName)
 	}
 }

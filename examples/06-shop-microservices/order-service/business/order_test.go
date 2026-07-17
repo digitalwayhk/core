@@ -92,8 +92,7 @@ func TestConcurrentCreateOrderConvergesOnOneFact(t *testing.T) {
 		go func(index int) {
 			defer wait.Done()
 			command := base
-			command.OrderID = base.OrderID + uint(index)
-			command.EventID = fmt.Sprintf("%s-%d", base.EventID, index)
+			command.OrderID, command.EventID = nextValue(fmt.Sprintf("%s-worker-%d", base.EventID, index))
 			order, err := CreateOrder(command, fixedProductSnapshot())
 			if err == nil {
 				ids <- order.ID

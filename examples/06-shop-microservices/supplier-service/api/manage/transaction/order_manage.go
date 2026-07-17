@@ -11,12 +11,12 @@ import (
 
 // OrderManage 只提供供应商订单投影的查询能力。
 type OrderManage struct {
-	*managepkg.ManageService[models.SupplierOrder]
+	*TransactionManage[models.SupplierOrder]
 }
 
 func NewOrderManage() *OrderManage {
 	own := &OrderManage{}
-	own.ManageService = managepkg.NewManageService[models.SupplierOrder](own)
+	own.TransactionManage = NewTransactionManage[models.SupplierOrder](own)
 	return own
 }
 

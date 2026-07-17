@@ -12,13 +12,13 @@ import (
 )
 
 type UserManage struct {
-	*managepkg.ManageService[models.User]
+	*BaseDataManage[models.User]
 	SetEnabled *SetUserEnabled
 }
 
 func NewUserManage() *UserManage {
 	own := &UserManage{}
-	own.ManageService = managepkg.NewManageService[models.User](own)
+	own.BaseDataManage = NewBaseDataManage[models.User](own)
 	own.SetEnabled = NewSetUserEnabled(own)
 	return own
 }

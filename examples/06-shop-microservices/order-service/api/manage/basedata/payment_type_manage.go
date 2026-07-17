@@ -14,13 +14,13 @@ import (
 )
 
 type PaymentTypeManage struct {
-	*managepkg.ManageService[models.PaymentType]
+	*BaseDataManage[models.PaymentType]
 	SetEnabled *SetPaymentTypeEnabled
 }
 
 func NewPaymentTypeManage() *PaymentTypeManage {
 	own := &PaymentTypeManage{}
-	own.ManageService = managepkg.NewManageService[models.PaymentType](own)
+	own.BaseDataManage = NewBaseDataManage[models.PaymentType](own)
 	own.SetEnabled = NewSetPaymentTypeEnabled(own)
 	return own
 }

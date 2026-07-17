@@ -10,12 +10,12 @@ import (
 )
 
 type AddressManage struct {
-	*managepkg.ManageService[models.Address]
+	*BaseDataManage[models.Address]
 }
 
 func NewAddressManage() *AddressManage {
 	own := &AddressManage{}
-	own.ManageService = managepkg.NewManageService[models.Address](own)
+	own.BaseDataManage = NewBaseDataManage[models.Address](own)
 	return own
 }
 

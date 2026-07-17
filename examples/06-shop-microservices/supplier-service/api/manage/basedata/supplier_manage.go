@@ -13,13 +13,13 @@ import (
 
 // SupplierManage 同时服务供应商本人和平台管理员，权限差异全部由 Hook 处理。
 type SupplierManage struct {
-	*managepkg.ManageService[models.Supplier]
+	*BaseDataManage[models.Supplier]
 	SetEnabled *SetSupplierEnabled
 }
 
 func NewSupplierManage() *SupplierManage {
 	own := &SupplierManage{}
-	own.ManageService = managepkg.NewManageService[models.Supplier](own)
+	own.BaseDataManage = NewBaseDataManage[models.Supplier](own)
 	own.SetEnabled = NewSetSupplierEnabled(own)
 	return own
 }

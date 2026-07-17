@@ -87,7 +87,9 @@ examples/06-shop-microservices/
 
 示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务级基础模型和数据库名，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影和 Outbox/Inbox 等业务事实，`models/internal/store` 统一 `IDataAction` 和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。具体模型通过基础资料模型或业务事实模型继承服务级基础模型，自动获得 `GetLocalDBName/GetRemoteDBName`；不要在每个具体模型上重复声明库名。
 
-示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域、通用 Manage 基座，`api/manage/basedata` 放基础资料 Manage 与受控命令，`api/manage/transaction` 放订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
+示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域和全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 与受控命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
+
+多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，否则服务级授权、owner 限域、分页、审计和后续 Hook 改动会散落到多个文件，复杂系统会失去可读性。
 
 新增或重排文件默认按 struct 拆分：一个业务 struct 一个文件。多个模型、多个 Manage、多个 Router 或多个 DTO 不应聚在一个大文件里；只有紧密配套的小型测试桩或私有辅助结构可以与被测代码同文件。
 
@@ -117,11 +119,12 @@ API / Manage command -> business service -> models -> IDataAction
 Manage 扩展遵循以下顺序：
 
 1. 通用 CRUD 继续使用 `ManageService[T]` 和 `ModelList`；
-2. 服务级 `ShopManage` 用 `DoBefore/DoAfter/SearchBefore/SearchAfter` 统一处理授权、日志、分页和查询约束；
-3. `BaseDataManage` 与 `BusinessManage` 实现模型类别规则，具体 Manage 只重写差异 Hook；需保留父级规则时必须显式先调父级。
-4. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
-5. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
-6. 自定义 Router 的 `Do` 调用 business，不直接修改模型。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
+2. 复杂服务可使用 `manage.HookedManageService[T]` 作为可选辅助基类，把 `DoBefore/DoAfter/SearchBefore/SearchAfter` 分派到 `OnView/OnAdd/OnEdit/OnRemove/OnSearch` 等细粒度 Hook；
+3. 服务级 `ShopManage` 或 `ServiceManage` 统一处理授权、日志、分页和查询约束；
+4. `BaseDataManage` 与 `BusinessManage`/`TransactionManage` 实现模型类别规则，具体 Manage 只重写差异 Hook；需保留父级规则时必须显式先调父级。
+5. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
+6. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
+7. 自定义 Router 的 `Do` 调用 business，不直接修改模型。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
 
 支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
 

@@ -8,19 +8,18 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	managepkg "github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
 )
 
 type OrderManage struct {
-	*managepkg.ManageService[models.Order]
+	*TransactionManage[models.Order]
 	Cancel *CancelOrder
 	Refund *RefundOrder
 }
 
 func NewOrderManage() *OrderManage {
 	own := &OrderManage{}
-	own.ManageService = managepkg.NewManageService[models.Order](own)
+	own.TransactionManage = NewTransactionManage[models.Order](own)
 	own.Cancel, own.Refund = NewCancelOrder(own), NewRefundOrder(own)
 	return own
 }

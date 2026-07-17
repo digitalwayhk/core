@@ -13,13 +13,13 @@ import (
 
 // ProductManage 通过同一组 Manage 路由服务供应商本人和平台管理员。
 type ProductManage struct {
-	*managepkg.ManageService[models.Product]
+	*BaseDataManage[models.Product]
 	SetEnabled *SetProductEnabled
 }
 
 func NewProductManage() *ProductManage {
 	own := &ProductManage{}
-	own.ManageService = managepkg.NewManageService[models.Product](own)
+	own.BaseDataManage = NewBaseDataManage[models.Product](own)
 	own.SetEnabled = NewSetProductEnabled(own)
 	return own
 }

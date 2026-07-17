@@ -8,12 +8,11 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	managepkg "github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
 )
 
 type PaymentRecordManage struct {
-	*managepkg.ManageService[models.PaymentRecord]
+	*TransactionManage[models.PaymentRecord]
 	Confirm       *ConfirmPayment
 	Fail          *FailPayment
 	ConfirmRefund *ConfirmRefund
@@ -21,7 +20,7 @@ type PaymentRecordManage struct {
 
 func NewPaymentRecordManage() *PaymentRecordManage {
 	own := &PaymentRecordManage{}
-	own.ManageService = managepkg.NewManageService[models.PaymentRecord](own)
+	own.TransactionManage = NewTransactionManage[models.PaymentRecord](own)
 	own.Confirm, own.Fail, own.ConfirmRefund = NewConfirmPayment(own), NewFailPayment(own), NewConfirmRefund(own)
 	return own
 }
