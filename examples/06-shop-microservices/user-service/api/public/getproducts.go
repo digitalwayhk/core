@@ -2,6 +2,7 @@ package public
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,34 +13,44 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-// GetProducts 是 User Service 面向买家的商品查询 facade。
-type GetProducts struct{ Name, Code, SupplierID string }
+type GetProducts struct {
+	ID         uint
+	Name, Code string
+	SupplierID uint
+}
 
-func (g *GetProducts) Parse(req servertypes.IRequest) error {
-	g.Name = strings.TrimSpace(req.GetValue("name"))
-	g.Code = strings.TrimSpace(req.GetValue("code"))
-	g.SupplierID = strings.TrimSpace(req.GetValue("supplierID"))
+func (own *GetProducts) Parse(req servertypes.IRequest) error {
+	own.Name, own.Code = strings.TrimSpace(req.GetValue("name")), strings.TrimSpace(req.GetValue("code"))
+	for key, target := range map[string]*uint{"id": &own.ID, "supplierID": &own.SupplierID} {
+		if value := strings.TrimSpace(req.GetValue(key)); value != "" {
+			parsed, err := strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				return err
+			}
+			*target = uint(parsed)
+		}
+	}
 	return nil
 }
 func (*GetProducts) Validation(servertypes.IRequest) error { return nil }
-func (g *GetProducts) Do(req servertypes.IRequest) (interface{}, error) {
-	res, err := req.CallService(&supplierapi.GetProducts{Name: g.Name, Code: g.Code, SupplierID: g.SupplierID})
+func (own *GetProducts) Do(req servertypes.IRequest) (interface{}, error) {
+	response, err := req.CallService(&supplierapi.GetProducts{ID: own.ID, Name: own.Name, Code: own.Code, SupplierID: own.SupplierID})
 	if err != nil {
 		return nil, err
 	}
-	if !res.GetSuccess() {
-		return nil, res.GetError()
+	if !response.GetSuccess() {
+		return nil, response.GetError()
 	}
 	items := []*supplierdto.Product{}
-	res.GetData(&items)
+	response.GetData(&items)
 	return items, nil
 }
 func (*GetProducts) GetResponse() interface{} { return []*supplierdto.Product{} }
-func (g *GetProducts) GetCacheKey() string {
-	return utils.HashCodes(strings.ToLower(g.Name), strings.ToLower(g.Code), g.SupplierID)
+func (own *GetProducts) GetCacheKey() string {
+	return utils.HashCodes(strconv.FormatUint(uint64(own.ID), 10), strings.ToLower(own.Name), strings.ToLower(own.Code), strconv.FormatUint(uint64(own.SupplierID), 10))
 }
-func (g *GetProducts) RouterInfo() *servertypes.RouterInfo {
-	info := router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+func (own *GetProducts) RouterInfo() *servertypes.RouterInfo {
+	info := router.DefaultRouterInfoWithOptions(own, router.WithMethod(http.MethodGet))
 	info.UseCache(30 * time.Second)
 	return info
 }

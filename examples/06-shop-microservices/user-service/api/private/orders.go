@@ -9,137 +9,166 @@ import (
 
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
-	orderapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/private"
+	orderapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
-// AddOrder 在 User Service 验证本人地址后调用 Order Service。
-type AddOrder struct {
-	ProductID uint `json:"productID"`
-	Quantity  int  `json:"quantity"`
-	AddressID uint `json:"addressID"`
+func trustedUser(req servertypes.IRequest, requireEnabled bool) (*models.User, error) {
+	if req == nil {
+		return nil, errors.New("用户身份无效")
+	}
+	uid, _ := req.GetUser()
+	user, err := models.FindUser(strings.TrimSpace(uid))
+	if err != nil || user == nil {
+		return nil, errors.New("用户身份无效")
+	}
+	if requireEnabled && !user.Enabled {
+		return nil, errors.New("用户已禁用，只允许查看")
+	}
+	return user, nil
 }
 
-func (a *AddOrder) Parse(req servertypes.IRequest) error { return req.Bind(a) }
-func (a *AddOrder) Validation(req servertypes.IRequest) error {
-	if a.ProductID == 0 || a.Quantity <= 0 || a.AddressID == 0 {
+type AddOrder struct {
+	RequestID string `json:"requestID"`
+	ProductID uint   `json:"productID"`
+	Quantity  int    `json:"quantity"`
+	AddressID uint   `json:"addressID"`
+}
+
+func (own *AddOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
+func (own *AddOrder) Validation(req servertypes.IRequest) error {
+	if strings.TrimSpace(own.RequestID) == "" {
+		return errors.New("requestID 不能为空")
+	}
+	if own.ProductID == 0 || own.Quantity <= 0 || own.AddressID == 0 {
 		return errors.New("商品、数量和地址不能为空")
 	}
-	_, err := trustedUser(req)
+	_, err := trustedUser(req, true)
 	return err
 }
-func (a *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
-	uid, _ := trustedUser(req)
-	address, err := models.FindOwnedAddress(uid, a.AddressID)
+func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
+	user, err := trustedUser(req, true)
+	if err != nil {
+		return nil, err
+	}
+	address, err := models.FindOwnedAddress(user.ID, own.AddressID)
 	if err != nil || address == nil {
 		return nil, errors.New("地址不存在或无权使用")
 	}
-	key := uid + "-" + strconv.FormatUint(uint64(req.NewID()), 10)
-	res, err := req.CallService(&orderapi.CreateOrder{ProductID: a.ProductID, Quantity: a.Quantity, IdempotencyKey: key, Address: models.AddressSnapshot(address)})
+	requestID := strconv.FormatUint(uint64(user.ID), 10) + ":" + strings.TrimSpace(own.RequestID)
+	response, err := req.CallService(&orderapi.CreateOrder{UserID: user.ID, ProductID: own.ProductID, Quantity: own.Quantity, RequestID: requestID, Address: models.AddressSnapshot(address)})
 	if err != nil {
 		return nil, err
 	}
-	if !res.GetSuccess() {
-		return nil, res.GetError()
+	if !response.GetSuccess() {
+		return nil, response.GetError()
 	}
 	result := &orderdto.Order{}
-	res.GetData(result)
+	response.GetData(result)
 	return result, nil
 }
-func (*AddOrder) GetResponse() interface{}              { return &orderdto.Order{} }
-func (a *AddOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(a) }
+func (*AddOrder) GetResponse() interface{}                { return &orderdto.Order{} }
+func (own *AddOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }
 
-// GetOrders 查询本人订单，并作为买家 WebSocket 订阅路由。
-type GetOrders struct{ requestUserID, subscriptionUserID string }
+type GetOrders struct {
+	requestUserID      uint
+	subscriptionUserID uint
+	subscriptionAuthID string
+}
 
 func (*GetOrders) Parse(servertypes.IRequest) error { return nil }
-func (g *GetOrders) Validation(req servertypes.IRequest) error {
-	g.requestUserID = g.resolveUserID(req)
-	if g.requestUserID == "" {
-		return errors.New("用户身份无效")
+func (own *GetOrders) Validation(req servertypes.IRequest) error {
+	user, err := trustedUser(req, false)
+	if err != nil {
+		return err
 	}
+	own.requestUserID = user.ID
 	return nil
 }
-func (g *GetOrders) Do(req servertypes.IRequest) (interface{}, error) {
-	res, err := req.CallService(&orderapi.GetUserOrders{})
+func (own *GetOrders) Do(req servertypes.IRequest) (interface{}, error) {
+	response, err := req.CallService(&orderapi.GetOrders{UserID: own.requestUserID})
 	if err != nil {
 		return nil, err
 	}
-	if !res.GetSuccess() {
-		return nil, res.GetError()
+	if !response.GetSuccess() {
+		return nil, response.GetError()
 	}
 	items := []*orderdto.Order{}
-	res.GetData(&items)
+	response.GetData(&items)
 	return items, nil
 }
 func (*GetOrders) GetResponse() interface{} { return []*orderdto.Order{} }
-func (g *GetOrders) RouterInfo() *servertypes.RouterInfo {
-	info := router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+func (own *GetOrders) RouterInfo() *servertypes.RouterInfo {
+	info := router.DefaultRouterInfoWithOptions(own, router.WithMethod(http.MethodGet))
 	info.UseCache(10 * time.Second)
 	return info
 }
-func (g *GetOrders) GetCacheKey() string {
-	uid := strings.TrimSpace(g.requestUserID)
-	if uid == "" {
-		uid = strings.TrimSpace(g.subscriptionUserID)
+func (own *GetOrders) GetCacheKey() string {
+	userID := own.requestUserID
+	if userID == 0 {
+		userID = own.subscriptionUserID
 	}
-	if uid == "" {
+	if userID == 0 {
 		return ""
 	}
-	return utils.HashCodes(uid)
+	return utils.HashCodes(strconv.FormatUint(uint64(userID), 10))
 }
-func (g *GetOrders) Reset()                  { g.requestUserID = "" }
-func (g *GetOrders) Clean()                  { g.requestUserID = "" }
-func (g *GetOrders) SetUserID(uid, _ string) { g.subscriptionUserID = strings.TrimSpace(uid) }
-func (g *GetOrders) GetUserID() string       { return g.subscriptionUserID }
-func (g *GetOrders) GetHashKey() uint64      { return utils.HashCode64(g.subscriptionUserID) }
-func (g *GetOrders) NoticeFiltersRouter(message interface{}, api servertypes.IRouter) (bool, interface{}) {
+
+func InvalidateOrderCache(userID uint) {
+	(&GetOrders{}).RouterInfo().FailureCache(&GetOrders{requestUserID: userID})
+}
+func (own *GetOrders) Reset() { own.requestUserID = 0 }
+func (own *GetOrders) Clean() { own.requestUserID = 0 }
+func (own *GetOrders) SetUserID(uid, _ string) {
+	own.subscriptionAuthID = strings.TrimSpace(uid)
+	if user, err := models.FindUser(own.subscriptionAuthID); err == nil && user != nil {
+		own.subscriptionUserID = user.ID
+	}
+}
+func (own *GetOrders) GetUserID() string  { return own.subscriptionAuthID }
+func (own *GetOrders) GetHashKey() uint64 { return uint64(own.subscriptionUserID) }
+func (*GetOrders) NoticeFiltersRouter(message interface{}, api servertypes.IRouter) (bool, interface{}) {
 	event, ok := message.(*eventdto.OrderChanged)
 	if !ok || event == nil {
 		return false, nil
 	}
 	subscription, ok := api.(*GetOrders)
-	if !ok || subscription.subscriptionUserID == "" || event.UserID != subscription.subscriptionUserID {
+	if !ok || subscription.subscriptionUserID == 0 || event.UserID != subscription.subscriptionUserID {
 		return false, nil
 	}
 	return true, event
 }
-func (g *GetOrders) resolveUserID(req servertypes.IRequest) string {
-	if req != nil {
-		uid, _ := req.GetUser()
-		if strings.TrimSpace(uid) != "" {
-			return strings.TrimSpace(uid)
-		}
-	}
-	return strings.TrimSpace(g.subscriptionUserID)
-}
 
-type DeleteOrder struct {
+type CancelOrder struct {
 	OrderID uint `json:"orderID"`
 }
 
-func (d *DeleteOrder) Parse(req servertypes.IRequest) error { return req.Bind(d) }
-func (d *DeleteOrder) Validation(req servertypes.IRequest) error {
-	if d.OrderID == 0 {
+func (own *CancelOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
+func (own *CancelOrder) Validation(req servertypes.IRequest) error {
+	if own.OrderID == 0 {
 		return errors.New("订单 ID 不能为空")
 	}
-	_, err := trustedUser(req)
+	_, err := trustedUser(req, true)
 	return err
 }
-func (d *DeleteOrder) Do(req servertypes.IRequest) (interface{}, error) {
-	res, err := req.CallService(&orderapi.DeleteOrder{OrderID: d.OrderID})
+func (own *CancelOrder) Do(req servertypes.IRequest) (interface{}, error) {
+	user, err := trustedUser(req, true)
 	if err != nil {
 		return nil, err
 	}
-	if !res.GetSuccess() {
-		return nil, res.GetError()
+	response, err := req.CallService(&orderapi.CancelOrder{UserID: user.ID, OrderID: own.OrderID})
+	if err != nil {
+		return nil, err
 	}
-	item := &orderdto.Order{}
-	res.GetData(item)
-	return item, nil
+	if !response.GetSuccess() {
+		return nil, response.GetError()
+	}
+	result := &orderdto.Order{}
+	response.GetData(result)
+	return result, nil
 }
-func (*DeleteOrder) GetResponse() interface{}              { return &orderdto.Order{} }
-func (d *DeleteOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(d) }
+func (*CancelOrder) GetResponse() interface{}                { return &orderdto.Order{} }
+func (own *CancelOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }

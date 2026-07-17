@@ -3,12 +3,14 @@ package userservice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
+	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models"
@@ -26,12 +28,18 @@ type Service struct {
 
 func (*Service) ServiceName() string { return contract.UserServiceName }
 func (*Service) Routers() []servertypes.IRouter {
-	return []servertypes.IRouter{&publicapi.GetProducts{}, &publicapi.GetPaymentTypes{}, &privateapi.AddAddress{}, &privateapi.GetAddresses{}, &privateapi.DeleteAddress{}, &privateapi.AddOrder{}, &privateapi.GetOrders{}, &privateapi.DeleteOrder{}, &privateapi.CreatePayment{}}
+	routers := []servertypes.IRouter{&publicapi.GetSuppliers{}, &publicapi.GetProducts{}, &publicapi.GetPaymentTypes{}, &privateapi.AddOrder{}, &privateapi.GetOrders{}, &privateapi.CancelOrder{}, &privateapi.CreatePayment{}}
+	routers = append(routers, manageapi.NewUserManage().Routers()...)
+	routers = append(routers, manageapi.NewAddressManage().Routers()...)
+	return routers
 }
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error {
 	if args == nil || strings.TrimSpace(args.UID) == "" {
 		return contract.ErrInvalidIdentity
+	}
+	if args.UID == contract.PlatformAdminUserID {
+		return nil
 	}
 	_, err := models.EnsureUser(args.UID, args.Username)
 	return err
@@ -49,9 +57,23 @@ func (s *Service) Start() {
 		if err := json.Unmarshal(env.Data, metadata); err != nil {
 			return err
 		}
-		return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error { (&publicapi.GetProducts{}).RouterInfo().FailureCache(nil); return nil })
+		if metadata.SchemaVersion != contract.EventSchemaVersion {
+			return fmt.Errorf("不支持的事件 schemaVersion: %d", metadata.SchemaVersion)
+		}
+		return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error {
+			switch metadata.EventType {
+			case contract.EventSupplierChanged:
+				(&publicapi.GetSuppliers{}).RouterInfo().FailureCache(nil)
+				(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
+			case contract.EventProductChanged:
+				(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
+			case contract.EventPaymentTypeChanged:
+				(&publicapi.GetPaymentTypes{}).RouterInfo().FailureCache(nil)
+			}
+			return nil
+		})
 	}
-	for _, eventType := range []string{contract.EventProductChanged, contract.EventSupplierChanged} {
+	for _, eventType := range []string{contract.EventProductChanged, contract.EventSupplierChanged, contract.EventPaymentTypeChanged} {
 		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, cacheHandler); subscribeErr == nil {
 			s.cancels = append(s.cancels, cancel)
 		}
@@ -61,19 +83,23 @@ func (s *Service) Start() {
 		if err := json.Unmarshal(env.Data, payload); err != nil {
 			return err
 		}
+		if payload.SchemaVersion != contract.EventSchemaVersion {
+			return fmt.Errorf("不支持的订单事件 schemaVersion: %d", payload.SchemaVersion)
+		}
 		return models.ProcessInbox(payload.EventID, payload.EventType, func() error {
-			(&privateapi.GetOrders{}).RouterInfo().FailureCache(nil)
+			privateapi.InvalidateOrderCache(payload.UserID)
 			(&privateapi.GetOrders{}).RouterInfo().NoticeWebSocket(payload)
 			return nil
 		})
 	}
-	for _, eventType := range []string{contract.EventOrderChanged, contract.EventPaymentChanged} {
+	for _, eventType := range []string{contract.EventOrderCreated, contract.EventOrderStatusChanged, contract.EventPaymentChanged} {
 		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, orderHandler); subscribeErr == nil {
 			s.cancels = append(s.cancels, cancel)
 		}
 	}
 	externalCancels, err := exampleruntime.SubscribeExternalControls(context.Background(), sc.ServiceEventBridge,
-		contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectOrderChanged, contract.SubjectPaymentChanged)
+		contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectPaymentTypeChanged,
+		contract.SubjectOrderCreated, contract.SubjectOrderStatusChanged, contract.SubjectPaymentChanged)
 	if err != nil {
 		logx.Errorw("service_external_control_subscribe_failed", logx.Field("service", contract.UserServiceName), logx.Field("error", err))
 		panic(err)

@@ -2,6 +2,7 @@ package public
 
 import (
 	"net/http"
+	"time"
 
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	orderapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
@@ -28,5 +29,7 @@ func (*GetPaymentTypes) Do(req servertypes.IRequest) (interface{}, error) {
 }
 func (*GetPaymentTypes) GetResponse() interface{} { return []*orderdto.PaymentType{} }
 func (g *GetPaymentTypes) RouterInfo() *servertypes.RouterInfo {
-	return router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info := router.DefaultRouterInfoWithOptions(g, router.WithMethod(http.MethodGet))
+	info.UseCache(30 * time.Second)
+	return info
 }
