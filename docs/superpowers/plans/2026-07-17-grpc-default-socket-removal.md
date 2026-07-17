@@ -25,9 +25,11 @@
 | 7 示例 06 | `9e25697`、`496da71`、`3552b62`、`12e8ca6` |
 | 8 删除 Socket | `1327726`、`d473573`、`758483d`、`016a816`、`12ca575` |
 | 9 发布治理 | `25bab39`、`dc1904e`、`028eed1`、`3d6b888` |
-| 10 总验收与内审修复 | `20576e3`、`666b56b`、`0e8e351`；Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
+| 10 总验收与内审修复 | `20576e3`、`666b56b`、`0e8e351`、`406e6cd`；Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
 
 进程级集成 suite 必须使用 `go test -p 1` 串行运行，避免两个真实多进程环境争用本机启动预算；不得通过放宽 WebSocket/UAT 断言掩盖并发资源争用。
+
+最终外部只读审查结论为 `APPROVED`，无 P0/P1。外审 P2-1 已收口为 `observational/shop-microservices` 观察门禁：强制显式提供 `CORE_TEST_REDIS_ADDR`，并使用 `go test -p 1 -race` 串行执行示例 06 单元、同进程与三进程集成测试。外审 P2-2 不属于 Core 实现缺陷：futures 真实配置验证未通过前，仍保持 `blocked-by-consumer-verification`，禁止正式发布。
 
 ---
 

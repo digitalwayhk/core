@@ -71,6 +71,11 @@ grep -q 'CORE_TEST_REDIS_ADDR' <<<"$casdoor_integration_mode" || fail "Casdoor �
 grep -q 'CORE_TEST_CASDOOR_AUTH=1' <<<"$casdoor_integration_mode" || fail "Casdoor Redis 测试未使用显式开启标记"
 grep -q 'examples/integration/casdoor-auth-lifecycle' <<<"$casdoor_integration_mode" || fail "Casdoor 集成模式未运行目标测试包"
 
+shop_integration_mode="$(sed -n '/^[[:space:]]*integration-shop-microservices)/,/^[[:space:]]*;;/p' "$TEST_SCRIPT")"
+grep -q 'CORE_TEST_REDIS_ADDR' <<<"$shop_integration_mode" || fail "商城多服务集成模式未显式要求 Redis 地址"
+grep -Eq 'go test[[:space:]]+-p[[:space:]]+1[[:space:]]+-race' <<<"$shop_integration_mode" || fail "商城双集成未固定使用 -p 1 串行包执行"
+grep -q 'examples/integration/06-shop-microservices-three-process' <<<"$shop_integration_mode" || fail "商城多服务集成模式未运行三进程测试包"
+
 grep -q 'log=".*/required-quick.log"' "$tmp_dir/failure.out" || fail "END 元数据中的日志路径未加引号"
 
 success_bin="$tmp_dir/success-bin"

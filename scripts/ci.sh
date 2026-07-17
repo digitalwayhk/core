@@ -6,7 +6,7 @@ GATE="${1:-}"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/ci.sh {required/quick|required/contracts|required/server-manage|required/race|observational/persistence|scheduled/stress|scheduled/integration}
+usage: scripts/ci.sh {required/quick|required/contracts|required/server-manage|required/race|observational/persistence|observational/shop-microservices|scheduled/stress|scheduled/integration}
 EOF
 }
 
@@ -25,6 +25,9 @@ case "$GATE" in
     ;;
   observational/persistence)
     command=("$ROOT/scripts/test.sh" persistence-unit)
+    ;;
+  observational/shop-microservices)
+    command=("$ROOT/scripts/test.sh" integration-shop-microservices)
     ;;
   scheduled/stress)
     command=("$ROOT/scripts/test.sh" concurrency-stress)

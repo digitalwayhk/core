@@ -33,6 +33,14 @@ case "${1:-quick}" in
 	  : "${CORE_TEST_REDIS_ADDR:?CORE_TEST_REDIS_ADDR is required}"
 	  CORE_TEST_CASDOOR_AUTH=1 go test -race ./examples/integration/casdoor-auth-lifecycle -count=1 -timeout=15m
 	  ;;
+	integration-shop-microservices)
+	  : "${CORE_TEST_REDIS_ADDR:?CORE_TEST_REDIS_ADDR is required}"
+	  SHOP_REDIS_ADDR="$CORE_TEST_REDIS_ADDR" go test -p 1 -race \
+	    ./examples/06-shop-microservices/... \
+	    ./examples/integration/06-shop-microservices \
+	    ./examples/integration/06-shop-microservices-three-process \
+	    -count=1 -timeout=20m
+	  ;;
   config-contract)
     go test \
       ./pkg/server/config \
