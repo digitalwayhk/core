@@ -85,7 +85,9 @@ examples/06-shop-microservices/
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
 
-示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务级基础模型和数据库名，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影和 Outbox/Inbox 等业务事实，`models/internal/store` 统一 `IDataAction` 和事务互斥，`models/schema` 统一建表，根 `models` 只做兼容别名和少量 facade。具体模型通过基础资料模型或业务事实模型继承服务级基础模型，自动获得 `GetLocalDBName/GetRemoteDBName`；不要在每个具体模型上重复声明库名。
+示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务级基础模型和数据库名，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影和 Outbox/Inbox 等业务事实，`models/internal/store` 统一 `IDataAction` 和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。具体模型通过基础资料模型或业务事实模型继承服务级基础模型，自动获得 `GetLocalDBName/GetRemoteDBName`；不要在每个具体模型上重复声明库名。
+
+示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域、通用 Manage 基座，`api/manage/basedata` 放基础资料 Manage 与受控命令，`api/manage/transaction` 放订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
 
 新增或重排文件默认按 struct 拆分：一个业务 struct 一个文件。多个模型、多个 Manage、多个 Router 或多个 DTO 不应聚在一个大文件里；只有紧密配套的小型测试桩或私有辅助结构可以与被测代码同文件。
 

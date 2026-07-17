@@ -59,11 +59,20 @@ func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
 
 	for _, service := range []string{"user-service", "supplier-service", "order-service"} {
 		modelRoot := filepath.Join(root, "examples/06-shop-microservices", service, "models")
-		for _, subdir := range []string{"common", "internal/store", "schema"} {
+		for _, subdir := range []string{"common", "basedata", "transaction", "internal/store", "schema"} {
 			info, err := os.Stat(filepath.Join(modelRoot, subdir))
 			require.NoError(t, err, "%s 必须按 05 示例拆出 models/%s", service, subdir)
 			require.True(t, info.IsDir(), "%s models/%s 必须是目录", service, subdir)
 		}
+		requireOnlyFacadeGoFiles(t, modelRoot, "models.go")
+
+		manageRoot := filepath.Join(root, "examples/06-shop-microservices", service, "api/manage")
+		for _, subdir := range []string{"common", "basedata", "transaction"} {
+			info, err := os.Stat(filepath.Join(manageRoot, subdir))
+			require.NoError(t, err, "%s 必须按 05 示例拆出 api/manage/%s", service, subdir)
+			require.True(t, info.IsDir(), "%s api/manage/%s 必须是目录", service, subdir)
+		}
+		requireOnlyFacadeGoFiles(t, manageRoot, "manage.go")
 	}
 
 	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/main/supplier/main.go"), "IsWebSocket: true")
@@ -98,4 +107,16 @@ func requireFileNotContains(t *testing.T, path, fragment string) {
 	contents, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.NotContains(t, string(contents), fragment, path)
+}
+
+func requireOnlyFacadeGoFiles(t *testing.T, dir, facade string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		require.Equal(t, facade, entry.Name(), "%s 根目录只允许保留 %s，业务实现必须进入语义子目录", dir, facade)
+	}
 }
