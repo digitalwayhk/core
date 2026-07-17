@@ -17,15 +17,15 @@
 | 任务 | 提交 |
 | --- | --- |
 | 1 默认配置 | `3020f99`、`54e02e3`、`94ae985`、`f55f963` |
-| 2 zrpc Client | `d335448`、`5bd5eac`、`3e1e0cc` |
-| 3 gRPC Server 生命周期 | `b542374`、`6642327` |
-| 4 GRPCPort 发现 | `5b6c886`、`84f56a3` |
-| 5 TLS/mTLS/mesh | `c4695ac`、`2c32fd0`、`71011ee`、`cbd1563`、`66d7963`、`34c6dad`、`eaea857`、`e450154`、`d24e293` |
-| 6 协议选择与统计 | `a3caf9d`、`80f8425` |
+| 2 协议专属端点与发送前回退 | `d335448`、`5bd5eac`、`3e1e0cc` |
+| 3 zrpc Client | `b542374`、`6642327` |
+| 4 gRPC Server 生命周期与 health | `5b6c886`、`84f56a3` |
+| 5 ServiceContext、服务发现与安全生命周期 | `c4695ac`、`2c32fd0`、`71011ee`、`cbd1563`、`66d7963`、`34c6dad`、`eaea857`、`e450154`、`d24e293` |
+| 6 protobuf envelope 与错误边界 | `a3caf9d`、`80f8425` |
 | 7 示例 06 | `9e25697`、`496da71`、`3552b62`、`12e8ca6` |
 | 8 删除 Socket | `1327726`、`d473573`、`758483d`、`016a816`、`12ca575` |
 | 9 发布治理 | `25bab39`、`dc1904e`、`028eed1`、`3d6b888` |
-| 10 总验收 | Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
+| 10 总验收 | `20576e3`；Core 门禁通过；futures 源码 smoke 通过，真实旧配置因既有 Jaeger 值保持正式发布阻断 |
 
 进程级集成 suite 必须使用 `go test -p 1` 串行运行，避免两个真实多进程环境争用本机启动预算；不得通过放宽 WebSocket/UAT 断言掩盖并发资源争用。
 
@@ -815,12 +815,12 @@ rtk git commit -m "docs: publish grpc transport migration"
 - Create: `docs/codex/GRPC_SOCKET_REMOVAL_REVIEW_PROMPT.md`
 - Modify only if evidence requires: `docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md`
 
-- [ ] **Step 1: 运行 Core 全量门禁**
+- [x] **Step 1: 运行 Core 全量门禁**
 
 ```bash
 rtk go test ./pkg/server/... -count=1
 rtk go test -race ./pkg/server/config ./pkg/server/cluster ./pkg/server/transport/... ./pkg/server/router ./pkg/server/run ./pkg/server/types -count=1
-rtk go test -race ./examples/06-shop-microservices/... ./examples/integration/06-shop-microservices ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=20m
+rtk go test -p 1 -race ./examples/06-shop-microservices/... ./examples/integration/06-shop-microservices ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=20m
 rtk go vet ./pkg/server/... ./examples/06-shop-microservices/...
 rtk ./scripts/check-logging.sh
 rtk ./scripts/ci.sh required/quick
@@ -830,7 +830,7 @@ rtk ./scripts/ci.sh required/race
 
 Expected: 全部 exit 0。任何失败先归因，不用 retry/sleep 刷绿。
 
-- [ ] **Step 2: 验证协议与安全负向路径**
+- [x] **Step 2: 验证协议与安全负向路径**
 
 Run: `rtk go test -race ./pkg/server/transport/grpc -run 'MTLS|WrongCA|ServerName|Health|Stop|ZRPC' -count=20`
 
@@ -838,7 +838,7 @@ Run: `rtk go test -race ./pkg/server/transport -run 'Fallback|Retry|Send' -count
 
 Expected: 错误证书稳定失败；发送后 HTTP 调用计数恒为 0；关闭/重建无 race。
 
-- [ ] **Step 3: `futures` 只读核验**
+- [x] **Step 3: `futures` 只读核验**
 
 仅在 `/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/futures` 执行搜索、配置加载和测试，不写文件：
 
@@ -849,11 +849,11 @@ rtk go test ./... -run 'Config|Service' -count=1
 
 如果全仓测试预算过大，记录实际执行的最小包和未覆盖范围。发现旧字段导致加载失败时，标记消费方阻断，禁止修改 futures 或宣称可直接升级。
 
-- [ ] **Step 4: 创建外部只读审查提示词**
+- [x] **Step 4: 创建外部只读审查提示词**
 
 提示词必须包含：设计/计划路径、起止提交、精确测试结果、Socket 语义残留扫描、zrpc 复用边界、mTLS/mesh、发送后不回退、示例 06 协议证明、futures 只读结果。要求输出 P0/P1/P2、兼容性、虚假绿色检查和 `APPROVED/CHANGES_REQUIRED`。
 
-- [ ] **Step 5: 最终提交**
+- [x] **Step 5: 最终提交**
 
 ```bash
 rtk git add docs/codex/GRPC_SOCKET_REMOVAL_REVIEW_PROMPT.md docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md
