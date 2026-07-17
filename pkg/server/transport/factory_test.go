@@ -21,16 +21,22 @@ func TestBuildSelector_HTTPPrimary(t *testing.T) {
 }
 
 func TestBuildSelector_GRPCWithHTTPFallback(t *testing.T) {
-	sel, err := BuildSelector(config.TransportConfig{Internal: "grpc", Fallback: []string{"http", "socket"}})
+	sel, err := BuildSelector(config.TransportConfig{Internal: "grpc", Fallback: []string{"http"}})
 	require.NoError(t, err)
 	require.NotNil(t, sel)
 
 	ds, ok := sel.(*DefaultSelector)
 	require.True(t, ok)
-	require.Len(t, ds.fallback, 2)
+	require.Len(t, ds.fallback, 1)
 	assert.Equal(t, "grpc", ds.primary.Name())
 	assert.Equal(t, "http", ds.fallback[0].Name())
-	assert.Equal(t, "socket", ds.fallback[1].Name())
+}
+
+func TestBuildSelector_RemovedSocketReturnsError(t *testing.T) {
+	sel, err := BuildSelector(config.TransportConfig{Internal: "socket"})
+	assert.Nil(t, sel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "supported protocols: grpc, http")
 }
 
 func TestBuildSelector_GRPCInjectsSecurityConfig(t *testing.T) {

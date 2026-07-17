@@ -28,7 +28,6 @@ func newRollbackContext(name string) *router.ServiceContext {
 	cfg.RunIp = "127.0.0.1"
 	cfg.DataCenterID = 1
 	cfg.Port = 0
-	cfg.SocketPort = 0
 	cfg.Cluster.Mode = "off"
 	cfg.MQ.Mode = "off"
 	cfg.Transport.GRPC.Port = 0
@@ -116,25 +115,8 @@ func TestInitializeServersRollsBackSecondServiceFailures(t *testing.T) {
 	}
 }
 
-func TestExplicitSocketOverrideKeepsDefaultGRPCServer(t *testing.T) {
-	ctx := newRollbackContext("socket-with-default-grpc")
-	server := bareWebServer()
-	server.SocketPort = 25001
-	server.saveConfig = func(*config.ServerConfig) error { return nil }
-
-	constructed, err := server.initializeServers([]*router.ServiceContext{ctx})
-	require.NoError(t, err)
-	require.Equal(t, 25001, ctx.Config.SocketPort)
-	require.Positive(t, ctx.Config.Transport.GRPC.Port)
-	require.Len(t, ctx.GetServers(), 3, "HTTP、Socket 与 gRPC 都必须进入生命周期")
-
-	for index := len(constructed) - 1; index >= 0; index-- {
-		constructed[index].Stop()
-	}
-}
-
-func TestDefaultGRPCDoesNotConstructSocketServer(t *testing.T) {
-	ctx := newRollbackContext("grpc-without-default-socket")
+func TestDefaultGRPCConstructsOnlyHTTPAndGRPCServers(t *testing.T) {
+	ctx := newRollbackContext("grpc-default-servers")
 	ctx.Config.Port = 8080
 	ctx.Config.Transport.GRPC.Port = 18080
 	server := bareWebServer()
@@ -143,22 +125,6 @@ func TestDefaultGRPCDoesNotConstructSocketServer(t *testing.T) {
 	constructed, err := server.initializeServers([]*router.ServiceContext{ctx})
 	require.NoError(t, err)
 	require.Len(t, ctx.GetServers(), 2, "默认只应构造 HTTP 与 gRPC")
-	require.Zero(t, ctx.Config.SocketPort)
-	for index := len(constructed) - 1; index >= 0; index-- {
-		constructed[index].Stop()
-	}
-}
-
-func TestSocketProtocolUsesConfiguredPort(t *testing.T) {
-	ctx := newRollbackContext("configured-socket-fallback")
-	ctx.Config.SocketPort = 25002
-	ctx.Config.Transport.Fallback = []string{"socket"}
-	server := bareWebServer()
-	server.saveConfig = func(*config.ServerConfig) error { return nil }
-
-	constructed, err := server.initializeServers([]*router.ServiceContext{ctx})
-	require.NoError(t, err)
-	require.Len(t, ctx.GetServers(), 3, "配置 socket fallback 时应构造 Socket")
 	for index := len(constructed) - 1; index >= 0; index-- {
 		constructed[index].Stop()
 	}

@@ -64,7 +64,6 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 	extra, _ := json.Marshal(map[string]interface{}{
 		"datacenter_id":  node.DataCenterID,
 		"machine_id":     node.MachineID,
-		"socket_port":    node.SocketPort,
 		"grpc_port":      node.GRPCPort,
 		"weight":         node.Weight,
 		"registered_at":  node.RegisteredAt.Format(time.RFC3339),
@@ -274,9 +273,6 @@ func consulEntryToNode(e *consulapi.ServiceEntry) *NodeInfo {
 			}
 			if v, ok := consulMetadataPort(m["grpc_port"]); ok {
 				node.GRPCPort = v
-			}
-			if v, ok := consulMetadataPort(m["socket_port"]); ok {
-				node.SocketPort = v
 			}
 		}
 	}

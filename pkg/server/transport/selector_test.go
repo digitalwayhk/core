@@ -84,33 +84,6 @@ func TestDefaultSelector_FallbackWhenPrimaryNotSupported(t *testing.T) {
 	assert.Equal(t, "http", chosen.Transport.Name())
 }
 
-func TestDefaultSelectorSelectsSocketPrimaryDuringMigration(t *testing.T) {
-	socketTransport := &mockTransport{name: "socket", supports: true}
-	selector := transport.NewDefaultSelector(socketTransport)
-
-	selection, err := selector.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
-		Socket: "orders:18080",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "socket", selection.Transport.Name())
-	assert.Equal(t, "orders:18080", selection.Endpoint)
-}
-
-func TestDefaultSelectorFallsBackToSocketDuringMigration(t *testing.T) {
-	grpcTransport := &mockTransport{name: "grpc", supports: true, healthErr: errors.New("unhealthy")}
-	socketTransport := &mockTransport{name: "socket", supports: true}
-	selector := transport.NewDefaultSelector(grpcTransport, socketTransport)
-
-	selection, err := selector.Select(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
-		GRPC: "orders:19090", Socket: "orders:18080",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "socket", selection.Transport.Name())
-	assert.Equal(t, "orders:18080", selection.Endpoint)
-}
-
 func TestDefaultSelectorSkipsTransportWithEmptyProtocolEndpoint(t *testing.T) {
 	grpcTransport := &mockTransport{name: "grpc", supports: true}
 	selector := transport.NewDefaultSelector(grpcTransport)

@@ -73,18 +73,16 @@ func TestGRPCTransport_PayloadRoundTrip(t *testing.T) {
 
 	tr := newInsecureTransport()
 	sent := &coretypes.PayLoad{
-		TraceID:          "trace-1",
-		SourceAddress:    "192.0.2.10",
-		SourcePort:       8080,
-		SourceSocketPort: 9000,
-		SourceService:    "svc-a",
-		TargetAddress:    "192.0.2.20",
-		TargetPort:       8081,
-		TargetSocketPort: 9001,
-		TargetService:    "svc-b",
-		TargetPath:       "/api/test",
-		Auth:             true,
-		Data:             []byte(`{"x":1}`),
+		TraceID:       "trace-1",
+		SourceAddress: "192.0.2.10",
+		SourcePort:    8080,
+		SourceService: "svc-a",
+		TargetAddress: "192.0.2.20",
+		TargetPort:    8081,
+		TargetService: "svc-b",
+		TargetPath:    "/api/test",
+		Auth:          true,
+		Data:          []byte(`{"x":1}`),
 	}
 	_, err := tr.Send(context.Background(), sent, addr)
 	require.NoError(t, err)
@@ -97,10 +95,8 @@ func TestGRPCTransport_PayloadRoundTrip(t *testing.T) {
 	assert.Equal(t, []byte(`{"x":1}`), received.Data)
 	assert.Empty(t, received.SourceAddress)
 	assert.Zero(t, received.SourcePort)
-	assert.Zero(t, received.SourceSocketPort)
 	assert.Empty(t, received.TargetAddress)
 	assert.Zero(t, received.TargetPort)
-	assert.Zero(t, received.TargetSocketPort)
 }
 
 func TestGRPCTransport_TypeSafeInstanceRoundTrip(t *testing.T) {

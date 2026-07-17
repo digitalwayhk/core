@@ -22,14 +22,13 @@ import (
 
 type ServerConfig struct {
 	rest.RestConf
-	DataCenterID          uint
-	MachineID             uint
-	Auth                  AuthSecret
-	ManageAuth            AuthSecret
-	ServerManageAuth      AuthSecret
-	RunIp                 string
-	ParentServerIP        string
-	SocketPort            int
+	DataCenterID     uint
+	MachineID        uint
+	Auth             AuthSecret
+	ManageAuth       AuthSecret
+	ServerManageAuth AuthSecret
+	RunIp            string
+	ParentServerIP   string
 	// AttachServices 已由 ClusterProvider + ServiceResolver 替代。
 	// Deprecated: 仅保留旧调用链配置兼容，新服务不得再写入。
 	AttachServices        map[string]*AttachAddress
@@ -203,10 +202,9 @@ const (
 )
 
 type AttachAddress struct {
-	Name       string
-	Address    string
-	Port       int
-	SocketPort int
+	Name    string
+	Address string
+	Port    int
 }
 type CustomerData struct {
 	Key   string
@@ -303,7 +301,6 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		Enable:       false,
 		YamlFilePath: "",
 	}
-	con.SocketPort = port + 10000
 	con.Debug = false
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
@@ -361,6 +358,9 @@ func migrateConfig(file string) error {
 	if migrateRefreshSecrets(m) {
 		changed = true
 	}
+	if migrateRemovedSocketConfig(m) {
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -372,6 +372,23 @@ func migrateConfig(file string) error {
 		return fmt.Errorf("write migrated config: %w", err)
 	}
 	return nil
+}
+
+// migrateRemovedSocketConfig removes the retired internal Socket transport
+// while leaving unrelated and unknown user configuration untouched.
+func migrateRemovedSocketConfig(m map[string]interface{}) bool {
+	changed := false
+	if _, ok := m["SocketPort"]; ok {
+		delete(m, "SocketPort")
+		changed = true
+	}
+	if transportConfig, ok := m["Transport"].(map[string]interface{}); ok {
+		if _, ok := transportConfig["Socket"]; ok {
+			delete(transportConfig, "Socket")
+			changed = true
+		}
+	}
+	return changed
 }
 
 // migrateRefreshSecrets 为已有 AccessSecret 的历史 auth/manage 配置生成一次性
@@ -570,9 +587,10 @@ func fixDurations(v reflect.Value, m map[string]interface{}) {
 		}
 	}
 }
+
 // SetAttachService 写入旧静态服务地址。
 // Deprecated: 新服务使用 ClusterProvider + ServiceResolver 自动解析目标节点。
-func (con *ServerConfig) SetAttachService(name string, address string, port, socketport int) {
+func (con *ServerConfig) SetAttachService(name string, address string, port int) {
 	if con.AttachServices == nil {
 		con.AttachServices = make(map[string]*AttachAddress)
 	}
@@ -580,13 +598,11 @@ func (con *ServerConfig) SetAttachService(name string, address string, port, soc
 	if ok {
 		as.Address = address
 		as.Port = port
-		as.SocketPort = socketport
 	} else {
 		as = &AttachAddress{
-			Name:       name,
-			Address:    address,
-			Port:       port,
-			SocketPort: socketport,
+			Name:    name,
+			Address: address,
+			Port:    port,
 		}
 		con.AttachServices[name] = as
 	}

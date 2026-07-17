@@ -20,7 +20,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/digitalwayhk/core/pkg/server/trans/rest"
-	"github.com/digitalwayhk/core/pkg/server/trans/socket"
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -37,7 +36,6 @@ type WebServer struct {
 	ViewPort         int
 	serverip         string
 	Port             int
-	SocketPort       int
 	GRPCPort         int
 	isRun            bool
 	registryVersion  uint64
@@ -203,7 +201,6 @@ func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
 				if context != nil {
 					cfg.Address = context.Config.RunIp
 					cfg.Port = context.Config.Port
-					cfg.SocketPort = context.Config.SocketPort
 				}
 				ctx.Config.Save()
 			}
@@ -436,10 +433,6 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 		if ctx.Config.Port != own.Port && own.Port != router.DEFAULTPORT {
 			ctx.Config.Port = own.Port + int(ctx.Config.DataCenterID) - 1
 		}
-		if own.SocketPort > 0 {
-			ctx.Config.SocketPort = own.SocketPort
-			ctx.Config.Transport.Socket.Enable = true
-		}
 	}
 	ordered, err := precomputeServicePorts(contexts, own.GRPCPort)
 	if err != nil {
@@ -487,7 +480,6 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 func (own *WebServer) serverArgs() {
 	parentServer := flag.String("server", "", "主服务器地址,当前服务器的父服务器地址,如果是根服务器，则不需要此参数")
 	port := flag.Int("p", router.DEFAULTPORT, "运行端口,默认8080")
-	socket := flag.Int("socket", 0, "启用Socket服务并指定端口,为0时按服务传输配置决定")
 	grpcPort := flag.Int("grpc", 0, "覆盖gRPC服务端口,为0时使用各服务配置")
 	view := flag.Int("view", 80, "启用视图服务并指定端口,为0时不启用视图服务")
 	flag.Parse()
@@ -497,9 +489,6 @@ func (own *WebServer) serverArgs() {
 	own.serverip = *parentServer
 	if own.Port == 0 {
 		own.Port = *port
-	}
-	if own.SocketPort == 0 {
-		own.SocketPort = *socket
 	}
 	if own.GRPCPort == 0 {
 		own.GRPCPort = *grpcPort
@@ -539,10 +528,6 @@ func (own *WebServer) newInternalServer(ctx *router.ServiceContext) error {
 	ctx.Config.Transport.GRPC.Port = boundPort
 	ctx.SetGRPCServer(server)
 
-	if socketEnabled(ctx.Config.Transport, own.SocketPort) {
-		ss := socket.NewServer(ctx)
-		ctx.SetSocketServer(ss)
-	}
 	return nil
 }
 
@@ -597,31 +582,11 @@ func precomputeServicePorts(contexts []*router.ServiceContext, grpcBase int) ([]
 		if err := reserve(plannedGRPC[ctx], "gRPC", serviceName); err != nil {
 			return nil, err
 		}
-		if socketEnabled(ctx.Config.Transport, 0) {
-			if ctx.Config.SocketPort == 0 {
-				return nil, fmt.Errorf("socket port for service %s must be configured when socket transport is enabled", serviceName)
-			}
-			if err := reserve(ctx.Config.SocketPort, "socket", serviceName); err != nil {
-				return nil, err
-			}
-		}
 	}
 	for ctx, port := range plannedGRPC {
 		ctx.Config.Transport.GRPC.Port = port
 	}
 	return ordered, nil
-}
-
-func socketEnabled(transportConfig config.TransportConfig, cliPort int) bool {
-	if cliPort > 0 || transportConfig.Socket.Enable || transportConfig.Internal == "socket" {
-		return true
-	}
-	for _, protocol := range transportConfig.Fallback {
-		if protocol == "socket" {
-			return true
-		}
-	}
-	return false
 }
 
 var (

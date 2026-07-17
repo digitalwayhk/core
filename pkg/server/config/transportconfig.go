@@ -15,23 +15,17 @@ const GRPCServerNameTargetService = "{service}"
 
 // TransportConfig 内部传输配置。Internal 指定首选协议，Fallback 为降级顺序。
 type TransportConfig struct {
-	Internal   string                `json:",optional"` // grpc | http | socket | quic | mq
-	Fallback   []string              `json:",optional"`
-	MaxRetries int                   `json:",optional"` // 网络错误重试次数，0=不重试
-	RetryDelay time.Duration         `json:",optional"` // 重试基础延迟，默认 100ms
-	HTTP       HTTPTransportConfig   `json:",optional"`
-	Socket     SocketTransportConfig `json:",optional"`
-	QUIC       QUICTransportConfig   `json:",optional"`
-	GRPC       GRPCTransportConfig   `json:",optional"`
+	Internal   string              `json:",optional"` // grpc | http | quic | mq
+	Fallback   []string            `json:",optional"`
+	MaxRetries int                 `json:",optional"` // 网络错误重试次数，0=不重试
+	RetryDelay time.Duration       `json:",optional"` // 重试基础延迟，默认 100ms
+	HTTP       HTTPTransportConfig `json:",optional"`
+	QUIC       QUICTransportConfig `json:",optional"`
+	GRPC       GRPCTransportConfig `json:",optional"`
 }
 
 // HTTPTransportConfig HTTP 传输配置。
 type HTTPTransportConfig struct {
-	Enable bool `json:",optional"`
-}
-
-// SocketTransportConfig 内部 Socket 传输配置。
-type SocketTransportConfig struct {
 	Enable bool `json:",optional"`
 }
 
@@ -96,21 +90,21 @@ func (t *TransportConfig) ApplyServerDefaults(cluster ClusterConfig, httpPort in
 // Validate 校验 TransportConfig 中的字段合法性。
 func (t *TransportConfig) Validate() error {
 	implementedTransports := map[string]bool{
-		"grpc": true, "http": true, "socket": true,
+		"grpc": true, "http": true,
 	}
 	if t.Internal != "" {
 		switch t.Internal {
 		case "quic", "mq":
-			return errors.New("transport.internal " + t.Internal + " is not implemented; use grpc, http, or socket")
+			return errors.New("transport.internal " + t.Internal + " is not implemented; use grpc or http")
 		}
 		if !implementedTransports[t.Internal] {
-			return errors.New("transport.internal must be one of: grpc, http, socket")
+			return errors.New("transport.internal must be one of: grpc, http")
 		}
 	}
 	for _, fb := range t.Fallback {
 		switch fb {
 		case "quic", "mq":
-			return errors.New("transport.fallback contains " + fb + ", which is not implemented; use grpc, http, or socket")
+			return errors.New("transport.fallback contains " + fb + ", which is not implemented; use grpc or http")
 		}
 		if !implementedTransports[fb] {
 			return errors.New("transport.fallback contains invalid value: " + fb)

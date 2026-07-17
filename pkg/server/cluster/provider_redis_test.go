@@ -31,7 +31,7 @@ func TestRedisProvider_RegisterListHeartbeatAndDeregister(t *testing.T) {
 	node := &cluster.NodeInfo{
 		ID: "orders-1", ServiceName: "orders",
 		DataCenterID: 1, MachineID: 1,
-		Address: "order-1", Port: 8080, SocketPort: 18080, GRPCPort: 19090, Weight: 1,
+		Address: "order-1", Port: 8080, GRPCPort: 19090, Weight: 1,
 	}
 
 	require.NoError(t, provider.Register(ctx, node))

@@ -366,7 +366,7 @@ OpenAPI 生成逻辑会：
 - `run`：WebServer 启动器、HTML 服务、OpenAPI 支持。
 - `trans/rest`：HTTP 服务和客户端。
 - `trans/websocket`：WebSocket 客户端和 melody 实现。
-- `trans/socket`：内部 socket 通信。
+- `transport/grpc`：默认内部服务通信，复用 go-zero/zrpc 生命周期与标准 gRPC health。
 - `trans/quic`：QUIC 通信实验/实现。
 - `safe`：鉴权和安全控制。
 - `api`：系统内置管理、公开、私有 API。

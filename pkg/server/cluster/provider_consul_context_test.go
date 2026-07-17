@@ -62,7 +62,7 @@ func TestConsulProviderMetadataRoundTripIncludesTransportPorts(t *testing.T) {
 	require.NoError(t, err)
 	node := &NodeInfo{
 		ID: "orders-node", ServiceName: "orders", Address: "orders.internal",
-		Port: 8080, GRPCPort: 19090, SocketPort: 18080,
+		Port: 8080, GRPCPort: 19090,
 		DataCenterID: 2, MachineID: 7, Weight: 3,
 	}
 	require.NoError(t, provider.Register(context.Background(), node))
@@ -98,7 +98,6 @@ func TestConsulProviderMetadataRoundTripIncludesTransportPorts(t *testing.T) {
 func assertConsulTransportMetadata(t *testing.T, node *NodeInfo) {
 	t.Helper()
 	assert.Equal(t, 19090, node.GRPCPort)
-	assert.Equal(t, 18080, node.SocketPort)
 	assert.Equal(t, int64(2), node.DataCenterID)
 	assert.Equal(t, int64(7), node.MachineID)
 	assert.Equal(t, 3, node.Weight)

@@ -566,7 +566,7 @@ func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {
 	if own.Subscriber[ob.State] == nil {
 		own.Subscriber[ob.State] = make(map[string]*ObserveArgs, 0)
 	}
-	if _, ok := own.Subscriber[ob.State][ob.OwnAddress]; ok {
+	if _, ok := own.Subscriber[ob.State][ob.ReceiveService]; ok {
 		return nil //errors.New("subscriber already exists")
 	}
 	copied := *ob
@@ -574,7 +574,7 @@ func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {
 	if err := own.subscribeEventLocked(&copied); err != nil {
 		return err
 	}
-	own.Subscriber[ob.State][ob.OwnAddress] = &copied
+	own.Subscriber[ob.State][ob.ReceiveService] = &copied
 	return nil
 }
 
@@ -587,9 +587,6 @@ func (own *RouterInfo) subscribeEventLocked(observer *ObserveArgs) error {
 		if env == nil || json.Unmarshal(env.Data, args) != nil {
 			return
 		}
-		args.ReceiveAddress = observer.OwnAddress
-		args.ReceiveProt = observer.OwnProt
-		args.ReceiveSocketProt = observer.OwnSocketProt
 		args.ReceiveService = observer.ReceiveService
 		_ = observer.Notify(args)
 	})
@@ -602,7 +599,7 @@ func (own *RouterInfo) subscribeEventLocked(observer *ObserveArgs) error {
 	if own.eventCancels[observer.State] == nil {
 		own.eventCancels[observer.State] = make(map[string]func())
 	}
-	own.eventCancels[observer.State][observer.OwnAddress] = cancel
+	own.eventCancels[observer.State][observer.ReceiveService] = cancel
 	return nil
 }
 func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
@@ -614,11 +611,11 @@ func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
 		own.Unlock()
 		return errors.New("subscriber not exists")
 	}
-	delete(own.Subscriber[ob.State], ob.OwnAddress)
+	delete(own.Subscriber[ob.State], ob.ReceiveService)
 	var cancel func()
 	if own.eventCancels[ob.State] != nil {
-		cancel = own.eventCancels[ob.State][ob.OwnAddress]
-		delete(own.eventCancels[ob.State], ob.OwnAddress)
+		cancel = own.eventCancels[ob.State][ob.ReceiveService]
+		delete(own.eventCancels[ob.State], ob.ReceiveService)
 	}
 	own.Unlock()
 	if cancel != nil {

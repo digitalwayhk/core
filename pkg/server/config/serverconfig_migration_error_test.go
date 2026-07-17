@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadConfigLoadsLegacySocketWithoutChangingGRPCDefaults(t *testing.T) {
+func TestReadConfigRemovesLegacySocketWithoutChangingGRPCDefaults(t *testing.T) {
 	originalConfigDirPath := CONFIGDIRPATH
 	CONFIGDIRPATH = t.TempDir() + string(os.PathSeparator)
 	t.Cleanup(func() { CONFIGDIRPATH = originalConfigDirPath })
@@ -23,11 +24,42 @@ func TestReadConfigLoadsLegacySocketWithoutChangingGRPCDefaults(t *testing.T) {
 	var cfg *ServerConfig
 	require.NotPanics(t, func() { cfg = ReadConfig(serviceName) })
 	require.NotNil(t, cfg)
-	assert.Equal(t, 18080, cfg.SocketPort)
-	assert.True(t, cfg.Transport.Socket.Enable)
 	assert.Equal(t, 18080, cfg.Transport.GRPC.Port)
 	assert.Equal(t, "insecure", cfg.Transport.GRPC.Security.Mode)
 	require.NoError(t, cfg.Validate())
+
+	configFile := filepath.Join(CONFIGDIRPATH, serviceName+".json")
+	migrated, err := os.ReadFile(configFile)
+	require.NoError(t, err)
+	var values map[string]interface{}
+	require.NoError(t, json.Unmarshal(migrated, &values))
+	assert.NotContains(t, values, "SocketPort")
+	transport, ok := values["Transport"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, transport, "Socket")
+
+	before := string(migrated)
+	require.NoError(t, migrateConfig(configFile))
+	after, err := os.ReadFile(configFile)
+	require.NoError(t, err)
+	assert.Equal(t, before, string(after), "重复迁移必须保持文件不变")
+}
+
+func TestMigrateConfigPreservesUnknownFieldsWhenRemovingSocket(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"SocketPort":18080,"FutureField":{"enabled":true},"Transport":{"Internal":"grpc","Socket":{"Enable":true},"FutureTransport":"keep"}}`)
+	require.NoError(t, os.WriteFile(file, data, 0o600))
+	require.NoError(t, migrateConfig(file))
+
+	var values map[string]interface{}
+	migrated, err := os.ReadFile(file)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(migrated, &values))
+	assert.NotContains(t, values, "SocketPort")
+	assert.Equal(t, map[string]interface{}{"enabled": true}, values["FutureField"])
+	transport := values["Transport"].(map[string]interface{})
+	assert.NotContains(t, transport, "Socket")
+	assert.Equal(t, "keep", transport["FutureTransport"])
 }
 
 func TestMigrateConfigReturnsWriteFailure(t *testing.T) {

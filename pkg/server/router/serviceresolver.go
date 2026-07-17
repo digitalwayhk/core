@@ -85,10 +85,10 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 			Local: local,
 			Info: &types.TargetInfo{
 				TargetAddress: address, TargetService: serviceName,
-				TargetPort: local.Config.Port, TargetSocketPort: local.Config.SocketPort,
+				TargetPort:     local.Config.Port,
 				TargetGRPCPort: grpcPort,
 			},
-			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort, local.Config.SocketPort),
+			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort),
 		}, nil
 	}
 
@@ -117,10 +117,10 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 		NodeID: node.ID,
 		Info: &types.TargetInfo{
 			TargetAddress: node.Address, TargetService: serviceName,
-			TargetPort: node.Port, TargetSocketPort: node.SocketPort,
+			TargetPort:     node.Port,
 			TargetGRPCPort: node.GRPCPort,
 		},
-		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort, node.SocketPort),
+		Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort),
 	}, nil
 }
 
@@ -134,7 +134,7 @@ func cloneProtocolSet(source map[string]struct{}) map[string]struct{} {
 
 func nodeSupportsProtocols(node *cluster.NodeInfo, protocols map[string]struct{}) bool {
 	if len(protocols) == 0 {
-		return node.GRPCPort > 0 || node.Port > 0 || node.SocketPort > 0
+		return node.GRPCPort > 0 || node.Port > 0
 	}
 	if _, ok := protocols["grpc"]; ok && node.GRPCPort > 0 {
 		return true
@@ -142,13 +142,10 @@ func nodeSupportsProtocols(node *cluster.NodeInfo, protocols map[string]struct{}
 	if _, ok := protocols["http"]; ok && node.Port > 0 {
 		return true
 	}
-	if _, ok := protocols["socket"]; ok && node.SocketPort > 0 {
-		return true
-	}
 	return false
 }
 
-func serviceTransportEndpoints(address string, httpPort, grpcPort, socketPort int) transport.TransportEndpoints {
+func serviceTransportEndpoints(address string, httpPort, grpcPort int) transport.TransportEndpoints {
 	var endpoints transport.TransportEndpoints
 	if grpcPort > 0 {
 		endpoints.GRPC = net.JoinHostPort(address, strconv.Itoa(grpcPort))
@@ -156,9 +153,6 @@ func serviceTransportEndpoints(address string, httpPort, grpcPort, socketPort in
 	if httpPort > 0 {
 		endpoint := &url.URL{Scheme: "http", Host: net.JoinHostPort(address, strconv.Itoa(httpPort))}
 		endpoints.HTTP = endpoint.String()
-	}
-	if socketPort > 0 {
-		endpoints.Socket = net.JoinHostPort(address, strconv.Itoa(socketPort))
 	}
 	return endpoints
 }

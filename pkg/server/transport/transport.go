@@ -1,5 +1,5 @@
 // Package transport provides a unified interface for all internal service-to-service
-// communication channels. Concrete implementations (HTTP, Socket, gRPC, MQ) live in
+// communication channels. Concrete implementations (HTTP, gRPC, MQ) live in
 // sub-packages and are wired together by a TransportSelector.
 package transport
 

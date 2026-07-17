@@ -39,8 +39,8 @@ func TestRouterInfoSubscriptionsDelegateToServiceEventBridge(t *testing.T) {
 	info.SetEventBridge("test", bridge)
 	received := make(chan *NotifyArgs, 1)
 	observer := &ObserveArgs{
-		State:      ObserveResponse,
-		OwnAddress: "event-bridge-test",
+		State:          ObserveResponse,
+		ReceiveService: "event-bridge-test",
 		CallBack: func(args *NotifyArgs) error {
 			received <- args
 			return nil
@@ -78,8 +78,8 @@ func TestRouterInfoEventBridgeRebindsForRecreatedService(t *testing.T) {
 	info.Freeze("test")
 	received := make(chan string, 1)
 	require.NoError(t, info.Subscribe(&ObserveArgs{
-		State:      ObserveResponse,
-		OwnAddress: "rebind-test",
+		State:          ObserveResponse,
+		ReceiveService: "rebind-test",
 		CallBack: func(args *NotifyArgs) error {
 			received <- args.TraceID
 			return nil
@@ -129,8 +129,8 @@ func TestRouterInfoObserverUsesSnapshotBeforePoolReturn(t *testing.T) {
 	release := make(chan struct{})
 	observed := make(chan string, 1)
 	err := info.Subscribe(&ObserveArgs{
-		State:      ObserveResponse,
-		OwnAddress: "snapshot-test",
+		State:          ObserveResponse,
+		ReceiveService: "snapshot-test",
 		CallBack: func(args *NotifyArgs) error {
 			<-release
 			var value snapshotExecutionRouter

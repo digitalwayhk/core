@@ -35,7 +35,6 @@ type NodeInfo struct {
 	MachineID     int64             `json:"machine_id"`
 	Address       string            `json:"address"`
 	Port          int               `json:"port"`
-	SocketPort    int               `json:"socket_port,omitempty"`
 	GRPCPort      int               `json:"grpc_port,omitempty"`
 	Status        NodeStatus        `json:"status"`
 	Weight        int               `json:"weight"` // for weighted balancing; default 1

@@ -252,8 +252,8 @@ func TestServiceRouterSameOwnerReuseDoesNotRebindRuntimes(t *testing.T) {
 	require.Same(t, info, serviceRouter.GetRouter(info.GetPath()))
 
 	require.NoError(t, info.Subscribe(&types.ObserveArgs{
-		State:      types.ObserveRequest,
-		OwnAddress: "same-owner-observer",
+		State:          types.ObserveRequest,
+		ReceiveService: "same-owner-observer",
 	}))
 	info.UseCache(time.Second)
 	assert.Equal(t, 1, eventRuntime.subscriptions, "同 owner 复用不得替换原事件运行时")

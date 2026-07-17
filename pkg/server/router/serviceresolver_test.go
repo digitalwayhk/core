@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,7 +69,7 @@ func TestServiceResolverRoundRobinsRunningNodes(t *testing.T) {
 		require.NoError(t, provider.Register(ctx, &cluster.NodeInfo{
 			ID: fmt.Sprintf("orders-%d", i), ServiceName: "orders",
 			DataCenterID: 1, MachineID: int64(i),
-			Address: fmt.Sprintf("order-%d", i), Port: 8080, SocketPort: 18080,
+			Address: fmt.Sprintf("order-%d", i), Port: 8080,
 		}))
 	}
 	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
@@ -99,7 +102,7 @@ func TestRequestGetTargetServerInfoUsesServiceResolver(t *testing.T) {
 	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
 		ID: "orders-remote", ServiceName: "orders",
 		DataCenterID: 1, MachineID: 3,
-		Address: "orders.internal", Port: 8080, SocketPort: 18080, GRPCPort: 19090,
+		Address: "orders.internal", Port: 8080, GRPCPort: 19090,
 	}))
 	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
 	defer resolver.Close()
@@ -108,7 +111,6 @@ func TestRequestGetTargetServerInfoUsesServiceResolver(t *testing.T) {
 	target := req.GetTargetServerInfo("orders")
 	require.NotNil(t, target)
 	assert.Equal(t, "orders.internal", target.TargetAddress)
-	assert.Equal(t, 18080, target.TargetSocketPort)
 	assert.Equal(t, 19090, target.TargetGRPCPort)
 }
 
@@ -130,6 +132,32 @@ func TestResolverReturnsProtocolSpecificEndpoints(t *testing.T) {
 	assert.Equal(t, "http://orders.internal:8080", resolved.Endpoints.HTTP)
 }
 
+func TestResolverUsesGRPCPortDecodedFromConsulMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1/health/service/orders") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("index") == "1" {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Consul-Index", "1")
+		_, _ = fmt.Fprint(w, `[{"Service":{"ID":"orders-node","Service":"orders","Address":"orders.internal","Port":8080,"Meta":{"node_id":"node","extra":"{\"grpc_port\":19090}"}},"Checks":[{"Status":"passing"}]}]`)
+	}))
+	defer server.Close()
+	provider, err := cluster.NewConsulProvider(server.URL)
+	require.NoError(t, err)
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil }, "grpc")
+	defer resolver.Close()
+
+	resolved, err := resolver.Resolve(context.Background(), "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "orders.internal:19090", resolved.Endpoints.GRPC)
+	assert.Equal(t, 19090, resolved.Info.TargetGRPCPort)
+}
+
 func TestResolverDoesNotBorrowHTTPPortWhenGRPCPortIsMissing(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()
@@ -148,21 +176,20 @@ func TestResolverDoesNotBorrowHTTPPortWhenGRPCPortIsMissing(t *testing.T) {
 	assert.Equal(t, "http://orders.internal:8080", resolved.Endpoints.HTTP)
 }
 
-func TestResolverAcceptsSocketOnlyNodeDuringMigration(t *testing.T) {
+func TestResolverRejectsNodeWithoutSupportedTransport(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()
 	defer provider.Close()
 	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
 		ID: "orders-socket-only", ServiceName: "orders",
 		DataCenterID: 1, MachineID: 11,
-		Address: "orders.internal", SocketPort: 18080,
+		Address: "orders.internal",
 	}))
 	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
 	defer resolver.Close()
 
-	resolved, err := resolver.Resolve(context.Background(), "orders")
-	require.NoError(t, err)
-	assert.Equal(t, "orders.internal:18080", resolved.Endpoints.Socket)
+	_, err := resolver.Resolve(context.Background(), "orders")
+	require.ErrorIs(t, err, ErrTargetServiceUnavailable)
 }
 
 func TestResolverFiltersMixedNodesByAllowedProtocols(t *testing.T) {
@@ -173,7 +200,7 @@ func TestResolverFiltersMixedNodesByAllowedProtocols(t *testing.T) {
 	nodes := []*cluster.NodeInfo{
 		{ID: "orders-grpc", ServiceName: "orders", DataCenterID: 1, MachineID: 21, Address: "grpc", GRPCPort: 19090},
 		{ID: "orders-http", ServiceName: "orders", DataCenterID: 1, MachineID: 22, Address: "http", Port: 8080},
-		{ID: "orders-socket", ServiceName: "orders", DataCenterID: 1, MachineID: 23, Address: "socket", SocketPort: 18080},
+		{ID: "orders-empty", ServiceName: "orders", DataCenterID: 1, MachineID: 23, Address: "empty"},
 	}
 	for _, node := range nodes {
 		require.NoError(t, provider.Register(ctx, node))
@@ -194,7 +221,7 @@ func TestResolverFiltersMixedNodesByAllowedProtocols(t *testing.T) {
 		resolved, err := grpcHTTP.Resolve(ctx, "orders")
 		require.NoError(t, err)
 		selected[resolved.NodeID] = true
-		assert.NotEqual(t, "orders-socket", resolved.NodeID)
+		assert.NotEqual(t, "orders-empty", resolved.NodeID)
 	}
 	assert.Equal(t, map[string]bool{"orders-grpc": true, "orders-http": true}, selected)
 }
@@ -207,7 +234,7 @@ func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing
 	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
 		ID: serviceName + "-1", ServiceName: serviceName,
 		DataCenterID: 1, MachineID: 4,
-		Address: "discovered-orders", Port: 8080, SocketPort: 18080,
+		Address: "discovered-orders", Port: 8080,
 	}))
 	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
 	defer resolver.Close()

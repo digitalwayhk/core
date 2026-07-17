@@ -90,7 +90,6 @@
 | `ServerConfig.ServerManageAuth.CasDoor.WebhookSecret` | rejected | ServerConfig.Validate | ServerManage 不接入 Casdoor Webhook，非空配置明确拒绝 |
 | `ServerConfig.RunIp` | supported | ServiceContext | 服务地址与节点信息组装消费 |
 | `ServerConfig.ParentServerIP` | supported | server routing | 父服务连接路由消费 |
-| `ServerConfig.SocketPort` | supported | socket server | socket listener 构造消费 |
 | `ServerConfig.AttachServices` | supported | legacy ServiceContext | 废弃兼容字段；新调用使用 ClusterProvider + ServiceResolver，不读取静态地址表 |
 | `ServerConfig.Debug` | supported | server runtime | debug 运行模式分支消费 |
 | `ServerConfig.IsWhiteList` | supported | access-control middleware | 白名单开关消费 |
@@ -145,8 +144,6 @@
 | `ServerConfig.Transport.RetryDelay` | supported | ServiceContext transport retry | 请求重试间隔消费 |
 | `ServerConfig.Transport.HTTP` | rejected | TransportConfig.Validate | Enable 容器不是协议选择入口，启用时拒绝 |
 | `ServerConfig.Transport.HTTP.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
-| `ServerConfig.Transport.Socket` | rejected | TransportConfig.Validate | Enable 容器不是协议选择入口，启用时拒绝 |
-| `ServerConfig.Transport.Socket.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
 | `ServerConfig.Transport.QUIC` | rejected | TransportConfig.Validate | 任一 QUIC 启用或文件配置都拒绝 |
 | `ServerConfig.Transport.QUIC.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented |
 | `ServerConfig.Transport.QUIC.CertFile` | rejected | TransportConfig.Validate | 非空值返回 not implemented |

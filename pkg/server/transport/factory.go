@@ -6,7 +6,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
 	httptransport "github.com/digitalwayhk/core/pkg/server/transport/http"
-	sockettransport "github.com/digitalwayhk/core/pkg/server/transport/socket"
 )
 
 // BuildSelector constructs a TransportSelector from the given configuration,
@@ -17,7 +16,7 @@ import (
 //   - (sel, nil)   — selector built successfully.
 //   - (nil, error) — Internal or Fallback names an unimplemented protocol.
 //
-// Supported protocols: grpc, http, socket.
+// Supported protocols: grpc, http.
 // Protocols "quic" and "mq" are recognised as valid config values but adapters are
 // not yet implemented; using either as Internal returns an error.
 func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
@@ -25,8 +24,7 @@ func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
 		"grpc": func() Transport {
 			return grpctransport.New(cfg.GRPC)
 		},
-		"http":   func() Transport { return httptransport.New() },
-		"socket": func() Transport { return sockettransport.New() },
+		"http": func() Transport { return httptransport.New() },
 	}
 
 	if cfg.Internal == "" && len(cfg.Fallback) == 0 {
@@ -36,7 +34,7 @@ func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
 	// Internal is the explicit primary choice — fail fast if not implemented.
 	if cfg.Internal != "" {
 		if _, ok := builders[cfg.Internal]; !ok {
-			return nil, fmt.Errorf("transport: protocol %q not implemented; supported protocols: grpc, http, socket", cfg.Internal)
+			return nil, fmt.Errorf("transport: protocol %q not implemented; supported protocols: grpc, http", cfg.Internal)
 		}
 	}
 
@@ -55,7 +53,7 @@ func BuildSelector(cfg config.TransportConfig) (TransportSelector, error) {
 		seen[name] = true
 		build, ok := builders[name]
 		if !ok {
-			return nil, fmt.Errorf("transport: protocol %q not implemented; supported protocols: grpc, http, socket", name)
+			return nil, fmt.Errorf("transport: protocol %q not implemented; supported protocols: grpc, http", name)
 		}
 		transports = append(transports, build())
 	}

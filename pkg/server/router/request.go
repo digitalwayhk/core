@@ -226,10 +226,9 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 func (own *Request) GetServerInfo() *types.TargetInfo {
 	cont := own.GetService()
 	return &types.TargetInfo{
-		TargetAddress:    cont.Config.RunIp,
-		TargetService:    own.ServiceName(),
-		TargetPort:       cont.Config.Port,
-		TargetSocketPort: cont.Config.SocketPort,
+		TargetAddress: cont.Config.RunIp,
+		TargetService: own.ServiceName(),
+		TargetPort:    cont.Config.Port,
 	}
 }
 func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
@@ -245,10 +244,9 @@ func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
 		return nil
 	}
 	return &types.TargetInfo{
-		TargetAddress:    cont.Config.Host,
-		TargetService:    serviceName,
-		TargetPort:       cont.Config.Port,
-		TargetSocketPort: cont.Config.SocketPort,
+		TargetAddress: cont.Config.Host,
+		TargetService: serviceName,
+		TargetPort:    cont.Config.Port,
 	}
 }
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
@@ -271,12 +269,6 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
-		// if info.TargetSocketPort == 0 {
-		// 	con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
-		// 	payload.TargetSocketPort = con.SocketPort
-		// } else {
-		// 	payload.TargetSocketPort = info.TargetSocketPort
-		// }
 		if info.TargetToken != "" {
 			payload.Token = info.TargetToken
 		}

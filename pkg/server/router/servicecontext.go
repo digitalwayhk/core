@@ -424,7 +424,6 @@ func (own *ServiceContext) GetSlowestRoutersJSON(
 }
 
 const DEFAULTPORT = 8080
-const DEFAULTSOCKETPORT = 0
 
 type contextInitialization struct {
 	ready      chan struct{}
@@ -616,10 +615,9 @@ func NewServiceContext(service types.IService) *ServiceContext {
 			con = config.NewServiceDefaultConfig(name, port)
 			con.DataCenterID = uint(sequence) + 1
 			con.MachineID = 1
-			con.SocketPort = DEFAULTSOCKETPORT + sequence
 			con.AttachServices = make(map[string]*config.AttachAddress)
 			for _, as := range sc.Service.AttachService {
-				con.SetAttachService(as.ServiceName, "", 0, 0)
+				con.SetAttachService(as.ServiceName, "", 0)
 			}
 			if err := con.Save(); err != nil {
 				panic(err)
@@ -1435,7 +1433,6 @@ func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo,
 		MachineID:    int64(own.Config.MachineID),
 		Address:      address,
 		Port:         own.Config.Port,
-		SocketPort:   own.Config.SocketPort,
 		GRPCPort:     own.Config.Transport.GRPC.Port,
 		Weight:       1,
 	}
@@ -1550,18 +1547,10 @@ func (own *ServiceContext) IsRun() bool {
 func (own *ServiceContext) SetHttpServer(server types.IRunServer) {
 	own.Service.HttpServer = server
 }
-func (own *ServiceContext) SetSocketServer(server types.IRunServer) {
-	own.Service.AddInternalServer(server)
-}
 func (own *ServiceContext) GetServers() []service.Service {
-	items := make([]service.Service, 0, 2+len(own.Service.GetInternalServers()))
+	items := make([]service.Service, 0, 2)
 	if own.Service.HttpServer != nil {
 		items = append(items, own.Service.HttpServer)
-	}
-	for _, server := range own.Service.GetInternalServers() {
-		if server != nil {
-			items = append(items, server)
-		}
 	}
 	if own.grpcServer != nil {
 		items = append(items, &managedGRPCService{owner: own, server: own.grpcServer})
@@ -1579,17 +1568,6 @@ func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 		if as, ok := own.Service.AttachService[name]; ok {
 			as.Address = cas.Address
 			as.Port = cas.Port
-			// if cas.SocketPort == 0 {
-			// 	csc := own.GetServerConfig(as.Address, as.Port)
-			// 	if csc != nil {
-			// 		as.SocketPort = csc.SocketPort
-			// 		cas.SocketPort = csc.SocketPort
-			// 		cas.Address = csc.RunIp
-			// 		as.Address = csc.RunIp
-			// 		own.Config.Save()
-			// 	}
-			// }
-			as.SocketPort = cas.SocketPort
 			as.IsAttach = false
 			for _, sr := range as.ObserverRouters {
 				sr.IsOk = false
@@ -1634,16 +1612,11 @@ func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 	info := observe.RouterInfo()
 	for _, as := range own.Service.AttachService {
-		if as.Address == "" || as.Port == 0 {
-			continue
-		}
 		for _, oa := range as.ObserverRouters {
-			ti := &types.TargetInfo{}
-			ti.TargetAddress = as.Address
-			ti.TargetPort = as.Port
-			ti.TargetService = as.ServiceName
-			ti.TargetPath = info.GetPath()
-			ti.TargetSocketPort = as.SocketPort
+			ti := &types.TargetInfo{
+				TargetService: as.ServiceName,
+				TargetPath:    info.GetPath(),
+			}
 			ok, err := own.observeCall(oa, ti)
 			if err != nil {
 				return err
@@ -1686,7 +1659,7 @@ func runobservemap() {
 			if own == nil {
 				continue
 			}
-			values, err := own.Service.CallService(v)
+			values, err := own.invokePayload(context.Background(), v)
 			if err != nil {
 				logx.Errorw("observe_call_failed",
 					logx.Field("service", own.Service.Name),
@@ -1725,29 +1698,21 @@ func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.Target
 	if oa.ServiceName == "" || oa.Topic == "" {
 		return false, errors.New("observeCall ServiceName or Topic is empty")
 	}
-	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
-		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
+	if info.TargetService == "" || info.TargetPath == "" {
+		return false, errors.New("observeCall TargetService or TargetPath is empty")
 	}
-	oa.OwnAddress = own.Config.RunIp
-	oa.OwnProt = own.Config.Port
-	oa.OwnSocketProt = own.Config.SocketPort
 	oa.ReceiveService = own.Service.Name
 	payload := &types.PayLoad{
-		TraceID:          "1",
-		SourceAddress:    oa.OwnAddress,
-		SourceService:    oa.ReceiveService,
-		TargetAddress:    info.TargetAddress,
-		TargetService:    info.TargetService,
-		TargetPort:       info.TargetPort,
-		TargetSocketPort: info.TargetSocketPort,
-		SourcePath:       "",
-		TargetPath:       info.TargetPath,
-		UserId:           "",
-		ClientIP:         oa.OwnAddress,
-		Auth:             false,
-		Instance:         oa,
+		TraceID:       "1",
+		SourceService: oa.ReceiveService,
+		TargetService: info.TargetService,
+		SourcePath:    "",
+		TargetPath:    info.TargetPath,
+		UserId:        "",
+		Auth:          false,
+		Instance:      oa,
 	}
-	values, err := own.Service.CallService(payload)
+	values, err := own.invokePayload(context.Background(), payload)
 	if err != nil {
 		oa.Error = err
 		return false, err
@@ -1777,20 +1742,15 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	}
 	info := notify.RouterInfo()
 	payload := &types.PayLoad{
-		TraceID:          args.TraceID,
-		SourceAddress:    ctx.Config.RunIp,
-		SourceService:    args.SendService,
-		TargetAddress:    args.ReceiveAddress,
-		TargetService:    args.ReceiveService,
-		TargetPort:       args.ReceiveProt,
-		TargetSocketPort: args.ReceiveSocketProt,
-		SourcePath:       args.Topic,
-		TargetPath:       info.GetPath(),
-		ClientIP:         ctx.Config.RunIp,
-		Auth:             false,
-		Instance:         args,
+		TraceID:       args.TraceID,
+		SourceService: args.SendService,
+		TargetService: args.ReceiveService,
+		SourcePath:    args.Topic,
+		TargetPath:    info.GetPath(),
+		Auth:          false,
+		Instance:      args,
 	}
-	values, err := ctx.Service.CallService(payload)
+	values, err := ctx.invokePayload(context.Background(), payload)
 	if err != nil {
 		return err
 	}
@@ -1814,11 +1774,6 @@ func (own *ServiceContext) CallTargetService(traceid string, router types.IRoute
 		}
 		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
-		}
-		if info.TargetSocketPort == 0 {
-			payload.TargetSocketPort = own.Config.SocketPort
-		} else {
-			payload.TargetSocketPort = info.TargetSocketPort
 		}
 		if info.TargetToken != "" {
 			payload.Token = info.TargetToken
@@ -1907,11 +1862,10 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		}
 		payload.TargetAddress = resolved.Info.TargetAddress
 		payload.TargetPort = resolved.Info.TargetPort
-		payload.TargetSocketPort = resolved.Info.TargetSocketPort
 		endpoints = resolved.Endpoints
 	} else if payload.TargetAddress != "" {
 		// 直接指定地址的旧调用只具备 HTTP 端点；gRPC 端点必须来自服务发现。
-		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0, payload.TargetSocketPort)
+		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0)
 	} else {
 		return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
 	}
@@ -1964,18 +1918,17 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
 	return func(ctx context.Context, target *cluster.NodeInfo, data []byte, path string) ([]byte, error) {
 		payload := &types.PayLoad{
-			TargetAddress:    target.Address,
-			TargetPort:       target.Port,
-			TargetSocketPort: target.SocketPort,
-			TargetPath:       path,
-			TargetService:    target.ServiceName,
-			Data:             data,
-			Instance:         json.RawMessage(data),
-			HttpMethod:       "POST",
-			Auth:             true,
-			SourceService:    own.Service.Name,
+			TargetAddress: target.Address,
+			TargetPort:    target.Port,
+			TargetPath:    path,
+			TargetService: target.ServiceName,
+			Data:          data,
+			Instance:      json.RawMessage(data),
+			HttpMethod:    "POST",
+			Auth:          true,
+			SourceService: own.Service.Name,
 		}
-		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort, target.SocketPort)
+		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort)
 		attempts := own.Config.Transport.MaxRetries
 		if attempts <= 0 {
 			attempts = 1

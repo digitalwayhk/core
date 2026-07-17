@@ -272,7 +272,7 @@ func TestTransportConfigApplyDefaults_EmptyStruct(t *testing.T) {
 
 // TestTransportConfigValidate_ValidInternal 已实现的 internal 不报错。
 func TestTransportConfigValidate_ValidInternal(t *testing.T) {
-	for _, name := range []string{"grpc", "http", "socket"} {
+	for _, name := range []string{"grpc", "http"} {
 		tr := TransportConfig{Internal: name}
 		assert.NoError(t, tr.Validate(), "internal=%s", name)
 	}
@@ -343,9 +343,11 @@ func TestTransportConfigValidate_UnimplementedEnableFields(t *testing.T) {
 	}
 }
 
-func TestTransportConfigValidateAllowsLegacySocketEnable(t *testing.T) {
-	tr := TransportConfig{Socket: SocketTransportConfig{Enable: true}}
-	assert.NoError(t, tr.Validate())
+func TestTransportConfigValidateRejectsRemovedSocketProtocol(t *testing.T) {
+	tr := TransportConfig{Internal: "socket"}
+	err := tr.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "grpc, http")
 }
 
 func TestTransportConfigValidate_GRPCPortIsConfigurable(t *testing.T) {
