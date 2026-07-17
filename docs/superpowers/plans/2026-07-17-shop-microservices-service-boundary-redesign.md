@@ -1,6 +1,6 @@
 # 商城微服务边界重构实施计划
 
-> 状态：实施完成，等待最终全量门禁复核
+> 状态：完成
 > 日期：2026-07-17
 > 范围：`examples/06-shop-microservices`、Core 可信内部调用方能力、集成测试、部署和现行文档
 
@@ -148,7 +148,7 @@
 - [x] Compose 仅暴露 User、Supplier；Order 无宿主机端口。
 - [x] 证书挂载说明改为中文并明确 SAN/权限要求。
 
-提交：`test(example-06): 验证 mTLS 调用和隐藏订单服务`
+提交：`76774f7 test(example-06): 验证 mTLS 调用和隐藏订单服务`
 
 ### 任务 13：现行文档和能力沉淀
 
@@ -158,14 +158,35 @@
 - [x] 增加文档契约测试，禁止恢复重复 call API。
 - [x] 运行文档、API 和发布兼容门禁。
 
+提交：`1e76168 docs(example-06): 记录可信内部服务边界`
+
 ### 任务 14：最终发布验证
 
-- [ ] 格式化所有本次修改的 Go 文件。
-- [ ] 运行示例 06 全包 race。
-- [ ] 运行同进程和三进程真实集成 race。
-- [ ] 运行 Core router/types/gRPC/compat 定向回归和 vet。
-- [ ] 运行日志、api-compat、release-contract 门禁。
-- [ ] 检查最终 diff，只提交本次范围，不覆盖用户已有修改。
+- [x] 格式化所有本次修改的 Go 文件。
+- [x] 运行示例 06 全包 race。
+- [x] 运行同进程和三进程真实集成 race。
+- [x] 运行 Core router/types/gRPC/compat 定向回归和 vet。
+- [x] 运行日志、api-compat、release-contract 门禁。
+- [x] 检查最终 diff，只提交本次范围，不覆盖用户已有修改。
+
+最终验证中发现同进程全包 race 在 `TestUATBuyerOrderLifecycle` 中因 Supplier 本地 `supplier_order` 写入遇到 SQLite `database is locked` 失败；根因是前序 WebSocket 测试的订单投影后台写与后续 Manage 写共用同一 Supplier SQLite 文件，但部分写路径未进入统一事务互斥。修复为 Supplier 模型层写操作统一走 `RunTransaction`，用同一把本地互斥保护 Supplier 库写入。
+
+提交：`83285e4 fix(example-06): 串行化供应商本地写入`
+
+最终验证证据：
+
+- `gofmt -w internal/compat/docs_contract_test.go examples/06-shop-microservices/supplier-service/models/models.go examples/06-shop-microservices/supplier-service/models/supplier_order.go`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./internal/compat -run TestCurrentDocsDescribeTrustedShopBoundaries -count=1`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./internal/compat -count=1`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test -race ./examples/06-shop-microservices/... -count=1`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test -race ./examples/integration/06-shop-microservices -count=1 -v`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test -race ./examples/integration/06-shop-microservices-three-process -count=1 -v`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test -race ./pkg/server/types ./pkg/server/router ./pkg/server/transport/grpc ./internal/compat -count=1`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy go vet ./examples/06-shop-microservices/... ./examples/integration/06-shop-microservices ./examples/integration/06-shop-microservices-three-process ./pkg/server/types ./pkg/server/router ./pkg/server/transport/grpc ./internal/compat`
+- `rtk proxy ./scripts/check-logging.sh`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy ./scripts/test.sh api-compat`
+- `GOCACHE=/private/tmp/core-codex-gocache rtk proxy ./scripts/test.sh release-contract`
+- `rtk docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml config`
 
 ## 最终验收清单
 
@@ -178,4 +199,4 @@
 - [x] 受限路由在 Parse 前拒绝 HTTP、缺失信任、错误服务和 mTLS 身份不匹配。
 - [x] 同进程与三进程都经过真实 Core Resolver。
 - [x] 路由兼容快照包含内部调用方白名单。
-- [ ] 全量门禁通过并记录最终证据。
+- [x] 全量门禁通过并记录最终证据。
