@@ -32,6 +32,15 @@ type SupplierChanged struct {
 	Action     string `json:"action"`
 }
 
+type PaymentTypeChanged struct {
+	Metadata
+	PaymentTypeID uint   `json:"paymentTypeID"`
+	Code          string `json:"code"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Action        string `json:"action"`
+}
+
 // OrderChanged 是订单创建、订单状态和支付状态事件共享的完整快照。
 type OrderChanged struct {
 	Metadata

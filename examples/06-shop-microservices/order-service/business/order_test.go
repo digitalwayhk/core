@@ -187,3 +187,30 @@ func TestUsedPaymentTypeCannotBeDeletedOrRecoded(t *testing.T) {
 	paymentType.Code = "changed-code"
 	require.ErrorIs(t, models.SavePaymentType(paymentType), contract.ErrResourceInUse)
 }
+
+func TestPaymentTypeChangesWriteReliableEvents(t *testing.T) {
+	before, err := models.PendingOutbox()
+	require.NoError(t, err)
+	paymentType := models.NewPaymentType()
+	paymentType.SetID(740001)
+	paymentType.Name, paymentType.Code, paymentType.Enabled = "可靠支付", "reliable-pay", true
+	_, createdEvent := nextValue("payment-type-created")
+	created, err := CreatePaymentType(paymentType, createdEvent)
+	require.NoError(t, err)
+	require.False(t, created.Enabled)
+
+	_, enabledEvent := nextValue("payment-type-enabled")
+	enabled, err := SetPaymentTypeEnabled(created.ID, true, enabledEvent)
+	require.NoError(t, err)
+	require.True(t, enabled.Enabled)
+
+	after, err := models.PendingOutbox()
+	require.NoError(t, err)
+	require.Len(t, after, len(before)+2)
+	events := map[string]string{}
+	for _, item := range after {
+		events[item.EventID] = item.EventType
+	}
+	require.Equal(t, contract.EventPaymentTypeChanged, events[createdEvent])
+	require.Equal(t, contract.EventPaymentTypeChanged, events[enabledEvent])
+}

@@ -2,13 +2,120 @@ package business
 
 import (
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
+	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
+
+func paymentTypeEvent(eventID, action string, item *models.PaymentType) eventdto.PaymentTypeChanged {
+	return eventdto.PaymentTypeChanged{Metadata: eventdto.Metadata{
+		EventID: eventID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventPaymentTypeChanged,
+		OccurredAt: time.Now().UTC(), SourceService: contract.OrderServiceName, AggregateID: strconv.FormatUint(uint64(item.ID), 10),
+	}, PaymentTypeID: item.ID, Code: item.Code, Name: item.Name, Enabled: item.Enabled, Action: action}
+}
+
+func writePaymentTypeEvent(action persistencetypes.IDataAction, eventID, actionName string, item *models.PaymentType) error {
+	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentTypeChanged, contract.SubjectPaymentTypeChanged, paymentTypeEvent(eventID, actionName, item))
+	if err != nil {
+		return err
+	}
+	return action.Insert(outbox)
+}
+
+func CreatePaymentType(input *models.PaymentType, eventID string) (*models.PaymentType, error) {
+	item := models.NewPaymentType()
+	item.SetID(input.ID)
+	item.Name, item.Code, item.Enabled = input.Name, input.Code, false
+	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.InsertWith(action); err != nil {
+			return err
+		}
+		return writePaymentTypeEvent(action, eventID, "created", item)
+	})
+	return item, err
+}
+
+func UpdatePaymentType(id uint, name, code, eventID string) (*models.PaymentType, error) {
+	var result *models.PaymentType
+	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		item, err := models.FindPaymentTypeWith(action, id)
+		if err != nil || item == nil {
+			return contract.ErrResourceNotFound
+		}
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code != item.Code {
+			used, useErr := models.PaymentTypeInUseWith(action, id)
+			if useErr != nil {
+				return useErr
+			}
+			if used {
+				return contract.ErrResourceInUse
+			}
+		}
+		item.Name, item.Code = name, code
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		if err := writePaymentTypeEvent(action, eventID, "updated", item); err != nil {
+			return err
+		}
+		result = item
+		return nil
+	})
+	return result, err
+}
+
+func SetPaymentTypeEnabled(id uint, enabled bool, eventID string) (*models.PaymentType, error) {
+	var result *models.PaymentType
+	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		item, err := models.FindPaymentTypeWith(action, id)
+		if err != nil || item == nil {
+			return contract.ErrResourceNotFound
+		}
+		item.Enabled = enabled
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		if err := writePaymentTypeEvent(action, eventID, "enabled_changed", item); err != nil {
+			return err
+		}
+		result = item
+		return nil
+	})
+	return result, err
+}
+
+func DeletePaymentType(id uint, eventID string) (*models.PaymentType, error) {
+	var result *models.PaymentType
+	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		item, err := models.FindPaymentTypeWith(action, id)
+		if err != nil || item == nil {
+			return contract.ErrResourceNotFound
+		}
+		used, err := models.PaymentTypeInUseWith(action, id)
+		if err != nil {
+			return err
+		}
+		if used {
+			return contract.ErrResourceInUse
+		}
+		if err := item.DeleteWith(action); err != nil {
+			return err
+		}
+		if err := writePaymentTypeEvent(action, eventID, "deleted", item); err != nil {
+			return err
+		}
+		result = item
+		return nil
+	})
+	return result, err
+}
 
 func EnabledPaymentTypes() ([]*orderdto.PaymentType, error) {
 	items, err := models.ListPaymentTypes(true)

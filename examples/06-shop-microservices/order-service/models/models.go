@@ -319,6 +319,27 @@ func FindPaymentTypeWith(a persistencetypes.IDataAction, id uint) (*PaymentType,
 	return items[0], nil
 }
 
+func (p *PaymentType) InsertWith(a persistencetypes.IDataAction) error {
+	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
+	if p.Name == "" || p.Code == "" {
+		return errors.New("支付类型名称和编码不能为空")
+	}
+	p.SetHashcode(p.GetHash())
+	return a.Insert(p)
+}
+
+func (p *PaymentType) UpdateWith(a persistencetypes.IDataAction) error {
+	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
+	if p.Name == "" || p.Code == "" {
+		return errors.New("支付类型名称和编码不能为空")
+	}
+	p.SetHashcode(p.GetHash())
+	p.SetUpdatedAt(time.Now().UTC())
+	return a.Update(p)
+}
+
+func (p *PaymentType) DeleteWith(a persistencetypes.IDataAction) error { return a.Delete(p) }
+
 func PaymentTypeInUse(id uint) (bool, error) {
 	if err := EnsureStorage(); err != nil {
 		return false, err
@@ -327,6 +348,16 @@ func PaymentTypeInUse(id uint) (bool, error) {
 	query := search(NewPaymentRecord(), 1)
 	query.AddWhereN("PaymentTypeID", id)
 	if err := dataAction().Load(query, &items); err != nil {
+		return false, err
+	}
+	return len(items) > 0, nil
+}
+
+func PaymentTypeInUseWith(a persistencetypes.IDataAction, id uint) (bool, error) {
+	var items []*PaymentRecord
+	query := search(NewPaymentRecord(), 1)
+	query.AddWhereN("PaymentTypeID", id)
+	if err := a.Load(query, &items); err != nil {
 		return false, err
 	}
 	return len(items) > 0, nil
