@@ -75,10 +75,17 @@ func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
 		requireOnlyFacadeGoFiles(t, manageRoot, "manage.go")
 		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "type ServiceManage")
 		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "NewHookedManageService")
+		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "shop_manage_operation_failed")
+		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "shop_manage_operation_succeeded")
+		requireFileNotContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "shop_user_manage_operation")
+		requireFileNotContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "shop_supplier_manage_operation")
+		requireFileNotContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "shop_order_manage_operation")
 		requireFileContains(t, filepath.Join(manageRoot, "basedata", "base_data_manage.go"), "type BaseDataManage")
 		requireFileContains(t, filepath.Join(manageRoot, "transaction", "transaction_manage.go"), "type TransactionManage")
+		requireFileContains(t, filepath.Join(manageRoot, "common", "service_manage.go"), "logx.Infow")
 		requireConcreteManageUsesLocalBase(t, filepath.Join(manageRoot, "basedata"), "BaseDataManage")
 		requireConcreteManageUsesLocalBase(t, filepath.Join(manageRoot, "transaction"), "TransactionManage")
+		requireConcreteManageDoesNotRepeatServiceAuthorization(t, manageRoot)
 	}
 
 	requireFileNotContains(t, filepath.Join(root, "examples/06-shop-microservices/main/supplier/main.go"), "IsWebSocket: true")
@@ -151,5 +158,37 @@ func requireConcreteManageUsesLocalBase(t *testing.T, dir, baseName string) {
 		text := string(contents)
 		require.NotContains(t, text, "*managepkg.ManageService", "%s 不能直接嵌入 ManageService，必须先继承本服务 %s", path, baseName)
 		require.Contains(t, text, "*"+baseName, "%s 必须继承本目录的 %s", path, baseName)
+	}
+}
+
+func requireConcreteManageDoesNotRepeatServiceAuthorization(t *testing.T, manageRoot string) {
+	t.Helper()
+	for _, dir := range []string{"basedata", "transaction"} {
+		entries, err := os.ReadDir(filepath.Join(manageRoot, dir))
+		require.NoError(t, err)
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_manage.go") {
+				continue
+			}
+			if entry.Name() == "base_data_manage.go" || entry.Name() == "transaction_manage.go" {
+				continue
+			}
+			path := filepath.Join(manageRoot, dir, entry.Name())
+			contents, err := os.ReadFile(path)
+			require.NoError(t, err)
+			text := string(contents)
+			for _, fragment := range []string{
+				"commonmanage.AdminOnly(",
+				"commonmanage.AdminSearch(",
+				"commonmanage.ActorFrom(",
+				"commonmanage.ActorFromRequest(",
+				"commonmanage.OwnerSearch(",
+				"commonmanage.AddOwnerWhere(",
+				"commonmanage.AuthorizeWrite(",
+				"commonmanage.AuthorizeSupplierWrite(",
+			} {
+				require.NotContains(t, text, fragment, "%s 的服务级权限判断必须上移到 common.ServiceManage", path)
+			}
+		}
 	}
 }

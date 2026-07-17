@@ -23,50 +23,38 @@ func (own *AddressManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove}
 }
 
-func (*AddressManage) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	search, ok := sender.(*managepkg.Search[models.Address])
-	if !ok {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	return commonmanage.OwnerSearch(search.SearchItem, req, "UserID")
-}
+func (*AddressManage) UserOwnerColumn() string { return "UserID" }
 
-func (*AddressManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	actor, err := commonmanage.ActorFrom(req)
-	if err != nil {
-		return nil, err, true
-	}
+func (*AddressManage) ResolveUserWriteScope(sender interface{}, actor commonmanage.Actor) (commonmanage.WriteScope, error, bool) {
 	switch operation := sender.(type) {
 	case *managepkg.Add[models.Address]:
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		if !actor.Admin {
 			operation.Model.UserID = actor.User.ID
 		}
-		if err := commonmanage.AuthorizeWrite(actor, operation.Model.UserID); err != nil {
-			return nil, err, true
-		}
+		return commonmanage.WriteScope{UserID: operation.Model.UserID}, nil, false
 	case *managepkg.Edit[models.Address]:
 		if operation.Model == nil || operation.OldItem == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		if err := commonmanage.AuthorizeWrite(actor, operation.OldItem.UserID); err != nil {
-			return nil, err, true
-		}
-		operation.Model.UserID = operation.OldItem.UserID
+		return commonmanage.WriteScope{UserID: operation.OldItem.UserID}, nil, false
 	case *managepkg.Remove[models.Address]:
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		current, err := models.FindAddress(operation.Model.ID)
 		if err != nil || current == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		if err := commonmanage.AuthorizeWrite(actor, current.UserID); err != nil {
-			return nil, err, true
-		}
+		return commonmanage.WriteScope{UserID: current.UserID}, nil, false
 	}
+	return commonmanage.WriteScope{}, nil, false
+}
+
+func (*AddressManage) OnEditBefore(operation *managepkg.Edit[models.Address], _ servertypes.IRequest) (interface{}, error, bool) {
+	operation.Model.UserID = operation.OldItem.UserID
 	return nil, nil, false
 }
 

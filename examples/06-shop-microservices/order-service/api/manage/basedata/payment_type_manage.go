@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage/common"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
@@ -29,52 +28,52 @@ func (own *PaymentTypeManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove, own.SetEnabled}
 }
 
-func (*PaymentTypeManage) SearchBefore(_ interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	return commonmanage.AdminSearch(req)
+func (own *PaymentTypeManage) OnAddBefore(operation *managepkg.Add[models.PaymentType], req servertypes.IRequest) (interface{}, error, bool) {
+	if operation.Model == nil {
+		return nil, contract.ErrResourceNotFound, true
+	}
+	result, err := business.CreatePaymentType(operation.Model, strconv.FormatUint(uint64(req.NewID()), 10))
+	if err == nil {
+		publicapi.InvalidatePaymentTypeCache()
+	}
+	return result, err, true
 }
 
-func (own *PaymentTypeManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	if err := commonmanage.AdminOnly(req); err != nil {
-		return nil, err, true
+func (own *PaymentTypeManage) OnEditBefore(operation *managepkg.Edit[models.PaymentType], req servertypes.IRequest) (interface{}, error, bool) {
+	if operation.Model == nil || operation.OldItem == nil {
+		return nil, contract.ErrResourceNotFound, true
 	}
-	switch operation := sender.(type) {
-	case *managepkg.Add[models.PaymentType]:
-		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		result, err := business.CreatePaymentType(operation.Model, strconv.FormatUint(uint64(req.NewID()), 10))
-		if err == nil {
-			publicapi.InvalidatePaymentTypeCache()
-		}
-		return result, err, true
-	case *managepkg.Edit[models.PaymentType]:
-		if operation.Model == nil || operation.OldItem == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		result, err := business.UpdatePaymentType(operation.OldItem.ID, operation.Model.Name, operation.Model.Code, strconv.FormatUint(uint64(req.NewID()), 10))
-		if err == nil {
-			publicapi.InvalidatePaymentTypeCache()
-		}
-		return result, err, true
-	case *managepkg.Remove[models.PaymentType]:
-		if operation.Model != nil {
-			result, err := business.DeletePaymentType(operation.Model.ID, strconv.FormatUint(uint64(req.NewID()), 10))
-			if err == nil {
-				publicapi.InvalidatePaymentTypeCache()
-			}
-			return result, err, true
-		}
-	case *SetPaymentTypeEnabled:
-		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		result, err := business.SetPaymentTypeEnabled(operation.Model.ID, operation.Model.Enabled, strconv.FormatUint(uint64(req.NewID()), 10))
-		if err == nil {
-			publicapi.InvalidatePaymentTypeCache()
-		}
-		return result, err, true
+	result, err := business.UpdatePaymentType(operation.OldItem.ID, operation.Model.Name, operation.Model.Code, strconv.FormatUint(uint64(req.NewID()), 10))
+	if err == nil {
+		publicapi.InvalidatePaymentTypeCache()
 	}
-	return nil, nil, false
+	return result, err, true
+}
+
+func (own *PaymentTypeManage) OnRemoveBefore(operation *managepkg.Remove[models.PaymentType], req servertypes.IRequest) (interface{}, error, bool) {
+	if operation.Model == nil {
+		return nil, contract.ErrResourceNotFound, true
+	}
+	result, err := business.DeletePaymentType(operation.Model.ID, strconv.FormatUint(uint64(req.NewID()), 10))
+	if err == nil {
+		publicapi.InvalidatePaymentTypeCache()
+	}
+	return result, err, true
+}
+
+func (own *PaymentTypeManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
+	operation, ok := sender.(*SetPaymentTypeEnabled)
+	if !ok {
+		return nil, nil, false
+	}
+	if operation.Model == nil {
+		return nil, contract.ErrResourceNotFound, true
+	}
+	result, err := business.SetPaymentTypeEnabled(operation.Model.ID, operation.Model.Enabled, strconv.FormatUint(uint64(req.NewID()), 10))
+	if err == nil {
+		publicapi.InvalidatePaymentTypeCache()
+	}
+	return result, err, true
 }
 
 func (*PaymentTypeManage) ViewModel(model *view.ViewModel) {

@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage/common"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -29,14 +28,7 @@ func (own *PaymentRecordManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Confirm, own.Fail, own.ConfirmRefund}
 }
 
-func (*PaymentRecordManage) SearchBefore(_ interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	return commonmanage.AdminSearch(req)
-}
-
-func (own *PaymentRecordManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	if err := commonmanage.AdminOnly(req); err != nil {
-		return nil, err, true
-	}
+func (own *PaymentRecordManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
 	var paymentID string
 	var action func(string, string) (interface{}, error)
 	switch operation := sender.(type) {

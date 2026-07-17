@@ -1,11 +1,8 @@
 package transaction
 
 import (
-	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/manage/common"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	managepkg "github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
 )
 
@@ -24,13 +21,7 @@ func (own *OrderManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search}
 }
 
-func (*OrderManage) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	search, ok := sender.(*managepkg.Search[models.SupplierOrder])
-	if !ok {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	return commonmanage.AddOwnerWhere(search.SearchItem, req, "SupplierID")
-}
+func (*OrderManage) SupplierOwnerColumn() string { return "SupplierID" }
 
 func (*OrderManage) ViewModel(model *view.ViewModel) {
 	model.Title = "供应商订单查询"

@@ -28,57 +28,55 @@ func (own *SupplierManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Edit, own.Remove, own.SetEnabled}
 }
 
-func (*SupplierManage) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	search, ok := sender.(*managepkg.Search[models.Supplier])
-	if !ok {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	return commonmanage.AddOwnerWhere(search.SearchItem, req, "ID")
-}
+func (*SupplierManage) SupplierOwnerColumn() string { return "ID" }
 
-func (own *SupplierManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	actor, err := commonmanage.ActorFromRequest(req)
-	if err != nil {
-		return nil, err, true
-	}
-	eventID := models.EventID(req.NewID())
+func (*SupplierManage) ResolveSupplierWriteScope(sender interface{}, _ commonmanage.Actor) (commonmanage.WriteScope, error, bool) {
 	switch operation := sender.(type) {
 	case *managepkg.Edit[models.Supplier]:
 		if operation.Model == nil || operation.OldItem == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		current := operation.OldItem
-		if err := commonmanage.AuthorizeSupplierWrite(actor, current); err != nil {
-			return nil, err, true
-		}
-		updated, err := business.UpdateSupplierDetails(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Description, eventID)
-		if err == nil {
-			publicapi.InvalidateSupplierCaches()
-		}
-		return updated, err, true
+		return commonmanage.WriteScope{Supplier: operation.OldItem}, nil, false
 	case *managepkg.Remove[models.Supplier]:
-		if !actor.Admin {
-			return nil, contract.ErrForbidden, true
-		}
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		current, findErr := models.FindSupplierByID(operation.Model.ID)
-		if findErr != nil || current == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		err := models.DeleteSupplier(current)
-		if err == nil {
-			publicapi.InvalidateSupplierCaches()
-		}
-		return current, err, true
+		return commonmanage.WriteScope{AdminOnly: true}, nil, false
 	case *SetSupplierEnabled:
-		if !actor.Admin {
-			return nil, contract.ErrForbidden, true
-		}
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
+		return commonmanage.WriteScope{AdminOnly: true}, nil, false
+	}
+	return commonmanage.WriteScope{}, nil, false
+}
+
+func (own *SupplierManage) OnEditBefore(operation *managepkg.Edit[models.Supplier], req servertypes.IRequest) (interface{}, error, bool) {
+	eventID := models.EventID(req.NewID())
+	current := operation.OldItem
+	updated, err := business.UpdateSupplierDetails(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Description, eventID)
+	if err == nil {
+		publicapi.InvalidateSupplierCaches()
+	}
+	return updated, err, true
+}
+
+func (own *SupplierManage) OnRemoveBefore(operation *managepkg.Remove[models.Supplier], _ servertypes.IRequest) (interface{}, error, bool) {
+	current, findErr := models.FindSupplierByID(operation.Model.ID)
+	if findErr != nil || current == nil {
+		return nil, contract.ErrResourceNotFound, true
+	}
+	err := models.DeleteSupplier(current)
+	if err == nil {
+		publicapi.InvalidateSupplierCaches()
+	}
+	return current, err, true
+}
+
+func (own *SupplierManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
+	switch operation := sender.(type) {
+	case *SetSupplierEnabled:
+		eventID := models.EventID(req.NewID())
 		updated, err := business.SetSupplierEnabled(operation.Model.ID, operation.Model.Enabled, eventID)
 		if err == nil {
 			publicapi.InvalidateSupplierCaches()
@@ -88,7 +86,7 @@ func (own *SupplierManage) DoBefore(sender interface{}, req servertypes.IRequest
 	return nil, nil, false
 }
 
-func (*SupplierManage) DoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
+func (*SupplierManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
 	publicapi.InvalidateSupplierCaches()
 	return nil, nil
 }

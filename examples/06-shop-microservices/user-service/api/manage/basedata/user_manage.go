@@ -27,37 +27,33 @@ func (own *UserManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Edit, own.SetEnabled}
 }
 
-func (*UserManage) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	search, ok := sender.(*managepkg.Search[models.User])
-	if !ok {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	return commonmanage.OwnerSearch(search.SearchItem, req, "ID")
-}
+func (*UserManage) UserOwnerColumn() string { return "ID" }
 
-func (own *UserManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	actor, err := commonmanage.ActorFrom(req)
-	if err != nil {
-		return nil, err, true
-	}
+func (*UserManage) ResolveUserWriteScope(sender interface{}, _ commonmanage.Actor) (commonmanage.WriteScope, error, bool) {
 	switch operation := sender.(type) {
 	case *managepkg.Edit[models.User]:
 		if operation.Model == nil || operation.OldItem == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		if err := commonmanage.AuthorizeWrite(actor, operation.OldItem.ID); err != nil {
-			return nil, err, true
-		}
-		current := operation.OldItem
-		current.Name = strings.TrimSpace(operation.Model.Name)
-		return current, models.SaveUser(current), true
+		return commonmanage.WriteScope{UserID: operation.OldItem.ID}, nil, false
 	case *SetUserEnabled:
-		if !actor.Admin {
-			return nil, contract.ErrForbidden, true
-		}
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
+		return commonmanage.WriteScope{AdminOnly: true}, nil, false
+	}
+	return commonmanage.WriteScope{}, nil, false
+}
+
+func (own *UserManage) OnEditBefore(operation *managepkg.Edit[models.User], _ servertypes.IRequest) (interface{}, error, bool) {
+	current := operation.OldItem
+	current.Name = strings.TrimSpace(operation.Model.Name)
+	return current, models.SaveUser(current), true
+}
+
+func (own *UserManage) OnCommandBefore(sender interface{}, _ servertypes.IRequest) (interface{}, error, bool) {
+	switch operation := sender.(type) {
+	case *SetUserEnabled:
 		current, err := models.FindUserByID(operation.Model.ID)
 		if err != nil || current == nil {
 			return nil, contract.ErrResourceNotFound, true

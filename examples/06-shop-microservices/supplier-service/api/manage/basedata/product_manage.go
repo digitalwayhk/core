@@ -28,96 +28,105 @@ func (own *ProductManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove, own.SetEnabled}
 }
 
-func (*ProductManage) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	search, ok := sender.(*managepkg.Search[models.Product])
-	if !ok {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	return commonmanage.AddOwnerWhere(search.SearchItem, req, "SupplierID")
-}
+func (*ProductManage) SupplierOwnerColumn() string { return "SupplierID" }
 
-func (own *ProductManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	actor, err := commonmanage.ActorFromRequest(req)
-	if err != nil {
-		return nil, err, true
-	}
-	eventID := models.EventID(req.NewID())
+func (*ProductManage) ResolveSupplierWriteScope(sender interface{}, actor commonmanage.Actor) (commonmanage.WriteScope, error, bool) {
 	switch operation := sender.(type) {
 	case *managepkg.Add[models.Product]:
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		ownerID := operation.Model.SupplierID
 		if !actor.Admin {
-			if !actor.Supplier.Enabled {
-				return nil, contract.ErrSubjectDisabled, true
-			}
 			ownerID = actor.Supplier.ID
 		}
+		operation.Model.SupplierID = ownerID
 		supplier, findErr := models.FindSupplierByID(ownerID)
 		if findErr != nil || supplier == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		if !supplier.Enabled {
-			return nil, contract.ErrSubjectDisabled, true
+			return commonmanage.WriteScope{}, contract.ErrSubjectDisabled, true
 		}
-		created, err := business.CreateProduct(ownerID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.NewID(), eventID)
-		if err == nil {
-			publicapi.InvalidateProductCache()
-		}
-		return created, err, true
+		return commonmanage.WriteScope{Supplier: supplier}, nil, false
 	case *managepkg.Edit[models.Product]:
 		if operation.Model == nil || operation.OldItem == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		current := operation.OldItem
-		supplier, findErr := models.FindSupplierByID(current.SupplierID)
+		supplier, findErr := models.FindSupplierByID(operation.OldItem.SupplierID)
 		if findErr != nil || supplier == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		if err := commonmanage.AuthorizeSupplierWrite(actor, supplier); err != nil {
-			return nil, err, true
-		}
-		updated, err := business.UpdateProduct(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Price, eventID)
-		if err == nil {
-			publicapi.InvalidateProductCache()
-		}
-		return updated, err, true
+		return commonmanage.WriteScope{Supplier: supplier}, nil, false
 	case *managepkg.Remove[models.Product]:
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		current, findErr := models.FindProduct(operation.Model.ID)
 		if findErr != nil || current == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
 		supplier, findErr := models.FindSupplierByID(current.SupplierID)
 		if findErr != nil || supplier == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
-		if err := commonmanage.AuthorizeSupplierWrite(actor, supplier); err != nil {
-			return nil, err, true
-		}
-		err := models.DeleteProduct(current)
-		if err == nil {
-			publicapi.InvalidateProductCache()
-		}
-		return current, err, true
+		return commonmanage.WriteScope{Supplier: supplier}, nil, false
 	case *SetProductEnabled:
 		if operation.Model == nil {
-			return nil, contract.ErrResourceNotFound, true
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
 		}
+		current, findErr := models.FindProduct(operation.Model.ID)
+		if findErr != nil || current == nil {
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
+		}
+		supplier, findErr := models.FindSupplierByID(current.SupplierID)
+		if findErr != nil || supplier == nil {
+			return commonmanage.WriteScope{}, contract.ErrResourceNotFound, true
+		}
+		return commonmanage.WriteScope{Supplier: supplier}, nil, false
+	}
+	return commonmanage.WriteScope{}, nil, false
+}
+
+func (own *ProductManage) OnAddBefore(operation *managepkg.Add[models.Product], req servertypes.IRequest) (interface{}, error, bool) {
+	eventID := models.EventID(req.NewID())
+	created, err := business.CreateProduct(operation.Model.SupplierID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.NewID(), eventID)
+	if err == nil {
+		publicapi.InvalidateProductCache()
+	}
+	return created, err, true
+}
+
+func (own *ProductManage) OnEditBefore(operation *managepkg.Edit[models.Product], req servertypes.IRequest) (interface{}, error, bool) {
+	eventID := models.EventID(req.NewID())
+	current := operation.OldItem
+	updated, err := business.UpdateProduct(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Price, eventID)
+	if err == nil {
+		publicapi.InvalidateProductCache()
+	}
+	return updated, err, true
+}
+
+func (own *ProductManage) OnRemoveBefore(operation *managepkg.Remove[models.Product], _ servertypes.IRequest) (interface{}, error, bool) {
+	current, findErr := models.FindProduct(operation.Model.ID)
+	if findErr != nil || current == nil {
+		return nil, contract.ErrResourceNotFound, true
+	}
+	err := models.DeleteProduct(current)
+	if err == nil {
+		publicapi.InvalidateProductCache()
+	}
+	return current, err, true
+}
+
+func (own *ProductManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
+	switch operation := sender.(type) {
+	case *SetProductEnabled:
 		current, findErr := models.FindProduct(operation.Model.ID)
 		if findErr != nil || current == nil {
 			return nil, contract.ErrResourceNotFound, true
 		}
-		supplier, findErr := models.FindSupplierByID(current.SupplierID)
-		if findErr != nil || supplier == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		if err := commonmanage.AuthorizeSupplierWrite(actor, supplier); err != nil {
-			return nil, err, true
-		}
+		eventID := models.EventID(req.NewID())
 		updated, err := business.SetProductEnabled(current.ID, operation.Model.Enabled, eventID)
 		if err == nil {
 			publicapi.InvalidateProductCache()
@@ -127,7 +136,7 @@ func (own *ProductManage) DoBefore(sender interface{}, req servertypes.IRequest)
 	return nil, nil, false
 }
 
-func (*ProductManage) DoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
+func (*ProductManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
 	publicapi.InvalidateProductCache()
 	return nil, nil
 }

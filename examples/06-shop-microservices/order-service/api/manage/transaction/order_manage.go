@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage/common"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -28,14 +27,7 @@ func (own *OrderManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Cancel, own.Refund}
 }
 
-func (*OrderManage) SearchBefore(_ interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	return commonmanage.AdminSearch(req)
-}
-
-func (own *OrderManage) DoBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	if err := commonmanage.AdminOnly(req); err != nil {
-		return nil, err, true
-	}
+func (own *OrderManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
 	var selected *models.Order
 	switch operation := sender.(type) {
 	case *CancelOrder:

@@ -30,7 +30,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - 出现基础资料、交易业务或身份审计继承时，按 03/05 拆分 `common/basedata/transaction/identity`；根包只做兼容门面。
 - 示例 06 这类多服务也必须按 05 的方式拆每个服务内部目录：`models/common` 定义服务级基础模型和数据库名，`models/basedata` 放基础资料，`models/transaction` 或对应业务域放交易事实，`models/internal/store` 统一 `IDataAction`，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。
 - `api/manage` 同样按 05 语义拆分：`api/manage/common` 放权限、owner、全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 和命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单/支付/投影等业务 Manage，`api/manage/audit` 放审计/身份事件；根 `api/manage` 只保留 `manage.go` 门面和路由注册入口。
-- 多服务示例中每个服务都必须拥有独立的 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 再继承本服务 `ServiceManage[T]`，每个具体 Manage 只能继承本目录的基础资料或业务基座，不能直接嵌入 `manage.ManageService[T]`。这样服务级授权、owner 限域、分页、审计和 Hook 行为可以在一个位置演进。
+- 多服务示例中每个服务都必须拥有独立的 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 再继承本服务 `ServiceManage[T]`，每个具体 Manage 只能继承本目录的基础资料或业务基座，不能直接嵌入 `manage.ManageService[T]`。服务级权限、owner 限域、禁用主体拦截、分页、审计和日志这类横切逻辑必须写在 `common.ServiceManage[T]` 或更靠近根部的抽象基座，具体 Manage 只描述业务目标对象和业务动作，不到处重复鉴权或日志。
 - `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
 - 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
 - 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件；同文件出现多个 struct 只允许紧密配套的小请求/响应/测试桩，并必须保持可读。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
@@ -67,13 +67,13 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
 10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
 11. 优先复用 go-zero/成熟客户端；不支持的配置值 fail closed，不得伪装可用。
-12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump。
+12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump；Manage 生命周期日志参考 05 的 `ShopManage.logManageResult`，统一事件名 `shop_manage_operation_failed/succeeded` 和字段 `owner/phase/service/route/trace_id/code`，不要按服务发明 `shop_user_manage...` 之类事件。
 13. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
 14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`，也不启用第二套 zrpc 服务发现。
 15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。
-18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
+18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；权限、日志和通用限域只在抽象层实现一次，具体 Manage 不重复；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
 19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName` 和数据库名；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名方法。
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
 
@@ -87,7 +87,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 ## 审查红旗
 
 - RouterInfo 冻结后修改元数据，或在共享单例中保存请求、用户、trace、response。
-- Manage owner 绑定错误、子类覆盖 Hook 却丢失必需父级规则、具体 Manage 直接嵌入框架 `ManageService` 绕过服务级/基础资料级/业务级基座，或用通用 CRUD 绕过状态机。
+- Manage owner 绑定错误、子类覆盖 Hook 却丢失必需父级规则、具体 Manage 直接嵌入框架 `ManageService` 绕过服务级/基础资料级/业务级基座、具体 Manage 重复实现服务级权限/日志，或用通用 CRUD 绕过状态机。
 - public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
