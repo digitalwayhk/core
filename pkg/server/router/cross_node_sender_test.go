@@ -26,6 +26,7 @@ type serviceContextRecordingTransport struct {
 	healthErr error
 	sendErr   error
 	sendCalls atomic.Int32
+	target    string
 }
 
 func (t *serviceContextRecordingTransport) Name() string              { return t.name }
@@ -37,9 +38,28 @@ func (*serviceContextRecordingTransport) Supports(context.Context, *types.PayLoa
 func (t *serviceContextRecordingTransport) Health(context.Context, string) error {
 	return t.healthErr
 }
-func (t *serviceContextRecordingTransport) Send(context.Context, *types.PayLoad, string) ([]byte, error) {
+func (t *serviceContextRecordingTransport) Send(_ context.Context, payload *types.PayLoad, _ string) ([]byte, error) {
 	t.sendCalls.Add(1)
+	t.target = payload.TargetService
 	return nil, t.sendErr
+}
+
+func TestMakeCrossNodeSenderCarriesTargetServiceIdentity(t *testing.T) {
+	grpcTransport := &serviceContextRecordingTransport{name: "grpc"}
+	selector := transport.NewDefaultSelector(grpcTransport)
+	serviceContext := &ServiceContext{
+		Service: &types.Service{Name: "users"},
+		Config: &config.ServerConfig{Transport: config.TransportConfig{
+			MaxRetries: 1,
+		}},
+		TransportSelector: selector,
+	}
+
+	_, err := serviceContext.makeCrossNodeSender()(context.Background(), &cluster.NodeInfo{
+		ID: "peer", ServiceName: "shop-order", Address: "127.0.0.1", GRPCPort: 19090,
+	}, json.RawMessage(`{"event":"order"}`), "/api/servermanage/ws/notice")
+	require.NoError(t, err)
+	assert.Equal(t, "shop-order", grpcTransport.target)
 }
 
 func TestMakeCrossNodeSenderPreservesNoticeJSONForHTTPFallback(t *testing.T) {

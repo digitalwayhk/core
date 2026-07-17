@@ -6,6 +6,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/transport"
+	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,6 +62,16 @@ func TestTransportStatsAllowsLoopback(t *testing.T) {
 		service:                &router.ServiceContext{},
 	}
 	require.NoError(t, (&TransportStats{}).Validation(request))
+}
+
+func TestTransportStatsRemoteManageOptionDoesNotBypassLoopback(t *testing.T) {
+	service := &router.ServiceContext{}
+	service.SetServerOption(&types.ServerOption{RemoteAccessManageAPI: true})
+	request := &transportStatsRequest{
+		publicRateLimitRequest: &publicRateLimitRequest{clientIP: "10.0.0.8", serviceName: "remote-enabled"},
+		service:                service,
+	}
+	require.Error(t, (&TransportStats{}).Validation(request))
 }
 
 func TestTransportStatsRouteIsLocalServerManageEndpoint(t *testing.T) {

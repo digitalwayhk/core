@@ -1968,6 +1968,7 @@ func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
 			TargetPort:       target.Port,
 			TargetSocketPort: target.SocketPort,
 			TargetPath:       path,
+			TargetService:    target.ServiceName,
 			Data:             data,
 			Instance:         json.RawMessage(data),
 			HttpMethod:       "POST",
