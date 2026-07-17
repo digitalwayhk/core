@@ -11,7 +11,9 @@ import (
 	"github.com/zeromicro/go-zero/zrpc"
 	"golang.org/x/sync/singleflight"
 	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	pb "github.com/digitalwayhk/core/pkg/server/transport/grpc/proto"
@@ -115,7 +117,7 @@ func (g *GRPCTransport) Send(ctx context.Context, payload *coretypes.PayLoad, ta
 		return nil, err
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("grpc: remote error: %s", resp.Error)
+		return nil, status.Error(codes.Internal, "internal server error")
 	}
 	return resp.Data, nil
 }

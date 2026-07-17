@@ -155,6 +155,48 @@ func TestGRPCTransport_HandlerErrorUsesSafeInternalStatus(t *testing.T) {
 	assert.NotContains(t, err.Error(), privateError)
 }
 
+type legacyErrorServer struct {
+	pb.UnimplementedCoreTransportServer
+	errorText string
+}
+
+func (s *legacyErrorServer) Call(context.Context, *pb.PayloadRequest) (*pb.PayloadResponse, error) {
+	return &pb.PayloadResponse{Error: s.errorText}, nil
+}
+
+func TestGRPCTransport_LegacyResponseErrorIsSanitized(t *testing.T) {
+	const privateError = "legacy database password leaked"
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	pb.RegisterCoreTransportServer(server, &legacyErrorServer{errorText: privateError})
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(server.Stop)
+
+	transport := newInsecureTransport()
+	t.Cleanup(func() { _ = transport.Stop(context.Background()) })
+	data, err := transport.Send(context.Background(), &coretypes.PayLoad{}, lis.Addr().String())
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	assert.Equal(t, "internal server error", status.Convert(err).Message())
+	assert.NotContains(t, err.Error(), privateError)
+}
+
+func TestGRPCTransport_BusinessFailureResponseRemainsData(t *testing.T) {
+	businessResponse := []byte(`{"success":false,"errorCode":700,"errorMessage":"validation failed"}`)
+	addr, stop := startTestServer(t, func(context.Context, *coretypes.PayLoad) ([]byte, error) {
+		return businessResponse, nil
+	})
+	defer stop()
+
+	transport := newInsecureTransport()
+	t.Cleanup(func() { _ = transport.Stop(context.Background()) })
+	data, err := transport.Send(context.Background(), &coretypes.PayLoad{}, addr)
+	require.NoError(t, err)
+	assert.Equal(t, businessResponse, data)
+}
+
 func TestGRPCTransport_Health_Reachable(t *testing.T) {
 	addr, stop := startTestServer(t, func(_ context.Context, _ *coretypes.PayLoad) ([]byte, error) {
 		return nil, nil
