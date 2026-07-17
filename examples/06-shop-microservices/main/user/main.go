@@ -14,7 +14,7 @@ func main() {
 		panic(err)
 	}
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&userservice.Service{}, bootstrap.ServiceConfig("shop-user", 18081, 2, 1)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&userservice.Service{}, bootstrap.DistributedServiceConfig("shop-user", 18081, 2, 1)))
 	server.SetOption(&userservice.Service{}, &servertypes.ServerOption{IsWebSocket: true})
 	server.Start()
 }

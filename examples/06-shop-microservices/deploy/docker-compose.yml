@@ -9,18 +9,39 @@ services:
       retries: 20
   user:
     build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
-    command: ["/app/user", "-p", "18080", "-socket", "28080", "-view", "0"]
-    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=user"]
+    command: ["/app/user", "-p", "18080", "-grpc", "28081", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: user
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-user.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-user.key
+      SHOP_GRPC_SERVER_NAME: localhost
+    volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     ports: ["18081:18081"]
     depends_on: {redis: {condition: service_healthy}}
   supplier:
     build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
-    command: ["/app/supplier", "-p", "18081", "-socket", "28081", "-view", "0"]
-    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=supplier"]
+    command: ["/app/supplier", "-p", "18081", "-grpc", "28082", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: supplier
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-supplier.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-supplier.key
+      SHOP_GRPC_SERVER_NAME: localhost
+    volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     ports: ["18082:18082"]
     depends_on: {redis: {condition: service_healthy}}
   order:
     build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
-    command: ["/app/order", "-p", "18082", "-socket", "28082", "-view", "0"]
-    environment: ["SHOP_REDIS_ADDR=redis:6379", "SHOP_ADVERTISE_ADDRESS=order"]
+    command: ["/app/order", "-p", "18082", "-grpc", "28083", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: order
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: localhost
+    volumes: ["./certs:/run/secrets/shop-grpc:ro"]
     depends_on: {redis: {condition: service_healthy}}

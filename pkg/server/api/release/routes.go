@@ -10,6 +10,7 @@ func Routers() []types.IRouter {
 	return []types.IRouter{
 		&public.TestToken{},
 		&public.QueryConfig{},
+		&public.TransportStats{},
 		&public.QueryRouters{},
 		&public.Observe{},
 		&public.Notify{},

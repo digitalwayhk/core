@@ -13,6 +13,6 @@ func main() {
 		panic(err)
 	}
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.ServiceConfig("shop-order", 18083, 2, 3)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.DistributedServiceConfig("shop-order", 18083, 2, 3)))
 	server.Start()
 }

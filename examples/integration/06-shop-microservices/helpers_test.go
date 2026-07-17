@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/bootstrap"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
@@ -21,8 +22,16 @@ type suiteSet struct{ base, user, supplier, order *integration.Suite }
 
 var suites *suiteSet
 
+func TestAllInOneTransportConfigIsLocalInsecureGRPC(t *testing.T) {
+	cfg := bootstrap.LocalServiceConfig("shop-user", 28081, 2, 1)
+	require.Equal(t, "local", cfg.Cluster.Provider)
+	require.Equal(t, "grpc", cfg.Transport.Internal)
+	require.Empty(t, cfg.Transport.Fallback)
+	require.Equal(t, "insecure", cfg.Transport.GRPC.Security.Mode)
+}
+
 func TestMain(m *testing.M) {
-	base, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/all-in-one", BinaryName: "shop-microservices", TempPrefix: "core-shop-microservices-", ServiceCount: 4, ServiceIndex: 1, Arguments: []string{"-view", "0"}})
+	base, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/all-in-one", BinaryName: "shop-microservices", TempPrefix: "core-shop-microservices-", ServiceCount: 4, ServiceIndex: 1, GRPCServiceCount: 4, Arguments: []string{"-view", "0"}})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

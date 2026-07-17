@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,23 +25,27 @@ import (
 type Suite struct {
 	RootDir      string
 	BasePort     int
+	GRPCBasePort int
 	BaseURL      string
 	WebSocketURL string
 	Binary       string
 	Arguments    []string
+	Environment  map[string]string
 	command      *exec.Cmd
 	outputFile   *os.File
 }
 
 // ProcessOptions 描述一个与具体业务无关的示例进程启动方式。
 type ProcessOptions struct {
-	BuildPackage string
-	BinaryName   string
-	TempPrefix   string
-	ServiceCount int
-	ServiceIndex int
-	Arguments    []string
-	DisableRace  bool
+	BuildPackage     string
+	BinaryName       string
+	TempPrefix       string
+	ServiceCount     int
+	ServiceIndex     int
+	GRPCServiceCount int
+	Arguments        []string
+	Environment      map[string]string
+	DisableRace      bool
 }
 
 // ResponseEnvelope 对应框架默认 HTTP 响应外壳。
@@ -60,6 +65,20 @@ type TokenResponse struct {
 	TokenType        string `json:"token_type"`
 	AccessExpiresIn  int64  `json:"access_expires_in"`
 	RefreshExpiresIn int64  `json:"refresh_expires_in,omitempty"`
+}
+
+// TransportStatsSnapshot is the structured local server-management response
+// used to prove which internal transport a real integration flow selected.
+type TransportStatsSnapshot struct {
+	Transport struct {
+		GRPCSelected uint64
+		HTTPSelected uint64
+		SendSuccess  uint64
+		SendFailure  uint64
+		HTTPFallback uint64
+		InboundGRPC  uint64
+	} `json:"transport"`
+	Fallback []string `json:"fallback"`
 }
 
 // AccessTokenFromData 优先解析结构化 Token 响应，并在过渡期兼容旧字符串响应。
@@ -184,14 +203,22 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		cleanup()
 		return nil, fmt.Errorf("构建示例失败: %w\n%s", buildErr, output)
 	}
+	grpcBasePort, err := reserveNonOverlappingPortRange(options.GRPCServiceCount, basePort, options.ServiceCount)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
 
 	arguments := append([]string{}, options.Arguments...)
 	arguments = append(arguments, "-p", strconv.Itoa(basePort))
+	if grpcBasePort > 0 {
+		arguments = append(arguments, "-grpc", strconv.Itoa(grpcBasePort))
+	}
 	suite := &Suite{
-		RootDir: rootDir, BasePort: basePort,
+		RootDir: rootDir, BasePort: basePort, GRPCBasePort: grpcBasePort,
 		BaseURL:      "http://127.0.0.1:" + strconv.Itoa(basePort+options.ServiceIndex),
 		WebSocketURL: "ws://127.0.0.1:" + strconv.Itoa(basePort+options.ServiceIndex) + "/ws",
-		Binary:       binary, Arguments: arguments,
+		Binary:       binary, Arguments: arguments, Environment: cloneEnvironment(options.Environment),
 	}
 	if err := suite.Restart(); err != nil {
 		cleanup()
@@ -211,6 +238,7 @@ func (s *Suite) Restart() error {
 	}
 	command := exec.Command(s.Binary, s.Arguments...)
 	command.Dir = s.RootDir
+	command.Env = mergeEnvironment(os.Environ(), s.Environment)
 	command.Stdout = outputFile
 	command.Stderr = outputFile
 	if err := command.Start(); err != nil {
@@ -220,6 +248,40 @@ func (s *Suite) Restart() error {
 	s.command = command
 	s.outputFile = outputFile
 	return nil
+}
+
+func cloneEnvironment(environment map[string]string) map[string]string {
+	if len(environment) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(environment))
+	for key, value := range environment {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func mergeEnvironment(parent []string, overrides map[string]string) []string {
+	merged := make(map[string]string, len(parent)+len(overrides))
+	for _, entry := range parent {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			merged[key] = value
+		}
+	}
+	for key, value := range overrides {
+		merged[key] = value
+	}
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+merged[key])
+	}
+	return result
 }
 
 // repositoryRoot 根据当前测试文件定位仓库根目录，避免依赖调用者工作目录。
@@ -257,6 +319,22 @@ func reservePortRange(count int) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("无法申请连续测试端口")
+}
+
+func reserveNonOverlappingPortRange(count, occupiedBase, occupiedCount int) (int, error) {
+	if count <= 0 {
+		return 0, nil
+	}
+	for attempt := 0; attempt < 100; attempt++ {
+		base, err := reservePortRange(count)
+		if err != nil {
+			return 0, err
+		}
+		if base+count <= occupiedBase || occupiedBase+occupiedCount <= base {
+			return base, nil
+		}
+	}
+	return 0, fmt.Errorf("unable to reserve gRPC ports outside HTTP range")
 }
 
 // Stop 先请求优雅退出，超时后强制结束子进程并清理临时文件。
@@ -362,6 +440,17 @@ func (s *Suite) DoJSON(method, path, token string, body interface{}) (ResponseEn
 		}
 	}
 	return envelope, nil
+}
+
+// TransportStats reads the request-bound ServiceContext snapshot through the
+// local-only server-management route. It never infers protocol use from logs.
+func (s *Suite) TransportStats(t testing.TB) TransportStatsSnapshot {
+	t.Helper()
+	envelope := s.RequestJSON(t, http.MethodPost, "/api/servermanage/transportstats", "", nil)
+	require.True(t, envelope.Success, envelope.ErrorMessage)
+	var snapshot TransportStatsSnapshot
+	require.NoError(t, json.Unmarshal(envelope.Data, &snapshot))
+	return snapshot
 }
 
 // TokenFor 通过框架内建 TestToken 路由获取指定用户类型的令牌。

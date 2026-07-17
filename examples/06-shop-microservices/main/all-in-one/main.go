@@ -17,11 +17,11 @@ import (
 func main() {
 	mustInitializeStorage(usermodels.EnsureStorage, suppliermodels.EnsureStorage, ordermodels.EnsureStorage)
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&userservice.Service{}, bootstrap.ServiceConfig("shop-user", 18081, 2, 1)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&userservice.Service{}, bootstrap.LocalServiceConfig("shop-user", 18081, 2, 1)))
 	server.SetOption(&userservice.Service{}, &servertypes.ServerOption{IsWebSocket: true})
-	server.AddServiceContext(router.NewServiceContextWithConfig(&supplierservice.Service{}, bootstrap.ServiceConfig("shop-supplier", 18082, 3, 2)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&supplierservice.Service{}, bootstrap.LocalServiceConfig("shop-supplier", 18082, 3, 2)))
 	server.SetOption(&supplierservice.Service{}, &servertypes.ServerOption{IsWebSocket: true})
-	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.ServiceConfig("shop-order", 18083, 4, 3)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.LocalServiceConfig("shop-order", 18083, 4, 3)))
 	server.Start()
 }
 

@@ -40,7 +40,7 @@ response, err := req.CallService(&orderapi.CreateOrder{
 ```
 
 - Resolver 先查同进程 ServiceContext，未命中再查 Redis ClusterProvider。
-- 远程调用使用受控私网 socket，不经最终用户 WebSocket。
+- 远程同步调用使用 gRPC；三进程配置启用应用层 mTLS，不经最终用户 WebSocket。
 - 写请求只发送一次；User 生成 IdempotencyKey，Order 用唯一约束返回同一订单。
 - 无健康节点或 Redis 不可用时 fail closed，不回退 `AttachServices`。
 
@@ -76,10 +76,10 @@ docker compose -f docker-compose.integration.yml up -d redis
 
 ```bash
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -view 0
+go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -grpc 38080 -view 0
 ```
 
-`all-in-one` 只用于本地断点和快速阅读，不提供故障隔离、独立扩容或进程级资源隔离。
+`all-in-one` 使用 local provider 和 `insecure` gRPC，Redis 仅承载 EventBridge。它只用于本地断点和快速阅读，不提供故障隔离、独立扩容或进程级资源隔离。显式 `-grpc 38080` 为框架 `server` 与三个业务 ServiceContext 分配 `38080..38083`，避免与常见的本机 `18080` 端口冲突。
 
 三进程部署演示：
 
@@ -87,17 +87,25 @@ go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -view 0
 docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml up --build
 ```
 
-Compose 只映射 User `18081` 和 Supplier `18082` HTTP 端口。Order HTTP 和所有 socket 只在 Docker 私网中可见。Redis 发现使用 `core:discovery:*`，事件使用 `core:event:*`。
+Compose 只映射 User `18081` 和 Supplier `18082` HTTP 端口。Order HTTP 和所有 gRPC 端口只在 Docker 网络中可见。Redis 发现使用 `core:discovery:*`，事件使用 `core:event:*`。启动前必须通过部署密钥系统向 `deploy/certs` 注入 CA 和三个服务身份；Compose 仅以只读方式挂载该目录，仓库不包含证书或私钥。
 
 端口由框架按“命令行 `-p` 基准端口 + DataCenterID - 1”解析，示例固定映射如下，部署时必须成组修改，不能只改 Compose 的 `ports`：
 
-| 进程 | `-p` 基准端口 | DataCenterID | 实际业务 HTTP | 内部 socket | 宿主机暴露 |
+| 进程 | `-p` 基准端口 | DataCenterID | 实际业务 HTTP | 内部 gRPC | 宿主机暴露 |
 | --- | ---: | ---: | ---: | ---: | --- |
 | User | 18080 | 2 | 18081 | 28081 | 18081 |
 | Supplier | 18081 | 2 | 18082 | 28082 | 18082 |
 | Order | 18082 | 2 | 18083 | 28083 | 不暴露 |
 
 同进程入口为了让三个 ServiceContext 的 MachineID 空间保持独立，使用 DataCenterID `2/3/4`，业务 HTTP 仍固定为 `18081/18082/18083`。生产配置应从统一配置源生成这些参数，避免手工分别维护命令、DataCenterID 和端口映射。
+
+## gRPC 生产安全
+
+- 应用层 mTLS：`Transport.GRPC.Security.Mode=mtls`，由密钥系统注入 CA、服务证书和私钥。Compose 展示的是这种模式。
+- 服务网格：`Transport.GRPC.Security.Mode=mesh`，应用不读取证书文件，mTLS 身份、加密和证书轮换由 sidecar 与网格控制面负责。
+- 即使 gRPC 只暴露在私网，`insecure` 也不是生产安全方案；它只用于 all-in-one 本地调试。
+
+三进程配置的 `Transport.Internal` 固定为 `grpc`，`Transport.Fallback` 为空。本机管理路由 `/api/servermanage/transportstats` 返回请求所属 ServiceContext 的结构化传输计数；默认未授权请求仅允许本机访问。集成测试比较 UAT 前后快照，不解析日志。
 
 ## 验收
 
@@ -107,16 +115,16 @@ go test -race ./examples/06-shop-microservices/... -count=1
 
 # 同进程真实 HTTP/WebSocket/Redis
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go test ./examples/integration/06-shop-microservices -count=1 -timeout=15m
+go test -race ./examples/integration/06-shop-microservices -count=1 -timeout=15m
 
 # 最终用户活动 UAT：商品快照、订单归属、支付与供应商视图
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go test ./examples/integration/06-shop-microservices \
+go test -race ./examples/integration/06-shop-microservices \
   -run TestUATBuyerOrderLifecycle -count=1 -timeout=15m
 
-# 三个独立 race 进程、Redis 发现和远程 socket
+# 三个独立 race 进程、Redis 发现、mTLS gRPC 和真实传输计数
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go test ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=15m
+go test -race ./examples/integration/06-shop-microservices-three-process -count=1 -timeout=15m
 ```
 
 集成测试不写 `AttachServices`，因此绿灯可以直接证明新 Resolver 链路已生效。
