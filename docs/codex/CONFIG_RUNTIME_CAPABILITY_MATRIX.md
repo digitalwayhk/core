@@ -148,9 +148,8 @@
 | `ServerConfig.Transport.QUIC.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented |
 | `ServerConfig.Transport.QUIC.CertFile` | rejected | TransportConfig.Validate | 非空值返回 not implemented |
 | `ServerConfig.Transport.QUIC.KeyFile` | rejected | TransportConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.Transport.GRPC` | supported | gRPC transport | message size 由 client/server 构造消费，Enable/Port 自定义拒绝 |
-| `ServerConfig.Transport.GRPC.Enable` | rejected | TransportConfig.Validate | true 返回 not implemented，改用 Internal/Fallback |
-| `ServerConfig.Transport.GRPC.Port` | rejected | TransportConfig.Validate | 仅允许 0/固定 19090 兼容值，自定义值拒绝 |
+| `ServerConfig.Transport.GRPC` | supported | gRPC transport | Port、message size 和安全配置由 client/server 构造消费 |
+| `ServerConfig.Transport.GRPC.Port` | supported | gRPC server、NodeInfo、ServiceResolver | 0 按 HTTP Port 派生；显式值允许 1..65535 |
 | `ServerConfig.Transport.GRPC.MaxRecvMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.Transport.GRPC.MaxSendMsgSize` | supported | gRPC transport | ApplyDefaults 保留自定义值并透传构造器 |
 | `ServerConfig.RouteCache` | supported | ServiceContext | 规范化配置并创建服务级 RouteCacheManager |
