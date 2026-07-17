@@ -2,6 +2,7 @@ package grpc_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	grpctransport "github.com/digitalwayhk/core/pkg/server/transport/grpc"
@@ -70,12 +72,18 @@ func TestGRPCTransport_PayloadRoundTrip(t *testing.T) {
 
 	tr := newInsecureTransport()
 	sent := &coretypes.PayLoad{
-		TraceID:       "trace-1",
-		SourceService: "svc-a",
-		TargetService: "svc-b",
-		TargetPath:    "/api/test",
-		Auth:          true,
-		Data:          []byte(`{"x":1}`),
+		TraceID:          "trace-1",
+		SourceAddress:    "192.0.2.10",
+		SourcePort:       8080,
+		SourceSocketPort: 9000,
+		SourceService:    "svc-a",
+		TargetAddress:    "192.0.2.20",
+		TargetPort:       8081,
+		TargetSocketPort: 9001,
+		TargetService:    "svc-b",
+		TargetPath:       "/api/test",
+		Auth:             true,
+		Data:             []byte(`{"x":1}`),
 	}
 	_, err := tr.Send(context.Background(), sent, addr)
 	require.NoError(t, err)
@@ -86,6 +94,65 @@ func TestGRPCTransport_PayloadRoundTrip(t *testing.T) {
 	assert.Equal(t, "/api/test", received.TargetPath)
 	assert.True(t, received.Auth)
 	assert.Equal(t, []byte(`{"x":1}`), received.Data)
+	assert.Empty(t, received.SourceAddress)
+	assert.Zero(t, received.SourcePort)
+	assert.Zero(t, received.SourceSocketPort)
+	assert.Empty(t, received.TargetAddress)
+	assert.Zero(t, received.TargetPort)
+	assert.Zero(t, received.TargetSocketPort)
+}
+
+func TestCoreTransportDescriptorExcludesPrivateHealthAndEndpointFields(t *testing.T) {
+	file := pb.File_pkg_server_transport_grpc_proto_payload_proto
+	service := file.Services().ByName("CoreTransport")
+	require.NotNil(t, service)
+	require.Equal(t, 1, service.Methods().Len())
+	assert.Equal(t, protoreflect.Name("Call"), service.Methods().Get(0).Name())
+	assert.Nil(t, service.Methods().ByName("Health"))
+	assert.Nil(t, file.Messages().ByName("HealthRequest"))
+	assert.Nil(t, file.Messages().ByName("HealthResponse"))
+
+	request := file.Messages().ByName("PayloadRequest")
+	require.NotNil(t, request)
+	reservedNumbers := map[protoreflect.FieldNumber]bool{}
+	for i := 0; i < request.ReservedRanges().Len(); i++ {
+		fieldRange := request.ReservedRanges().Get(i)
+		for number := fieldRange[0]; number < fieldRange[1]; number++ {
+			reservedNumbers[number] = true
+		}
+	}
+	for _, number := range []protoreflect.FieldNumber{2, 3, 4, 6, 7, 8} {
+		assert.Truef(t, reservedNumbers[number], "field number %d must be reserved", number)
+	}
+
+	reservedNames := map[protoreflect.Name]bool{}
+	for i := 0; i < request.ReservedNames().Len(); i++ {
+		reservedNames[request.ReservedNames().Get(i)] = true
+	}
+	for _, name := range []protoreflect.Name{
+		"source_address", "source_port", "source_socket_port",
+		"target_address", "target_port", "target_socket_port",
+	} {
+		assert.Nilf(t, request.Fields().ByName(name), "field %q must not exist", name)
+		assert.Truef(t, reservedNames[name], "field name %q must be reserved", name)
+	}
+}
+
+func TestGRPCTransport_HandlerErrorUsesSafeInternalStatus(t *testing.T) {
+	const privateError = "database password leaked"
+	addr, stop := startTestServer(t, func(context.Context, *coretypes.PayLoad) ([]byte, error) {
+		return nil, errors.New(privateError)
+	})
+	defer stop()
+
+	tr := newInsecureTransport()
+	defer tr.Stop(context.Background())
+	data, err := tr.Send(context.Background(), &coretypes.PayLoad{}, addr)
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	assert.Equal(t, "internal server error", status.Convert(err).Message())
+	assert.NotContains(t, err.Error(), privateError)
 }
 
 func TestGRPCTransport_Health_Reachable(t *testing.T) {

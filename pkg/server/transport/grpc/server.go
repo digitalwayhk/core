@@ -261,14 +261,9 @@ func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb
 	payload := pbToPayload(req)
 	data, err := s.handler(ctx, payload)
 	if err != nil {
-		return &pb.PayloadResponse{Error: err.Error()}, nil
+		return nil, status.Error(codes.Internal, "internal server error")
 	}
 	return &pb.PayloadResponse{Data: data}, nil
-}
-
-// Health implements pb.CoreTransportServer.
-func (s *Server) Health(_ context.Context, _ *pb.HealthRequest) (*pb.HealthResponse, error) {
-	return &pb.HealthResponse{Healthy: true}, nil
 }
 
 // Check reports whether the Server has started and is not stopping.
@@ -280,23 +275,17 @@ func (s *Server) Check() bool {
 
 func pbToPayload(req *pb.PayloadRequest) *coretypes.PayLoad {
 	return &coretypes.PayLoad{
-		TraceID:          req.TraceId,
-		SourceAddress:    req.SourceAddress,
-		SourcePort:       int(req.SourcePort),
-		SourceSocketPort: int(req.SourceSocketPort),
-		SourceService:    req.SourceService,
-		TargetAddress:    req.TargetAddress,
-		TargetPort:       int(req.TargetPort),
-		TargetSocketPort: int(req.TargetSocketPort),
-		TargetService:    req.TargetService,
-		SourcePath:       req.SourcePath,
-		TargetPath:       req.TargetPath,
-		UserId:           req.UserId,
-		UserName:         req.UserName,
-		ClientIP:         req.ClientIp,
-		Auth:             req.Auth,
-		Data:             req.Data,
-		HttpMethod:       req.HttpMethod,
-		Token:            req.Token,
+		TraceID:       req.TraceId,
+		SourceService: req.SourceService,
+		TargetService: req.TargetService,
+		SourcePath:    req.SourcePath,
+		TargetPath:    req.TargetPath,
+		UserId:        req.UserId,
+		UserName:      req.UserName,
+		ClientIP:      req.ClientIp,
+		Auth:          req.Auth,
+		Data:          req.Data,
+		HttpMethod:    req.HttpMethod,
+		Token:         req.Token,
 	}
 }

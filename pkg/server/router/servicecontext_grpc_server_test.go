@@ -13,8 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 )
 
 func newGRPCLifecycleTestContext(t *testing.T, name string) (*ServiceContext, *grpctransport.Server) {
@@ -87,7 +89,9 @@ func TestGRPCInboundStatsAreIsolatedPerServiceContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err = pb.NewCoreTransportClient(conn).Call(ctx, &pb.PayloadRequest{TargetService: "missing", TargetPath: "/missing"})
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
+	assert.Equal(t, "internal server error", status.Convert(err).Message())
 
 	assert.Equal(t, uint64(1), firstContext.TransportStats.Snapshot().InboundGRPC)
 	assert.Zero(t, secondContext.TransportStats.Snapshot().InboundGRPC)
