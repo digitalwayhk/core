@@ -87,6 +87,50 @@ func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models
 	return item, err
 }
 
+// UpdateSupplierDetails 只修改供应商可维护的公开资料，身份与启用状态保持不变。
+func UpdateSupplierDetails(id uint, name, code, description, eventID string) (*models.Supplier, error) {
+	item, err := models.FindSupplierByID(id)
+	if err != nil || item == nil {
+		return nil, contract.ErrResourceNotFound
+	}
+	item.Name = strings.TrimSpace(name)
+	item.Code = strings.ToLower(strings.TrimSpace(code))
+	item.Description = strings.TrimSpace(description)
+	payload := models.SupplierChangedPayload(eventID, item.ID, "updated")
+	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	if err != nil {
+		return nil, err
+	}
+	err = models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		return action.Insert(outbox)
+	})
+	return item, err
+}
+
+// SetSupplierEnabled 由管理员受控命令调用，不与公开资料编辑混用。
+func SetSupplierEnabled(id uint, enabled bool, eventID string) (*models.Supplier, error) {
+	item, err := models.FindSupplierByID(id)
+	if err != nil || item == nil {
+		return nil, contract.ErrResourceNotFound
+	}
+	item.Enabled = enabled
+	payload := models.SupplierChangedPayload(eventID, item.ID, "enabled_changed")
+	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	if err != nil {
+		return nil, err
+	}
+	err = models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		return action.Insert(outbox)
+	})
+	return item, err
+}
+
 func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id uint, eventID string) (*models.Product, error) {
 	supplier, err := models.FindSupplierByID(ownerID)
 	if err != nil || supplier == nil || !supplier.Enabled {
@@ -163,6 +207,57 @@ func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *
 		return action.Insert(outbox)
 	})
 	return ProductResponse(item), err
+}
+
+// UpdateProduct 只更新通用编辑允许的商品资料，归属和上下架状态保持不变。
+func UpdateProduct(id uint, name, code string, price decimal.Decimal, eventID string) (*models.Product, error) {
+	item, err := models.FindProduct(id)
+	if err != nil || item == nil {
+		return nil, contract.ErrResourceNotFound
+	}
+	item.Name = strings.TrimSpace(name)
+	item.Code = strings.ToLower(strings.TrimSpace(code))
+	item.Price = price
+	payload := models.ProductChangedPayload(eventID, item.SupplierID, item.ID, "updated")
+	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	if err != nil {
+		return nil, err
+	}
+	err = models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		return action.Insert(outbox)
+	})
+	return item, err
+}
+
+// SetProductEnabled 由供应商或管理员受控命令调用；上架时供应商必须有效。
+func SetProductEnabled(id uint, enabled bool, eventID string) (*models.Product, error) {
+	item, err := models.FindProduct(id)
+	if err != nil || item == nil {
+		return nil, contract.ErrResourceNotFound
+	}
+	supplier, err := models.FindSupplierByID(item.SupplierID)
+	if err != nil || supplier == nil {
+		return nil, contract.ErrResourceNotFound
+	}
+	if enabled && !supplier.Enabled {
+		return nil, contract.ErrSubjectDisabled
+	}
+	item.Enabled = enabled
+	payload := models.ProductChangedPayload(eventID, item.SupplierID, item.ID, "enabled_changed")
+	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	if err != nil {
+		return nil, err
+	}
+	err = models.RunTransaction(func(action persistencetypes.IDataAction) error {
+		if err := item.UpdateWith(action); err != nil {
+			return err
+		}
+		return action.Insert(outbox)
+	})
+	return item, err
 }
 
 func AvailableProducts(id uint, name, code string, supplierID uint) ([]*supplierdto.Product, error) {

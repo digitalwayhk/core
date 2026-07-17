@@ -255,6 +255,11 @@ func (p *Product) InsertWith(a persistencetypes.IDataAction) error {
 }
 
 func (p *Product) UpdateWith(a persistencetypes.IDataAction) error {
+	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
+	if p.Name == "" || p.Code == "" || p.SupplierID == 0 || !p.Price.GreaterThan(decimal.Zero) {
+		return errors.New("商品名称、编码、供应商和正数价格不能为空")
+	}
+	p.SetHashcode(p.GetHash())
 	p.SetUpdatedAt(time.Now().UTC())
 	return a.Update(p)
 }
