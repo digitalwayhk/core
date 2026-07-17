@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"reflect"
 	"runtime/debug"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,9 +96,12 @@ type RouterInfo struct {
 	cacheRuntime         RouteCacheRuntime
 	externalRateLimit    ExternalRateLimitPolicy
 	hasExternalRateLimit bool
-	owner                string
-	frozen               bool
-	frozenMetadata       routerMetadata
+	// InternalCallers 是注册期声明的可信内部服务白名单。
+	// Deprecated: 注册时请使用 router.WithInternalCallers，读取时请使用 GetInternalCallers。
+	InternalCallers []string
+	owner           string
+	frozen          bool
+	frozenMetadata  routerMetadata
 
 	// 🆕 性能统计字段
 	stats     *RouterStats `json:"-"`
@@ -117,6 +122,7 @@ type routerMetadata struct {
 	poolSize             int
 	externalRateLimit    ExternalRateLimitPolicy
 	hasExternalRateLimit bool
+	internalCallers      string
 }
 
 // Freeze 在路由完成注册后冻结身份元数据。重复冻结仅在所有者和元数据一致时幂等。
@@ -131,6 +137,7 @@ func (own *RouterInfo) Freeze(owner string) {
 		return
 	}
 	own.owner = owner
+	own.InternalCallers = normalizeInternalCallers(own.InternalCallers)
 	own.frozenMetadata = own.currentMetadataLocked()
 	own.frozen = true
 }
@@ -154,7 +161,24 @@ func (own *RouterInfo) currentMetadataLocked() routerMetadata {
 		poolSize:             own.PoolSize,
 		externalRateLimit:    own.externalRateLimit,
 		hasExternalRateLimit: own.hasExternalRateLimit,
+		internalCallers:      strings.Join(own.InternalCallers, "\x00"),
 	}
+}
+
+func normalizeInternalCallers(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (own *RouterInfo) assertMetadataFrozenLocked() {
@@ -320,6 +344,14 @@ func (own *RouterInfo) GetServiceName() string {
 	defer own.RUnlock()
 	own.assertMetadataFrozenLocked()
 	return own.ServiceName
+}
+
+// GetInternalCallers 返回注册期冻结的可信内部服务白名单副本。
+func (own *RouterInfo) GetInternalCallers() []string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	return append([]string(nil), own.InternalCallers...)
 }
 
 // GetID 返回路由注册期确定的稳定 ID。

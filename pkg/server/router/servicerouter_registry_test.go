@@ -10,6 +10,7 @@ import (
 
 	manageapi "github.com/digitalwayhk/core/examples/01-simple-shop/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/01-simple-shop/api/private"
+	publicfixture "github.com/digitalwayhk/core/internal/compat/fixture/api/public"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -284,6 +285,24 @@ func TestRouterInfoOptionsApplyOnlyBeforeRegistration(t *testing.T) {
 	)
 	assert.Same(t, registered, resolved)
 	assert.Equal(t, http.MethodGet, resolved.GetMethod(), "注册后的 Option 不得改写冻结元数据")
+}
+
+func TestInternalCallersAreNormalizedFrozenAndDefensivelyCopied(t *testing.T) {
+	info := router.DefaultRouterInfoWithOptions(
+		&publicfixture.GetThing{},
+		router.WithInternalCallers(" shop-user ", "shop-order", "shop-user", ""),
+	)
+	info.Freeze("internal-caller-fixture")
+
+	got := info.GetInternalCallers()
+	require.Equal(t, []string{"shop-order", "shop-user"}, got)
+	got[0] = "mutated"
+	require.Equal(t, []string{"shop-order", "shop-user"}, info.GetInternalCallers())
+
+	require.Panics(t, func() {
+		info.InternalCallers = []string{"changed"}
+		_ = info.GetPath()
+	})
 }
 
 func TestRouterInfoOptionsConfigureRegistrationMetadata(t *testing.T) {

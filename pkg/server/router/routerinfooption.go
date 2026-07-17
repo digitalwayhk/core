@@ -61,6 +61,15 @@ func WithPathType(pathType types.ApiType) RouterInfoOption {
 	})
 }
 
+// WithInternalCallers 声明只有列出的可信服务才能调用该路由。
+// 白名单在 RouterInfo 首次注册时规范化并冻结。
+func WithInternalCallers(serviceNames ...string) RouterInfoOption {
+	values := append([]string(nil), serviceNames...)
+	return routerInfoOptionFunc(func(info *types.RouterInfo) {
+		info.InternalCallers = values
+	})
+}
+
 // WithPoolSize 设置路由注册后使用的对象池容量。
 func WithPoolSize(size int) RouterInfoOption {
 	return routerInfoOptionFunc(func(info *types.RouterInfo) {
