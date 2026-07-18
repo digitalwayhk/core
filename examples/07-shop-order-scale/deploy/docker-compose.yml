@@ -1,0 +1,63 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  shop-user:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/user", "-p", "18181", "-grpc", "28181", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-user
+    ports: ["18181:18181"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-supplier:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/supplier", "-p", "18182", "-grpc", "28182", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-supplier
+    ports: ["18182:18182"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-order-a:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/order", "-p", "18183", "-grpc", "28183", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-order-a
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+    volumes: ["order-a-pending:/data/pending"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-order-b:
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/order", "-p", "18184", "-grpc", "28184", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-order-b
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+    volumes: ["order-b-pending:/data/pending"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-order:
+    profiles: ["scale"]
+    build: {context: ../../.., dockerfile: examples/06-shop-microservices/deploy/Dockerfile}
+    command: ["/app/order", "-p", "18183", "-grpc", "28183", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-order
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+    volumes: ["order-scale-pending:/data/pending"]
+    depends_on: {redis: {condition: service_healthy}}
+
+volumes:
+  order-a-pending:
+  order-b-pending:
+  order-scale-pending:
