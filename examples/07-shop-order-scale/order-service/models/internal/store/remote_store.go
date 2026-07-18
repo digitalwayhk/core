@@ -15,7 +15,6 @@ import (
 var (
 	remoteActionOnce sync.Once
 	remoteAction     persistencetypes.IDataAction
-	remoteTxMu       sync.Mutex
 	remoteEnsureMu   sync.Mutex
 )
 
@@ -68,7 +67,7 @@ func EnsureRemoteModel(model interface{}) error {
 	return ensureModelWith(GetRemote(), &remoteEnsureMu, model)
 }
 
-// RunRemoteTransaction 在共享远程权威库中串行执行事务。
+// RunRemoteTransaction 在共享远程权威库中执行独立 MySQL 事务。
 func RunRemoteTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) error {
-	return runTransaction(&remoteTxMu, &remoteEnsureMu, GetRemote, ensureStorage, operation)
+	return runTransaction(nil, &remoteEnsureMu, GetRemote, ensureStorage, operation)
 }

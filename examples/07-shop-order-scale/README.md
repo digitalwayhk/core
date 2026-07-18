@@ -56,8 +56,11 @@ buyer request
 - 框架需要通过当前 ClusterProvider 申请 MachineID lease，并在 Snowflake 初始化前完成绑定。
 - 每个副本必须拥有唯一 `ServiceInstanceID`，并记录到业务事实、pending、Outbox、Inbox、同步状态和诊断日志；`ServiceInstanceIP` 只用于诊断。
 - Docker 扩容时不固定暴露多个 order 业务端口；副本通过配置的发现机制注册，调用方只通过 ServiceResolver 选择实例。
+- `shop-order` scale 模板不传固定 `-p/-grpc`；需要覆盖容器内监听端口时使用 `SHOP_ORDER_HTTP_PORT/SHOP_ORDER_GRPC_PORT`。
 - 注册发现机制不应绑定 Redis；Redis、局域网发现或其他中间件由配置决定，示例只验证框架抽象可用。
 - Docker `--scale shop-order=N` 模板不能挂载共享 named volume；每个副本的本地 pending 必须由容器私有目录或编排平台独立卷承载。
+
+下单返回 `accepted` 表示当前副本已经可靠持久化到 Badger；同步到 MySQL 前，其他 order 副本无法合并该副本的本地 pending，这是示例有意展示的最终一致窗口。user-service 会对 `UserID+RequestID` 生成稳定 OrderID，order-service 也会在 Public 下单时探测 MySQL 幂等键，避免常规重试拿到不同订单号。
 
 ## 缓存规则
 

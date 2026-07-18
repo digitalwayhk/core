@@ -15,8 +15,22 @@ func TestDockerScaleServiceDoesNotPublishOrderPorts(t *testing.T) {
 	content := read07Compose(t)
 	scaleBlock := composeServiceBlock(content, "shop-order")
 	require.NotContains(t, scaleBlock, "ports:")
+	require.NotContains(t, scaleBlock, "\"-p\"")
+	require.NotContains(t, scaleBlock, "\"-grpc\"")
 	require.Contains(t, scaleBlock, "SHOP_LOCAL_PENDING_DIR: /data/pending")
 	require.NotContains(t, scaleBlock, "SHOP_ADVERTISE_ADDRESS:")
+}
+
+// TestPublicCancelPayDoNotWriteOutboxTwice 防止 Public 层绕过 business 再写第二条 Outbox。
+func TestPublicCancelPayDoNotWriteOutboxTwice(t *testing.T) {
+	for _, file := range []string{
+		filepath.Join("..", "..", "07-shop-order-scale", "order-service", "api", "public", "cancel_order.go"),
+		filepath.Join("..", "..", "07-shop-order-scale", "order-service", "api", "public", "create_payment.go"),
+	} {
+		data, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.NotContains(t, string(data), "WriteOrderChanged"+"Outbox")
+	}
 }
 
 // TestDockerScaleServiceDoesNotSharePendingVolume 验证 --scale 模板不把多个副本挂到同一个 pending 卷。

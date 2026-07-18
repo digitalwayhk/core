@@ -3,6 +3,7 @@ package business
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
@@ -29,12 +30,13 @@ func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) error {
 	if err != nil {
 		return err
 	}
+	var syncErr error
 	for _, pending := range items {
 		if err := s.syncOne(ctx, remote, pending); err != nil {
-			return err
+			syncErr = errors.Join(syncErr, err)
 		}
 	}
-	return nil
+	return syncErr
 }
 
 func (s RemoteOrderSyncer) syncOne(ctx context.Context, remote RemoteOrderStore, order *models.Order) error {

@@ -25,8 +25,10 @@ func ensureModelWith(action persistencetypes.IDataAction, mu *sync.Mutex, model 
 }
 
 func runTransaction(mu *sync.Mutex, ensureMu *sync.Mutex, getAction func() persistencetypes.IDataAction, ensureStorage func() error, operation func(persistencetypes.IDataAction) error) (err error) {
-	mu.Lock()
-	defer mu.Unlock()
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	if err = ensureStorage(); err != nil {
 		return err
 	}

@@ -45,9 +45,17 @@ func Benchmark07DrainPendingOnce(b *testing.B) {
 		require.NoError(b, err)
 	}
 	syncer := orderbusiness.RemoteOrderSyncer{}
-	runBusinessBenchmarkSingleConcurrency(b, 1, "orders/s", func(int) error {
-		return syncer.DrainOnce(context.Background(), 1)
-	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	startedAt := time.Now()
+	if err := syncer.DrainOnce(context.Background(), b.N); err != nil {
+		b.Fatal(err)
+	}
+	elapsed := time.Since(startedAt)
+	b.StopTimer()
+	if elapsed > 0 {
+		b.ReportMetric(float64(b.N)/elapsed.Seconds(), "orders/s")
+	}
 }
 
 func make07OrderCommands(prefix string, ids benchmarkIDFactory, userBase uint, count int) []orderbusiness.CreateOrderCommand {

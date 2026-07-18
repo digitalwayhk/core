@@ -13,7 +13,8 @@ func main() {
 	if err := models.EnsureStorage(); err != nil {
 		panic(err)
 	}
+	httpPort := bootstrap.OrderHTTPPort()
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.DistributedOrderConfig(18183, 4)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.DistributedOrderConfig(httpPort, 4)))
 	server.Start()
 }

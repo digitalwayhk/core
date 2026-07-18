@@ -24,10 +24,35 @@ func (LocalOrderWriter) Accept(_ context.Context, command CreateOrderCommand) (u
 		}
 		return existing.ID, nil
 	}
+	if command.EnableRemoteIdempotency {
+		existing, err := findRemoteOrderByRequest(command.UserID, strings.TrimSpace(command.RequestID))
+		if err != nil {
+			return 0, err
+		}
+		if existing != nil {
+			if existing.RequestFingerprint != strings.TrimSpace(command.RequestFingerprint) {
+				return 0, errors.New("幂等键已用于不同订单请求")
+			}
+			return existing.ID, nil
+		}
+	}
 	if err := models.AddOrder(order); err != nil {
 		return 0, err
 	}
 	return command.OrderID, nil
+}
+
+func findRemoteOrderByRequest(userID uint, requestID string) (*models.Order, error) {
+	var order *models.Order
+	err := models.RunRemoteTransaction(func(action models.DataAction) error {
+		found, err := models.FindRemoteOrderByIdempotencyWith(action, userID, requestID)
+		if err != nil {
+			return nil
+		}
+		order = found
+		return nil
+	})
+	return order, err
 }
 
 func orderFromCommand(command CreateOrderCommand) *models.Order {

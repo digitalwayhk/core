@@ -72,7 +72,7 @@ services:
   shop-order:
     profiles: ["scale"]
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
-    command: ["/app/order", "-p", "18183", "-grpc", "28183", "-view", "0"]
+    command: ["/app/order", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_LOCAL_PENDING_DIR: /data/pending

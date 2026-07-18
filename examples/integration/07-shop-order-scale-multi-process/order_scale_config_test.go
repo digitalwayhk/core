@@ -34,6 +34,16 @@ func TestDiscoveryProviderComesFromConfig(t *testing.T) {
 	require.Equal(t, "insecure", distributed.Transport.GRPC.Security.Mode)
 }
 
+// TestOrderReplicaPortsComeFromEnvironment 验证 order 副本端口可由编排环境覆盖。
+func TestOrderReplicaPortsComeFromEnvironment(t *testing.T) {
+	t.Setenv("SHOP_ORDER_HTTP_PORT", "19083")
+	t.Setenv("SHOP_ORDER_GRPC_PORT", "29083")
+	require.Equal(t, 19083, bootstrap.OrderHTTPPort())
+	cfg := bootstrap.DistributedOrderConfig(bootstrap.OrderHTTPPort(), 4)
+	require.Equal(t, 19083, cfg.Port)
+	require.Equal(t, 29083, cfg.Transport.GRPC.Port)
+}
+
 // TestOrderReplicaNewIDDoesNotCollide 验证不同 MachineID 副本生成的订单 ID 不重复。
 func TestOrderReplicaNewIDDoesNotCollide(t *testing.T) {
 	first := utils.NewAlgorithmSnowFlake(1, 4)

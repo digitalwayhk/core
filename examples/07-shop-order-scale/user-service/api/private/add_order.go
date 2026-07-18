@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/supplier"
@@ -14,6 +15,8 @@ import (
 	supplierapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service/api/public"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
+
+var userOrderIDByRequest sync.Map
 
 // AddOrder 是买家下单入口。
 type AddOrder struct {
@@ -53,7 +56,9 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	if len(products) == 0 || products[0] == nil {
 		return nil, errors.New("商品不存在")
 	}
+	orderID := orderIDForRequest(uint(userID64), strings.TrimSpace(own.RequestID), req)
 	orderRes, err := req.CallService(&orderapi.CreateOrder{
+		OrderID:      orderID,
 		UserID:       uint(userID64),
 		SupplierID:   products[0].SupplierID,
 		ProductID:    products[0].ID,
@@ -75,6 +80,21 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	var order orderdto.Order
 	orderRes.GetData(&order)
 	return &order, nil
+}
+
+func orderIDForRequest(userID uint, requestID string, req interface{ NewID() uint }) uint {
+	key := strconv.FormatUint(uint64(userID), 10) + ":" + strings.TrimSpace(requestID)
+	if value, ok := userOrderIDByRequest.Load(key); ok {
+		if id, ok := value.(uint); ok && id > 0 {
+			return id
+		}
+	}
+	id := req.NewID()
+	actual, _ := userOrderIDByRequest.LoadOrStore(key, id)
+	if stored, ok := actual.(uint); ok && stored > 0 {
+		return stored
+	}
+	return id
 }
 
 // GetResponse 返回订单响应 DTO 类型。

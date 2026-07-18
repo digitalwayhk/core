@@ -3,5 +3,5 @@ package common
 
 const (
 	// RemoteDatabaseName 是所有 order 实例共享的远程权威库名。
-	RemoteDatabaseName = "shop-order-scale-remote"
+	RemoteDatabaseName = "shop_order_scale_remote"
 )

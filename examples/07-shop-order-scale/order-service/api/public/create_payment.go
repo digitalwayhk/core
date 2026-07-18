@@ -42,9 +42,6 @@ func (own *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := business.WriteOrderChangedOutbox(item, req.GetTraceId()+"-"+contract.EventPaymentChanged, contract.EventPaymentChanged); err != nil {
-		return nil, err
-	}
 	if sc := router.GetContext(contract.OrderServiceName); sc != nil {
 		sc.NotifyOutbox()
 	}

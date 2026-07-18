@@ -29,4 +29,10 @@ docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml --profi
 
 `shop-order` scale 模板故意不声明 named volume。Compose 使用 `--scale` 时，同一个服务定义中的 named volume 会被多个副本共享，这会破坏“每个副本独立本地 pending”的约束；需要持久化时应由编排平台按副本注入独立卷。
 
-scale 模板也不设置 `SHOP_ADVERTISE_ADDRESS`，运行时会使用容器 hostname 作为发现地址，避免多个副本注册同一个静态地址。
+scale 模板也不设置 `SHOP_ADVERTISE_ADDRESS`，运行时会使用容器 hostname 作为发现地址，避免多个副本注册同一个静态地址。模板不传固定 `-p/-grpc` 参数；如果编排平台要求覆盖容器内监听端口，应使用 `SHOP_ORDER_HTTP_PORT/SHOP_ORDER_GRPC_PORT` 环境变量。
+
+真实 Docker 多副本 UAT 默认不在普通测试中启动；需要验证完整链路时运行：
+
+```bash
+SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale-multi-process -run TestDockerComposeOrderScaleUAT -count=1 -v
+```

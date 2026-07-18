@@ -18,6 +18,7 @@ import (
 
 // CreateOrder 是 user-service 调用 order-service 的可靠下单入口。
 type CreateOrder struct {
+	OrderID            uint                    `json:"orderID"`
 	UserID             uint                    `json:"userID"`
 	SupplierID         uint                    `json:"supplierID"`
 	ProductID          uint                    `json:"productID"`
@@ -50,28 +51,33 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		fingerprint = own.RequestID
 	}
 	serviceInstanceID, serviceInstanceIP := orderRuntimeIdentity()
+	orderID := own.OrderID
+	if orderID == 0 {
+		orderID = req.NewID()
+	}
 	command := business.CreateOrderCommand{
-		OrderID:            req.NewID(),
-		UserID:             own.UserID,
-		RequestID:          own.RequestID,
-		RequestFingerprint: fingerprint,
-		SupplierID:         own.SupplierID,
-		ProductID:          own.ProductID,
-		SupplierCode:       own.SupplierCode,
-		SupplierName:       own.SupplierName,
-		ProductCode:        own.ProductCode,
-		ProductName:        own.ProductName,
-		UnitPrice:          own.UnitPrice,
-		Quantity:           own.Quantity,
-		Recipient:          own.Address.ReceiverName,
-		Phone:              own.Address.Phone,
-		Region:             own.Address.Province + own.Address.City + own.Address.District,
-		AddressDetail:      own.Address.Detail,
-		AddressID:          own.Address.AddressID,
-		TraceID:            req.GetTraceId(),
-		ServiceName:        req.ServiceName(),
-		ServiceInstanceID:  serviceInstanceID,
-		ServiceInstanceIP:  serviceInstanceIP,
+		OrderID:                 orderID,
+		UserID:                  own.UserID,
+		RequestID:               own.RequestID,
+		RequestFingerprint:      fingerprint,
+		SupplierID:              own.SupplierID,
+		ProductID:               own.ProductID,
+		SupplierCode:            own.SupplierCode,
+		SupplierName:            own.SupplierName,
+		ProductCode:             own.ProductCode,
+		ProductName:             own.ProductName,
+		UnitPrice:               own.UnitPrice,
+		Quantity:                own.Quantity,
+		Recipient:               own.Address.ReceiverName,
+		Phone:                   own.Address.Phone,
+		Region:                  own.Address.Province + own.Address.City + own.Address.District,
+		AddressDetail:           own.Address.Detail,
+		AddressID:               own.Address.AddressID,
+		TraceID:                 req.GetTraceId(),
+		ServiceName:             req.ServiceName(),
+		ServiceInstanceID:       serviceInstanceID,
+		ServiceInstanceIP:       serviceInstanceIP,
+		EnableRemoteIdempotency: true,
 	}
 	orderID, err := (business.LocalOrderWriter{}).Accept(context.Background(), command)
 	if err != nil {

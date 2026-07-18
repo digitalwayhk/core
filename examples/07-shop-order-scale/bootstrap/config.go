@@ -3,6 +3,7 @@ package bootstrap
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,16 @@ func RedisAddress() string {
 		return value
 	}
 	return "127.0.0.1:6379"
+}
+
+// OrderHTTPPort 返回 order 进程 HTTP 监听端口。
+func OrderHTTPPort() int {
+	return envInt("SHOP_ORDER_HTTP_PORT", 18183)
+}
+
+// OrderGRPCPort 返回 order 进程内部 gRPC 监听端口。
+func OrderGRPCPort(httpPort int) int {
+	return envInt("SHOP_ORDER_GRPC_PORT", httpPort+10000)
 }
 
 // AdvertiseAddress 返回服务注册到发现中心的地址。
@@ -54,6 +65,7 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 // DistributedOrderConfig 创建可水平扩展 order 副本配置。
 func DistributedOrderConfig(port, dataCenterID int) *config.ServerConfig {
 	cfg := DistributedServiceConfig("shop-order", port, dataCenterID, 0)
+	cfg.Transport.GRPC.Port = OrderGRPCPort(port)
 	cfg.Cluster.Claim.AutoMachineID = true
 	cfg.Cluster.Claim.MachineIDMax = 31
 	cfg.ApplyDefaults()
@@ -74,4 +86,16 @@ func baseServiceConfig(name string, port, dataCenterID, machineID int) *config.S
 	cfg.Transport.MaxRetries = 1
 	cfg.Transport.RetryDelay = 0
 	return cfg
+}
+
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

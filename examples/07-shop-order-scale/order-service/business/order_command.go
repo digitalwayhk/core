@@ -10,27 +10,28 @@ import (
 
 // CreateOrderCommand 表达 order 实例本地可靠接收订单所需的最小业务事实。
 type CreateOrderCommand struct {
-	OrderID            uint
-	UserID             uint
-	RequestID          string
-	RequestFingerprint string
-	SupplierID         uint
-	ProductID          uint
-	SupplierCode       string
-	SupplierName       string
-	ProductCode        string
-	ProductName        string
-	UnitPrice          decimal.Decimal
-	Quantity           int
-	Recipient          string
-	Phone              string
-	Region             string
-	AddressDetail      string
-	AddressID          uint
-	TraceID            string
-	ServiceName        string
-	ServiceInstanceID  string
-	ServiceInstanceIP  string
+	OrderID                 uint
+	UserID                  uint
+	RequestID               string
+	RequestFingerprint      string
+	SupplierID              uint
+	ProductID               uint
+	SupplierCode            string
+	SupplierName            string
+	ProductCode             string
+	ProductName             string
+	UnitPrice               decimal.Decimal
+	Quantity                int
+	Recipient               string
+	Phone                   string
+	Region                  string
+	AddressDetail           string
+	AddressID               uint
+	TraceID                 string
+	ServiceName             string
+	ServiceInstanceID       string
+	ServiceInstanceIP       string
+	EnableRemoteIdempotency bool
 }
 
 func (c CreateOrderCommand) validate() error {
