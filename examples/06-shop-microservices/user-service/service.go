@@ -84,7 +84,7 @@ func handleUserCacheEvent(_ context.Context, env *event.Envelope) error {
 	if metadata.SchemaVersion != contract.EventSchemaVersion {
 		return fmt.Errorf("不支持的事件 schemaVersion: %d", metadata.SchemaVersion)
 	}
-	return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error {
+	return models.ProcessInbox(metadata.TraceID, metadata.EventID, metadata.EventType, func() error {
 		switch metadata.EventType {
 		case contract.EventSupplierChanged:
 			(&publicapi.GetSuppliers{}).RouterInfo().FailureCache(nil)
@@ -106,7 +106,7 @@ func handleUserOrderEvent(_ context.Context, env *event.Envelope) error {
 	if payload.SchemaVersion != contract.EventSchemaVersion {
 		return fmt.Errorf("不支持的订单事件 schemaVersion: %d", payload.SchemaVersion)
 	}
-	return models.ProcessInbox(payload.EventID, payload.EventType, func() error {
+	return models.ProcessInbox(payload.TraceID, payload.EventID, payload.EventType, func() error {
 		privateapi.InvalidateOrderCache(payload.UserID)
 		(&privateapi.GetOrders{}).RouterInfo().NoticeWebSocket(payload)
 		return nil

@@ -25,7 +25,7 @@ func (own *CancelOrder) Validation(servertypes.IRequest) error {
 }
 
 func (own *CancelOrder) Do(req servertypes.IRequest) (interface{}, error) {
-	return business.CancelOrder(own.UserID, own.OrderID, strconv.FormatUint(uint64(req.NewID()), 10))
+	return business.CancelOrder(own.UserID, own.OrderID, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 }
 
 func (*CancelOrder) GetResponse() interface{} { return &orderdto.Order{} }

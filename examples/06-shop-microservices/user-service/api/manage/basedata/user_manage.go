@@ -45,8 +45,9 @@ func (*UserManage) ResolveUserWriteScope(sender interface{}, _ commonmanage.Acto
 	return commonmanage.WriteScope{}, nil, false
 }
 
-func (own *UserManage) OnEditBefore(operation *managepkg.Edit[models.User], _ servertypes.IRequest) (interface{}, error, bool) {
+func (own *UserManage) OnEditBefore(operation *managepkg.Edit[models.User], req servertypes.IRequest) (interface{}, error, bool) {
 	current := operation.OldItem
+	current.TraceID = req.GetTraceId()
 	current.Name = strings.TrimSpace(operation.Model.Name)
 	return current, models.SaveUser(current), true
 }

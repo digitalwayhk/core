@@ -53,7 +53,13 @@ func (*AddressManage) ResolveUserWriteScope(sender interface{}, actor commonmana
 	return commonmanage.WriteScope{}, nil, false
 }
 
-func (*AddressManage) OnEditBefore(operation *managepkg.Edit[models.Address], _ servertypes.IRequest) (interface{}, error, bool) {
+func (*AddressManage) OnAddBefore(operation *managepkg.Add[models.Address], req servertypes.IRequest) (interface{}, error, bool) {
+	operation.Model.TraceID = req.GetTraceId()
+	return nil, nil, false
+}
+
+func (*AddressManage) OnEditBefore(operation *managepkg.Edit[models.Address], req servertypes.IRequest) (interface{}, error, bool) {
+	operation.Model.TraceID = req.GetTraceId()
 	operation.Model.UserID = operation.OldItem.UserID
 	return nil, nil, false
 }

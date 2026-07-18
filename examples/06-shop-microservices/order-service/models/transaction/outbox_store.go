@@ -21,7 +21,7 @@ func (OutboxStore) LoadPending(context.Context, int) ([]event.OutboxMessage, err
 		for _, item := range items {
 			result = append(result, event.OutboxMessage{
 				ID: item.ID, EventID: item.EventID, EventType: item.EventType,
-				Subject: item.Subject, Payload: item.Payload,
+				Subject: item.Subject, Payload: item.Payload, TraceID: item.TraceID,
 			})
 		}
 		return nil

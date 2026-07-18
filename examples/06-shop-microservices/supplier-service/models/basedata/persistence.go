@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/internal/store"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
@@ -111,17 +112,17 @@ func ListProducts() ([]*Product, error) {
 	return items, err
 }
 
-func ProductChangedPayload(eventID string, supplierID, productID uint, action string) eventdto.ProductChanged {
+func ProductChangedPayload(traceID, eventID string, supplierID, productID uint, action string) eventdto.ProductChanged {
 	return eventdto.ProductChanged{Metadata: eventdto.Metadata{
-		EventID: eventID, SchemaVersion: 1, EventType: "shop.product.changed", OccurredAt: time.Now().UTC(),
-		SourceService: "shop-supplier", AggregateID: eventID,
+		EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventProductChanged, OccurredAt: time.Now().UTC(),
+		SourceService: contract.SupplierServiceName, AggregateID: strconv.FormatUint(uint64(productID), 10),
 	}, SupplierID: supplierID, ProductID: productID, Action: action}
 }
 
-func SupplierChangedPayload(eventID string, supplierID uint, action string) eventdto.SupplierChanged {
+func SupplierChangedPayload(traceID, eventID string, supplierID uint, action string) eventdto.SupplierChanged {
 	return eventdto.SupplierChanged{Metadata: eventdto.Metadata{
-		EventID: eventID, SchemaVersion: 1, EventType: "shop.supplier.changed", OccurredAt: time.Now().UTC(),
-		SourceService: "shop-supplier", AggregateID: strconv.FormatUint(uint64(supplierID), 10),
+		EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventSupplierChanged, OccurredAt: time.Now().UTC(),
+		SourceService: contract.SupplierServiceName, AggregateID: strconv.FormatUint(uint64(supplierID), 10),
 	}, SupplierID: supplierID, Action: action}
 }
 

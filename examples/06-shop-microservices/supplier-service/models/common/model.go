@@ -6,6 +6,7 @@ const DatabaseName = "shop-supplier"
 
 type SupplierServiceModel struct {
 	*entity.Model
+	TraceID string `gorm:"index" json:"traceID"`
 }
 
 func NewSupplierServiceModel() *SupplierServiceModel {

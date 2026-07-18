@@ -8,12 +8,13 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/internal/store"
 )
 
-func NewProductOutbox(eventID, eventType, subject string, payload interface{}) (*Outbox, error) {
+func NewProductOutbox(traceID, eventID, eventType, subject string, payload interface{}) (*Outbox, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	item := NewOutbox()
+	item.TraceID = strings.TrimSpace(traceID)
 	item.EventID, item.EventType, item.Subject, item.Payload = strings.TrimSpace(eventID), eventType, subject, data
 	item.SetHashcode(item.GetHash())
 	return item, nil

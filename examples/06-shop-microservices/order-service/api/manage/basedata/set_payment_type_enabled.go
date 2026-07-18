@@ -36,7 +36,7 @@ func (own *SetPaymentTypeEnabled) Do(req servertypes.IRequest) (interface{}, err
 	if stop || err != nil || result != nil {
 		return result, err
 	}
-	return business.SetPaymentTypeEnabled(own.Model.ID, own.Model.Enabled, strconv.FormatUint(uint64(req.NewID()), 10))
+	return business.SetPaymentTypeEnabled(own.Model.ID, own.Model.Enabled, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 }
 func (own *SetPaymentTypeEnabled) RouterInfo() *servertypes.RouterInfo {
 	return managepkg.RouterInfo(own)

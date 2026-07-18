@@ -31,7 +31,7 @@ func orderEvent(eventID string, revision uint64, orderID, supplierID, productID 
 		Metadata: eventdto.Metadata{
 			EventID: eventID, SchemaVersion: contract.EventSchemaVersion,
 			EventType: contract.EventOrderCreated, SourceService: contract.OrderServiceName,
-			AggregateID: "order", OccurredAt: now,
+			AggregateID: "order", TraceID: "trace-" + eventID, OccurredAt: now,
 		},
 		OrderRevision: revision, OrderID: orderID, UserID: 9,
 		SupplierID: supplierID, ProductID: productID,
@@ -80,11 +80,13 @@ func TestApplyOrderEventIsIdempotentAndRevisionMonotonic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), stored.OrderRevision)
 	require.Equal(t, "完整地址", stored.AddressDetail)
+	require.Equal(t, created.TraceID, stored.TraceID)
 	var inboxItems []*Inbox
 	query := search(NewInbox(), 10)
 	query.AddWhereN("EventID", "event-created")
 	require.NoError(t, dataAction().Load(query, &inboxItems))
 	require.Len(t, inboxItems, 1)
+	require.Equal(t, created.TraceID, inboxItems[0].TraceID)
 }
 
 func TestUsedProductAndSupplierCannotBeDeleted(t *testing.T) {

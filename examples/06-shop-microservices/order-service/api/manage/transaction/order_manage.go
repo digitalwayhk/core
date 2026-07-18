@@ -25,7 +25,7 @@ func (own *OrderManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Cancel, own.Refund}
 }
 
-func cancelSelectedOrder(selected *models.Order, eventID string) (interface{}, error) {
+func cancelSelectedOrder(selected *models.Order, traceID, eventID string) (interface{}, error) {
 	if selected == nil {
 		return nil, contract.ErrResourceNotFound
 	}
@@ -33,7 +33,7 @@ func cancelSelectedOrder(selected *models.Order, eventID string) (interface{}, e
 	if err != nil || item == nil {
 		return nil, contract.ErrResourceNotFound
 	}
-	return business.CancelOrder(item.UserID, item.ID, eventID)
+	return business.CancelOrder(item.UserID, item.ID, traceID, eventID)
 }
 
 func (*OrderManage) ViewModel(model *view.ViewModel) {

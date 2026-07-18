@@ -19,17 +19,18 @@ func TestSupplierOwnsProductAndOutboxFacts(t *testing.T) {
 	require.NotZero(t, supplierA.ID)
 	require.NotZero(t, supplierB.ID)
 
-	product, err := CreateProduct(supplierA.ID, "测试商品", "product-a", decimal.NewFromInt(12), 1001, "event-create")
+	product, err := CreateProduct(supplierA.ID, "测试商品", "product-a", decimal.NewFromInt(12), 1001, "trace-product-create", "event-create")
 	require.NoError(t, err)
 	assert.False(t, product.Enabled)
+	assert.Equal(t, "trace-product-create", product.TraceID)
 	_, err = ProductSnapshot(product.ID)
 	require.ErrorContains(t, err, "未上架")
 
 	enabled := true
 	price := decimal.NewFromInt(18)
-	_, err = UpdateOwnedProduct(supplierB.ID, product.ID, &price, &enabled, "event-forbidden")
+	_, err = UpdateOwnedProduct(supplierB.ID, product.ID, &price, &enabled, "trace-forbidden", "event-forbidden")
 	require.ErrorContains(t, err, "无权")
-	updated, err := UpdateOwnedProduct(supplierA.ID, product.ID, &price, &enabled, "event-update")
+	updated, err := UpdateOwnedProduct(supplierA.ID, product.ID, &price, &enabled, "trace-product-update", "event-update")
 	require.NoError(t, err)
 	assert.True(t, updated.Enabled)
 	assert.True(t, updated.Price.Equal(price))
@@ -42,4 +43,10 @@ func TestSupplierOwnsProductAndOutboxFacts(t *testing.T) {
 	pending, err := models.PendingOutbox()
 	require.NoError(t, err)
 	assert.Len(t, pending, 2)
+	traces := map[string]string{}
+	for _, item := range pending {
+		traces[item.EventID] = item.TraceID
+	}
+	assert.Equal(t, "trace-product-create", traces["event-create"])
+	assert.Equal(t, "trace-product-update", traces["event-update"])
 }

@@ -31,7 +31,7 @@ func (own *PaymentTypeManage) OnAddBefore(operation *managepkg.Add[models.Paymen
 	if operation.Model == nil {
 		return nil, contract.ErrResourceNotFound, true
 	}
-	result, err := business.CreatePaymentType(operation.Model, strconv.FormatUint(uint64(req.NewID()), 10))
+	result, err := business.CreatePaymentType(operation.Model, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 	return result, err, true
 }
 
@@ -39,7 +39,7 @@ func (own *PaymentTypeManage) OnEditBefore(operation *managepkg.Edit[models.Paym
 	if operation.Model == nil || operation.OldItem == nil {
 		return nil, contract.ErrResourceNotFound, true
 	}
-	result, err := business.UpdatePaymentType(operation.OldItem.ID, operation.Model.Name, operation.Model.Code, strconv.FormatUint(uint64(req.NewID()), 10))
+	result, err := business.UpdatePaymentType(operation.OldItem.ID, operation.Model.Name, operation.Model.Code, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 	return result, err, true
 }
 
@@ -47,7 +47,7 @@ func (own *PaymentTypeManage) OnRemoveBefore(operation *managepkg.Remove[models.
 	if operation.Model == nil {
 		return nil, contract.ErrResourceNotFound, true
 	}
-	result, err := business.DeletePaymentType(operation.Model.ID, strconv.FormatUint(uint64(req.NewID()), 10))
+	result, err := business.DeletePaymentType(operation.Model.ID, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 	return result, err, true
 }
 

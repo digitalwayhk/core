@@ -47,7 +47,7 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	}
 	product := products[0]
 	snapshot := supplierdto.ProductSnapshot{ProductID: product.ID, SupplierID: product.SupplierID, SupplierCode: product.SupplierCode, SupplierName: product.SupplierName, ProductCode: product.Code, ProductName: product.Name, UnitPrice: product.Price}
-	return business.CreateOrder(business.CreateOrderCommand{OrderID: req.NewID(), UserID: own.UserID, RequestID: own.RequestID, EventID: strconv.FormatUint(uint64(req.NewID()), 10), ProductID: own.ProductID, Quantity: own.Quantity, Address: own.Address}, snapshot)
+	return business.CreateOrder(business.CreateOrderCommand{OrderID: req.NewID(), UserID: own.UserID, RequestID: own.RequestID, TraceID: req.GetTraceId(), EventID: strconv.FormatUint(uint64(req.NewID()), 10), ProductID: own.ProductID, Quantity: own.Quantity, Address: own.Address}, snapshot)
 }
 
 func (*CreateOrder) GetResponse() interface{} { return &orderdto.Order{} }

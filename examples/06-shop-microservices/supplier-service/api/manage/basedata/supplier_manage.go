@@ -53,7 +53,7 @@ func (*SupplierManage) ResolveSupplierWriteScope(sender interface{}, _ commonman
 func (own *SupplierManage) OnEditBefore(operation *managepkg.Edit[models.Supplier], req servertypes.IRequest) (interface{}, error, bool) {
 	eventID := models.EventID(req.NewID())
 	current := operation.OldItem
-	updated, err := business.UpdateSupplierDetails(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Description, eventID)
+	updated, err := business.UpdateSupplierDetails(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Description, req.GetTraceId(), eventID)
 	return updated, err, true
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
@@ -45,8 +46,8 @@ func TestOrderEventContainsRevisionAndFullFulfillmentSnapshot(t *testing.T) {
 	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
 	payload := eventdto.OrderChanged{
 		Metadata: eventdto.Metadata{
-			EventID: "event-1", SchemaVersion: 1, EventType: "shop.order.created",
-			OccurredAt: now, SourceService: "shop-order", AggregateID: "11",
+			EventID: "event-1", TraceID: "trace-1", SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventOrderCreated,
+			OccurredAt: now, SourceService: contract.OrderServiceName, AggregateID: "11",
 		},
 		OrderRevision: 2, OrderID: 11, UserID: 21, SupplierID: 31, ProductID: 41,
 		SupplierCode: "supplier-31", SupplierName: "供应商",
@@ -61,6 +62,7 @@ func TestOrderEventContainsRevisionAndFullFulfillmentSnapshot(t *testing.T) {
 
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
+	assert.Contains(t, string(data), `"traceID":"trace-1"`)
 	assert.Contains(t, string(data), `"schemaVersion":1`)
 	assert.Contains(t, string(data), `"orderRevision":2`)
 	assert.Contains(t, string(data), `"supplierID":31`)

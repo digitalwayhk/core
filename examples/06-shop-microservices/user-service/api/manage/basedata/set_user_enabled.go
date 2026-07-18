@@ -37,6 +37,7 @@ func (own *SetUserEnabled) Do(req servertypes.IRequest) (interface{}, error) {
 	if err != nil || current == nil {
 		return nil, contract.ErrResourceNotFound
 	}
+	current.TraceID = req.GetTraceId()
 	current.Enabled = own.Model.Enabled
 	return current, models.SaveUser(current)
 }

@@ -44,7 +44,7 @@ func fixedProductSnapshot() supplierdto.ProductSnapshot {
 func createOrderCommand(requestID string, userID uint, quantity int) CreateOrderCommand {
 	orderID, eventID := nextValue("order-created")
 	return CreateOrderCommand{
-		OrderID: orderID, UserID: userID, RequestID: requestID, EventID: eventID,
+		OrderID: orderID, UserID: userID, RequestID: requestID, TraceID: "trace-" + eventID, EventID: eventID,
 		ProductID: fixedProductSnapshot().ProductID, Quantity: quantity,
 		Address: userdto.AddressSnapshot{AddressID: 71, Recipient: " 收件人 ", Phone: " 10086 ", Region: " 华南 ", Detail: " 完整地址 "},
 	}
@@ -78,6 +78,31 @@ func TestCreateOrderConvergesAndPreservesSnapshots(t *testing.T) {
 	require.Equal(t, "供应商快照", second.Product.SupplierName)
 	require.Equal(t, "完整地址", second.Address.Detail)
 	require.True(t, decimal.NewFromInt(30).Equal(second.TotalAmount))
+}
+
+func TestCreateOrderStoresTraceIDInOrderAndOutbox(t *testing.T) {
+	_, requestID := nextValue("trace-request")
+	command := createOrderCommand(requestID, 111, 2)
+	command.TraceID = "trace-create-order"
+	created, err := CreateOrder(command, fixedProductSnapshot())
+	require.NoError(t, err)
+
+	stored, err := models.FindOrder(created.ID)
+	require.NoError(t, err)
+	require.Equal(t, command.TraceID, stored.TraceID)
+
+	items, err := models.PendingOutbox()
+	require.NoError(t, err)
+	var found *models.Outbox
+	for _, item := range items {
+		if item.EventID == command.EventID {
+			found = item
+			break
+		}
+	}
+	require.NotNil(t, found)
+	require.Equal(t, command.TraceID, found.TraceID)
+	require.Contains(t, string(found.Payload), `"traceID":"`+command.TraceID+`"`)
 }
 
 func TestConcurrentCreateOrderConvergesOnOneFact(t *testing.T) {
@@ -120,7 +145,7 @@ func TestCancelOrderKeepsFactAndAdvancesRevision(t *testing.T) {
 	created, err := CreateOrder(createOrderCommand(requestID, 13, 1), fixedProductSnapshot())
 	require.NoError(t, err)
 	_, eventID := nextValue("cancel-event")
-	cancelled, err := CancelOrder(created.UserID, created.ID, eventID)
+	cancelled, err := CancelOrder(created.UserID, created.ID, "trace-cancel-order", eventID)
 	require.NoError(t, err)
 	require.Equal(t, models.OrderStatusCancelled, cancelled.OrderStatus)
 	require.Equal(t, uint64(2), cancelled.OrderRevision)
@@ -140,30 +165,33 @@ func TestPaymentAttemptsAndRefundStateMachine(t *testing.T) {
 	require.NoError(t, err)
 	_, paymentID := nextValue("payment")
 	_, paymentEvent := nextValue("payment-processing")
-	record, err := CreatePayment(created.UserID, created.ID, paymentType.ID, paymentID, paymentEvent)
+	record, err := CreatePayment(created.UserID, created.ID, paymentType.ID, paymentID, "trace-payment", paymentEvent)
 	require.NoError(t, err)
 	require.Equal(t, uint(1), record.Attempt)
 	require.Equal(t, paymentID, record.PaymentID)
+	storedPayment, err := models.FindPaymentByPaymentID(paymentID)
+	require.NoError(t, err)
+	require.Equal(t, "trace-payment", storedPayment.TraceID)
 
 	_, anotherPaymentID := nextValue("payment")
 	_, anotherEvent := nextValue("payment-processing")
-	_, err = CreatePayment(created.UserID, created.ID, paymentType.ID, anotherPaymentID, anotherEvent)
+	_, err = CreatePayment(created.UserID, created.ID, paymentType.ID, anotherPaymentID, "trace-payment-another", anotherEvent)
 	require.Error(t, err)
 
 	_, paidEvent := nextValue("payment-paid")
-	paid, err := ConfirmPayment(paymentID, paidEvent)
+	paid, err := ConfirmPayment(paymentID, "trace-paid", paidEvent)
 	require.NoError(t, err)
 	require.Equal(t, models.PaymentStatusPaid, paid.PaymentStatus)
 	require.Equal(t, uint64(3), paid.OrderRevision)
 
 	_, cancelEvent := nextValue("paid-cancel")
-	refunding, err := CancelOrder(created.UserID, created.ID, cancelEvent)
+	refunding, err := CancelOrder(created.UserID, created.ID, "trace-refund-start", cancelEvent)
 	require.NoError(t, err)
 	require.Equal(t, models.OrderStatusCancelling, refunding.OrderStatus)
 	require.Equal(t, models.PaymentStatusRefunding, refunding.PaymentStatus)
 
 	_, refundEvent := nextValue("payment-refunded")
-	refunded, err := ConfirmRefund(paymentID, refundEvent)
+	refunded, err := ConfirmRefund(paymentID, "trace-refunded", refundEvent)
 	require.NoError(t, err)
 	require.Equal(t, models.OrderStatusCancelled, refunded.OrderStatus)
 	require.Equal(t, models.PaymentStatusRefunded, refunded.PaymentStatus)
@@ -179,7 +207,7 @@ func TestUsedPaymentTypeCannotBeDeletedOrRecoded(t *testing.T) {
 	require.NoError(t, err)
 	_, paymentID := nextValue("used-payment")
 	_, eventID := nextValue("used-payment-event")
-	_, err = CreatePayment(created.UserID, created.ID, paymentType.ID, paymentID, eventID)
+	_, err = CreatePayment(created.UserID, created.ID, paymentType.ID, paymentID, "trace-used-payment", eventID)
 	require.NoError(t, err)
 
 	require.ErrorIs(t, models.DeletePaymentType(paymentType), contract.ErrResourceInUse)
@@ -194,12 +222,12 @@ func TestPaymentTypeChangesWriteReliableEvents(t *testing.T) {
 	paymentType.SetID(740001)
 	paymentType.Name, paymentType.Code, paymentType.Enabled = "可靠支付", "reliable-pay", true
 	_, createdEvent := nextValue("payment-type-created")
-	created, err := CreatePaymentType(paymentType, createdEvent)
+	created, err := CreatePaymentType(paymentType, "trace-payment-type-created", createdEvent)
 	require.NoError(t, err)
 	require.False(t, created.Enabled)
 
 	_, enabledEvent := nextValue("payment-type-enabled")
-	enabled, err := SetPaymentTypeEnabled(created.ID, true, enabledEvent)
+	enabled, err := SetPaymentTypeEnabled(created.ID, true, "trace-payment-type-enabled", enabledEvent)
 	require.NoError(t, err)
 	require.True(t, enabled.Enabled)
 

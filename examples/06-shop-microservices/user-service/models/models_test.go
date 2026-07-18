@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,9 +26,17 @@ func TestMain(m *testing.M) {
 func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
 	var calls atomic.Int32
 	operation := func() error { calls.Add(1); return nil }
-	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
-	require.NoError(t, ProcessInbox("event-once", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("trace-event-once", "event-once", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("trace-event-once", "event-once", "shop.order.changed", operation))
 	assert.Equal(t, int32(1), calls.Load())
+	var items []*Inbox
+	require.NoError(t, RunTransaction(func(action persistencetypes.IDataAction) error {
+		query := &persistencetypes.SearchItem{Model: NewInbox(), Size: 1}
+		query.AddWhereN("EventID", "event-once")
+		return action.Load(query, &items)
+	}))
+	require.Len(t, items, 1)
+	require.Equal(t, "trace-event-once", items[0].TraceID)
 }
 
 func TestInboxRetriesUnprocessedEvent(t *testing.T) {
@@ -38,9 +47,9 @@ func TestInboxRetriesUnprocessedEvent(t *testing.T) {
 		}
 		return nil
 	}
-	require.Error(t, ProcessInbox("event-retry", "shop.order.changed", operation))
-	require.NoError(t, ProcessInbox("event-retry", "shop.order.changed", operation))
-	require.NoError(t, ProcessInbox("event-retry", "shop.order.changed", operation))
+	require.Error(t, ProcessInbox("trace-event-retry", "event-retry", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("trace-event-retry", "event-retry", "shop.order.changed", operation))
+	require.NoError(t, ProcessInbox("trace-event-retry", "event-retry", "shop.order.changed", operation))
 	assert.Equal(t, int32(2), calls.Load())
 }
 

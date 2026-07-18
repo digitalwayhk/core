@@ -8,7 +8,7 @@ import (
 
 var inboxMu sync.Mutex
 
-func ProcessInbox(eventID, eventType string, operation func() error) error {
+func ProcessInbox(traceID, eventID, eventType string, operation func() error) error {
 	inboxMu.Lock()
 	defer inboxMu.Unlock()
 	if err := store.EnsureModel(NewInbox()); err != nil {
@@ -27,6 +27,7 @@ func ProcessInbox(eventID, eventType string, operation func() error) error {
 		return err
 	}
 	item := NewInbox()
+	item.TraceID = traceID
 	item.EventID, item.EventType = eventID, eventType
 	item.SetHashcode(item.GetHash())
 	return store.Get().Insert(item)

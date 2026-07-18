@@ -13,35 +13,37 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-func paymentTypeEvent(eventID, action string, item *models.PaymentType) eventdto.PaymentTypeChanged {
+func paymentTypeEvent(traceID, eventID, action string, item *models.PaymentType) eventdto.PaymentTypeChanged {
 	return eventdto.PaymentTypeChanged{Metadata: eventdto.Metadata{
-		EventID: eventID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventPaymentTypeChanged,
+		EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventPaymentTypeChanged,
 		OccurredAt: time.Now().UTC(), SourceService: contract.OrderServiceName, AggregateID: strconv.FormatUint(uint64(item.ID), 10),
 	}, PaymentTypeID: item.ID, Code: item.Code, Name: item.Name, Enabled: item.Enabled, Action: action}
 }
 
-func writePaymentTypeEvent(action persistencetypes.IDataAction, eventID, actionName string, item *models.PaymentType) error {
-	outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentTypeChanged, contract.SubjectPaymentTypeChanged, paymentTypeEvent(eventID, actionName, item))
+func writePaymentTypeEvent(action persistencetypes.IDataAction, traceID, eventID, actionName string, item *models.PaymentType) error {
+	outbox, err := models.NewOutboxRecord(traceID, eventID, contract.EventPaymentTypeChanged, contract.SubjectPaymentTypeChanged, paymentTypeEvent(traceID, eventID, actionName, item))
 	if err != nil {
 		return err
 	}
 	return action.Insert(outbox)
 }
 
-func CreatePaymentType(input *models.PaymentType, eventID string) (*models.PaymentType, error) {
+func CreatePaymentType(input *models.PaymentType, traceID, eventID string) (*models.PaymentType, error) {
 	item := models.NewPaymentType()
+	item.TraceID = strings.TrimSpace(traceID)
 	item.SetID(input.ID)
 	item.Name, item.Code, item.Enabled = input.Name, input.Code, false
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		if err := item.InsertWith(action); err != nil {
 			return err
 		}
-		return writePaymentTypeEvent(action, eventID, "created", item)
+		return writePaymentTypeEvent(action, traceID, eventID, "created", item)
 	})
 	return item, err
 }
 
-func UpdatePaymentType(id uint, name, code, eventID string) (*models.PaymentType, error) {
+func UpdatePaymentType(id uint, name, code, traceID, eventID string) (*models.PaymentType, error) {
+	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		item, err := models.FindPaymentTypeWith(action, id)
@@ -59,10 +61,11 @@ func UpdatePaymentType(id uint, name, code, eventID string) (*models.PaymentType
 			}
 		}
 		item.Name, item.Code = name, code
+		item.TraceID = traceID
 		if err := item.UpdateWith(action); err != nil {
 			return err
 		}
-		if err := writePaymentTypeEvent(action, eventID, "updated", item); err != nil {
+		if err := writePaymentTypeEvent(action, traceID, eventID, "updated", item); err != nil {
 			return err
 		}
 		result = item
@@ -71,7 +74,8 @@ func UpdatePaymentType(id uint, name, code, eventID string) (*models.PaymentType
 	return result, err
 }
 
-func SetPaymentTypeEnabled(id uint, enabled bool, eventID string) (*models.PaymentType, error) {
+func SetPaymentTypeEnabled(id uint, enabled bool, traceID, eventID string) (*models.PaymentType, error) {
+	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		item, err := models.FindPaymentTypeWith(action, id)
@@ -79,10 +83,11 @@ func SetPaymentTypeEnabled(id uint, enabled bool, eventID string) (*models.Payme
 			return contract.ErrResourceNotFound
 		}
 		item.Enabled = enabled
+		item.TraceID = traceID
 		if err := item.UpdateWith(action); err != nil {
 			return err
 		}
-		if err := writePaymentTypeEvent(action, eventID, "enabled_changed", item); err != nil {
+		if err := writePaymentTypeEvent(action, traceID, eventID, "enabled_changed", item); err != nil {
 			return err
 		}
 		result = item
@@ -91,7 +96,8 @@ func SetPaymentTypeEnabled(id uint, enabled bool, eventID string) (*models.Payme
 	return result, err
 }
 
-func DeletePaymentType(id uint, eventID string) (*models.PaymentType, error) {
+func DeletePaymentType(id uint, traceID, eventID string) (*models.PaymentType, error) {
+	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		item, err := models.FindPaymentTypeWith(action, id)
@@ -108,7 +114,8 @@ func DeletePaymentType(id uint, eventID string) (*models.PaymentType, error) {
 		if err := item.DeleteWith(action); err != nil {
 			return err
 		}
-		if err := writePaymentTypeEvent(action, eventID, "deleted", item); err != nil {
+		item.TraceID = traceID
+		if err := writePaymentTypeEvent(action, traceID, eventID, "deleted", item); err != nil {
 			return err
 		}
 		result = item
@@ -129,8 +136,9 @@ func EnabledPaymentTypes() ([]*orderdto.PaymentType, error) {
 	return result, nil
 }
 
-func CreatePayment(userID, orderID, paymentTypeID uint, paymentID, eventID string) (*orderdto.PaymentRecord, error) {
+func CreatePayment(userID, orderID, paymentTypeID uint, paymentID, traceID, eventID string) (*orderdto.PaymentRecord, error) {
 	paymentID, eventID = strings.TrimSpace(paymentID), strings.TrimSpace(eventID)
+	traceID = strings.TrimSpace(traceID)
 	if userID == 0 || orderID == 0 || paymentTypeID == 0 || paymentID == "" || eventID == "" {
 		return nil, errors.New("支付参数不完整")
 	}
@@ -161,17 +169,18 @@ func CreatePayment(userID, orderID, paymentTypeID uint, paymentID, eventID strin
 			}
 		}
 		record := models.NewPaymentRecord()
+		record.TraceID = traceID
 		record.OrderID, record.PaymentTypeID, record.Attempt, record.PaymentID = order.ID, paymentType.ID, attempt, paymentID
 		record.Amount, record.Status = order.TotalAmount, models.PaymentStatusProcessing
 		if err := record.InsertWith(action); err != nil {
 			return err
 		}
-		order.PaymentStatus, order.CurrentPaymentID = models.PaymentStatusProcessing, paymentID
+		order.TraceID, order.PaymentStatus, order.CurrentPaymentID = traceID, models.PaymentStatusProcessing, paymentID
 		order.OrderRevision++
 		if err := order.UpdateWith(action); err != nil {
 			return err
 		}
-		outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, contract.EventPaymentChanged, "payment_processing", order))
+		outbox, err := models.NewOutboxRecord(traceID, eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(traceID, eventID, contract.EventPaymentChanged, "payment_processing", order))
 		if err != nil {
 			return err
 		}
@@ -184,7 +193,8 @@ func CreatePayment(userID, orderID, paymentTypeID uint, paymentID, eventID strin
 	return models.PaymentToDTO(result), err
 }
 
-func changePayment(paymentID, eventID string, from, targetPayment, targetOrder int, actionName string) (*orderdto.Order, error) {
+func changePayment(paymentID, traceID, eventID string, from, targetPayment, targetOrder int, actionName string) (*orderdto.Order, error) {
+	traceID = strings.TrimSpace(traceID)
 	var result *models.Order
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		record, err := models.FindPaymentByPaymentIDWith(action, paymentID)
@@ -202,11 +212,11 @@ func changePayment(paymentID, eventID string, from, targetPayment, targetOrder i
 		if record.Status != from || order.PaymentStatus != from {
 			return errors.New("支付状态转换无效")
 		}
-		record.Status = targetPayment
+		record.TraceID, record.Status = traceID, targetPayment
 		if err := record.UpdateWith(action); err != nil {
 			return err
 		}
-		order.PaymentStatus = targetPayment
+		order.TraceID, order.PaymentStatus = traceID, targetPayment
 		if targetOrder >= 0 {
 			order.OrderStatus = targetOrder
 		}
@@ -214,7 +224,7 @@ func changePayment(paymentID, eventID string, from, targetPayment, targetOrder i
 		if err := order.UpdateWith(action); err != nil {
 			return err
 		}
-		outbox, err := models.NewOutboxRecord(eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(eventID, contract.EventPaymentChanged, actionName, order))
+		outbox, err := models.NewOutboxRecord(traceID, eventID, contract.EventPaymentChanged, contract.SubjectPaymentChanged, models.ChangeEvent(traceID, eventID, contract.EventPaymentChanged, actionName, order))
 		if err != nil {
 			return err
 		}
@@ -227,14 +237,14 @@ func changePayment(paymentID, eventID string, from, targetPayment, targetOrder i
 	return models.ToDTO(result), err
 }
 
-func ConfirmPayment(paymentID, eventID string) (*orderdto.Order, error) {
-	return changePayment(paymentID, eventID, models.PaymentStatusProcessing, models.PaymentStatusPaid, -1, "paid")
+func ConfirmPayment(paymentID, traceID, eventID string) (*orderdto.Order, error) {
+	return changePayment(paymentID, traceID, eventID, models.PaymentStatusProcessing, models.PaymentStatusPaid, -1, "paid")
 }
 
-func FailPayment(paymentID, eventID string) (*orderdto.Order, error) {
-	return changePayment(paymentID, eventID, models.PaymentStatusProcessing, models.PaymentStatusFailed, -1, "payment_failed")
+func FailPayment(paymentID, traceID, eventID string) (*orderdto.Order, error) {
+	return changePayment(paymentID, traceID, eventID, models.PaymentStatusProcessing, models.PaymentStatusFailed, -1, "payment_failed")
 }
 
-func ConfirmRefund(paymentID, eventID string) (*orderdto.Order, error) {
-	return changePayment(paymentID, eventID, models.PaymentStatusRefunding, models.PaymentStatusRefunded, models.OrderStatusCancelled, "refunded")
+func ConfirmRefund(paymentID, traceID, eventID string) (*orderdto.Order, error) {
+	return changePayment(paymentID, traceID, eventID, models.PaymentStatusRefunding, models.PaymentStatusRefunded, models.OrderStatusCancelled, "refunded")
 }

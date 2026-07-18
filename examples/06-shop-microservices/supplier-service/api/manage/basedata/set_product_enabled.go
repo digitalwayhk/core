@@ -39,7 +39,7 @@ func (own *SetProductEnabled) Do(req servertypes.IRequest) (interface{}, error) 
 	if stop || err != nil || result != nil {
 		return result, err
 	}
-	return business.SetProductEnabled(own.Model.ID, own.Model.Enabled, models.EventID(req.NewID()))
+	return business.SetProductEnabled(own.Model.ID, own.Model.Enabled, req.GetTraceId(), models.EventID(req.NewID()))
 }
 
 func (own *SetProductEnabled) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }

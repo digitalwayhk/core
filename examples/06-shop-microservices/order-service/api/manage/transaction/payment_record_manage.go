@@ -25,11 +25,11 @@ func (own *PaymentRecordManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Confirm, own.Fail, own.ConfirmRefund}
 }
 
-func handlePaymentCommand[T any](model *models.PaymentRecord, eventID string, action func(string, string) (T, error)) (interface{}, error) {
+func handlePaymentCommand[T any](model *models.PaymentRecord, traceID, eventID string, action func(string, string, string) (T, error)) (interface{}, error) {
 	if model == nil || model.PaymentID == "" {
 		return nil, contract.ErrResourceNotFound
 	}
-	return action(model.PaymentID, eventID)
+	return action(model.PaymentID, traceID, eventID)
 }
 
 func (*PaymentRecordManage) ViewModel(model *view.ViewModel) {

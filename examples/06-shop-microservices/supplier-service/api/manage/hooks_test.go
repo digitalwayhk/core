@@ -81,7 +81,7 @@ func newSupplier(t *testing.T, authID string, enabled bool) *models.Supplier {
 
 func newProduct(t *testing.T, supplier *models.Supplier, code string) *models.Product {
 	t.Helper()
-	product, err := business.CreateProduct(supplier.ID, code, code, decimal.NewFromInt(12), requestFor("seed").NewID(), "product-"+code)
+	product, err := business.CreateProduct(supplier.ID, code, code, decimal.NewFromInt(12), requestFor("seed").NewID(), "trace-product-"+code, "product-"+code)
 	require.NoError(t, err)
 	return product
 }

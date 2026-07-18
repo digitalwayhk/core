@@ -89,14 +89,14 @@ func (*ProductManage) ResolveSupplierWriteScope(sender interface{}, actor common
 
 func (own *ProductManage) OnAddBefore(operation *managepkg.Add[models.Product], req servertypes.IRequest) (interface{}, error, bool) {
 	eventID := models.EventID(req.NewID())
-	created, err := business.CreateProduct(operation.Model.SupplierID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.NewID(), eventID)
+	created, err := business.CreateProduct(operation.Model.SupplierID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.NewID(), req.GetTraceId(), eventID)
 	return created, err, true
 }
 
 func (own *ProductManage) OnEditBefore(operation *managepkg.Edit[models.Product], req servertypes.IRequest) (interface{}, error, bool) {
 	eventID := models.EventID(req.NewID())
 	current := operation.OldItem
-	updated, err := business.UpdateProduct(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Price, eventID)
+	updated, err := business.UpdateProduct(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.GetTraceId(), eventID)
 	return updated, err, true
 }
 

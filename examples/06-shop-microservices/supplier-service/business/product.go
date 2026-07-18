@@ -66,15 +66,17 @@ func EnsureSupplier(userID, name string) (*models.Supplier, error) {
 	return item, item.Save()
 }
 
-func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models.Supplier, error) {
+func UpdateSupplier(id uint, name string, enabled bool, traceID, eventID string) (*models.Supplier, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindSupplierByID(id)
 	if err != nil || item == nil {
 		return nil, errors.New("供应商不存在")
 	}
 	item.Name = strings.TrimSpace(name)
 	item.Enabled = enabled
-	payload := models.SupplierChangedPayload(eventID, item.ID, "updated")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	item.TraceID = traceID
+	payload := models.SupplierChangedPayload(traceID, eventID, item.ID, "updated")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +90,8 @@ func UpdateSupplier(id uint, name string, enabled bool, eventID string) (*models
 }
 
 // UpdateSupplierDetails 只修改供应商可维护的公开资料，身份与启用状态保持不变。
-func UpdateSupplierDetails(id uint, name, code, description, eventID string) (*models.Supplier, error) {
+func UpdateSupplierDetails(id uint, name, code, description, traceID, eventID string) (*models.Supplier, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindSupplierByID(id)
 	if err != nil || item == nil {
 		return nil, contract.ErrResourceNotFound
@@ -96,8 +99,9 @@ func UpdateSupplierDetails(id uint, name, code, description, eventID string) (*m
 	item.Name = strings.TrimSpace(name)
 	item.Code = strings.ToLower(strings.TrimSpace(code))
 	item.Description = strings.TrimSpace(description)
-	payload := models.SupplierChangedPayload(eventID, item.ID, "updated")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	item.TraceID = traceID
+	payload := models.SupplierChangedPayload(traceID, eventID, item.ID, "updated")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -111,14 +115,16 @@ func UpdateSupplierDetails(id uint, name, code, description, eventID string) (*m
 }
 
 // SetSupplierEnabled 由管理员受控命令调用，不与公开资料编辑混用。
-func SetSupplierEnabled(id uint, enabled bool, eventID string) (*models.Supplier, error) {
+func SetSupplierEnabled(id uint, enabled bool, traceID, eventID string) (*models.Supplier, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindSupplierByID(id)
 	if err != nil || item == nil {
 		return nil, contract.ErrResourceNotFound
 	}
 	item.Enabled = enabled
-	payload := models.SupplierChangedPayload(eventID, item.ID, "enabled_changed")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
+	item.TraceID = traceID
+	payload := models.SupplierChangedPayload(traceID, eventID, item.ID, "enabled_changed")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventSupplierChanged, contract.SubjectSupplierChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -131,16 +137,18 @@ func SetSupplierEnabled(id uint, enabled bool, eventID string) (*models.Supplier
 	return item, err
 }
 
-func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id uint, eventID string) (*models.Product, error) {
+func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id uint, traceID, eventID string) (*models.Product, error) {
+	traceID = strings.TrimSpace(traceID)
 	supplier, err := models.FindSupplierByID(ownerID)
 	if err != nil || supplier == nil || !supplier.Enabled {
 		return nil, errors.New("供应商不存在或已禁用")
 	}
 	item := models.NewProduct()
 	item.SetID(id)
+	item.TraceID = traceID
 	item.SupplierID, item.Name, item.Code, item.Price = ownerID, name, code, price
-	payload := models.ProductChangedPayload(eventID, ownerID, id, "created")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	payload := models.ProductChangedPayload(traceID, eventID, ownerID, id, "created")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +189,8 @@ func OwnedProducts(ownerID uint) ([]*supplierdto.Product, error) {
 	return result, nil
 }
 
-func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *bool, eventID string) (*supplierdto.Product, error) {
+func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *bool, traceID, eventID string) (*supplierdto.Product, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindProduct(id)
 	if err != nil || item == nil || item.SupplierID != ownerID {
 		return nil, errors.New("商品不存在或无权操作")
@@ -195,8 +204,9 @@ func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *
 	if enabled != nil {
 		item.Enabled = *enabled
 	}
-	payload := models.ProductChangedPayload(eventID, ownerID, id, "updated")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	item.TraceID = traceID
+	payload := models.ProductChangedPayload(traceID, eventID, ownerID, id, "updated")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +220,8 @@ func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *
 }
 
 // UpdateProduct 只更新通用编辑允许的商品资料，归属和上下架状态保持不变。
-func UpdateProduct(id uint, name, code string, price decimal.Decimal, eventID string) (*models.Product, error) {
+func UpdateProduct(id uint, name, code string, price decimal.Decimal, traceID, eventID string) (*models.Product, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindProduct(id)
 	if err != nil || item == nil {
 		return nil, contract.ErrResourceNotFound
@@ -218,8 +229,9 @@ func UpdateProduct(id uint, name, code string, price decimal.Decimal, eventID st
 	item.Name = strings.TrimSpace(name)
 	item.Code = strings.ToLower(strings.TrimSpace(code))
 	item.Price = price
-	payload := models.ProductChangedPayload(eventID, item.SupplierID, item.ID, "updated")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	item.TraceID = traceID
+	payload := models.ProductChangedPayload(traceID, eventID, item.SupplierID, item.ID, "updated")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +245,8 @@ func UpdateProduct(id uint, name, code string, price decimal.Decimal, eventID st
 }
 
 // SetProductEnabled 由供应商或管理员受控命令调用；上架时供应商必须有效。
-func SetProductEnabled(id uint, enabled bool, eventID string) (*models.Product, error) {
+func SetProductEnabled(id uint, enabled bool, traceID, eventID string) (*models.Product, error) {
+	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindProduct(id)
 	if err != nil || item == nil {
 		return nil, contract.ErrResourceNotFound
@@ -246,8 +259,9 @@ func SetProductEnabled(id uint, enabled bool, eventID string) (*models.Product, 
 		return nil, contract.ErrSubjectDisabled
 	}
 	item.Enabled = enabled
-	payload := models.ProductChangedPayload(eventID, item.SupplierID, item.ID, "enabled_changed")
-	outbox, err := models.NewProductOutbox(eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
+	item.TraceID = traceID
+	payload := models.ProductChangedPayload(traceID, eventID, item.SupplierID, item.ID, "enabled_changed")
+	outbox, err := models.NewProductOutbox(traceID, eventID, contract.EventProductChanged, contract.SubjectProductChanged, payload)
 	if err != nil {
 		return nil, err
 	}

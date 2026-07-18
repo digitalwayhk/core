@@ -99,6 +99,7 @@ func ApplyOrderEvent(event eventdto.OrderChanged) error {
 		}
 
 		inbox := NewInbox()
+		inbox.TraceID = event.TraceID
 		inbox.EventID, inbox.EventType = event.EventID, event.EventType
 		inbox.SetHashcode(inbox.GetHash())
 		return action.Insert(inbox)
@@ -106,6 +107,7 @@ func ApplyOrderEvent(event eventdto.OrderChanged) error {
 }
 
 func applyOrderSnapshot(item *SupplierOrder, event eventdto.OrderChanged) {
+	item.TraceID = event.TraceID
 	item.OrderID = event.OrderID
 	item.OrderRevision = event.OrderRevision
 	item.SupplierID = event.SupplierID

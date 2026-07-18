@@ -48,10 +48,10 @@ func PaymentToDTO(record *PaymentRecord) *orderdto.PaymentRecord {
 	return &orderdto.PaymentRecord{ID: record.ID, OrderID: record.OrderID, PaymentTypeID: record.PaymentTypeID, Attempt: record.Attempt, PaymentID: record.PaymentID, Amount: record.Amount, Status: record.Status, CreatedAt: created, UpdatedAt: updated}
 }
 
-func ChangeEvent(eventID, eventType, action string, order *Order) eventdto.OrderChanged {
+func ChangeEvent(traceID, eventID, eventType, action string, order *Order) eventdto.OrderChanged {
 	created, updated := modelTimes(order.Model)
 	return eventdto.OrderChanged{
-		Metadata:      eventdto.Metadata{EventID: eventID, SchemaVersion: contract.EventSchemaVersion, EventType: eventType, OccurredAt: time.Now().UTC(), SourceService: contract.OrderServiceName, AggregateID: strconv.FormatUint(uint64(order.ID), 10)},
+		Metadata:      eventdto.Metadata{EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: eventType, OccurredAt: time.Now().UTC(), SourceService: contract.OrderServiceName, AggregateID: strconv.FormatUint(uint64(order.ID), 10)},
 		OrderRevision: order.OrderRevision, OrderID: order.ID, UserID: order.UserID, SupplierID: order.SupplierID, ProductID: order.ProductID,
 		SupplierCode: order.SupplierCode, SupplierName: order.SupplierName, ProductCode: order.ProductCode, ProductName: order.ProductName,
 		UnitPrice: order.UnitPrice, Quantity: order.Quantity, TotalAmount: order.TotalAmount, PaymentStatus: order.PaymentStatus, OrderStatus: order.OrderStatus,

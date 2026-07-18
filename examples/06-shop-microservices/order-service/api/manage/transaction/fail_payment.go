@@ -31,6 +31,6 @@ func (own *FailPayment) Do(req servertypes.IRequest) (interface{}, error) {
 	if stop || err != nil || result != nil {
 		return result, err
 	}
-	return handlePaymentCommand(own.Model, strconv.FormatUint(uint64(req.NewID()), 10), business.FailPayment)
+	return handlePaymentCommand(own.Model, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10), business.FailPayment)
 }
 func (own *FailPayment) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }

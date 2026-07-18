@@ -26,7 +26,7 @@ func (own *CreatePayment) Validation(servertypes.IRequest) error {
 }
 
 func (own *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
-	return business.CreatePayment(own.UserID, own.OrderID, own.PaymentTypeID, strconv.FormatUint(uint64(req.NewID()), 10), strconv.FormatUint(uint64(req.NewID()), 10))
+	return business.CreatePayment(own.UserID, own.OrderID, own.PaymentTypeID, strconv.FormatUint(uint64(req.NewID()), 10), req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10))
 }
 
 func (*CreatePayment) GetResponse() interface{} { return &orderdto.PaymentRecord{} }

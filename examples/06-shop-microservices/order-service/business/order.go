@@ -20,6 +20,7 @@ type CreateOrderCommand struct {
 	OrderID   uint
 	UserID    uint
 	RequestID string
+	TraceID   string
 	EventID   string
 	ProductID uint
 	Quantity  int
@@ -64,6 +65,7 @@ func existingOrder(command CreateOrderCommand, fingerprint string) (*orderdto.Or
 
 func CreateOrder(command CreateOrderCommand, product supplierdto.ProductSnapshot) (*orderdto.Order, error) {
 	command.RequestID = strings.TrimSpace(command.RequestID)
+	command.TraceID = strings.TrimSpace(command.TraceID)
 	command.EventID = strings.TrimSpace(command.EventID)
 	command.Address = normalizeAddress(command.Address)
 	if command.OrderID == 0 || command.UserID == 0 || command.RequestID == "" || command.EventID == "" || command.ProductID == 0 || command.Quantity <= 0 || command.Address.AddressID == 0 ||
@@ -91,6 +93,7 @@ func CreateOrder(command CreateOrderCommand, product supplierdto.ProductSnapshot
 		}
 		item := models.NewOrder()
 		item.SetID(command.OrderID)
+		item.TraceID = command.TraceID
 		item.IdempotencyKey, item.RequestFingerprint, item.OrderRevision = command.RequestID, fingerprint, 1
 		item.UserID, item.SupplierID, item.ProductID = command.UserID, product.SupplierID, product.ProductID
 		item.SupplierCode, item.SupplierName = strings.TrimSpace(product.SupplierCode), strings.TrimSpace(product.SupplierName)
@@ -101,7 +104,7 @@ func CreateOrder(command CreateOrderCommand, product supplierdto.ProductSnapshot
 		if err := item.InsertWith(action); err != nil {
 			return err
 		}
-		outbox, outboxErr := models.NewOutboxRecord(command.EventID, contract.EventOrderCreated, contract.SubjectOrderCreated, models.ChangeEvent(command.EventID, contract.EventOrderCreated, "created", item))
+		outbox, outboxErr := models.NewOutboxRecord(command.TraceID, command.EventID, contract.EventOrderCreated, contract.SubjectOrderCreated, models.ChangeEvent(command.TraceID, command.EventID, contract.EventOrderCreated, "created", item))
 		if outboxErr != nil {
 			return outboxErr
 		}
@@ -132,7 +135,8 @@ func UserOrders(userID uint) ([]*orderdto.Order, error) {
 	return result, nil
 }
 
-func CancelOrder(userID, orderID uint, eventID string) (*orderdto.Order, error) {
+func CancelOrder(userID, orderID uint, traceID, eventID string) (*orderdto.Order, error) {
+	traceID = strings.TrimSpace(traceID)
 	var result *models.Order
 	err := models.RunTransaction(func(action persistencetypes.IDataAction) error {
 		order, err := models.FindOrderWith(action, orderID)
@@ -163,11 +167,12 @@ func CancelOrder(userID, orderID uint, eventID string) (*orderdto.Order, error) 
 		default:
 			return errors.New("当前支付状态不允许撤单")
 		}
+		order.TraceID = traceID
 		order.OrderRevision++
 		if err := order.UpdateWith(action); err != nil {
 			return err
 		}
-		outbox, err := models.NewOutboxRecord(eventID, contract.EventOrderStatusChanged, contract.SubjectOrderStatusChanged, models.ChangeEvent(eventID, contract.EventOrderStatusChanged, "cancelled", order))
+		outbox, err := models.NewOutboxRecord(traceID, eventID, contract.EventOrderStatusChanged, contract.SubjectOrderStatusChanged, models.ChangeEvent(traceID, eventID, contract.EventOrderStatusChanged, "cancelled", order))
 		if err != nil {
 			return err
 		}
@@ -182,5 +187,5 @@ func CancelOrder(userID, orderID uint, eventID string) (*orderdto.Order, error) 
 
 // DeleteOrCancel 是旧调用方的迁移别名；订单事实不会再被物理删除。
 func DeleteOrCancel(userID uint, orderID uint, eventID string) (*orderdto.Order, error) {
-	return CancelOrder(userID, orderID, eventID)
+	return CancelOrder(userID, orderID, "", eventID)
 }

@@ -31,6 +31,6 @@ func (own *ConfirmPayment) Do(req servertypes.IRequest) (interface{}, error) {
 	if stop || err != nil || result != nil {
 		return result, err
 	}
-	return handlePaymentCommand(own.Model, strconv.FormatUint(uint64(req.NewID()), 10), business.ConfirmPayment)
+	return handlePaymentCommand(own.Model, req.GetTraceId(), strconv.FormatUint(uint64(req.NewID()), 10), business.ConfirmPayment)
 }
 func (own *ConfirmPayment) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }
