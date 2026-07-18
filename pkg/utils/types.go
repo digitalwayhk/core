@@ -91,16 +91,6 @@ func startReflectionMemoryMonitor() {
 }
 
 func cleanReflectionCaches(m *runtime.MemStats) {
-	poolCount, poolDeleted := 0, 0
-	reflectObjectPool.Range(func(key, _ interface{}) bool {
-		poolCount++
-		if poolCount > 50 {
-			reflectObjectPool.Delete(key)
-			poolDeleted++
-		}
-		return true
-	})
-
 	mappingCount, mappingDeleted := 0, 0
 	fieldMappingCache.Range(func(key, _ interface{}) bool {
 		mappingCount++
@@ -112,69 +102,32 @@ func cleanReflectionCaches(m *runtime.MemStats) {
 	})
 
 	runtime.GC()
-	logx.Infof("反射缓存清理 - 内存: %dMB, 对象池删除: %d, 映射缓存删除: %d",
-		m.Alloc/1024/1024, poolDeleted, mappingDeleted)
+	logx.Infof("反射缓存清理 - 内存: %dMB, 映射缓存删除: %d",
+		m.Alloc/1024/1024, mappingDeleted)
 }
 
-// ==================== 对象池 ====================
-
-var reflectObjectPool sync.Map // key: reflect.Type, value: *sync.Pool
-
-// 修复：使用 LoadOrStore 原子操作，去除冗余 sync.RWMutex
-func getObjectPool(t reflect.Type) *sync.Pool {
-	if pool, ok := reflectObjectPool.Load(t); ok {
-		return pool.(*sync.Pool)
-	}
-	newPool := &sync.Pool{
-		New: func() interface{} {
-			return reflect.New(t).Interface()
-		},
-	}
-	actual, _ := reflectObjectPool.LoadOrStore(t, newPool)
-	return actual.(*sync.Pool)
-}
+// ==================== 类型实例创建 ====================
 
 func NewInterface(obj interface{}) interface{} {
 	tye, _ := GetTypeAndValue(obj)
 	return NewInterfaceByType(tye)
 }
 
+// NewInterfaceByType 按类型创建一个零值实例（指针）。
+// 说明：此前基于 sync.Pool 的对象池因缺少归还路径（RecycleObject 从未被调用）而从未生效，
+// 且路由层已有独立对象池，故此处直接用 reflect.New 创建全新零值对象，语义等价且更简洁。
 func NewInterfaceByType(typ reflect.Type) interface{} {
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
 	}
-	pool := getObjectPool(typ)
-	newObj := pool.Get()
-	resetObject(newObj) // 在 Get 时重置，保证调用方拿到干净对象
-	return newObj
+	return reflect.New(typ).Interface()
 }
 
-func resetObject(obj interface{}) {
-	if obj == nil {
-		return
-	}
-	v := reflect.ValueOf(obj)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-	if v.Kind() == reflect.Struct {
-		v.Set(reflect.Zero(v.Type()))
-	}
-}
-
-// RecycleObject 归还对象到池，不在 Put 时重置（Get 时已重置，避免双重重置）
-func RecycleObject(obj interface{}) {
-	if obj == nil {
-		return
-	}
-	tye := reflect.TypeOf(obj)
-	if tye.Kind() == reflect.Ptr {
-		tye = tye.Elem()
-	}
-	if pool, ok := reflectObjectPool.Load(tye); ok {
-		pool.(*sync.Pool).Put(obj)
-	}
-}
+// RecycleObject 保留旧对象池 API 的源码兼容性。
+//
+// NewInterfaceByType 现在直接创建全新零值对象，路由层对象复用由独立池负责；
+// 因此这里不再执行实际归还动作。
+func RecycleObject(obj interface{}) {}
 
 // ==================== 类型工具 ====================
 
@@ -420,6 +373,9 @@ func ForItem(item interface{}, value func(name string) interface{}) {
 	}
 	DeepForItem(item, func(field, parent reflect.StructField, kind TypeKind) {
 		vv := sv.FieldByName(field.Name)
+		if !vv.IsValid() || !vv.CanSet() {
+			return
+		}
 		if v := value(field.Name); v != nil {
 			vv.Set(reflect.ValueOf(v))
 		}
@@ -658,11 +614,6 @@ func getIntSize(kind reflect.Kind) int {
 	}
 }
 
-func convertOp(val string, src reflect.Type) reflect.Value {
-	v, _ := convertOp1(val, src)
-	return v
-}
-
 func convertOp1(val string, src reflect.Type) (reflect.Value, error) {
 	ret := reflect.New(src).Elem()
 	switch src.Kind() {
@@ -727,16 +678,25 @@ func Add(v1, v2 reflect.Value) reflect.Value {
 	vs2 := convertString(v2)
 	switch tye.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		vi1, _ := strconv.ParseInt(vs1, 0, size)
-		vi2, _ := strconv.ParseInt(vs2, 0, size)
+		vi1, err1 := strconv.ParseInt(vs1, 10, size)
+		vi2, err2 := strconv.ParseInt(vs2, 10, size)
+		if err1 != nil || err2 != nil {
+			logx.Errorf("Add 整型解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
+		}
 		num.SetInt(vi1 + vi2)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		vi1, _ := strconv.ParseUint(vs1, 0, size)
-		vi2, _ := strconv.ParseUint(vs2, 0, size)
+		vi1, err1 := strconv.ParseUint(vs1, 10, size)
+		vi2, err2 := strconv.ParseUint(vs2, 10, size)
+		if err1 != nil || err2 != nil {
+			logx.Errorf("Add 无符号整型解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
+		}
 		num.SetUint(vi1 + vi2)
 	case reflect.Float32, reflect.Float64:
-		vi1, _ := strconv.ParseFloat(vs1, size)
-		vi2, _ := strconv.ParseFloat(vs2, size)
+		vi1, err1 := strconv.ParseFloat(vs1, size)
+		vi2, err2 := strconv.ParseFloat(vs2, size)
+		if err1 != nil || err2 != nil {
+			logx.Errorf("Add 浮点解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
+		}
 		num.SetFloat(vi1 + vi2)
 	}
 	return num

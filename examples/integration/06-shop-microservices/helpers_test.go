@@ -32,7 +32,18 @@ func TestAllInOneTransportConfigIsLocalInsecureGRPC(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	base, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/all-in-one", BinaryName: "shop-microservices", TempPrefix: "core-shop-microservices-", ServiceCount: 4, ServiceIndex: 1, GRPCServiceCount: 4, Arguments: []string{"-view", "0"}})
+	redisPrefix := "core:test:06:all-in-one:" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	base, err := integration.StartProcess(integration.ProcessOptions{
+		BuildPackage: "./examples/06-shop-microservices/main/all-in-one",
+		BinaryName:   "shop-microservices",
+		TempPrefix:   "core-shop-microservices-",
+		ServiceCount: 4, ServiceIndex: 1, GRPCServiceCount: 4,
+		Arguments: []string{"-view", "0"},
+		Environment: map[string]string{
+			"SHOP_REDIS_DISCOVERY_PREFIX": redisPrefix + ":discovery",
+			"SHOP_REDIS_EVENT_PREFIX":     redisPrefix + ":event",
+		},
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

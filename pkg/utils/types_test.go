@@ -25,6 +25,20 @@ func TestDeepForVisitsNamedBaseFieldWhenFieldNameMatchesTypeName(t *testing.T) {
 	}
 }
 
+func TestAnyToTypeDataPreservesIntegerBaseAutoDetection(t *testing.T) {
+	value, err := AnyToTypeData("0x10", reflect.TypeOf(int(0)))
+	if err != nil {
+		t.Fatalf("AnyToTypeData 应继续支持 base 0 整数字符串: %v", err)
+	}
+	if value != 16 {
+		t.Fatalf("AnyToTypeData(\"0x10\") = %v, want 16", value)
+	}
+}
+
+func TestRecycleObjectRemainsSourceCompatible(t *testing.T) {
+	RecycleObject(&deepForNamedStatusFixture{})
+}
+
 func containsString(items []string, target string) bool {
 	for _, item := range items {
 		if item == target {

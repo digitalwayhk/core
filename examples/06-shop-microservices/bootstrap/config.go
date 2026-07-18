@@ -15,6 +15,21 @@ func RedisAddress() string {
 	}
 	return "127.0.0.1:6379"
 }
+
+func RedisDiscoveryPrefix() string {
+	if value := strings.TrimSpace(os.Getenv("SHOP_REDIS_DISCOVERY_PREFIX")); value != "" {
+		return value
+	}
+	return "core:discovery"
+}
+
+func RedisEventPrefix() string {
+	if value := strings.TrimSpace(os.Getenv("SHOP_REDIS_EVENT_PREFIX")); value != "" {
+		return value
+	}
+	return "core:event"
+}
+
 func AdvertiseAddress() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_ADVERTISE_ADDRESS")); value != "" {
 		return value
@@ -41,7 +56,7 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 	cfg.Cluster.Provider = "redis"
 	cfg.Cluster.AdvertiseAddress = AdvertiseAddress()
 	cfg.Cluster.HeartbeatInterval = time.Second
-	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: "core:discovery", TTL: 5 * time.Second}
+	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: RedisDiscoveryPrefix(), TTL: 5 * time.Second}
 	serverName := strings.TrimSpace(os.Getenv("SHOP_GRPC_SERVER_NAME"))
 	if serverName == "" {
 		serverName = config.GRPCServerNameTargetService
@@ -65,7 +80,7 @@ func baseServiceConfig(name string, port, dataCenterID, machineID int) *config.S
 	cfg.MQ.Mode = "on"
 	cfg.MQ.Provider = "redis-stream"
 	cfg.MQ.Usage = []string{"event-stream"}
-	cfg.MQ.RedisStream = config.RedisStreamMQConfig{Addr: RedisAddress(), Prefix: "core:event"}
+	cfg.MQ.RedisStream = config.RedisStreamMQConfig{Addr: RedisAddress(), Prefix: RedisEventPrefix()}
 	cfg.Transport.Internal = "grpc"
 	cfg.Transport.Fallback = nil
 	cfg.Transport.MaxRetries = 1

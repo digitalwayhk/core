@@ -27,17 +27,18 @@ import (
 
 func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
+	redisPrefix := "core:test:06:three-process:" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	assertPKIFileModes(t, pki)
 	assertPKISANs(t, pki)
 	parentCA, parentCASet := os.LookupEnv("SHOP_GRPC_CA_FILE")
-	user, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/user", BinaryName: "shop-user", TempPrefix: "core-shop-user-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-user")})
+	user, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/user", BinaryName: "shop-user", TempPrefix: "core-shop-user-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-user", redisPrefix)})
 	require.NoError(t, err)
 	defer user.Stop()
 	assertParentEnvironmentUnchanged(t, "SHOP_GRPC_CA_FILE", parentCA, parentCASet)
-	supplier, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/supplier", BinaryName: "shop-supplier", TempPrefix: "core-shop-supplier-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-supplier")})
+	supplier, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/supplier", BinaryName: "shop-supplier", TempPrefix: "core-shop-supplier-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-supplier", redisPrefix)})
 	require.NoError(t, err)
 	defer supplier.Stop()
-	order, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/order", BinaryName: "shop-order", TempPrefix: "core-shop-order-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-order")})
+	order, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/order", BinaryName: "shop-order", TempPrefix: "core-shop-order-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-order", redisPrefix)})
 	require.NoError(t, err)
 	defer order.Stop()
 	waitProcessReady(t, user, "/api/shop-user/getproducts")
@@ -154,13 +155,15 @@ func readServiceGRPCPort(t *testing.T, suite *integration.Suite, serviceName str
 	return 0
 }
 
-func processEnvironment(pki *integration.GRPCTestPKI, serviceName string) map[string]string {
+func processEnvironment(pki *integration.GRPCTestPKI, serviceName, redisPrefix string) map[string]string {
 	identity := pki.Services[serviceName]
 	return map[string]string{
-		"SHOP_GRPC_CA_FILE":     pki.CAFile,
-		"SHOP_GRPC_CERT_FILE":   identity.CertFile,
-		"SHOP_GRPC_KEY_FILE":    identity.KeyFile,
-		"SHOP_GRPC_SERVER_NAME": "{service}",
+		"SHOP_GRPC_CA_FILE":           pki.CAFile,
+		"SHOP_GRPC_CERT_FILE":         identity.CertFile,
+		"SHOP_GRPC_KEY_FILE":          identity.KeyFile,
+		"SHOP_GRPC_SERVER_NAME":       "{service}",
+		"SHOP_REDIS_DISCOVERY_PREFIX": redisPrefix + ":discovery",
+		"SHOP_REDIS_EVENT_PREFIX":     redisPrefix + ":event",
 	}
 }
 
