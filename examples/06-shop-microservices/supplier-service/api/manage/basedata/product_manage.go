@@ -109,20 +109,6 @@ func (own *ProductManage) OnRemoveBefore(operation *managepkg.Remove[models.Prod
 	return current, err, true
 }
 
-func (own *ProductManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	switch operation := sender.(type) {
-	case *SetProductEnabled:
-		current, findErr := models.FindProduct(operation.Model.ID)
-		if findErr != nil || current == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		eventID := models.EventID(req.NewID())
-		updated, err := business.SetProductEnabled(current.ID, operation.Model.Enabled, eventID)
-		return updated, err, true
-	}
-	return nil, nil, false
-}
-
 func (*ProductManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
 	return nil, nil
 }

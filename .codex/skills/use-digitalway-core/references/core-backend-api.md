@@ -88,7 +88,7 @@ examples/06-shop-microservices/
 
 示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域和全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 与受控命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
 
-多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现服务级权限、owner 限域、禁用主体拦截、分页、审计或日志；这些横切逻辑必须在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在权限或日志调整时到处修改。
+多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现服务级权限、owner 限域、禁用主体拦截、分页、审计或日志；这些横切逻辑必须在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在权限或日志调整时到处修改。自定义 Manage 命令不要引入命令专用 Hook 旁路；命令 `Do` 先调用 owner `DoBefore`，通过服务级权限/限域后再调用 business。
 
 Manage 日志参考示例 05 的 `ShopManage.logManageResult`：统一使用 `logx.Infow("shop_manage_operation_failed", ...)` 和 `logx.Infow("shop_manage_operation_succeeded", ...)`，字段保持 `owner`、`phase`、`service`、`route`、`trace_id`、失败时 `code`。不要按服务名发明 `shop_user_manage_operation_*`、`shop_supplier_manage_operation_*` 等新事件，也不要记录 token、请求/响应 body、SQL 或对象 dump。
 
@@ -125,7 +125,7 @@ Manage 扩展遵循以下顺序：
 4. `BaseDataManage` 与 `BusinessManage`/`TransactionManage` 实现模型类别规则，具体 Manage 只重写差异 Hook；需保留父级规则时必须显式先调父级。
 5. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
 6. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
-7. 自定义 Router 的 `Do` 调用 business，不直接修改模型。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
+7. 自定义 Router 的 `Do` 先调用 owner `DoBefore` 复用服务级权限和限域，再调用 business，不直接修改模型，也不另造 `CommandBefore` 一类命令专用 Hook。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
 
 支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
 

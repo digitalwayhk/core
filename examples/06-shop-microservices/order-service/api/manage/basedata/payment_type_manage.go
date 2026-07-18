@@ -51,18 +51,6 @@ func (own *PaymentTypeManage) OnRemoveBefore(operation *managepkg.Remove[models.
 	return result, err, true
 }
 
-func (own *PaymentTypeManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	operation, ok := sender.(*SetPaymentTypeEnabled)
-	if !ok {
-		return nil, nil, false
-	}
-	if operation.Model == nil {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	result, err := business.SetPaymentTypeEnabled(operation.Model.ID, operation.Model.Enabled, strconv.FormatUint(uint64(req.NewID()), 10))
-	return result, err, true
-}
-
 func (*PaymentTypeManage) ViewModel(model *view.ViewModel) {
 	model.Title, model.AutoLoad = "支付类型管理", true
 }

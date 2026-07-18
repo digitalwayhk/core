@@ -2,6 +2,7 @@ package basedata
 
 import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	managepkg "github.com/digitalwayhk/core/service/manage"
@@ -34,8 +35,11 @@ func (own *SetProductEnabled) Do(req servertypes.IRequest) (interface{}, error) 
 	if !ok {
 		return nil, contract.ErrForbidden
 	}
-	result, err, _ := owner.DoBefore(own, req)
-	return result, err
+	result, err, stop := owner.DoBefore(own, req)
+	if stop || err != nil || result != nil {
+		return result, err
+	}
+	return business.SetProductEnabled(own.Model.ID, own.Model.Enabled, models.EventID(req.NewID()))
 }
 
 func (own *SetProductEnabled) RouterInfo() *servertypes.RouterInfo { return managepkg.RouterInfo(own) }

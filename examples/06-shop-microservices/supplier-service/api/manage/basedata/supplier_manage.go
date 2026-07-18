@@ -66,16 +66,6 @@ func (own *SupplierManage) OnRemoveBefore(operation *managepkg.Remove[models.Sup
 	return current, err, true
 }
 
-func (own *SupplierManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	switch operation := sender.(type) {
-	case *SetSupplierEnabled:
-		eventID := models.EventID(req.NewID())
-		updated, err := business.SetSupplierEnabled(operation.Model.ID, operation.Model.Enabled, eventID)
-		return updated, err, true
-	}
-	return nil, nil, false
-}
-
 func (*SupplierManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
 	return nil, nil
 }

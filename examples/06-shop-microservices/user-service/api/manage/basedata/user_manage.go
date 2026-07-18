@@ -51,19 +51,6 @@ func (own *UserManage) OnEditBefore(operation *managepkg.Edit[models.User], _ se
 	return current, models.SaveUser(current), true
 }
 
-func (own *UserManage) OnCommandBefore(sender interface{}, _ servertypes.IRequest) (interface{}, error, bool) {
-	switch operation := sender.(type) {
-	case *SetUserEnabled:
-		current, err := models.FindUserByID(operation.Model.ID)
-		if err != nil || current == nil {
-			return nil, contract.ErrResourceNotFound, true
-		}
-		current.Enabled = operation.Model.Enabled
-		return current, models.SaveUser(current), true
-	}
-	return nil, nil, false
-}
-
 func (*UserManage) ViewModel(model *view.ViewModel) {
 	model.Title, model.AutoLoad = "用户管理", true
 }

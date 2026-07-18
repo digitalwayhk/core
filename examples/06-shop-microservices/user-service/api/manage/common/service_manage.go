@@ -23,10 +23,6 @@ type WriteScopeResolver interface {
 	ResolveUserWriteScope(sender interface{}, actor Actor) (WriteScope, error, bool)
 }
 
-type CommandBefore interface {
-	OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool)
-}
-
 // ServiceManage 是 user-service 全部 Manage 的服务级基座。
 // owner 必须传最终具体 Manage，确保 Hook 分派到最末层实现。
 type ServiceManage[T persistencetypes.IModel] struct {
@@ -46,9 +42,6 @@ func (own *ServiceManage[T]) DoBefore(sender interface{}, req servertypes.IReque
 	}()
 	if data, err, stop = own.HookedManageService.DoBefore(sender, req); stop || err != nil || data != nil {
 		return data, err, stop
-	}
-	if hook, ok := own.owner.(CommandBefore); ok {
-		return hook.OnCommandBefore(sender, req)
 	}
 	return nil, nil, false
 }

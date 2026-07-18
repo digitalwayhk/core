@@ -1,10 +1,7 @@
 package transaction
 
 import (
-	"strconv"
-
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -28,33 +25,11 @@ func (own *PaymentRecordManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Confirm, own.Fail, own.ConfirmRefund}
 }
 
-func (own *PaymentRecordManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	var paymentID string
-	var action func(string, string) (interface{}, error)
-	switch operation := sender.(type) {
-	case *ConfirmPayment:
-		if operation.Model != nil {
-			paymentID = operation.Model.PaymentID
-		}
-		action = func(id, event string) (interface{}, error) { return business.ConfirmPayment(id, event) }
-	case *FailPayment:
-		if operation.Model != nil {
-			paymentID = operation.Model.PaymentID
-		}
-		action = func(id, event string) (interface{}, error) { return business.FailPayment(id, event) }
-	case *ConfirmRefund:
-		if operation.Model != nil {
-			paymentID = operation.Model.PaymentID
-		}
-		action = func(id, event string) (interface{}, error) { return business.ConfirmRefund(id, event) }
-	default:
-		return nil, nil, false
+func handlePaymentCommand[T any](model *models.PaymentRecord, eventID string, action func(string, string) (T, error)) (interface{}, error) {
+	if model == nil || model.PaymentID == "" {
+		return nil, contract.ErrResourceNotFound
 	}
-	if paymentID == "" {
-		return nil, contract.ErrResourceNotFound, true
-	}
-	result, err := action(paymentID, strconv.FormatUint(uint64(req.NewID()), 10))
-	return result, err, true
+	return action(model.PaymentID, eventID)
 }
 
 func (*PaymentRecordManage) ViewModel(model *view.ViewModel) {

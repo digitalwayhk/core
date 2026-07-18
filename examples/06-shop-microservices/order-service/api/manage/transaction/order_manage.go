@@ -1,8 +1,6 @@
 package transaction
 
 import (
-	"strconv"
-
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
@@ -27,25 +25,15 @@ func (own *OrderManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Cancel, own.Refund}
 }
 
-func (own *OrderManage) OnCommandBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
-	var selected *models.Order
-	switch operation := sender.(type) {
-	case *CancelOrder:
-		selected = operation.Model
-	case *RefundOrder:
-		selected = operation.Model
-	default:
-		return nil, nil, false
-	}
+func cancelSelectedOrder(selected *models.Order, eventID string) (interface{}, error) {
 	if selected == nil {
-		return nil, contract.ErrResourceNotFound, true
+		return nil, contract.ErrResourceNotFound
 	}
 	item, err := models.FindOrder(selected.ID)
 	if err != nil || item == nil {
-		return nil, contract.ErrResourceNotFound, true
+		return nil, contract.ErrResourceNotFound
 	}
-	result, err := business.CancelOrder(item.UserID, item.ID, strconv.FormatUint(uint64(req.NewID()), 10))
-	return result, err, true
+	return business.CancelOrder(item.UserID, item.ID, eventID)
 }
 
 func (*OrderManage) ViewModel(model *view.ViewModel) {
