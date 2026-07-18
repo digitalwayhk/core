@@ -9,6 +9,7 @@ import (
 
 	orderbusiness "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	ordermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,14 @@ import (
 func TestUATPendingSurvivesRemoteFailure(t *testing.T) {
 	t.Setenv("SHOP_LOCAL_PENDING_DIR", t.TempDir())
 	require.NoError(t, ordermodels.StartOrderWriteStore())
-	t.Cleanup(func() { require.NoError(t, ordermodels.StopOrderWriteStore()) })
+	t.Cleanup(func() {
+		err := ordermodels.StopOrderWriteStore()
+		var pendingErr *nosql.PendingSyncError
+		if errors.As(err, &pendingErr) {
+			return
+		}
+		require.NoError(t, err)
+	})
 	unique := uint(time.Now().UnixNano() % 1000000)
 	requestID := "pending-failure-uat-" + time.Now().Format("150405.000000000")
 	ids := newBenchmarkIDFactory(24)

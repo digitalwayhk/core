@@ -35,6 +35,8 @@ AddOrder
 
 这里的 Group Commit 不是“内存入队即成功”。每个请求只有在所属批次完成 Badger `SyncWrites` 后才返回，所以已确认订单在进程异常退出后仍可恢复。队列积压少于 16 笔时逐单立即提交，避免低并发固定等待；达到阈值后才短暂聚合，以减少高并发下的 fsync 次数。
 
+写后同步通过 `PrefixedBadgerDB.UseWriteBehind(WriteBehindTarget)` 绑定远端汇合目标。04 使用 `ModelListWriteBehindTarget` 兼容 SQLite 示例，业务代码只负责本地可靠提交、背压和指标封装，不再直接管理 pending ACK；`EnableWriteBehind(ModelList)` 仅保留为旧代码兼容入口。
+
 订单 `GetHash()` 仍是 `orderID`；Badger 通过 `ILocalRowCode` 使用 `Order:u:<UserID摘要>:<orderID>`，因此可直接扫描当前可信用户的 pending 前缀，不再遍历全局积压，也不在磁盘键中暴露原始 UserID。查询合并 SQLite 与 Badger，支付、删除和撤销在进入 SQLite 事务前按需汇合目标订单。
 
 后台同步与强制本地删除按键串行：若同步先开始，删除等待远端提交后再删 SQLite；若删除先开始，同步重新校验发现键已不存在后跳过。这保证已删订单不会被在途快照复活。

@@ -3,7 +3,6 @@ package business
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
@@ -22,29 +21,16 @@ type RemoteOrderSyncer struct {
 
 // DrainOnce 尝试同步一批 Badger 本地订单，成功后删除本地副本。
 func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) error {
-	remote := s.Remote
-	if remote == nil {
-		remote = ModelRemoteOrderStore{}
-	}
-	items, err := models.PendingLocalOrders(limit)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var syncErr error
-	for _, pending := range items {
-		if err := s.syncOne(ctx, remote, pending); err != nil {
-			syncErr = errors.Join(syncErr, err)
+	if s.Remote != nil {
+		if err := models.UseOrderWriteBehind(OrderWriteBehindTarget{Remote: s.Remote}); err != nil {
+			return err
 		}
 	}
-	return syncErr
-}
-
-func (s RemoteOrderSyncer) syncOne(ctx context.Context, remote RemoteOrderStore, order *models.Order) error {
-	_, err := remote.Upsert(ctx, order)
-	if err != nil {
-		return err
-	}
-	return models.RemoveLocalOrder(order)
+	_ = limit
+	return models.SyncLocalOrders()
 }
 
 func orderEventID(orderID uint, eventType string) string {

@@ -91,6 +91,24 @@ func AddOrder(order *Order) error {
 	return store.Add(order)
 }
 
+// UseOrderWriteBehind 绑定当前实例本地订单 pending 的远端汇合目标。
+func UseOrderWriteBehind(target nosql.WriteBehindTarget[Order]) error {
+	store, err := getOrderWriteStore()
+	if err != nil {
+		return err
+	}
+	return store.UseWriteBehind(target)
+}
+
+// SyncLocalOrders 触发当前实例本地订单 pending 的远端汇合。
+func SyncLocalOrders() error {
+	store, err := getOrderWriteStore()
+	if err != nil {
+		return err
+	}
+	return store.SyncPending()
+}
+
 // FindLocalOrderByRequest 按用户幂等键查询当前副本本地订单。
 func FindLocalOrderByRequest(userID uint, requestID string) (*Order, error) {
 	store, err := getOrderWriteStore()

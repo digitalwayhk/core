@@ -55,6 +55,22 @@ func newOrderWriteStore(path string, config nosql.BadgerDBConfig) (*OrderWriteSt
 	return store, nil
 }
 
+// UseWriteBehind 绑定当前订单本地写入层的远端汇合目标。
+func (s *OrderWriteStore) UseWriteBehind(target nosql.WriteBehindTarget[Order]) error {
+	if s == nil {
+		return errors.New("订单写入存储未初始化")
+	}
+	return s.db.UseWriteBehind(target)
+}
+
+// SyncPending 触发当前实例 Badger pending 到远端目标的同步。
+func (s *OrderWriteStore) SyncPending() error {
+	if s == nil {
+		return errors.New("订单写入存储未初始化")
+	}
+	return s.db.ForceSyncAll()
+}
+
 // Add 将订单可靠提交到当前实例本地 Badger。
 func (s *OrderWriteStore) Add(order *Order) error {
 	if order == nil {

@@ -62,6 +62,9 @@ func (s *Service) Start() {
 	if err := models.StartOrderWriteStore(); err != nil {
 		panic(err)
 	}
+	if err := models.UseOrderWriteBehind(business.OrderWriteBehindTarget{}); err != nil {
+		panic(err)
+	}
 	if err := sc.UseOutbox(models.OutboxStore{}); err != nil {
 		panic(err)
 	}

@@ -18,7 +18,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 普通 public API | `types.IRouter`、`IRouterResponse`、`api/dto` | `examples/01-simple-shop/api/public` | Server 基础配置；CORS 启用时显式 origin | `go test ./examples/integration/01-simple-shop -run Public` | Stable |
 | 认证 private API | `api/private`、`req.GetUser()`、`api/dto` | `examples/01-simple-shop/api/private` | JWT 或每服务 Logto/Casdoor；代理部署配置 `TrustedProxies` | `go test ./examples/integration/01-simple-shop -run Private` | Stable |
 | 模型持久化 | Manage `ModelList[T]`、模型 `IDataAction` 方法、`NewModel()` | `examples/01-simple-shop/models` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
-| 本地可靠写回 | `NewSharedBadgerDB[T]`、`EnableWriteBehind` | 无独立示例 | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
+| 本地可靠写回 | `NewSharedBadgerDB[T]`、`UseWriteBehind(WriteBehindTarget)` | `examples/04-shop-performance`、`examples/07-shop-order-scale` | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/01-simple-shop/api/manage` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/integration/01-simple-shop -run Manage` | Stable |
 | 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `service/manage` 测试 | 同管理 CRUD | `go test ./service/manage/...` | Stable |
 | OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | 发布契约文档 | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
@@ -91,9 +91,9 @@ func (own *Product) NewModel() {
 
 纯缓存模式以远端数据库为事实源，可以设置 TTL；只有显式 `CorruptionPolicyResetCache` 才允许在检测到损坏时清空重建。默认策略是 `CorruptionPolicyFail`，会保留目录并返回错误。
 
-write-behind 模式使用 `EnableWriteBehind`，要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。待同步记录禁止 TTL；关闭时仍有积压会返回可通过 `errors.As` 识别的 `PendingSyncError`。旧 `SetSyncDB` 仅为编译兼容入口，新代码不得使用。
+write-behind 模式使用 `UseWriteBehind(WriteBehindTarget)`，要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。待同步记录禁止 TTL；关闭时仍有积压会返回可通过 `errors.As` 识别的 `PendingSyncError`。旧 `EnableWriteBehind(ModelList)` 和 `SetSyncDB` 仅为 `ModelList/IDataAction` 兼容入口，新业务热路径不得使用。
 
-`DefaultSharedConfig` 面向共享缓存，默认 `SyncWrites=false`，不能直接启用 write-behind。可靠写回必须显式设置 `SyncWrites=true` 并通过 `EnableWriteBehind` 校验，不要依赖共享缓存默认值。
+`DefaultSharedConfig` 面向共享缓存，默认 `SyncWrites=false`，不能直接启用 write-behind。可靠写回必须显式设置 `SyncWrites=true` 并通过 `UseWriteBehind` 校验，不要依赖共享缓存默认值。
 
 write-behind 是 at-least-once：远端成功而本地确认失败时会重试，因此远端 insert/update/delete 必须通过稳定主键、upsert 或操作 ID 保证幂等。同 key 多次更新会合并为最新状态，只适用于账户快照、资料和订单当前状态；资金流水、审计记录等不可合并事件必须使用唯一事件 ID 的 NATS JetStream 或 transactional outbox。
 

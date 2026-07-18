@@ -48,7 +48,7 @@ func newOrderWriteStore(path string, action persistencetypes.IDataAction, config
 		return nil, err
 	}
 	list := entity.NewModelList[Order](action)
-	if err := db.EnableWriteBehind(list); err != nil {
+	if err := db.UseWriteBehind(nosql.NewModelListWriteBehindTarget(list)); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

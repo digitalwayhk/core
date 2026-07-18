@@ -20,6 +20,8 @@ func TestOrderSyncerRetriesRemoteFailure(t *testing.T) {
 	t.Setenv("SHOP_LOCAL_PENDING_DIR", t.TempDir())
 	require.NoError(t, models.StartOrderWriteStore())
 	t.Cleanup(func() { require.NoError(t, models.StopOrderWriteStore()) })
+	remote := &retryRemoteStore{fail: true}
+	require.NoError(t, models.UseOrderWriteBehind(OrderWriteBehindTarget{Remote: remote}))
 	unique := uint(time.Now().UnixNano() % 1000000)
 	requestID := fmt.Sprintf("syncer-retry-request-%d", unique)
 	ids := newBusinessTestIDFactory(25)
@@ -43,8 +45,7 @@ func TestOrderSyncerRetriesRemoteFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, command.OrderID, orderID)
 
-	remote := &retryRemoteStore{fail: true}
-	syncer := RemoteOrderSyncer{Remote: remote}
+	syncer := RemoteOrderSyncer{}
 	require.Error(t, syncer.DrainOnce(context.Background(), 10000))
 
 	pending, err := models.FindLocalOrderByRequest(command.UserID, command.RequestID)
@@ -58,9 +59,10 @@ func TestOrderSyncerRetriesRemoteFailure(t *testing.T) {
 	require.GreaterOrEqual(t, remote.calls, 1)
 	require.True(t, remote.seen[command.OrderID])
 
-	pending, err = models.FindLocalOrderByRequest(command.UserID, command.RequestID)
-	require.NoError(t, err)
-	require.Nil(t, pending)
+	require.Eventually(t, func() bool {
+		pending, err = models.FindLocalOrderByRequest(command.UserID, command.RequestID)
+		return err == nil && pending == nil
+	}, time.Second, 20*time.Millisecond)
 	pendingItems, err := models.PendingLocalOrders(10000)
 	require.NoError(t, err)
 	for _, item := range pendingItems {

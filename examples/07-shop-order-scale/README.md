@@ -37,7 +37,7 @@ buyer request
   -> user/supplier 消费事件更新本地投影和缓存失效
 ```
 
-本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单 public/private 业务链路必须走 business + 专用 store。
+本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用 `PrefixedBadgerDB.UseWriteBehind(OrderWriteBehindTarget)` 把本地订单 pending 汇合到共享 MySQL，并由框架统一 ACK 与关闭恢复；订单业务 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单 public/private 业务链路必须走 business + 专用 store。
 
 ## 管理配置同步
 

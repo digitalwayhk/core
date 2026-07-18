@@ -105,6 +105,12 @@ var (
 	// AddOrder 将订单写入当前实例 Badger 可靠层。
 	AddOrder = transaction.AddOrder
 
+	// UseOrderWriteBehind 绑定本地订单 pending 的远端汇合目标。
+	UseOrderWriteBehind = transaction.UseOrderWriteBehind
+
+	// SyncLocalOrders 触发本地订单 pending 汇合到远端目标。
+	SyncLocalOrders = transaction.SyncLocalOrders
+
 	// FindLocalOrderByRequest 按 UserID + requestID 查询当前实例本地订单。
 	FindLocalOrderByRequest = transaction.FindLocalOrderByRequest
 

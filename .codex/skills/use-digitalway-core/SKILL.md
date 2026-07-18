@@ -80,7 +80,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
 21. 示例 07 这类水平扩展示例必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。多实例服务的 pending、Outbox、Inbox、同步状态和投影必须记录 TraceID、ServiceName、ServiceInstanceID；ServiceInstanceIP 只用于诊断，不参与业务判断。
 22. 自动水平扩展示例必须启用 `AutoMachineID=true`，并验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得为可扩容副本硬编码固定 MachineID，也不得把注册发现能力写死到 Redis，具体使用 Redis、局域网发现或其他中间件由配置决定。
-23. 示例 07 或任何高吞吐订单写入场景必须参考示例 04 的专用业务写路径：public/private API 调用 business，business 调用专用写 store；本地可靠写、Group Commit、write-behind、同步状态和背压由专用 store 负责。`ModelList` 的默认操作主要用于 Manage API、视图和低频管理 CRUD，不得把高频业务下单、支付、撤单热路径设计成围绕 `ModelList`/SQLite 表轮询的实现。07 的订单权威库在分布式/Docker 下必须使用真正共享的 MySQL 等网络数据库；不得用每进程本地 SQLite 冒充共享 remote。
+23. 示例 07 或任何高吞吐订单写入场景必须参考示例 04 的专用业务写路径：public/private API 调用 business，business 调用专用写 store；本地可靠写、Group Commit、write-behind、同步状态和背压由专用 store 负责。`PrefixedBadgerDB` 的业务热路径必须使用 `UseWriteBehind(WriteBehindTarget)` 绑定远端汇合目标，由框架统一管理 pending、ACK、重试保留、关闭恢复和指标；`EnableWriteBehind(ModelList)`/`SetSyncDB` 只是兼容层，不作为新业务默认方案。`ModelList` 的默认操作主要用于 Manage API、视图和低频管理 CRUD，不得把高频业务下单、支付、撤单热路径设计成围绕 `ModelList`/SQLite 表轮询的实现。07 的订单权威库在分布式/Docker 下必须使用真正共享的 MySQL 等网络数据库；不得用每进程本地 SQLite 冒充共享 remote。
 24. 示例 07 的幂等策略必须明确当前扩展边界：如果只扩展 order-service，user-service 中 `UserID+RequestID -> OrderID` 的入口稳定映射可以是示例级进程内辅助，但 README 必须写明多 user 副本或重启后未同步窗口需要 Redis/MySQL 等共享幂等存储，或确定性订单号策略；如果 Public 下单为了跨 order 副本一致性开启远程幂等探测，MySQL 不可达时必须选择 fail-closed 或清楚文档化降级纯本地接单的双 pending 风险，不能隐式失败或假装仍保持全局幂等。
 25. 示例 04/07 这类性能 benchmark 必须使用 04 的基准模式：先用 fixture 在计时外准备数据和启动/关闭本地 store；按能力拆分本地可靠提交、同步汇合、读缓存和混合负载，不把准备数据、远程探测、建表或清理计入热路径；使用 `ReportAllocs/ResetTimer/StopTimer`、可配置并发矩阵、吞吐和延迟分位数指标；07 的本地接单 benchmark 不得在热路径探测 MySQL，远程汇合 benchmark 才依赖 MySQL。benchmark/UAT/注册类测试创建业务主键必须使用框架 `req.NewID()` 或同源 Snowflake worker，不得用 `base+index` 手写递增 ID；水平扩展示例还必须验证不同 MachineID 副本生成 ID 不重复。
 26. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
@@ -105,7 +105,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
 - 在 skill、文档或代码注释里把示例 06 描述成 `api/call` 目标，或暗示需要复制调用 API。
 - 水平扩展示例把最终业务库按副本做技术分片、为副本硬编码 MachineID、只测试固定端口单实例，或跳过 `AutoMachineID=true` 的真实多副本验证。
-- 高吞吐业务 API 直接复用 Manage/ModelList/SQLite 表轮询作为写入热路径，尤其是在订单下单、支付、撤单这类 public/private 业务链路中没有参考示例 04 的专用写 store、Group Commit 和 write-behind。
+- 高吞吐业务 API 直接复用 Manage/ModelList/SQLite 表轮询作为写入热路径，尤其是在订单下单、支付、撤单这类 public/private 业务链路中没有参考示例 04 的专用写 store、Group Commit 和 `UseWriteBehind(WriteBehindTarget)`。
 - 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效、内部权威服务 Public 重复缓存入口 facade 已缓存的数据，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。

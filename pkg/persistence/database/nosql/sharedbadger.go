@@ -194,6 +194,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 
 	syncDB         bool
 	syncList       *entity.ModelList[T]
+	syncTarget     WriteBehindTarget[T]
 	syncBindErr    error
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
@@ -279,20 +280,14 @@ func (p *PrefixedBadgerDB[T]) generateKey(item *T) string {
 	return ""
 }
 
-// EnableWriteBehind 使用可持久化、冲突安全且禁止损坏重建的配置启用远端写回。
+// EnableWriteBehind 使用 ModelList/IDataAction 兼容层启用远端写回。
+// Deprecated: 业务热路径请使用 UseWriteBehind(target)。此方法仅为 ModelList/IDataAction 兼容层。
 func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error {
 	if list == nil {
 		return fmt.Errorf("%w: sync list 不能为空", ErrUnsafeWriteBehindConfig)
 	}
-	config := p.manager.config
-	if !config.SyncWrites {
-		return p.recordWriteBehindBindError(fmt.Errorf("%w: sync_writes 必须为 true", ErrUnsafeWriteBehindConfig))
-	}
-	if !config.DetectConflicts {
-		return p.recordWriteBehindBindError(fmt.Errorf("%w: detect_conflicts 必须为 true", ErrUnsafeWriteBehindConfig))
-	}
-	if config.CorruptionPolicy != CorruptionPolicyFail {
-		return p.recordWriteBehindBindError(fmt.Errorf("%w: corruption_policy 必须为 %q", ErrUnsafeWriteBehindConfig, CorruptionPolicyFail))
+	if err := p.validateWriteBehindConfig(); err != nil {
+		return p.recordWriteBehindBindError(err)
 	}
 
 	p.syncLock.Lock()
@@ -302,6 +297,7 @@ func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error
 	}
 	p.syncDB = true
 	p.syncList = list
+	p.syncTarget = nil
 	p.syncBindErr = nil
 
 	// 绑定连接池信号量：以 adapter 指针为键，同一连接池的所有 prefix 共用同一信号量。
@@ -311,18 +307,61 @@ func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error
 	}
 	p.syncLock.Unlock()
 
+	p.startWriteBehindWorker()
+	return nil
+}
+
+// UseWriteBehind 使用可插拔 target 启用远端写回。
+func (p *PrefixedBadgerDB[T]) UseWriteBehind(target WriteBehindTarget[T]) error {
+	if target == nil {
+		return fmt.Errorf("%w: write-behind target 不能为空", ErrUnsafeWriteBehindConfig)
+	}
+	if err := p.validateWriteBehindConfig(); err != nil {
+		return p.recordWriteBehindBindError(err)
+	}
+
+	p.syncLock.Lock()
+	if p.syncDB {
+		p.syncLock.Unlock()
+		return nil
+	}
+	p.syncDB = true
+	p.syncList = nil
+	p.syncTarget = target
+	p.syncBindErr = nil
+	p.syncLock.Unlock()
+
+	p.startWriteBehindWorker()
+	return nil
+}
+
+func (p *PrefixedBadgerDB[T]) validateWriteBehindConfig() error {
+	config := p.manager.config
+	if !config.SyncWrites {
+		return fmt.Errorf("%w: sync_writes 必须为 true", ErrUnsafeWriteBehindConfig)
+	}
+	if !config.DetectConflicts {
+		return fmt.Errorf("%w: detect_conflicts 必须为 true", ErrUnsafeWriteBehindConfig)
+	}
+	if config.CorruptionPolicy != CorruptionPolicyFail {
+		return fmt.Errorf("%w: corruption_policy 必须为 %q", ErrUnsafeWriteBehindConfig, CorruptionPolicyFail)
+	}
+	return nil
+}
+
+func (p *PrefixedBadgerDB[T]) startWriteBehindWorker() {
 	p.syncOnce.Do(func() {
 		p.wg.Add(1)
 		go p.syncToOtherDB()
 		logx.Infof("共享DB自动同步已启动 [prefix=%s]", p.prefix)
 	})
-	return nil
 }
 
 func (p *PrefixedBadgerDB[T]) recordWriteBehindBindError(err error) error {
 	p.syncLock.Lock()
 	p.syncDB = false
 	p.syncList = nil
+	p.syncTarget = nil
 	p.syncBindErr = err
 	p.syncLock.Unlock()
 	return err
@@ -341,6 +380,7 @@ func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
 		p.syncLock.Lock()
 		p.syncDB = false
 		p.syncList = nil
+		p.syncTarget = nil
 		p.syncBindErr = nil
 		p.syncLock.Unlock()
 		return
@@ -1683,6 +1723,7 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	}
 
 	p.syncLock.RLock()
+	target := p.syncTarget
 	if !p.syncDB {
 		p.syncLock.RUnlock()
 		return nil, fmt.Errorf("未开启 syncDB")
@@ -1705,6 +1746,9 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	items = currentItems
 	if len(items) == 0 {
 		return nil, nil
+	}
+	if target != nil {
+		return p.syncBatchWithTarget(items, target)
 	}
 
 	// 按「操作类型 + 目标 DB 名」双维分组，确保每个事务只操作同一个库。
@@ -1818,6 +1862,40 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	}
 
 	return p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+}
+
+func (p *PrefixedBadgerDB[T]) syncBatchWithTarget(items []*SyncQueueItem[T], target WriteBehindTarget[T]) ([]string, error) {
+	snapshotTimes := make(map[string]time.Time, len(items))
+	for _, wrapper := range items {
+		if wrapper != nil && wrapper.Key != "" {
+			snapshotTimes[wrapper.Key] = wrapper.UpdatedAt
+		}
+	}
+	result, err := target.SyncBatch(context.Background(), items)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || len(result.ConfirmedKeys) == 0 {
+		if result != nil && len(result.DeadKeys) > 0 {
+			logx.Infow("write_behind_dead_keys_observed",
+				logx.Field("prefix", p.prefix),
+				logx.Field("count", len(result.DeadKeys)),
+			)
+		}
+		return nil, nil
+	}
+	candidates := p.collectSyncAfterDeleteCandidates(items, result.ConfirmedKeys)
+	confirmed, err := p.confirmSyncSuccess(result.ConfirmedKeys, snapshotTimes, candidates)
+	if err != nil {
+		return confirmed, err
+	}
+	if len(result.DeadKeys) > 0 {
+		logx.Infow("write_behind_dead_keys_observed",
+			logx.Field("prefix", p.prefix),
+			logx.Field("count", len(result.DeadKeys)),
+		)
+	}
+	return confirmed, nil
 }
 
 // lockSyncKeys 使同一数据键的远端同步与强制本地删除串行。
@@ -3455,11 +3533,20 @@ func (p *PrefixedBadgerDB[T]) ForceSyncAll() error {
 	}
 	p.closeMu.RUnlock()
 
-	if !p.syncDB || p.syncList == nil {
+	p.syncLock.RLock()
+	syncEnabled := p.syncDB && (p.syncList != nil || p.syncTarget != nil)
+	p.syncLock.RUnlock()
+	if !syncEnabled {
 		return fmt.Errorf("同步功能未启用")
 	}
 
 	logx.Info(" 开始强制同步所有待同步数据...")
+	if rebuilt, err := p.rebuildSyncQueue(); err != nil {
+		logx.Errorf("强制同步前重建同步队列索引失败 [prefix=%s]: %v", p.prefix, err)
+		return err
+	} else if rebuilt > 0 {
+		logx.Infof("强制同步前同步队列索引已重建 [prefix=%s, 补充: %d]", p.prefix, rebuilt)
+	}
 
 	totalSynced := 0
 	maxIterations := 100 // 防止无限循环

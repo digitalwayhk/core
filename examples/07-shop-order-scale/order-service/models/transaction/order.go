@@ -78,8 +78,8 @@ func (o *Order) GetLocalKey() string {
 	return prefix + strconv.FormatUint(uint64(o.GetID()), 10)
 }
 
-// IsSyncAfterDelete 声明订单同步完成后可从本地 Badger 层清除。
-func (o *Order) IsSyncAfterDelete() bool { return false }
+// IsSyncAfterDelete 声明订单同步完成后可从本地 Badger pending 层清除。
+func (o *Order) IsSyncAfterDelete() bool { return true }
 
 // OrderPendingUserPrefix 使用摘要隔离用户本地订单键空间。
 func OrderPendingUserPrefix(userID uint) string {
