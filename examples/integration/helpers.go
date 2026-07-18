@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,8 @@ var httpClient = &http.Client{
 	},
 }
 
+var processStartPortMu sync.Mutex
+
 // WebSocketMessage 对应框架 WebSocket 的 event/channel/data 信封。
 type WebSocketMessage struct {
 	Event   string          `json:"event"`
@@ -199,8 +202,11 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		return nil, fmt.Errorf("构建示例失败: %w\n%s", buildErr, output)
 	}
 	// Build first, then reserve ports immediately before process start. The child
-	// cannot inherit these listeners, so this minimizes (but cannot eliminate)
-	// the probe-to-bind window.
+	// cannot inherit these listeners, so this minimizes the probe-to-bind window.
+	// 并发启动多个真实进程时，端口探测与子进程 bind 必须串行，否则两个
+	// StartProcess 可能同时探测到同一段可用端口。
+	processStartPortMu.Lock()
+	defer processStartPortMu.Unlock()
 	basePort, err := reservePortRange(options.ServiceCount)
 	if err != nil {
 		cleanup()
