@@ -72,8 +72,9 @@ func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
 		BuildPackage: "./examples/05-shop-casdoor-rbac/main", BinaryName: "shop-casdoor-rbac",
 		TempPrefix: "core-shop-casdoor-rbac-", ServiceCount: 2, ServiceIndex: 1,
-		Arguments:   []string{"-view", "0"},
-		DisableRace: integration.IsBenchmarkRun(),
+		GRPCServiceCount: 2,
+		Arguments:        []string{"-view", "0"},
+		DisableRace:      integration.IsBenchmarkRun(),
 	})
 	if err != nil {
 		return nil, err

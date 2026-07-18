@@ -24,6 +24,55 @@ Auth 与 Manage 必须使用不同的 Casdoor Client、Access Secret、Refresh S
 
 `IdentityEventManage` 只暴露 `View` 和 `Search`，不允许通用 Add、Edit 或 Remove 绕过事件 Hook。
 
+## Manage 服务级钩子
+
+`ShopManage` 不承担具体模型的解析和校验，而是统一处理整个商城后台的横切行为：
+
+- `DoBefore`：统一分派标准操作，并在这一总入口记录所有前置 Hook 失败。
+- `DoAfter`：统一分派成功后操作，并在这一总出口记录后置 Hook 失败或最终成功。动作级 `On...After` 不重复打日志。每条日志都包含最终 `owner` 类型名，可在同一服务内按 ProductManage、OrderManage 等管理模块统一聚合。
+- `SearchBefore`：把全服务查询限制在每页 100 条，无显式排序时使用 ID 倒序。
+- `SearchAfter`：保留框架默认项行为，并把查询 `Tag` 透传回前端。
+
+最终 Manage 通过嵌入 `ShopManage` 自动获得全部默认 Hook，只需重写关心的 `OnViewBefore`、`OnAddBefore`、`OnEditBefore`、`OnRemoveBefore`、`OnSearchBefore` 或对应 `After` 方法。每个方法都代表该服务下所有派生 Manage 的同类命令，因此可以把通用授权、审计、缓存失效和查询约束留在服务层，再把模型类别和具体业务规则逐层下沉。
+
+派生 Manage 有三种使用方式：不实现方法时完全继承父级；同名方法不调父级时完全替换；先调父级再追加逻辑时保留公共能力并增加条件。当前示例的层次为：
+
+- `ShopManage`：管理身份、生命周期集中日志、100 条分页上限和默认排序。
+- `BaseDataManage`：新增默认禁用、禁止直接修改启停状态，以及统一调用模型新增、修改、删除校验。基础数据模型在 `RemoveValid` 中检查业务引用，有引用时只能禁用。
+- `BusinessManage`：阻止通用 CRUD 绕过状态机，并将业务数据分页收紧为 50 条。
+- 最终 Manage：`ProductManage` 只追加供应商可用性，`SupplierManage` 完全继承基础数据 CRUD，`PaymentTypeManage` 只追加已使用编码稳定性；三者的删除引用保护都由模型 `RemoveValid` 统一进入。Order/PaymentRecord/IdentityEvent 再按查询成本分别收紧到 30/30/25 条。
+
+`IdentityEventManage.OnSearchBefore` 明确先调用 `BusinessManage.OnSearchBefore`，再增加审计查询条件，展示了多层规则累加。基础模型的 `AddValid/UpdateValid` 已经包含字段规范化，因此本示例不再重复实现 `ParseAfter`。
+
+`OrderManage.ViewModel` 只设置页面属性；`PaymentStatus` 由模型反射生成，再统一由 `ViewFieldModel` 设置标题、搜索和状态选项，避免重复字段。
+
+## 目录与依赖方向
+
+本示例把模型、业务和 Manage 都按领域分包，用目录表达继承层次，而不是把所有文件放在同一个包中：
+
+```text
+models/
+  common/                 # ShopModel、BaseDataModel、BusinessModel 和公开错误
+  basedata/               # 商品、供应商、支付类型
+  transaction/            # 订单、支付流水和状态
+  identity/               # Casdoor 身份事件审计
+  internal/store/         # 示例私有的 IDataAction 和事务边界
+  schema/                 # 全部模型建表组装点
+business/
+  basedata/               # 基础资料规则
+  transaction/            # 订单与支付状态机、跨模型事务
+  identity/               # 身份事件幂等审计
+api/manage/
+  common/                 # 全 Shop 服务共享的 Manage Hook 和集中日志
+  basedata/               # 基础资料 CRUD、启用/禁用命令
+  transaction/            # 业务数据查询和受控状态命令
+  audit/                  # 只读身份审计
+```
+
+`models`、`business` 和 `api/manage` 根包只保留兼容门面，使旧的构造函数和路由注册保持稳定。新实现应直接放入对应子包；依赖只能从 API 指向 business、再指向 models，不得反向引用。
+
+单元测试与被测实现同目录，例如 `business/transaction/payment_flow_test.go` 和 `api/manage/audit/identityeventmanage_test.go`。跨子包的继承或兼容门面契约测试才保留在根包；真实进程、HTTP、Casdoor 和 WebSocket 测试只放在 `examples/integration/05-shop-casdoor-rbac`。固定样本数据应使用 Go 约定的 `testdata/`，不另建通用 `test` 包。
+
 ## 运行
 
 首次启动：
