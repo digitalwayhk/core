@@ -21,6 +21,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 性能优化 | `examples/04-shop-performance` | RouterInfo L1/L2/L3、EventBridge 主动失效、SingleFlight、Badger 可靠本地写、Group Commit、基准与分位数 |
 | Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
 | Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
+| 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、本地可靠 pending、共享远程 order 权威库、异步同步、规则配置同步、06/07 性能对比 |
 
 对应真实进程测试位于 `examples/integration/01-simple-shop`至 `05-shop-casdoor-rbac`，多服务还必须同时参考 `examples/integration/06-shop-microservices` 和 `06-shop-microservices-three-process`；通用进程、HTTP、TestToken 和 WebSocket 能力只复用 `examples/integration/helpers.go`。
 
@@ -77,9 +78,11 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；权限、日志和通用限域只在抽象层实现一次，具体 Manage 不重复；自定义命令也走 owner `DoBefore`，不增加命令专用 Hook 旁路；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
 19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName`、数据库名和 `TraceID`；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名或 TraceID 字段。
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
-21. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
-22. 多服务业务必须提供真实多进程 UAT，并按角色或调用方拆分可单独运行的角色闭环测试；跨服务发现、内部调用、事件投递、缓存失效和权限边界不能只用同进程或单服务测试替代。
-23. 只要服务实现 WebSocket 能力，就必须在集成测试和 UAT 中使用真实 WebSocket 覆盖登录、按真实 RouterInfo 路径订阅、事件结构、当前用户投递、其他用户隔离、未认证/错误订阅等异常边界。
+21. 示例 07 这类水平扩展示例必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。多实例服务的 pending、Outbox、Inbox、同步状态和投影必须记录 TraceID、ServiceName、ServiceInstanceID；ServiceInstanceIP 只用于诊断，不参与业务判断。
+22. 自动水平扩展示例必须启用 `AutoMachineID=true`，并验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得为可扩容副本硬编码固定 MachineID，也不得把注册发现能力写死到 Redis，具体使用 Redis、局域网发现或其他中间件由配置决定。
+23. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
+24. 多服务业务必须提供真实多进程 UAT，并按角色或调用方拆分可单独运行的角色闭环测试；跨服务发现、内部调用、事件投递、缓存失效和权限边界不能只用同进程或单服务测试替代。
+25. 只要服务实现 WebSocket 能力，就必须在集成测试和 UAT 中使用真实 WebSocket 覆盖登录、按真实 RouterInfo 路径订阅、事件结构、当前用户投递、其他用户隔离、未认证/错误订阅等异常边界。
 
 ## 工作流
 
@@ -98,6 +101,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - 业务服务自己保存 Outbox worker、轮询发布事件、直接调用 `SubscribeExternalControl`，或者让发布方知道消费者是谁；标准方式是 `sc.UseOutbox` 和 `sc.SubscribeEvent`。
 - 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
 - 在 skill、文档或代码注释里把示例 06 描述成 `api/call` 目标，或暗示需要复制调用 API。
+- 水平扩展示例把最终业务库按副本做技术分片、为副本硬编码 MachineID、只测试固定端口单实例，或跳过 `AutoMachineID=true` 的真实多副本验证。
 - 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效、内部权威服务 Public 重复缓存入口 facade 已缓存的数据，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。

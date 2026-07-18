@@ -86,13 +86,11 @@ Order 创建时同步读取已启用商品和供应商，随后在同一事务�
 
 | 读路径 | TTL | 主动失效 |
 | --- | ---: | --- |
-| Supplier 内部供应商/商品 Public | 30 秒 | Supplier/Product 事务提交后本地失效 |
 | User 供应商/商品 facade | 30 秒 | `SupplierChanged`、`ProductChanged` |
-| Order 支付类型 Public | 30 秒 | PaymentType 事务提交后本地失效 |
 | User 支付类型 facade | 30 秒 | `PaymentTypeChanged` |
 | User 本人订单 Private | 10 秒 | 对应用户的 Order/Payment 事件 |
 
-缓存键包含全部查询条件；认证读路径的身份只能来自 Token 映射后的数字 ID。缓存只是可重建副本，Redis 不保存业务权威模型。
+缓存键包含全部查询条件；认证读路径的身份只能来自 Token 映射后的数字 ID。缓存只是可重建副本，Redis 不保存业务权威模型。Supplier 和 Order 作为内部权威服务，受限 Public API 不重复 `UseCache`，避免入口 facade 与权威校验形成双层失效链。
 
 ## 目录
 
