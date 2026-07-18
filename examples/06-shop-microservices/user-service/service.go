@@ -48,65 +48,78 @@ func (s *Service) Start() {
 	if sc == nil || sc.ServiceEventBridge == nil {
 		return
 	}
+	s.registerEventSubscriptions(sc)
+}
+
+func (s *Service) registerEventSubscriptions(sc *router.ServiceContext) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cacheHandler := func(_ context.Context, env *event.Envelope) error {
-		metadata := &eventdto.Metadata{}
-		if err := json.Unmarshal(env.Data, metadata); err != nil {
-			return err
-		}
-		if metadata.SchemaVersion != contract.EventSchemaVersion {
-			return fmt.Errorf("不支持的事件 schemaVersion: %d", metadata.SchemaVersion)
-		}
-		return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error {
-			switch metadata.EventType {
-			case contract.EventSupplierChanged:
-				(&publicapi.GetSuppliers{}).RouterInfo().FailureCache(nil)
-				(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
-			case contract.EventProductChanged:
-				(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
-			case contract.EventPaymentTypeChanged:
-				(&publicapi.GetPaymentTypes{}).RouterInfo().FailureCache(nil)
-			}
-			return nil
-		})
-	}
-	orderHandler := func(_ context.Context, env *event.Envelope) error {
-		payload := &eventdto.OrderChanged{}
-		if err := json.Unmarshal(env.Data, payload); err != nil {
-			return err
-		}
-		if payload.SchemaVersion != contract.EventSchemaVersion {
-			return fmt.Errorf("不支持的订单事件 schemaVersion: %d", payload.SchemaVersion)
-		}
-		return models.ProcessInbox(payload.EventID, payload.EventType, func() error {
-			privateapi.InvalidateOrderCache(payload.UserID)
-			(&privateapi.GetOrders{}).RouterInfo().NoticeWebSocket(payload)
-			return nil
-		})
-	}
-	for _, subscription := range []event.Subscription{
-		{Subject: contract.SubjectProductChanged, EventType: contract.EventProductChanged, Reliable: true, Handler: cacheHandler},
-		{Subject: contract.SubjectSupplierChanged, EventType: contract.EventSupplierChanged, Reliable: true, Handler: cacheHandler},
-		{Subject: contract.SubjectPaymentTypeChanged, EventType: contract.EventPaymentTypeChanged, Reliable: true, Handler: cacheHandler},
-		{Subject: contract.SubjectOrderCreated, EventType: contract.EventOrderCreated, Reliable: true, Handler: orderHandler},
-		{Subject: contract.SubjectOrderStatusChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: orderHandler},
-		{Subject: contract.SubjectPaymentChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: orderHandler},
-	} {
+
+	for _, subscription := range userEventSubscriptions() {
 		cancel, err := sc.SubscribeEvent(subscription)
 		if err != nil {
-			for _, cancel := range s.cancels {
-				cancel()
-			}
-			s.cancels = nil
+			s.cancelEventSubscriptions()
 			panic(err)
 		}
 		s.cancels = append(s.cancels, cancel)
 	}
 }
+
+func userEventSubscriptions() []event.Subscription {
+	return []event.Subscription{
+		{Subject: contract.SubjectProductChanged, EventType: contract.EventProductChanged, Reliable: true, Handler: handleUserCacheEvent},
+		{Subject: contract.SubjectSupplierChanged, EventType: contract.EventSupplierChanged, Reliable: true, Handler: handleUserCacheEvent},
+		{Subject: contract.SubjectPaymentTypeChanged, EventType: contract.EventPaymentTypeChanged, Reliable: true, Handler: handleUserCacheEvent},
+		{Subject: contract.SubjectOrderCreated, EventType: contract.EventOrderCreated, Reliable: true, Handler: handleUserOrderEvent},
+		{Subject: contract.SubjectOrderStatusChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: handleUserOrderEvent},
+		{Subject: contract.SubjectPaymentChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: handleUserOrderEvent},
+	}
+}
+
+func handleUserCacheEvent(_ context.Context, env *event.Envelope) error {
+	metadata := &eventdto.Metadata{}
+	if err := json.Unmarshal(env.Data, metadata); err != nil {
+		return err
+	}
+	if metadata.SchemaVersion != contract.EventSchemaVersion {
+		return fmt.Errorf("不支持的事件 schemaVersion: %d", metadata.SchemaVersion)
+	}
+	return models.ProcessInbox(metadata.EventID, metadata.EventType, func() error {
+		switch metadata.EventType {
+		case contract.EventSupplierChanged:
+			(&publicapi.GetSuppliers{}).RouterInfo().FailureCache(nil)
+			(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
+		case contract.EventProductChanged:
+			(&publicapi.GetProducts{}).RouterInfo().FailureCache(nil)
+		case contract.EventPaymentTypeChanged:
+			(&publicapi.GetPaymentTypes{}).RouterInfo().FailureCache(nil)
+		}
+		return nil
+	})
+}
+
+func handleUserOrderEvent(_ context.Context, env *event.Envelope) error {
+	payload := &eventdto.OrderChanged{}
+	if err := json.Unmarshal(env.Data, payload); err != nil {
+		return err
+	}
+	if payload.SchemaVersion != contract.EventSchemaVersion {
+		return fmt.Errorf("不支持的订单事件 schemaVersion: %d", payload.SchemaVersion)
+	}
+	return models.ProcessInbox(payload.EventID, payload.EventType, func() error {
+		privateapi.InvalidateOrderCache(payload.UserID)
+		(&privateapi.GetOrders{}).RouterInfo().NoticeWebSocket(payload)
+		return nil
+	})
+}
+
 func (s *Service) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.cancelEventSubscriptions()
+}
+
+func (s *Service) cancelEventSubscriptions() {
 	for _, cancel := range s.cancels {
 		cancel()
 	}
