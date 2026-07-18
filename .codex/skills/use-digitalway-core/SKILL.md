@@ -63,7 +63,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 5. 模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料只能禁用，不能删除。
 6. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
 7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。
-8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。
+8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。多服务 public/private 缓存只放在面向外部流量的入口服务 facade，例如 06 的 user-service；supplier/order 这类内部权威服务的 Public API 不再重复缓存，避免展示缓存与权威校验缓存双层失效。
 9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
 10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
 11. 优先复用 go-zero/成熟客户端；不支持的配置值 fail closed，不得伪装可用。
@@ -94,6 +94,6 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
 - 在 skill、文档或代码注释里把示例 06 描述成 `api/call` 目标，或暗示需要复制调用 API。
 - 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为。
-- `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效，或把 write-behind pending 当缓存删除。
+- `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效、内部权威服务 Public 重复缓存入口 facade 已缓存的数据，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
 - 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。

@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
-	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -33,9 +32,6 @@ func (own *PaymentTypeManage) OnAddBefore(operation *managepkg.Add[models.Paymen
 		return nil, contract.ErrResourceNotFound, true
 	}
 	result, err := business.CreatePaymentType(operation.Model, strconv.FormatUint(uint64(req.NewID()), 10))
-	if err == nil {
-		publicapi.InvalidatePaymentTypeCache()
-	}
 	return result, err, true
 }
 
@@ -44,9 +40,6 @@ func (own *PaymentTypeManage) OnEditBefore(operation *managepkg.Edit[models.Paym
 		return nil, contract.ErrResourceNotFound, true
 	}
 	result, err := business.UpdatePaymentType(operation.OldItem.ID, operation.Model.Name, operation.Model.Code, strconv.FormatUint(uint64(req.NewID()), 10))
-	if err == nil {
-		publicapi.InvalidatePaymentTypeCache()
-	}
 	return result, err, true
 }
 
@@ -55,9 +48,6 @@ func (own *PaymentTypeManage) OnRemoveBefore(operation *managepkg.Remove[models.
 		return nil, contract.ErrResourceNotFound, true
 	}
 	result, err := business.DeletePaymentType(operation.Model.ID, strconv.FormatUint(uint64(req.NewID()), 10))
-	if err == nil {
-		publicapi.InvalidatePaymentTypeCache()
-	}
 	return result, err, true
 }
 
@@ -70,9 +60,6 @@ func (own *PaymentTypeManage) OnCommandBefore(sender interface{}, req servertype
 		return nil, contract.ErrResourceNotFound, true
 	}
 	result, err := business.SetPaymentTypeEnabled(operation.Model.ID, operation.Model.Enabled, strconv.FormatUint(uint64(req.NewID()), 10))
-	if err == nil {
-		publicapi.InvalidatePaymentTypeCache()
-	}
 	return result, err, true
 }
 

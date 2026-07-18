@@ -2,12 +2,28 @@ package supplierservice
 
 import (
 	"testing"
+	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
+
+type cacheRecorder struct {
+	enabled []string
+}
+
+func (r *cacheRecorder) EnableRoute(path string, _ time.Duration) error {
+	r.enabled = append(r.enabled, path)
+	return nil
+}
+func (*cacheRecorder) Get(string, interface{}) (interface{}, bool, error) { return nil, false, nil }
+func (*cacheRecorder) Set(string, interface{}, interface{}, time.Duration) error {
+	return nil
+}
+func (*cacheRecorder) Delete(string, interface{}) error { return nil }
+func (*cacheRecorder) DeleteRoute(string) error         { return nil }
 
 func TestSupplierServiceExposesManageAndConstrainedPublicRoutesOnly(t *testing.T) {
 	routers := (&Service{}).Routers()
@@ -24,4 +40,12 @@ func TestSupplierServiceExposesManageAndConstrainedPublicRoutesOnly(t *testing.T
 
 	products := (&publicapi.GetProducts{}).RouterInfo()
 	require.Equal(t, []string{contract.OrderServiceName, contract.UserServiceName}, products.GetInternalCallers())
+}
+
+func TestSupplierAuthorityPublicRoutesDoNotEnableRouteCache(t *testing.T) {
+	for _, api := range []servertypes.IRouter{&publicapi.GetSuppliers{}, &publicapi.GetProducts{}} {
+		recorder := &cacheRecorder{}
+		api.RouterInfo().SetCacheManager(contract.SupplierServiceName, recorder)
+		require.Empty(t, recorder.enabled, api.RouterInfo().GetPath())
+	}
 }

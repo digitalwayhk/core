@@ -3,7 +3,6 @@ package basedata
 import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/manage/common"
-	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -55,9 +54,6 @@ func (own *SupplierManage) OnEditBefore(operation *managepkg.Edit[models.Supplie
 	eventID := models.EventID(req.NewID())
 	current := operation.OldItem
 	updated, err := business.UpdateSupplierDetails(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Description, eventID)
-	if err == nil {
-		publicapi.InvalidateSupplierCaches()
-	}
 	return updated, err, true
 }
 
@@ -67,9 +63,6 @@ func (own *SupplierManage) OnRemoveBefore(operation *managepkg.Remove[models.Sup
 		return nil, contract.ErrResourceNotFound, true
 	}
 	err := models.DeleteSupplier(current)
-	if err == nil {
-		publicapi.InvalidateSupplierCaches()
-	}
 	return current, err, true
 }
 
@@ -78,16 +71,12 @@ func (own *SupplierManage) OnCommandBefore(sender interface{}, req servertypes.I
 	case *SetSupplierEnabled:
 		eventID := models.EventID(req.NewID())
 		updated, err := business.SetSupplierEnabled(operation.Model.ID, operation.Model.Enabled, eventID)
-		if err == nil {
-			publicapi.InvalidateSupplierCaches()
-		}
 		return updated, err, true
 	}
 	return nil, nil, false
 }
 
 func (*SupplierManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
-	publicapi.InvalidateSupplierCaches()
 	return nil, nil
 }
 

@@ -3,7 +3,6 @@ package basedata
 import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	commonmanage "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/manage/common"
-	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/api/public"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -91,9 +90,6 @@ func (*ProductManage) ResolveSupplierWriteScope(sender interface{}, actor common
 func (own *ProductManage) OnAddBefore(operation *managepkg.Add[models.Product], req servertypes.IRequest) (interface{}, error, bool) {
 	eventID := models.EventID(req.NewID())
 	created, err := business.CreateProduct(operation.Model.SupplierID, operation.Model.Name, operation.Model.Code, operation.Model.Price, req.NewID(), eventID)
-	if err == nil {
-		publicapi.InvalidateProductCache()
-	}
 	return created, err, true
 }
 
@@ -101,9 +97,6 @@ func (own *ProductManage) OnEditBefore(operation *managepkg.Edit[models.Product]
 	eventID := models.EventID(req.NewID())
 	current := operation.OldItem
 	updated, err := business.UpdateProduct(current.ID, operation.Model.Name, operation.Model.Code, operation.Model.Price, eventID)
-	if err == nil {
-		publicapi.InvalidateProductCache()
-	}
 	return updated, err, true
 }
 
@@ -113,9 +106,6 @@ func (own *ProductManage) OnRemoveBefore(operation *managepkg.Remove[models.Prod
 		return nil, contract.ErrResourceNotFound, true
 	}
 	err := models.DeleteProduct(current)
-	if err == nil {
-		publicapi.InvalidateProductCache()
-	}
 	return current, err, true
 }
 
@@ -128,16 +118,12 @@ func (own *ProductManage) OnCommandBefore(sender interface{}, req servertypes.IR
 		}
 		eventID := models.EventID(req.NewID())
 		updated, err := business.SetProductEnabled(current.ID, operation.Model.Enabled, eventID)
-		if err == nil {
-			publicapi.InvalidateProductCache()
-		}
 		return updated, err, true
 	}
 	return nil, nil, false
 }
 
 func (*ProductManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
-	publicapi.InvalidateProductCache()
 	return nil, nil
 }
 

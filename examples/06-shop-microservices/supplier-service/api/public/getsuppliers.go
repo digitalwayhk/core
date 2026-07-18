@@ -4,13 +4,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/business"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 )
 
 type GetSuppliers struct {
@@ -36,16 +34,11 @@ func (g *GetSuppliers) Do(servertypes.IRequest) (interface{}, error) {
 	return business.AvailableSuppliers(g.ID, g.Code, g.Name)
 }
 func (*GetSuppliers) GetResponse() interface{} { return business.SupplierListResponse() }
-func (g *GetSuppliers) GetCacheKey() string {
-	return utils.HashCodes(strconv.FormatUint(uint64(g.ID), 10), strings.ToLower(g.Code), strings.ToLower(g.Name))
-}
 func (g *GetSuppliers) RouterInfo() *servertypes.RouterInfo {
-	info := router.DefaultRouterInfoWithOptions(g,
+	return router.DefaultRouterInfoWithOptions(g,
 		router.WithServiceName(contract.SupplierServiceName),
 		router.WithPath("/api/"+contract.SupplierServiceName+"/getsuppliers"),
 		router.WithMethod(http.MethodGet),
 		router.WithInternalCallers(contract.UserServiceName),
 	)
-	info.UseCache(30 * time.Second)
-	return info
 }

@@ -3,12 +3,28 @@ package orderservice
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/public"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
+
+type cacheRecorder struct {
+	enabled []string
+}
+
+func (r *cacheRecorder) EnableRoute(path string, _ time.Duration) error {
+	r.enabled = append(r.enabled, path)
+	return nil
+}
+func (*cacheRecorder) Get(string, interface{}) (interface{}, bool, error) { return nil, false, nil }
+func (*cacheRecorder) Set(string, interface{}, interface{}, time.Duration) error {
+	return nil
+}
+func (*cacheRecorder) Delete(string, interface{}) error { return nil }
+func (*cacheRecorder) DeleteRoute(string) error         { return nil }
 
 func TestOrderServiceExposesOnlyConstrainedPublicAndManageRoutes(t *testing.T) {
 	routers := (&Service{}).Routers()
@@ -40,4 +56,11 @@ func TestOrderManageAuthenticationAllowsOnlyPlatformAdmin(t *testing.T) {
 		Identity: servertypes.AuthIdentity{UID: contract.PlatformAdminUserID},
 	})
 	require.NoError(t, err)
+}
+
+func TestOrderAuthorityPublicRoutesDoNotEnableRouteCache(t *testing.T) {
+	recorder := &cacheRecorder{}
+	api := &publicapi.GetPaymentTypes{}
+	api.RouterInfo().SetCacheManager(contract.OrderServiceName, recorder)
+	require.Empty(t, recorder.enabled, api.RouterInfo().GetPath())
 }
