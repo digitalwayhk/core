@@ -15,7 +15,7 @@ import (
 // OutboxRecord 保存等待 ServiceEventBridge 发布的订单事件。
 type OutboxRecord struct {
 	*common.RuntimeStampedModel
-	EventID     string     `gorm:"not null;uniqueIndex" json:"eventID"`
+	EventID     string     `gorm:"type:varchar(191);not null;uniqueIndex" json:"eventID"`
 	EventType   string     `gorm:"index" json:"eventType"`
 	Subject     string     `gorm:"index" json:"subject"`
 	Payload     []byte     `json:"payload"`

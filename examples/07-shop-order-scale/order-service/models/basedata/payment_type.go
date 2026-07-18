@@ -15,7 +15,7 @@ import (
 type PaymentType struct {
 	*common.ServiceBaseModel
 	Name    string `gorm:"not null" json:"name"`
-	Code    string `gorm:"not null;uniqueIndex" json:"code"`
+	Code    string `gorm:"type:varchar(191);not null;uniqueIndex" json:"code"`
 	Enabled bool   `gorm:"index" json:"enabled"`
 }
 

@@ -15,15 +15,14 @@ import (
 // TestDockerUATAdminRoleFlow 验证管理员角色在 Docker 多进程下可管理基础资料且不能从宿主机直连 order。
 func TestDockerUATAdminRoleFlow(t *testing.T) {
 	compose := startDockerOrderScaleStack(t)
-	user := &integration.Suite{BaseURL: "http://127.0.0.1:18181"}
 	supplier := &integration.Suite{BaseURL: "http://127.0.0.1:18182"}
-	waitDockerUserReady(t, user)
+	waitDockerHTTPReady(t, 18181)
+	waitDockerHTTPReady(t, 18182)
 	nodes := verifyDockerOrderReplicaDiscovery(t, compose)
 	require.GreaterOrEqual(t, len(nodes), 2)
 
-	adminToken := supplier.TokenFor(t, "platform-admin", 1)
-	productID := addDockerSupplierProduct(t, supplier, adminToken)
-	require.NotZero(t, productID)
+	adminFixture := prepareDockerAdminFixture(t, supplier)
+	require.NotZero(t, adminFixture.PaymentTypeID)
 	requireHostOrderPortClosed(t, 18183)
 	requireHostOrderPortClosed(t, 18184)
 }

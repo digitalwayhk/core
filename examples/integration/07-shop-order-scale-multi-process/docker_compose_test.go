@@ -37,7 +37,10 @@ func TestPublicCancelPayDoNotWriteOutboxTwice(t *testing.T) {
 func TestDockerScaleServiceDoesNotSharePendingVolume(t *testing.T) {
 	content := read07Compose(t)
 	scaleBlock := composeServiceBlock(content, "shop-order")
-	require.NotContains(t, scaleBlock, "volumes:")
+	require.NotContains(t, scaleBlock, "order-scale-pending")
+	require.NotContains(t, scaleBlock, "order-a-pending")
+	require.NotContains(t, scaleBlock, "order-b-pending")
+	require.Contains(t, scaleBlock, "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro")
 	require.NotContains(t, content, "order-scale-pending")
 	require.Contains(t, content, "order-a-pending")
 	require.Contains(t, content, "order-b-pending")

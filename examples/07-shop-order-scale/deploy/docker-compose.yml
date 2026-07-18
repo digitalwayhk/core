@@ -21,25 +21,37 @@ services:
 
   shop-user:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
-    command: ["/app/user", "-p", "18181", "-grpc", "28181", "-view", "0"]
+    command: ["/app/user", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-user
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-user.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-user.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes: ["${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"]
     ports: ["18181:18181"]
     depends_on: {redis: {condition: service_healthy}}
 
   shop-supplier:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
-    command: ["/app/supplier", "-p", "18182", "-grpc", "28182", "-view", "0"]
+    command: ["/app/supplier", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-supplier
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-supplier.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-supplier.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes: ["${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"]
     ports: ["18182:18182"]
     depends_on: {redis: {condition: service_healthy}}
 
   shop-order-a:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
-    command: ["/app/order", "-p", "18183", "-grpc", "28183", "-view", "0"]
+    command: ["/app/order", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-a
@@ -48,15 +60,24 @@ services:
       SHOP_ORDER_REMOTE_MYSQL_USER: root
       SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
       SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
-    volumes: ["order-a-pending:/data/pending"]
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "order-a-pending:/data/pending"
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
     depends_on:
       redis: {condition: service_healthy}
       mysql: {condition: service_healthy}
 
   shop-order-b:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
-    command: ["/app/order", "-p", "18184", "-grpc", "28184", "-view", "0"]
+    command: ["/app/order", "-view", "0"]
     environment:
+      SHOP_ORDER_HTTP_PORT: 18184
+      SHOP_ORDER_GRPC_PORT: 28184
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-b
       SHOP_LOCAL_PENDING_DIR: /data/pending
@@ -64,7 +85,14 @@ services:
       SHOP_ORDER_REMOTE_MYSQL_USER: root
       SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
       SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
-    volumes: ["order-b-pending:/data/pending"]
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "order-b-pending:/data/pending"
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
     depends_on:
       redis: {condition: service_healthy}
       mysql: {condition: service_healthy}
@@ -80,6 +108,13 @@ services:
       SHOP_ORDER_REMOTE_MYSQL_USER: root
       SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
       SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
     depends_on:
       redis: {condition: service_healthy}
       mysql: {condition: service_healthy}

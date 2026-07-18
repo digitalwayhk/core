@@ -7,6 +7,7 @@ import (
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
+	userdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/user"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
@@ -57,21 +58,30 @@ func orderToDTO(item *models.Order) *orderdto.Order {
 		return nil
 	}
 	return &orderdto.Order{
-		OrderID:           item.ID,
-		OrderRevision:     item.OrderRevision,
-		UserID:            item.UserID,
-		SupplierID:        item.SupplierID,
-		ProductID:         item.ProductID,
-		SupplierCode:      item.SupplierCode,
-		SupplierName:      item.SupplierName,
-		ProductCode:       item.ProductCode,
-		ProductName:       item.ProductName,
-		UnitPrice:         item.UnitPrice,
-		Quantity:          item.Quantity,
-		TotalAmount:       item.TotalAmount,
-		OrderStatus:       item.OrderStatus,
-		PaymentStatus:     item.PaymentStatus,
-		CurrentPaymentID:  item.CurrentPaymentID,
+		OrderID:          item.ID,
+		OrderRevision:    item.OrderRevision,
+		UserID:           item.UserID,
+		SupplierID:       item.SupplierID,
+		ProductID:        item.ProductID,
+		SupplierCode:     item.SupplierCode,
+		SupplierName:     item.SupplierName,
+		ProductCode:      item.ProductCode,
+		ProductName:      item.ProductName,
+		UnitPrice:        item.UnitPrice,
+		Quantity:         item.Quantity,
+		TotalAmount:      item.TotalAmount,
+		OrderStatus:      item.OrderStatus,
+		PaymentStatus:    item.PaymentStatus,
+		CurrentPaymentID: item.CurrentPaymentID,
+		Address: userdto.AddressSnapshot{
+			UserID:       item.UserID,
+			AddressID:    item.AddressID,
+			ReceiverName: item.Recipient,
+			Phone:        item.Phone,
+			Province:     item.Region,
+			Detail:       item.AddressDetail,
+			TraceID:      item.TraceID,
+		},
 		TraceID:           item.TraceID,
 		ServiceName:       item.ServiceName,
 		ServiceInstanceID: item.ServiceInstanceID,

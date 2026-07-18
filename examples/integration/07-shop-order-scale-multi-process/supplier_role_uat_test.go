@@ -17,17 +17,18 @@ func TestDockerUATSupplierRoleFlow(t *testing.T) {
 	compose := startDockerOrderScaleStack(t)
 	user := &integration.Suite{BaseURL: "http://127.0.0.1:18181"}
 	supplier := &integration.Suite{BaseURL: "http://127.0.0.1:18182"}
-	waitDockerUserReady(t, user)
+	waitDockerHTTPReady(t, 18181)
+	waitDockerHTTPReady(t, 18182)
 	verifyDockerOrderReplicaDiscovery(t, compose)
 
-	adminToken := supplier.TokenFor(t, "platform-admin", 1)
-	productID := addDockerSupplierProduct(t, supplier, adminToken)
+	adminFixture := prepareDockerAdminFixture(t, supplier)
+	supplierFixture := prepareDockerSupplierFixture(t, supplier, adminFixture)
 
 	response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/getproducts", "", map[string]interface{}{})
 	require.True(t, response.Success, response.ErrorMessage)
 	var products []*supplierdto.Product
 	require.NoError(t, json.Unmarshal(response.Data, &products))
-	require.True(t, dockerProductExists(products, productID))
+	require.True(t, dockerProductExists(products, supplierFixture.ProductID))
 }
 
 // dockerProductExists 判断 user facade 返回的商品列表中是否包含指定商品。

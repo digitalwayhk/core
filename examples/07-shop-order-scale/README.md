@@ -80,6 +80,7 @@ buyer request
 
 - 单进程集成测试验证 07 的业务语义、规则配置、pending 同步和事件投递。
 - 多进程 UAT 必须按角色拆分：买家、供应商、管理员分别拥有可单独运行的闭环测试。
+- 角色测试需要其他角色拥有的关键数据时，只能调用对应角色 fixture 准备，例如买家下单前组合管理员基础条件和供应商商品，不在买家测试中隐藏创建逻辑。
 - 多 order 副本 UAT 必须验证自动 MachineID、唯一 ServiceInstanceID、本地 pending 目录隔离、共享 MySQL 远程权威库和 resolver 多节点调用。
 - Docker 多进程 UAT 默认由 `SHOP_RUN_DOCKER_UAT=1` 显式启用；CI 可把这些测试放到夜间或外部依赖 job，普通单元测试只保留 compose/config 静态约束。
 - 有 WebSocket 的买家角色必须覆盖真实订阅、订单事件投递和其他买家隔离。

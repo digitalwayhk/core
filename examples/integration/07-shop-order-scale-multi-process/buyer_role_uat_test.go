@@ -20,16 +20,17 @@ func TestDockerUATBuyerRoleFlow(t *testing.T) {
 	compose := startDockerOrderScaleStack(t)
 	user := &integration.Suite{BaseURL: "http://127.0.0.1:18181"}
 	supplier := &integration.Suite{BaseURL: "http://127.0.0.1:18182"}
-	waitDockerUserReady(t, user)
+	waitDockerHTTPReady(t, 18181)
+	waitDockerHTTPReady(t, 18182)
 	user.WebSocketURL = "ws://127.0.0.1:18181/ws"
 	verifyDockerOrderReplicaDiscovery(t, compose)
 
-	adminToken := supplier.TokenFor(t, "platform-admin", 1)
-	productID := addDockerSupplierProduct(t, supplier, adminToken)
-	requireDockerBuyerPublicFacade(t, user, productID)
+	adminFixture := prepareDockerAdminFixture(t, supplier)
+	supplierFixture := prepareDockerSupplierFixture(t, supplier, adminFixture)
+	requireDockerBuyerPublicFacade(t, user, supplierFixture.ProductID)
 
-	buyerToken := user.TokenFor(t, "docker-buyer-role", 0)
-	otherToken := user.TokenFor(t, "docker-other-buyer-role", 0)
+	buyerToken := user.TokenFor(t, "720101", 0)
+	otherToken := user.TokenFor(t, "720102", 0)
 	buyerWS := connectDockerBuyerOrdersWebSocket(t, user, buyerToken)
 	defer buyerWS.Close()
 	otherWS := connectDockerBuyerOrdersWebSocket(t, user, otherToken)
@@ -38,19 +39,20 @@ func TestDockerUATBuyerRoleFlow(t *testing.T) {
 
 	requestID := "docker-buyer-role-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 
-	created := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
-	retried := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
+	created := createDockerBuyerOrderWithRequest(t, user, buyerToken, supplierFixture.ProductID, requestID)
+	retried := createDockerBuyerOrderWithRequest(t, user, buyerToken, supplierFixture.ProductID, requestID)
 	require.Equal(t, created.OrderID, retried.OrderID)
 	waitDockerOrderVisible(t, user, buyerToken, created.OrderID)
 	require.Equal(t, "Docker买家", dockerBuyerOrderByID(t, user, buyerToken, created.OrderID).Address.ReceiverName)
 	requireDockerOrderEvent(t, user, buyerWS, created.OrderID, "", "unpaid")
 
-	paid := payDockerBuyerOrder(t, user, buyerToken, created.OrderID)
+	paid := payDockerBuyerOrder(t, user, buyerToken, created.OrderID, adminFixture.PaymentTypeID)
 	require.Equal(t, "paid", paid.PaymentStatus)
 	requireDockerOrderEvent(t, user, buyerWS, created.OrderID, "", "paid")
 
-	cancelled := createDockerBuyerOrder(t, user, buyerToken, productID)
+	cancelled := createDockerBuyerOrder(t, user, buyerToken, supplierFixture.ProductID)
 	waitDockerOrderVisible(t, user, buyerToken, cancelled.OrderID)
+	requireDockerOrderEvent(t, user, buyerWS, cancelled.OrderID, "", "unpaid")
 	cancelled = cancelDockerBuyerOrder(t, user, buyerToken, cancelled.OrderID)
 	require.Equal(t, "cancelled", cancelled.OrderStatus)
 	requireDockerOrderEvent(t, user, buyerWS, cancelled.OrderID, "cancelled", "")

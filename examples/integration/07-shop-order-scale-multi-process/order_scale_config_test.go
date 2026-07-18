@@ -31,7 +31,9 @@ func TestDiscoveryProviderComesFromConfig(t *testing.T) {
 	require.Equal(t, "local", local.Cluster.Provider)
 	require.Equal(t, "redis", distributed.Cluster.Provider)
 	require.Equal(t, "insecure", local.Transport.GRPC.Security.Mode)
-	require.Equal(t, "insecure", distributed.Transport.GRPC.Security.Mode)
+	require.Equal(t, "mesh", distributed.Transport.GRPC.Security.Mode)
+	require.Equal(t, "127.0.0.1:6379", distributed.Cluster.Providers.Redis.Addr)
+	require.Equal(t, "127.0.0.1:6379", distributed.MQ.RedisStream.Addr)
 }
 
 // TestOrderReplicaPortsComeFromEnvironment 验证 order 副本端口可由编排环境覆盖。

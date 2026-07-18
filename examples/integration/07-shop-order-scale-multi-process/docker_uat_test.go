@@ -3,6 +3,7 @@ package shoporderscalemultiprocess
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -25,15 +26,16 @@ func TestDockerComposeOrderScaleUAT(t *testing.T) {
 	compose := startDockerOrderScaleStack(t)
 	user := &integration.Suite{BaseURL: "http://127.0.0.1:18181"}
 	supplier := &integration.Suite{BaseURL: "http://127.0.0.1:18182"}
-	waitDockerUserReady(t, user)
+	waitDockerHTTPReady(t, 18181)
+	waitDockerHTTPReady(t, 18182)
 	verifyDockerOrderReplicaDiscovery(t, compose)
 
-	adminToken := supplier.TokenFor(t, "platform-admin", 1)
-	productID := addDockerSupplierProduct(t, supplier, adminToken)
+	adminFixture := prepareDockerAdminFixture(t, supplier)
+	supplierFixture := prepareDockerSupplierFixture(t, supplier, adminFixture)
 	buyerToken := user.TokenFor(t, "720001", 0)
 	requestID := "docker-uat-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	created := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
-	retried := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
+	created := createDockerBuyerOrderWithRequest(t, user, buyerToken, supplierFixture.ProductID, requestID)
+	retried := createDockerBuyerOrderWithRequest(t, user, buyerToken, supplierFixture.ProductID, requestID)
 	require.Equal(t, created.OrderID, retried.OrderID)
 	waitDockerOrderVisible(t, user, buyerToken, created.OrderID)
 }
@@ -44,6 +46,8 @@ func startDockerOrderScaleStack(t *testing.T) string {
 	if os.Getenv("SHOP_RUN_DOCKER_UAT") != "1" {
 		t.Skip("设置 SHOP_RUN_DOCKER_UAT=1 后运行真实 Docker 多副本 UAT")
 	}
+	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
+	t.Setenv("SHOP_GRPC_CERTS_DIR", filepath.Dir(pki.CAFile))
 	compose := dockerComposeFile()
 	runCompose(t, compose, "up", "-d", "--build", "mysql", "redis", "shop-user", "shop-supplier", "shop-order-a", "shop-order-b")
 	t.Cleanup(func() { runCompose(t, compose, "down", "-v", "--remove-orphans") })
@@ -136,18 +140,23 @@ func dockerOrderNodes(compose string) ([]*cluster.NodeInfo, error) {
 	return nodes, nil
 }
 
-func waitDockerUserReady(t *testing.T, suite *integration.Suite) {
+// waitDockerHTTPReady 等待 Docker 服务 HTTP 端口就绪，不依赖任何角色业务数据。
+func waitDockerHTTPReady(t *testing.T, port int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		response, err := suite.DoJSON(http.MethodPost, "/api/shop-user/getproducts", "", map[string]interface{}{})
-		return err == nil && response.Success
-	}, 30*time.Second, 500*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 200*time.Millisecond)
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return err == nil
+	}, 30*time.Second, 300*time.Millisecond)
 }
 
-func addDockerSupplierProduct(t *testing.T, supplier *integration.Suite, adminToken string) uint {
+// addDockerSupplierProduct 使用供应商角色凭据创建供应商和商品基础资料。
+func addDockerSupplierProduct(t *testing.T, supplier *integration.Suite, supplierToken string) uint {
 	t.Helper()
 	unique := strconv.FormatInt(time.Now().UnixNano(), 10)
-	supplierResponse := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/suppliermanage/add", adminToken, map[string]interface{}{
+	supplierResponse := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/suppliermanage/add", supplierToken, map[string]interface{}{
 		"userID":      920001,
 		"code":        "docker-supplier-" + unique,
 		"name":        "07 Docker供应商",
@@ -157,7 +166,7 @@ func addDockerSupplierProduct(t *testing.T, supplier *integration.Suite, adminTo
 	require.True(t, supplierResponse.Success, supplierResponse.ErrorMessage)
 	supplierID := parseDockerManageID(t, supplierResponse.Data)
 
-	productResponse := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/add", adminToken, map[string]interface{}{
+	productResponse := supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/add", supplierToken, map[string]interface{}{
 		"supplierID": supplierID,
 		"code":       "docker-product-" + unique,
 		"name":       "07 Docker商品",
@@ -198,11 +207,11 @@ func createDockerBuyerOrderWithRequest(t *testing.T, user *integration.Suite, bu
 }
 
 // payDockerBuyerOrder 通过 user-service Private API 支付买家本人订单。
-func payDockerBuyerOrder(t *testing.T, user *integration.Suite, buyerToken string, orderID uint) orderdto.Order {
+func payDockerBuyerOrder(t *testing.T, user *integration.Suite, buyerToken string, orderID, paymentTypeID uint) orderdto.Order {
 	t.Helper()
 	response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/createpayment", buyerToken, map[string]interface{}{
 		"orderID":       orderID,
-		"paymentTypeID": 1,
+		"paymentTypeID": paymentTypeID,
 		"paymentID":     "docker-payment-" + strconv.FormatInt(time.Now().UnixNano(), 10),
 	})
 	require.True(t, response.Success, response.ErrorMessage)
@@ -261,6 +270,16 @@ func parseDockerManageID(t *testing.T, data json.RawMessage) uint {
 	}
 	if id, ok := object["id"].(float64); ok {
 		return uint(id)
+	}
+	if id, ok := object["ID"].(string); ok {
+		parsed, err := strconv.ParseUint(id, 10, 64)
+		require.NoError(t, err)
+		return uint(parsed)
+	}
+	if id, ok := object["id"].(string); ok {
+		parsed, err := strconv.ParseUint(id, 10, 64)
+		require.NoError(t, err)
+		return uint(parsed)
 	}
 	t.Fatalf("响应缺少 ID: %s", string(data))
 	return 0

@@ -255,7 +255,7 @@ func (m *MySQL) ensureValidConnection() error {
 	return nil
 }
 
-//  重建连接的方法（增强版）
+// 重建连接的方法（增强版）
 func (m *MySQL) recreateConnection() error {
 	// 清理当前连接
 	m.cleanupCurrentConnection()
@@ -413,7 +413,7 @@ func (m *MySQL) GetDB() (*gorm.DB, error) {
 	return db, nil
 }
 
-//  修复 init 方法 - 确保调用顺序正确
+// 修复 init 方法 - 确保调用顺序正确
 func (m *MySQL) init(data interface{}) error {
 	resolvedDBName, err := m.resolveDBName(data)
 	if err != nil {
@@ -797,6 +797,9 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 			t := field.Type.Elem()
 			if t.Kind() == reflect.Ptr {
 				t = t.Elem()
+			}
+			if t.Kind() != reflect.Struct {
+				return
 			}
 
 			name1 := t.Name()

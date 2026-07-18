@@ -15,7 +15,7 @@ import (
 // OrderRule 保存所有 order 实例共享的下单业务规则。
 type OrderRule struct {
 	*common.ServiceBaseModel
-	RuleCode       string          `gorm:"not null;uniqueIndex" json:"ruleCode"`
+	RuleCode       string          `gorm:"type:varchar(191);not null;uniqueIndex" json:"ruleCode"`
 	RuleName       string          `json:"ruleName"`
 	MinQuantity    int             `json:"minQuantity"`
 	MaxQuantity    int             `json:"maxQuantity"`
