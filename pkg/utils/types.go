@@ -390,7 +390,7 @@ func deepFor(stype reflect.Type, parent reflect.StructField, forfunc func(field,
 		if forfunc == nil {
 			continue
 		}
-		if !field.Anonymous && field.Type.Name() != field.Name {
+		if !field.Anonymous {
 			forfunc(field, parent, GetTypeKind(field.Type))
 		} else {
 			elemType := field.Type
