@@ -32,7 +32,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - `api/manage` 同样按 05 语义拆分：`api/manage/common` 放权限、owner、全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 和命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单/支付/投影等业务 Manage，`api/manage/audit` 放审计/身份事件；根 `api/manage` 只保留 `manage.go` 门面和路由注册入口。
 - 多服务示例中每个服务都必须拥有独立的 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 再继承本服务 `ServiceManage[T]`，每个具体 Manage 只能继承本目录的基础资料或业务基座，不能直接嵌入 `manage.ManageService[T]`。服务级权限、owner 限域、禁用主体拦截、分页、审计和日志这类横切逻辑必须写在 `common.ServiceManage[T]` 或更靠近根部的抽象基座，具体 Manage 只描述业务目标对象和业务动作，不到处重复鉴权或日志。
 - `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
-- 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
+- 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。示例 06 三进程 UAT 必须按角色拆文件：买家、供应商、管理员各自文件保存本角色功能闭环和异常权限断言，完整业务流程测试只组合这些角色步骤，不把所有角色逻辑堆在一个大测试函数里。
 - 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件；同文件出现多个 struct 只允许紧密配套的小请求/响应/测试桩，并必须保持可读。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
 
 ## 现行指南索引
