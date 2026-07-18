@@ -42,6 +42,7 @@ func TestManageAPIs(t *testing.T) {
 	t.Run("OrderManageAddNotRegistered", testOrderManageAddCommandNotRegistered)
 	t.Run("OrderManageEditNotRegistered", testOrderManageEditCommandNotRegistered)
 	t.Run("OrderManageRemoveNotRegistered", testOrderManageRemoveCommandNotRegistered)
+	t.Run("OrderManageSearchAndForeignSearch", testOrderManageSearchAndForeignSearch)
 }
 
 // testProductManageViewCommand 验证商品管理元数据可被管理员读取。
@@ -142,6 +143,64 @@ func testOrderManageSearchCommand(t *testing.T) {
 	require.True(t, response.Success, response.ErrorMessage)
 }
 
+// testOrderManageSearchAndForeignSearch 演示管理查询能力：
+// 先用订单主查询查到刚创建的订单，再用订单视图中的商品外键元数据查到对应商品。
+func testOrderManageSearchAndForeignSearch(t *testing.T) {
+	adminToken := suite.TokenFor(t, "order-query-admin", 1)
+	buyerToken := suite.TokenFor(t, "order-query-buyer", 0)
+	productName := fmt.Sprintf("订单查询商品-%d", time.Now().UnixNano())
+	product := suite.AddProduct(t, adminToken, productName, "39.90")
+	order := suite.AddOrder(t, buyerToken, product.ID, 3)
+
+	mainSearch := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/ordermanage/search", adminToken, map[string]interface{}{
+		"page": 1,
+		"size": 20,
+		"whereList": []map[string]interface{}{
+			{"name": "ID", "value": order.ID},
+		},
+	})
+	require.True(t, mainSearch.Success, mainSearch.ErrorMessage)
+	var orderTable struct {
+		Rows  []OrderDTO `json:"rows"`
+		Total int64      `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(mainSearch.Data, &orderTable), string(mainSearch.Data))
+	require.Equal(t, int64(1), orderTable.Total)
+	require.Len(t, orderTable.Rows, 1)
+	require.Equal(t, order.ID, orderTable.Rows[0].ID)
+	require.Equal(t, productName, orderTable.Rows[0].ProductName)
+
+	viewResponse := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/ordermanage/view", adminToken, nil)
+	require.True(t, viewResponse.Success, viewResponse.ErrorMessage)
+	var viewModel struct {
+		Fields []map[string]interface{} `json:"fields"`
+	}
+	require.NoError(t, json.Unmarshal(viewResponse.Data, &viewModel), string(viewResponse.Data))
+	productField := fieldByName(viewModel.Fields, "productID")
+	require.NotNil(t, productField, string(viewResponse.Data))
+	require.NotNil(t, productField["foreign"], string(viewResponse.Data))
+
+	foreignSearch := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/ordermanage/search", adminToken, map[string]interface{}{
+		"page":    1,
+		"size":    20,
+		"field":   productField,
+		"foreign": productField["foreign"],
+		"whereList": []map[string]interface{}{
+			{"name": "ID", "value": product.ID},
+		},
+	})
+	require.True(t, foreignSearch.Success, foreignSearch.ErrorMessage)
+	var productTable struct {
+		Rows  []ProductDTO `json:"rows"`
+		Total int64        `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(foreignSearch.Data, &productTable), string(foreignSearch.Data))
+	require.Equal(t, int64(1), productTable.Total)
+	require.Len(t, productTable.Rows, 1)
+	require.Equal(t, product.ID, productTable.Rows[0].ID)
+	require.Equal(t, productName, productTable.Rows[0].Name)
+}
+
 // testOrderManageAddCommandNotRegistered 验证订单管理不暴露新增 command。
 func testOrderManageAddCommandNotRegistered(t *testing.T) {
 	assertOrderManageCommandNotRegistered(t, "add")
@@ -161,4 +220,13 @@ func assertOrderManageCommandNotRegistered(t *testing.T, command string) {
 	t.Helper()
 	response := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/ordermanage/"+command, suite.TokenFor(t, "order-readonly-admin-"+command, 1), map[string]interface{}{})
 	assert.Equal(t, http.StatusNotFound, response.HTTPStatus)
+}
+
+func fieldByName(fields []map[string]interface{}, name string) map[string]interface{} {
+	for _, field := range fields {
+		if field["field"] == name || field["porpfield"] == name {
+			return field
+		}
+	}
+	return nil
 }

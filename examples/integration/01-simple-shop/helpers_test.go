@@ -43,12 +43,13 @@ type OrderDTO struct {
 // startShopSuite 启动真实商城进程，并等待框架自动生成配置和业务路由可用。
 func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
-		BuildPackage: "./examples/01-simple-shop/main",
-		BinaryName:   "simple-shop",
-		TempPrefix:   "core-simple-shop-",
-		ServiceCount: 2,
-		ServiceIndex: 1,
-		Arguments:    []string{"-view", "0"},
+		BuildPackage:     "./examples/01-simple-shop/main",
+		BinaryName:       "simple-shop",
+		TempPrefix:       "core-simple-shop-",
+		ServiceCount:     2,
+		ServiceIndex:     1,
+		GRPCServiceCount: 2,
+		Arguments:        []string{"-view", "0"},
 	})
 	if err != nil {
 		return nil, err

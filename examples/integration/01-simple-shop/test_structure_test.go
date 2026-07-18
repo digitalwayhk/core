@@ -35,6 +35,7 @@ func TestAPIsHaveIndependentTestMethods(t *testing.T) {
 			"testProductManageRemoveCommand",
 			"testOrderManageViewCommand",
 			"testOrderManageSearchCommand",
+			"testOrderManageSearchAndForeignSearch",
 			"testOrderManageAddCommandNotRegistered",
 			"testOrderManageEditCommandNotRegistered",
 			"testOrderManageRemoveCommandNotRegistered",

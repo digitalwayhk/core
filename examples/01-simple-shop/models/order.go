@@ -16,6 +16,7 @@ import (
 type Order struct {
 	*entity.Model
 	ProductID   uint            `json:"productID" desc:"商品 ID"`
+	Product     *Product        `json:"product,omitempty" gorm:"-"`
 	ProductName string          `json:"productName" desc:"商品名称快照"`
 	UnitPrice   decimal.Decimal `json:"unitPrice" desc:"商品单价快照"`
 	Quantity    int             `json:"quantity" desc:"购买数量"`
