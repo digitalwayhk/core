@@ -51,6 +51,15 @@ const (
 
 	// PaymentStatusPaid 表示订单已支付。
 	PaymentStatusPaid = transaction.PaymentStatusPaid
+
+	// PendingStatusAccepted 表示 pending 已可靠接收。
+	PendingStatusAccepted = transaction.PendingStatusAccepted
+
+	// PendingStatusSynced 表示 pending 已同步成功。
+	PendingStatusSynced = transaction.PendingStatusSynced
+
+	// PendingStatusFailed 表示 pending 最近一次同步失败。
+	PendingStatusFailed = transaction.PendingStatusFailed
 )
 
 var (
@@ -80,6 +89,18 @@ var (
 
 	// NewLocalPendingOrder 创建本地 pending 订单模型。
 	NewLocalPendingOrder = transaction.NewLocalPendingOrder
+
+	// FindLocalPendingByRequest 按 UserID + requestID 查询本地 pending。
+	FindLocalPendingByRequest = transaction.FindLocalPendingByRequest
+
+	// PendingLocalOrders 读取待同步本地 pending。
+	PendingLocalOrders = transaction.PendingLocalOrders
+
+	// MarkPendingSyncedWith 标记本地 pending 已同步。
+	MarkPendingSyncedWith = transaction.MarkPendingSyncedWith
+
+	// MarkPendingFailedWith 标记本地 pending 同步失败。
+	MarkPendingFailedWith = transaction.MarkPendingFailedWith
 
 	// NewOutbox 创建本地 Outbox 模型。
 	NewOutbox = transaction.NewOutbox

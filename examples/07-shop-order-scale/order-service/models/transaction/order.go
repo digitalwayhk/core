@@ -17,7 +17,7 @@ import (
 type Order struct {
 	*common.RuntimeStampedModel
 	RequestID          string          `gorm:"not null;index:idx_order_request,unique" json:"requestID"`
-	RequestFingerprint string          `gorm:"not null" json:"-"`
+	RequestFingerprint string          `gorm:"not null" json:"requestFingerprint"`
 	OrderRevision      uint64          `gorm:"not null" json:"orderRevision"`
 	UserID             uint            `gorm:"not null;index:idx_order_request,unique;index" json:"userID"`
 	SupplierID         uint            `gorm:"not null;index" json:"supplierID"`
