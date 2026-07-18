@@ -16,6 +16,7 @@ import (
 	userdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/user"
 	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,6 +195,61 @@ func createDockerBuyerOrderWithRequest(t *testing.T, user *integration.Suite, bu
 	require.NoError(t, json.Unmarshal(response.Data, &order))
 	require.NotZero(t, order.OrderID)
 	return order
+}
+
+// payDockerBuyerOrder 通过 user-service Private API 支付买家本人订单。
+func payDockerBuyerOrder(t *testing.T, user *integration.Suite, buyerToken string, orderID uint) orderdto.Order {
+	t.Helper()
+	response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/createpayment", buyerToken, map[string]interface{}{
+		"orderID":       orderID,
+		"paymentTypeID": 1,
+		"paymentID":     "docker-payment-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	require.True(t, response.Success, response.ErrorMessage)
+	var order orderdto.Order
+	require.NoError(t, json.Unmarshal(response.Data, &order))
+	require.Equal(t, orderID, order.OrderID)
+	return order
+}
+
+// cancelDockerBuyerOrder 通过 user-service Private API 撤销买家本人订单。
+func cancelDockerBuyerOrder(t *testing.T, user *integration.Suite, buyerToken string, orderID uint) orderdto.Order {
+	t.Helper()
+	response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/cancelorder", buyerToken, map[string]interface{}{
+		"orderID": orderID,
+	})
+	require.True(t, response.Success, response.ErrorMessage)
+	var order orderdto.Order
+	require.NoError(t, json.Unmarshal(response.Data, &order))
+	require.Equal(t, orderID, order.OrderID)
+	return order
+}
+
+// connectDockerBuyerOrdersWebSocket 登录并订阅 Docker user-service 买家订单 WebSocket。
+func connectDockerBuyerOrdersWebSocket(t *testing.T, user *integration.Suite, token string) *websocket.Conn {
+	t.Helper()
+	connection, _, err := websocket.DefaultDialer.Dial(user.WebSocketURL, nil)
+	require.NoError(t, err)
+	user.WriteWebSocket(t, connection, "sub", "logon", map[string]string{"token": token})
+	require.Equal(t, "success", user.ReadWebSocket(t, connection, 3*time.Second).Event)
+	user.WriteWebSocket(t, connection, "sub", "/api/shop-user/getorders", map[string]interface{}{"page": 1, "size": 20})
+	require.Equal(t, "sub", user.ReadWebSocket(t, connection, 3*time.Second).Event)
+	return connection
+}
+
+// requireDockerOrderEvent 读取并校验买家订单 WebSocket 事件。
+func requireDockerOrderEvent(t *testing.T, user *integration.Suite, connection *websocket.Conn, orderID uint, orderStatus, paymentStatus string) {
+	t.Helper()
+	message := user.ReadWebSocket(t, connection, 8*time.Second)
+	var event orderdto.OrderChanged
+	require.NoError(t, json.Unmarshal(message.Data, &event))
+	require.Equal(t, orderID, event.OrderID)
+	if strings.TrimSpace(orderStatus) != "" {
+		require.Equal(t, orderStatus, event.OrderStatus)
+	}
+	if strings.TrimSpace(paymentStatus) != "" {
+		require.Equal(t, paymentStatus, event.PaymentStatus)
+	}
 }
 
 func parseDockerManageID(t *testing.T, data json.RawMessage) uint {
