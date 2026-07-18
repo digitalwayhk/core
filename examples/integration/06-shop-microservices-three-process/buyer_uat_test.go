@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"testing"
 	"time"
 
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
@@ -19,6 +20,22 @@ type threeProcessBuyerRole struct {
 	token       string
 	otherToken  string
 	address     userdto.Address
+}
+
+// TestThreeProcessUATBuyerRoleFlow 验证买家角色可独立完成资料维护、下单、发起支付和本人订单查询闭环。
+func TestThreeProcessUATBuyerRoleFlow(t *testing.T) {
+	scenario := startThreeProcessUAT(t)
+
+	buyer := scenario.completeBuyerProfile()
+	supplier := scenario.publishSupplierProduct()
+	paymentType := scenario.configurePaymentType()
+
+	created := scenario.buyerCreatesOrder(buyer, supplier)
+	payment := scenario.buyerCreatesPayment(buyer, created, paymentType)
+	assertPaymentBelongsToOrder(t, payment, created)
+
+	scenario.assertBuyerCanSeeOwnOrder(buyer, created)
+	scenario.assertOtherBuyerCannotSeeOrder(buyer, created)
 }
 
 // completeBuyerProfile 准备买家 Manage 与 Private token，并完成用户资料和地址维护。

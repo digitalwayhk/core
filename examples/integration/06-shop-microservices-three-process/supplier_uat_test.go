@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"testing"
 	"time"
 
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
@@ -20,6 +21,18 @@ type threeProcessSupplierRole struct {
 	token      string
 	otherToken string
 	product    supplierdto.Product
+}
+
+// TestThreeProcessUATSupplierRoleFlow 验证供应商角色可独立完成商品上架、订单投影查询和其他供应商隔离闭环。
+func TestThreeProcessUATSupplierRoleFlow(t *testing.T) {
+	scenario := startThreeProcessUAT(t)
+
+	buyer := scenario.completeBuyerProfile()
+	supplier := scenario.publishSupplierProduct()
+	created := scenario.buyerCreatesOrder(buyer, supplier)
+
+	scenario.assertSupplierCanSeeOwnOrder(supplier, created, buyer)
+	scenario.assertOtherSupplierCannotSeeOrder(supplier, created)
 }
 
 // publishSupplierProduct 准备供应商角色 token，并完成商品创建与上架。

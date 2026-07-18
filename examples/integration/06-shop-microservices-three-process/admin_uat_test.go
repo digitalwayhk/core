@@ -19,6 +19,18 @@ type threeProcessAdminRole struct {
 	token string
 }
 
+// TestThreeProcessUATAdminRoleFlow 验证管理员角色可独立完成支付类型配置并查询全量订单事实。
+func TestThreeProcessUATAdminRoleFlow(t *testing.T) {
+	scenario := startThreeProcessUAT(t)
+
+	buyer := scenario.completeBuyerProfile()
+	supplier := scenario.publishSupplierProduct()
+	_ = scenario.configurePaymentType()
+	created := scenario.buyerCreatesOrder(buyer, supplier)
+
+	scenario.assertAdminCanSeeOrder(created, supplier, buyer)
+}
+
 // admin 构造平台管理员角色 token，代表订单服务后台管理用户。
 func (scenario *threeProcessUAT) admin() threeProcessAdminRole {
 	t := scenarioTest(scenario)
