@@ -419,7 +419,7 @@ func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
 func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.ServiceName, info.Path, recovered)
+			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.GetServiceName(), info.GetPath(), recovered)
 			err = fmt.Errorf("parse websocket call request: %v", recovered)
 			api = nil
 		}
@@ -436,7 +436,7 @@ func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) 
 func (mm *MelodyManager) parseSubscriptionRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logx.Errorf("服务%s的路由%s发生异常:ParseSubscription, error: %v", info.ServiceName, info.Path, recovered)
+			logx.Errorf("服务%s的路由%s发生异常:ParseSubscription, error: %v", info.GetServiceName(), info.GetPath(), recovered)
 			err = fmt.Errorf("parse websocket subscription request: %v", recovered)
 			api = nil
 		}

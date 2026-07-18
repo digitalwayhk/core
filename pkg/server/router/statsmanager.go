@@ -97,7 +97,7 @@ func (sm *StatsManager) GetAllStats(
 		if len(filterTypes) > 0 {
 			matched := false
 			for _, t := range filterTypes {
-				if router.PathType == t {
+				if router.GetPathType() == t {
 					matched = true
 					break
 				}
@@ -111,7 +111,7 @@ func (sm *StatsManager) GetAllStats(
 		stats.Routers = append(stats.Routers, snapshot)
 
 		// 统计路由类型
-		switch router.PathType {
+		switch router.GetPathType() {
 		case types.PublicType:
 			stats.PublicRouters++
 		case types.PrivateType:

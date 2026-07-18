@@ -50,3 +50,21 @@ func TestRouterInfoUseCacheDelegatesToManager(t *testing.T) {
 		t.Fatalf("delegate counts = enabled:%d sets:%d deletes:%d", runtime.enabled, runtime.sets, runtime.deletes)
 	}
 }
+
+func TestRouterInfoUseCacheRejectsFrozenMetadataMutation(t *testing.T) {
+	runtime := &fakeRouteCacheRuntime{}
+	info := &RouterInfo{Path: "/api/items", ServiceName: "test"}
+	info.SetCacheManager("test", runtime)
+	info.Freeze("test")
+	info.Path = "/api/changed"
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("冻结元数据被修改后 UseCache 必须 fail closed")
+		}
+		if runtime.enabled != 0 {
+			t.Fatalf("缓存运行时不应收到被篡改的路由: enabled=%d", runtime.enabled)
+		}
+	}()
+	info.UseCache(time.Second)
+}

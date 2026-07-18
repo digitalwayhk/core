@@ -9,6 +9,7 @@ import (
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
@@ -46,4 +47,18 @@ func TestRequestIgnoresCasdoorUserContext(t *testing.T) {
 	uid, username := getUserIDAndName(req, httpRequest)
 	require.Empty(t, uid)
 	require.Empty(t, username)
+}
+
+func TestRequestReadsSecretClaimsFromTypedVerifiedContext(t *testing.T) {
+	httpRequest := httptest.NewRequest("GET", "/private", nil)
+	httpRequest = httpRequest.WithContext(safe.WithVerifiedSecretClaims(
+		httpRequest.Context(), map[string]string{"api_key": "private-api-key"},
+	))
+	req := &Request{}
+
+	getRequestInfo(httpRequest, req)
+
+	value, ok := req.GetSecretClaim("api_key")
+	require.True(t, ok)
+	require.Equal(t, "private-api-key", value)
 }

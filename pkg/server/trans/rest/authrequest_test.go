@@ -113,6 +113,31 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 	require.Equal(t, []string{"hook", "router"}, calls)
 }
 
+func TestSecretClaimsOnlyUseVerifiedServerSideChannel(t *testing.T) {
+	hook := authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
+		require.Equal(t, "private-api-key", args.SecretClaims["api_key"])
+		require.NotContains(t, args.Claims, "api_key")
+		require.NotContains(t, args.Claims, "secret_args")
+		return nil
+	})
+	sc := authRequestServiceContext(hook)
+	info := authRequestRouterInfo(types.PrivateType)
+	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			require.Nil(t, request.Context().Value("api_key"))
+			require.Equal(t, "private-api-key", safe.VerifiedSecretClaimsFromContext(request.Context())["api_key"])
+		})),
+	)
+	request := authenticatedRequestWithSecret(t, sc.Config.Auth.AccessSecret, types.AuthIdentity{
+		UID: "user-1", Username: "用户一", AuthType: types.AuthTypeUser,
+	}, "api_key", "private-api-key")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
 func TestCasdoorAuthorityUnavailableRejectsProtectedRequest(t *testing.T) {
 	sc := authRequestServiceContext(authRequestHookFunc(func(context.Context, types.AuthRequestArgs) error {
 		t.Fatal("撤销权威失败时不得执行业务Hook")
@@ -287,6 +312,28 @@ func authenticatedRequest(t *testing.T, secret string, identity types.AuthIdenti
 	t.Helper()
 	now := time.Now().UTC().Add(-time.Second)
 	claims := safe.NewClaims(identity.UID, identity.Username)
+	pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
+		Claims: claims, Identity: identity, AuthType: identity.AuthType, IssuedAt: now,
+		AccessSecret: secret, AccessExpireSeconds: 3600,
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodGet, "/private/orders", nil)
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	return request
+}
+
+func authenticatedRequestWithSecret(
+	t *testing.T,
+	secret string,
+	identity types.AuthIdentity,
+	key, value string,
+) *http.Request {
+	t.Helper()
+	now := time.Now().UTC().Add(-time.Second)
+	claims := safe.NewClaims(identity.UID, identity.Username)
+	require.NoError(t, claims.ConfigureSecretData(secret, identity.AuthType))
+	require.NoError(t, claims.AddSecretData(key, value))
 	pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
 		Claims: claims, Identity: identity, AuthType: identity.AuthType, IssuedAt: now,
 		AccessSecret: secret, AccessExpireSeconds: 3600,

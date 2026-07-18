@@ -1,6 +1,7 @@
 package routecache_test
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,59 @@ func newL1Manager(t *testing.T, limit int) *routecache.Manager {
 	return manager
 }
 
+func newWeightedL1Manager(t *testing.T, maxEntries int, maxValueBytes, maxBytes int64) *routecache.Manager {
+	t.Helper()
+	cfg := config.RouteCacheConfig{
+		Mode: "local",
+		TTL:  time.Second,
+		L1: config.RouteCacheL1Config{
+			MaxEntries:    maxEntries,
+			MaxValueBytes: maxValueBytes,
+			MaxBytes:      maxBytes,
+		},
+	}
+	cfg.ApplyDefaults()
+	manager, err := routecache.NewManager("weighted-service", cfg)
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", cfg.TTL))
+	return manager
+}
+
+func TestRouteCachePureL1ReturnsSerializedValue(t *testing.T) {
+	manager := newWeightedL1Manager(t, 16, 1024, 4096)
+	require.NoError(t, manager.Set("/api/items", "same-type", map[string]string{"name": "item"}, time.Second))
+
+	value, ok, err := manager.Get("/api/items", "same-type")
+	require.NoError(t, err)
+	require.True(t, ok)
+	raw, ok := value.(json.RawMessage)
+	require.True(t, ok)
+	assert.JSONEq(t, `{"name":"item"}`, string(raw))
+}
+
+func TestRouteCacheSkipsValueLargerThanMaxValueBytes(t *testing.T) {
+	manager := newWeightedL1Manager(t, 16, 8, 4096)
+	require.NoError(t, manager.Set("/api/items", "oversized", "0123456789", time.Second))
+
+	_, ok, err := manager.Get("/api/items", "oversized")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestRouteCacheL1EvictsToMaxBytes(t *testing.T) {
+	manager := newWeightedL1Manager(t, 16, 64, 11)
+	require.NoError(t, manager.Set("/api/items", "first", "1234", time.Second))
+	require.NoError(t, manager.Set("/api/items", "second", "5678", time.Second))
+
+	_, firstExists, err := manager.Get("/api/items", "first")
+	require.NoError(t, err)
+	assert.False(t, firstExists)
+	_, secondExists, err := manager.Get("/api/items", "second")
+	require.NoError(t, err)
+	assert.True(t, secondExists)
+}
+
 func TestRouteCacheKeyUsesCacheKeyBeforeHashKey(t *testing.T) {
 	key, err := routecache.BuildKey(preferredCacheKey{})
 
@@ -61,7 +115,9 @@ func TestRouteCacheL1ExpiresAndEvicts(t *testing.T) {
 	value, ok, err := manager.Get("/api/items", "first")
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, "one", value)
+	raw, ok := value.(json.RawMessage)
+	require.True(t, ok)
+	assert.JSONEq(t, `"one"`, string(raw))
 	time.Sleep(50 * time.Millisecond)
 	_, ok, err = manager.Get("/api/items", "first")
 	require.NoError(t, err)
@@ -106,7 +162,9 @@ func TestRouteCacheSingleFlightLoadsOnce(t *testing.T) {
 		require.NoError(t, err)
 	}
 	for value := range results {
-		assert.Equal(t, "loaded", value)
+		raw, ok := value.(json.RawMessage)
+		require.True(t, ok)
+		assert.JSONEq(t, `"loaded"`, string(raw))
 	}
 }
 
@@ -149,7 +207,9 @@ func TestRouteCacheTakeBestEffortLoadsSameKeyOnce(t *testing.T) {
 		require.NoError(t, err)
 	}
 	for value := range results {
-		assert.Equal(t, "loaded", value)
+		raw, ok := value.(json.RawMessage)
+		require.True(t, ok)
+		assert.JSONEq(t, `"loaded"`, string(raw))
 	}
 }
 

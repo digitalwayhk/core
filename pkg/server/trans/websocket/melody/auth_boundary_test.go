@@ -71,17 +71,28 @@ func (h *webSocketAuthHookRecorder) OnAuthRequest(_ context.Context, args types.
 
 type webSocketAuthTestRequest struct {
 	types.IRequest
-	service string
+	service      string
+	secretClaims map[string]string
 }
 
 func (*webSocketAuthTestRequest) GetTraceId() string    { return "trace-ws" }
 func (*webSocketAuthTestRequest) GetClientIP() string   { return "198.51.100.10" }
 func (r *webSocketAuthTestRequest) ServiceName() string { return r.service }
+func (r *webSocketAuthTestRequest) SetSecretClaims(claims map[string]string) {
+	r.secretClaims = types.CloneSecretClaims(claims)
+}
+func (r *webSocketAuthTestRequest) GetSecretClaim(key string) (string, bool) {
+	value, ok := r.secretClaims[key]
+	return value, ok
+}
 
 func TestAuthenticatedSubscriptionRevalidatesTokenAndRunsRequestHook(t *testing.T) {
 	now := time.Now().UTC()
+	claims := safe.NewClaims("user-1", "用户一")
+	require.NoError(t, claims.ConfigureSecretData("websocket-access-secret", types.AuthTypeUser))
+	require.NoError(t, claims.AddSecretData("api_key", "private-api-key"))
 	pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
-		Claims: safe.NewClaims("user-1", "用户一"), Identity: types.AuthIdentity{UID: "user-1", Username: "用户一"},
+		Claims: claims, Identity: types.AuthIdentity{UID: "user-1", Username: "用户一"},
 		AuthType: types.AuthTypeUser, IssuedAt: now, AccessSecret: "websocket-access-secret", AccessExpireSeconds: 3600,
 	})
 	require.NoError(t, err)
@@ -96,7 +107,8 @@ func TestAuthenticatedSubscriptionRevalidatesTokenAndRunsRequestHook(t *testing.
 	require.NoError(t, subscriptions.Logon(&SessionRequest{Token: pair.AccessToken}))
 	info := &types.RouterInfo{Path: "/private/orders", Method: "GET", PathType: types.PrivateType, Auth: true}
 
-	verified, err := subscriptions.authorizeAuthenticatedSubscription(info, &webSocketAuthTestRequest{service: "shop"})
+	request := &webSocketAuthTestRequest{service: "shop"}
+	verified, err := subscriptions.authorizeAuthenticatedSubscription(info, request)
 
 	require.NoError(t, err)
 	require.Equal(t, "user-1", verified.UID)
@@ -104,6 +116,11 @@ func TestAuthenticatedSubscriptionRevalidatesTokenAndRunsRequestHook(t *testing.
 	require.Equal(t, "user-1", hook.args.Identity.UID)
 	require.Equal(t, "/private/orders", hook.args.Path)
 	require.Equal(t, "trace-ws", hook.args.TraceID)
+	require.Equal(t, "private-api-key", hook.args.SecretClaims["api_key"])
+	require.NotContains(t, hook.args.Claims, "secret_args")
+	secret, ok := request.GetSecretClaim("api_key")
+	require.True(t, ok)
+	require.Equal(t, "private-api-key", secret)
 
 	subscriptions.req.Token = "tampered-after-logon"
 	_, err = subscriptions.authorizeAuthenticatedSubscription(info, &webSocketAuthTestRequest{service: "shop"})

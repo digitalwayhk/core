@@ -270,15 +270,16 @@ func (h *RouteWebSocketHub) publishSubscription(info *RouterInfo, hash uint64, a
 	if h.events == nil {
 		return nil
 	}
+	path := info.GetPath()
 	payload := routeWebSocketSubscriptionEvent{
 		Service: h.service,
-		Route:   info.Path,
+		Route:   path,
 		Hash:    hash,
 		Active:  active,
 	}
 	env := event.NewEnvelope(h.service, routeWebSocketSubscriptionEventType(h.service), nil)
-	env.Subject = info.Path
-	env.ShardKey = h.service + ":" + info.Path + ":" + strconv.FormatUint(hash, 10)
+	env.Subject = path
+	env.ShardKey = h.service + ":" + path + ":" + strconv.FormatUint(hash, 10)
 	return h.events.Publish(context.Background(), event.PublishRequest{
 		Class:    event.ControlDelivery,
 		Envelope: env,

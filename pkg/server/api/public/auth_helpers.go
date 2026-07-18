@@ -197,6 +197,9 @@ func issueWithSchedule(
 	}
 
 	claims := safe.NewClaims(uid, username)
+	if err := claims.ConfigureSecretData(auth.AccessSecret, authType); err != nil {
+		return safe.TokenPairResponse{}, err
+	}
 	identity.UID = uid
 	identity.Username = username
 	identity.AuthType = authType
@@ -214,6 +217,7 @@ func issueWithSchedule(
 		RefreshExpiresAt:     refreshExpiresAt,
 		Extra:                extra,
 		Claims:               claims,
+		SecretClaims:         claims,
 		Identity:             identity,
 	}
 	if sc != nil && sc.AuthHookProvider != nil {

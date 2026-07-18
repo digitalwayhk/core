@@ -27,6 +27,17 @@ type IRequest interface {
 type IRequestHttp interface {
 	GetHttpRequest() *http.Request //获取原生http请求
 }
+
+// IRequestSecretClaims 是受保护 Router 可选实现的服务端秘密 Claim 读取契约。
+// 不将方法加入 IRequest，避免破坏既有消费方 mock 和自定义请求。
+type IRequestSecretClaims interface {
+	GetSecretClaim(key string) (string, bool)
+}
+
+// IRequestSecretClaimsSetter 仅供框架验证边界将已解密 Claim 注入当前请求。
+type IRequestSecretClaimsSetter interface {
+	SetSecretClaims(claims map[string]string)
+}
 type IRequestClear interface {
 	ClearTraceId()
 	SetPath(path string)

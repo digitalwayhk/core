@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,13 +10,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRouteCacheConfigDefaultsToOff(t *testing.T) {
+func TestRouteCacheL1ConfigExposesWeightedLimits(t *testing.T) {
+	typeOfConfig := reflect.TypeOf(config.RouteCacheL1Config{})
+	for _, field := range []string{"MaxEntries", "MaxValueBytes", "MaxBytes"} {
+		_, ok := typeOfConfig.FieldByName(field)
+		assert.Truef(t, ok, "RouteCacheL1Config 缺少字段 %s", field)
+	}
+	_, legacyLimitExists := typeOfConfig.FieldByName("Limit")
+	assert.True(t, legacyLimitExists, "Limit 必须在迁移窗口内保留兼容")
+}
+
+func TestRouteCacheConfigDefaultsToLocal(t *testing.T) {
 	cfg := config.RouteCacheConfig{}
 	cfg.ApplyDefaults()
 
-	assert.Equal(t, "off", cfg.Mode)
+	assert.Equal(t, "local", cfg.Mode)
 	assert.Equal(t, 10*time.Second, cfg.TTL)
-	assert.Greater(t, cfg.L1.Limit, 0)
+	assert.Zero(t, cfg.L1.MaxEntries, "MaxEntries=0 表示运行时自动解析")
+	assert.Greater(t, cfg.L1.MaxValueBytes, int64(0))
+	require.NoError(t, cfg.Validate())
+}
+
+func TestRouteCacheLegacyOffNormalizesToLocal(t *testing.T) {
+	cfg := config.RouteCacheConfig{Mode: "off"}
+	cfg.ApplyDefaults()
+
+	assert.Equal(t, "local", cfg.Mode)
 	require.NoError(t, cfg.Validate())
 }
 

@@ -10,6 +10,12 @@ type IClaimsMutator interface {
 	AddData(key, value string)
 }
 
+// ISecretClaimsMutator 允许认证钩子注入只能在服务端验签后读取的秘密 Claim。
+// 独立于 IClaimsMutator 以保持既有消费方实现的源码兼容。
+type ISecretClaimsMutator interface {
+	AddSecretData(key, value string) error
+}
+
 // AuthType 标识 Token 可访问的路由类型。
 type AuthType string
 
@@ -47,6 +53,7 @@ type AuthHookArgs struct {
 	RefreshExpiresAt     time.Time
 	Extra                interface{}
 	Claims               IClaimsMutator
+	SecretClaims         ISecretClaimsMutator
 	Identity             AuthIdentity
 }
 
@@ -71,14 +78,15 @@ type AuthIdentity struct {
 // AuthRequestArgs 是业务 Router 执行前传给服务授权 Hook 的不可变快照。
 // Claims 必须通过 CloneAuthClaims 构造，不能与 JWT context 共享可变 map/slice。
 type AuthRequestArgs struct {
-	Identity    AuthIdentity
-	ServiceName string
-	Path        string
-	Method      string
-	PathType    ApiType
-	ClientIP    string
-	TraceID     string
-	Claims      map[string]interface{}
+	Identity     AuthIdentity
+	ServiceName  string
+	Path         string
+	Method       string
+	PathType     ApiType
+	ClientIP     string
+	TraceID      string
+	Claims       map[string]interface{}
+	SecretClaims map[string]string
 }
 
 // CasdoorEvent 是框架验证、规范化并持久化后的身份控制事件。
@@ -115,6 +123,18 @@ func CloneAuthClaims(source map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{}, len(source))
 	for key, value := range source {
 		result[key] = cloneAuthClaimValue(value)
+	}
+	return result
+}
+
+// CloneSecretClaims 复制已验签并解密的服务端秘密 Claim。
+func CloneSecretClaims(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
 	}
 	return result
 }

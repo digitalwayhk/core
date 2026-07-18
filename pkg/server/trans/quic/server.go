@@ -48,7 +48,7 @@ func (own *Server) Stop() {
 func setupHandler(context *router.ServiceContext) http.Handler {
 	mux := http.NewServeMux()
 	for _, rou := range context.Router.GetRouters() {
-		mux.HandleFunc(rou.Path, routeHandler(context.Router))
+		mux.HandleFunc(rou.GetPath(), routeHandler(context.Router))
 	}
 	return mux
 }

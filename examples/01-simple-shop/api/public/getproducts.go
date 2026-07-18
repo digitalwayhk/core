@@ -1,6 +1,7 @@
 package public
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -52,7 +53,5 @@ func (own *GetProducts) GetResponse() interface{} {
 
 // RouterInfo 将商品查询注册为公开 GET 路由。
 func (own *GetProducts) RouterInfo() *servertypes.RouterInfo {
-	info := router.DefaultRouterInfo(own)
-	info.Method = "GET"
-	return info
+	return router.DefaultRouterInfoWithOptions(own, router.WithMethod(http.MethodGet))
 }

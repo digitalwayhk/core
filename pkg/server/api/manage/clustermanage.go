@@ -42,11 +42,11 @@ func (c *ClusterStatus) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (c *ClusterStatus) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/status"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/status"),
+		router.WithAuth(true),
+	)
 }
 
 // ---- ClusterNodes ----
@@ -80,11 +80,11 @@ func (c *ClusterNodes) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (c *ClusterNodes) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/nodes"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/nodes"),
+		router.WithAuth(true),
+	)
 }
 
 // ---- ClusterSwitchProvider ----
@@ -152,9 +152,9 @@ func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProv
 }
 
 func (c *ClusterSwitchProvider) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/switchprovider"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/switchprovider"),
+		router.WithAuth(true),
+	)
 }

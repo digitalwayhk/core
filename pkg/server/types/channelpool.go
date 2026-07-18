@@ -57,6 +57,7 @@ func (own *RouterInfo) initChannelPool() {
 	if own.channelPool != nil {
 		return
 	}
+	// 已持有 RouterInfo 写锁，直接读取注册期快照字段，避免 Getter 重入 RWMutex。
 	size := own.PoolSize
 	if size <= 0 {
 		size = defaultPoolSize()

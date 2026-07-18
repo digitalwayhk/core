@@ -46,18 +46,19 @@ type RefreshTokenIdentity struct {
 
 // AccessTokenIdentity 是从已验证 Access Token 中提取的身份。
 type AccessTokenIdentity struct {
-	UID       string
-	Username  string
-	AuthType  types.AuthType
-	IssuedAt  time.Time
-	ExpiresAt time.Time
-	Identity  types.AuthIdentity
-	Claims    map[string]interface{}
+	UID          string
+	Username     string
+	AuthType     types.AuthType
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+	Identity     types.AuthIdentity
+	Claims       map[string]interface{}
+	SecretClaims map[string]string `json:"-"`
 }
 
 var reservedTokenClaims = map[string]struct{}{
 	"uid": {}, "uname": {}, "auth_type": {}, "token_use": {}, "iat": {}, "exp": {},
-	"auth_provider": {}, "provider_subject": {}, "auth_generation": {},
+	"auth_provider": {}, "provider_subject": {}, "auth_generation": {}, "args": {}, "secret_args": {},
 }
 
 // IssueTokenPair 使用同一 IssuedAt 颁发 Access Token 和可选的 Refresh Token。
@@ -69,6 +70,9 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 	accessClaims := baseTokenClaims(req.Claims.Uid, req.Claims.Uname, req.AuthType, "access", req.IssuedAt, req.AccessExpireSeconds)
 	for key, value := range req.Claims.Args {
 		accessClaims[key] = value
+	}
+	if len(req.Claims.secretArgs) > 0 {
+		accessClaims[secretArgsClaim] = cloneStringMap(req.Claims.secretArgs)
 	}
 	addIdentityClaims(accessClaims, req.Identity)
 	accessToken, err := signMapClaims(accessClaims, req.AccessSecret)
@@ -113,6 +117,9 @@ func validateTokenIssueRequest(req TokenIssueRequest) error {
 		if _, reserved := reservedTokenClaims[key]; reserved {
 			return fmt.Errorf("认证Hook不能覆盖保留Claim %q", key)
 		}
+	}
+	if err := req.Claims.validateSecretContext(req.AccessSecret, req.AuthType); err != nil {
+		return fmt.Errorf("秘密 Claim 无效: %w", err)
 	}
 	if err := validateIssueIdentity(req); err != nil {
 		return err
@@ -229,15 +236,22 @@ func ValidateAccessToken(tokenString, secret string, expectedAuthType types.Auth
 	if err != nil {
 		return nil, fmt.Errorf("Access Token Claims 不完整: %w", err)
 	}
+	secretClaims, err := decryptSecretClaims(claims[secretArgsClaim], secret, uid, expectedAuthType)
+	if err != nil {
+		return nil, fmt.Errorf("秘密 Claim 无效: %w", err)
+	}
+	publicClaims := types.CloneAuthClaims(map[string]interface{}(claims))
+	delete(publicClaims, secretArgsClaim)
 
 	return &AccessTokenIdentity{
-		UID:       uid,
-		Username:  username,
-		AuthType:  expectedAuthType,
-		IssuedAt:  time.Unix(issuedAt, 0).UTC(),
-		ExpiresAt: time.Unix(expiresAt, 0).UTC(),
-		Identity:  identity,
-		Claims:    types.CloneAuthClaims(map[string]interface{}(claims)),
+		UID:          uid,
+		Username:     username,
+		AuthType:     expectedAuthType,
+		IssuedAt:     time.Unix(issuedAt, 0).UTC(),
+		ExpiresAt:    time.Unix(expiresAt, 0).UTC(),
+		Identity:     identity,
+		Claims:       publicClaims,
+		SecretClaims: types.CloneSecretClaims(secretClaims),
 	}, nil
 }
 
@@ -267,6 +281,9 @@ func ValidateRefreshToken(tokenString, secret string, expectedAuthType types.Aut
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("Refresh Token Claims 无效")
+	}
+	if _, exists := claims[secretArgsClaim]; exists {
+		return nil, errors.New("Refresh Token 不允许包含秘密 Claim")
 	}
 
 	uid, _ := claims["uid"].(string)

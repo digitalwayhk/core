@@ -10,6 +10,12 @@ import (
 
 type authLifecycleHooks struct{}
 
+type legacyClaimsMutator struct{}
+
+func (*legacyClaimsMutator) AddData(string, string) {}
+
+var _ IClaimsMutator = (*legacyClaimsMutator)(nil)
+
 func (*authLifecycleHooks) OnAuth(context.Context, *AuthHookArgs) error { return nil }
 
 func (*authLifecycleHooks) OnAuthRequest(context.Context, AuthRequestArgs) error { return nil }
@@ -24,6 +30,11 @@ func TestAuthLifecycleHookContractsCanBeImplementedTogether(t *testing.T) {
 	require.True(t, issueOK)
 	require.True(t, requestOK)
 	require.True(t, eventOK)
+}
+
+func TestSecretClaimsUseOptionalCompatibleContract(t *testing.T) {
+	var args AuthHookArgs
+	require.Nil(t, args.SecretClaims)
 }
 
 func TestCloneAuthClaimsDoesNotShareNestedMutableValues(t *testing.T) {

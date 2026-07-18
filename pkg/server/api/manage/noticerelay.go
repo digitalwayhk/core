@@ -44,11 +44,11 @@ func (f *ForwardNotice) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (f *ForwardNotice) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(f)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/ws/notice"
-	info.Auth = false // peer-to-peer, authenticated by network ACL
-	return info
+	return router.DefaultRouterInfoWithOptions(f,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/ws/notice"),
+		router.WithAuth(false), // peer-to-peer, authenticated by network ACL
+	)
 }
 
 // ---- SyncSubscription ----
@@ -83,9 +83,9 @@ func (s *SyncSubscription) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (s *SyncSubscription) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(s)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/ws/subscription"
-	info.Auth = false
-	return info
+	return router.DefaultRouterInfoWithOptions(s,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/ws/subscription"),
+		router.WithAuth(false),
+	)
 }

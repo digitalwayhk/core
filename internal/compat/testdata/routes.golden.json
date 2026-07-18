@@ -11,6 +11,9 @@
     "method": "GET",
     "path": "/api/fixture/getthing",
     "pathType": "public",
-    "auth": false
+    "auth": false,
+    "internalCallers": [
+      "shop-user"
+    ]
   }
 ]

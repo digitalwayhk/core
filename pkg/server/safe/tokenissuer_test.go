@@ -1,6 +1,7 @@
 package safe
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -41,6 +42,81 @@ func TestIssueTokenPairSeparatesAccessAndRefreshClaims(t *testing.T) {
 	require.EqualValues(t, now.Add(7200*time.Second).Unix(), access["exp"])
 	require.EqualValues(t, now.Unix(), refresh["iat"])
 	require.EqualValues(t, now.Add(2592000*time.Second).Unix(), refresh["exp"])
+}
+
+func TestIssueTokenPairEncryptsSecretClaimsWithAccessDomainSecret(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	claims := NewClaims("user-1", "用户一")
+	require.NoError(t, claims.ConfigureSecretData("access-secret", types.AuthTypeUser))
+	require.NoError(t, claims.AddSecretData("api_key", "private-api-key"))
+
+	pair, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeUser, IssuedAt: now,
+		AccessSecret: "access-secret", AccessExpireSeconds: 3600,
+		RefreshSecret: "refresh-secret", RefreshExpireSeconds: 7200, IssueRefresh: true,
+	})
+	require.NoError(t, err)
+
+	rawAccess := parseTokenClaims(t, pair.AccessToken, "access-secret")
+	require.NotContains(t, string(mustJSON(t, rawAccess)), "private-api-key")
+	require.Contains(t, rawAccess, "secret_args")
+	require.NotContains(t, parseTokenClaims(t, pair.RefreshToken, "refresh-secret"), "secret_args")
+
+	verified, err := ValidateAccessToken(pair.AccessToken, "access-secret", types.AuthTypeUser, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, "private-api-key", verified.SecretClaims["api_key"])
+	require.NotContains(t, verified.Claims, "secret_args")
+}
+
+func TestIssueTokenPairRejectsSecretClaimsConfiguredForAnotherDomain(t *testing.T) {
+	claims := NewClaims("user-1", "用户一")
+	require.NoError(t, claims.ConfigureSecretData("auth-access-secret", types.AuthTypeUser))
+	require.NoError(t, claims.AddSecretData("api_key", "private-api-key"))
+
+	_, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeManage, IssuedAt: time.Now().UTC(),
+		AccessSecret: "manage-access-secret", AccessExpireSeconds: 3600,
+	})
+	require.ErrorContains(t, err, "秘密 Claim")
+}
+
+func TestIssueTokenPairRejectsIgnoredSecretClaimError(t *testing.T) {
+	claims := NewClaims("user-1", "用户一")
+	_ = claims.AddSecretData("api_key", "private-api-key")
+
+	_, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeUser, IssuedAt: time.Now().UTC(),
+		AccessSecret: "access-secret", AccessExpireSeconds: 3600,
+	})
+	require.ErrorContains(t, err, "秘密 Claim")
+	_, err = claims.GetToken("access-secret", 3600)
+	require.ErrorContains(t, err, "秘密 Claim")
+}
+
+func TestValidateAccessTokenRejectsTamperedSecretClaim(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	claims := NewClaims("user-1", "用户一")
+	require.NoError(t, claims.ConfigureSecretData("access-secret", types.AuthTypeUser))
+	require.NoError(t, claims.AddSecretData("api_key", "private-api-key"))
+	pair, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeUser, IssuedAt: now,
+		AccessSecret: "access-secret", AccessExpireSeconds: 3600,
+	})
+	require.NoError(t, err)
+	raw := parseTokenClaims(t, pair.AccessToken, "access-secret")
+	secretArgs := raw["secret_args"].(map[string]interface{})
+	secretArgs["api_key"] = secretArgs["api_key"].(string) + "x"
+	tampered := signTokenClaims(t, "access-secret", raw)
+
+	_, err = ValidateAccessToken(tampered, "access-secret", types.AuthTypeUser, now.Add(time.Minute))
+	require.ErrorContains(t, err, "秘密 Claim")
+}
+
+func mustJSON(t *testing.T, value interface{}) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return data
 }
 
 func TestIssueTokenPairCarriesCasdoorIdentityInBothTokens(t *testing.T) {

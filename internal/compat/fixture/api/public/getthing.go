@@ -18,7 +18,9 @@ func (r *GetThing) Do(types.IRequest) (interface{}, error) {
 }
 func (r *GetThing) GetResponse() interface{} { return map[string]string{"status": "ok"} }
 func (r *GetThing) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(r)
-	info.Method = http.MethodGet
-	return info
+	return router.DefaultRouterInfoWithOptions(
+		r,
+		router.WithMethod(http.MethodGet),
+		router.WithInternalCallers("shop-user"),
+	)
 }

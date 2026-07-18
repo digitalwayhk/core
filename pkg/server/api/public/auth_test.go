@@ -2,6 +2,7 @@ package public
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/authstate"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
@@ -36,7 +38,10 @@ func (h *authHookRecorder) OnAuth(_ context.Context, args *types.AuthHookArgs) e
 
 func TestIssueForServiceCallsHookBeforeSigning(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0).UTC()
-	hook := &authHookRecorder{}
+	hook := &authHookRecorder{mutate: func(args *types.AuthHookArgs) {
+		require.NotNil(t, args.SecretClaims)
+		require.NoError(t, args.SecretClaims.AddSecretData("api_key", "private-api-key"))
+	}}
 	sc := authTestServiceContext(hook)
 	extra := struct{ Provider string }{Provider: "casdoor"}
 
@@ -58,7 +63,13 @@ func TestIssueForServiceCallsHookBeforeSigning(t *testing.T) {
 	access := decodeAuthToken(t, pair.AccessToken, "auth-access")
 	refresh := decodeAuthToken(t, pair.RefreshToken, "auth-refresh")
 	require.Equal(t, "gold", access["shop_level"])
+	require.NotContains(t, string(mustMarshalAuthValue(t, access)), "private-api-key")
 	require.NotContains(t, refresh, "shop_level")
+	require.NotContains(t, refresh, "secret_args")
+	verified, err := safe.ValidateAccessToken(pair.AccessToken, "auth-access", types.AuthTypeUser, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, "private-api-key", verified.SecretClaims["api_key"])
+	require.NotContains(t, verified.Claims, "secret_args")
 }
 
 func TestIssueForServiceCarriesCasdoorIdentityToHookAndTokens(t *testing.T) {
@@ -282,4 +293,11 @@ func decodeAuthToken(t *testing.T, tokenString, secret string) jwt.MapClaims {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	require.True(t, ok)
 	return claims
+}
+
+func mustMarshalAuthValue(t *testing.T, value interface{}) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return data
 }

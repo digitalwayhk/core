@@ -134,6 +134,29 @@ func TestRouteCachePromotesL2HitToL1(t *testing.T) {
 	assert.JSONEq(t, `{"value":1}`, string(value.(json.RawMessage)))
 }
 
+func TestRouteCacheOversizedValueDoesNotReachL2(t *testing.T) {
+	cfg := config.RouteCacheConfig{
+		Mode: "local",
+		TTL:  time.Minute,
+		L1: config.RouteCacheL1Config{
+			MaxEntries:    16,
+			MaxValueBytes: 8,
+			MaxBytes:      4096,
+		},
+		L2: testBadgerL2Config(t.TempDir()),
+	}
+	cfg.ApplyDefaults()
+	manager, err := NewManager("oversized-service", cfg)
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	require.NoError(t, manager.EnableRoute("/api/items", time.Minute))
+	require.NoError(t, manager.Set("/api/items", "oversized", "0123456789", time.Minute))
+
+	_, ok, err := manager.Get("/api/items", "oversized")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
 func TestBadgerL2CloseHonorsContextFreeLifecycle(t *testing.T) {
 	l2, err := NewBadgerL2(testBadgerL2Config(t.TempDir()))
 	require.NoError(t, err)

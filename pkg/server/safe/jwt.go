@@ -5,34 +5,35 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type Claims struct {
-	Uid        string            `json:"userid"`
-	Uname      string            `json:"username"`
-	Args       map[string]string `json:"args"`
-	EncryptKey string            `json:"-"`
+	Uid         string            `json:"userid"`
+	Uname       string            `json:"username"`
+	Args        map[string]string `json:"args"`
+	EncryptKey  string            `json:"-"`
+	secretArgs  map[string]string
+	secretKey   []byte
+	secretType  types.AuthType
+	secretErr   error
+	secretSizes map[string]int
 }
 
 func NewClaims(userId string, username string) *Claims {
-	uuid := uuid.New().String()
 	return &Claims{
 		Uid:   userId,
 		Uname: username,
 		Args:  make(map[string]string),
-		//生成个随机安全值
-		EncryptKey: uuid,
+		// EncryptKey 仅保留旧对象内加解密兼容，不用于 Token 秘密 Claim。
+		EncryptKey: uuid.NewString(),
 	}
 }
 func (own *Claims) SetEncryptKey(key string) *Claims {
@@ -43,29 +44,13 @@ func (own *Claims) AddData(key string, value string) {
 	if own.Args == nil {
 		own.Args = make(map[string]string)
 	}
-	nv := value
-	if isSensitiveKey(key) {
-		var err error
-		nv, err = utils.EncryptAES(nv, own.EncryptKey)
-		if err != nil {
-			logx.Errorf("加密失败: %v", err)
-		}
-	}
-	own.Args[key] = nv
+	own.Args[key] = value
 }
 func (own *Claims) GetData(key string) (string, error) {
 	if own.Args == nil {
 		return "", errors.New("无数据")
 	}
 	if value, exists := own.Args[key]; exists {
-		if isSensitiveKey(key) {
-			var err error
-			value, err = utils.DecryptAES(value, own.EncryptKey)
-			if err != nil {
-				logx.Errorf("解密失败: %v", err)
-				return "", err
-			}
-		}
 		return value, nil
 	}
 	return "", errors.New("未找到数据")
@@ -74,6 +59,12 @@ func (own *Claims) GetData(key string) (string, error) {
 // GetToken 保留用于源代码兼容；新代码应使用 IssueTokenPair 生成带用途隔离的 Token。
 // Deprecated: 使用 IssueTokenPair。
 func (own *Claims) GetToken(secret string, expire int64) (string, error) {
+	if own == nil {
+		return "", errors.New("Claims 不能为空")
+	}
+	if own.secretErr != nil {
+		return "", fmt.Errorf("秘密 Claim 无效: %w", own.secretErr)
+	}
 	iat := time.Now().Unix()
 	claims := make(jwt.MapClaims)
 	claims["exp"] = iat + expire
@@ -85,20 +76,15 @@ func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 			claims[k] = v
 		}
 	}
+	if len(own.secretArgs) > 0 {
+		if err := own.validateSecretContext(secret, own.secretType); err != nil {
+			return "", fmt.Errorf("秘密 Claim 无效: %w", err)
+		}
+		claims[secretArgsClaim] = cloneStringMap(own.secretArgs)
+	}
 	token := jwt.New(jwt.SigningMethodHS256)
 	token.Claims = claims
 	return token.SignedString([]byte(secret))
-}
-
-// 判断是否为敏感字段
-func isSensitiveKey(key string) bool {
-	sensitiveKeys := []string{"email", "phone", "real", "card", "id", "name"}
-	for _, sensitive := range sensitiveKeys {
-		if strings.Contains(key, sensitive) {
-			return true
-		}
-	}
-	return false
 }
 
 // ValidateJWTToken 保留为最终用户 Access Token 的兼容包装。

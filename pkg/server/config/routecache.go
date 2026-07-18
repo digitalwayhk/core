@@ -6,7 +6,7 @@ import (
 )
 
 type RouteCacheConfig struct {
-	Mode  string                `json:",optional"` // off | local | shared
+	Mode  string                `json:",optional"` // local | shared; 旧 off 会兼容为 local
 	TTL   time.Duration         `json:",optional"`
 	L1    RouteCacheL1Config    `json:",optional"`
 	L2    RouteCacheL2Config    `json:",optional"`
@@ -14,7 +14,11 @@ type RouteCacheConfig struct {
 }
 
 type RouteCacheL1Config struct {
-	Limit int `json:",optional"`
+	// Limit 是 MaxEntries 的兼容字段，新配置应使用 MaxEntries。
+	Limit         int   `json:",optional"`
+	MaxEntries    int   `json:",optional"`
+	MaxValueBytes int64 `json:",optional"`
+	MaxBytes      int64 `json:",optional"`
 }
 
 type RouteCacheL2Config struct {
@@ -34,13 +38,21 @@ type RouteCacheRedisConfig struct {
 
 func (c *RouteCacheConfig) ApplyDefaults() {
 	if c.Mode == "" {
-		c.Mode = "off"
+		c.Mode = "local"
+	}
+	if c.Mode == "off" {
+		c.Mode = "local"
 	}
 	if c.TTL <= 0 {
 		c.TTL = 10 * time.Second
 	}
-	if c.L1.Limit <= 0 {
-		c.L1.Limit = 10000
+	if c.L1.MaxEntries <= 0 {
+		if c.L1.Limit > 0 {
+			c.L1.MaxEntries = c.L1.Limit
+		}
+	}
+	if c.L1.MaxValueBytes <= 0 {
+		c.L1.MaxValueBytes = 1 << 20
 	}
 	if c.L2.MaxBytes <= 0 {
 		c.L2.MaxBytes = 512 << 20
@@ -58,15 +70,24 @@ func (c *RouteCacheConfig) ApplyDefaults() {
 
 func (c *RouteCacheConfig) Validate() error {
 	switch c.Mode {
-	case "off", "local", "shared":
+	case "local", "shared":
 	default:
-		return errors.New("routeCache.mode must be one of: off, local, shared")
+		return errors.New("routeCache.mode must be one of: local, shared")
 	}
 	if c.TTL <= 0 {
 		return errors.New("routeCache.ttl must be positive")
 	}
-	if c.L1.Limit <= 0 {
-		return errors.New("routeCache.l1.limit must be positive")
+	if c.L1.Limit < 0 {
+		return errors.New("routeCache.l1.limit must not be negative")
+	}
+	if c.L1.MaxEntries < 0 {
+		return errors.New("routeCache.l1.maxEntries must not be negative")
+	}
+	if c.L1.MaxValueBytes <= 0 {
+		return errors.New("routeCache.l1.maxValueBytes must be positive")
+	}
+	if c.L1.MaxBytes < 0 {
+		return errors.New("routeCache.l1.maxBytes must not be negative")
 	}
 	if c.L2.MaxBytes <= 0 {
 		return errors.New("routeCache.l2.maxBytes must be positive")

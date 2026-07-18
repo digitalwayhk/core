@@ -144,6 +144,9 @@
         ],
         "tags": [
           "fixture"
+        ],
+        "x-internal-callers": [
+          "shop-user"
         ]
       }
     }

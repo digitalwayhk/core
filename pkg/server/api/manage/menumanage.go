@@ -103,16 +103,18 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 		}
 		data := sc.Router.GetTypeRouters(types.ApiType(types.ManageType))
 		for _, info := range data {
-			if info.Path == "" {
+			path := info.GetPath()
+			instanceName := info.GetInstanceName()
+			if path == "" {
 				continue
 			}
 			item := getMenuModel(info, items)
 			if item == nil {
 				item = smodels.NewMenuModel()
-				item.Name = info.InstanceName
+				item.Name = instanceName
 				name := strings.ToLower(item.Name)
-				endIndex := strings.Index(info.Path, name)
-				item.Url = info.Path[0:endIndex] + name
+				endIndex := strings.Index(path, name)
+				item.Url = path[0:endIndex] + name
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
 				if err != nil {
@@ -134,13 +136,13 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 				}
 				items = append(items, item)
 			}
-			cmds := strings.Split(info.Path, "/")
+			cmds := strings.Split(path, "/")
 			if len(cmds) > 0 {
 				cmd := cmds[len(cmds)-1]
 				if cmd != "" {
 					npm := smodels.NewPermissionsModel()
 					npm.Name = cmd
-					npm.Url = info.Path
+					npm.Url = path
 					item.Permissions = append(item.Permissions, npm)
 				}
 			}
@@ -160,11 +162,13 @@ func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceC
 }
 
 func getMenuModel(info *types.RouterInfo, items []*smodels.MenuModel) *smodels.MenuModel {
-	name := strings.ToLower(info.InstanceName)
-	endIndex := strings.Index(info.Path, name)
-	url := info.Path[0:endIndex] + name
+	instanceName := info.GetInstanceName()
+	path := info.GetPath()
+	name := strings.ToLower(instanceName)
+	endIndex := strings.Index(path, name)
+	url := path[0:endIndex] + name
 	for _, item := range items {
-		if item.Name == info.InstanceName && item.Url == url {
+		if item.Name == instanceName && item.Url == url {
 			return item
 		}
 	}

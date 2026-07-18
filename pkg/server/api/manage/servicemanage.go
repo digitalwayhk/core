@@ -269,7 +269,7 @@ func getchilddata(sc *router.ServiceContext, req types.IRequest, cm *view.ViewCh
 				Model:       entity.NewModel(),
 				ServiceName: an,
 				RouterPath:  c,
-				RouterType:  ri.PathType,
+				RouterType:  ri.GetPathType(),
 			}
 			callrou = append(callrou, cr)
 		}

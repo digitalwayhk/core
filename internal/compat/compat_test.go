@@ -43,14 +43,15 @@ func newFixtureServiceRouter(name string, port int, specs ...RouteEntry) *router
 	for _, spec := range specs {
 		api := &fixtureRouter{}
 		api.info = &types.RouterInfo{
-			Path:         spec.Path,
-			Method:       spec.Method,
-			Auth:         spec.Auth,
-			ServiceName:  spec.Service,
-			PathType:     types.ApiType(spec.PathType),
-			StructName:   "fixtureRouter",
-			InstanceName: "fixtureRouter",
-			Subscriber:   make(map[types.ObserveState]map[string]*types.ObserveArgs),
+			Path:            spec.Path,
+			Method:          spec.Method,
+			Auth:            spec.Auth,
+			ServiceName:     spec.Service,
+			PathType:        types.ApiType(spec.PathType),
+			InternalCallers: append([]string(nil), spec.InternalCallers...),
+			StructName:      "fixtureRouter",
+			InstanceName:    "fixtureRouter",
+			Subscriber:      make(map[types.ObserveState]map[string]*types.ObserveArgs),
 		}
 		api.info.SetInstance(api)
 		routers = append(routers, api)
@@ -84,6 +85,9 @@ func TestRouteSnapshotIsSortedAndMatchesGolden(t *testing.T) {
 
 	got, err := SnapshotRoutes(sr)
 	require.NoError(t, err)
+	require.Contains(t, string(got), `"internalCallers": [
+      "shop-user"
+    ]`)
 	requireGolden(t, "routes.golden.json", got)
 }
 
@@ -116,6 +120,8 @@ func TestOpenAPISnapshotIgnoresRuntimeHostAndPort(t *testing.T) {
 	privateOperation := paths["/api/fixture/creatething"].(map[string]interface{})["post"].(map[string]interface{})
 	require.NotEmpty(t, privateOperation["security"])
 	require.NotEmpty(t, privateOperation["requestBody"])
+	publicOperation := paths["/api/fixture/getthing"].(map[string]interface{})["get"].(map[string]interface{})
+	require.Equal(t, []interface{}{"shop-user"}, publicOperation["x-internal-callers"])
 }
 
 func TestOpenAPISnapshotRejectsMethodPathConflict(t *testing.T) {

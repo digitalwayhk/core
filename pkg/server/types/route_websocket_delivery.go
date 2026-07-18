@@ -39,15 +39,16 @@ func (h *RouteWebSocketHub) publishNotice(info *RouterInfo, hash uint64, message
 		h.enqueueDelivery(routeWebSocketDelivery{info: info, hash: hash, message: message})
 		return
 	}
+	path := info.GetPath()
 	payload := routeWebSocketNoticeEvent{
 		Service: h.service,
-		Route:   info.Path,
+		Route:   path,
 		Hash:    hash,
 		Forward: forward,
 	}
 	env := event.NewEnvelope(h.service, routeWebSocketNoticeEventType(h.service), nil)
-	env.Subject = info.Path
-	env.ShardKey = h.service + ":" + info.Path + ":" + strconv.FormatUint(hash, 10)
+	env.Subject = path
+	env.ShardKey = h.service + ":" + path + ":" + strconv.FormatUint(hash, 10)
 	h.pendingNotices.Store(env.ID, routeWebSocketPendingNotice{info: info, message: message, forward: forward})
 	err := h.events.Publish(context.Background(), event.PublishRequest{
 		Class:    event.ControlDelivery,
@@ -60,7 +61,7 @@ func (h *RouteWebSocketHub) publishNotice(info *RouterInfo, hash uint64, message
 		h.pendingNotices.Delete(env.ID)
 		logx.Errorw("websocket_notice_publish_failed",
 			logx.Field("service", h.service),
-			logx.Field("route", info.Path),
+			logx.Field("route", path),
 			logx.Field("hash", hash),
 			logx.Field("error", err),
 		)
@@ -83,7 +84,7 @@ func (h *RouteWebSocketHub) handleNoticeEvent(env *event.Envelope) {
 	})
 	if pending.forward {
 		if forwarder := GetCrossNodeForwarderForService(h.service); forwarder != nil {
-			forwarder.ForwardNotice(context.Background(), pending.info.Path, routeWebSocketHashFromEnvelope(env), pending.message)
+			forwarder.ForwardNotice(context.Background(), pending.info.GetPath(), routeWebSocketHashFromEnvelope(env), pending.message)
 		}
 	}
 }
@@ -166,7 +167,7 @@ func (h *RouteWebSocketHub) deliver(delivery routeWebSocketDelivery) {
 func (h *RouteWebSocketHub) sendPrepared(info *RouterInfo, hash uint64, clients []IWebSocket, data interface{}) {
 	eventName := strconv.FormatUint(hash, 10)
 	for _, client := range clients {
-		if sendWebSocket(client, eventName, info.Path, data) {
+		if sendWebSocket(client, eventName, info.GetPath(), data) {
 			h.stats.delivered.Add(1)
 			info.recordWebSocketMessage(0)
 		} else {

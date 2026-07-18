@@ -137,6 +137,7 @@ func internalJWTAuthorize(secret string, authType types.AuthType, next http.Hand
 			identity: verified.Identity,
 			claims:   types.CloneAuthClaims(verified.Claims),
 		})
+		ctx = safe.WithVerifiedSecretClaims(ctx, verified.SecretClaims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -166,6 +167,9 @@ func buildAuthRequestArgs(
 	}
 	args := types.AuthRequestArgs{
 		Identity: identity, ServiceName: serviceName, Claims: types.CloneAuthClaims(claims),
+	}
+	if r != nil {
+		args.SecretClaims = safe.VerifiedSecretClaimsFromContext(r.Context())
 	}
 	if info != nil {
 		args.Path = info.GetPath()

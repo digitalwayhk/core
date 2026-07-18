@@ -1,6 +1,7 @@
 package safe
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -53,4 +54,11 @@ func TestValidateJWTTokenRejectsRefreshPurpose(t *testing.T) {
 
 	_, _, err := ValidateJWTToken(token, config.AuthSecret{AccessSecret: "access-secret"})
 	require.Error(t, err)
+}
+
+func TestClaimsJSONKeepsLegacyFieldNames(t *testing.T) {
+	claims := NewClaims("user-1", "用户一")
+	data, err := json.Marshal(claims)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"userid":"user-1","username":"用户一","args":{}}`, string(data))
 }

@@ -321,6 +321,14 @@ func (r *authenticatedWebSocketRequest) GetWebSocketAuthIdentity() (types.WebSoc
 	return r.identity, strings.TrimSpace(r.identity.UID) != ""
 }
 
+func (r *authenticatedWebSocketRequest) GetSecretClaim(key string) (string, bool) {
+	reader, ok := r.IRequest.(types.IRequestSecretClaims)
+	if !ok {
+		return "", false
+	}
+	return reader.GetSecretClaim(key)
+}
+
 func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.RouterInfo, req types.IRequest) (*safe.AccessTokenIdentity, error) {
 	if s == nil || s.req == nil || s.manage == nil || s.manage.serviceContext == nil || s.manage.serviceContext.Config == nil {
 		return nil, webSocketAuthenticationError(errors.New("authentication context unavailable"))
@@ -346,6 +354,9 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 			return nil, webSocketAuthenticationError(err)
 		}
 	}
+	if setter, ok := req.(types.IRequestSecretClaimsSetter); ok {
+		setter.SetSecretClaims(verified.SecretClaims)
+	}
 	if hook != nil {
 		if s.hookSlots == nil {
 			s.hookSlots = make(chan struct{}, 1)
@@ -354,6 +365,7 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 			Identity: verified.Identity, ServiceName: req.ServiceName(), Path: info.GetPath(),
 			Method: info.GetMethod(), PathType: info.GetPathType(), ClientIP: req.GetClientIP(),
 			TraceID: req.GetTraceId(), Claims: types.CloneAuthClaims(verified.Claims),
+			SecretClaims: types.CloneSecretClaims(verified.SecretClaims),
 		}
 		if err := invokeWebSocketAuthRequestHook(requestContext(req), s.manage.serviceContext.Config.Timeout, hook, args, s.hookSlots); err != nil {
 			return nil, err

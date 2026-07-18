@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -31,6 +32,11 @@ type Request struct {
 	service       *ServiceContext
 	servicerouter *ServiceRouter
 	routerinfo    *types.RouterInfo
+	secretClaims  *requestSecretClaims
+}
+
+type requestSecretClaims struct {
+	values map[string]string
 }
 
 func getRequestInfo(r *http.Request, req *Request) {
@@ -58,7 +64,29 @@ func getRequestInfo(r *http.Request, req *Request) {
 		req.userName = uname
 	}
 	req.traceID = getTraceID(ctext, r)
+	req.SetSecretClaims(safe.VerifiedSecretClaimsFromContext(ctext))
 	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
+}
+
+// GetSecretClaim 返回当前已验签请求的服务端秘密 Claim。
+func (own *Request) GetSecretClaim(key string) (string, bool) {
+	if own == nil || own.secretClaims == nil || own.secretClaims.values == nil {
+		return "", false
+	}
+	value, ok := own.secretClaims.values[key]
+	return value, ok
+}
+
+// SetSecretClaims 仅供框架认证边界注入已验签并解密的 Claim 快照。
+func (own *Request) SetSecretClaims(claims map[string]string) {
+	if own == nil {
+		return
+	}
+	if len(claims) == 0 {
+		own.secretClaims = nil
+		return
+	}
+	own.secretClaims = &requestSecretClaims{values: types.CloneSecretClaims(claims)}
 }
 func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	if r == nil {
@@ -95,7 +123,7 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 		getRequestInfo(r, req)
 		info := routers.GetRouter(req.apiPath)
 		if info != nil {
-			req.auth = info.Auth
+			req.auth = info.GetAuth()
 			req.routerinfo = info
 			getUserIDAndName(req, r)
 			if req.auth {
@@ -207,15 +235,17 @@ func (own *Request) GetService() *ServiceContext {
 }
 
 func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
-	if sinfo.PathType != tinfo.PathType {
-		if sinfo.PathType != types.ManageType {
-			if sinfo.PathType == types.PublicType {
-				if tinfo.PathType != types.PublicType {
+	sourceType := sinfo.GetPathType()
+	targetType := tinfo.GetPathType()
+	if sourceType != targetType {
+		if sourceType != types.ManageType {
+			if sourceType == types.PublicType {
+				if targetType != types.PublicType {
 					return errors.New("不能调用目标路由,public 路由只能调用 public type的路由!")
 				}
 			}
-			if sinfo.PathType == types.PrivateType {
-				if tinfo.PathType == types.ManageType {
+			if sourceType == types.PrivateType {
+				if targetType == types.ManageType {
 					return errors.New("不能调用目标路由,manage 路由只能由调用 manage type路由调用!")
 				}
 			}
@@ -290,14 +320,14 @@ func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid string, ro
 		TraceID:       traceid,
 		SourceService: sourceservice,
 		SourcePath:    sourcepath,
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        uid,
 		UserName:      uname,
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,
 		Instance:      router,
-		HttpMethod:    info.Method,
+		HttpMethod:    info.GetMethod(),
 	}
 }
 
@@ -308,14 +338,14 @@ func ToPayLoad(req *Request, router types.IRouter, tinfo *types.RouterInfo) *typ
 		TraceID:       req.GetTraceId(),
 		SourceService: req.ServiceName(),
 		SourcePath:    req.GetPath(),
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        uid,
 		UserName:      uname,
 		ClientIP:      req.GetClientIP(),
 		Auth:          req.Authorized(),
 		Instance:      router,
-		HttpMethod:    tinfo.Method,
+		HttpMethod:    tinfo.GetMethod(),
 	}
 }
 
@@ -337,7 +367,7 @@ func ToRequest(own *types.PayLoad) types.IRequest {
 	}
 	req.servicerouter = req.service.Router
 	info := req.servicerouter.GetRouter(req.apiPath)
-	req.auth = info.Auth
+	req.auth = info.GetAuth()
 	req.routerinfo = info
 	return req
 }
@@ -354,7 +384,7 @@ func (own *InitRequest) CallService(router types.IRouter, callback ...func(res t
 		own.CallRouters = make(map[string]types.IRouter)
 	}
 	info := router.RouterInfo()
-	own.CallRouters[info.Path] = router
+	own.CallRouters[info.GetPath()] = router
 	return &Response{Success: false}, nil
 }
 

@@ -70,16 +70,16 @@ func (own *HTMLServer) Start() {
 
 	for _, service := range own.services {
 		for _, router := range service.GetTypeRouters(types.ManageType) {
-			mux.Handle(router.Path+"/"+service.Service.Service.Name, htmlHandler(service))
+			mux.Handle(router.GetPath()+"/"+service.Service.Service.Name, htmlHandler(service))
 		}
 		for _, router := range service.GetTypeRouters(types.ServerManagerType) {
-			if router.StructName != "QueryService" {
-				mux.Handle(router.Path+"/"+service.Service.Service.Name, htmlHandler(service))
+			if router.GetStructName() != "QueryService" {
+				mux.Handle(router.GetPath()+"/"+service.Service.Service.Name, htmlHandler(service))
 			}
 		}
 	}
 	mux.Handle("/api/openapi", htmlHandler(own.services...))
-	mux.HandleFunc(qs.RouterInfo().Path, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(qs.RouterInfo().GetPath(), func(w http.ResponseWriter, r *http.Request) {
 		data, _ := qs.Do(nil)
 		httpx.OkJson(w, data)
 	})

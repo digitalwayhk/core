@@ -15,11 +15,12 @@ import (
 const canonicalServerURL = "https://compat.invalid/"
 
 type RouteEntry struct {
-	Service  string `json:"service"`
-	Method   string `json:"method"`
-	Path     string `json:"path"`
-	PathType string `json:"pathType"`
-	Auth     bool   `json:"auth"`
+	Service         string   `json:"service"`
+	Method          string   `json:"method"`
+	Path            string   `json:"path"`
+	PathType        string   `json:"pathType"`
+	Auth            bool     `json:"auth"`
+	InternalCallers []string `json:"internalCallers,omitempty"`
 }
 
 func SnapshotRoutes(services ...*router.ServiceRouter) ([]byte, error) {
@@ -30,21 +31,23 @@ func SnapshotRoutes(services ...*router.ServiceRouter) ([]byte, error) {
 			return nil, fmt.Errorf("route snapshot: nil service router")
 		}
 		for _, info := range service.GetRouters() {
-			if info == nil || info.Method == "" || info.Path == "" {
+			if info == nil || info.GetMethod() == "" || info.GetPath() == "" {
 				return nil, fmt.Errorf("route snapshot: route method and path are required")
 			}
-			method := strings.ToUpper(info.Method)
-			key := method + " " + info.Path
+			method := strings.ToUpper(info.GetMethod())
+			path := info.GetPath()
+			key := method + " " + path
 			if _, ok := seen[key]; ok {
 				return nil, fmt.Errorf("route snapshot: duplicate route %s", key)
 			}
 			seen[key] = struct{}{}
 			entries = append(entries, RouteEntry{
-				Service:  info.ServiceName,
-				Method:   method,
-				Path:     info.Path,
-				PathType: string(info.PathType),
-				Auth:     info.Auth,
+				Service:         info.GetServiceName(),
+				Method:          method,
+				Path:            path,
+				PathType:        string(info.GetPathType()),
+				Auth:            info.GetAuth(),
+				InternalCallers: info.GetInternalCallers(),
 			})
 		}
 	}
@@ -84,19 +87,20 @@ func validateOpenAPIInputs(services []*router.ServiceRouter) error {
 		}
 		infos := append(service.GetTypeRouters("public"), service.GetTypeRouters("private")...)
 		for _, info := range infos {
-			if info == nil || info.Method == "" || info.Path == "" {
+			if info == nil || info.GetMethod() == "" || info.GetPath() == "" {
 				return fmt.Errorf("openapi snapshot: route method and path are required")
 			}
-			method := strings.ToUpper(info.Method)
-			key := method + " " + info.Path
+			method := strings.ToUpper(info.GetMethod())
+			path := info.GetPath()
+			key := method + " " + path
 			if _, ok := routes[key]; ok {
 				return fmt.Errorf("openapi snapshot: duplicate route %s", key)
 			}
 			routes[key] = struct{}{}
-			if _, ok := operationIDs[info.Path]; ok {
-				return fmt.Errorf("openapi snapshot: duplicate operationId %s", info.Path)
+			if _, ok := operationIDs[path]; ok {
+				return fmt.Errorf("openapi snapshot: duplicate operationId %s", path)
 			}
-			operationIDs[info.Path] = struct{}{}
+			operationIDs[path] = struct{}{}
 		}
 	}
 	return nil

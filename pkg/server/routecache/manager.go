@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,6 +78,17 @@ func NewManager(service string, cfg config.RouteCacheConfig, options ...Option) 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	autoMaxBytes := cfg.L1.MaxBytes == 0
+	autoMaxEntries := cfg.L1.MaxEntries == 0
+	cfg.L1 = resolveL1Config(cfg.L1)
+	logx.Infow("route_cache_l1_resolved",
+		logx.Field("service", service),
+		logx.Field("max_entries", cfg.L1.MaxEntries),
+		logx.Field("max_value_bytes", cfg.L1.MaxValueBytes),
+		logx.Field("max_bytes", cfg.L1.MaxBytes),
+		logx.Field("max_entries_source", resolutionSource(autoMaxEntries)),
+		logx.Field("max_bytes_source", resolutionSource(autoMaxBytes)),
+	)
 	resolved := managerOptions{}
 	for _, apply := range options {
 		if apply != nil {
@@ -122,6 +132,13 @@ func NewManager(service string, cfg config.RouteCacheConfig, options ...Option) 
 	return manager, nil
 }
 
+func resolutionSource(auto bool) string {
+	if auto {
+		return "auto"
+	}
+	return "config"
+}
+
 func (m *Manager) sharedUnavailable(cause error) (*Manager, error) {
 	if m.config.Redis.OnUnavailable != "bypass" {
 		m.cancelInvalidationSubscriptions()
@@ -133,7 +150,7 @@ func (m *Manager) sharedUnavailable(cause error) (*Manager, error) {
 }
 
 func (m *Manager) initLocalTiers() error {
-	l1, err := newL1Cache(m.config.TTL, m.config.L1.Limit)
+	l1, err := newL1Cache(m.config.L1)
 	if err != nil {
 		return err
 	}
@@ -147,6 +164,7 @@ func (m *Manager) initLocalTiers() error {
 	m.l2, err = NewBadgerL2(l2Config)
 	if err != nil {
 		m.l1.Clear()
+		m.l1.Close()
 		m.l1 = nil
 	}
 	return err
@@ -202,7 +220,7 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 			return nil, false, getErr
 		}
 		if ok {
-			m.l1.Set(key, data, m.routeTTL(route))
+			m.l1.Set(key, json.RawMessage(data), m.routeTTL(route))
 			return data, true, nil
 		}
 	}
@@ -223,7 +241,7 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 			return nil, false, err
 		}
 	}
-	m.l1.Set(key, data, ttl)
+	m.l1.Set(key, json.RawMessage(data), ttl)
 	return data, true, nil
 }
 
@@ -248,6 +266,9 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 	if err != nil {
 		return err
 	}
+	if int64(len(data)) > m.config.L1.MaxValueBytes {
+		return nil
+	}
 	if m.redis != nil {
 		if err := m.redis.Set(context.Background(), key, data, ttl); err != nil {
 			m.degrade()
@@ -263,11 +284,7 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 			return err
 		}
 	}
-	l1Value := value
-	if m.l2 != nil || m.redis != nil {
-		l1Value = json.RawMessage(data)
-	}
-	m.l1.Set(key, l1Value, ttl)
+	m.l1.Set(key, json.RawMessage(data), ttl)
 	return nil
 }
 
@@ -395,6 +412,9 @@ func (m *Manager) Take(route string, source interface{}, ttl time.Duration, load
 		if err := m.Set(route, source, value, ttl); err != nil {
 			return nil, err
 		}
+		if cached, ok, err := m.Get(route, source); err != nil || ok {
+			return cached, err
+		}
 		return value, nil
 	})
 }
@@ -433,6 +453,12 @@ func (m *Manager) TakeBestEffort(route string, source interface{}, ttl time.Dura
 		}
 		if setErr := m.Set(route, source, value, ttl); setErr != nil {
 			m.logBestEffortBypass("write", route, setErr)
+			return value, nil
+		}
+		if cached, ok, getErr := m.Get(route, source); getErr == nil && ok {
+			return cached, nil
+		} else if getErr != nil {
+			m.logBestEffortBypass("read_after_write", route, getErr)
 		}
 		return value, nil
 	})
@@ -504,6 +530,9 @@ func (m *Manager) Close() {
 	m.state.Store(uint32(StateClosed))
 	m.cancelInvalidationSubscriptions()
 	m.clearLocal()
+	if m.l1 != nil {
+		m.l1.Close()
+	}
 	if m.l2 != nil {
 		_ = m.l2.Close()
 	}
@@ -567,13 +596,7 @@ func (m *Manager) clearRouteLocal(route string) error {
 		}
 	}
 	if m.l1 != nil {
-		m.l1.keys.Range(func(key, _ interface{}) bool {
-			text, ok := key.(string)
-			if ok && strings.HasPrefix(text, prefix) {
-				m.l1.Delete(text)
-			}
-			return true
-		})
+		// generation 已经使旧路由 key 不可达；旧条目由 TTL/LRU 有界淘汰。
 	}
 	return nil
 }
