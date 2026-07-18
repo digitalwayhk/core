@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
+	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,12 +33,47 @@ func TestThreeProcessUATBuyerRoleFlow(t *testing.T) {
 	supplier := scenario.publishSupplierProduct()
 	paymentType := scenario.configurePaymentType()
 
+	buyerWS := scenario.connectBuyerOrdersWebSocket(buyer.token)
+	defer buyerWS.Close()
+	otherWS := scenario.connectBuyerOrdersWebSocket(buyer.otherToken)
+	defer otherWS.Close()
+	otherEvents := scenario.user.StreamWebSocket(t, otherWS)
+
 	created := scenario.buyerCreatesOrder(buyer, supplier)
+	scenario.assertBuyerReceivesOrderWebSocket(buyerWS, otherEvents, created)
 	payment := scenario.buyerCreatesPayment(buyer, created, paymentType)
 	assertPaymentBelongsToOrder(t, payment, created)
 
 	scenario.assertBuyerCanSeeOwnOrder(buyer, created)
 	scenario.assertOtherBuyerCannotSeeOrder(buyer, created)
+}
+
+// connectBuyerOrdersWebSocket 登录用户服务 WebSocket 并订阅买家订单路由。
+func (scenario *threeProcessUAT) connectBuyerOrdersWebSocket(token string) *websocket.Conn {
+	t := scenarioTest(scenario)
+	t.Helper()
+	connection, _, err := websocket.DefaultDialer.Dial(scenario.user.WebSocketURL, nil)
+	require.NoError(t, err)
+	scenario.user.WriteWebSocket(t, connection, "sub", "logon", map[string]string{"token": token})
+	require.Equal(t, "success", scenario.user.ReadWebSocket(t, connection, 3*time.Second).Event)
+	scenario.user.WriteWebSocket(t, connection, "sub", "/api/shop-user/getorders", map[string]interface{}{})
+	require.Equal(t, "sub", scenario.user.ReadWebSocket(t, connection, 3*time.Second).Event)
+	return connection
+}
+
+// assertBuyerReceivesOrderWebSocket 验证订单事件只通过 WebSocket 推送给下单买家。
+func (scenario *threeProcessUAT) assertBuyerReceivesOrderWebSocket(buyerWS *websocket.Conn, otherEvents <-chan integration.WebSocketMessage, created orderdto.Order) {
+	t := scenarioTest(scenario)
+	t.Helper()
+	message := scenario.user.ReadWebSocket(t, buyerWS, 5*time.Second)
+	var orderEvent eventdto.OrderChanged
+	require.NoError(t, json.Unmarshal(message.Data, &orderEvent))
+	require.Equal(t, created.ID, orderEvent.OrderID)
+	select {
+	case unexpected := <-otherEvents:
+		t.Fatalf("其他买家不应收到订单 WebSocket 事件: %+v", unexpected)
+	case <-time.After(300 * time.Millisecond):
+	}
 }
 
 // completeBuyerProfile 准备买家 Manage 与 Private token，并完成用户资料和地址维护。
