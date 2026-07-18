@@ -42,7 +42,7 @@ func BuildOrderChangedEvent(order *models.Order, eventID, eventType string) orde
 	return payload
 }
 
-// WriteOrderChangedOutbox 把订单变化事件写入当前 order 实例本地 Outbox。
+// WriteOrderChangedOutbox 把订单变化事件写入 MySQL Outbox。
 func WriteOrderChangedOutbox(order *models.Order, eventID, eventType string) error {
 	payload := BuildOrderChangedEvent(order, eventID, eventType)
 	outbox, err := models.NewOutboxRecord(payload.TraceID, payload.EventID, payload.EventType, payload.Subject, payload)
@@ -51,7 +51,7 @@ func WriteOrderChangedOutbox(order *models.Order, eventID, eventType string) err
 	}
 	outbox.ServiceName = payload.ServiceName
 	outbox.ServiceInstanceID = payload.ServiceInstanceID
-	return models.RunLocalTransaction(func(action models.DataAction) error {
-		return outbox.InsertWith(action)
+	return models.RunRemoteTransaction(func(action models.DataAction) error {
+		return models.InsertOutboxIfMissingWith(action, outbox)
 	})
 }

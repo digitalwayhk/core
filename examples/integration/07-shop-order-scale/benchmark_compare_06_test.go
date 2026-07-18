@@ -25,23 +25,33 @@ func Benchmark06CreateOrderDirect(b *testing.B) {
 		UnitPrice:    decimal.NewFromInt(10),
 	}
 	address := userdto06.AddressSnapshot{AddressID: 1, Recipient: "基准用户", Phone: "13800000000", Region: "广东深圳", Detail: "科技园"}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for index := 0; index < b.N; index++ {
-		requestID := fmt.Sprintf("bench-06-sync-%d-%d", time.Now().UnixNano(), index)
-		orderID := uint(time.Now().UnixNano()%1_000_000_000) + uint(index) + 860000000
-		_, err := business06.CreateOrder(business06.CreateOrderCommand{
-			OrderID:   orderID,
+	for _, concurrency := range benchmarkConcurrencies() {
+		concurrency := concurrency
+		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
+			commands := make06OrderCommands(b.N, product.ProductID, address, newBenchmarkIDFactory(20))
+			runBusinessBenchmarkSingleConcurrency(b, concurrency, "orders/s", func(index int) error {
+				_, err := business06.CreateOrder(commands[index], product)
+				return err
+			})
+		})
+	}
+}
+
+func make06OrderCommands(count int, productID uint, address userdto06.AddressSnapshot, ids benchmarkIDFactory) []business06.CreateOrderCommand {
+	commands := make([]business06.CreateOrderCommand, count)
+	suffix := time.Now().UnixNano()
+	for index := range commands {
+		requestID := fmt.Sprintf("bench-06-sync-%d-%d", suffix, index)
+		commands[index] = business06.CreateOrderCommand{
+			OrderID:   ids.NewID(),
 			UserID:    uint(160000000 + index),
 			RequestID: requestID,
 			TraceID:   "bench-trace-" + requestID,
 			EventID:   "event-" + requestID,
-			ProductID: product.ProductID,
+			ProductID: productID,
 			Quantity:  2,
 			Address:   address,
-		}, product)
-		if err != nil {
-			b.Fatal(err)
 		}
 	}
+	return commands
 }

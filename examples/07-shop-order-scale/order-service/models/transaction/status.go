@@ -19,14 +19,3 @@ const (
 	// PaymentStatusPaid 表示订单已支付。
 	PaymentStatusPaid = "paid"
 )
-
-const (
-	// PendingStatusAccepted 表示本地 pending 已可靠保存但尚未同步。
-	PendingStatusAccepted = "accepted"
-
-	// PendingStatusSynced 表示本地 pending 已完成远程同步。
-	PendingStatusSynced = "synced"
-
-	// PendingStatusFailed 表示本地 pending 最近一次同步失败。
-	PendingStatusFailed = "failed"
-)

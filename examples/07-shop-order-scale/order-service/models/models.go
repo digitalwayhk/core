@@ -29,13 +29,10 @@ type (
 	// Order 是共享远程权威库中的订单事实模型别名。
 	Order = transaction.Order
 
-	// LocalPendingOrder 是当前 order 实例的本地 pending 模型别名。
-	LocalPendingOrder = transaction.LocalPendingOrder
-
-	// OutboxRecord 是当前 order 实例的本地 Outbox 模型别名。
+	// OutboxRecord 是 MySQL 权威库中的 Outbox 模型别名。
 	OutboxRecord = transaction.OutboxRecord
 
-	// OutboxStore 是标准 EventBridge 使用的本地 Outbox 适配器别名。
+	// OutboxStore 是标准 EventBridge 使用的 MySQL Outbox 适配器别名。
 	OutboxStore = transaction.OutboxStore
 
 	// OrderQueryFilter 是远程权威订单查询条件别名。
@@ -57,15 +54,6 @@ const (
 
 	// PaymentStatusPaid 表示订单已支付。
 	PaymentStatusPaid = transaction.PaymentStatusPaid
-
-	// PendingStatusAccepted 表示 pending 已可靠接收。
-	PendingStatusAccepted = transaction.PendingStatusAccepted
-
-	// PendingStatusSynced 表示 pending 已同步成功。
-	PendingStatusSynced = transaction.PendingStatusSynced
-
-	// PendingStatusFailed 表示 pending 最近一次同步失败。
-	PendingStatusFailed = transaction.PendingStatusFailed
 )
 
 var (
@@ -114,35 +102,42 @@ var (
 	// PayRemoteOrderWith 支付远程权威订单。
 	PayRemoteOrderWith = transaction.PayRemoteOrderWith
 
-	// NewLocalPendingOrder 创建本地 pending 订单模型。
-	NewLocalPendingOrder = transaction.NewLocalPendingOrder
+	// AddOrder 将订单写入当前实例 Badger 可靠层。
+	AddOrder = transaction.AddOrder
 
-	// FindLocalPendingByRequest 按 UserID + requestID 查询本地 pending。
-	FindLocalPendingByRequest = transaction.FindLocalPendingByRequest
+	// FindLocalOrderByRequest 按 UserID + requestID 查询当前实例本地订单。
+	FindLocalOrderByRequest = transaction.FindLocalOrderByRequest
 
-	// PendingLocalOrders 读取待同步本地 pending。
+	// PendingLocalOrders 读取当前实例待汇合本地订单。
 	PendingLocalOrders = transaction.PendingLocalOrders
 
-	// MarkPendingSyncedWith 标记本地 pending 已同步。
-	MarkPendingSyncedWith = transaction.MarkPendingSyncedWith
+	// RemoveLocalOrder 删除已成功汇合的本地订单。
+	RemoveLocalOrder = transaction.RemoveLocalOrder
 
-	// MarkPendingFailedWith 标记本地 pending 同步失败。
-	MarkPendingFailedWith = transaction.MarkPendingFailedWith
+	// PendingOrdersByUser 查询当前实例指定用户本地未汇合订单。
+	PendingOrdersByUser = transaction.PendingOrdersByUser
 
-	// NewOutbox 创建本地 Outbox 模型。
+	// StartOrderWriteStore 启动当前实例 Badger 可靠写入层。
+	StartOrderWriteStore = transaction.StartOrderWriteStore
+
+	// StopOrderWriteStore 停止当前实例 Badger 可靠写入层。
+	StopOrderWriteStore = transaction.StopOrderWriteStore
+
+	// GetOrderWritePerformanceSnapshot 返回当前实例写入指标。
+	GetOrderWritePerformanceSnapshot = transaction.GetOrderWritePerformanceSnapshot
+
+	// NewOutbox 创建 MySQL Outbox 模型。
 	NewOutbox = transaction.NewOutbox
 
-	// NewOutboxRecord 创建本地 Outbox 事件记录。
+	// NewOutboxRecord 创建 MySQL Outbox 事件记录。
 	NewOutboxRecord = transaction.NewOutboxRecord
+
+	// InsertOutboxIfMissingWith 幂等写入 MySQL Outbox。
+	InsertOutboxIfMissingWith = transaction.InsertOutboxIfMissingWith
 )
 
-// EnsureStorage 确保 07 订单服务本地库和远程权威库完成建表。
+// EnsureStorage 确保 07 订单服务 MySQL 权威库完成建表。
 func EnsureStorage() error { return schema.EnsureStorage() }
-
-// RunLocalTransaction 在当前 order 实例本地库执行事务。
-func RunLocalTransaction(operation func(persistencetypes.IDataAction) error) error {
-	return store.RunLocalTransaction(schema.EnsureStorage, operation)
-}
 
 // RunRemoteTransaction 在共享远程权威库执行事务。
 func RunRemoteTransaction(operation func(persistencetypes.IDataAction) error) error {

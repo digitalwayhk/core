@@ -3,7 +3,7 @@ package business
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
@@ -18,24 +18,13 @@ func (LocalOrderWriter) Accept(_ context.Context, command CreateOrderCommand) (u
 		return 0, err
 	}
 	order := orderFromCommand(command)
-	payload, err := json.Marshal(order)
-	if err != nil {
-		return 0, err
+	if existing, err := models.FindLocalOrderByRequest(command.UserID, strings.TrimSpace(command.RequestID)); err == nil && existing != nil {
+		if existing.RequestFingerprint != strings.TrimSpace(command.RequestFingerprint) {
+			return 0, errors.New("幂等键已用于不同订单请求")
+		}
+		return existing.ID, nil
 	}
-	pending := models.NewLocalPendingOrder()
-	pending.ID = command.OrderID
-	pending.OrderID = command.OrderID
-	pending.UserID = command.UserID
-	pending.RequestID = strings.TrimSpace(command.RequestID)
-	pending.TraceID = strings.TrimSpace(command.TraceID)
-	pending.ServiceName = serviceNameOrDefault(command.ServiceName)
-	pending.ServiceInstanceID = strings.TrimSpace(command.ServiceInstanceID)
-	pending.ServiceInstanceIP = strings.TrimSpace(command.ServiceInstanceIP)
-	pending.Payload = payload
-	pending.SyncStatus = models.PendingStatusAccepted
-	if err := models.RunLocalTransaction(func(action models.DataAction) error {
-		return pending.InsertWith(action)
-	}); err != nil {
+	if err := models.AddOrder(order); err != nil {
 		return 0, err
 	}
 	return command.OrderID, nil

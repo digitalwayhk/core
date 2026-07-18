@@ -3,7 +3,7 @@ package business
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
@@ -19,7 +19,7 @@ type RemoteOrderSyncer struct {
 	Remote RemoteOrderStore
 }
 
-// DrainOnce 尝试同步一批本地 pending，失败只标记 pending 并保留重试。
+// DrainOnce 尝试同步一批 Badger 本地订单，成功后删除本地副本。
 func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) error {
 	remote := s.Remote
 	if remote == nil {
@@ -37,31 +37,19 @@ func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) error {
 	return nil
 }
 
-func (s RemoteOrderSyncer) syncOne(ctx context.Context, remote RemoteOrderStore, pending *models.LocalPendingOrder) error {
-	order := models.NewOrder()
-	if err := json.Unmarshal(pending.Payload, order); err != nil {
-		return markPendingFailed(pending, err)
-	}
-	stored, err := remote.Upsert(ctx, order)
+func (s RemoteOrderSyncer) syncOne(ctx context.Context, remote RemoteOrderStore, order *models.Order) error {
+	_, err := remote.Upsert(ctx, order)
 	if err != nil {
-		return markPendingFailed(pending, err)
+		return err
 	}
-	return models.RunLocalTransaction(func(action models.DataAction) error {
-		if err := models.MarkPendingSyncedWith(action, pending); err != nil {
-			return err
-		}
-		outbox, err := models.NewOutboxRecord(stored.TraceID, stored.RequestID, contract.EventOrderCreated, contract.SubjectOrderChanged, BuildOrderChangedEvent(stored, stored.RequestID, contract.EventOrderCreated))
-		if err != nil {
-			return err
-		}
-		outbox.ServiceName = stored.ServiceName
-		outbox.ServiceInstanceID = stored.ServiceInstanceID
-		return outbox.InsertWith(action)
-	})
+	return models.RemoveLocalOrder(order)
 }
 
-func markPendingFailed(pending *models.LocalPendingOrder, err error) error {
-	return models.RunLocalTransaction(func(action models.DataAction) error {
-		return models.MarkPendingFailedWith(action, pending, err.Error())
-	})
+func orderEventID(orderID uint, eventType string) string {
+	return fmt.Sprintf("order:%d:%s", orderID, eventType)
+}
+
+func newOrderCreatedOutbox(order *models.Order) (*models.OutboxRecord, error) {
+	eventID := orderEventID(order.ID, contract.EventOrderCreated)
+	return models.NewOutboxRecord(order.TraceID, eventID, contract.EventOrderCreated, contract.SubjectOrderChanged, BuildOrderChangedEvent(order, eventID, contract.EventOrderCreated))
 }

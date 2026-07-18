@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	userdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/user"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/shopspring/decimal"
 )
@@ -47,6 +49,7 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	if fingerprint == "" {
 		fingerprint = own.RequestID
 	}
+	serviceInstanceID, serviceInstanceIP := orderRuntimeIdentity()
 	command := business.CreateOrderCommand{
 		OrderID:            req.NewID(),
 		UserID:             own.UserID,
@@ -67,6 +70,8 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		AddressID:          own.Address.AddressID,
 		TraceID:            req.GetTraceId(),
 		ServiceName:        req.ServiceName(),
+		ServiceInstanceID:  serviceInstanceID,
+		ServiceInstanceIP:  serviceInstanceIP,
 	}
 	orderID, err := (business.LocalOrderWriter{}).Accept(context.Background(), command)
 	if err != nil {
@@ -84,6 +89,18 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		PaymentStatus: "unpaid",
 		TraceID:       req.GetTraceId(),
 	}, nil
+}
+
+func orderRuntimeIdentity() (string, string) {
+	sc := router.GetContext(contract.OrderServiceName)
+	if sc == nil {
+		return "", ""
+	}
+	address := ""
+	if sc.Config != nil && sc.Config.Cluster.AdvertiseAddress != "" {
+		address = sc.Config.Cluster.AdvertiseAddress
+	}
+	return sc.ServiceInstanceID, address
 }
 
 // GetResponse 返回下单响应 DTO 类型。

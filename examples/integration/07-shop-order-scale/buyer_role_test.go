@@ -15,12 +15,13 @@ import (
 
 // TestUATBuyerOrderLifecycle 验证买家下单、同步、查询和支付的核心闭环。
 func TestUATBuyerOrderLifecycle(t *testing.T) {
-	require.NoError(t, ordermodels.EnsureStorage())
+	requireOrderMySQL(t)
 	unique := uint(time.Now().UnixNano() % 1000000)
 	requestID := fmt.Sprintf("buyer-uat-%d", unique)
+	ids := newBenchmarkIDFactory(23)
 
 	_, err := (orderbusiness.LocalOrderWriter{}).Accept(context.Background(), orderbusiness.CreateOrderCommand{
-		OrderID:            810000 + unique,
+		OrderID:            ids.NewID(),
 		UserID:             110000 + unique,
 		RequestID:          requestID,
 		RequestFingerprint: "fingerprint-" + requestID,

@@ -13,7 +13,7 @@ import (
 
 // TestUATAdminOrderRuleSharedAuthority 验证管理员修改共享规则后缓存失效读取最新配置。
 func TestUATAdminOrderRuleSharedAuthority(t *testing.T) {
-	require.NoError(t, ordermodels.EnsureStorage())
+	requireOrderMySQL(t)
 	rule := ordermodels.NewOrderRule()
 	rule.ID = uint(820000 + time.Now().UnixNano()%1000000)
 	rule.RuleCode = "default"

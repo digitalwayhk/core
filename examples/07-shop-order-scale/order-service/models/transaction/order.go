@@ -2,6 +2,8 @@
 package transaction
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"strings"
@@ -62,6 +64,30 @@ func (o *Order) NewModel() {
 // GetHash 返回订单远程幂等唯一散列。
 func (o *Order) GetHash() string {
 	return utils.HashCodes(strings.TrimSpace(o.RequestID), strconv.FormatUint(uint64(o.UserID), 10))
+}
+
+// GetLocalKey 返回 Badger 本地可靠写入层的用户隔离键。
+func (o *Order) GetLocalKey() string {
+	if o == nil || o.GetID() == 0 {
+		return ""
+	}
+	prefix := OrderPendingUserPrefix(o.UserID)
+	if prefix == "" {
+		return ""
+	}
+	return prefix + strconv.FormatUint(uint64(o.GetID()), 10)
+}
+
+// IsSyncAfterDelete 声明订单同步完成后可从本地 Badger 层清除。
+func (o *Order) IsSyncAfterDelete() bool { return false }
+
+// OrderPendingUserPrefix 使用摘要隔离用户本地订单键空间。
+func OrderPendingUserPrefix(userID uint) string {
+	if userID == 0 {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(strconv.FormatUint(uint64(userID), 10)))
+	return "u:" + hex.EncodeToString(digest[:16]) + ":"
 }
 
 // InsertWith 将订单事实写入指定事务。

@@ -1,4 +1,4 @@
-// Package store 封装 07 订单服务本地实例库的数据访问能力。
+// Package store 提供 07 订单服务模型查询和事务辅助能力。
 package store
 
 import (
@@ -6,37 +6,12 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/common"
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
-
-var (
-	localActionOnce sync.Once
-	localAction     persistencetypes.IDataAction
-	localTxMu       sync.Mutex
-	localEnsureMu   sync.Mutex
-)
-
-// GetLocal 返回当前 order 实例本地可靠写入库的数据访问器。
-func GetLocal() persistencetypes.IDataAction {
-	localActionOnce.Do(func() { localAction = entity.GetGlobalSqliteInstance(common.LocalDatabaseName) })
-	return localAction
-}
 
 // NewSearch 创建统一分页查询参数。
 func NewSearch(model interface{}, size int) *persistencetypes.SearchItem {
 	return &persistencetypes.SearchItem{Page: 1, Size: size, Model: model}
-}
-
-// EnsureLocalModel 确保本地模型表已创建。
-func EnsureLocalModel(model interface{}) error {
-	return ensureModelWith(GetLocal(), &localEnsureMu, model)
-}
-
-// RunLocalTransaction 在本地实例库中串行执行事务。
-func RunLocalTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) error {
-	return runTransaction(&localTxMu, &localEnsureMu, GetLocal, ensureStorage, operation)
 }
 
 func ensureModelWith(action persistencetypes.IDataAction, mu *sync.Mutex, model interface{}) error {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/bootstrap"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
+	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,4 +32,19 @@ func TestDiscoveryProviderComesFromConfig(t *testing.T) {
 	require.Equal(t, "redis", distributed.Cluster.Provider)
 	require.Equal(t, "insecure", local.Transport.GRPC.Security.Mode)
 	require.Equal(t, "insecure", distributed.Transport.GRPC.Security.Mode)
+}
+
+// TestOrderReplicaNewIDDoesNotCollide 验证不同 MachineID 副本生成的订单 ID 不重复。
+func TestOrderReplicaNewIDDoesNotCollide(t *testing.T) {
+	first := utils.NewAlgorithmSnowFlake(1, 4)
+	second := utils.NewAlgorithmSnowFlake(2, 4)
+	seen := make(map[uint]struct{}, 2000)
+	for index := 0; index < 1000; index++ {
+		for _, id := range []uint{uint(first.NextId()), uint(second.NextId())} {
+			if _, exists := seen[id]; exists {
+				t.Fatalf("水平副本生成重复 ID: %d", id)
+			}
+			seen[id] = struct{}{}
+		}
+	}
 }

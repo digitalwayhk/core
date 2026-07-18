@@ -56,6 +56,12 @@ func (s *Service) Start() {
 	if sc == nil {
 		panic(fmt.Errorf("订单服务缺失 ServiceContext: %s", contract.OrderServiceName))
 	}
+	if err := models.EnsureStorage(); err != nil {
+		panic(err)
+	}
+	if err := models.StartOrderWriteStore(); err != nil {
+		panic(err)
+	}
 	if err := sc.UseOutbox(models.OutboxStore{}); err != nil {
 		panic(err)
 	}
@@ -75,6 +81,9 @@ func (s *Service) Stop() {
 	}
 	if done != nil {
 		<-done
+	}
+	if err := models.StopOrderWriteStore(); err != nil {
+		logx.Errorw("shop_order_write_store_stop_failed", logx.Field("service", contract.OrderServiceName), logx.Field("error", err))
 	}
 }
 

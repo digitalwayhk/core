@@ -16,7 +16,17 @@ func (ModelRemoteOrderStore) Upsert(_ context.Context, order *models.Order) (*mo
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
 		stored, err = models.UpsertRemoteOrderWith(action, order)
-		return err
+		if err != nil {
+			return err
+		}
+		outbox, err := newOrderCreatedOutbox(stored)
+		if err != nil {
+			return err
+		}
+		outbox.ServiceName = stored.ServiceName
+		outbox.ServiceInstanceID = stored.ServiceInstanceID
+		outbox.ServiceInstanceIP = stored.ServiceInstanceIP
+		return models.InsertOutboxIfMissingWith(action, outbox)
 	})
 	return stored, err
 }

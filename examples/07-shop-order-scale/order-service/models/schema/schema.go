@@ -1,4 +1,4 @@
-// Package schema 集中声明 07 订单服务本地库和远程权威库的建表能力。
+// Package schema 集中声明 07 订单服务 MySQL 远程权威库的建表能力。
 package schema
 
 import (
@@ -14,16 +14,10 @@ var (
 	ensureErr  error
 )
 
-// EnsureStorage 确保本地 pending/outbox 和远程订单权威表都已创建。
+// EnsureStorage 确保远程 MySQL 权威库完成建表。
 func EnsureStorage() error {
 	ensureOnce.Do(func() {
-		for _, model := range []interface{}{transaction.NewLocalPendingOrder(), transaction.NewOutbox()} {
-			if err := store.EnsureLocalModel(model); err != nil {
-				ensureErr = err
-				return
-			}
-		}
-		for _, model := range []interface{}{transaction.NewOrder(), basedata.NewOrderRule(), basedata.NewPaymentType()} {
+		for _, model := range []interface{}{transaction.NewOrder(), transaction.NewOutbox(), basedata.NewOrderRule(), basedata.NewPaymentType()} {
 			if err := store.EnsureRemoteModel(model); err != nil {
 				ensureErr = err
 				return

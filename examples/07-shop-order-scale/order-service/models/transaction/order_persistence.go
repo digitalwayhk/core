@@ -44,6 +44,12 @@ func UpsertRemoteOrderWith(action persistencetypes.IDataAction, order *Order) (*
 		order.AcceptedAt = now
 	}
 	if err := order.InsertWith(action); err != nil {
+		if existing, findErr := FindRemoteOrderByIdempotencyWith(action, order.UserID, order.RequestID); findErr == nil && existing != nil {
+			if existing.RequestFingerprint != order.RequestFingerprint {
+				return nil, errors.New("幂等键已用于不同订单请求")
+			}
+			return existing, nil
+		}
 		return nil, err
 	}
 	return order, nil

@@ -16,42 +16,48 @@ import (
 
 // Benchmark07LocalOrderAccept 测量 07 下单入口只写本地 pending 的接收成本。
 func Benchmark07LocalOrderAccept(b *testing.B) {
-	require.NoError(b, ordermodels.EnsureStorage())
-	writer := orderbusiness.LocalOrderWriter{}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for index := 0; index < b.N; index++ {
-		requestID := fmt.Sprintf("bench-07-local-%d-%d", time.Now().UnixNano(), index)
-		orderID := uint(time.Now().UnixNano()%1_000_000_000) + uint(index) + 900000000
-		_, err := writer.Accept(context.Background(), orderbusiness.CreateOrderCommand{
-			OrderID:            orderID,
-			UserID:             uint(100000000 + index),
-			RequestID:          requestID,
-			RequestFingerprint: requestID,
-			SupplierID:         200001,
-			ProductID:          300001,
-			UnitPrice:          decimal.NewFromInt(10),
-			Quantity:           2,
-			TraceID:            "bench-trace-" + requestID,
-			ServiceName:        "shop-order",
-			ServiceInstanceID:  "bench-order",
+	for _, concurrency := range benchmarkConcurrencies() {
+		concurrency := concurrency
+		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
+			b.Setenv("SHOP_LOCAL_PENDING_DIR", b.TempDir())
+			require.NoError(b, ordermodels.StartOrderWriteStore())
+			b.Cleanup(func() { require.NoError(b, ordermodels.StopOrderWriteStore()) })
+			commands := make07OrderCommands("bench-07-local", newBenchmarkIDFactory(21), 100000000, b.N)
+			writer := orderbusiness.LocalOrderWriter{}
+			runBusinessBenchmarkSingleConcurrency(b, concurrency, "orders/s", func(index int) error {
+				_, err := writer.Accept(context.Background(), commands[index])
+				return err
+			})
 		})
-		if err != nil {
-			b.Fatal(err)
-		}
 	}
 }
 
 // Benchmark07DrainPendingOnce 测量 07 从本地 pending 同步到远程权威库的批量成本。
 func Benchmark07DrainPendingOnce(b *testing.B) {
-	require.NoError(b, ordermodels.EnsureStorage())
+	requireOrderMySQL(b)
+	b.Setenv("SHOP_LOCAL_PENDING_DIR", b.TempDir())
+	require.NoError(b, ordermodels.StartOrderWriteStore())
+	b.Cleanup(func() { require.NoError(b, ordermodels.StopOrderWriteStore()) })
 	writer := orderbusiness.LocalOrderWriter{}
-	for index := 0; index < b.N; index++ {
-		requestID := fmt.Sprintf("bench-07-drain-%d-%d", time.Now().UnixNano(), index)
-		orderID := uint(time.Now().UnixNano()%1_000_000_000) + uint(index) + 920000000
-		_, err := writer.Accept(context.Background(), orderbusiness.CreateOrderCommand{
-			OrderID:            orderID,
-			UserID:             uint(120000000 + index),
+	commands := make07OrderCommands("bench-07-drain", newBenchmarkIDFactory(22), 120000000, b.N)
+	for index := range commands {
+		_, err := writer.Accept(context.Background(), commands[index])
+		require.NoError(b, err)
+	}
+	syncer := orderbusiness.RemoteOrderSyncer{}
+	runBusinessBenchmarkSingleConcurrency(b, 1, "orders/s", func(int) error {
+		return syncer.DrainOnce(context.Background(), 1)
+	})
+}
+
+func make07OrderCommands(prefix string, ids benchmarkIDFactory, userBase uint, count int) []orderbusiness.CreateOrderCommand {
+	commands := make([]orderbusiness.CreateOrderCommand, count)
+	suffix := time.Now().UnixNano()
+	for index := range commands {
+		requestID := fmt.Sprintf("%s-%d-%d", prefix, suffix, index)
+		commands[index] = orderbusiness.CreateOrderCommand{
+			OrderID:            ids.NewID(),
+			UserID:             userBase + uint(index),
 			RequestID:          requestID,
 			RequestFingerprint: requestID,
 			SupplierID:         220001,
@@ -61,15 +67,7 @@ func Benchmark07DrainPendingOnce(b *testing.B) {
 			TraceID:            "bench-trace-" + requestID,
 			ServiceName:        "shop-order",
 			ServiceInstanceID:  "bench-order",
-		})
-		require.NoError(b, err)
-	}
-	syncer := orderbusiness.RemoteOrderSyncer{}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for index := 0; index < b.N; index++ {
-		if err := syncer.DrainOnce(context.Background(), 1); err != nil {
-			b.Fatal(err)
 		}
 	}
+	return commands
 }

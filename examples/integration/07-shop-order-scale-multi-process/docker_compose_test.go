@@ -16,6 +16,7 @@ func TestDockerScaleServiceDoesNotPublishOrderPorts(t *testing.T) {
 	scaleBlock := composeServiceBlock(content, "shop-order")
 	require.NotContains(t, scaleBlock, "ports:")
 	require.Contains(t, scaleBlock, "SHOP_LOCAL_PENDING_DIR: /data/pending")
+	require.NotContains(t, scaleBlock, "SHOP_ADVERTISE_ADDRESS:")
 }
 
 // TestDockerScaleServiceDoesNotSharePendingVolume 验证 --scale 模板不把多个副本挂到同一个 pending 卷。
@@ -26,6 +27,19 @@ func TestDockerScaleServiceDoesNotSharePendingVolume(t *testing.T) {
 	require.NotContains(t, content, "order-scale-pending")
 	require.Contains(t, content, "order-a-pending")
 	require.Contains(t, content, "order-b-pending")
+}
+
+// TestDockerOrderReplicasUseInternalMySQL 验证所有 order 副本共享内部 MySQL 权威库。
+func TestDockerOrderReplicasUseInternalMySQL(t *testing.T) {
+	content := read07Compose(t)
+	require.Contains(t, content, "mysql:")
+	require.Contains(t, content, "MYSQL_DATABASE: shop_order_scale_remote")
+	for _, service := range []string{"shop-order-a", "shop-order-b", "shop-order"} {
+		block := composeServiceBlock(content, service)
+		require.Contains(t, block, "SHOP_ORDER_REMOTE_MYSQL_HOST: mysql")
+		require.Contains(t, block, "SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote")
+		require.NotContains(t, block, "ports:")
+	}
 }
 
 // read07Compose 读取 07 Docker Compose 文件。

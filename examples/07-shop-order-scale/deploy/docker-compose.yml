@@ -8,6 +8,17 @@ services:
       timeout: 1s
       retries: 20
 
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: shop-root
+      MYSQL_DATABASE: shop_order_scale_remote
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pshop-root --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   shop-user:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
     command: ["/app/user", "-p", "18181", "-grpc", "28181", "-view", "0"]
@@ -33,8 +44,14 @@ services:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-a
       SHOP_LOCAL_PENDING_DIR: /data/pending
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
     volumes: ["order-a-pending:/data/pending"]
-    depends_on: {redis: {condition: service_healthy}}
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
 
   shop-order-b:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
@@ -43,8 +60,14 @@ services:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-b
       SHOP_LOCAL_PENDING_DIR: /data/pending
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
     volumes: ["order-b-pending:/data/pending"]
-    depends_on: {redis: {condition: service_healthy}}
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
 
   shop-order:
     profiles: ["scale"]
@@ -52,9 +75,14 @@ services:
     command: ["/app/order", "-p", "18183", "-grpc", "28183", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
-      SHOP_ADVERTISE_ADDRESS: shop-order
       SHOP_LOCAL_PENDING_DIR: /data/pending
-    depends_on: {redis: {condition: service_healthy}}
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
 
 volumes:
   order-a-pending:

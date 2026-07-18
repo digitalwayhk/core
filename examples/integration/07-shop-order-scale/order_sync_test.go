@@ -15,21 +15,32 @@ import (
 
 // TestUATPendingSurvivesRemoteFailure 验证远程失败不会丢失本地可靠订单事实。
 func TestUATPendingSurvivesRemoteFailure(t *testing.T) {
-	require.NoError(t, ordermodels.EnsureStorage())
+	t.Setenv("SHOP_LOCAL_PENDING_DIR", t.TempDir())
+	require.NoError(t, ordermodels.StartOrderWriteStore())
+	t.Cleanup(func() { require.NoError(t, ordermodels.StopOrderWriteStore()) })
 	unique := uint(time.Now().UnixNano() % 1000000)
 	requestID := "pending-failure-uat-" + time.Now().Format("150405.000000000")
+	ids := newBenchmarkIDFactory(24)
 	_, err := (orderbusiness.LocalOrderWriter{}).Accept(context.Background(), orderbusiness.CreateOrderCommand{
-		OrderID: 850000 + unique, UserID: 150000 + unique, SupplierID: 250000 + unique, ProductID: 350000 + unique,
-		RequestID: requestID, RequestFingerprint: requestID, UnitPrice: decimal.NewFromInt(8), Quantity: 2,
-		TraceID: "trace-pending-failure", ServiceName: "shop-order", ServiceInstanceID: "order-a",
+		OrderID:            ids.NewID(),
+		UserID:             150000 + unique,
+		SupplierID:         250000 + unique,
+		ProductID:          350000 + unique,
+		RequestID:          requestID,
+		RequestFingerprint: requestID,
+		UnitPrice:          decimal.NewFromInt(8),
+		Quantity:           2,
+		TraceID:            "trace-pending-failure",
+		ServiceName:        "shop-order",
+		ServiceInstanceID:  "order-a",
 	})
 	require.NoError(t, err)
 
 	syncer := orderbusiness.RemoteOrderSyncer{Remote: failingRemote{}}
-	require.NoError(t, syncer.DrainOnce(context.Background(), 10000))
-	pending, err := ordermodels.FindLocalPendingByRequest(150000+unique, requestID)
+	require.Error(t, syncer.DrainOnce(context.Background(), 10000))
+	pending, err := ordermodels.FindLocalOrderByRequest(150000+unique, requestID)
 	require.NoError(t, err)
-	require.Equal(t, ordermodels.PendingStatusFailed, pending.SyncStatus)
+	require.NotNil(t, pending)
 }
 
 type failingRemote struct{}

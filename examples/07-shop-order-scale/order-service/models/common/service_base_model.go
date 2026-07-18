@@ -15,8 +15,8 @@ func NewServiceBaseModel() *ServiceBaseModel {
 	return &ServiceBaseModel{Model: entity.NewModel(), ServiceName: "shop-order"}
 }
 
-// GetLocalDBName 返回当前 order 实例本地可靠写入库名。
-func (m *ServiceBaseModel) GetLocalDBName() string { return LocalDatabaseName }
+// GetLocalDBName 返回模型默认库名；07 order 不再使用本地 SQL 库。
+func (m *ServiceBaseModel) GetLocalDBName() string { return RemoteDatabaseName }
 
 // GetRemoteDBName 返回所有 order 实例共享的远程权威库名。
 func (m *ServiceBaseModel) GetRemoteDBName() string { return RemoteDatabaseName }

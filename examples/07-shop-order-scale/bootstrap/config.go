@@ -22,6 +22,9 @@ func AdvertiseAddress() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_ADVERTISE_ADDRESS")); value != "" {
 		return value
 	}
+	if hostname, err := os.Hostname(); err == nil && strings.TrimSpace(hostname) != "" {
+		return strings.TrimSpace(hostname)
+	}
 	return "127.0.0.1"
 }
 

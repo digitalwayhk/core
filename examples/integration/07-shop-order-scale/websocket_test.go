@@ -19,6 +19,7 @@ import (
 
 // TestUATBuyerWebSocketOrderSubscription 验证买家下单后只会由本人 WebSocket 订阅收到订单事件。
 func TestUATBuyerWebSocketOrderSubscription(t *testing.T) {
+	requireOrderMySQL(t)
 	user, supplier := start07AllInOne(t)
 	adminToken := supplier.TokenFor(t, "platform-admin", 1)
 	productID := add07SupplierProduct(t, supplier, adminToken)
