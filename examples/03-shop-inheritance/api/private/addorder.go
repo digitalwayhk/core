@@ -32,9 +32,11 @@ func (own *AddOrder) Validation(req servertypes.IRequest) error {
 }
 
 // Do 调用订单业务服务并在提交后通知。
+// 订单 ID 在接口层由 req.NewID() 生成，供 model.GetHash / 主键使用。
 func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	userID, _ := req.GetUser()
-	change, err := business.NewOrderService().CreateOrder(userID, own.ProductID, own.Quantity, req.NewID())
+	orderID := req.NewID()
+	change, err := business.NewOrderService().CreateOrder(userID, own.ProductID, own.Quantity, orderID)
 	if err != nil {
 		return nil, err
 	}

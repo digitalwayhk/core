@@ -6,9 +6,10 @@
 
 - `GetProducts`、`GetSuppliers`、`GetPaymentTypes` 使用 30 秒缓存。
 - `GetOrders` 使用 10 秒缓存，缓存键只取 Token 解析出的可信用户 ID 摘要。
-- 本地 L1 与 Badger L2 由 `RouteCache` 统一管理；同键冷加载通过可选 SingleFlight 合并。
+- 路由调用 `UseCache` 后即使用默认 L1，无需修改配置；本示例另外显式启用 Badger L2。同键冷加载通过可选 SingleFlight 合并。
 - 商品、供应商、支付类型和订单状态变化成功后主动失效相关缓存，TTL 只负责兜底。
-- 集成测试先让框架生成配置，再在临时目录启用 local L1/L2 并重启，不提交运行时配置文件。
+- L1 默认按进程/容器有效内存的 2% 自动解析总字节预算（下限 16 MiB、上限 256 MiB）；超过 `MaxValueBytes` 的响应正常返回但不进入任何缓存层。
+- 集成测试先让框架生成配置，再在临时目录显式启用 Badger L2 并重启，不提交运行时配置文件。
 
 ## 下单热路径
 
@@ -43,6 +44,7 @@ AddOrder
 - go-zero `syncx.TimeoutLimit` 保护单实例最多 500 个在途订单写入；超出部分最多等待 2 秒。
 - pending 软/硬阈值是 10,000/50,000；软阈值持续 30 秒或达到硬阈值时拒绝新写入。
 - Badger 目录每 5 秒采样，示例硬上限是 1 GiB。生产项目必须根据磁盘配额重新配置，不应照搬数字。
+- 高并发基准可临时覆盖示例阈值（子进程继承环境变量）：`SHOP_ORDER_WRITE_MAX_CONCURRENT`、`SHOP_ORDER_WRITE_SOFT_PENDING`、`SHOP_ORDER_WRITE_HARD_PENDING`、`SHOP_ORDER_WRITE_HARD_DISK_BYTES`、`SHOP_ORDER_WRITE_ACQUIRE_TIMEOUT_MS`、`SHOP_ORDER_WRITE_BACKLOG_DURATION_MS`。默认值仍是生产演示用的保守保护，不是跨机器承诺。
 - `models.GetOrderWritePerformanceSnapshot()` 返回 Group Commit、SQLite 同步、pending/磁盘和背压快照。`LifetimeAPIConfirmedTPS` 是 Badger 可靠提交的进程生命周期均值，`LifetimeSQLiteConvergenceTPS` 是 SQLite 墙钟收敛的进程生命周期均值；两者都包含启动和空闲时间，不是当前一秒的瞬时 TPS。`SQLiteActiveSyncTPS` 只表示实际同步忙碌时段的效率。
 
 `ShopService.Start/Stop` 管理订单存储生命周期。服务强制终止后，同一运行目录重启会恢复同步队列；优雅关闭会尝试冲刷积压并返回可观察错误。

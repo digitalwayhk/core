@@ -311,6 +311,42 @@ func TestForceDeleteLocalBeforeSyncSkipsStaleSnapshot(t *testing.T) {
 	require.ErrorIs(t, err, badger.ErrKeyNotFound, "旧快照不得使本地记录复活")
 }
 
+// TestSyncBatchSkipsStaleSnapshotWhenUpdatedAtDrifted 钉住锁内重检的 UpdatedAt CAS：
+// 键仍存在但内容已被更新时，旧队列快照不得把过期版本写入远端。
+func TestSyncBatchSkipsStaleSnapshotWhenUpdatedAtDrifted(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("update-during-sync", "SOL", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	stale, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	require.True(t, stale[0].fromSyncQueue)
+
+	// 同键写入更新版本，使旧快照的 UpdatedAt 失效。
+	item.Amount = 99
+	require.NoError(t, db.Set(item, 0))
+
+	synced, err := db.syncBatch(stale)
+	require.NoError(t, err)
+	require.Empty(t, synced, "UpdatedAt 漂移的旧快照必须在远端事务前被过滤")
+	_, exists := action.value(item)
+	require.False(t, exists, "过期快照不得写入远端")
+
+	// 新快照仍应可同步成功，证明键未被误删，只是旧快照被跳过。
+	fresh, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, fresh, 1)
+	require.Equal(t, 99.0, fresh[0].Item.Amount)
+	synced, err = db.syncBatch(fresh)
+	require.NoError(t, err)
+	require.Len(t, synced, 1)
+	found, exists := action.value(item)
+	require.True(t, exists)
+	require.Equal(t, 99.0, found.(*testLedger).Amount)
+}
+
 // ============================================================
 // 问题 2: batchInsertWithErrorHandling 缺少致命错误中断检查
 //

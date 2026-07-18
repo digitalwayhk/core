@@ -14,10 +14,14 @@ type OrderService struct{}
 func NewOrderService() *OrderService { return &OrderService{} }
 
 // CreateOrder 使用商品事实数据创建用户订单快照。
+// orderID 须由接口层 req.NewID() 提供，作为 GetHash / 主键。
 func (own *OrderService) CreateOrder(userID string, productID uint, quantity int, orderID uint) (*OrderChange, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, models.NewBusinessError("用户身份无效")
+	}
+	if orderID == 0 {
+		return nil, models.NewValidationError("订单 ID 不能为空")
 	}
 	if quantity <= 0 {
 		return nil, models.NewValidationError("订单数量必须大于 0")

@@ -7,8 +7,11 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-// Insert 规范化秒级创建时间并写入订单。
+// Insert 规范化秒级创建时间并写入订单；Hashcode 由 ID 派生，调用方须先 SetID（如 req.NewID）。
 func (own *Order) Insert() error {
+	if own.GetID() == 0 {
+		return NewValidationError("订单 ID 不能为空")
+	}
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	if own.CreatedAt != nil {
 		createdAt = own.CreatedAt.UTC().Truncate(time.Second)
@@ -16,13 +19,7 @@ func (own *Order) Insert() error {
 	own.SetCreatedAt(createdAt)
 	own.SetUpdatedAt(createdAt)
 	own.SetHashcode(own.GetHash())
-	if err := getDataAction().Insert(own); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return NewBusinessError("同一用户每秒只能购买一次同一商品")
-		}
-		return err
-	}
-	return nil
+	return getDataAction().Insert(own)
 }
 
 // Update 保存订单状态变化。

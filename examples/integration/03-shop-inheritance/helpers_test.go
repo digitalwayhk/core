@@ -68,8 +68,9 @@ func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
 		BuildPackage: "./examples/03-shop-inheritance/main", BinaryName: "shop-inheritance",
 		TempPrefix: "core-shop-inheritance-", ServiceCount: 2, ServiceIndex: 1,
-		Arguments:   []string{"-view", "0"},
-		DisableRace: integration.IsBenchmarkRun(),
+		GRPCServiceCount: 2,
+		Arguments:        []string{"-view", "0"},
+		DisableRace:      integration.IsBenchmarkRun(),
 	})
 	if err != nil {
 		return nil, err

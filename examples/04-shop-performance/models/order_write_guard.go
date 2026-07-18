@@ -1,6 +1,8 @@
 package models
 
 import (
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,7 +53,7 @@ type OrderWriteGuardSnapshot struct {
 }
 
 func defaultOrderWriteGuardConfig() orderWriteGuardConfig {
-	return orderWriteGuardConfig{
+	config := orderWriteGuardConfig{
 		MaxConcurrent:      orderWriteMaxConcurrent,
 		SoftPending:        orderWritePendingSoftLimit,
 		HardPending:        orderWritePendingHardLimit,
@@ -59,6 +61,59 @@ func defaultOrderWriteGuardConfig() orderWriteGuardConfig {
 		HardDiskBytes:      orderWriteHardDiskBytes,
 		AcquireTimeout:     orderWriteAcquireTimeout,
 	}
+	// 环境变量仅覆盖示例保护阈值，便于高并发基准与生产演示分离默认值。
+	// 未设置时保持 README 中的示例数字。
+	if value, ok := envInt("SHOP_ORDER_WRITE_MAX_CONCURRENT"); ok {
+		config.MaxConcurrent = value
+	}
+	if value, ok := envInt("SHOP_ORDER_WRITE_SOFT_PENDING"); ok {
+		config.SoftPending = value
+	}
+	if value, ok := envInt("SHOP_ORDER_WRITE_HARD_PENDING"); ok {
+		config.HardPending = value
+	}
+	if value, ok := envInt64("SHOP_ORDER_WRITE_HARD_DISK_BYTES"); ok {
+		config.HardDiskBytes = value
+	}
+	if value, ok := envDurationMillis("SHOP_ORDER_WRITE_ACQUIRE_TIMEOUT_MS"); ok {
+		config.AcquireTimeout = value
+	}
+	if value, ok := envDurationMillis("SHOP_ORDER_WRITE_BACKLOG_DURATION_MS"); ok {
+		config.MaxBacklogDuration = value
+	}
+	return config
+}
+
+func envInt(name string) (int, bool) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return 0, false
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+func envInt64(name string) (int64, bool) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+func envDurationMillis(name string) (time.Duration, bool) {
+	value, ok := envInt(name)
+	if !ok {
+		return 0, false
+	}
+	return time.Duration(value) * time.Millisecond, true
 }
 
 func newOrderWriteGuard(config orderWriteGuardConfig) *orderWriteGuard {

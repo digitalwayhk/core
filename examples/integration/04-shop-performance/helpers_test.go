@@ -68,8 +68,9 @@ func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
 		BuildPackage: "./examples/04-shop-performance/main", BinaryName: "shop-performance",
 		TempPrefix: "core-shop-performance-", ServiceCount: 2, ServiceIndex: 1,
-		Arguments:   []string{"-view", "0"},
-		DisableRace: integration.IsBenchmarkRun(),
+		GRPCServiceCount: 2,
+		Arguments:        []string{"-view", "0"},
+		DisableRace:      integration.IsBenchmarkRun(),
 	})
 	if err != nil {
 		return nil, err
@@ -114,7 +115,9 @@ func enableLocalRouteCache(configPath string) error {
 		"Mode": "local",
 		"TTL":  int64(10 * time.Second),
 		"L1": map[string]interface{}{
-			"Limit": 4096,
+			"MaxEntries":    4096,
+			"MaxValueBytes": int64(1 << 20),
+			"MaxBytes":      int64(64 << 20),
 		},
 		"L2": map[string]interface{}{
 			"Enable":           true,

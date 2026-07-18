@@ -2,10 +2,7 @@ package models
 
 import (
 	"strconv"
-	"strings"
-	"time"
 
-	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
 )
 
@@ -40,17 +37,15 @@ func (own *Order) NewModel() {
 // OrderStatus 返回强类型订单状态。
 func (own *Order) OrderStatus() OrderStatus { return OrderStatus(own.Status) }
 
-// GetHash 使用用户、商品和 UTC 秒级创建时间生成唯一哈希。
+// GetHash 使用订单 ID 作为稳定唯一键（由接口层 req.NewID 赋值）。
 func (own *Order) GetHash() string {
-	if own.Model == nil || own.CreatedAt == nil || strings.TrimSpace(own.UserID) == "" || own.ProductID == 0 {
-		if own.Model != nil {
-			return own.Hashcode
-		}
+	if own.Model == nil {
 		return ""
 	}
-	createdAt := own.CreatedAt.UTC().Truncate(time.Second).Format(time.RFC3339)
-	key := strings.TrimSpace(own.UserID) + ":" + strconv.FormatUint(uint64(own.ProductID), 10) + ":" + createdAt
-	return utils.HashCodes(key)
+	if own.ID == 0 {
+		return own.Hashcode
+	}
+	return strconv.FormatUint(uint64(own.ID), 10)
 }
 
 // TotalAmount 返回订单价格快照计算出的金额。

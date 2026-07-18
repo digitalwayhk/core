@@ -92,6 +92,7 @@ func TestOrderBatcherGroupsConcurrentOrders(t *testing.T) {
 	require.Zero(t, snapshot.ThresholdImmediateBatches)
 	require.Greater(t, snapshot.AggregatedBatches, uint64(0))
 	require.Zero(t, snapshot.SingletonAggregatedBatches)
+	requirePathBatchAccounting(t, snapshot)
 }
 
 // TestOrderBatcherPropagatesBatchFailure 确保整批持久化失败会传递给每个等待者，
@@ -208,6 +209,7 @@ func TestOrderBatcherSnapshotRecordsReliableCommits(t *testing.T) {
 	require.Equal(t, uint64(0), snapshot.FailedBatches)
 	require.Equal(t, 1, snapshot.MaxBatchSize)
 	require.GreaterOrEqual(t, snapshot.TotalCommitDuration, time.Duration(0))
+	requirePathBatchAccounting(t, snapshot)
 }
 
 func TestOrderBatcherSnapshotSeparatesSingletonAggregationPath(t *testing.T) {
@@ -223,4 +225,54 @@ func TestOrderBatcherSnapshotSeparatesSingletonAggregationPath(t *testing.T) {
 	require.Zero(t, snapshot.ThresholdImmediateBatches)
 	require.Equal(t, uint64(1), snapshot.SingletonAggregatedBatches)
 	require.Zero(t, snapshot.AggregatedBatches)
+	requirePathBatchAccounting(t, snapshot)
+}
+
+// TestOrderBatcherSnapshotPathCountsReconcile 钉住三类决策路径与 CommitBatches 的可对账关系。
+// 阈值立即、聚合窗口单条、真实多条合批必须互斥且合计等于总批次数；失败批次仍记入路径。
+func TestOrderBatcherSnapshotPathCountsReconcile(t *testing.T) {
+	batcher := &orderBatcher{
+		commit: func(items []*Order) error {
+			if len(items) == 2 {
+				return errors.New("故意失败以验证路径仍计数")
+			}
+			return nil
+		},
+	}
+
+	finish := func(thresholdImmediate bool, ids ...uint) {
+		batch := make([]orderBatchRequest, 0, len(ids))
+		results := make([]chan error, 0, len(ids))
+		for _, id := range ids {
+			order := NewOrder()
+			order.SetID(id)
+			result := make(chan error, 1)
+			results = append(results, result)
+			batch = append(batch, orderBatchRequest{order: order, result: result})
+		}
+		batcher.finishBatch(batch, thresholdImmediate)
+		for _, result := range results {
+			<-result
+		}
+	}
+
+	finish(true, 1)        // 阈值立即
+	finish(false, 2)       // 聚合窗口单条
+	finish(false, 3, 4)    // 多条合批且失败
+	finish(false, 5, 6, 7) // 多条合批成功
+
+	snapshot := batcher.Snapshot()
+	require.Equal(t, uint64(1), snapshot.ThresholdImmediateBatches)
+	require.Equal(t, uint64(1), snapshot.SingletonAggregatedBatches)
+	require.Equal(t, uint64(2), snapshot.AggregatedBatches)
+	require.Equal(t, uint64(1), snapshot.FailedBatches)
+	require.Equal(t, uint64(1+1+3), snapshot.CommittedOrders, "失败批不得计入 committed")
+	requirePathBatchAccounting(t, snapshot)
+}
+
+func requirePathBatchAccounting(t *testing.T, snapshot OrderBatcherSnapshot) {
+	t.Helper()
+	require.Equal(t, snapshot.CommitBatches,
+		snapshot.ThresholdImmediateBatches+snapshot.SingletonAggregatedBatches+snapshot.AggregatedBatches,
+		"CommitBatches 必须等于三类决策路径计数之和")
 }
