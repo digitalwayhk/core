@@ -28,6 +28,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 配置 profile | `ServerConfig.ApplyDefaults/Validate` | 配置能力矩阵 | 显式环境/profile | `./scripts/test.sh config-contract` | Stable |
 | 内部传输选择 | `transport.BuildSelector` | 配置能力矩阵 | http/grpc/socket；QUIC/MQ transport 被拒绝 | `./scripts/test.sh config-contract` | Conditional |
 | 受限内部 Public | `router.WithInternalCallers`、`req.CallService` | `examples/06-shop-microservices` | 同进程 ServiceContext；跨进程必须有可验证 mTLS 身份 | `./scripts/test.sh integration-shop-microservices` | Stable |
+| 订单水平扩展 | `AutoMachineID=true`、`sc.UseOutbox`、本地 pending + 远程权威库 | `examples/07-shop-order-scale` | ClusterProvider 可用；每副本 pending 隔离；order 不暴露宿主业务端口 | `go test ./examples/integration/07-shop-order-scale ./examples/integration/07-shop-order-scale-multi-process` | Conditional |
 | 本地集群 | LocalProvider | 配置能力矩阵 | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
 | etcd/Consul 集群 | Etcd/Consul Provider | 外部依赖集成文档 | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
 | MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams 或 NATS JetStream；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker` | Conditional |

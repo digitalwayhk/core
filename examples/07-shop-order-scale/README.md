@@ -30,8 +30,9 @@ buyer request
   -> shop-user private facade
   -> shop-order public API（resolver 选择任意 order 副本）
   -> order 副本本地 pending store 持久成功后返回
-  -> order 副本异步批量同步共享远程 order 权威库
+  -> order 副本后台同步循环批量写入共享远程 order 权威库
   -> order 权威事实写入 Outbox
+  -> sc.UseOutbox(models.OutboxStore{}) 发布标准事件
   -> EventBridge 投递 OrderCreated/OrderStatusChanged/PaymentChanged
   -> user/supplier 消费事件更新本地投影和缓存失效
 ```
@@ -56,6 +57,7 @@ buyer request
 - 每个副本必须拥有唯一 `ServiceInstanceID`，并记录到业务事实、pending、Outbox、Inbox、同步状态和诊断日志。
 - Docker 扩容时不固定暴露多个 order 业务端口；副本通过配置的发现机制注册，调用方只通过 ServiceResolver 选择实例。
 - 注册发现机制不应绑定 Redis；Redis、局域网发现或其他中间件由配置决定，示例只验证框架抽象可用。
+- Docker `--scale shop-order=N` 模板不能挂载共享 named volume；每个副本的本地 pending 必须由容器私有目录或编排平台独立卷承载。
 
 ## 缓存规则
 
@@ -73,6 +75,23 @@ buyer request
 - 多 order 副本 UAT 必须验证自动 MachineID、唯一 ServiceInstanceID、本地 pending 目录隔离、共享远程权威库和 resolver 多节点调用。
 - 有 WebSocket 的买家角色必须覆盖真实订阅、订单事件投递和其他买家隔离。
 - 07 完成后增加基准性能测试，对比 06 与 07 在订单写入吞吐、延迟分位数和失败恢复上的差异。
+
+## 基准测试
+
+07 提供 06/07 写路径对比 benchmark：
+
+```bash
+GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale \
+  -run '^$' -bench 'Benchmark(06|07)' -benchtime=10s -count=1 -v
+```
+
+对比项：
+
+- `Benchmark06CreateOrderDirect`：06 同步写远程订单权威库和 Outbox。
+- `Benchmark07LocalOrderAccept`：07 下单入口只写当前副本本地 pending。
+- `Benchmark07DrainPendingOnce`：07 后台同步 pending 到远程权威库。
+
+benchmark 结果只用于同机同次趋势评估，不作为固定提升倍数门禁；真实容量评估仍需要按部署拓扑、远程库和 MQ 配置重新压测。
 
 ## 质量门禁
 

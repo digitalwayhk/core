@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -36,9 +38,15 @@ func (own *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
 	if paymentID == "" {
 		paymentID = req.GetTraceId()
 	}
-	item, err := business.PayOrder(own.OrderID, own.UserID, paymentID)
+	item, err := business.PayOrder(own.OrderID, own.UserID, paymentID, req.GetTraceId())
 	if err != nil {
 		return nil, err
+	}
+	if err := business.WriteOrderChangedOutbox(item, req.GetTraceId()+"-"+contract.EventPaymentChanged, contract.EventPaymentChanged); err != nil {
+		return nil, err
+	}
+	if sc := router.GetContext(contract.OrderServiceName); sc != nil {
+		sc.NotifyOutbox()
 	}
 	return orderToDTO(item), nil
 }

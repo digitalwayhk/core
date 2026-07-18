@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -27,11 +29,17 @@ func (own *CancelOrder) Validation(servertypes.IRequest) error {
 	return nil
 }
 
-// Do 在远程权威库撤销订单。
-func (own *CancelOrder) Do(servertypes.IRequest) (interface{}, error) {
-	item, err := business.CancelOrder(own.OrderID, own.UserID)
+// Do 在远程权威库撤销订单并发布订单状态变化事件。
+func (own *CancelOrder) Do(req servertypes.IRequest) (interface{}, error) {
+	item, err := business.CancelOrder(own.OrderID, own.UserID, req.GetTraceId())
 	if err != nil {
 		return nil, err
+	}
+	if err := business.WriteOrderChangedOutbox(item, req.GetTraceId()+"-"+contract.EventOrderStatusChanged, contract.EventOrderStatusChanged); err != nil {
+		return nil, err
+	}
+	if sc := router.GetContext(contract.OrderServiceName); sc != nil {
+		sc.NotifyOutbox()
 	}
 	return orderToDTO(item), nil
 }

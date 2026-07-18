@@ -3,6 +3,7 @@ package supplierservice
 
 import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
+	manageapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service/api/manage"
 	publicapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service/api/public"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -15,7 +16,10 @@ func (*Service) ServiceName() string { return contract.SupplierServiceName }
 
 // Routers 注册供应商服务内部 Public API。
 func (*Service) Routers() []servertypes.IRouter {
-	return []servertypes.IRouter{&publicapi.GetSuppliers{}, &publicapi.GetProducts{}}
+	routers := []servertypes.IRouter{&publicapi.GetSuppliers{}, &publicapi.GetProducts{}}
+	routers = append(routers, manageapi.NewSupplierManage().Routers()...)
+	routers = append(routers, manageapi.NewProductManage().Routers()...)
+	return routers
 }
 
 // SubscribeRouters 保留旧观察路由兼容入口；内部事件订阅后续统一用 EventBridge。

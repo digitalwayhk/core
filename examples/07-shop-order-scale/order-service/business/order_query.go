@@ -18,22 +18,22 @@ func ListOrders(filter models.OrderQueryFilter, page, size int) ([]*models.Order
 }
 
 // CancelOrder 在远程权威库撤销订单。
-func CancelOrder(orderID, userID uint) (*models.Order, error) {
+func CancelOrder(orderID, userID uint, traceID string) (*models.Order, error) {
 	var order *models.Order
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
-		order, err = models.CancelRemoteOrderWith(action, orderID, userID)
+		order, err = models.CancelRemoteOrderWith(action, orderID, userID, traceID)
 		return err
 	})
 	return order, err
 }
 
 // PayOrder 在远程权威库标记订单支付成功。
-func PayOrder(orderID, userID uint, paymentID string) (*models.Order, error) {
+func PayOrder(orderID, userID uint, paymentID, traceID string) (*models.Order, error) {
 	var order *models.Order
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
-		order, err = models.PayRemoteOrderWith(action, orderID, userID, paymentID)
+		order, err = models.PayRemoteOrderWith(action, orderID, userID, paymentID, traceID)
 		return err
 	})
 	return order, err

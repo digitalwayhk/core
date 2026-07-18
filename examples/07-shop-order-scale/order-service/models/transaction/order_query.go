@@ -38,7 +38,7 @@ func ListRemoteOrdersWith(action persistencetypes.IDataAction, filter OrderQuery
 }
 
 // CancelRemoteOrderWith 在远程权威库撤销订单。
-func CancelRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID uint) (*Order, error) {
+func CancelRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID uint, traceID string) (*Order, error) {
 	order, err := findRemoteOrderByIDWith(action, orderID)
 	if err != nil {
 		return nil, err
@@ -46,13 +46,14 @@ func CancelRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID 
 	if userID > 0 && order.UserID != userID {
 		return nil, errors.New("无权撤销该订单")
 	}
+	order.TraceID = traceID
 	order.OrderStatus = OrderStatusCancelled
 	order.OrderRevision++
 	return order, order.UpdateWith(action)
 }
 
 // PayRemoteOrderWith 在远程权威库标记订单支付成功。
-func PayRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID uint, paymentID string) (*Order, error) {
+func PayRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID uint, paymentID, traceID string) (*Order, error) {
 	order, err := findRemoteOrderByIDWith(action, orderID)
 	if err != nil {
 		return nil, err
@@ -61,6 +62,7 @@ func PayRemoteOrderWith(action persistencetypes.IDataAction, orderID, userID uin
 		return nil, errors.New("无权支付该订单")
 	}
 	now := time.Now().UTC()
+	order.TraceID = traceID
 	order.PaymentStatus = PaymentStatusPaid
 	order.CurrentPaymentID = paymentID
 	order.OrderRevision++

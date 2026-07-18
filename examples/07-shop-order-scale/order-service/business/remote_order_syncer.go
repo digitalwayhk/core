@@ -4,11 +4,8 @@ package business
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
-	eventdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/event"
-	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 )
 
@@ -53,7 +50,7 @@ func (s RemoteOrderSyncer) syncOne(ctx context.Context, remote RemoteOrderStore,
 		if err := models.MarkPendingSyncedWith(action, pending); err != nil {
 			return err
 		}
-		outbox, err := models.NewOutboxRecord(stored.TraceID, stored.RequestID, contract.EventOrderCreated, contract.SubjectOrderChanged, orderChangedEvent(stored))
+		outbox, err := models.NewOutboxRecord(stored.TraceID, stored.RequestID, contract.EventOrderCreated, contract.SubjectOrderChanged, BuildOrderChangedEvent(stored, stored.RequestID, contract.EventOrderCreated))
 		if err != nil {
 			return err
 		}
@@ -67,30 +64,4 @@ func markPendingFailed(pending *models.LocalPendingOrder, err error) error {
 	return models.RunLocalTransaction(func(action models.DataAction) error {
 		return models.MarkPendingFailedWith(action, pending, err.Error())
 	})
-}
-
-func orderChangedEvent(order *models.Order) orderdto.OrderChanged {
-	occurredAt := time.Now().UTC()
-	if order.CreatedAt != nil {
-		occurredAt = *order.CreatedAt
-	}
-	return orderdto.OrderChanged{
-		Metadata: eventdto.Metadata{
-			SchemaVersion:     contract.EventSchemaVersion,
-			EventID:           order.RequestID,
-			EventType:         contract.EventOrderCreated,
-			Subject:           contract.SubjectOrderChanged,
-			TraceID:           order.TraceID,
-			ServiceName:       order.ServiceName,
-			ServiceInstanceID: order.ServiceInstanceID,
-			OccurredAt:        occurredAt,
-		},
-		OrderID:       order.ID,
-		OrderRevision: order.OrderRevision,
-		UserID:        order.UserID,
-		SupplierID:    order.SupplierID,
-		ProductID:     order.ProductID,
-		OrderStatus:   order.OrderStatus,
-		PaymentStatus: order.PaymentStatus,
-	}
 }

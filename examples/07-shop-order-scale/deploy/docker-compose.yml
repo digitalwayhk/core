@@ -54,10 +54,8 @@ services:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order
       SHOP_LOCAL_PENDING_DIR: /data/pending
-    volumes: ["order-scale-pending:/data/pending"]
     depends_on: {redis: {condition: service_healthy}}
 
 volumes:
   order-a-pending:
   order-b-pending:
-  order-scale-pending:
