@@ -41,7 +41,10 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	order, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/06-shop-microservices/main/order", BinaryName: "shop-order", TempPrefix: "core-shop-order-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-order", redisPrefix)})
 	require.NoError(t, err)
 	defer order.Stop()
-	waitProcessReady(t, user, "/api/shop-user/getproducts")
+	processes := []*integration.Suite{user, supplier, order}
+	waitProcessReady(t, user, "/api/health", processes...)
+	waitProcessReady(t, supplier, "/api/health", processes...)
+	waitProcessReady(t, order, "/api/health", processes...)
 	grpcPorts := []int{
 		readServiceGRPCPort(t, user, "shop-user"),
 		readServiceGRPCPort(t, supplier, "shop-supplier"),
@@ -55,7 +58,7 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 		assertGRPCHealthServing(t, grpcPorts[index], serviceName, pki)
 	}
 	assertGRPCHealthFails(t, grpcPorts[0], "shop-order", pki)
-	processes := []*integration.Suite{user, supplier, order}
+	waitProcessReady(t, user, "/api/shop-user/getproducts", processes...)
 	before := make([]integration.TransportStatsSnapshot, len(processes))
 	for index, process := range processes {
 		before[index] = process.TransportStats(t)
@@ -240,9 +243,9 @@ func assertGRPCHealthFails(t *testing.T, port int, serverName string, pki *integ
 	require.Error(t, err)
 }
 
-func waitProcessReady(t *testing.T, suite *integration.Suite, path string) {
+func waitProcessReady(t *testing.T, suite *integration.Suite, path string, processes ...*integration.Suite) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		response, err := suite.DoJSON(http.MethodGet, path, "", nil)
 		if err == nil && response.Success {
@@ -250,6 +253,13 @@ func waitProcessReady(t *testing.T, suite *integration.Suite, path string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	suite.PrintLog()
+	if len(processes) == 0 {
+		suite.PrintLog()
+	} else {
+		for index, process := range processes {
+			t.Logf("process %d log:", index)
+			process.PrintLog()
+		}
+	}
 	t.Fatalf("等待进程启动超时: %s", path)
 }
