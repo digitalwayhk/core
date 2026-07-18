@@ -159,10 +159,13 @@
 | `ServerConfig.Transport.GRPC.Security.KeyFile` | supported | gRPC client/server TLS | mtls 加载私钥；缺失或无效时启动失败 |
 | `ServerConfig.Transport.GRPC.Security.ServerName` | supported | zrpc client TLS | 固定名称或 `{service}` 动态目标服务名校验 |
 | `ServerConfig.RouteCache` | supported | ServiceContext | 规范化配置并创建服务级 RouteCacheManager |
-| `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | off/local 可用；shared 要求 Redis 与 EventBridge 外部失效订阅同时就绪 |
+| `ServerConfig.RouteCache.Mode` | supported | RouteCacheManager | 默认 local；shared 要求 Redis 与 EventBridge 外部失效订阅同时就绪；旧 off 兼容规范化为 local |
 | `ServerConfig.RouteCache.TTL` | supported | RouteCacheManager | 作为路由未显式指定时的默认 TTL |
-| `ServerConfig.RouteCache.L1` | supported | RouteCacheManager | 使用 go-zero collection.Cache 管理本地缓存 |
-| `ServerConfig.RouteCache.L1.Limit` | supported | RouteCacheManager | 传入 collection.WithLimit 限制 L1 条目数 |
+| `ServerConfig.RouteCache.L1` | supported | RouteCacheManager | 使用成熟 LRU 管理本地序列化缓存，按条目数与字节预算双重淘汰 |
+| `ServerConfig.RouteCache.L1.MaxEntries` | supported | RouteCacheManager | 0 按自动字节预算/4 KiB 解析，上限 10000；非零时显式限制条目数 |
+| `ServerConfig.RouteCache.L1.MaxValueBytes` | supported | RouteCacheManager | 默认 1 MiB；超限响应不写入 L1/L2/L3 |
+| `ServerConfig.RouteCache.L1.MaxBytes` | supported | RouteCacheManager | 0 按有效内存 2% 自动解析为进程级 16–256 MiB 总预算；非零时使用显式值 |
+| `ServerConfig.RouteCache.L1.Limit` | supported | RouteCacheManager | 废弃兼容字段，映射到 MaxEntries；新配置不应再使用 |
 | `ServerConfig.RouteCache.L2` | supported | RouteCacheManager | 可选装配服务隔离的纯 Badger TTL 缓存 |
 | `ServerConfig.RouteCache.L2.Enable` | supported | RouteCacheManager | true 时创建并在服务关闭时关闭 Badger L2 |
 | `ServerConfig.RouteCache.L2.Path` | supported | BadgerL2 | 作为服务哈希子目录的根路径 |

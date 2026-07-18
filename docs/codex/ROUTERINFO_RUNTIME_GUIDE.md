@@ -81,7 +81,7 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 | `local` | 使用 go-zero L1，可选启用服务隔离的纯 Badger L2 |
 | `shared` | Redis L3 是共享事实缓存，L1/L2 只是本地副本；失效通过 EventBridge 外部控制事件传播 |
 
-纯 L1 模式保留写入对象的 Go 类型；启用 L2 或 L3 后，直接 L1 命中与下层回填都返回 `json.RawMessage`，以保证同一缓存键不会因命中层级改变类型。直接调用 `RouteCacheManager.Get` 的消费方应将分层缓存数据视为序列化结果；需要具体 Go 类型时必须显式反序列化，不得对原始业务类型做直接断言。
+所有 L1/L2/L3 命中都返回 `json.RawMessage`，以保证同一缓存键不会因命中层级改变类型。直接调用 `RouteCacheManager.Get/Take` 的消费方应将缓存数据视为序列化结果；需要具体 Go 类型时必须显式反序列化，不得对原始业务类型做直接断言。
 
 共享模式启动要求 Redis Ping 成功，并且 EventBridge 外部失效订阅建立成功。默认 `OnUnavailable=fail` 阻止启动；显式 `bypass` 会关闭 L1/L2/L3 全部层后继续启动，不会退化为各节点独立缓存。
 

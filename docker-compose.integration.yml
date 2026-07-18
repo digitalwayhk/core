@@ -80,7 +80,7 @@ services:
       retries: 30
 
   mysql:
-    image: mysql:8.4.4
+    image: mysql:9.0.0
     profiles: ["persistence"]
     environment:
       MYSQL_DATABASE: core_test
