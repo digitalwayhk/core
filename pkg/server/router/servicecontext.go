@@ -23,6 +23,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
+	"github.com/gofrs/uuid"
 	"github.com/yitter/idgenerator-go/idgen"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/service"
@@ -75,6 +76,7 @@ type ServiceContext struct {
 	localFallbackProvider    cluster.DiscoveryProvider       `json:"-"`
 	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
 	ServiceResolver          *ServiceResolver                `json:"-"`
+	ServiceInstanceID        string
 	ownsClusterProvider      bool
 	membership               *cluster.MembershipManager     `json:"-"`
 	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
@@ -696,18 +698,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		SubscriberID: sc.Service.Name,
 	})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
-
-	// Phase 4: claim a unique MachineID in the process-local registry before
-	// initialising Snowflake, preventing ID collisions between services in the
-	// same process or between hot-reload replicas.
-	if con.Cluster.Mode != "off" {
-		machineID, err := claimMachineID(con, sc.Service.Name)
-		if err != nil {
-			logx.Errorf("cluster: MachineID claim failed (%v), proceeding with config value", err)
-		} else {
-			con.MachineID = uint(machineID)
-		}
-	}
+	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
 
 	if err := initCluster(sc); err != nil {
 		if con.Cluster.Mode == "on" {
@@ -718,6 +709,22 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Field("error", err),
 		)
 	}
+
+	// Phase 4: claim a unique MachineID before initialising Snowflake.
+	// AutoMachineID uses the configured ClusterProvider; legacy fixed mode keeps
+	// the process-local conflict guard used by earlier examples.
+	if con.Cluster.Mode != "off" {
+		machineID, err := claimMachineID(sc, con)
+		if err != nil {
+			if con.Cluster.Claim.AutoMachineID {
+				panic(fmt.Sprintf("cluster: AutoMachineID claim failed: %v", err))
+			}
+			logx.Errorf("cluster: MachineID claim failed (%v), proceeding with config value", err)
+		} else {
+			con.MachineID = uint(machineID)
+		}
+	}
+
 	protocols := append([]string{con.Transport.Internal}, con.Transport.Fallback...)
 	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext, protocols...)
 	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
@@ -1449,27 +1456,35 @@ func providerName(provider cluster.DiscoveryProvider) string {
 }
 
 func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
-	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
-		own.Config.DataCenterID, own.Config.MachineID)
+	nodeID := own.clusterNodeID(own.Config.MachineID)
 	address := own.Config.RunIp
 	if own.Config.Cluster.AdvertiseAddress != "" {
 		address = own.Config.Cluster.AdvertiseAddress
 	}
 	node := &cluster.NodeInfo{
-		ID:           nodeID,
-		ServiceName:  own.Service.Name,
-		DataCenterID: int64(own.Config.DataCenterID),
-		MachineID:    int64(own.Config.MachineID),
-		Address:      address,
-		Port:         own.Config.Port,
-		GRPCPort:     own.Config.Transport.GRPC.Port,
-		Weight:       1,
+		ID:                nodeID,
+		ServiceName:       own.Service.Name,
+		ServiceInstanceID: own.ServiceInstanceID,
+		DataCenterID:      int64(own.Config.DataCenterID),
+		MachineID:         int64(own.Config.MachineID),
+		Address:           address,
+		Port:              own.Config.Port,
+		GRPCPort:          own.Config.Transport.GRPC.Port,
+		Weight:            1,
 	}
 	interval := own.Config.Cluster.HeartbeatInterval
 	if interval == 0 {
 		interval = 3 * time.Second
 	}
 	return nodeID, node, interval
+}
+
+func (own *ServiceContext) clusterNodeID(machineID uint) string {
+	instanceID := own.ServiceInstanceID
+	if instanceID == "" {
+		instanceID = "unknown"
+	}
+	return fmt.Sprintf("%s-%d-%d-%s", own.Service.Name, own.Config.DataCenterID, machineID, instanceID)
 }
 
 func (own *ServiceContext) startMembership(
@@ -2007,24 +2022,69 @@ func initCluster(sc *ServiceContext) error {
 	return nil
 }
 
-// claimMachineID registers this service in the process-local cluster registry.
-// If the configured MachineID is already taken, it auto-allocates the next free ID.
-// Returns the (possibly new) MachineID to use for Snowflake initialisation.
-func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error) {
+func newServiceInstanceID(serviceName string) string {
+	id, err := uuid.NewV4()
+	if err != nil {
+		return fmt.Sprintf("%s-%d", serviceName, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%s", serviceName, id.String())
+}
+
+// claimMachineID registers this service before Snowflake initialisation.
+// AutoMachineID uses the configured provider; fixed mode preserves the
+// process-local expansion behaviour used by existing single-process examples.
+func claimMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
+	if con.Cluster.Claim.AutoMachineID {
+		return claimAutoMachineID(sc, con)
+	}
+	return claimProcessLocalMachineID(sc, con)
+}
+
+func claimAutoMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
+	ctx := context.Background()
+	dc := int64(con.DataCenterID)
+	maxMachineID := int64(con.Cluster.Claim.MachineIDMax)
+	if maxMachineID <= 0 {
+		maxMachineID = 31
+	}
+	provider := sc.ClusterProvider
+	if provider == nil {
+		provider = processLocalRegistry
+	}
+	var lastErr error
+	for attempt := int64(0); attempt <= maxMachineID; attempt++ {
+		machine, err := cluster.AllocateMachineID(ctx, provider, sc.Service.Name, dc, maxMachineID)
+		if err != nil {
+			return int64(con.MachineID), err
+		}
+		node := sc.clusterNodeInfo(uint(machine))
+		if err := provider.Register(ctx, node); err != nil {
+			if errors.Is(err, cluster.ErrSlotConflict) {
+				lastErr = err
+				continue
+			}
+			return int64(con.MachineID), err
+		}
+		logx.Infow("cluster_auto_machine_id_claimed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("service_instance_id", sc.ServiceInstanceID),
+			logx.Field("datacenter_id", dc),
+			logx.Field("machine_id", machine),
+			logx.Field("provider", provider.Name()),
+		)
+		return machine, nil
+	}
+	if lastErr != nil {
+		return int64(con.MachineID), lastErr
+	}
+	return int64(con.MachineID), fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
+}
+
+func claimProcessLocalMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
 	ctx := context.Background()
 	dc := int64(con.DataCenterID)
 	machine := int64(con.MachineID)
-
-	nodeID := fmt.Sprintf("%s-%d-%d", serviceName, dc, machine)
-	node := &cluster.NodeInfo{
-		ID:           nodeID,
-		ServiceName:  serviceName,
-		DataCenterID: dc,
-		MachineID:    machine,
-		Address:      "127.0.0.1",
-		Port:         con.Port,
-		Weight:       1,
-	}
+	node := sc.clusterNodeInfo(uint(machine))
 
 	err := processLocalRegistry.Register(ctx, node)
 	if err == nil {
@@ -2036,17 +2096,35 @@ func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error)
 	if con.Cluster.Claim.MachineIDMax > 0 {
 		maxMachineID = int64(con.Cluster.Claim.MachineIDMax)
 	}
-	newMachine := processLocalRegistry.AllocateMachineID(serviceName, dc, maxMachineID)
+	newMachine := processLocalRegistry.AllocateMachineID(sc.Service.Name, dc, maxMachineID)
 	if newMachine < 0 {
 		return machine, fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
 	}
-	node.ID = fmt.Sprintf("%s-%d-%d", serviceName, dc, newMachine)
+	node.ID = sc.clusterNodeID(uint(newMachine))
 	node.MachineID = newMachine
 	if regErr := processLocalRegistry.Register(ctx, node); regErr != nil {
 		return machine, regErr
 	}
-	logx.Infof("cluster: auto-allocated MachineID=%d for %s (was %d)", newMachine, serviceName, machine)
+	logx.Infof("cluster: auto-allocated MachineID=%d for %s (was %d)", newMachine, sc.Service.Name, machine)
 	return newMachine, nil
+}
+
+func (own *ServiceContext) clusterNodeInfo(machineID uint) *cluster.NodeInfo {
+	address := own.Config.RunIp
+	if own.Config.Cluster.AdvertiseAddress != "" {
+		address = own.Config.Cluster.AdvertiseAddress
+	}
+	return &cluster.NodeInfo{
+		ID:                own.clusterNodeID(machineID),
+		ServiceName:       own.Service.Name,
+		ServiceInstanceID: own.ServiceInstanceID,
+		DataCenterID:      int64(own.Config.DataCenterID),
+		MachineID:         int64(machineID),
+		Address:           address,
+		Port:              own.Config.Port,
+		GRPCPort:          own.Config.Transport.GRPC.Port,
+		Weight:            1,
+	}
 }
 
 func GetResponseData[T any](response interface{}) *T {

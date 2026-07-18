@@ -108,8 +108,8 @@
 | `ServerConfig.Cluster.HeartbeatTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
 | `ServerConfig.Cluster.SuspectTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
 | `ServerConfig.Cluster.InstanceReuseCooldown` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
-| `ServerConfig.Cluster.Claim` | rejected | ClusterConfig.Validate | 容器的未接线自动 claim/策略值在启动前拒绝 |
-| `ServerConfig.Cluster.Claim.AutoMachineID` | rejected | ClusterConfig.Validate | true 返回 not implemented |
+| `ServerConfig.Cluster.Claim` | supported | ClusterConfig.Validate、ServiceContext、ClusterProvider | 容器由子字段分别声明支持或拒绝；`AutoMachineID` 与 `MachineIDMax` 已接入 |
+| `ServerConfig.Cluster.Claim.AutoMachineID` | supported | ServiceContext + ClusterProvider | true 时在 Snowflake 初始化前通过当前 Provider 申请 MachineID lease，并写回运行时配置 |
 | `ServerConfig.Cluster.Claim.AutoDataCenterID` | rejected | ClusterConfig.Validate | true 返回 not implemented |
 | `ServerConfig.Cluster.Claim.MachineIDMax` | supported | machine ID claim | claim 范围构造消费 |
 | `ServerConfig.Cluster.Claim.DataCenterIDMax` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |

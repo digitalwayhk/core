@@ -200,9 +200,6 @@ func (c *ClusterConfig) Validate() error {
 		return err
 	}
 
-	if c.Claim.AutoMachineID {
-		return fmt.Errorf("cluster.claim.autoMachineID=%t is not implemented; set it to false", c.Claim.AutoMachineID)
-	}
 	if c.Claim.AutoDataCenterID {
 		return fmt.Errorf("cluster.claim.autoDataCenterID=%t is not implemented; set it to false", c.Claim.AutoDataCenterID)
 	}

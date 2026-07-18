@@ -30,17 +30,18 @@ type NodeInfo struct {
 	// ID is globally unique, e.g. "<service>-<datacenter>-<machine>-<pid>"
 	ID string `json:"id"`
 
-	ServiceName   string            `json:"service_name"`
-	DataCenterID  int64             `json:"datacenter_id"`
-	MachineID     int64             `json:"machine_id"`
-	Address       string            `json:"address"`
-	Port          int               `json:"port"`
-	GRPCPort      int               `json:"grpc_port,omitempty"`
-	Status        NodeStatus        `json:"status"`
-	Weight        int               `json:"weight"` // for weighted balancing; default 1
-	RegisteredAt  time.Time         `json:"registered_at"`
-	LastHeartbeat time.Time         `json:"last_heartbeat"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	ServiceName       string            `json:"service_name"`
+	ServiceInstanceID string            `json:"service_instance_id,omitempty"`
+	DataCenterID      int64             `json:"datacenter_id"`
+	MachineID         int64             `json:"machine_id"`
+	Address           string            `json:"address"`
+	Port              int               `json:"port"`
+	GRPCPort          int               `json:"grpc_port,omitempty"`
+	Status            NodeStatus        `json:"status"`
+	Weight            int               `json:"weight"` // for weighted balancing; default 1
+	RegisteredAt      time.Time         `json:"registered_at"`
+	LastHeartbeat     time.Time         `json:"last_heartbeat"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
 }
 
 // IsHealthy returns true when the node is running and has a recent heartbeat.

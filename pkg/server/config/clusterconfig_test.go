@@ -140,7 +140,6 @@ func TestClusterConfigValidate_RejectedErrorsIncludeValue(t *testing.T) {
 		{name: "mode", configure: func(c *ClusterConfig) { c.Mode = "legacy" }, want: `"legacy"`},
 		{name: "provider", configure: func(c *ClusterConfig) { c.Provider = "zookeeper" }, want: `"zookeeper"`},
 		{name: "node name", configure: func(c *ClusterConfig) { c.NodeName = "node-a" }, want: `"node-a"`},
-		{name: "auto machine id", configure: func(c *ClusterConfig) { c.Claim.AutoMachineID = true }, want: "true"},
 		{name: "discovery seeds", configure: func(c *ClusterConfig) { c.Discovery.Seeds = []string{"node-a:9000"} }, want: "node-a:9000"},
 		{name: "shard policy", configure: func(c *ClusterConfig) { c.Shard.MissingKeyPolicy = "average" }, want: `"average"`},
 		{name: "consul prefix", configure: func(c *ClusterConfig) { c.Providers.Consul.Prefix = "custom" }, want: `"custom"`},
@@ -170,7 +169,6 @@ func TestClusterConfigValidate_UnimplementedClusterFields(t *testing.T) {
 		fieldPath string
 	}{
 		{name: "node name", configure: func(c *ClusterConfig) { c.NodeName = "node-a" }, fieldPath: "cluster.nodeName"},
-		{name: "auto machine id", configure: func(c *ClusterConfig) { c.Claim.AutoMachineID = true }, fieldPath: "cluster.claim.autoMachineID"},
 		{name: "auto data center id", configure: func(c *ClusterConfig) { c.Claim.AutoDataCenterID = true }, fieldPath: "cluster.claim.autoDataCenterID"},
 		{name: "expand data center conflict", configure: func(c *ClusterConfig) { c.Claim.ConflictPolicy = "expand-data-center-id" }, fieldPath: "cluster.claim.conflictPolicy"},
 		{name: "fail conflict", configure: func(c *ClusterConfig) { c.Claim.ConflictPolicy = "fail" }, fieldPath: "cluster.claim.conflictPolicy"},
@@ -193,6 +191,15 @@ func TestClusterConfigValidate_UnimplementedClusterFields(t *testing.T) {
 			assert.Contains(t, err.Error(), "not implemented")
 		})
 	}
+}
+
+// TestClusterConfigValidate_AutoMachineIDSupported 验证自动 MachineID 已接入运行时。
+func TestClusterConfigValidate_AutoMachineIDSupported(t *testing.T) {
+	c := ClusterConfig{Mode: "auto", Provider: "local"}
+	c.ApplyDefaults()
+	c.Claim.AutoMachineID = true
+
+	require.NoError(t, c.Validate())
 }
 
 func TestClusterConfigValidate_NonConfigurableFields(t *testing.T) {
