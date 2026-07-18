@@ -17,6 +17,7 @@ type (
 	Order             = transaction.Order
 	PaymentRecord     = transaction.PaymentRecord
 	Outbox            = transaction.Outbox
+	OutboxStore       = transaction.OutboxStore
 	PaymentType       = basedata.PaymentType
 )
 

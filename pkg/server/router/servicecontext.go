@@ -915,6 +915,35 @@ func GetContexts() map[string]*ServiceContext {
 func (own *ServiceContext) NewID() uint {
 	return uint(own.snow.NextId())
 }
+
+// UseOutbox 启用当前服务的可靠 Outbox 发布器。事件来源服务名固定为当前 ServiceContext。
+func (own *ServiceContext) UseOutbox(store event.OutboxStore) error {
+	if own == nil || own.ServiceEventBridge == nil || own.Service == nil {
+		return event.ErrServiceEventBridgeClosed
+	}
+	return own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
+		SourceService: own.Service.Name,
+		Store:         store,
+		External:      own.ServiceEventBridge.HasExternalPublisher(),
+	})
+}
+
+// NotifyOutbox 唤醒当前服务 Outbox 发布器尽快扫描本地 Outbox 表。
+func (own *ServiceContext) NotifyOutbox() {
+	if own == nil || own.ServiceEventBridge == nil {
+		return
+	}
+	own.ServiceEventBridge.NotifyOutbox()
+}
+
+// SubscribeEvent 注册统一业务事件订阅；运行时负责连接本地事件中心和外部事件桥。
+func (own *ServiceContext) SubscribeEvent(subscription event.Subscription) (func(), error) {
+	if own == nil || own.ServiceEventBridge == nil {
+		return nil, event.ErrServiceEventBridgeClosed
+	}
+	return own.ServiceEventBridge.SubscribeEvent(subscription)
+}
+
 func (own *ServiceContext) SetPid(pid int) {
 	own.Pid = pid
 }

@@ -1,0 +1,154 @@
+package event
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/zeromicro/go-zero/core/logx"
+)
+
+// OutboxMessage 是框架 Outbox 发布器需要的最小事件记录。
+// 业务模型负责把本地 Outbox 表转换成该结构，发布器不理解业务表。
+type OutboxMessage struct {
+	ID             uint
+	EventID        string
+	EventType      string
+	Subject        string
+	Payload        []byte
+	TraceID        string
+	IdempotencyKey string
+	ShardKey       string
+}
+
+// OutboxStore 只负责访问本服务本地 Outbox 表。
+// 可靠性来自业务事实与 Outbox 在同一数据库事务内提交。
+type OutboxStore interface {
+	LoadPending(ctx context.Context, limit int) ([]OutboxMessage, error)
+	MarkPublished(ctx context.Context, message OutboxMessage) error
+}
+
+type OutboxOptions struct {
+	SourceService string
+	Store         OutboxStore
+	Interval      time.Duration
+	BatchSize     int
+	External      bool
+}
+
+type outboxPublisher struct {
+	source   string
+	store    OutboxStore
+	interval time.Duration
+	batch    int
+	external bool
+	bridge   *ServiceEventBridge
+	notify   chan struct{}
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+}
+
+func newOutboxPublisher(bridge *ServiceEventBridge, options OutboxOptions) (*outboxPublisher, error) {
+	if bridge == nil || bridge.closed.Load() {
+		return nil, ErrServiceEventBridgeClosed
+	}
+	if options.Store == nil {
+		return nil, errors.New("event outbox store is nil")
+	}
+	if options.SourceService == "" {
+		return nil, errors.New("event outbox source service is empty")
+	}
+	if options.Interval <= 0 {
+		options.Interval = 100 * time.Millisecond
+	}
+	if options.BatchSize <= 0 {
+		options.BatchSize = 100
+	}
+	ctx, cancel := context.WithCancel(bridge.ctx)
+	publisher := &outboxPublisher{
+		source: options.SourceService, store: options.Store, interval: options.Interval,
+		batch: options.BatchSize, external: options.External, bridge: bridge,
+		notify: make(chan struct{}, 1), cancel: cancel,
+	}
+	publisher.wg.Add(1)
+	go publisher.run(ctx)
+	return publisher, nil
+}
+
+func (p *outboxPublisher) run(ctx context.Context) {
+	defer p.wg.Done()
+	ticker := time.NewTicker(p.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.notify:
+			p.drain(ctx)
+		case <-ticker.C:
+			p.drain(ctx)
+		}
+	}
+}
+
+func (p *outboxPublisher) drain(ctx context.Context) {
+	for {
+		items, err := p.store.LoadPending(ctx, p.batch)
+		if err != nil {
+			logx.Errorw("event_outbox_load_failed", logx.Field("service", p.source), logx.Field("error", err))
+			return
+		}
+		if len(items) == 0 {
+			return
+		}
+		for _, item := range items {
+			if err := p.publish(ctx, item); err != nil {
+				logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("error", err))
+				continue
+			}
+			if err := p.store.MarkPublished(ctx, item); err != nil {
+				logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("error", err))
+			}
+		}
+		if len(items) < p.batch {
+			return
+		}
+	}
+}
+
+func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error {
+	env := NewEnvelope(p.source, item.EventType, item.Payload)
+	if item.EventID != "" {
+		env.ID = item.EventID
+	}
+	env.Subject = item.Subject
+	env.TraceID = item.TraceID
+	env.IdempotencyKey = item.IdempotencyKey
+	if env.IdempotencyKey == "" {
+		env.IdempotencyKey = env.ID
+	}
+	env.ShardKey = item.ShardKey
+	if env.ShardKey == "" {
+		env.ShardKey = item.EventType + ":" + env.ID
+	}
+	return p.bridge.Publish(ctx, PublishRequest{Class: ControlDelivery, External: p.external, Subject: item.Subject, Envelope: env})
+}
+
+func (p *outboxPublisher) notifyNow() {
+	if p == nil {
+		return
+	}
+	select {
+	case p.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (p *outboxPublisher) close() {
+	if p == nil {
+		return
+	}
+	p.cancel()
+	p.wg.Wait()
+}

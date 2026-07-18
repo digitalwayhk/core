@@ -9,7 +9,6 @@ import (
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	eventdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/event"
-	exampleruntime "github.com/digitalwayhk/core/examples/06-shop-microservices/runtime"
 	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/manage"
 	privateapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/private"
 	publicapi "github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/api/public"
@@ -17,7 +16,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // Service 是买家唯一外部入口，不保存订单或商品权威副本。
@@ -52,7 +50,7 @@ func (s *Service) Start() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cacheHandler := func(env *event.Envelope) error {
+	cacheHandler := func(_ context.Context, env *event.Envelope) error {
 		metadata := &eventdto.Metadata{}
 		if err := json.Unmarshal(env.Data, metadata); err != nil {
 			return err
@@ -73,12 +71,7 @@ func (s *Service) Start() {
 			return nil
 		})
 	}
-	for _, eventType := range []string{contract.EventProductChanged, contract.EventSupplierChanged, contract.EventPaymentTypeChanged} {
-		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, cacheHandler); subscribeErr == nil {
-			s.cancels = append(s.cancels, cancel)
-		}
-	}
-	orderHandler := func(env *event.Envelope) error {
+	orderHandler := func(_ context.Context, env *event.Envelope) error {
 		payload := &eventdto.OrderChanged{}
 		if err := json.Unmarshal(env.Data, payload); err != nil {
 			return err
@@ -92,19 +85,24 @@ func (s *Service) Start() {
 			return nil
 		})
 	}
-	for _, eventType := range []string{contract.EventOrderCreated, contract.EventOrderStatusChanged, contract.EventPaymentChanged} {
-		if cancel, subscribeErr := sc.ServiceEventBridge.SubscribeControl(eventType, orderHandler); subscribeErr == nil {
-			s.cancels = append(s.cancels, cancel)
+	for _, subscription := range []event.Subscription{
+		{Subject: contract.SubjectProductChanged, EventType: contract.EventProductChanged, Reliable: true, Handler: cacheHandler},
+		{Subject: contract.SubjectSupplierChanged, EventType: contract.EventSupplierChanged, Reliable: true, Handler: cacheHandler},
+		{Subject: contract.SubjectPaymentTypeChanged, EventType: contract.EventPaymentTypeChanged, Reliable: true, Handler: cacheHandler},
+		{Subject: contract.SubjectOrderCreated, EventType: contract.EventOrderCreated, Reliable: true, Handler: orderHandler},
+		{Subject: contract.SubjectOrderStatusChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: orderHandler},
+		{Subject: contract.SubjectPaymentChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: orderHandler},
+	} {
+		cancel, err := sc.SubscribeEvent(subscription)
+		if err != nil {
+			for _, cancel := range s.cancels {
+				cancel()
+			}
+			s.cancels = nil
+			panic(err)
 		}
+		s.cancels = append(s.cancels, cancel)
 	}
-	externalCancels, err := exampleruntime.SubscribeExternalControls(context.Background(), sc.ServiceEventBridge,
-		contract.SubjectProductChanged, contract.SubjectSupplierChanged, contract.SubjectPaymentTypeChanged,
-		contract.SubjectOrderCreated, contract.SubjectOrderStatusChanged, contract.SubjectPaymentChanged)
-	if err != nil {
-		logx.Errorw("service_external_control_subscribe_failed", logx.Field("service", contract.UserServiceName), logx.Field("error", err))
-		panic(err)
-	}
-	s.cancels = append(s.cancels, externalCancels...)
 }
 func (s *Service) Stop() {
 	s.mu.Lock()

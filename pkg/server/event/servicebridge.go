@@ -76,13 +76,17 @@ type ServiceEventBridge struct {
 	closed atomic.Bool
 	once   sync.Once
 
-	externalMu           sync.RWMutex
-	external             ExternalPublisher
-	subscriber           ExternalSubscriber
-	reliableSubscriber   ReliableExternalSubscriber
-	subscriberID         string
-	dropped              atomic.Uint64
-	controlQueueTimeouts atomic.Uint64
+	externalMu            sync.RWMutex
+	external              ExternalPublisher
+	subscriber            ExternalSubscriber
+	reliableSubscriber    ReliableExternalSubscriber
+	externalSubMu         sync.Mutex
+	externalSubscriptions map[string]*externalSubscriptionRef
+	outboxMu              sync.Mutex
+	outbox                *outboxPublisher
+	subscriberID          string
+	dropped               atomic.Uint64
+	controlQueueTimeouts  atomic.Uint64
 }
 
 func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *ServiceEventBridge {
@@ -139,6 +143,13 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.externalMu.Unlock()
 }
 
+func (b *ServiceEventBridge) HasExternalPublisher() bool {
+	if b == nil {
+		return false
+	}
+	return b.externalPublisher() != nil
+}
+
 func (b *ServiceEventBridge) Subscribe(eventType string, handler Handler) (func(), error) {
 	if b == nil || b.closed.Load() {
 		return nil, ErrServiceEventBridgeClosed
@@ -153,6 +164,77 @@ func (b *ServiceEventBridge) SubscribeControl(eventType string, handler ControlH
 		return nil, ErrServiceEventBridgeClosed
 	}
 	return b.stream.SubscribeControl(eventType, handler)
+}
+
+// SubscribeEvent 注册统一业务事件订阅。Subject 负责接入外部通道，EventType 是可选过滤条件。
+func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
+	if b == nil || b.closed.Load() {
+		return nil, ErrServiceEventBridgeClosed
+	}
+	if err := validateSubscription(sub); err != nil {
+		return nil, err
+	}
+	match := func(env *Envelope) bool {
+		if env == nil {
+			return false
+		}
+		if sub.Subject != "" && env.Subject != sub.Subject {
+			return false
+		}
+		if sub.EventType != "" && env.Type != sub.EventType {
+			return false
+		}
+		return true
+	}
+	var localCancel func()
+	var err error
+	if sub.Reliable {
+		handler := func(env *Envelope) error {
+			if !match(env) {
+				return nil
+			}
+			return sub.Handler(context.Background(), env)
+		}
+		if sub.EventType == "" {
+			localCancel, err = b.stream.SubscribeAnyControl(handler)
+		} else {
+			localCancel, err = b.stream.SubscribeControl(sub.EventType, handler)
+		}
+	} else {
+		handler := func(env *Envelope) {
+			if match(env) {
+				_ = sub.Handler(context.Background(), env)
+			}
+		}
+		if sub.EventType == "" {
+			localCancel, err = b.stream.SubscribeAny(handler)
+		} else {
+			localCancel, err = b.stream.Subscribe(sub.EventType, handler)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	var externalCancel func()
+	if sub.Subject != "" && b.canSubscribeExternal(sub.Reliable) {
+		externalCancel, err = b.subscribeExternalRef(context.Background(), sub.Reliable, sub.Subject)
+		if err != nil {
+			if localCancel != nil {
+				localCancel()
+			}
+			return nil, err
+		}
+	}
+	return combineCancels(externalCancel, localCancel), nil
+}
+
+func (b *ServiceEventBridge) canSubscribeExternal(reliable bool) bool {
+	b.externalMu.RLock()
+	defer b.externalMu.RUnlock()
+	if reliable {
+		return b.reliableSubscriber != nil && b.subscriberID != ""
+	}
+	return b.subscriber != nil
 }
 
 // SubscribeExternal 将指定主题交给已装配的外部事件适配器订阅。控制事件依赖
@@ -233,6 +315,35 @@ func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest
 	}
 }
 
+// UseOutbox 启用当前服务的可靠 Outbox 发布器。
+func (b *ServiceEventBridge) UseOutbox(options OutboxOptions) error {
+	publisher, err := newOutboxPublisher(b, options)
+	if err != nil {
+		return err
+	}
+	b.outboxMu.Lock()
+	old := b.outbox
+	b.outbox = publisher
+	b.outboxMu.Unlock()
+	if old != nil {
+		old.close()
+	}
+	return nil
+}
+
+// NotifyOutbox 唤醒 Outbox 发布器尽快扫描本服务待发布事件。
+func (b *ServiceEventBridge) NotifyOutbox() {
+	if b == nil {
+		return
+	}
+	b.outboxMu.Lock()
+	publisher := b.outbox
+	b.outboxMu.Unlock()
+	if publisher != nil {
+		publisher.notifyNow()
+	}
+}
+
 func (b *ServiceEventBridge) waitControlResult(ctx context.Context, job controlEvent) error {
 	select {
 	case err := <-job.result:
@@ -264,6 +375,14 @@ func (b *ServiceEventBridge) Close(ctx context.Context) error {
 	}
 	b.once.Do(func() {
 		b.closed.Store(true)
+		b.outboxMu.Lock()
+		outbox := b.outbox
+		b.outbox = nil
+		b.outboxMu.Unlock()
+		if outbox != nil {
+			outbox.close()
+		}
+		b.closeExternalSubscriptions()
 		b.cancel()
 	})
 	done := make(chan struct{})
@@ -317,6 +436,11 @@ func (b *ServiceEventBridge) deliver(ctx context.Context, request PublishRequest
 	}
 	if err := b.stream.Publish(ctx, env); err != nil {
 		return err
+	}
+	if request.Class == ControlDelivery {
+		if err := b.stream.PublishControl(ctx, env); err != nil {
+			return err
+		}
 	}
 	if request.External {
 		publisher := b.externalPublisher()

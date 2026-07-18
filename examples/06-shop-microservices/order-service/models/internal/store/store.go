@@ -43,6 +43,12 @@ func EnsureModelWith(action persistencetypes.IDataAction, model interface{}) err
 func Lock()   { ensureMu.Lock() }
 func Unlock() { ensureMu.Unlock() }
 
+func RunSerialized(operation func() error) error {
+	transactionMu.Lock()
+	defer transactionMu.Unlock()
+	return operation()
+}
+
 func RunInTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) (err error) {
 	transactionMu.Lock()
 	defer transactionMu.Unlock()

@@ -152,11 +152,15 @@ func TestServiceEventBridgeHandlerPanicDoesNotStopControlWorker(t *testing.T) {
 
 type fakeExternalEventAdapter struct {
 	subscribeCalls atomic.Int32
+	publishCalls   atomic.Int32
 	publishErr     error
 	reliableID     string
+	published      []*event.Envelope
 }
 
-func (a *fakeExternalEventAdapter) Publish(context.Context, string, *event.Envelope) error {
+func (a *fakeExternalEventAdapter) Publish(_ context.Context, _ string, env *event.Envelope) error {
+	a.publishCalls.Add(1)
+	a.published = append(a.published, env)
 	return a.publishErr
 }
 func (a *fakeExternalEventAdapter) Subscribe(context.Context, string) (func(), error) {
@@ -221,4 +225,118 @@ func TestServiceEventBridgeControlWaitsForLocalDeliveryAndPropagatesExternalFail
 	}
 	close(release)
 	require.ErrorIs(t, <-done, externalErr)
+}
+
+type outboxStoreStub struct {
+	mu      sync.Mutex
+	items   []event.OutboxMessage
+	marked  []event.OutboxMessage
+	loads   int
+	markErr error
+}
+
+func (s *outboxStoreStub) LoadPending(context.Context, int) ([]event.OutboxMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loads++
+	return append([]event.OutboxMessage(nil), s.items...), nil
+}
+
+func (s *outboxStoreStub) MarkPublished(_ context.Context, message event.OutboxMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.markErr != nil {
+		return s.markErr
+	}
+	s.marked = append(s.marked, message)
+	for index, item := range s.items {
+		if item.ID == message.ID {
+			s.items = append(s.items[:index], s.items[index+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+func TestServiceEventBridgeUseOutboxPublishesPendingMessagesAndMarksAfterSuccess(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	adapter := &fakeExternalEventAdapter{}
+	bridge.SetExternalPublisher(adapter)
+	store := &outboxStoreStub{items: []event.OutboxMessage{{
+		ID: 7, EventID: "event-7", EventType: "shop.order.created", Subject: "shop.events.order.created",
+		Payload: []byte(`{"orderID":7}`), TraceID: "trace-7",
+	}}}
+
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{
+		SourceService: "shop-order",
+		Store:         store,
+		Interval:      time.Hour,
+		BatchSize:     10,
+		External:      true,
+	}))
+	bridge.NotifyOutbox()
+
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(store.marked) == 1
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), adapter.publishCalls.Load())
+	require.Len(t, adapter.published, 1)
+	assert.Equal(t, "event-7", adapter.published[0].ID)
+	assert.Equal(t, "shop-order", adapter.published[0].Source)
+	assert.Equal(t, "shop.order.created", adapter.published[0].Type)
+	assert.Equal(t, "shop.events.order.created", adapter.published[0].Subject)
+	assert.Equal(t, "trace-7", adapter.published[0].TraceID)
+}
+
+func TestServiceEventBridgeUseOutboxDoesNotMarkWhenExternalPublishFails(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	bridge.SetExternalPublisher(&fakeExternalEventAdapter{publishErr: errors.New("publish failed")})
+	store := &outboxStoreStub{items: []event.OutboxMessage{{
+		ID: 8, EventID: "event-8", EventType: "shop.order.created", Subject: "shop.events.order.created",
+	}}}
+
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{
+		SourceService: "shop-order",
+		Store:         store,
+		Interval:      time.Hour,
+		BatchSize:     10,
+		External:      true,
+	}))
+	bridge.NotifyOutbox()
+	time.Sleep(50 * time.Millisecond)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Empty(t, store.marked)
+	assert.NotEmpty(t, store.items)
+}
+
+func TestServiceEventBridgeSubscribeEventAllowsSubjectWildcardEventType(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	var got []string
+	var mu sync.Mutex
+	cancel, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "shop.events.order",
+		Handler: func(_ context.Context, env *event.Envelope) error {
+			mu.Lock()
+			got = append(got, env.Type)
+			mu.Unlock()
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	defer cancel()
+
+	matching := event.NewEnvelope("shop-order", "shop.order.created", nil)
+	matching.Subject = "shop.events.order"
+	require.NoError(t, bridge.Publish(context.Background(), event.PublishRequest{Class: event.ControlDelivery, Envelope: matching}))
+	otherSubject := event.NewEnvelope("shop-order", "shop.payment.changed", nil)
+	otherSubject.Subject = "shop.events.payment"
+	require.NoError(t, bridge.Publish(context.Background(), event.PublishRequest{Class: event.ControlDelivery, Envelope: otherSubject}))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"shop.order.created"}, got)
 }

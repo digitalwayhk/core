@@ -62,7 +62,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 4. Manage CRUD 不绕过 ModelList；public/private 不直接依赖 GORM/SQLite；`IDataAction` 实现只在 models 边界选择。
 5. 模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料只能禁用，不能删除。
 6. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
-7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。
+7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。服务发布事件只在 `Start()` 中声明 `sc.UseOutbox(models.OutboxStore{})`，订阅只使用统一 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})`；业务不再手写 Outbox worker、`SubscribeExternalControl` 或同时注册内外两套订阅。`EventType` 可为空，表示订阅该 Subject 下全部事件类型。
 8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。多服务 public/private 缓存只放在面向外部流量的入口服务 facade，例如 06 的 user-service；supplier/order 这类内部权威服务的 Public API 不再重复缓存，避免展示缓存与权威校验缓存双层失效。
 9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
 10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
@@ -70,7 +70,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump；Manage 生命周期日志参考 05 的 `ShopManage.logManageResult`，统一事件名 `shop_manage_operation_failed/succeeded` 和字段 `owner/phase/service/route/trace_id/code`，不要按服务发明 `shop_user_manage...` 之类事件。
 13. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
 14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`，也不启用第二套 zrpc 服务发现。
-15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。
+15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。`OutboxStore` 只实现 `LoadPending/MarkPublished`，不关心服务名、消费者或 MQ；当前服务名由 `ServiceContext` 作为事件 Source，Subject 来自 Outbox 记录，谁订阅谁消费。
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。
 18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；权限、日志和通用限域只在抽象层实现一次，具体 Manage 不重复；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
@@ -91,6 +91,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
+- 业务服务自己保存 Outbox worker、轮询发布事件、直接调用 `SubscribeExternalControl`，或者让发布方知道消费者是谁；标准方式是 `sc.UseOutbox` 和 `sc.SubscribeEvent`。
 - 为内部服务复制 `api/call` 路由、把 Public 当作天然外网开放、相信 Header/`SourceService` 自报身份，或在受限路由 Parse 后才鉴权。
 - 在 skill、文档或代码注释里把示例 06 描述成 `api/call` 目标，或暗示需要复制调用 API。
 - 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为。

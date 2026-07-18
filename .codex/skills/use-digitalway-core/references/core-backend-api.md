@@ -79,7 +79,6 @@ examples/06-shop-microservices/
 ├── user-service                 # 买家 facade 与地址权威
 ├── supplier-service             # 供应商/商品权威与受限 Public API
 ├── order-service                # 订单/支付事实与 Outbox
-├── runtime                      # 通用 Outbox worker
 └── main,deploy                  # 同进程调试和三进程部署
 ```
 
@@ -456,7 +455,7 @@ func (*ShopService) Routers() []types.IRouter {
 func (*ShopService) SubscribeRouters() []*types.ObserveArgs { return nil }
 ```
 
-`SubscribeRouters` 用于内部 EventBridge 观察订阅，不是外部用户 WebSocket 订阅。没有内部观察者时返回 nil。
+`SubscribeRouters` 是旧 Router 生命周期观察订阅兼容入口，不是外部用户 WebSocket 订阅，也不是新业务事件订阅入口。没有内部观察者时返回 nil；新业务统一在 `Start()` 中使用 `sc.SubscribeEvent(...)`。
 
 main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。单服务运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。示例 06 为了让同进程和三进程使用完全相同的 Redis 契约，由 `bootstrap.ServiceConfig` 在组合根显式构造配置，仍不提交运行后 JSON。
 
@@ -483,8 +482,10 @@ CORS fail closed：`IsCors=true` 必须显式 origin；`*` 只能由调用方主
 - 客户端按 endpoint 复用 go-zero `zrpc.Client`；Core Resolver 仍是唯一节点发现权威，不启用 zrpc 自带发现。
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
 - HTTP 仅可作为显式发送前 fallback；gRPC 开始发送后不得跨协议重试。内部异步事件使用 EventBridge，WebSocket 只面向最终用户。
-- Redis 发现和 EventBridge 使用不同 Prefix。控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。
-- 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。
+- Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 只实现 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload 来自 Outbox 记录。
+- 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
+- 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
+- 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。发布方只负责发布事实，不知道也不等待消费者处理完成。
 - User 下单必须提供业务 `requestID`；事实服务用 `{UserID}:{requestID}` 唯一约束和请求指纹收敛并发重试。
 - Supplier 使用统一 Manage Hook 同时处理本人和管理员权限；Order 可靠事件按 `OrderID` 幂等写本地永久 `SupplierOrder`，删除 Hook 只查询该投影，禁止同步查询远端判断能否删除。
 - WebSocket 仅把本服务已消费的订单摘要推送给当前最终用户，不承担服务间传输和离线积压。

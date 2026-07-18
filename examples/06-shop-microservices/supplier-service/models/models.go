@@ -18,6 +18,7 @@ type (
 	Product              = basedata.Product
 	SupplierOrder        = transaction.SupplierOrder
 	Outbox               = transaction.Outbox
+	OutboxStore          = transaction.OutboxStore
 	Inbox                = transaction.Inbox
 )
 

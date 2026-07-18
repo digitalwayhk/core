@@ -18,9 +18,11 @@ type ControlHandler func(env *Envelope) error
 // Stream is a simple in-process event bus that fans out events to registered handlers.
 // It is used when no external MQ provider is configured (mode=off or auto without connectivity).
 type Stream struct {
-	mu       sync.RWMutex
-	handlers map[string][]Handler // keyed by event Type
-	controls map[string][]ControlHandler
+	mu          sync.RWMutex
+	handlers    map[string][]Handler // keyed by event Type
+	controls    map[string][]ControlHandler
+	anyHandlers []Handler
+	anyControls []ControlHandler
 }
 
 // NewStream returns an initialised local event stream.
@@ -51,6 +53,29 @@ func (s *Stream) SubscribeControl(eventType string, handler ControlHandler) (fun
 	}, nil
 }
 
+// SubscribeAnyControl 注册接收所有控制事件的 Handler，调用方可自行按 Subject/Type 过滤。
+func (s *Stream) SubscribeAnyControl(handler ControlHandler) (func(), error) {
+	if handler == nil {
+		return nil, errors.New("event control handler is nil")
+	}
+	s.mu.Lock()
+	s.anyControls = append(s.anyControls, handler)
+	key := fmt.Sprintf("%p", handler)
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		list := s.anyControls
+		updated := make([]ControlHandler, 0, len(list))
+		for _, current := range list {
+			if fmt.Sprintf("%p", current) != key {
+				updated = append(updated, current)
+			}
+		}
+		s.anyControls = updated
+		s.mu.Unlock()
+	}, nil
+}
+
 // Subscribe registers handler to be called for events of the given type.
 // Returns a cancel function to unsubscribe and a nil error (reserved for future use).
 func (s *Stream) Subscribe(eventType string, handler Handler) (func(), error) {
@@ -73,6 +98,29 @@ func (s *Stream) Subscribe(eventType string, handler Handler) (func(), error) {
 	return cancel, nil
 }
 
+// SubscribeAny 注册接收所有观察事件的 Handler，调用方可自行按 Subject/Type 过滤。
+func (s *Stream) SubscribeAny(handler Handler) (func(), error) {
+	if handler == nil {
+		return nil, errors.New("event handler is nil")
+	}
+	s.mu.Lock()
+	s.anyHandlers = append(s.anyHandlers, handler)
+	key := fmt.Sprintf("%p", handler)
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		list := s.anyHandlers
+		updated := make([]Handler, 0, len(list))
+		for _, h := range list {
+			if fmt.Sprintf("%p", h) != key {
+				updated = append(updated, h)
+			}
+		}
+		s.anyHandlers = updated
+		s.mu.Unlock()
+	}, nil
+}
+
 // Publish delivers the envelope to all handlers registered for its Type.
 // Delivery is synchronous; use goroutines in handlers for async processing.
 func (s *Stream) Publish(_ context.Context, env *Envelope) error {
@@ -82,6 +130,7 @@ func (s *Stream) Publish(_ context.Context, env *Envelope) error {
 	s.mu.RLock()
 	handlers := make([]Handler, len(s.handlers[env.Type]))
 	copy(handlers, s.handlers[env.Type])
+	handlers = append(handlers, s.anyHandlers...)
 	s.mu.RUnlock()
 
 	for _, h := range handlers {
@@ -104,6 +153,7 @@ func (s *Stream) PublishControl(_ context.Context, env *Envelope) error {
 	}
 	s.mu.RLock()
 	handlers := append([]ControlHandler(nil), s.controls[env.Type]...)
+	handlers = append(handlers, s.anyControls...)
 	s.mu.RUnlock()
 	var failures []error
 	for _, handler := range handlers {

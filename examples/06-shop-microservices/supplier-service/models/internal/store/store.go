@@ -40,6 +40,12 @@ func EnsureModelWith(action persistencetypes.IDataAction, model interface{}) err
 	return action.Load(NewSearch(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
 }
 
+func RunSerialized(operation func() error) error {
+	transactionMu.Lock()
+	defer transactionMu.Unlock()
+	return operation()
+}
+
 func RunInTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) (err error) {
 	transactionMu.Lock()
 	defer transactionMu.Unlock()
