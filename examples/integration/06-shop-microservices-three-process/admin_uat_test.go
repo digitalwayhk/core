@@ -1,3 +1,5 @@
+// 本文件保存 06 三进程 UAT 中平台管理员角色的完整闭环。
+// 管理员负责在订单服务配置支付类型，并验证平台订单 Manage 能看到所有订单事实。
 package shopmicroservices_test
 
 import (
@@ -17,12 +19,14 @@ type threeProcessAdminRole struct {
 	token string
 }
 
+// admin 构造平台管理员角色 token，代表订单服务后台管理用户。
 func (scenario *threeProcessUAT) admin() threeProcessAdminRole {
 	t := scenarioTest(scenario)
 	t.Helper()
 	return threeProcessAdminRole{token: scenario.order.TokenFor(t, "platform-admin", 1)}
 }
 
+// configurePaymentType 通过订单服务 Manage API 创建并启用支付类型，供买家支付使用。
 func (scenario *threeProcessUAT) configurePaymentType() orderdto.PaymentType {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -43,6 +47,7 @@ func (scenario *threeProcessUAT) configurePaymentType() orderdto.PaymentType {
 	return orderdto.PaymentType{ID: uint(id), Name: raw.Name, Code: raw.Code, Enabled: true}
 }
 
+// assertAdminCanSeeOrder 验证管理员可以在订单服务查询到完整订单事实和地址快照。
 func (scenario *threeProcessUAT) assertAdminCanSeeOrder(created orderdto.Order, supplier threeProcessSupplierRole, buyer threeProcessBuyerRole) {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -54,6 +59,7 @@ func (scenario *threeProcessUAT) assertAdminCanSeeOrder(created orderdto.Order, 
 	}, 5*time.Second, 25*time.Millisecond)
 }
 
+// searchAdminOrders 查询订单服务管理员订单列表，并转换为订单 DTO 便于业务断言。
 func (scenario *threeProcessUAT) searchAdminOrders(token string) []*orderdto.Order {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -96,6 +102,7 @@ func (scenario *threeProcessUAT) searchAdminOrders(token string) []*orderdto.Ord
 	return result
 }
 
+// assertPaymentBelongsToOrder 验证支付记录与买家创建的订单保持同一订单 ID。
 func assertPaymentBelongsToOrder(t *testing.T, payment orderdto.PaymentRecord, order orderdto.Order) {
 	t.Helper()
 	require.Equal(t, order.ID, payment.OrderID)

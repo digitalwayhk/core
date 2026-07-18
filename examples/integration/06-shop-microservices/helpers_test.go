@@ -1,3 +1,6 @@
+// 本文件提供 06 all-in-one 集成测试的进程启动、角色令牌和业务操作辅助能力。
+// all-in-one 测试覆盖单进程多服务组合下的买家、供应商和管理员闭环，
+// 这里的辅助函数只负责准备商品、地址、订单、支付类型和 WebSocket 订阅。
 package shopmicroservices_test
 
 import (
@@ -23,6 +26,7 @@ type suiteSet struct{ base, user, supplier, order *integration.Suite }
 
 var suites *suiteSet
 
+// TestAllInOneTransportConfigIsLocalInsecureGRPC 验证 all-in-one 调试模式只使用本地 insecure gRPC，不启用 HTTP fallback。
 func TestAllInOneTransportConfigIsLocalInsecureGRPC(t *testing.T) {
 	cfg := bootstrap.LocalServiceConfig("shop-user", 28081, 2, 1)
 	require.Equal(t, "local", cfg.Cluster.Provider)
@@ -31,6 +35,7 @@ func TestAllInOneTransportConfigIsLocalInsecureGRPC(t *testing.T) {
 	require.Equal(t, "insecure", cfg.Transport.GRPC.Security.Mode)
 }
 
+// TestMain 启动 06 all-in-one 真实进程，并为用户、供应商和订单服务派生不同访问端口。
 func TestMain(m *testing.M) {
 	redisPrefix := "core:test:06:all-in-one:" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	base, err := integration.StartProcess(integration.ProcessOptions{
@@ -81,6 +86,7 @@ func waitReady() error {
 	return fmt.Errorf("等待多服务商城启动超时")
 }
 
+// addProduct 以供应商角色创建并上架一个商品，返回后续买家下单所需的商品 DTO 和供应商 token。
 func addProduct(t *testing.T, supplierID string) (supplierdto.Product, string) {
 	token := suites.supplier.TokenFor(t, supplierID, 1)
 	created := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/add", token, map[string]interface{}{"name": "集成商品", "code": fmt.Sprintf("product-%d", time.Now().UnixNano()), "price": "12.50"})
@@ -101,6 +107,8 @@ func addProduct(t *testing.T, supplierID string) (supplierdto.Product, string) {
 	product.Enabled = true
 	return product, token
 }
+
+// addAddress 以普通用户 Manage 身份新增收货地址，并返回 Private API 下单所需的用户 token。
 func addAddress(t *testing.T, userID string) (userdto.Address, string) {
 	manageToken := suites.user.TokenFor(t, userID, 1)
 	token := suites.user.TokenFor(t, userID, 0)
@@ -116,6 +124,8 @@ func addAddress(t *testing.T, userID string) (userdto.Address, string) {
 	address := userdto.Address{ID: uint(id), Recipient: raw.Recipient, Phone: raw.Phone, Region: raw.Region, Detail: raw.Detail}
 	return address, token
 }
+
+// addOrder 通过用户服务 Private API 创建订单，验证入口服务到订单/供应商服务的内部调用链。
 func addOrder(t *testing.T, token string, productID, addressID uint) orderdto.Order {
 	response := suites.user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", token, map[string]interface{}{"requestID": fmt.Sprintf("request-%d", time.Now().UnixNano()), "productID": productID, "quantity": 2, "addressID": addressID})
 	require.True(t, response.Success, response.ErrorMessage)
@@ -123,6 +133,8 @@ func addOrder(t *testing.T, token string, productID, addressID uint) orderdto.Or
 	require.NoError(t, json.Unmarshal(response.Data, &order))
 	return order
 }
+
+// addPaymentType 以平台管理员身份在订单服务配置并启用支付类型。
 func addPaymentType(t *testing.T, code string) orderdto.PaymentType {
 	t.Helper()
 	admin := suites.order.TokenFor(t, "platform-admin", 1)
@@ -141,6 +153,8 @@ func addPaymentType(t *testing.T, code string) orderdto.PaymentType {
 	require.True(t, enabled.Success, enabled.ErrorMessage)
 	return orderdto.PaymentType{ID: uint(id), Name: raw.Name, Code: raw.Code, Enabled: true}
 }
+
+// connectAndSubscribe 建立用户 WebSocket 并订阅指定路由，用于验证订单事件不会串用户。
 func connectAndSubscribe(t *testing.T, suite *integration.Suite, token, channel string) *websocket.Conn {
 	connection, _, err := websocket.DefaultDialer.Dial(suite.WebSocketURL, nil)
 	require.NoError(t, err)

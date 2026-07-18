@@ -4,6 +4,7 @@ package supplierservice
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -71,8 +72,8 @@ func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error 
 // Start 启用供应商服务 Outbox 发布，并订阅订单事件维护本地 SupplierOrder 投影。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.SupplierServiceName)
-	if sc == nil || sc.ServiceEventBridge == nil {
-		return
+	if sc == nil {
+		panic(fmt.Errorf("供应商服务缺失 ServiceContext: %s", contract.SupplierServiceName))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

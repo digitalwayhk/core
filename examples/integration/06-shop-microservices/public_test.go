@@ -1,3 +1,5 @@
+// 本文件验证 06 all-in-one 集成场景下 Public API 的入口 facade 和内部调用边界。
+// 用户服务可以对外提供商品目录 facade，供应商和订单服务的受限 Public API 不能被直接 HTTP 调用。
 package shopmicroservices_test
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestProductFacade 验证用户服务通过内部调用读取供应商商品，并作为买家入口 facade 返回商品目录。
 func TestProductFacade(t *testing.T) {
 	product, _ := addProduct(t, "supplier-public")
 	response := suites.user.RequestJSON(t, http.MethodGet, "/api/shop-user/getproducts?code="+product.Code, "", nil)
@@ -19,6 +22,7 @@ func TestProductFacade(t *testing.T) {
 	require.Equal(t, product.SupplierID, items[0].SupplierID)
 }
 
+// TestInternalPublicRoutesRejectDirectHTTP 验证供应商/订单服务的内部 Public 路由拒绝未信任的直接 HTTP 请求。
 func TestInternalPublicRoutesRejectDirectHTTP(t *testing.T) {
 	for _, target := range []struct {
 		suiteURL string

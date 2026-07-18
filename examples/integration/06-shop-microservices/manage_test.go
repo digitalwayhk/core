@@ -1,3 +1,6 @@
+// 本文件验证 06 all-in-one 集成场景下 Manage API 的角色限域和缓存失效边界。
+// 供应商只能管理/查询自己的资料，平台管理员可做跨供应商禁用操作，
+// 买家入口 facade 需要在供应商禁用事件后主动失效商品目录缓存。
 package shopmicroservices_test
 
 import (
@@ -10,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSupplierManageScopesOwnerAndAdmin 验证供应商自管理查询被 owner 限域，平台管理员可查看全量供应商。
 func TestSupplierManageScopesOwnerAndAdmin(t *testing.T) {
 	ownerToken := suites.supplier.TokenFor(t, "supplier-manage-owner", 1)
 	otherToken := suites.supplier.TokenFor(t, "supplier-manage-other", 1)
@@ -23,6 +27,7 @@ func TestSupplierManageScopesOwnerAndAdmin(t *testing.T) {
 	require.True(t, all.Success, all.ErrorMessage)
 }
 
+// TestSupplierDisableInvalidatesBuyerCatalog 验证管理员禁用供应商后，用户服务商品 facade 缓存会被事件主动失效。
 func TestSupplierDisableInvalidatesBuyerCatalog(t *testing.T) {
 	product, ownerToken := addProduct(t, "supplier-cache")
 	path := "/api/shop-user/getproducts?code=" + product.Code

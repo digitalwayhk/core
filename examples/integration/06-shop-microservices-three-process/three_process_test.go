@@ -1,3 +1,5 @@
+// 本文件验证 06 示例在用户、供应商、订单三个独立进程下的服务发现、mTLS gRPC 和内部调用链。
+// 测试重点是跨进程不走 HTTP fallback，内部调用方身份由证书 SAN 与逻辑服务名共同确认。
 package shopmicroservices_test
 
 import (
@@ -26,6 +28,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
+// TestThreeProcessDiscoveryAndRemoteCalls 验证三进程启动、Redis 发现、mTLS 健康检查和 User -> Order -> Supplier gRPC 调用链。
 func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
 	redisPrefix := "core:test:06:three-process:" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -130,6 +133,7 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 	assertGRPCHealthFails(t, grpcPorts[0], "shop-user", wrongPKI)
 }
 
+// startShopProcesses 并发启动用户、供应商和订单三个真实进程，使用同一 Redis 前缀和独立 mTLS 身份。
 func startShopProcesses(t *testing.T, pki *integration.GRPCTestPKI, redisPrefix string) (*integration.Suite, *integration.Suite, *integration.Suite) {
 	t.Helper()
 	specs := []integration.ProcessOptions{
@@ -161,6 +165,7 @@ func startShopProcesses(t *testing.T, pki *integration.GRPCTestPKI, redisPrefix 
 	return results[0], results[1], results[2]
 }
 
+// readServiceGRPCPort 从进程落盘配置中读取实际 gRPC 端口，验证内部调用不依赖固定端口。
 func readServiceGRPCPort(t *testing.T, suite *integration.Suite, serviceName string) int {
 	t.Helper()
 	path := filepath.Join(suite.RootDir, "etc", serviceName+".json")
@@ -185,6 +190,7 @@ func readServiceGRPCPort(t *testing.T, suite *integration.Suite, serviceName str
 	return 0
 }
 
+// processEnvironment 为单个服务进程构造 mTLS 和 Redis 发现/事件隔离环境变量。
 func processEnvironment(pki *integration.GRPCTestPKI, serviceName, redisPrefix string) map[string]string {
 	identity := pki.Services[serviceName]
 	return map[string]string{
@@ -197,6 +203,7 @@ func processEnvironment(pki *integration.GRPCTestPKI, serviceName, redisPrefix s
 	}
 }
 
+// assertParentEnvironmentUnchanged 验证测试进程启动不会污染父进程环境变量。
 func assertParentEnvironmentUnchanged(t *testing.T, key, before string, existed bool) {
 	t.Helper()
 	after, stillExists := os.LookupEnv(key)
@@ -204,6 +211,7 @@ func assertParentEnvironmentUnchanged(t *testing.T, key, before string, existed 
 	require.Equal(t, before, after)
 }
 
+// assertPKIFileModes 验证测试生成的证书和私钥文件权限符合最小暴露要求。
 func assertPKIFileModes(t *testing.T, pki *integration.GRPCTestPKI) {
 	t.Helper()
 	files := []string{pki.CAFile, pki.Client.CertFile, pki.Client.KeyFile}
@@ -221,6 +229,7 @@ func assertPKIFileModes(t *testing.T, pki *integration.GRPCTestPKI) {
 	}
 }
 
+// assertPKISANs 验证每个服务证书包含逻辑服务名、localhost 和本地回环地址。
 func assertPKISANs(t *testing.T, pki *integration.GRPCTestPKI) {
 	t.Helper()
 	for serviceName, identity := range pki.Services {
@@ -236,6 +245,7 @@ func assertPKISANs(t *testing.T, pki *integration.GRPCTestPKI) {
 	}
 }
 
+// clientTLSConfig 构造测试客户端 mTLS 配置，用于验证服务名匹配和错误 SAN 拒绝。
 func clientTLSConfig(t *testing.T, pki *integration.GRPCTestPKI, serverName string) *tls.Config {
 	t.Helper()
 	caPEM, err := os.ReadFile(pki.CAFile)
@@ -247,6 +257,7 @@ func clientTLSConfig(t *testing.T, pki *integration.GRPCTestPKI, serverName stri
 	return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, Certificates: []tls.Certificate{certificate}, ServerName: serverName}
 }
 
+// assertGRPCHealthServing 验证给定服务名的 mTLS gRPC 健康检查可以成功。
 func assertGRPCHealthServing(t *testing.T, port int, serverName string, pki *integration.GRPCTestPKI) {
 	t.Helper()
 	connection, err := googlegrpc.NewClient(fmt.Sprintf("127.0.0.1:%d", port), googlegrpc.WithTransportCredentials(credentials.NewTLS(clientTLSConfig(t, pki, serverName))))
@@ -259,6 +270,7 @@ func assertGRPCHealthServing(t *testing.T, port int, serverName string, pki *int
 	require.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, response.Status)
 }
 
+// assertGRPCHealthFails 验证错误服务名或错误证书不能通过 mTLS gRPC 健康检查。
 func assertGRPCHealthFails(t *testing.T, port int, serverName string, pki *integration.GRPCTestPKI) {
 	t.Helper()
 	connection, err := googlegrpc.NewClient(fmt.Sprintf("127.0.0.1:%d", port), googlegrpc.WithTransportCredentials(credentials.NewTLS(clientTLSConfig(t, pki, serverName))))
@@ -270,6 +282,7 @@ func assertGRPCHealthFails(t *testing.T, port int, serverName string, pki *integ
 	require.Error(t, err)
 }
 
+// waitProcessReady 等待指定真实进程路由可用，超时后打印所有相关进程日志。
 func waitProcessReady(t *testing.T, suite *integration.Suite, path string, processes ...*integration.Suite) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

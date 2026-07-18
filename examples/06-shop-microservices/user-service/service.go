@@ -54,8 +54,8 @@ func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error 
 // Start 订阅供应商、商品、支付类型和订单事件，维护入口 facade 缓存与买家 WebSocket。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.UserServiceName)
-	if sc == nil || sc.ServiceEventBridge == nil {
-		return
+	if sc == nil {
+		panic(fmt.Errorf("用户服务缺失 ServiceContext: %s", contract.UserServiceName))
 	}
 	s.registerEventSubscriptions(sc)
 }

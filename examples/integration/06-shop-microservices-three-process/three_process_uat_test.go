@@ -1,3 +1,6 @@
+// 本文件编排 06 三进程 UAT 的完整业务主流程。
+// 主流程只组合买家、供应商和管理员三个角色文件中的步骤，
+// 让每个角色的功能闭环与异常权限断言可以独立阅读和维护。
 package shopmicroservices_test
 
 import (
@@ -16,6 +19,7 @@ type threeProcessUAT struct {
 	suffix   string
 }
 
+// TestThreeProcessUATThreeRolesOrderVisibility 验证三角色在三进程部署下完成资料维护、商品上架、支付配置、下单和订单可见性隔离。
 func TestThreeProcessUATThreeRolesOrderVisibility(t *testing.T) {
 	scenario := startThreeProcessUAT(t)
 

@@ -1,3 +1,6 @@
+// 本文件保存 06 三进程 UAT 中供应商角色的完整闭环。
+// 供应商负责在供应商服务维护并上架自己的商品，
+// 并验证只能在本服务看到属于自己的订单投影。
 package shopmicroservices_test
 
 import (
@@ -19,6 +22,7 @@ type threeProcessSupplierRole struct {
 	product    supplierdto.Product
 }
 
+// publishSupplierProduct 准备供应商角色 token，并完成商品创建与上架。
 func (scenario *threeProcessUAT) publishSupplierProduct() threeProcessSupplierRole {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -30,6 +34,7 @@ func (scenario *threeProcessUAT) publishSupplierProduct() threeProcessSupplierRo
 	return supplier
 }
 
+// addSupplierProduct 通过供应商 Manage API 创建商品并启用，供买家从用户服务 facade 下单。
 func (scenario *threeProcessUAT) addSupplierProduct(token, code string) supplierdto.Product {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -51,6 +56,7 @@ func (scenario *threeProcessUAT) addSupplierProduct(token, code string) supplier
 	return supplierdto.Product{ID: uint(id), SupplierID: raw.SupplierID, Name: raw.Name, Code: raw.Code, Price: decimal.RequireFromString(raw.Price), Enabled: true}
 }
 
+// assertSupplierCanSeeOwnOrder 验证供应商服务通过订单事件投影看到自己的订单。
 func (scenario *threeProcessUAT) assertSupplierCanSeeOwnOrder(supplier threeProcessSupplierRole, created orderdto.Order, buyer threeProcessBuyerRole) {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -61,6 +67,7 @@ func (scenario *threeProcessUAT) assertSupplierCanSeeOwnOrder(supplier threeProc
 	}, 5*time.Second, 25*time.Millisecond)
 }
 
+// assertOtherSupplierCannotSeeOrder 验证其他供应商不能查询到当前供应商的订单投影。
 func (scenario *threeProcessUAT) assertOtherSupplierCannotSeeOrder(supplier threeProcessSupplierRole, created orderdto.Order) {
 	t := scenarioTest(scenario)
 	t.Helper()
@@ -68,6 +75,7 @@ func (scenario *threeProcessUAT) assertOtherSupplierCannotSeeOrder(supplier thre
 	require.Nil(t, findSupplierOrderByID(otherSupplierOrders, created.ID), "其他供应商不能查询到该订单")
 }
 
+// searchSupplierOrders 查询供应商服务本地订单投影，并转换为 SupplierOrder DTO 便于业务断言。
 func (scenario *threeProcessUAT) searchSupplierOrders(token string) []*orderdto.SupplierOrder {
 	t := scenarioTest(scenario)
 	t.Helper()

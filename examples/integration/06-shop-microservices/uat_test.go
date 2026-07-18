@@ -1,3 +1,5 @@
+// 本文件验证 06 all-in-one 集成场景下买家下单、供应商订单投影、支付和撤单的完整业务闭环。
+// 测试同时覆盖 requestID 幂等、订单事件投递、买家订单查询和供应商本地 SupplierOrder 投影。
 package shopmicroservices_test
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestUATBuyerOrderLifecycle 验证买家从商品下单到支付、供应商可见订单、买家撤单的 UAT 主流程。
 func TestUATBuyerOrderLifecycle(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	product, supplierToken := addProduct(t, "uat-supplier-"+suffix)
@@ -65,6 +68,7 @@ func getBuyerOrders(t *testing.T, token string) []*orderdto.Order {
 	return orders
 }
 
+// getSupplierOrders 通过供应商 Manage 订单投影查询当前供应商可见订单，用于验证事件投递后的本地读模型。
 func getSupplierOrders(t *testing.T, token string) []*orderdto.SupplierOrder {
 	t.Helper()
 	response := suites.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/ordermanage/search", token, map[string]interface{}{"page": 1, "size": 100})

@@ -3,6 +3,7 @@ package orderservice
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	manageapi "github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/api/manage"
@@ -44,8 +45,8 @@ func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 // Start 启用订单服务 Outbox，让订单和支付事实变更可靠发布到 EventBridge。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.OrderServiceName)
-	if sc == nil || sc.ServiceEventBridge == nil {
-		return
+	if sc == nil {
+		panic(fmt.Errorf("订单服务缺失 ServiceContext: %s", contract.OrderServiceName))
 	}
 	if err := sc.UseOutbox(models.OutboxStore{}); err != nil {
 		panic(err)
