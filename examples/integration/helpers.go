@@ -233,6 +233,11 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		cleanup()
 		return nil, err
 	}
+	if err := suite.waitBoundPorts(options.ServiceCount, options.GRPCServiceCount, 10*time.Second); err != nil {
+		suite.Stop()
+		cleanup()
+		return nil, err
+	}
 	return suite, nil
 }
 
@@ -257,6 +262,43 @@ func (s *Suite) Restart() error {
 	s.command = command
 	s.outputFile = outputFile
 	return nil
+}
+
+func (s *Suite) waitBoundPorts(httpCount, grpcCount int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if s.allPortsAccepting(httpCount, grpcCount) {
+			return nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return fmt.Errorf("等待测试进程监听端口超时: httpBase=%d httpCount=%d grpcBase=%d grpcCount=%d", s.BasePort, httpCount, s.GRPCBasePort, grpcCount)
+}
+
+func (s *Suite) allPortsAccepting(httpCount, grpcCount int) bool {
+	for offset := 0; offset < httpCount; offset++ {
+		if !tcpPortAccepting(s.BasePort + offset) {
+			return false
+		}
+	}
+	for offset := 0; offset < grpcCount; offset++ {
+		if !tcpPortAccepting(s.GRPCBasePort + offset) {
+			return false
+		}
+	}
+	return true
+}
+
+func tcpPortAccepting(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 100*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func cloneEnvironment(environment map[string]string) map[string]string {
