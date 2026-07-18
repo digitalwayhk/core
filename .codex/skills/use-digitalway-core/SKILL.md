@@ -32,7 +32,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - `api/manage` 同样按 05 语义拆分：`api/manage/common` 放权限、owner、全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 和命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单/支付/投影等业务 Manage，`api/manage/audit` 放审计/身份事件；根 `api/manage` 只保留 `manage.go` 门面和路由注册入口。
 - 多服务示例中每个服务都必须拥有独立的 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 再继承本服务 `ServiceManage[T]`，每个具体 Manage 只能继承本目录的基础资料或业务基座，不能直接嵌入 `manage.ManageService[T]`。服务级权限、owner 限域、禁用主体拦截、分页、审计和日志这类横切逻辑必须写在 `common.ServiceManage[T]` 或更靠近根部的抽象基座，具体 Manage 只描述业务目标对象和业务动作，不到处重复鉴权或日志。自定义 Manage 命令的 `Do` 必须先调用 owner 的 `DoBefore` 复用服务级权限，再执行业务动作；不要另造 `CommandBefore` 这类命令专用旁路。
 - `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
-- 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。示例 06 三进程 UAT 必须按角色拆文件：买家、供应商、管理员各自文件保存本角色全部功能闭环和异常权限断言，每个角色文件必须有可单独 `go test -run` 的角色闭环测试；买家角色必须覆盖资料/地址、下单、支付、本人订单查询、WebSocket 订单订阅和其他买家隔离；完整业务流程测试只组合这些角色步骤，不把所有角色逻辑堆在一个大测试函数里。
+- 单元测试与实现同目录；跨子包契约测试留 facade 根包；真实进程测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。只要是多服务业务，就必须有真实多进程 UAT，因为任一业务角色都可能通过跨服务调用链才能确认可用；UAT 必须按业务角色或调用方拆文件，每个角色文件保存本角色全部功能闭环和异常权限断言，并提供可单独 `go test -run` 的角色闭环测试。示例 06 三进程 UAT 的买家、供应商、管理员是标准模板；买家角色必须覆盖资料/地址、下单、支付、本人订单查询、WebSocket 订单订阅和其他买家隔离；完整业务流程测试只组合这些角色步骤，不把所有角色逻辑堆在一个大测试函数里。
 - 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件；同文件出现多个 struct 只允许紧密配套的小请求/响应/测试桩，并必须保持可读。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
 - 每个源文件开头都必须有中文文件级注释，说明该文件在服务/目录中的能力边界；每个导出的 public 类型、函数、方法和变量必须有中文注释，复杂 private 函数也要补充意图说明。单元测试和 `examples/integration` 集成测试同样适用；测试文件的文件级注释要写清测试的业务闭环、角色或边界，不允许只靠测试名让人猜。
 
@@ -78,6 +78,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName`、数据库名和 `TraceID`；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名或 TraceID 字段。
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
 21. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
+22. 多服务业务必须提供真实多进程 UAT，并按角色或调用方拆分可单独运行的角色闭环测试；跨服务发现、内部调用、事件投递、缓存失效和权限边界不能只用同进程或单服务测试替代。
 
 ## 工作流
 
