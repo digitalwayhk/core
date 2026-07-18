@@ -23,7 +23,7 @@ func EnsureStorage() error {
 				return
 			}
 		}
-		for _, model := range []interface{}{transaction.NewOrder(), basedata.NewOrderRule()} {
+		for _, model := range []interface{}{transaction.NewOrder(), basedata.NewOrderRule(), basedata.NewPaymentType()} {
 			if err := store.EnsureRemoteModel(model); err != nil {
 				ensureErr = err
 				return

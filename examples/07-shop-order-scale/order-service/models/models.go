@@ -23,6 +23,9 @@ type (
 	// OrderRule 是共享远程权威库中的订单规则模型别名。
 	OrderRule = basedata.OrderRule
 
+	// PaymentType 是共享远程权威库中的支付类型模型别名。
+	PaymentType = basedata.PaymentType
+
 	// Order 是共享远程权威库中的订单事实模型别名。
 	Order = transaction.Order
 
@@ -34,6 +37,9 @@ type (
 
 	// OutboxStore 是标准 EventBridge 使用的本地 Outbox 适配器别名。
 	OutboxStore = transaction.OutboxStore
+
+	// OrderQueryFilter 是远程权威订单查询条件别名。
+	OrderQueryFilter = transaction.OrderQueryFilter
 )
 
 const (
@@ -78,6 +84,18 @@ var (
 	// SaveOrderRuleWith 保存远程权威库订单规则。
 	SaveOrderRuleWith = basedata.SaveOrderRuleWith
 
+	// NewPaymentType 创建支付类型模型。
+	NewPaymentType = basedata.NewPaymentType
+
+	// ListPaymentTypesWith 读取远程权威库支付类型列表。
+	ListPaymentTypesWith = basedata.ListPaymentTypesWith
+
+	// FindPaymentTypeWith 按 ID 读取远程权威库支付类型。
+	FindPaymentTypeWith = basedata.FindPaymentTypeWith
+
+	// SavePaymentTypeWith 保存远程权威库支付类型。
+	SavePaymentTypeWith = basedata.SavePaymentTypeWith
+
 	// NewOrder 创建订单事实模型。
 	NewOrder = transaction.NewOrder
 
@@ -86,6 +104,15 @@ var (
 
 	// UpsertRemoteOrderWith 幂等写入远程订单。
 	UpsertRemoteOrderWith = transaction.UpsertRemoteOrderWith
+
+	// ListRemoteOrdersWith 分页查询远程权威订单。
+	ListRemoteOrdersWith = transaction.ListRemoteOrdersWith
+
+	// CancelRemoteOrderWith 撤销远程权威订单。
+	CancelRemoteOrderWith = transaction.CancelRemoteOrderWith
+
+	// PayRemoteOrderWith 支付远程权威订单。
+	PayRemoteOrderWith = transaction.PayRemoteOrderWith
 
 	// NewLocalPendingOrder 创建本地 pending 订单模型。
 	NewLocalPendingOrder = transaction.NewLocalPendingOrder

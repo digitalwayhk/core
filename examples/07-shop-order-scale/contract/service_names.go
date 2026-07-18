@@ -13,3 +13,6 @@ const (
 	// OrderServiceName 是订单权威服务的稳定服务名；水平扩展副本共享该逻辑名称。
 	OrderServiceName = "shop-order"
 )
+
+// PlatformAdminUserID 是示例中 TestToken 模拟的平台管理员用户 ID。
+const PlatformAdminUserID = "platform-admin"
