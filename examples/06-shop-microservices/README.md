@@ -102,7 +102,6 @@ dto/{user,supplier,order,event}  # 跨服务 JSON 契约，不引用持久化 Mo
 user-service                     # User/Address Manage、外部 facade、买家 Private
 supplier-service                 # Supplier/Product/Order Manage、内部 Public、永久投影
 order-service                    # 内部 Public、管理员 Manage、订单/支付事实与 Outbox
-runtime                          # 通用 Outbox worker 和外部控制订阅
 main/{all-in-one,user,supplier,order}
 deploy                           # 三进程 Docker Compose 与证书挂载说明
 ```

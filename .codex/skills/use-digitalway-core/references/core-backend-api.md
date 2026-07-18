@@ -606,7 +606,7 @@ func TestPrivateAPIs(t *testing.T) {
 
 Manage 按 command 拆分，而不是把 view/search/add/edit/remove 堆在一个测试函数中。Public/Private 按 API 拆分。这样既能单独定位失败，也能一次运行整类能力。
 
-示例 06 三进程 UAT 还必须按业务角色拆文件：`buyer_uat_test.go` 放普通用户注册模拟、资料/地址维护、下单、支付、本人订单查询、WebSocket 订单订阅和其他用户隔离；`supplier_uat_test.go` 放供应商注册模拟、商品维护/上架、本供应商订单投影查询和其他供应商隔离；`admin_uat_test.go` 放平台管理员支付类型配置和全量订单查询。每个角色文件必须提供一个可单独 `go test -run` 的角色全部功能闭环测试，完整三角色流程测试只负责启动三个真实进程并组合这些角色步骤；共享查找、进程启动、Redis consumer group 等跨角色辅助可以放独立 helper 文件。不要把三种角色的 API 调用、断言和异常用例全部堆在一个 UAT 大文件中。
+示例 06 三进程 UAT 还必须按业务角色拆文件：`buyer_uat_test.go` 放普通用户注册模拟、资料/地址维护、下单、支付、本人订单查询、WebSocket 订单订阅和其他用户隔离；`supplier_uat_test.go` 放供应商注册模拟、商品维护/上架、本供应商订单投影查询和其他供应商隔离；`admin_uat_test.go` 放平台管理员支付类型配置和全量订单查询。每个角色文件必须提供一个可单独 `go test -run` 的角色全部功能闭环测试，完整三角色流程测试只负责启动三个真实进程并组合这些角色步骤；共享查找、进程启动、业务 DTO 转换等跨角色辅助可以放独立 helper 文件。不要把三种角色的 API 调用、断言和异常用例全部堆在一个 UAT 大文件中。
 
 ### 最低验收范围
 
