@@ -16,6 +16,8 @@ import (
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
+// userOrderIDByRequest 保存当前 user-service 进程内的 requestID 到订单 ID 映射。
+// 生产中如果 user-service 也水平扩容，应替换成 Redis/MySQL 等共享幂等存储。
 var userOrderIDByRequest sync.Map
 
 // AddOrder 是买家下单入口。
@@ -82,6 +84,7 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	return &order, nil
 }
 
+// orderIDForRequest 为同一买家同一 requestID 返回稳定订单 ID。
 func orderIDForRequest(userID uint, requestID string, req interface{ NewID() uint }) uint {
 	key := strconv.FormatUint(uint64(userID), 10) + ":" + strings.TrimSpace(requestID)
 	if value, ok := userOrderIDByRequest.Load(key); ok {

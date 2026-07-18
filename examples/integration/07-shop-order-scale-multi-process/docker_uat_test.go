@@ -1,4 +1,4 @@
-// Package shoporderscalemultiprocess 提供 07 Docker 多 order 副本的可选真实 UAT。
+// Package shoporderscalemultiprocess 提供 07 Docker 多 order 副本的可选真实 UAT 辅助能力。
 package shoporderscalemultiprocess
 
 import (
@@ -8,32 +8,55 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	userdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/user"
 	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/stretchr/testify/require"
 )
 
 // TestDockerComposeOrderScaleUAT 验证 Docker 下两个 order 副本共享 MySQL 并完成真实下单查询。
 func TestDockerComposeOrderScaleUAT(t *testing.T) {
-	if os.Getenv("SHOP_RUN_DOCKER_UAT") != "1" {
-		t.Skip("设置 SHOP_RUN_DOCKER_UAT=1 后运行真实 Docker 多副本 UAT")
-	}
-	compose := filepath.Join("..", "..", "07-shop-order-scale", "deploy", "docker-compose.yml")
-	runCompose(t, compose, "up", "-d", "--build", "mysql", "redis", "shop-user", "shop-supplier", "shop-order-a", "shop-order-b")
-	t.Cleanup(func() { runCompose(t, compose, "down", "-v", "--remove-orphans") })
-
+	compose := startDockerOrderScaleStack(t)
 	user := &integration.Suite{BaseURL: "http://127.0.0.1:18181"}
 	supplier := &integration.Suite{BaseURL: "http://127.0.0.1:18182"}
 	waitDockerUserReady(t, user)
+	verifyDockerOrderReplicaDiscovery(t, compose)
 
 	adminToken := supplier.TokenFor(t, "platform-admin", 1)
 	productID := addDockerSupplierProduct(t, supplier, adminToken)
 	buyerToken := user.TokenFor(t, "720001", 0)
-	created := createDockerBuyerOrder(t, user, buyerToken, productID)
+	requestID := "docker-uat-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	created := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
+	retried := createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, requestID)
+	require.Equal(t, created.OrderID, retried.OrderID)
+	waitDockerOrderVisible(t, user, buyerToken, created.OrderID)
+}
+
+// startDockerOrderScaleStack 启动 07 Docker 双 order 副本测试栈。
+func startDockerOrderScaleStack(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("SHOP_RUN_DOCKER_UAT") != "1" {
+		t.Skip("设置 SHOP_RUN_DOCKER_UAT=1 后运行真实 Docker 多副本 UAT")
+	}
+	compose := dockerComposeFile()
+	runCompose(t, compose, "up", "-d", "--build", "mysql", "redis", "shop-user", "shop-supplier", "shop-order-a", "shop-order-b")
+	t.Cleanup(func() { runCompose(t, compose, "down", "-v", "--remove-orphans") })
+	return compose
+}
+
+// dockerComposeFile 返回 07 Docker Compose 文件路径。
+func dockerComposeFile() string {
+	return filepath.Join("..", "..", "07-shop-order-scale", "deploy", "docker-compose.yml")
+}
+
+// waitDockerOrderVisible 等待买家入口从共享 MySQL 权威库查询到指定订单。
+func waitDockerOrderVisible(t *testing.T, user *integration.Suite, buyerToken string, orderID uint) {
+	t.Helper()
 	require.Eventually(t, func() bool {
 		response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/getorders", buyerToken, map[string]interface{}{})
 		if !response.Success {
@@ -42,7 +65,7 @@ func TestDockerComposeOrderScaleUAT(t *testing.T) {
 		var orders []*orderdto.Order
 		require.NoError(t, json.Unmarshal(response.Data, &orders))
 		for _, item := range orders {
-			if item != nil && item.OrderID == created.OrderID {
+			if item != nil && item.OrderID == orderID {
 				return true
 			}
 		}
@@ -56,6 +79,60 @@ func runCompose(t *testing.T, compose string, args ...string) {
 	cmd := exec.Command("docker", full...)
 	output, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "docker %v\n%s", full, string(output))
+}
+
+// runComposeOutput 执行 Docker Compose 命令并返回输出。
+func runComposeOutput(compose string, args ...string) (string, error) {
+	full := append([]string{"compose", "-f", compose}, args...)
+	cmd := exec.Command("docker", full...)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
+// verifyDockerOrderReplicaDiscovery 验证两个 order 副本注册了不同实例和 MachineID。
+func verifyDockerOrderReplicaDiscovery(t *testing.T, compose string) []*cluster.NodeInfo {
+	t.Helper()
+	var nodes []*cluster.NodeInfo
+	require.Eventually(t, func() bool {
+		var err error
+		nodes, err = dockerOrderNodes(compose)
+		if err != nil || len(nodes) < 2 {
+			return false
+		}
+		machineIDs := map[int64]bool{}
+		instanceIDs := map[string]bool{}
+		for _, node := range nodes {
+			if node == nil || node.ServiceName != "shop-order" || node.MachineID < 0 || strings.TrimSpace(node.ServiceInstanceID) == "" {
+				return false
+			}
+			machineIDs[node.MachineID] = true
+			instanceIDs[node.ServiceInstanceID] = true
+		}
+		return len(machineIDs) >= 2 && len(instanceIDs) >= 2
+	}, 15*time.Second, 300*time.Millisecond)
+	return nodes
+}
+
+// dockerOrderNodes 从 Redis discovery 中读取当前 shop-order 注册节点。
+func dockerOrderNodes(compose string) ([]*cluster.NodeInfo, error) {
+	idsOutput, err := runComposeOutput(compose, "exec", "-T", "redis", "redis-cli", "--raw", "SMEMBERS", "core:discovery:07:services:shop-order")
+	if err != nil {
+		return nil, err
+	}
+	ids := strings.Fields(idsOutput)
+	nodes := make([]*cluster.NodeInfo, 0, len(ids))
+	for _, id := range ids {
+		data, err := runComposeOutput(compose, "exec", "-T", "redis", "redis-cli", "--raw", "GET", "core:discovery:07:nodes:shop-order:"+id)
+		if err != nil {
+			return nil, err
+		}
+		node := &cluster.NodeInfo{}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(data)), node); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
 }
 
 func waitDockerUserReady(t *testing.T, suite *integration.Suite) {
@@ -92,10 +169,16 @@ func addDockerSupplierProduct(t *testing.T, supplier *integration.Suite, adminTo
 
 func createDockerBuyerOrder(t *testing.T, user *integration.Suite, buyerToken string, productID uint) orderdto.Order {
 	t.Helper()
+	return createDockerBuyerOrderWithRequest(t, user, buyerToken, productID, "docker-uat-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+}
+
+// createDockerBuyerOrderWithRequest 使用指定 requestID 调用买家下单入口。
+func createDockerBuyerOrderWithRequest(t *testing.T, user *integration.Suite, buyerToken string, productID uint, requestID string) orderdto.Order {
+	t.Helper()
 	response := user.RequestJSON(t, http.MethodPost, "/api/shop-user/addorder", buyerToken, map[string]interface{}{
 		"productID": productID,
 		"quantity":  2,
-		"requestID": "docker-uat-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		"requestID": requestID,
 		"address": userdto.AddressSnapshot{
 			AddressID:    1,
 			ReceiverName: "Docker买家",

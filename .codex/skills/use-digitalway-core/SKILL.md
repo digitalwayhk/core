@@ -81,10 +81,11 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 21. 示例 07 这类水平扩展示例必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。多实例服务的 pending、Outbox、Inbox、同步状态和投影必须记录 TraceID、ServiceName、ServiceInstanceID；ServiceInstanceIP 只用于诊断，不参与业务判断。
 22. 自动水平扩展示例必须启用 `AutoMachineID=true`，并验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得为可扩容副本硬编码固定 MachineID，也不得把注册发现能力写死到 Redis，具体使用 Redis、局域网发现或其他中间件由配置决定。
 23. 示例 07 或任何高吞吐订单写入场景必须参考示例 04 的专用业务写路径：public/private API 调用 business，business 调用专用写 store；本地可靠写、Group Commit、write-behind、同步状态和背压由专用 store 负责。`ModelList` 的默认操作主要用于 Manage API、视图和低频管理 CRUD，不得把高频业务下单、支付、撤单热路径设计成围绕 `ModelList`/SQLite 表轮询的实现。07 的订单权威库在分布式/Docker 下必须使用真正共享的 MySQL 等网络数据库；不得用每进程本地 SQLite 冒充共享 remote。
-24. 示例 04/07 这类性能 benchmark 必须使用 04 的基准模式：先用 fixture 在计时外准备数据和启动/关闭本地 store；按能力拆分本地可靠提交、同步汇合、读缓存和混合负载，不把准备数据、远程探测、建表或清理计入热路径；使用 `ReportAllocs/ResetTimer/StopTimer`、可配置并发矩阵、吞吐和延迟分位数指标；07 的本地接单 benchmark 不得在热路径探测 MySQL，远程汇合 benchmark 才依赖 MySQL。benchmark/UAT/注册类测试创建业务主键必须使用框架 `req.NewID()` 或同源 Snowflake worker，不得用 `base+index` 手写递增 ID；水平扩展示例还必须验证不同 MachineID 副本生成 ID 不重复。
-25. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
-26. 多服务业务必须提供真实多进程 UAT，并按角色或调用方拆分可单独运行的角色闭环测试；跨服务发现、内部调用、事件投递、缓存失效和权限边界不能只用同进程或单服务测试替代。
-27. 只要服务实现 WebSocket 能力，就必须在集成测试和 UAT 中使用真实 WebSocket 覆盖登录、按真实 RouterInfo 路径订阅、事件结构、当前用户投递、其他用户隔离、未认证/错误订阅等异常边界。
+24. 示例 07 的幂等策略必须明确当前扩展边界：如果只扩展 order-service，user-service 中 `UserID+RequestID -> OrderID` 的入口稳定映射可以是示例级进程内辅助，但 README 必须写明多 user 副本或重启后未同步窗口需要 Redis/MySQL 等共享幂等存储，或确定性订单号策略；如果 Public 下单为了跨 order 副本一致性开启远程幂等探测，MySQL 不可达时必须选择 fail-closed 或清楚文档化降级纯本地接单的双 pending 风险，不能隐式失败或假装仍保持全局幂等。
+25. 示例 04/07 这类性能 benchmark 必须使用 04 的基准模式：先用 fixture 在计时外准备数据和启动/关闭本地 store；按能力拆分本地可靠提交、同步汇合、读缓存和混合负载，不把准备数据、远程探测、建表或清理计入热路径；使用 `ReportAllocs/ResetTimer/StopTimer`、可配置并发矩阵、吞吐和延迟分位数指标；07 的本地接单 benchmark 不得在热路径探测 MySQL，远程汇合 benchmark 才依赖 MySQL。benchmark/UAT/注册类测试创建业务主键必须使用框架 `req.NewID()` 或同源 Snowflake worker，不得用 `base+index` 手写递增 ID；水平扩展示例还必须验证不同 MachineID 副本生成 ID 不重复。
+26. 示例、能力代码、单元测试和 `examples/integration` 集成测试必须保持中文注释契约：文件开头先说明本文件提供的能力；所有 public API、导出类型、导出方法和导出函数必须有中文注释；复杂 private 逻辑按读者理解成本补注释；测试文件注释必须说明验证的场景、角色和边界。
+27. 多服务业务必须提供真实多进程 UAT，并按角色或调用方拆分可单独运行的角色闭环测试；跨服务发现、内部调用、事件投递、缓存失效和权限边界不能只用同进程或单服务测试替代。Docker/外部依赖 UAT 可以用显式环境变量门控，但必须在文档中给出按角色单独运行命令；多副本水平扩展示例至少要在可选 UAT 中采样 discovery 注册节点，确认 `MachineID` 和 `ServiceInstanceID` 唯一。
+28. 只要服务实现 WebSocket 能力，就必须在集成测试和 UAT 中使用真实 WebSocket 覆盖登录、按真实 RouterInfo 路径订阅、事件结构、当前用户投递、其他用户隔离、未认证/错误订阅等异常边界。
 
 ## 工作流
 

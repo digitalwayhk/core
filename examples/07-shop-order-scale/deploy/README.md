@@ -36,3 +36,13 @@ scale 模板也不设置 `SHOP_ADVERTISE_ADDRESS`，运行时会使用容器 hos
 ```bash
 SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale-multi-process -run TestDockerComposeOrderScaleUAT -count=1 -v
 ```
+
+按角色单独验证时可以运行：
+
+```bash
+SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale-multi-process -run TestDockerUATBuyerRoleFlow -count=1 -v
+SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale-multi-process -run TestDockerUATSupplierRoleFlow -count=1 -v
+SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration/07-shop-order-scale-multi-process -run TestDockerUATAdminRoleFlow -count=1 -v
+```
+
+Docker UAT 会读取 Redis discovery 中的 `shop-order` 节点，确认两个副本拥有不同 `MachineID` 和 `ServiceInstanceID`；买家角色还会用相同 `requestID` 重试下单，确认入口层幂等不会返回漂移的订单号。

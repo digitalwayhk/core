@@ -62,6 +62,11 @@ buyer request
 
 下单返回 `accepted` 表示当前副本已经可靠持久化到 Badger；同步到 MySQL 前，其他 order 副本无法合并该副本的本地 pending，这是示例有意展示的最终一致窗口。user-service 会对 `UserID+RequestID` 生成稳定 OrderID，order-service 也会在 Public 下单时探测 MySQL 幂等键，避免常规重试拿到不同订单号。
 
+这里有两个有意保留的示例边界：
+
+- 07 重点验证 `shop-order` 的水平扩展。当前 `shop-user` 的 `UserID+RequestID -> OrderID` 稳定映射是进程内辅助，能覆盖单入口实例的重试；如果生产中 `shop-user` 也要多副本扩容或重启后继续保证未同步窗口内订单号不漂移，应把该映射提升到 Redis/MySQL 等共享幂等存储，或采用可审计的确定性订单号策略。
+- Public 下单打开远程幂等探测后采用 fail-closed：本地 pending 未命中时会先查共享 MySQL 幂等键，MySQL 不可达则拒绝本次接单，而不是降级成可能产生双 pending 的纯本地接单。`Benchmark07LocalOrderAccept` 不打开该探测，只度量 04 风格本地可靠写的热路径。
+
 ## 缓存规则
 
 缓存只放在面向外部流量的入口服务 facade：
@@ -76,6 +81,7 @@ buyer request
 - 单进程集成测试验证 07 的业务语义、规则配置、pending 同步和事件投递。
 - 多进程 UAT 必须按角色拆分：买家、供应商、管理员分别拥有可单独运行的闭环测试。
 - 多 order 副本 UAT 必须验证自动 MachineID、唯一 ServiceInstanceID、本地 pending 目录隔离、共享 MySQL 远程权威库和 resolver 多节点调用。
+- Docker 多进程 UAT 默认由 `SHOP_RUN_DOCKER_UAT=1` 显式启用；CI 可把这些测试放到夜间或外部依赖 job，普通单元测试只保留 compose/config 静态约束。
 - 有 WebSocket 的买家角色必须覆盖真实订阅、订单事件投递和其他买家隔离。
 - 07 完成后增加基准性能测试，对比 06 与 07 在订单写入吞吐、延迟分位数和失败恢复上的差异。
 
