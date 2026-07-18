@@ -1,3 +1,4 @@
+// 本文件提供当前服务 Manage API 的公共权限、限域和横切 Hook 能力。
 package common
 
 import (
@@ -9,11 +10,13 @@ import (
 	"github.com/digitalwayhk/core/service/manage/view"
 )
 
+// Actor 定义本文件能力使用的核心结构。
 type Actor struct {
 	Admin bool
 	User  *models.User
 }
 
+// ActorFrom 执行本文件能力对应的业务操作。
 func ActorFrom(req servertypes.IRequest) (Actor, error) {
 	uid, _ := req.GetUser()
 	uid = strings.TrimSpace(uid)
@@ -30,6 +33,7 @@ func ActorFrom(req servertypes.IRequest) (Actor, error) {
 	return Actor{User: user}, nil
 }
 
+// OwnerSearch 执行本文件能力对应的业务操作。
 func OwnerSearch(item *view.SearchItem, req servertypes.IRequest, column string) (interface{}, error, bool) {
 	actor, err := ActorFrom(req)
 	if err != nil {
@@ -45,6 +49,7 @@ func OwnerSearch(item *view.SearchItem, req servertypes.IRequest, column string)
 	return nil, nil, false
 }
 
+// AuthorizeWrite 执行本文件能力对应的业务操作。
 func AuthorizeWrite(actor Actor, userID uint) error {
 	if actor.Admin {
 		return nil

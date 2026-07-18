@@ -1,3 +1,4 @@
+// 本文件提供当前服务供其他服务调用的 Public API 或入口 facade 能力。
 package public
 
 import (
@@ -15,6 +16,7 @@ import (
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
+// CreateOrder 定义本文件能力使用的核心结构。
 type CreateOrder struct {
 	UserID    uint                    `json:"userID"`
 	ProductID uint                    `json:"productID"`
@@ -23,8 +25,10 @@ type CreateOrder struct {
 	Address   userdto.AddressSnapshot `json:"address"`
 }
 
+// Parse 实现本类型在当前服务边界中的行为。
 func (own *CreateOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
 
+// Validation 实现本类型在当前服务边界中的行为。
 func (own *CreateOrder) Validation(servertypes.IRequest) error {
 	if own.UserID == 0 || own.ProductID == 0 || own.Quantity <= 0 || strings.TrimSpace(own.RequestID) == "" || own.Address.AddressID == 0 {
 		return errors.New("下单参数不完整")
@@ -32,6 +36,7 @@ func (own *CreateOrder) Validation(servertypes.IRequest) error {
 	return nil
 }
 
+// Do 实现本类型在当前服务边界中的行为。
 func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	response, err := req.CallService(&supplierapi.GetProducts{ID: own.ProductID})
 	if err != nil {
@@ -50,8 +55,10 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	return business.CreateOrder(business.CreateOrderCommand{OrderID: req.NewID(), UserID: own.UserID, RequestID: own.RequestID, TraceID: req.GetTraceId(), EventID: strconv.FormatUint(uint64(req.NewID()), 10), ProductID: own.ProductID, Quantity: own.Quantity, Address: own.Address}, snapshot)
 }
 
+// GetResponse 实现本类型在当前服务边界中的行为。
 func (*CreateOrder) GetResponse() interface{} { return &orderdto.Order{} }
 
+// RouterInfo 实现本类型在当前服务边界中的行为。
 func (own *CreateOrder) RouterInfo() *servertypes.RouterInfo {
 	return orderPublicRoute(own, "createorder", http.MethodPost)
 }

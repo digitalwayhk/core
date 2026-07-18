@@ -1,5 +1,7 @@
+// 本文件定义 06 微服务示例跨服务共享的稳定契约常量和错误能力。
 package contract
 
+// EventSchemaVersion 提供本文件能力需要的导出定义。
 const EventSchemaVersion = 1
 
 // EventVersion 为旧代码迁移保留；新事件统一使用 EventSchemaVersion。

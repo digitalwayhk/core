@@ -1,3 +1,4 @@
+// 本文件提供用户服务面向普通用户的 Private API 编排能力。
 package private
 
 import (
@@ -12,6 +13,7 @@ import (
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
+// AddOrder 定义本文件能力使用的核心结构。
 type AddOrder struct {
 	RequestID string `json:"requestID"`
 	ProductID uint   `json:"productID"`
@@ -19,8 +21,10 @@ type AddOrder struct {
 	AddressID uint   `json:"addressID"`
 }
 
+// Parse 实现本类型在当前服务边界中的行为。
 func (own *AddOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
 
+// Validation 实现本类型在当前服务边界中的行为。
 func (own *AddOrder) Validation(req servertypes.IRequest) error {
 	if strings.TrimSpace(own.RequestID) == "" {
 		return errors.New("requestID 不能为空")
@@ -32,6 +36,7 @@ func (own *AddOrder) Validation(req servertypes.IRequest) error {
 	return err
 }
 
+// Do 实现本类型在当前服务边界中的行为。
 func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	user, err := trustedUser(req, true)
 	if err != nil {
@@ -54,5 +59,8 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	return result, nil
 }
 
-func (*AddOrder) GetResponse() interface{}                { return &orderdto.Order{} }
+// GetResponse 实现本类型在当前服务边界中的行为。
+func (*AddOrder) GetResponse() interface{} { return &orderdto.Order{} }
+
+// RouterInfo 实现本类型在当前服务边界中的行为。
 func (own *AddOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }

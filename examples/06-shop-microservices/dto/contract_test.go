@@ -1,3 +1,4 @@
+// 本文件验证 06 微服务示例的跨服务契约和业务边界。
 package dto_test
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSharedDTOsUseNumericBusinessIDsAndStableSnapshots 验证当前场景的业务闭环和边界行为。
 func TestSharedDTOsUseNumericBusinessIDsAndStableSnapshots(t *testing.T) {
 	item := orderdto.Order{
 		ID: 11, OrderRevision: 2, UserID: 21, SupplierID: 31, ProductID: 41,
@@ -42,6 +44,7 @@ func TestSharedDTOsUseNumericBusinessIDsAndStableSnapshots(t *testing.T) {
 	assert.Contains(t, string(data), `"detail":"完整地址"`)
 }
 
+// TestOrderEventContainsRevisionAndFullFulfillmentSnapshot 验证当前场景的业务闭环和边界行为。
 func TestOrderEventContainsRevisionAndFullFulfillmentSnapshot(t *testing.T) {
 	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
 	payload := eventdto.OrderChanged{

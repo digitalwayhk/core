@@ -1,3 +1,4 @@
+// 本文件封装当前服务模型层统一的数据访问和事务串行能力。
 package store
 
 import (
@@ -17,19 +18,23 @@ var (
 	ensureMu      sync.Mutex
 )
 
+// Get 执行本文件能力对应的业务操作。
 func Get() persistencetypes.IDataAction {
 	actionOnce.Do(func() { action = entity.GetGlobalSqliteInstance(common.DatabaseName) })
 	return action
 }
 
+// NewSearch 执行本文件能力对应的业务操作。
 func NewSearch(model interface{}, size int) *persistencetypes.SearchItem {
 	return &persistencetypes.SearchItem{Page: 1, Size: size, Model: model}
 }
 
+// EnsureModel 执行本文件能力对应的业务操作。
 func EnsureModel(model interface{}) error {
 	return EnsureModelWith(Get(), model)
 }
 
+// EnsureModelWith 执行本文件能力对应的业务操作。
 func EnsureModelWith(action persistencetypes.IDataAction, model interface{}) error {
 	ensureMu.Lock()
 	defer ensureMu.Unlock()
@@ -40,12 +45,14 @@ func EnsureModelWith(action persistencetypes.IDataAction, model interface{}) err
 	return action.Load(NewSearch(model, 1), reflect.New(reflect.SliceOf(t)).Interface())
 }
 
+// RunSerialized 执行本文件能力对应的业务操作。
 func RunSerialized(operation func() error) error {
 	transactionMu.Lock()
 	defer transactionMu.Unlock()
 	return operation()
 }
 
+// RunInTransaction 执行本文件能力对应的业务操作。
 func RunInTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) (err error) {
 	transactionMu.Lock()
 	defer transactionMu.Unlock()

@@ -1,3 +1,4 @@
+// 本文件验证当前服务业务编排的事务、事件和幂等边界。
 package business
 
 import (
@@ -18,6 +19,7 @@ import (
 
 var orderTestSequence atomic.Uint64
 
+// TestMain 验证当前场景的业务闭环和边界行为。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "shop-order-test-")
 	if err != nil {
@@ -50,6 +52,7 @@ func createOrderCommand(requestID string, userID uint, quantity int) CreateOrder
 	}
 }
 
+// TestCreateOrderRejectsIdempotencyKeyReuseWithDifferentFingerprint 验证当前场景的业务闭环和边界行为。
 func TestCreateOrderRejectsIdempotencyKeyReuseWithDifferentFingerprint(t *testing.T) {
 	_, requestID := nextValue("buyer-request")
 	command := createOrderCommand(requestID, 10, 2)
@@ -65,6 +68,7 @@ func TestCreateOrderRejectsIdempotencyKeyReuseWithDifferentFingerprint(t *testin
 	require.Equal(t, uint64(1), first.OrderRevision)
 }
 
+// TestCreateOrderConvergesAndPreservesSnapshots 验证当前场景的业务闭环和边界行为。
 func TestCreateOrderConvergesAndPreservesSnapshots(t *testing.T) {
 	_, requestID := nextValue("same-request")
 	command := createOrderCommand(requestID, 11, 2)
@@ -80,6 +84,7 @@ func TestCreateOrderConvergesAndPreservesSnapshots(t *testing.T) {
 	require.True(t, decimal.NewFromInt(30).Equal(second.TotalAmount))
 }
 
+// TestCreateOrderStoresTraceIDInOrderAndOutbox 验证当前场景的业务闭环和边界行为。
 func TestCreateOrderStoresTraceIDInOrderAndOutbox(t *testing.T) {
 	_, requestID := nextValue("trace-request")
 	command := createOrderCommand(requestID, 111, 2)
@@ -105,6 +110,7 @@ func TestCreateOrderStoresTraceIDInOrderAndOutbox(t *testing.T) {
 	require.Contains(t, string(found.Payload), `"traceID":"`+command.TraceID+`"`)
 }
 
+// TestConcurrentCreateOrderConvergesOnOneFact 验证当前场景的业务闭环和边界行为。
 func TestConcurrentCreateOrderConvergesOnOneFact(t *testing.T) {
 	_, requestID := nextValue("concurrent-request")
 	base := createOrderCommand(requestID, 12, 1)
@@ -140,6 +146,7 @@ func TestConcurrentCreateOrderConvergesOnOneFact(t *testing.T) {
 	}
 }
 
+// TestCancelOrderKeepsFactAndAdvancesRevision 验证当前场景的业务闭环和边界行为。
 func TestCancelOrderKeepsFactAndAdvancesRevision(t *testing.T) {
 	_, requestID := nextValue("cancel-request")
 	created, err := CreateOrder(createOrderCommand(requestID, 13, 1), fixedProductSnapshot())
@@ -154,6 +161,7 @@ func TestCancelOrderKeepsFactAndAdvancesRevision(t *testing.T) {
 	require.NotNil(t, stored)
 }
 
+// TestPaymentAttemptsAndRefundStateMachine 验证当前场景的业务闭环和边界行为。
 func TestPaymentAttemptsAndRefundStateMachine(t *testing.T) {
 	paymentType := models.NewPaymentType()
 	paymentType.SetID(720001)
@@ -197,6 +205,7 @@ func TestPaymentAttemptsAndRefundStateMachine(t *testing.T) {
 	require.Equal(t, models.PaymentStatusRefunded, refunded.PaymentStatus)
 }
 
+// TestUsedPaymentTypeCannotBeDeletedOrRecoded 验证当前场景的业务闭环和边界行为。
 func TestUsedPaymentTypeCannotBeDeletedOrRecoded(t *testing.T) {
 	paymentType := models.NewPaymentType()
 	paymentType.SetID(730001)
@@ -215,6 +224,7 @@ func TestUsedPaymentTypeCannotBeDeletedOrRecoded(t *testing.T) {
 	require.ErrorIs(t, models.SavePaymentType(paymentType), contract.ErrResourceInUse)
 }
 
+// TestPaymentTypeChangesWriteReliableEvents 验证当前场景的业务闭环和边界行为。
 func TestPaymentTypeChangesWriteReliableEvents(t *testing.T) {
 	before, err := models.PendingOutbox()
 	require.NoError(t, err)

@@ -12,9 +12,13 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func ProductListResponse() interface{}  { return []*supplierdto.Product{} }
+// ProductListResponse 执行本文件能力对应的业务操作。
+func ProductListResponse() interface{} { return []*supplierdto.Product{} }
+
+// SupplierListResponse 执行本文件能力对应的业务操作。
 func SupplierListResponse() interface{} { return []*supplierdto.Supplier{} }
 
+// AvailableSuppliers 执行本文件能力对应的业务操作。
 func AvailableSuppliers(id uint, code, name string) ([]*supplierdto.Supplier, error) {
 	items, err := models.ListSuppliers()
 	if err != nil {
@@ -32,6 +36,7 @@ func AvailableSuppliers(id uint, code, name string) ([]*supplierdto.Supplier, er
 	return result, nil
 }
 
+// ProductResponse 执行本文件能力对应的业务操作。
 func ProductResponse(item *models.Product) *supplierdto.Product {
 	if item == nil {
 		return nil
@@ -45,6 +50,7 @@ func ProductResponse(item *models.Product) *supplierdto.Product {
 	return &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, SupplierCode: code, SupplierName: name, Name: item.Name, Code: item.Code, Price: item.Price, Enabled: item.Enabled}
 }
 
+// EnsureSupplier 执行本文件能力对应的业务操作。
 func EnsureSupplier(userID, name string) (*models.Supplier, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" || userID == contract.PlatformAdminUserID {
@@ -66,6 +72,7 @@ func EnsureSupplier(userID, name string) (*models.Supplier, error) {
 	return item, item.Save()
 }
 
+// UpdateSupplier 执行本文件能力对应的业务操作。
 func UpdateSupplier(id uint, name string, enabled bool, traceID, eventID string) (*models.Supplier, error) {
 	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindSupplierByID(id)
@@ -137,6 +144,7 @@ func SetSupplierEnabled(id uint, enabled bool, traceID, eventID string) (*models
 	return item, err
 }
 
+// CreateProduct 执行本文件能力对应的业务操作。
 func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id uint, traceID, eventID string) (*models.Product, error) {
 	traceID = strings.TrimSpace(traceID)
 	supplier, err := models.FindSupplierByID(ownerID)
@@ -162,6 +170,7 @@ func CreateProduct(ownerID uint, name, code string, price decimal.Decimal, id ui
 	return item, err
 }
 
+// ProductSnapshot 执行本文件能力对应的业务操作。
 func ProductSnapshot(id uint) (*supplierdto.ProductSnapshot, error) {
 	product, err := models.FindProduct(id)
 	if err != nil || product == nil || !product.Enabled {
@@ -175,6 +184,7 @@ func ProductSnapshot(id uint) (*supplierdto.ProductSnapshot, error) {
 		ProductCode: product.Code, ProductName: product.Name, UnitPrice: product.Price}, nil
 }
 
+// OwnedProducts 执行本文件能力对应的业务操作。
 func OwnedProducts(ownerID uint) ([]*supplierdto.Product, error) {
 	items, err := models.ListProducts()
 	if err != nil {
@@ -189,6 +199,7 @@ func OwnedProducts(ownerID uint) ([]*supplierdto.Product, error) {
 	return result, nil
 }
 
+// UpdateOwnedProduct 执行本文件能力对应的业务操作。
 func UpdateOwnedProduct(ownerID uint, id uint, price *decimal.Decimal, enabled *bool, traceID, eventID string) (*supplierdto.Product, error) {
 	traceID = strings.TrimSpace(traceID)
 	item, err := models.FindProduct(id)
@@ -274,6 +285,7 @@ func SetProductEnabled(id uint, enabled bool, traceID, eventID string) (*models.
 	return item, err
 }
 
+// AvailableProducts 执行本文件能力对应的业务操作。
 func AvailableProducts(id uint, name, code string, supplierID uint) ([]*supplierdto.Product, error) {
 	items, err := models.ListProducts()
 	if err != nil {

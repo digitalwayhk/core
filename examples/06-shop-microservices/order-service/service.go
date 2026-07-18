@@ -1,3 +1,4 @@
+// 本文件组装当前服务的路由、事件订阅、Outbox 和生命周期能力。
 package orderservice
 
 import (
@@ -14,7 +15,10 @@ import (
 // Service 是订单、支付和事件 Outbox 的事实服务。
 type Service struct{}
 
+// ServiceName 返回订单服务的稳定逻辑服务名，供路由、发现和内部调用鉴权使用。
 func (*Service) ServiceName() string { return contract.OrderServiceName }
+
+// Routers 注册订单内部 Public API 和平台管理员使用的订单/支付 Manage API。
 func (*Service) Routers() []servertypes.IRouter {
 	routers := []servertypes.IRouter{&publicapi.CreateOrder{}, &publicapi.CancelOrder{}, &publicapi.CreatePayment{}, &publicapi.GetOrders{}, &publicapi.GetPaymentTypes{}}
 	routers = append(routers, manageapi.NewPaymentTypeManage().Routers()...)
@@ -33,7 +37,11 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	}
 	return nil
 }
+
+// SubscribeRouters 保留旧观察路由兼容入口；订单服务事件发布统一走 Outbox。
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
+
+// Start 启用订单服务 Outbox，让订单和支付事实变更可靠发布到 EventBridge。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.OrderServiceName)
 	if sc == nil || sc.ServiceEventBridge == nil {

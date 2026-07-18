@@ -1,3 +1,4 @@
+// 本文件提供当前服务业务层的事务编排、状态变更和事件写入能力。
 package business
 
 import (
@@ -28,6 +29,7 @@ func writePaymentTypeEvent(action persistencetypes.IDataAction, traceID, eventID
 	return action.Insert(outbox)
 }
 
+// CreatePaymentType 执行本文件能力对应的业务操作。
 func CreatePaymentType(input *models.PaymentType, traceID, eventID string) (*models.PaymentType, error) {
 	item := models.NewPaymentType()
 	item.TraceID = strings.TrimSpace(traceID)
@@ -42,6 +44,7 @@ func CreatePaymentType(input *models.PaymentType, traceID, eventID string) (*mod
 	return item, err
 }
 
+// UpdatePaymentType 执行本文件能力对应的业务操作。
 func UpdatePaymentType(id uint, name, code, traceID, eventID string) (*models.PaymentType, error) {
 	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
@@ -74,6 +77,7 @@ func UpdatePaymentType(id uint, name, code, traceID, eventID string) (*models.Pa
 	return result, err
 }
 
+// SetPaymentTypeEnabled 执行本文件能力对应的业务操作。
 func SetPaymentTypeEnabled(id uint, enabled bool, traceID, eventID string) (*models.PaymentType, error) {
 	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
@@ -96,6 +100,7 @@ func SetPaymentTypeEnabled(id uint, enabled bool, traceID, eventID string) (*mod
 	return result, err
 }
 
+// DeletePaymentType 执行本文件能力对应的业务操作。
 func DeletePaymentType(id uint, traceID, eventID string) (*models.PaymentType, error) {
 	traceID = strings.TrimSpace(traceID)
 	var result *models.PaymentType
@@ -124,6 +129,7 @@ func DeletePaymentType(id uint, traceID, eventID string) (*models.PaymentType, e
 	return result, err
 }
 
+// EnabledPaymentTypes 执行本文件能力对应的业务操作。
 func EnabledPaymentTypes() ([]*orderdto.PaymentType, error) {
 	items, err := models.ListPaymentTypes(true)
 	if err != nil {
@@ -136,6 +142,7 @@ func EnabledPaymentTypes() ([]*orderdto.PaymentType, error) {
 	return result, nil
 }
 
+// CreatePayment 执行本文件能力对应的业务操作。
 func CreatePayment(userID, orderID, paymentTypeID uint, paymentID, traceID, eventID string) (*orderdto.PaymentRecord, error) {
 	paymentID, eventID = strings.TrimSpace(paymentID), strings.TrimSpace(eventID)
 	traceID = strings.TrimSpace(traceID)
@@ -237,14 +244,17 @@ func changePayment(paymentID, traceID, eventID string, from, targetPayment, targ
 	return models.ToDTO(result), err
 }
 
+// ConfirmPayment 执行本文件能力对应的业务操作。
 func ConfirmPayment(paymentID, traceID, eventID string) (*orderdto.Order, error) {
 	return changePayment(paymentID, traceID, eventID, models.PaymentStatusProcessing, models.PaymentStatusPaid, -1, "paid")
 }
 
+// FailPayment 执行本文件能力对应的业务操作。
 func FailPayment(paymentID, traceID, eventID string) (*orderdto.Order, error) {
 	return changePayment(paymentID, traceID, eventID, models.PaymentStatusProcessing, models.PaymentStatusFailed, -1, "payment_failed")
 }
 
+// ConfirmRefund 执行本文件能力对应的业务操作。
 func ConfirmRefund(paymentID, traceID, eventID string) (*orderdto.Order, error) {
 	return changePayment(paymentID, traceID, eventID, models.PaymentStatusRefunding, models.PaymentStatusRefunded, models.OrderStatusCancelled, "refunded")
 }

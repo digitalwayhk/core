@@ -1,3 +1,4 @@
+// 本文件验证当前服务 Manage API 的权限、限域和受控命令边界。
 package manage
 
 import (
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain 验证当前场景的业务闭环和边界行为。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "user-manage-")
 	if err != nil {
@@ -30,18 +32,35 @@ type manageRequest struct {
 	body interface{}
 }
 
-func (r *manageRequest) GetTraceId() string        { return "" }
+// GetTraceId 实现本类型在当前服务边界中的行为。
+func (r *manageRequest) GetTraceId() string { return "" }
+
+// GetUser 实现本类型在当前服务边界中的行为。
 func (r *manageRequest) GetUser() (string, string) { return r.uid, r.uid }
-func (*manageRequest) GetClientIP() string         { return "" }
-func (*manageRequest) NewID() uint                 { return 880001 }
-func (*manageRequest) Authorized() bool            { return true }
+
+// GetClientIP 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetClientIP() string { return "" }
+
+// NewID 实现本类型在当前服务边界中的行为。
+func (*manageRequest) NewID() uint { return 880001 }
+
+// Authorized 实现本类型在当前服务边界中的行为。
+func (*manageRequest) Authorized() bool { return true }
+
+// CallService 实现本类型在当前服务边界中的行为。
 func (*manageRequest) CallService(servertypes.IRouter, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
+
+// CallTargetService 实现本类型在当前服务边界中的行为。
 func (*manageRequest) CallTargetService(servertypes.IRouter, *servertypes.TargetInfo, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
+
+// GetValue 实现本类型在当前服务边界中的行为。
 func (*manageRequest) GetValue(string) string { return "" }
+
+// Bind 实现本类型在当前服务边界中的行为。
 func (r *manageRequest) Bind(target interface{}) error {
 	data, err := json.Marshal(r.body)
 	if err != nil {
@@ -49,13 +68,27 @@ func (r *manageRequest) Bind(target interface{}) error {
 	}
 	return json.Unmarshal(data, target)
 }
-func (*manageRequest) GoZeroBind(interface{}) error                         { return nil }
+
+// GoZeroBind 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GoZeroBind(interface{}) error { return nil }
+
+// NewResponse 实现本类型在当前服务边界中的行为。
 func (*manageRequest) NewResponse(interface{}, error) servertypes.IResponse { return nil }
-func (*manageRequest) GetPath() string                                      { return "" }
-func (*manageRequest) GetClaims(string) interface{}                         { return nil }
-func (*manageRequest) ServiceName() string                                  { return contract.UserServiceName }
-func (*manageRequest) GetServerInfo() *servertypes.TargetInfo               { return nil }
-func (*manageRequest) GetTargetServerInfo(string) *servertypes.TargetInfo   { return nil }
+
+// GetPath 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetPath() string { return "" }
+
+// GetClaims 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetClaims(string) interface{} { return nil }
+
+// ServiceName 实现本类型在当前服务边界中的行为。
+func (*manageRequest) ServiceName() string { return contract.UserServiceName }
+
+// GetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetServerInfo() *servertypes.TargetInfo { return nil }
+
+// GetTargetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetTargetServerInfo(string) *servertypes.TargetInfo { return nil }
 
 func requireWhere(t *testing.T, item *view.SearchItem, name string, value interface{}) {
 	t.Helper()
@@ -68,6 +101,7 @@ func requireWhere(t *testing.T, item *view.SearchItem, name string, value interf
 	t.Fatalf("缺少搜索条件 %s", name)
 }
 
+// TestUserAndAddressSearchScopeOwner 验证当前场景的业务闭环和边界行为。
 func TestUserAndAddressSearchScopeOwner(t *testing.T) {
 	user, err := models.EnsureUser("manage-buyer", "买家")
 	require.NoError(t, err)
@@ -86,6 +120,7 @@ func TestUserAndAddressSearchScopeOwner(t *testing.T) {
 	requireWhere(t, addressManage.Search.SearchItem, "UserID", user.ID)
 }
 
+// TestAddressAddInjectsOwnerAndDisabledUserIsReadOnly 验证当前场景的业务闭环和边界行为。
 func TestAddressAddInjectsOwnerAndDisabledUserIsReadOnly(t *testing.T) {
 	user, err := models.EnsureUser("address-owner", "地址用户")
 	require.NoError(t, err)
@@ -105,6 +140,7 @@ func TestAddressAddInjectsOwnerAndDisabledUserIsReadOnly(t *testing.T) {
 	require.True(t, stop)
 }
 
+// TestUserManageHasNoPhysicalRemoveRouter 验证当前场景的业务闭环和边界行为。
 func TestUserManageHasNoPhysicalRemoveRouter(t *testing.T) {
 	routers := NewUserManage().Routers()
 	require.Len(t, routers, 4)

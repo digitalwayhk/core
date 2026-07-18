@@ -1,3 +1,4 @@
+// 本文件验证当前服务 Manage API 的权限、限域和受控命令边界。
 package manage
 
 import (
@@ -13,27 +14,59 @@ import (
 
 type manageAuthRequest struct{ uid string }
 
-func (*manageAuthRequest) GetTraceId() string          { return "" }
+// GetTraceId 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetTraceId() string { return "" }
+
+// GetUser 实现本类型在当前服务边界中的行为。
 func (r *manageAuthRequest) GetUser() (string, string) { return r.uid, r.uid }
-func (*manageAuthRequest) GetClientIP() string         { return "" }
-func (*manageAuthRequest) NewID() uint                 { return 1 }
-func (*manageAuthRequest) Authorized() bool            { return true }
+
+// GetClientIP 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetClientIP() string { return "" }
+
+// NewID 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) NewID() uint { return 1 }
+
+// Authorized 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) Authorized() bool { return true }
+
+// CallService 实现本类型在当前服务边界中的行为。
 func (*manageAuthRequest) CallService(servertypes.IRouter, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
+
+// CallTargetService 实现本类型在当前服务边界中的行为。
 func (*manageAuthRequest) CallTargetService(servertypes.IRouter, *servertypes.TargetInfo, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
-func (*manageAuthRequest) GetValue(string) string                               { return "" }
-func (*manageAuthRequest) Bind(interface{}) error                               { return nil }
-func (*manageAuthRequest) GoZeroBind(interface{}) error                         { return nil }
-func (*manageAuthRequest) NewResponse(interface{}, error) servertypes.IResponse { return nil }
-func (*manageAuthRequest) GetPath() string                                      { return "" }
-func (*manageAuthRequest) GetClaims(string) interface{}                         { return nil }
-func (*manageAuthRequest) ServiceName() string                                  { return contract.OrderServiceName }
-func (*manageAuthRequest) GetServerInfo() *servertypes.TargetInfo               { return nil }
-func (*manageAuthRequest) GetTargetServerInfo(string) *servertypes.TargetInfo   { return nil }
 
+// GetValue 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetValue(string) string { return "" }
+
+// Bind 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) Bind(interface{}) error { return nil }
+
+// GoZeroBind 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GoZeroBind(interface{}) error { return nil }
+
+// NewResponse 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) NewResponse(interface{}, error) servertypes.IResponse { return nil }
+
+// GetPath 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetPath() string { return "" }
+
+// GetClaims 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetClaims(string) interface{} { return nil }
+
+// ServiceName 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) ServiceName() string { return contract.OrderServiceName }
+
+// GetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetServerInfo() *servertypes.TargetInfo { return nil }
+
+// GetTargetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageAuthRequest) GetTargetServerInfo(string) *servertypes.TargetInfo { return nil }
+
+// TestOrderManageInventoryUsesReadOnlyAndControlledCommands 验证当前场景的业务闭环和边界行为。
 func TestOrderManageInventoryUsesReadOnlyAndControlledCommands(t *testing.T) {
 	paymentTypes := NewPaymentTypeManage().Routers()
 	require.Len(t, paymentTypes, 6)
@@ -47,6 +80,7 @@ func TestOrderManageInventoryUsesReadOnlyAndControlledCommands(t *testing.T) {
 	require.IsType(t, &managepkg.Search[models.PaymentRecord]{}, payments[1])
 }
 
+// TestOrderManageRejectsNonAdminBeforeSearch 验证当前场景的业务闭环和边界行为。
 func TestOrderManageRejectsNonAdminBeforeSearch(t *testing.T) {
 	manage := NewOrderManage()
 	manage.Search.SearchItem = &view.SearchItem{}

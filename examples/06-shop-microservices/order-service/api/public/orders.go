@@ -1,3 +1,4 @@
+// 本文件提供当前服务供其他服务调用的 Public API 或入口 facade 能力。
 package public
 
 import (

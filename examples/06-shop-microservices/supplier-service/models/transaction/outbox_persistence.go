@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/internal/store"
 )
 
+// NewProductOutbox 执行本文件能力对应的业务操作。
 func NewProductOutbox(traceID, eventID, eventType, subject string, payload interface{}) (*Outbox, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -20,6 +22,7 @@ func NewProductOutbox(traceID, eventID, eventType, subject string, payload inter
 	return item, nil
 }
 
+// PendingOutbox 执行本文件能力对应的业务操作。
 func PendingOutbox() ([]*Outbox, error) {
 	if err := store.EnsureModel(NewOutbox()); err != nil {
 		return nil, err
@@ -32,6 +35,7 @@ func PendingOutbox() ([]*Outbox, error) {
 	return items, err
 }
 
+// MarkOutboxPublished 执行本文件能力对应的业务操作。
 func MarkOutboxPublished(item *Outbox) error {
 	item.Published = true
 	item.SetUpdatedAt(time.Now().UTC())

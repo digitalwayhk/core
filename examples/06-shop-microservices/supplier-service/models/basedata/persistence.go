@@ -1,3 +1,4 @@
+// 本文件定义当前服务基础资料模型及其持久化能力。
 package basedata
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// Save 实现本类型在当前服务边界中的行为。
 func (s *Supplier) Save() error {
 	s.AuthUserID, s.Name, s.Code = strings.TrimSpace(s.AuthUserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
 	if s.AuthUserID == "" || s.Name == "" || s.Code == "" {
@@ -26,6 +28,7 @@ func (s *Supplier) Save() error {
 	return store.Get().Update(s)
 }
 
+// UpdateWith 实现本类型在当前服务边界中的行为。
 func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
 	s.AuthUserID, s.Name, s.Code = strings.TrimSpace(s.AuthUserID), strings.TrimSpace(s.Name), strings.ToLower(strings.TrimSpace(s.Code))
 	if s.AuthUserID == "" || s.Name == "" || s.Code == "" {
@@ -36,6 +39,7 @@ func (s *Supplier) UpdateWith(action persistencetypes.IDataAction) error {
 	return action.Update(s)
 }
 
+// FindSupplier 执行本文件能力对应的业务操作。
 func FindSupplier(authUserID string) (*Supplier, error) {
 	if err := store.EnsureModel(NewSupplier()); err != nil {
 		return nil, err
@@ -49,6 +53,7 @@ func FindSupplier(authUserID string) (*Supplier, error) {
 	return items[0], nil
 }
 
+// FindSupplierByID 执行本文件能力对应的业务操作。
 func FindSupplierByID(id uint) (*Supplier, error) {
 	if err := store.EnsureModel(NewSupplier()); err != nil {
 		return nil, err
@@ -62,6 +67,7 @@ func FindSupplierByID(id uint) (*Supplier, error) {
 	return items[0], nil
 }
 
+// ListSuppliers 执行本文件能力对应的业务操作。
 func ListSuppliers() ([]*Supplier, error) {
 	if err := store.EnsureModel(NewSupplier()); err != nil {
 		return nil, err
@@ -71,6 +77,7 @@ func ListSuppliers() ([]*Supplier, error) {
 	return items, err
 }
 
+// InsertWith 实现本类型在当前服务边界中的行为。
 func (p *Product) InsertWith(action persistencetypes.IDataAction) error {
 	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
 	if p.Name == "" || p.Code == "" || p.SupplierID == 0 || !p.Price.GreaterThan(decimal.Zero) {
@@ -80,6 +87,7 @@ func (p *Product) InsertWith(action persistencetypes.IDataAction) error {
 	return action.Insert(p)
 }
 
+// UpdateWith 实现本类型在当前服务边界中的行为。
 func (p *Product) UpdateWith(action persistencetypes.IDataAction) error {
 	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
 	if p.Name == "" || p.Code == "" || p.SupplierID == 0 || !p.Price.GreaterThan(decimal.Zero) {
@@ -90,6 +98,7 @@ func (p *Product) UpdateWith(action persistencetypes.IDataAction) error {
 	return action.Update(p)
 }
 
+// FindProduct 执行本文件能力对应的业务操作。
 func FindProduct(id uint) (*Product, error) {
 	if err := store.EnsureModel(NewProduct()); err != nil {
 		return nil, err
@@ -103,6 +112,7 @@ func FindProduct(id uint) (*Product, error) {
 	return items[0], nil
 }
 
+// ListProducts 执行本文件能力对应的业务操作。
 func ListProducts() ([]*Product, error) {
 	if err := store.EnsureModel(NewProduct()); err != nil {
 		return nil, err
@@ -112,6 +122,7 @@ func ListProducts() ([]*Product, error) {
 	return items, err
 }
 
+// ProductChangedPayload 执行本文件能力对应的业务操作。
 func ProductChangedPayload(traceID, eventID string, supplierID, productID uint, action string) eventdto.ProductChanged {
 	return eventdto.ProductChanged{Metadata: eventdto.Metadata{
 		EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventProductChanged, OccurredAt: time.Now().UTC(),
@@ -119,6 +130,7 @@ func ProductChangedPayload(traceID, eventID string, supplierID, productID uint, 
 	}, SupplierID: supplierID, ProductID: productID, Action: action}
 }
 
+// SupplierChangedPayload 执行本文件能力对应的业务操作。
 func SupplierChangedPayload(traceID, eventID string, supplierID uint, action string) eventdto.SupplierChanged {
 	return eventdto.SupplierChanged{Metadata: eventdto.Metadata{
 		EventID: eventID, TraceID: traceID, SchemaVersion: contract.EventSchemaVersion, EventType: contract.EventSupplierChanged, OccurredAt: time.Now().UTC(),
@@ -126,4 +138,5 @@ func SupplierChangedPayload(traceID, eventID string, supplierID uint, action str
 	}, SupplierID: supplierID, Action: action}
 }
 
+// EventID 执行本文件能力对应的业务操作。
 func EventID(id uint) string { return strconv.FormatUint(uint64(id), 10) }

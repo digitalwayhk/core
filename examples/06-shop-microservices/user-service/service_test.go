@@ -1,3 +1,4 @@
+// 本文件验证当前服务启动配置、路由注册和服务边界能力。
 package userservice
 
 import (
@@ -7,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestUserServiceRouteInventoryHasManageFacadesAndBuyerCommands 验证当前场景的业务闭环和边界行为。
 func TestUserServiceRouteInventoryHasManageFacadesAndBuyerCommands(t *testing.T) {
 	routers := (&Service{}).Routers()
 	counts := map[servertypes.ApiType]int{}

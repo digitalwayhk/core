@@ -1,3 +1,4 @@
+// 本文件定义 06 微服务示例事件通道使用的跨服务消息 DTO 能力。
 package event
 
 import (
@@ -7,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// OrderChanged 定义本文件能力使用的核心结构。
 type OrderChanged struct {
 	Metadata
 	Action        string                  `json:"action,omitempty"`

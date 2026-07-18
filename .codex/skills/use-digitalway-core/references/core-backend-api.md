@@ -88,6 +88,8 @@ examples/06-shop-microservices/
 
 示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域和全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 与受控命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
 
+示例和服务代码必须先让人读得懂再追求复用：每个 Go 文件开头用中文文件级注释说明该文件提供的能力、所属边界和主要读者；每个 public 类型、函数、方法、变量必须有中文注释；private 逻辑在涉及权限、事务、事件、缓存、幂等、跨服务调用或测试编排时也要补充意图说明。测试文件的文件级注释必须写清验证的业务闭环、角色、边界和异常权限场景，避免系统复杂后只能靠逐行读代码理解测试目的。
+
 多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现服务级权限、owner 限域、禁用主体拦截、分页、审计或日志；这些横切逻辑必须在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在权限或日志调整时到处修改。自定义 Manage 命令不要引入命令专用 Hook 旁路；命令 `Do` 先调用 owner `DoBefore`，通过服务级权限/限域后再调用 business。
 
 Manage 日志参考示例 05 的 `ShopManage.logManageResult`：统一使用 `logx.Infow("shop_manage_operation_failed", ...)` 和 `logx.Infow("shop_manage_operation_succeeded", ...)`，字段保持 `owner`、`phase`、`service`、`route`、`trace_id`、失败时 `code`。不要按服务名发明 `shop_user_manage_operation_*`、`shop_supplier_manage_operation_*` 等新事件，也不要记录 token、请求/响应 body、SQL 或对象 dump。

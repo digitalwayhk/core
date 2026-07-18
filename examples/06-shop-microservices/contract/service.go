@@ -8,4 +8,5 @@ const (
 	OrderServiceName    = "shop-order"
 )
 
+// PlatformAdminUserID 提供本文件能力需要的导出定义。
 const PlatformAdminUserID = "platform-admin"

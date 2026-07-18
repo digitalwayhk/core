@@ -1,3 +1,4 @@
+// 本文件集中声明当前服务本地数据库建表 schema 能力。
 package schema
 
 import (
@@ -13,6 +14,7 @@ var (
 	storageErr error
 )
 
+// EnsureStorage 执行本文件能力对应的业务操作。
 func EnsureStorage() error {
 	once.Do(func() {
 		for _, model := range []interface{}{basedata.NewUser(), basedata.NewAddress(), transaction.NewInbox()} {

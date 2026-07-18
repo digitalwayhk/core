@@ -1,3 +1,4 @@
+// 本文件提供用户服务面向普通用户的 Private API 编排能力。
 package private
 
 import (

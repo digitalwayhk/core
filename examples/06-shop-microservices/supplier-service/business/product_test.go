@@ -1,3 +1,4 @@
+// 本文件验证当前服务业务编排的事务、事件和幂等边界。
 package business
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSupplierOwnsProductAndOutboxFacts 验证当前场景的业务闭环和边界行为。
 func TestSupplierOwnsProductAndOutboxFacts(t *testing.T) {
 	utils.TESTPATH = t.TempDir()
 	supplierA, err := EnsureSupplier("supplier-a", "供应商 A")

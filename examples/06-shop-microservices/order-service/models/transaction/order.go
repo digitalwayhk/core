@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// Order 定义本文件能力使用的核心结构。
 type Order struct {
 	*common.BusinessModel
 	IdempotencyKey     string          `gorm:"not null;uniqueIndex" json:"idempotencyKey"`
@@ -33,14 +35,17 @@ type Order struct {
 	OrderStatus        int             `json:"orderStatus"`
 }
 
+// NewOrder 执行本文件能力对应的业务操作。
 func NewOrder() *Order {
 	return &Order{BusinessModel: common.NewBusinessModel(), OrderStatus: OrderStatusNormal, PaymentStatus: PaymentStatusUnpaid}
 }
 
+// NewModel 实现本类型在当前服务边界中的行为。
 func (o *Order) NewModel() {
 	if o.BusinessModel == nil || o.OrderServiceModel == nil || o.Model == nil {
 		o.BusinessModel = common.NewBusinessModel()
 	}
 }
 
+// GetHash 实现本类型在当前服务边界中的行为。
 func (o *Order) GetHash() string { return utils.HashCodes(strings.TrimSpace(o.IdempotencyKey)) }

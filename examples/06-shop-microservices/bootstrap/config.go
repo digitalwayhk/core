@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 )
 
+// RedisAddress 执行本文件能力对应的业务操作。
 func RedisAddress() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_REDIS_ADDR")); value != "" {
 		return value
@@ -16,6 +17,7 @@ func RedisAddress() string {
 	return "127.0.0.1:6379"
 }
 
+// RedisDiscoveryPrefix 执行本文件能力对应的业务操作。
 func RedisDiscoveryPrefix() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_REDIS_DISCOVERY_PREFIX")); value != "" {
 		return value
@@ -23,6 +25,7 @@ func RedisDiscoveryPrefix() string {
 	return "core:discovery"
 }
 
+// RedisEventPrefix 执行本文件能力对应的业务操作。
 func RedisEventPrefix() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_REDIS_EVENT_PREFIX")); value != "" {
 		return value
@@ -30,6 +33,7 @@ func RedisEventPrefix() string {
 	return "core:event"
 }
 
+// AdvertiseAddress 执行本文件能力对应的业务操作。
 func AdvertiseAddress() string {
 	if value := strings.TrimSpace(os.Getenv("SHOP_ADVERTISE_ADDRESS")); value != "" {
 		return value
@@ -39,6 +43,7 @@ func AdvertiseAddress() string {
 
 // LocalServiceConfig creates the all-in-one configuration. Discovery remains
 // in-process while Redis Streams continues to carry EventBridge messages.
+// LocalServiceConfig 执行本文件能力对应的业务操作。
 func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.ServerConfig {
 	cfg := baseServiceConfig(name, port, dataCenterID, machineID)
 	cfg.Cluster.Mode = "on"
@@ -50,6 +55,7 @@ func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.
 
 // DistributedServiceConfig creates the Redis-discovered, application-mTLS
 // configuration used by the three independent service processes.
+// DistributedServiceConfig 执行本文件能力对应的业务操作。
 func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *config.ServerConfig {
 	cfg := baseServiceConfig(name, port, dataCenterID, machineID)
 	cfg.Cluster.Mode = "on"

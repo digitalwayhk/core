@@ -1,3 +1,4 @@
+// 本文件验证当前服务模型层的持久化、投影和幂等边界。
 package models
 
 import (
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain 验证当前场景的业务闭环和边界行为。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "supplier-models-")
 	if err != nil {
@@ -66,6 +68,7 @@ func insertSupplierAndProduct(t *testing.T, supplierID, productID uint) (*Suppli
 	return supplier, product
 }
 
+// TestApplyOrderEventIsIdempotentAndRevisionMonotonic 验证当前场景的业务闭环和边界行为。
 func TestApplyOrderEventIsIdempotentAndRevisionMonotonic(t *testing.T) {
 	supplier, product := insertSupplierAndProduct(t, 100, 200)
 	created := orderEvent("event-created", 1, 300, supplier.ID, product.ID)
@@ -89,6 +92,7 @@ func TestApplyOrderEventIsIdempotentAndRevisionMonotonic(t *testing.T) {
 	require.Equal(t, created.TraceID, inboxItems[0].TraceID)
 }
 
+// TestUsedProductAndSupplierCannotBeDeleted 验证当前场景的业务闭环和边界行为。
 func TestUsedProductAndSupplierCannotBeDeleted(t *testing.T) {
 	supplier, product := insertSupplierAndProduct(t, 101, 201)
 	require.NoError(t, ApplyOrderEvent(orderEvent("event-used", 1, 301, supplier.ID, product.ID)))

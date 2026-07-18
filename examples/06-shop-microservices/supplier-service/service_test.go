@@ -1,3 +1,4 @@
+// 本文件验证当前服务启动配置、路由注册和服务边界能力。
 package supplierservice
 
 import (
@@ -14,17 +15,27 @@ type cacheRecorder struct {
 	enabled []string
 }
 
+// EnableRoute 实现本类型在当前服务边界中的行为。
 func (r *cacheRecorder) EnableRoute(path string, _ time.Duration) error {
 	r.enabled = append(r.enabled, path)
 	return nil
 }
+
+// Get 实现本类型在当前服务边界中的行为。
 func (*cacheRecorder) Get(string, interface{}) (interface{}, bool, error) { return nil, false, nil }
+
+// Set 实现本类型在当前服务边界中的行为。
 func (*cacheRecorder) Set(string, interface{}, interface{}, time.Duration) error {
 	return nil
 }
-func (*cacheRecorder) Delete(string, interface{}) error { return nil }
-func (*cacheRecorder) DeleteRoute(string) error         { return nil }
 
+// Delete 实现本类型在当前服务边界中的行为。
+func (*cacheRecorder) Delete(string, interface{}) error { return nil }
+
+// DeleteRoute 实现本类型在当前服务边界中的行为。
+func (*cacheRecorder) DeleteRoute(string) error { return nil }
+
+// TestSupplierServiceExposesManageAndConstrainedPublicRoutesOnly 验证当前场景的业务闭环和边界行为。
 func TestSupplierServiceExposesManageAndConstrainedPublicRoutesOnly(t *testing.T) {
 	routers := (&Service{}).Routers()
 	require.NotEmpty(t, routers)
@@ -42,6 +53,7 @@ func TestSupplierServiceExposesManageAndConstrainedPublicRoutesOnly(t *testing.T
 	require.Equal(t, []string{contract.OrderServiceName, contract.UserServiceName}, products.GetInternalCallers())
 }
 
+// TestSupplierAuthorityPublicRoutesDoNotEnableRouteCache 验证当前场景的业务闭环和边界行为。
 func TestSupplierAuthorityPublicRoutesDoNotEnableRouteCache(t *testing.T) {
 	for _, api := range []servertypes.IRouter{&publicapi.GetSuppliers{}, &publicapi.GetProducts{}} {
 		recorder := &cacheRecorder{}

@@ -16,6 +16,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// CreateOrderCommand 定义本文件能力使用的核心结构。
 type CreateOrderCommand struct {
 	OrderID   uint
 	UserID    uint
@@ -63,6 +64,7 @@ func existingOrder(command CreateOrderCommand, fingerprint string) (*orderdto.Or
 	return models.ToDTO(existing), nil
 }
 
+// CreateOrder 执行本文件能力对应的业务操作。
 func CreateOrder(command CreateOrderCommand, product supplierdto.ProductSnapshot) (*orderdto.Order, error) {
 	command.RequestID = strings.TrimSpace(command.RequestID)
 	command.TraceID = strings.TrimSpace(command.TraceID)
@@ -123,6 +125,7 @@ func CreateOrder(command CreateOrderCommand, product supplierdto.ProductSnapshot
 	return models.ToDTO(result), nil
 }
 
+// UserOrders 执行本文件能力对应的业务操作。
 func UserOrders(userID uint) ([]*orderdto.Order, error) {
 	items, err := models.ListOrders("UserID", userID)
 	if err != nil {
@@ -135,6 +138,7 @@ func UserOrders(userID uint) ([]*orderdto.Order, error) {
 	return result, nil
 }
 
+// CancelOrder 执行本文件能力对应的业务操作。
 func CancelOrder(userID, orderID uint, traceID, eventID string) (*orderdto.Order, error) {
 	traceID = strings.TrimSpace(traceID)
 	var result *models.Order

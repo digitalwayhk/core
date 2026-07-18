@@ -1,3 +1,4 @@
+// 本文件定义 06 微服务示例跨服务共享的稳定契约常量和错误能力。
 package contract
 
 import "errors"

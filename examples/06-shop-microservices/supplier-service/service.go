@@ -1,3 +1,4 @@
+// 本文件组装当前服务的路由、事件订阅、Outbox 和生命周期能力。
 package supplierservice
 
 import (
@@ -23,7 +24,10 @@ type Service struct {
 	cancels []func()
 }
 
+// ServiceName 返回供应商服务的稳定逻辑服务名，供路由、发现和内部调用鉴权使用。
 func (*Service) ServiceName() string { return contract.SupplierServiceName }
+
+// Routers 注册供应商权威 Public API、供应商/商品 Manage API 和供应商订单投影查询。
 func (*Service) Routers() []servertypes.IRouter {
 	routers := []servertypes.IRouter{
 		&publicapi.GetSuppliers{}, &publicapi.GetProducts{},
@@ -48,10 +52,11 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	}
 	return nil
 }
+
+// SubscribeRouters 保留旧观察路由兼容入口；供应商服务内部事件统一走 EventBridge。
 func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 
-// OnAuth 在 TestToken 签发前幂等建立供应商资料。
-// 平台管理员是服务端固定身份，不会被误建为供应商。
+// OnAuth 在 TestToken 签发前幂等建立供应商资料；平台管理员不会被误建为供应商。
 func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error {
 	if args == nil || strings.TrimSpace(args.UID) == "" {
 		return contract.ErrInvalidIdentity
@@ -63,6 +68,7 @@ func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error 
 	return err
 }
 
+// Start 启用供应商服务 Outbox 发布，并订阅订单事件维护本地 SupplierOrder 投影。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.SupplierServiceName)
 	if sc == nil || sc.ServiceEventBridge == nil {
@@ -73,17 +79,10 @@ func (s *Service) Start() {
 	if err := sc.UseOutbox(models.OutboxStore{}); err != nil {
 		panic(err)
 	}
-	orderHandler := func(_ context.Context, env *event.Envelope) error {
-		payload := &eventdto.OrderChanged{}
-		if err := json.Unmarshal(env.Data, payload); err != nil {
-			return err
-		}
-		return models.ApplyOrderEvent(*payload)
-	}
 	for _, subscription := range []event.Subscription{
-		{Subject: contract.SubjectOrderCreated, EventType: contract.EventOrderCreated, Reliable: true, Handler: orderHandler},
-		{Subject: contract.SubjectOrderStatusChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: orderHandler},
-		{Subject: contract.SubjectPaymentChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: orderHandler},
+		{Subject: contract.SubjectOrderCreated, EventType: contract.EventOrderCreated, Reliable: true, Handler: handleSupplierOrderEvent},
+		{Subject: contract.SubjectOrderStatusChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: handleSupplierOrderEvent},
+		{Subject: contract.SubjectPaymentChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: handleSupplierOrderEvent},
 	} {
 		cancel, err := sc.SubscribeEvent(subscription)
 		if err != nil {
@@ -96,6 +95,17 @@ func (s *Service) Start() {
 		s.cancels = append(s.cancels, cancel)
 	}
 }
+
+// handleSupplierOrderEvent 消费订单服务发布的订单变化事件，幂等写入供应商本地订单投影。
+func handleSupplierOrderEvent(_ context.Context, env *event.Envelope) error {
+	payload := &eventdto.OrderChanged{}
+	if err := json.Unmarshal(env.Data, payload); err != nil {
+		return err
+	}
+	return models.ApplyOrderEvent(*payload)
+}
+
+// Stop 注销供应商服务启动时注册的内部事件订阅。
 func (s *Service) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

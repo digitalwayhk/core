@@ -1,3 +1,4 @@
+// 本文件验证当前服务 Manage API 的权限、限域和受控命令边界。
 package manage
 
 import (
@@ -19,6 +20,7 @@ import (
 
 var manageRequestID atomic.Uint64
 
+// TestMain 验证当前场景的业务闭环和边界行为。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "supplier-manage-")
 	if err != nil {
@@ -38,7 +40,10 @@ type manageRequest struct {
 
 func requestFor(uid string) *manageRequest { return &manageRequest{uid: uid, name: uid} }
 
+// ServiceName 实现本类型在当前服务边界中的行为。
 func (r *manageRequest) ServiceName() string { return contract.SupplierServiceName }
+
+// Bind 实现本类型在当前服务边界中的行为。
 func (r *manageRequest) Bind(target interface{}) error {
 	if r.body == nil {
 		return nil
@@ -49,23 +54,51 @@ func (r *manageRequest) Bind(target interface{}) error {
 	}
 	return json.Unmarshal(data, target)
 }
-func (*manageRequest) GoZeroBind(interface{}) error                         { return nil }
-func (*manageRequest) GetTraceId() string                                   { return "" }
-func (r *manageRequest) GetUser() (string, string)                          { return r.uid, r.name }
-func (*manageRequest) GetClientIP() string                                  { return "127.0.0.1" }
-func (*manageRequest) Authorized() bool                                     { return true }
-func (*manageRequest) GetValue(string) string                               { return "" }
-func (*manageRequest) GetPath() string                                      { return "" }
-func (*manageRequest) GetClaims(string) interface{}                         { return nil }
-func (*manageRequest) GetServerInfo() *servertypes.TargetInfo               { return nil }
-func (*manageRequest) GetTargetServerInfo(string) *servertypes.TargetInfo   { return nil }
+
+// GoZeroBind 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GoZeroBind(interface{}) error { return nil }
+
+// GetTraceId 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetTraceId() string { return "" }
+
+// GetUser 实现本类型在当前服务边界中的行为。
+func (r *manageRequest) GetUser() (string, string) { return r.uid, r.name }
+
+// GetClientIP 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetClientIP() string { return "127.0.0.1" }
+
+// Authorized 实现本类型在当前服务边界中的行为。
+func (*manageRequest) Authorized() bool { return true }
+
+// GetValue 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetValue(string) string { return "" }
+
+// GetPath 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetPath() string { return "" }
+
+// GetClaims 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetClaims(string) interface{} { return nil }
+
+// GetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetServerInfo() *servertypes.TargetInfo { return nil }
+
+// GetTargetServerInfo 实现本类型在当前服务边界中的行为。
+func (*manageRequest) GetTargetServerInfo(string) *servertypes.TargetInfo { return nil }
+
+// NewResponse 实现本类型在当前服务边界中的行为。
 func (*manageRequest) NewResponse(interface{}, error) servertypes.IResponse { return nil }
+
+// CallService 实现本类型在当前服务边界中的行为。
 func (*manageRequest) CallService(servertypes.IRouter, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
+
+// CallTargetService 实现本类型在当前服务边界中的行为。
 func (*manageRequest) CallTargetService(servertypes.IRouter, *servertypes.TargetInfo, ...func(servertypes.IResponse)) (servertypes.IResponse, error) {
 	return nil, nil
 }
+
+// NewID 实现本类型在当前服务边界中的行为。
 func (*manageRequest) NewID() uint {
 	return uint(900000 + manageRequestID.Add(1))
 }
@@ -106,6 +139,7 @@ func requireNoWhere(t *testing.T, item *view.SearchItem, name string) {
 	}
 }
 
+// TestManageSearchScopesSupplierButNotAdmin 验证当前场景的业务闭环和边界行为。
 func TestManageSearchScopesSupplierButNotAdmin(t *testing.T) {
 	supplier := newSupplier(t, "search-owner", true)
 	tests := []struct {
@@ -153,6 +187,7 @@ func TestManageSearchScopesSupplierButNotAdmin(t *testing.T) {
 	}
 }
 
+// TestSupplierEditPreservesIdentityAndEnabled 验证当前场景的业务闭环和边界行为。
 func TestSupplierEditPreservesIdentityAndEnabled(t *testing.T) {
 	supplier := newSupplier(t, "supplier-edit-owner", true)
 	manage := NewSupplierManage()
@@ -176,6 +211,7 @@ func TestSupplierEditPreservesIdentityAndEnabled(t *testing.T) {
 	require.Equal(t, "new-code", updated.Code)
 }
 
+// TestDisabledSupplierIsReadOnly 验证当前场景的业务闭环和边界行为。
 func TestDisabledSupplierIsReadOnly(t *testing.T) {
 	supplier := newSupplier(t, "disabled-owner", false)
 	manage := NewProductManage()
@@ -190,6 +226,7 @@ func TestDisabledSupplierIsReadOnly(t *testing.T) {
 	require.True(t, stop)
 }
 
+// TestSupplierEnabledCanOnlyBeChangedByAdmin 验证当前场景的业务闭环和边界行为。
 func TestSupplierEnabledCanOnlyBeChangedByAdmin(t *testing.T) {
 	supplier := newSupplier(t, "supplier-state-owner", true)
 	manage := NewSupplierManage()
@@ -204,6 +241,7 @@ func TestSupplierEnabledCanOnlyBeChangedByAdmin(t *testing.T) {
 	require.False(t, result.(*models.Supplier).Enabled)
 }
 
+// TestProductEditAndEnabledCommandsEnforceOwnership 验证当前场景的业务闭环和边界行为。
 func TestProductEditAndEnabledCommandsEnforceOwnership(t *testing.T) {
 	owner := newSupplier(t, "product-owner", true)
 	other := newSupplier(t, "product-other", true)
@@ -236,6 +274,7 @@ func TestProductEditAndEnabledCommandsEnforceOwnership(t *testing.T) {
 	require.True(t, result.(*models.Product).Enabled)
 }
 
+// TestSupplierOrderManageIsReadOnly 验证当前场景的业务闭环和边界行为。
 func TestSupplierOrderManageIsReadOnly(t *testing.T) {
 	routers := NewOrderManage().Routers()
 	require.Len(t, routers, 2)

@@ -1,3 +1,4 @@
+// 本文件提供当前服务 Manage API 的公共权限、限域和横切 Hook 能力。
 package common
 
 import (
@@ -11,15 +12,18 @@ import (
 
 // ServiceManage 是 order-service 全部 Manage 的服务级基座。
 // owner 必须传最终具体 Manage，确保 Hook 分派到最末层实现。
+// ServiceManage 定义本文件能力使用的核心结构。
 type ServiceManage[T persistencetypes.IModel] struct {
 	*managepkg.HookedManageService[T]
 	owner interface{}
 }
 
+// NewServiceManage 执行本文件能力对应的业务操作。
 func NewServiceManage[T persistencetypes.IModel](owner interface{}) *ServiceManage[T] {
 	return &ServiceManage[T]{HookedManageService: managepkg.NewHookedManageService[T](owner), owner: owner}
 }
 
+// DoBefore 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) DoBefore(sender interface{}, req servertypes.IRequest) (data interface{}, err error, stop bool) {
 	defer func() {
 		if err != nil {
@@ -32,11 +36,13 @@ func (own *ServiceManage[T]) DoBefore(sender interface{}, req servertypes.IReque
 	return nil, nil, false
 }
 
+// DoAfter 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) DoAfter(sender interface{}, req servertypes.IRequest) (data interface{}, err error) {
 	defer func() { own.logManageResult(req, "after", err) }()
 	return own.HookedManageService.DoAfter(sender, req)
 }
 
+// OnDoBefore 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) OnDoBefore(_ interface{}, req servertypes.IRequest) (interface{}, error, bool) {
 	if err := AdminOnly(req); err != nil {
 		return nil, err, true
@@ -44,10 +50,12 @@ func (own *ServiceManage[T]) OnDoBefore(_ interface{}, req servertypes.IRequest)
 	return nil, nil, false
 }
 
+// OnSearchBefore 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) OnSearchBefore(_ *managepkg.Search[T], _ servertypes.IRequest) (interface{}, error, bool) {
 	return nil, nil, false
 }
 
+// SearchBefore 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) SearchBefore(sender interface{}, req servertypes.IRequest) (interface{}, error, bool) {
 	if err := AdminOnly(req); err != nil {
 		return nil, err, true
@@ -55,6 +63,7 @@ func (own *ServiceManage[T]) SearchBefore(sender interface{}, req servertypes.IR
 	return own.HookedManageService.SearchBefore(sender, req)
 }
 
+// OnSearchAfter 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) OnSearchAfter(operation *managepkg.Search[T], result *view.TableData, _ servertypes.IRequest) (interface{}, error) {
 	if operation != nil && operation.SearchItem != nil && result != nil {
 		result.Tag = operation.SearchItem.Tag

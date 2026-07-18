@@ -1,3 +1,4 @@
+// 本文件定义当前服务基础资料模型及其持久化能力。
 package basedata
 
 import (
@@ -11,6 +12,7 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
+// ListPaymentTypes 执行本文件能力对应的业务操作。
 func ListPaymentTypes(enabledOnly bool) ([]*PaymentType, error) {
 	if err := store.EnsureModel(NewPaymentType()); err != nil {
 		return nil, err
@@ -24,10 +26,12 @@ func ListPaymentTypes(enabledOnly bool) ([]*PaymentType, error) {
 	return items, err
 }
 
+// FindPaymentType 执行本文件能力对应的业务操作。
 func FindPaymentType(id uint) (*PaymentType, error) {
 	return FindPaymentTypeWith(store.Get(), id)
 }
 
+// FindPaymentTypeWith 执行本文件能力对应的业务操作。
 func FindPaymentTypeWith(action persistencetypes.IDataAction, id uint) (*PaymentType, error) {
 	var items []*PaymentType
 	query := store.NewSearch(NewPaymentType(), 1)
@@ -38,6 +42,7 @@ func FindPaymentTypeWith(action persistencetypes.IDataAction, id uint) (*Payment
 	return items[0], nil
 }
 
+// InsertWith 实现本类型在当前服务边界中的行为。
 func (p *PaymentType) InsertWith(action persistencetypes.IDataAction) error {
 	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
 	if p.Name == "" || p.Code == "" {
@@ -47,6 +52,7 @@ func (p *PaymentType) InsertWith(action persistencetypes.IDataAction) error {
 	return action.Insert(p)
 }
 
+// UpdateWith 实现本类型在当前服务边界中的行为。
 func (p *PaymentType) UpdateWith(action persistencetypes.IDataAction) error {
 	p.Name, p.Code = strings.TrimSpace(p.Name), strings.ToLower(strings.TrimSpace(p.Code))
 	if p.Name == "" || p.Code == "" {
@@ -57,12 +63,15 @@ func (p *PaymentType) UpdateWith(action persistencetypes.IDataAction) error {
 	return action.Update(p)
 }
 
+// DeleteWith 实现本类型在当前服务边界中的行为。
 func (p *PaymentType) DeleteWith(action persistencetypes.IDataAction) error { return action.Delete(p) }
 
+// PaymentTypeInUse 执行本文件能力对应的业务操作。
 func PaymentTypeInUse(id uint) (bool, error) {
 	return PaymentTypeInUseWith(store.Get(), id)
 }
 
+// PaymentTypeInUseWith 执行本文件能力对应的业务操作。
 func PaymentTypeInUseWith(action persistencetypes.IDataAction, id uint) (bool, error) {
 	var items []*transaction.PaymentRecord
 	query := store.NewSearch(transaction.NewPaymentRecord(), 1)
@@ -73,6 +82,7 @@ func PaymentTypeInUseWith(action persistencetypes.IDataAction, id uint) (bool, e
 	return len(items) > 0, nil
 }
 
+// SavePaymentType 执行本文件能力对应的业务操作。
 func SavePaymentType(item *PaymentType) error {
 	item.Name = strings.TrimSpace(item.Name)
 	item.Code = strings.ToLower(strings.TrimSpace(item.Code))
@@ -98,6 +108,7 @@ func SavePaymentType(item *PaymentType) error {
 	return store.Get().Update(item)
 }
 
+// DeletePaymentType 执行本文件能力对应的业务操作。
 func DeletePaymentType(item *PaymentType) error {
 	used, err := PaymentTypeInUse(item.ID)
 	if err != nil {

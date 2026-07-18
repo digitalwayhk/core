@@ -1,3 +1,4 @@
+// 本文件验证当前服务模型层的持久化、投影和幂等边界。
 package models
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain 验证当前场景的业务闭环和边界行为。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "shop-user-test-")
 	if err != nil {
@@ -23,6 +25,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// TestInboxRunsDuplicateControlEventOnce 验证当前场景的业务闭环和边界行为。
 func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
 	var calls atomic.Int32
 	operation := func() error { calls.Add(1); return nil }
@@ -39,6 +42,7 @@ func TestInboxRunsDuplicateControlEventOnce(t *testing.T) {
 	require.Equal(t, "trace-event-once", items[0].TraceID)
 }
 
+// TestInboxRetriesUnprocessedEvent 验证当前场景的业务闭环和边界行为。
 func TestInboxRetriesUnprocessedEvent(t *testing.T) {
 	var calls atomic.Int32
 	operation := func() error {
@@ -53,6 +57,7 @@ func TestInboxRetriesUnprocessedEvent(t *testing.T) {
 	assert.Equal(t, int32(2), calls.Load())
 }
 
+// TestAddressOwnershipUsesTrustedUser 验证当前场景的业务闭环和边界行为。
 func TestAddressOwnershipUsesTrustedUser(t *testing.T) {
 	user, err := EnsureUser("buyer-a", "用户 A")
 	require.NoError(t, err)
@@ -71,6 +76,7 @@ func TestAddressOwnershipUsesTrustedUser(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestEnsureUserMapsAuthIdentityToStableNumericID 验证当前场景的业务闭环和边界行为。
 func TestEnsureUserMapsAuthIdentityToStableNumericID(t *testing.T) {
 	first, err := EnsureUser("auth-buyer-1", "Buyer")
 	require.NoError(t, err)

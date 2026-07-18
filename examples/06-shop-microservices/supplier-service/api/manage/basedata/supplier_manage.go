@@ -1,3 +1,4 @@
+// 本文件提供当前服务基础资料 Manage API 的对象管理和受控命令能力。
 package basedata
 
 import (
@@ -16,6 +17,7 @@ type SupplierManage struct {
 	SetEnabled *SetSupplierEnabled
 }
 
+// NewSupplierManage 执行本文件能力对应的业务操作。
 func NewSupplierManage() *SupplierManage {
 	own := &SupplierManage{}
 	own.BaseDataManage = NewBaseDataManage[models.Supplier](own)
@@ -23,12 +25,15 @@ func NewSupplierManage() *SupplierManage {
 	return own
 }
 
+// Routers 实现本类型在当前服务边界中的行为。
 func (own *SupplierManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Edit, own.Remove, own.SetEnabled}
 }
 
+// SupplierOwnerColumn 实现本类型在当前服务边界中的行为。
 func (*SupplierManage) SupplierOwnerColumn() string { return "ID" }
 
+// ResolveSupplierWriteScope 实现本类型在当前服务边界中的行为。
 func (*SupplierManage) ResolveSupplierWriteScope(sender interface{}, _ commonmanage.Actor) (commonmanage.WriteScope, error, bool) {
 	switch operation := sender.(type) {
 	case *managepkg.Edit[models.Supplier]:
@@ -50,6 +55,7 @@ func (*SupplierManage) ResolveSupplierWriteScope(sender interface{}, _ commonman
 	return commonmanage.WriteScope{}, nil, false
 }
 
+// OnEditBefore 实现本类型在当前服务边界中的行为。
 func (own *SupplierManage) OnEditBefore(operation *managepkg.Edit[models.Supplier], req servertypes.IRequest) (interface{}, error, bool) {
 	eventID := models.EventID(req.NewID())
 	current := operation.OldItem
@@ -57,6 +63,7 @@ func (own *SupplierManage) OnEditBefore(operation *managepkg.Edit[models.Supplie
 	return updated, err, true
 }
 
+// OnRemoveBefore 实现本类型在当前服务边界中的行为。
 func (own *SupplierManage) OnRemoveBefore(operation *managepkg.Remove[models.Supplier], _ servertypes.IRequest) (interface{}, error, bool) {
 	current, findErr := models.FindSupplierByID(operation.Model.ID)
 	if findErr != nil || current == nil {
@@ -66,15 +73,18 @@ func (own *SupplierManage) OnRemoveBefore(operation *managepkg.Remove[models.Sup
 	return current, err, true
 }
 
+// OnDoAfter 实现本类型在当前服务边界中的行为。
 func (*SupplierManage) OnDoAfter(interface{}, servertypes.IRequest) (interface{}, error) {
 	return nil, nil
 }
 
+// ViewModel 实现本类型在当前服务边界中的行为。
 func (*SupplierManage) ViewModel(model *view.ViewModel) {
 	model.Title = "供应商管理"
 	model.AutoLoad = true
 }
 
+// ViewFieldModel 实现本类型在当前服务边界中的行为。
 func (*SupplierManage) ViewFieldModel(_ interface{}, field *view.FieldModel) {
 	if field.IsFieldOrTitle("AuthUserID") || field.IsFieldOrTitle("Enabled") {
 		field.IsEdit = false

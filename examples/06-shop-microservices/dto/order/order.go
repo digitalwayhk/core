@@ -1,3 +1,4 @@
+// 本文件定义 06 微服务示例订单域对外传递的 DTO 能力。
 package order
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// Order 定义本文件能力使用的核心结构。
 type Order struct {
 	ID               uint                        `json:"id"`
 	OrderRevision    uint64                      `json:"orderRevision"`

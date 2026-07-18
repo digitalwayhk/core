@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -10,6 +11,7 @@ import (
 // OutboxStore 将 Supplier Service 本地 Outbox 表适配给框架事件发布器。
 type OutboxStore struct{}
 
+// LoadPending 实现本类型在当前服务边界中的行为。
 func (OutboxStore) LoadPending(context.Context, int) ([]event.OutboxMessage, error) {
 	var result []event.OutboxMessage
 	err := store.RunSerialized(func() error {
@@ -29,6 +31,7 @@ func (OutboxStore) LoadPending(context.Context, int) ([]event.OutboxMessage, err
 	return result, err
 }
 
+// MarkPublished 实现本类型在当前服务边界中的行为。
 func (OutboxStore) MarkPublished(_ context.Context, message event.OutboxMessage) error {
 	return store.RunSerialized(func() error {
 		items, err := PendingOutbox()

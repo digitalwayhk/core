@@ -67,8 +67,10 @@ var (
 	DeletePaymentType          = basedata.DeletePaymentType
 )
 
+// EnsureStorage 执行本文件能力对应的业务操作。
 func EnsureStorage() error { return schema.EnsureStorage() }
 
+// RunTransaction 执行本文件能力对应的业务操作。
 func RunTransaction(operation func(persistencetypes.IDataAction) error) error {
 	return store.RunInTransaction(schema.EnsureStorage, operation)
 }

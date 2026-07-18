@@ -1,3 +1,4 @@
+// 本文件定义当前服务基础资料模型及其持久化能力。
 package basedata
 
 import (
@@ -9,6 +10,7 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/user-service/models/internal/store"
 )
 
+// EnsureUser 执行本文件能力对应的业务操作。
 func EnsureUser(userID, name string) (*User, error) {
 	userID = strings.TrimSpace(userID)
 	name = strings.TrimSpace(name)
@@ -42,6 +44,7 @@ func EnsureUser(userID, name string) (*User, error) {
 	return item, store.Get().Insert(item)
 }
 
+// FindUser 执行本文件能力对应的业务操作。
 func FindUser(authUserID string) (*User, error) {
 	if err := store.EnsureModel(NewUser()); err != nil {
 		return nil, err
@@ -55,6 +58,7 @@ func FindUser(authUserID string) (*User, error) {
 	return items[0], nil
 }
 
+// FindUserByID 执行本文件能力对应的业务操作。
 func FindUserByID(id uint) (*User, error) {
 	if err := store.EnsureModel(NewUser()); err != nil {
 		return nil, err
@@ -68,6 +72,7 @@ func FindUserByID(id uint) (*User, error) {
 	return items[0], nil
 }
 
+// SaveUser 执行本文件能力对应的业务操作。
 func SaveUser(item *User) error {
 	item.AuthUserID, item.Name = strings.TrimSpace(item.AuthUserID), strings.TrimSpace(item.Name)
 	if item.AuthUserID == "" || item.Name == "" {
@@ -81,6 +86,7 @@ func SaveUser(item *User) error {
 	return store.Get().Update(item)
 }
 
+// InsertAddress 执行本文件能力对应的业务操作。
 func InsertAddress(item *Address) error {
 	item.Recipient = strings.TrimSpace(item.Recipient)
 	if item.UserID == 0 || item.Recipient == "" {
@@ -90,6 +96,7 @@ func InsertAddress(item *Address) error {
 	return store.Get().Insert(item)
 }
 
+// FindOwnedAddress 执行本文件能力对应的业务操作。
 func FindOwnedAddress(userID uint, id uint) (*Address, error) {
 	if err := store.EnsureModel(NewAddress()); err != nil {
 		return nil, err
@@ -104,6 +111,7 @@ func FindOwnedAddress(userID uint, id uint) (*Address, error) {
 	return items[0], nil
 }
 
+// FindAddress 执行本文件能力对应的业务操作。
 func FindAddress(id uint) (*Address, error) {
 	if err := store.EnsureModel(NewAddress()); err != nil {
 		return nil, err
@@ -117,6 +125,7 @@ func FindAddress(id uint) (*Address, error) {
 	return items[0], nil
 }
 
+// ListAddresses 执行本文件能力对应的业务操作。
 func ListAddresses(userID uint) ([]*Address, error) {
 	if err := store.EnsureModel(NewAddress()); err != nil {
 		return nil, err
@@ -128,8 +137,10 @@ func ListAddresses(userID uint) ([]*Address, error) {
 	return items, err
 }
 
+// DeleteAddress 执行本文件能力对应的业务操作。
 func DeleteAddress(item *Address) error { return store.Get().Delete(item) }
 
+// AddressDTO 执行本文件能力对应的业务操作。
 func AddressDTO(item *Address) *userdto.Address {
 	if item == nil {
 		return nil
@@ -137,6 +148,7 @@ func AddressDTO(item *Address) *userdto.Address {
 	return &userdto.Address{ID: item.ID, Recipient: item.Recipient, Phone: item.Phone, Region: item.Region, Detail: item.Detail}
 }
 
+// AddressSnapshot 执行本文件能力对应的业务操作。
 func AddressSnapshot(item *Address) userdto.AddressSnapshot {
 	return userdto.AddressSnapshot{AddressID: item.ID, Recipient: item.Recipient, Phone: item.Phone, Region: item.Region, Detail: item.Detail}
 }

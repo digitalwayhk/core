@@ -1,3 +1,4 @@
+// 本文件提供 06 微服务示例 all-in-one 调试进程的启动能力。
 package main
 
 import (

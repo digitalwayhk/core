@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -8,6 +9,7 @@ import (
 
 var inboxMu sync.Mutex
 
+// ProcessInbox 执行本文件能力对应的业务操作。
 func ProcessInbox(traceID, eventID, eventType string, operation func() error) error {
 	inboxMu.Lock()
 	defer inboxMu.Unlock()

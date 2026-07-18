@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -26,6 +27,7 @@ func modelTimes(model *entity.Model) (time.Time, time.Time) {
 	return created, updated
 }
 
+// ToDTO 执行本文件能力对应的业务操作。
 func ToDTO(order *Order) *orderdto.Order {
 	if order == nil {
 		return nil
@@ -40,6 +42,7 @@ func ToDTO(order *Order) *orderdto.Order {
 	}
 }
 
+// PaymentToDTO 执行本文件能力对应的业务操作。
 func PaymentToDTO(record *PaymentRecord) *orderdto.PaymentRecord {
 	if record == nil {
 		return nil
@@ -48,6 +51,7 @@ func PaymentToDTO(record *PaymentRecord) *orderdto.PaymentRecord {
 	return &orderdto.PaymentRecord{ID: record.ID, OrderID: record.OrderID, PaymentTypeID: record.PaymentTypeID, Attempt: record.Attempt, PaymentID: record.PaymentID, Amount: record.Amount, Status: record.Status, CreatedAt: created, UpdatedAt: updated}
 }
 
+// ChangeEvent 执行本文件能力对应的业务操作。
 func ChangeEvent(traceID, eventID, eventType, action string, order *Order) eventdto.OrderChanged {
 	created, updated := modelTimes(order.Model)
 	return eventdto.OrderChanged{

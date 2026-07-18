@@ -1,3 +1,4 @@
+// 本文件定义当前服务交易事实、Outbox、Inbox 或投影模型能力。
 package transaction
 
 import (
@@ -40,14 +41,19 @@ type SupplierOrder struct {
 	OrderUpdatedAt time.Time
 }
 
+// NewSupplierOrder 执行本文件能力对应的业务操作。
 func NewSupplierOrder() *SupplierOrder {
 	return &SupplierOrder{BusinessModel: common.NewBusinessModel()}
 }
+
+// NewModel 实现本类型在当前服务边界中的行为。
 func (s *SupplierOrder) NewModel() {
 	if s.BusinessModel == nil || s.SupplierServiceModel == nil || s.Model == nil {
 		s.BusinessModel = common.NewBusinessModel()
 	}
 }
+
+// GetHash 实现本类型在当前服务边界中的行为。
 func (s *SupplierOrder) GetHash() string {
 	return utils.HashCodes(strconv.FormatUint(uint64(s.OrderID), 10))
 }
@@ -62,6 +68,7 @@ func validateOrderEvent(event eventdto.OrderChanged) error {
 	return nil
 }
 
+// ApplyOrderEvent 执行本文件能力对应的业务操作。
 func ApplyOrderEvent(event eventdto.OrderChanged) error {
 	if err := validateOrderEvent(event); err != nil {
 		return err
@@ -130,6 +137,7 @@ func applyOrderSnapshot(item *SupplierOrder, event eventdto.OrderChanged) {
 	item.OrderUpdatedAt = event.UpdatedAt
 }
 
+// FindSupplierOrder 执行本文件能力对应的业务操作。
 func FindSupplierOrder(orderID uint) (*SupplierOrder, error) {
 	if err := ensureTransactionStorage(); err != nil {
 		return nil, err
@@ -146,6 +154,7 @@ func FindSupplierOrder(orderID uint) (*SupplierOrder, error) {
 	return items[0], nil
 }
 
+// DeleteProduct 执行本文件能力对应的业务操作。
 func DeleteProduct(item *basedata.Product) error {
 	return store.RunInTransaction(ensureTransactionStorage, func(action persistencetypes.IDataAction) error {
 		var references []*SupplierOrder
@@ -161,6 +170,7 @@ func DeleteProduct(item *basedata.Product) error {
 	})
 }
 
+// DeleteSupplier 执行本文件能力对应的业务操作。
 func DeleteSupplier(item *basedata.Supplier) error {
 	return store.RunInTransaction(ensureTransactionStorage, func(action persistencetypes.IDataAction) error {
 		var products []*basedata.Product
