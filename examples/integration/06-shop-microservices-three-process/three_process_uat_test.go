@@ -9,12 +9,11 @@ import (
 )
 
 type threeProcessUAT struct {
-	t           *testing.T
-	user        *integration.Suite
-	supplier    *integration.Suite
-	order       *integration.Suite
-	redisPrefix string
-	suffix      string
+	t        *testing.T
+	user     *integration.Suite
+	supplier *integration.Suite
+	order    *integration.Suite
+	suffix   string
 }
 
 func TestThreeProcessUATThreeRolesOrderVisibility(t *testing.T) {
@@ -23,7 +22,6 @@ func TestThreeProcessUATThreeRolesOrderVisibility(t *testing.T) {
 	buyer := scenario.completeBuyerProfile()
 	supplier := scenario.publishSupplierProduct()
 	paymentType := scenario.configurePaymentType()
-	scenario.waitSupplierOrderProjectionReady()
 
 	created := scenario.buyerCreatesOrder(buyer, supplier)
 	payment := scenario.buyerCreatesPayment(buyer, created, paymentType)
@@ -50,12 +48,11 @@ func startThreeProcessUAT(t *testing.T) *threeProcessUAT {
 	waitProcessReady(t, order, "/api/health", processes...)
 	waitProcessReady(t, user, "/api/shop-user/getproducts", processes...)
 	return &threeProcessUAT{
-		t:           t,
-		user:        user,
-		supplier:    supplier,
-		order:       order,
-		redisPrefix: redisPrefix,
-		suffix:      strconv.FormatInt(time.Now().UnixNano(), 10),
+		t:        t,
+		user:     user,
+		supplier: supplier,
+		order:    order,
+		suffix:   strconv.FormatInt(time.Now().UnixNano(), 10),
 	}
 }
 

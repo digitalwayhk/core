@@ -1,20 +1,14 @@
 package shopmicroservices_test
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/digitalwayhk/core/examples/06-shop-microservices/bootstrap"
-	"github.com/digitalwayhk/core/examples/06-shop-microservices/contract"
 	orderdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/order"
 	supplierdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/supplier"
 	userdto "github.com/digitalwayhk/core/examples/06-shop-microservices/dto/user"
-	integration "github.com/digitalwayhk/core/examples/integration"
-	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -55,12 +49,6 @@ func (scenario *threeProcessUAT) addSupplierProduct(token, code string) supplier
 	enabled := scenario.supplier.RequestJSON(t, http.MethodPost, "/api/manage/shop-supplier/productmanage/setproductenabled", token, map[string]interface{}{"id": raw.ID, "enabled": true})
 	require.True(t, enabled.Success, enabled.ErrorMessage)
 	return supplierdto.Product{ID: uint(id), SupplierID: raw.SupplierID, Name: raw.Name, Code: raw.Code, Price: decimal.RequireFromString(raw.Price), Enabled: true}
-}
-
-func (scenario *threeProcessUAT) waitSupplierOrderProjectionReady() {
-	t := scenarioTest(scenario)
-	t.Helper()
-	waitRedisConsumerGroup(t, scenario.redisPrefix+":event", contract.SubjectOrderCreated, contract.SupplierServiceName, scenario.user, scenario.supplier, scenario.order)
 }
 
 func (scenario *threeProcessUAT) assertSupplierCanSeeOwnOrder(supplier threeProcessSupplierRole, created orderdto.Order, buyer threeProcessBuyerRole) {
@@ -116,33 +104,4 @@ func (scenario *threeProcessUAT) searchSupplierOrders(token string) []*orderdto.
 			Address: userdto.AddressSnapshot{AddressID: row.AddressID, Recipient: row.Recipient, Phone: row.Phone, Region: row.Region, Detail: row.AddressDetail}})
 	}
 	return result
-}
-
-func waitRedisConsumerGroup(t require.TestingT, prefix, subject, group string, processes ...*integration.Suite) {
-	client := redis.NewClient(&redis.Options{Addr: bootstrap.RedisAddress()})
-	defer client.Close()
-	key := prefix + ":" + subject
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		groups, err := client.XInfoGroups(context.Background(), key).Result()
-		if err == nil {
-			for _, item := range groups {
-				if item.Name == group {
-					return
-				}
-			}
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	dumpThreeProcessLogs(processes...)
-	require.FailNowf(t, "等待 Redis consumer group 超时", "key=%s group=%s", key, group)
-}
-
-func dumpThreeProcessLogs(processes ...*integration.Suite) {
-	for index, process := range processes {
-		if process != nil {
-			fmt.Printf("process %d\n", index)
-			process.PrintLog()
-		}
-	}
 }
