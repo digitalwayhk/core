@@ -90,9 +90,18 @@ type ServiceContext struct {
 	lifecycleTimeout         time.Duration
 	shutdownErrMu            sync.RWMutex
 	shutdownErr              error
+	resources                *resourceManager
 }
 
 const grpcLifecycleTimeout = 5 * time.Second
+
+// UseResource 把实例级资源交给当前 ServiceContext 按注册逆序统一关闭。
+func (own *ServiceContext) UseResource(name string, resource ManagedResource) error {
+	if own == nil || own.resources == nil {
+		return ErrResourceManagerClosed
+	}
+	return own.resources.Use(name, resource)
+}
 
 // SetLifecycleTimeout 配置服务注册和停止的有界等待时间。
 func (own *ServiceContext) SetLifecycleTimeout(timeout time.Duration) {
@@ -609,7 +618,7 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		requestedFingerprint = fingerprint
 	}
 	return contextRegistry.getOrInitialize(name, true, requestedFingerprint, func(sequence int) *ServiceContext {
-		sc := &ServiceContext{}
+		sc := &ServiceContext{resources: newResourceManager()}
 		sc.StateChan = make(chan bool, 1)
 		sc.Service = initService(service, sc)
 		if con == nil {
@@ -657,7 +666,7 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 	}
 	con = normalized
 	return contextRegistry.getOrInitialize(name, false, fingerprint, func(_ int) *ServiceContext {
-		sc := &ServiceContext{}
+		sc := &ServiceContext{resources: newResourceManager()}
 		sc.StateChan = make(chan bool, 1)
 		sc.Service = initService(service, sc)
 		sc.Config = con
@@ -990,6 +999,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	serviceResolver := own.ServiceResolver
 	ownsClusterProvider := own.ownsClusterProvider
 	grpcServer := own.grpcServer
+	resources := own.resources
 	if !state {
 		own.membership = nil
 		own.CrossNodeBroker = nil
@@ -1020,6 +1030,17 @@ func (own *ServiceContext) SetRunState(state bool) {
 			contextRegistry.remove(own.Service.Name, own)
 			own.completeShutdown()
 		}()
+		if resources != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			if err := resources.Close(ctx); err != nil {
+				own.recordShutdownError(err)
+				logx.Errorw("service_managed_resources_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
 	}
 
 	if state {

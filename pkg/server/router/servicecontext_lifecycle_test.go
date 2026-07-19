@@ -25,6 +25,29 @@ type lifecycleProvider struct {
 	registerContextAware bool
 }
 
+type lifecycleManagedResource struct {
+	closed atomic.Int32
+	err    error
+}
+
+func (r *lifecycleManagedResource) Close(context.Context) error {
+	r.closed.Add(1)
+	return r.err
+}
+
+func TestServiceContextShutdownClosesManagedResources(t *testing.T) {
+	sc := newLifecycleServiceContext("sctest-managed-resource-shutdown")
+	wantErr := errors.New("managed resource close failed")
+	resource := &lifecycleManagedResource{err: wantErr}
+	require.NoError(t, sc.UseResource("orders", resource))
+
+	sc.SetRunState(false)
+	sc.SetRunState(false)
+
+	require.Equal(t, int32(1), resource.closed.Load())
+	require.ErrorIs(t, sc.ShutdownError(), wantErr)
+}
+
 func (p *lifecycleProvider) Name() string { return "lifecycle-test" }
 
 func (p *lifecycleProvider) Register(ctx context.Context, _ *cluster.NodeInfo) error {
