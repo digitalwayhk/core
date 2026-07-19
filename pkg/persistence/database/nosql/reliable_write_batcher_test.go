@@ -83,6 +83,25 @@ func TestBatchCommitterRoutesPartialPrefixResult(t *testing.T) {
 	require.Equal(t, 2, failed)
 }
 
+func TestBatchCommitterSubmitBatchReturnsCommittedPrefix(t *testing.T) {
+	commitErr := errors.New("third operation failed")
+	committer := newBatchCommitter[testFund](BatchCommitConfig{
+		MaxBatch: 1, CollectWindow: time.Millisecond, QueueCapacity: 1,
+	}, func(operations []WriteOperation[testFund]) (BatchWriteResult, error) {
+		require.Len(t, operations, 3)
+		return BatchWriteResult{Committed: 2}, commitErr
+	})
+	t.Cleanup(func() { _ = committer.Close(context.Background()) })
+
+	result, err := committer.SubmitBatch(context.Background(), []WriteOperation[testFund]{
+		{Type: WriteOperationSave, Item: newFund("batch", "A", 1)},
+		{Type: WriteOperationSave, Item: newFund("batch", "B", 1)},
+		{Type: WriteOperationSave, Item: newFund("batch", "C", 1)},
+	})
+	require.Equal(t, BatchWriteResult{Committed: 2}, result)
+	require.ErrorIs(t, err, commitErr)
+}
+
 func TestBatchCommitterConvertsCommitPanic(t *testing.T) {
 	committer := newBatchCommitter[testFund](BatchCommitConfig{
 		MaxBatch: 1, CollectWindow: time.Millisecond, QueueCapacity: 1,

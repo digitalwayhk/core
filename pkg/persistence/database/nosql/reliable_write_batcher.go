@@ -20,8 +20,13 @@ var (
 )
 
 type batchCommitRequest[T types.IModel] struct {
-	operation WriteOperation[T]
-	result    chan error
+	operations []WriteOperation[T]
+	result     chan batchCommitResponse
+}
+
+type batchCommitResponse struct {
+	result BatchWriteResult
+	err    error
 }
 
 // BatchCommitMetrics 描述 Group Commit 的提交、失败、批量和排队指标。
@@ -88,37 +93,53 @@ func newBatchCommitter[T types.IModel](
 
 // Submit 接受一个可靠操作，并等待其所在本地事务得到明确结果。
 func (b *BatchCommitter[T]) Submit(ctx context.Context, operation WriteOperation[T]) error {
+	_, err := b.SubmitBatch(ctx, []WriteOperation[T]{operation})
+	return err
+}
+
+// SubmitBatch 接受一个有序可靠操作组，并返回该操作组内已提交的连续前缀。
+func (b *BatchCommitter[T]) SubmitBatch(
+	ctx context.Context,
+	operations []WriteOperation[T],
+) (BatchWriteResult, error) {
 	if b == nil {
-		return ErrWriteStoreClosed
+		return BatchWriteResult{}, ErrWriteStoreClosed
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return BatchWriteResult{}, err
 	}
-	request := batchCommitRequest[T]{operation: operation, result: make(chan error, 1)}
+	if len(operations) == 0 {
+		return BatchWriteResult{}, nil
+	}
+	request := batchCommitRequest[T]{
+		operations: append([]WriteOperation[T](nil), operations...),
+		result:     make(chan batchCommitResponse, 1),
+	}
 	b.stateMu.RLock()
 	if b.closed {
 		b.stateMu.RUnlock()
-		return ErrWriteStoreClosed
+		return BatchWriteResult{}, ErrWriteStoreClosed
 	}
 	b.submitters.Add(1)
 	b.stateMu.RUnlock()
 	select {
 	case b.requests <- request:
-		b.metrics.submitted.Add(1)
+		b.metrics.submitted.Add(uint64(len(request.operations)))
 		updateReliableAtomicMax(&b.metrics.maxQueueDepth, int64(len(b.requests)))
 		b.submitters.Done()
 	case <-ctx.Done():
 		b.submitters.Done()
-		return ctx.Err()
+		return BatchWriteResult{}, ctx.Err()
 	case <-b.closing:
 		b.submitters.Done()
-		return ErrWriteStoreClosed
+		return BatchWriteResult{}, ErrWriteStoreClosed
 	}
 	// 请求进入 channel 后必须等待提交结果，不能把已接受写入伪装为取消。
-	return <-request.result
+	response := <-request.result
+	return response.result, response.err
 }
 
 // Close 停止接收新请求，排空所有已接受请求，并返回首个 commit 错误。
@@ -210,9 +231,13 @@ func (b *BatchCommitter[T]) finishBatch(batch []batchCommitRequest[T]) {
 	duration := time.Since(started)
 	b.metrics.batches.Add(1)
 	b.metrics.totalNanos.Add(duration.Nanoseconds())
-	updateReliableAtomicMax(&b.metrics.maxBatchSize, int64(len(batch)))
-	if result.Committed < 0 || result.Committed > len(batch) || (err == nil && result.Committed != len(batch)) {
-		err = fmt.Errorf("%w: committed=%d batch=%d", ErrInvalidBatchCommitResult, result.Committed, len(batch))
+	totalOperations := 0
+	for _, request := range batch {
+		totalOperations += len(request.operations)
+	}
+	updateReliableAtomicMax(&b.metrics.maxBatchSize, int64(totalOperations))
+	if result.Committed < 0 || result.Committed > totalOperations || (err == nil && result.Committed != totalOperations) {
+		err = fmt.Errorf("%w: committed=%d batch=%d", ErrInvalidBatchCommitResult, result.Committed, totalOperations)
 		result.Committed = 0
 	}
 	if err != nil {
@@ -224,12 +249,21 @@ func (b *BatchCommitter[T]) finishBatch(batch []batchCommitRequest[T]) {
 		b.errMu.Unlock()
 	}
 	b.metrics.committed.Add(uint64(result.Committed))
-	for index, request := range batch {
-		if index < result.Committed {
-			request.result <- nil
-			continue
+	remaining := result.Committed
+	for _, request := range batch {
+		committed := remaining
+		if committed > len(request.operations) {
+			committed = len(request.operations)
 		}
-		request.result <- err
+		remaining -= committed
+		requestErr := err
+		if committed == len(request.operations) {
+			requestErr = nil
+		}
+		request.result <- batchCommitResponse{
+			result: BatchWriteResult{Committed: committed},
+			err:    requestErr,
+		}
 	}
 }
 
@@ -243,9 +277,13 @@ func (b *BatchCommitter[T]) commitSafely(batch []batchCommitRequest[T]) (result 
 	if b.commit == nil {
 		return BatchWriteResult{}, errors.New("可靠批提交函数未配置")
 	}
-	operations := make([]WriteOperation[T], 0, len(batch))
+	operationCount := 0
 	for _, request := range batch {
-		operations = append(operations, request.operation)
+		operationCount += len(request.operations)
+	}
+	operations := make([]WriteOperation[T], 0, operationCount)
+	for _, request := range batch {
+		operations = append(operations, request.operations...)
 	}
 	return b.commit(operations)
 }
