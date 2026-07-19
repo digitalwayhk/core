@@ -129,6 +129,8 @@ const (
 var (
 	ErrUnsafeWriteBehindConfig = errors.New("unsafe write-behind config")
 	ErrWriteBehindTTL          = errors.New("write-behind entries cannot use ttl")
+	// ErrWriteBehindAlreadyBound 表示当前 PrefixedBadgerDB 已绑定写回目标，拒绝静默替换。
+	ErrWriteBehindAlreadyBound = errors.New("write-behind target already bound")
 )
 
 type PendingSyncError struct {
@@ -293,7 +295,7 @@ func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error
 	p.syncLock.Lock()
 	if p.syncDB {
 		p.syncLock.Unlock()
-		return nil
+		return fmt.Errorf("%w [prefix=%s]", ErrWriteBehindAlreadyBound, p.prefix)
 	}
 	p.syncDB = true
 	p.syncList = list
@@ -323,7 +325,7 @@ func (p *PrefixedBadgerDB[T]) UseWriteBehind(target WriteBehindTarget[T]) error 
 	p.syncLock.Lock()
 	if p.syncDB {
 		p.syncLock.Unlock()
-		return nil
+		return fmt.Errorf("%w [prefix=%s]", ErrWriteBehindAlreadyBound, p.prefix)
 	}
 	p.syncDB = true
 	p.syncList = nil
@@ -350,6 +352,10 @@ func (p *PrefixedBadgerDB[T]) validateWriteBehindConfig() error {
 }
 
 func (p *PrefixedBadgerDB[T]) startWriteBehindWorker() {
+	if !p.manager.config.AutoSync {
+		logx.Infof("共享DB自动同步未启用，等待手动触发 [prefix=%s]", p.prefix)
+		return
+	}
 	p.syncOnce.Do(func() {
 		p.wg.Add(1)
 		go p.syncToOtherDB()
@@ -1555,40 +1561,7 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 
 // processSyncQueue 执行一轮同步，返回实际同步成功数和错误
 func (p *PrefixedBadgerDB[T]) processSyncQueue() (synced int, err error) {
-	// 串行执行：如果有另一个调用正在进行，等其完成后再执行一次（不跳过）
-	// 这样既防止并发事务冲突，又确保直接调用方（如测试）总能观察到最新的同步状态
-	p.syncExecMu.Lock()
-	defer p.syncExecMu.Unlock()
-	started := time.Now()
-	defer func() { p.recordSyncMetrics(synced, err, time.Since(started)) }()
-
-	unsyncedItems, err := p.getUnsyncedBatch(p.manager.config.SyncBatchSize)
-	if err != nil {
-		return 0, fmt.Errorf("获取未同步数据失败: %w", err)
-	}
-
-	if len(unsyncedItems) == 0 {
-		return 0, nil
-	}
-
-	logx.Infof("开始同步 [prefix=%s, 数量: %d]", p.prefix, len(unsyncedItems))
-
-	confirmedKeys, err := p.syncBatch(unsyncedItems)
-	if err != nil {
-		logx.Errorf("批量同步失败 [prefix=%s]: %v", p.prefix, err)
-		return 0, err
-	}
-	successCount := len(confirmedKeys)
-	if successCount == 0 {
-		logx.Errorf("同步未确认任何数据 [prefix=%s, 待同步: %d]", p.prefix, len(unsyncedItems))
-		return 0, nil
-	}
-	if successCount < len(unsyncedItems) {
-		logx.Infof("同步部分完成 [prefix=%s, 成功: %d/%d]", p.prefix, successCount, len(unsyncedItems))
-		return successCount, nil
-	}
-	logx.Infof("同步成功 [prefix=%s, 成功: %d/%d]", p.prefix, successCount, len(unsyncedItems))
-	return successCount, nil
+	return p.processSyncQueueContext(context.Background(), p.manager.config.SyncBatchSize)
 }
 
 func (p *PrefixedBadgerDB[T]) recordSyncMetrics(synced int, err error, duration time.Duration) {
@@ -1718,6 +1691,16 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 
 // 完整的批量同步实现（包含错误处理）
 func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, error) {
+	return p.syncBatchContext(context.Background(), items)
+}
+
+func (p *PrefixedBadgerDB[T]) syncBatchContext(ctx context.Context, items []*SyncQueueItem[T]) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -1748,7 +1731,7 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 		return nil, nil
 	}
 	if target != nil {
-		return p.syncBatchWithTarget(items, target)
+		return p.syncBatchWithTargetContext(ctx, items, target)
 	}
 
 	// 按「操作类型 + 目标 DB 名」双维分组，确保每个事务只操作同一个库。
@@ -1786,6 +1769,13 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 	successKeys := make([]string, 0, len(items))
 	asyncDeleteCandidates := make([]syncAfterDeleteCandidate[T], 0)
 	for _, key := range groupOrder {
+		if err := ctx.Err(); err != nil {
+			confirmedKeys, confirmErr := p.confirmSyncSuccess(successKeys, snapshotTimes, asyncDeleteCandidates)
+			if confirmErr != nil {
+				return confirmedKeys, errors.Join(err, confirmErr)
+			}
+			return confirmedKeys, err
+		}
 		groupItems := groups[key]
 
 		// 在 isTansaction=false 时完成路由：getDataAction 设置 searchItem.Model → GetDBName 读取
@@ -1865,16 +1855,17 @@ func (p *PrefixedBadgerDB[T]) syncBatch(items []*SyncQueueItem[T]) ([]string, er
 }
 
 func (p *PrefixedBadgerDB[T]) syncBatchWithTarget(items []*SyncQueueItem[T], target WriteBehindTarget[T]) ([]string, error) {
+	return p.syncBatchWithTargetContext(context.Background(), items, target)
+}
+
+func (p *PrefixedBadgerDB[T]) syncBatchWithTargetContext(ctx context.Context, items []*SyncQueueItem[T], target WriteBehindTarget[T]) ([]string, error) {
 	snapshotTimes := make(map[string]time.Time, len(items))
 	for _, wrapper := range items {
 		if wrapper != nil && wrapper.Key != "" {
 			snapshotTimes[wrapper.Key] = wrapper.UpdatedAt
 		}
 	}
-	result, err := target.SyncBatch(context.Background(), items)
-	if err != nil {
-		return nil, err
-	}
+	result, err := target.SyncBatch(ctx, items)
 	if result == nil || len(result.ConfirmedKeys) == 0 {
 		if result != nil && len(result.DeadKeys) > 0 {
 			logx.Infow("write_behind_dead_keys_observed",
@@ -1882,12 +1873,12 @@ func (p *PrefixedBadgerDB[T]) syncBatchWithTarget(items []*SyncQueueItem[T], tar
 				logx.Field("count", len(result.DeadKeys)),
 			)
 		}
-		return nil, nil
+		return nil, err
 	}
 	candidates := p.collectSyncAfterDeleteCandidates(items, result.ConfirmedKeys)
-	confirmed, err := p.confirmSyncSuccess(result.ConfirmedKeys, snapshotTimes, candidates)
-	if err != nil {
-		return confirmed, err
+	confirmed, confirmErr := p.confirmSyncSuccess(result.ConfirmedKeys, snapshotTimes, candidates)
+	if confirmErr != nil {
+		return confirmed, errors.Join(err, confirmErr)
 	}
 	if len(result.DeadKeys) > 0 {
 		logx.Infow("write_behind_dead_keys_observed",
@@ -1895,7 +1886,7 @@ func (p *PrefixedBadgerDB[T]) syncBatchWithTarget(items []*SyncQueueItem[T], tar
 			logx.Field("count", len(result.DeadKeys)),
 		)
 	}
-	return confirmed, nil
+	return confirmed, err
 }
 
 // lockSyncKeys 使同一数据键的远端同步与强制本地删除串行。
@@ -3526,68 +3517,8 @@ func (p *PrefixedBadgerDB[T]) SetWithAutoLimit(item *T, ttl time.Duration, fn ..
 
 // ForceSyncAll 强制同步所有待同步数据（阻塞式）
 func (p *PrefixedBadgerDB[T]) ForceSyncAll() error {
-	p.closeMu.RLock()
-	if p.closed {
-		p.closeMu.RUnlock()
-		return fmt.Errorf("BadgerDB 实例已关闭")
-	}
-	p.closeMu.RUnlock()
-
-	p.syncLock.RLock()
-	syncEnabled := p.syncDB && (p.syncList != nil || p.syncTarget != nil)
-	p.syncLock.RUnlock()
-	if !syncEnabled {
-		return fmt.Errorf("同步功能未启用")
-	}
-
-	logx.Info(" 开始强制同步所有待同步数据...")
-	if rebuilt, err := p.rebuildSyncQueue(); err != nil {
-		logx.Errorf("强制同步前重建同步队列索引失败 [prefix=%s]: %v", p.prefix, err)
-		return err
-	} else if rebuilt > 0 {
-		logx.Infof("强制同步前同步队列索引已重建 [prefix=%s, 补充: %d]", p.prefix, rebuilt)
-	}
-
-	totalSynced := 0
-	maxIterations := 100 // 防止无限循环
-
-	for i := 0; i < maxIterations; i++ {
-		// 获取待同步数量
-		pendingCount, err := p.GetPendingSyncCount()
-		if err != nil {
-			logx.Errorf("获取待同步数量失败: %v", err)
-			return err
-		}
-
-		if pendingCount == 0 {
-			logx.Infof(" 强制同步完成，共同步 %d 条数据", totalSynced)
-			return nil
-		}
-
-		logx.Infof(" 剩余待同步: %d 条（第 %d 次迭代）", pendingCount, i+1)
-
-		syncedInThisBatch, err := p.processSyncQueue()
-		if err != nil {
-			logx.Errorf("强制同步失败: %v", err)
-			return err
-		}
-
-		if syncedInThisBatch <= 0 {
-			logx.Errorf(" 同步未取得进展，退出循环（剩余: %d）", pendingCount)
-			break
-		}
-
-		totalSynced += syncedInThisBatch
-		logx.Infof(" 本批次同步: %d 条", syncedInThisBatch)
-	}
-
-	remainingCount, _ := p.GetPendingSyncCount()
-	if remainingCount > 0 {
-		return fmt.Errorf("强制同步未完成，剩余 %d 条未同步数据", remainingCount)
-	}
-
-	logx.Infof(" 强制同步完成，共同步 %d 条数据", totalSynced)
-	return nil
+	_, err := p.ForceSyncAllContext(context.Background())
+	return err
 }
 
 // ForceSyncAsync 异步强制同步（不阻塞）

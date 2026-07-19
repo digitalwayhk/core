@@ -35,7 +35,8 @@ func (target *SQLWriteBehindTarget[T]) SyncBatch(ctx context.Context, items []*S
 	}
 	upserts := make([]*T, 0, len(items))
 	deletes := make([]*T, 0)
-	confirmed := make([]string, 0, len(items))
+	upsertKeys := make([]string, 0, len(items))
+	deleteKeys := make([]string, 0, len(items))
 	for _, item := range items {
 		if item == nil || item.Item == nil || item.Key == "" {
 			continue
@@ -43,10 +44,11 @@ func (target *SQLWriteBehindTarget[T]) SyncBatch(ctx context.Context, items []*S
 		switch item.Op {
 		case OpInsert, OpUpdate:
 			upserts = append(upserts, item.Item)
+			upsertKeys = append(upsertKeys, item.Key)
 		case OpDelete:
 			deletes = append(deletes, item.Item)
+			deleteKeys = append(deleteKeys, item.Key)
 		}
-		confirmed = append(confirmed, item.Key)
 	}
 	if len(upserts) > 0 {
 		if _, err := target.store.UpsertBatch(ctx, upserts); err != nil {
@@ -55,8 +57,9 @@ func (target *SQLWriteBehindTarget[T]) SyncBatch(ctx context.Context, items []*S
 	}
 	if len(deletes) > 0 {
 		if err := target.store.DeleteBatch(ctx, deletes); err != nil {
-			return nil, err
+			return &WriteBehindResult{ConfirmedKeys: upsertKeys}, err
 		}
 	}
+	confirmed := append(upsertKeys, deleteKeys...)
 	return &WriteBehindResult{ConfirmedKeys: confirmed}, nil
 }

@@ -25,6 +25,19 @@ func TestEnableWriteBehindAcceptsDurableConfig(t *testing.T) {
 	require.NoError(t, db.EnableWriteBehind(writeBehindTestList()))
 }
 
+// TestEnableWriteBehindRejectsSecondBinding 验证兼容入口同样拒绝静默重复绑定。
+func TestEnableWriteBehindRejectsSecondBinding(t *testing.T) {
+	config := DefaultSharedConfig(t.TempDir())
+	config.SyncWrites = true
+	config.CorruptionPolicy = CorruptionPolicyFail
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	require.NoError(t, db.EnableWriteBehind(writeBehindTestList()))
+	require.Error(t, db.EnableWriteBehind(writeBehindTestList()))
+}
+
 func TestEnableWriteBehindRejectsUnsafeConfigs(t *testing.T) {
 	tests := []struct {
 		name   string

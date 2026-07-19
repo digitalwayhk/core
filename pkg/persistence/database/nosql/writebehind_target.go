@@ -14,6 +14,7 @@ type WriteBehindTarget[T types.IModel] interface {
 }
 
 // WriteBehindResult 描述一次远端同步后每类 key 的处理结果。
+// SyncBatch 返回错误时仍可携带 ConfirmedKeys，框架会先 ACK 已成功 key 再传播错误。
 // 第一阶段只对 ConfirmedKeys 执行 ACK；RetryKeys 和 DeadKeys 保留给生产级增强阶段。
 type WriteBehindResult struct {
 	ConfirmedKeys []string

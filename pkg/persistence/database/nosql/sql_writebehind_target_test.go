@@ -3,14 +3,16 @@ package nosql
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 type fakeSQLWriteBehindStore struct {
-	upserts []*testFund
-	deletes []*testFund
+	upserts   []*testFund
+	deletes   []*testFund
+	deleteErr error
 }
 
 func (store *fakeSQLWriteBehindStore) UpsertBatch(_ context.Context, items []*testFund) ([]*testFund, error) {
@@ -20,7 +22,21 @@ func (store *fakeSQLWriteBehindStore) UpsertBatch(_ context.Context, items []*te
 
 func (store *fakeSQLWriteBehindStore) DeleteBatch(_ context.Context, items []*testFund) error {
 	store.deletes = append(store.deletes, items...)
-	return nil
+	return store.deleteErr
+}
+
+// TestSQLWriteBehindTargetConfirmsUpsertsBeforeDeleteFailure 验证删除失败时已提交 upsert 不会重复重试。
+func TestSQLWriteBehindTargetConfirmsUpsertsBeforeDeleteFailure(t *testing.T) {
+	store := &fakeSQLWriteBehindStore{deleteErr: errors.New("delete failed")}
+	target := NewSQLWriteBehindTarget[testFund](store)
+	items := []*SyncQueueItem[testFund]{
+		{Key: "testFund:sql-upsert:spot", Item: newFund("sql-upsert", "spot", 1), Op: OpInsert},
+		{Key: "testFund:sql-delete:spot", Item: newFund("sql-delete", "spot", 2), Op: OpDelete},
+	}
+
+	result, err := target.SyncBatch(context.Background(), items)
+	require.Error(t, err)
+	require.Equal(t, []string{"testFund:sql-upsert:spot"}, result.ConfirmedKeys)
 }
 
 // TestSQLWriteBehindTargetGroupsOperations 验证 insert/update 合并为 upsert，delete 单独删除。
