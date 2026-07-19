@@ -51,6 +51,21 @@ type SharedBadgerManager struct {
 	isClosed bool
 }
 
+// BadgerSize 描述 Badger LSM 与 value log 的原生磁盘大小快照。
+type BadgerSize struct {
+	LSMBytes  int64
+	VLogBytes int64
+}
+
+// Size 返回共享 Badger 当前的 LSM 与 value log 大小。
+func (m *SharedBadgerManager) Size() BadgerSize {
+	if m == nil || m.db == nil {
+		return BadgerSize{}
+	}
+	lsm, vlog := m.db.Size()
+	return BadgerSize{LSMBytes: lsm, VLogBytes: vlog}
+}
+
 var (
 	globalManagers = make(map[string]*SharedBadgerManager) // basePath -> manager
 	managerMutex   sync.RWMutex
