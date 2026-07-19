@@ -16,6 +16,7 @@ import (
 
 func TestPaymentFlowSupportsFailureRetryAndRefund(t *testing.T) {
 	utils.TESTPATH = t.TempDir()
+	runtime := newBusinessOrderRuntime(t)
 
 	supplier := insertEnabledSupplier(t, 100, "payment-supplier")
 	product := models.NewProduct()
@@ -34,8 +35,8 @@ func TestPaymentFlowSupportsFailureRetryAndRefund(t *testing.T) {
 	paymentType.Enabled = true
 	require.NoError(t, paymentType.Insert())
 
-	orders := NewOrderService()
-	payments := NewPaymentService()
+	orders := NewOrderService(runtime)
+	payments := NewPaymentService(runtime)
 
 	created, err := orders.CreateOrder("user-a", product.ID, 2, 301)
 	require.NoError(t, err)
@@ -93,7 +94,7 @@ func TestPaymentFlowSupportsFailureRetryAndRefund(t *testing.T) {
 	assert.Equal(t, models.PaymentStatusFailed, records[0].PaymentStatus())
 	assert.Equal(t, models.PaymentStatusRefunded, records[1].PaymentStatus())
 
-	require.ErrorContains(t, NewProductService().EnsureRemovable(product.ID), "商品已被订单使用")
+	require.ErrorContains(t, NewProductService(runtime).EnsureRemovable(product.ID), "商品已被订单使用")
 	require.ErrorContains(t, NewPaymentTypeService().EnsureRemovable(paymentType.ID), "支付类型已被支付流水使用")
 
 	rollbackRecord := models.NewPaymentRecord()

@@ -1,12 +1,15 @@
+// Package models 验证 04 订单实例级可靠写入、SQLite 汇合、失败保留和删除并发边界。
 package models
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
@@ -26,16 +29,68 @@ type failingInsertAction struct {
 	err error
 }
 
-func (a *failingInsertAction) Insert(interface{}) error            { return a.err }
-func (a *failingInsertAction) Clone() persistencetypes.IDataAction { return a }
-
-func (a *blockingInsertAction) Insert(data interface{}) error {
-	a.once.Do(func() { close(a.entered) })
-	<-a.release
-	return a.IDataAction.Insert(data)
+func (action *failingInsertAction) Insert(interface{}) error { return action.err }
+func (action *failingInsertAction) Clone() persistencetypes.IDataAction {
+	return action
 }
 
-func (a *blockingInsertAction) Clone() persistencetypes.IDataAction { return a }
+func (action *blockingInsertAction) Insert(data interface{}) error {
+	action.once.Do(func() { close(action.entered) })
+	<-action.release
+	return action.IDataAction.Insert(data)
+}
+
+func (action *blockingInsertAction) Clone() persistencetypes.IDataAction { return action }
+
+func newOrderWriteTestHarness(
+	t *testing.T,
+	root string,
+	action persistencetypes.IDataAction,
+	autoSync bool,
+) (*OrderWriteStore, *OrderWriteRuntime) {
+	t.Helper()
+	basePath := filepath.Join(root, "orders-badger")
+	resolvedPath := filepath.Join(basePath, "shop-performance-test", "dc-0", "machine-0")
+	badgerConfig := nosql.DefaultProductionConfig(resolvedPath)
+	badgerConfig.EnableLogger = false
+	badgerConfig.AutoSync = autoSync
+	badgerConfig.SyncBatchDelay = 20 * time.Millisecond
+	store, err := NewOrderWriteStore(
+		nosql.ServiceIdentity{ServiceName: "shop-performance-test"},
+		action,
+		nosql.ReliableWriteStoreConfig{
+			BasePath: basePath,
+			Badger:   badgerConfig,
+			Batch: nosql.BatchCommitConfig{
+				MaxBatch:      32,
+				CollectWindow: time.Millisecond,
+				QueueCapacity: 128,
+			},
+			Admission: nosql.WriteAdmissionConfig{
+				MaxConcurrent:  128,
+				AcquireTimeout: time.Second,
+			},
+			CloseTimeout: 3 * time.Second,
+		},
+	)
+	require.NoError(t, err)
+	runtime := NewOrderWriteRuntime()
+	require.NoError(t, runtime.Bind(store))
+	t.Cleanup(func() {
+		runtime.Unbind()
+		_ = store.Close(context.Background())
+		_ = nosql.CloseSharedManager(resolvedPath)
+	})
+	return store, runtime
+}
+
+func TestOrderWriteRuntimeInstancesDoNotShareStore(t *testing.T) {
+	first := NewOrderWriteRuntime()
+	second := NewOrderWriteRuntime()
+
+	require.ErrorIs(t, first.Save(context.Background(), NewOrder()), ErrOrderWriteStoreUnavailable)
+	require.ErrorIs(t, second.Save(context.Background(), NewOrder()), ErrOrderWriteStoreUnavailable)
+}
 
 func TestOrderWriteStorePersistsLocallyThenConvergesToSQLite(t *testing.T) {
 	root := t.TempDir()
@@ -47,11 +102,10 @@ func TestOrderWriteStorePersistsLocallyThenConvergesToSQLite(t *testing.T) {
 		entered:     make(chan struct{}),
 		release:     make(chan struct{}),
 	}
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	store, err := newOrderWriteStore(config.Path, blocking, config)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close(3 * time.Second) })
+	store, runtime := newOrderWriteTestHarness(t, root, blocking, true)
+	var releaseOnce sync.Once
+	releaseSync := func() { releaseOnce.Do(func() { close(blocking.release) }) }
+	t.Cleanup(releaseSync)
 
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	order := NewOrder()
@@ -60,25 +114,25 @@ func TestOrderWriteStorePersistsLocallyThenConvergesToSQLite(t *testing.T) {
 	order.UserID = "user-a"
 	order.ProductID = 2001
 	order.Quantity = 2
-	require.NoError(t, store.Add(order))
+	require.NoError(t, runtime.Save(context.Background(), order))
 
 	select {
 	case <-blocking.entered:
 	case <-time.After(3 * time.Second):
 		t.Fatal("后台同步未开始")
 	}
-	pending, err := store.PendingByUser("user-a")
+	pending, err := store.PendingByUser(context.Background(), "user-a")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	require.Equal(t, uint(1001), pending[0].ID)
 
-	close(blocking.release)
-	require.NoError(t, store.Flush())
+	releaseSync()
+	require.NoError(t, runtime.FlushOrders(context.Background()))
 	persisted, err := NewOrder().FindByIDWith(action, 1001)
 	require.NoError(t, err)
 	require.NotNil(t, persisted)
 	require.Eventually(t, func() bool {
-		items, scanErr := store.PendingByUser("user-a")
+		items, scanErr := store.PendingByUser(context.Background(), "user-a")
 		return scanErr == nil && len(items) == 0
 	}, 3*time.Second, 20*time.Millisecond)
 }
@@ -88,34 +142,24 @@ func TestOrderWriteStoreAllowsSameUserProductWhenIDsDiffer(t *testing.T) {
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
 	require.NoError(t, ensureModelWith(action, NewOrder()))
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	config.SyncBatchDelay = time.Second
-	store, err := newOrderWriteStore(config.Path, action, config)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close(3 * time.Second) })
+	store, runtime := newOrderWriteTestHarness(t, root, action, false)
 
-	createdAt := time.Now().UTC().Truncate(time.Second)
 	first := NewOrder()
 	first.SetID(1)
-	first.SetCreatedAt(createdAt)
 	first.UserID = "user-a"
 	first.ProductID = 2
 	second := NewOrder()
 	second.SetID(2)
-	second.SetCreatedAt(createdAt)
 	second.UserID = "user-a"
 	second.ProductID = 2
 
-	require.NoError(t, store.Add(first))
-	require.NoError(t, store.Add(second), "GetHash 使用 ID 后同用户同商品同秒可并存")
-	pending, err := store.PendingByUser("user-a")
+	require.NoError(t, runtime.Save(context.Background(), first))
+	require.NoError(t, runtime.Save(context.Background(), second))
+	pending, err := store.PendingByUser(context.Background(), "user-a")
 	require.NoError(t, err)
 	require.Len(t, pending, 2)
 }
 
-// TestOrderUsesUserPrefixedLocalKey 确保 Badger 可以按用户前缀扫描，
-// 同时保持 SQLite 和公共 GetHash 仍以订单 ID 为唯一契约。
 func TestOrderUsesUserPrefixedLocalKey(t *testing.T) {
 	order := NewOrder()
 	order.SetID(42)
@@ -123,7 +167,7 @@ func TestOrderUsesUserPrefixedLocalKey(t *testing.T) {
 
 	require.Equal(t, "42", order.GetHash())
 	require.Equal(t, orderPendingUserPrefix("user-a")+"42", order.GetLocalKey())
-	require.NotContains(t, order.GetLocalKey(), "user-a", "Badger 键不应暴露原始用户 ID")
+	require.NotContains(t, order.GetLocalKey(), "user-a")
 }
 
 func TestOrderWriteStoreRejectsMissingID(t *testing.T) {
@@ -131,16 +175,12 @@ func TestOrderWriteStoreRejectsMissingID(t *testing.T) {
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
 	require.NoError(t, ensureModelWith(action, NewOrder()))
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	store, err := newOrderWriteStore(config.Path, action, config)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close(3 * time.Second) })
+	_, runtime := newOrderWriteTestHarness(t, root, action, false)
 
 	order := NewOrder()
 	order.UserID = "user-a"
 	order.ProductID = 2
-	require.ErrorContains(t, store.Add(order), "订单 ID 不能为空")
+	require.ErrorContains(t, runtime.Save(context.Background(), order), "订单 ID 不能为空")
 }
 
 func TestOrderWriteStorePerformanceSnapshotSeparatesCommitAndSync(t *testing.T) {
@@ -148,25 +188,22 @@ func TestOrderWriteStorePerformanceSnapshotSeparatesCommitAndSync(t *testing.T) 
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
 	require.NoError(t, ensureModelWith(action, NewOrder()))
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	store, err := newOrderWriteStore(config.Path, action, config)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close(3 * time.Second) })
+	store, runtime := newOrderWriteTestHarness(t, root, action, false)
 
 	order := NewOrder()
 	order.SetID(2001)
 	order.UserID = "metrics-user"
 	order.ProductID = 2002
 	order.Quantity = 1
-	require.NoError(t, store.Add(order))
-	require.NoError(t, store.Flush())
+	require.NoError(t, runtime.Save(context.Background(), order))
+	require.NoError(t, runtime.FlushOrders(context.Background()))
 
 	snapshot := store.PerformanceSnapshot()
-	require.Equal(t, uint64(1), snapshot.GroupCommit.CommittedOrders)
+	metrics := store.reliable.Metrics()
+	require.Equal(t, uint64(1), snapshot.GroupCommit.Committed)
 	require.GreaterOrEqual(t, snapshot.Sync.SyncedItems, uint64(1))
 	require.Zero(t, snapshot.PendingOrders)
-	require.Greater(t, snapshot.BadgerDiskBytes, int64(0))
+	require.Equal(t, metrics.BadgerLSMBytes+metrics.BadgerVLogBytes, snapshot.BadgerDiskBytes)
 	require.Greater(t, snapshot.LifetimeAPIConfirmedTPS, float64(0))
 	require.Greater(t, snapshot.LifetimeSQLiteConvergenceTPS, float64(0))
 }
@@ -177,28 +214,22 @@ func TestOrderWriteStoreKeepsPendingWhenSQLiteSyncFails(t *testing.T) {
 	action := oltp.NewSqlite()
 	require.NoError(t, ensureModelWith(action, NewOrder()))
 	failing := &failingInsertAction{IDataAction: action, err: errors.New("sqlite unavailable")}
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	config.SyncBatchDelay = time.Second
-	store, err := newOrderWriteStore(config.Path, failing, config)
-	require.NoError(t, err)
+	store, runtime := newOrderWriteTestHarness(t, root, failing, false)
 
 	order := NewOrder()
 	order.SetID(3001)
-	order.SetCreatedAt(time.Now().UTC().Truncate(time.Second))
 	order.UserID = "failure-user"
 	order.ProductID = 3002
-	require.NoError(t, store.Add(order))
-	require.Error(t, store.Flush(), "SQLite 同步失败必须向调用方返回错误")
-	pending, err := store.PendingByUser("failure-user")
+	require.NoError(t, runtime.Save(context.Background(), order))
+	require.Error(t, runtime.FlushOrders(context.Background()))
+	pending, err := store.PendingByUser(context.Background(), "failure-user")
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
-	require.Error(t, store.Close(3*time.Second), "关闭时仍同步失败必须返回错误")
+	var pendingErr *nosql.PendingSyncError
+	require.ErrorAs(t, store.Close(context.Background()), &pendingErr)
 }
 
-// TestRemoveLocalWaitsForInflightSyncThenPurgesPending 确保业务删除不越过已取得快照的远端同步。
-// 同步完成后删除才返回，使调用方紧随其后的 SQLite Delete 不会被迟到 insert 复活。
-func TestRemoveLocalWaitsForInflightSyncThenPurgesPending(t *testing.T) {
+func TestOrderWriteStoreDeleteKeepsTombstoneUntilSQLiteConfirms(t *testing.T) {
 	root := t.TempDir()
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
@@ -208,89 +239,56 @@ func TestRemoveLocalWaitsForInflightSyncThenPurgesPending(t *testing.T) {
 		entered:     make(chan struct{}),
 		release:     make(chan struct{}),
 	}
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	store, err := newOrderWriteStore(config.Path, blocking, config)
-	require.NoError(t, err)
+	store, runtime := newOrderWriteTestHarness(t, root, blocking, true)
 	var releaseOnce sync.Once
 	releaseSync := func() { releaseOnce.Do(func() { close(blocking.release) }) }
-	t.Cleanup(func() {
-		releaseSync()
-		_ = store.Close(3 * time.Second)
-	})
+	t.Cleanup(releaseSync)
 
 	order := NewOrder()
 	order.SetID(4001)
-	order.SetCreatedAt(time.Now().UTC().Truncate(time.Second))
-	order.UserID = "purge-user"
+	order.UserID = "delete-race-user"
 	order.ProductID = 4002
 	order.Quantity = 1
-	require.NoError(t, store.Add(order))
+	require.NoError(t, runtime.Save(context.Background(), order))
 	select {
 	case <-blocking.entered:
 	case <-time.After(3 * time.Second):
 		t.Fatal("后台同步未开始")
 	}
-	pending, err := store.PendingByUser("purge-user")
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
 
-	removeDone := make(chan error, 1)
-	go func() { removeDone <- store.RemoveLocal(order) }()
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- runtime.DeleteAndSync(context.Background(), order) }()
+	require.Eventually(t, func() bool {
+		_, err := store.reliable.GetLocal(context.Background(), order.GetLocalKey())
+		return errors.Is(err, badger.ErrKeyNotFound) && store.reliable.Metrics().Pending == 1
+	}, 3*time.Second, 10*time.Millisecond)
 	select {
-	case err := <-removeDone:
-		t.Fatalf("远端同步尚未完成时 RemoveLocal 不得返回: %v", err)
+	case err := <-deleteDone:
+		t.Fatalf("SQLite 尚未确认删除时 DeleteAndSync 不得返回: %v", err)
 	case <-time.After(30 * time.Millisecond):
 	}
 	releaseSync()
-	require.NoError(t, <-removeDone)
-	pending, err = store.PendingByUser("purge-user")
-	require.NoError(t, err)
-	require.Empty(t, pending, "ForceDeleteLocal 必须立即清除未同步订单，避免合并读复活")
+	require.NoError(t, <-deleteDone)
+	require.Zero(t, store.reliable.Metrics().Pending)
 }
 
-// TestOrderDeleteDoesNotResurrectAfterLocalCleared 删除顺序：先本地后 SQLite。
-func TestOrderDeleteDoesNotResurrectAfterLocalCleared(t *testing.T) {
+func TestOrderDeleteDoesNotResurrectAfterLocalSync(t *testing.T) {
 	root := t.TempDir()
 	utils.TESTPATH = root
 	action := oltp.NewSqlite()
 	require.NoError(t, ensureModelWith(action, NewOrder()))
-	config := nosql.DefaultProductionConfig(filepath.Join(root, "orders-badger"))
-	config.EnableLogger = false
-	store, err := newOrderWriteStore(config.Path, action, config)
-	require.NoError(t, err)
-
-	globalOrderWriteStoreMu.Lock()
-	globalOrderWriteState = &orderWriteStoreState{path: config.Path, store: store}
-	// once 已完成，避免 Start 覆盖注入的 store。
-	globalOrderWriteState.once.Do(func() {})
-	globalOrderWriteStoreMu.Unlock()
-	t.Cleanup(func() {
-		_ = store.Close(3 * time.Second)
-		globalOrderWriteStoreMu.Lock()
-		globalOrderWriteState = nil
-		globalOrderWriteStoreMu.Unlock()
-		dataActionOnce = sync.Once{}
-		dataAction = nil
-	})
-	dataActionOnce = sync.Once{}
-	dataAction = action
+	_, runtime := newOrderWriteTestHarness(t, root, action, false)
 
 	order := NewOrder()
 	order.SetID(5001)
-	order.SetCreatedAt(time.Now().UTC().Truncate(time.Second))
 	order.UserID = "delete-user"
 	order.ProductID = 5002
 	order.Quantity = 1
-	require.NoError(t, store.Add(order))
-	require.NoError(t, store.Flush())
-	require.Eventually(t, func() bool {
-		items, scanErr := store.PendingByUser("delete-user")
-		return scanErr == nil && len(items) == 0
-	}, 3*time.Second, 20*time.Millisecond)
+	require.NoError(t, runtime.Save(context.Background(), order))
+	require.NoError(t, runtime.FlushOrders(context.Background()))
+	require.NoError(t, runtime.DeleteAndSync(context.Background(), order))
 
-	require.NoError(t, order.Delete())
-	visible, err := QueryVisibleOrders("delete-user")
+	visible, err := runtime.QueryVisibleOrders(context.Background(), "delete-user")
 	require.NoError(t, err)
 	require.Empty(t, visible)
 	persisted, err := NewOrder().FindByIDWith(action, 5001)

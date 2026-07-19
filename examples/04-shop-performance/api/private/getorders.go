@@ -17,7 +17,14 @@ import (
 type GetOrders struct {
 	requestUserID      string
 	subscriptionUserID string
+	service            *business.OrderService
 }
+
+// NewGetOrders 创建绑定实例级订单服务的查询路由。
+func NewGetOrders(service *business.OrderService) *GetOrders { return &GetOrders{service: service} }
+
+// New 为请求池或订阅创建保留实例依赖的新路由。
+func (own *GetOrders) New(interface{}) servertypes.IRouter { return NewGetOrders(own.service) }
 
 // Parse 只保存认证中间件注入的可信请求身份，不读取客户端身份字段。
 func (own *GetOrders) Parse(req servertypes.IRequest) error {
@@ -36,7 +43,7 @@ func (own *GetOrders) Validation(req servertypes.IRequest) error {
 
 // Do 通过订单业务服务查询本人订单。
 func (own *GetOrders) Do(req servertypes.IRequest) (interface{}, error) {
-	items, err := business.NewOrderService().ListUserOrders(own.resolveUserID(req))
+	items, err := own.service.ListUserOrders(own.resolveUserID(req))
 	if err != nil {
 		return nil, err
 	}

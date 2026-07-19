@@ -12,6 +12,8 @@ import (
 
 func TestSupplierDisableHidesProductsWithoutChangingProductState(t *testing.T) {
 	utils.TESTPATH = t.TempDir()
+	runtime := newBusinessOrderRuntime(t)
+	products := NewProductQueryService()
 
 	supplier := models.NewSupplier()
 	supplier.SetID(1001)
@@ -30,7 +32,7 @@ func TestSupplierDisableHidesProductsWithoutChangingProductState(t *testing.T) {
 	product.Enabled = true
 	require.NoError(t, product.Insert())
 
-	available, err := NewProductService().ListAvailable(0, "", "", 0, "")
+	available, err := products.ListAvailable(0, "", "", 0, "")
 	require.NoError(t, err)
 	require.Len(t, available, 1)
 
@@ -42,16 +44,16 @@ func TestSupplierDisableHidesProductsWithoutChangingProductState(t *testing.T) {
 	require.NotNil(t, persisted)
 	assert.True(t, persisted.Enabled, "禁用供应商不能改写商品自身状态")
 
-	available, err = NewProductService().ListAvailable(0, "", "", 0, "")
+	available, err = products.ListAvailable(0, "", "", 0, "")
 	require.NoError(t, err)
 	assert.Empty(t, available)
 
-	_, err = NewOrderService().CreateOrder("user-a", product.ID, 1, 3001)
+	_, err = NewOrderService(runtime).CreateOrder("user-a", product.ID, 1, 3001)
 	require.ErrorContains(t, err, "供应商已禁用")
 
 	_, err = NewSupplierService().SetEnabled(supplier.ID, true)
 	require.NoError(t, err)
-	available, err = NewProductService().ListAvailable(0, "", "", 0, "")
+	available, err = products.ListAvailable(0, "", "", 0, "")
 	require.NoError(t, err)
 	require.Len(t, available, 1)
 }

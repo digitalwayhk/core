@@ -1,17 +1,29 @@
 package business
 
 import (
+	"context"
 	"strings"
 
 	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-// OrderService 处理下单、查询、删除和撤销申请。
-type OrderService struct{}
+// OrderWriteAccess 定义订单业务所需的最小实例级可靠写入能力。
+type OrderWriteAccess interface {
+	Save(context.Context, *models.Order) error
+	DeleteAndSync(context.Context, *models.Order) error
+	QueryVisibleOrders(context.Context, string) ([]*models.Order, error)
+	FlushPendingOrder(context.Context, string, uint) error
+	FlushOrders(context.Context) error
+}
 
-// NewOrderService 创建无状态订单业务服务。
-func NewOrderService() *OrderService { return &OrderService{} }
+// OrderService 处理下单、查询、删除和撤销申请。
+type OrderService struct {
+	orders OrderWriteAccess
+}
+
+// NewOrderService 创建显式绑定实例级订单写入能力的业务服务。
+func NewOrderService(orders OrderWriteAccess) *OrderService { return &OrderService{orders: orders} }
 
 // CreateOrder 使用商品事实数据创建用户订单快照。
 // orderID 须由接口层 req.NewID() 提供，作为 GetHash / 主键。
@@ -43,7 +55,7 @@ func (own *OrderService) CreateOrder(userID string, productID uint, quantity int
 	order.UnitPrice = reference.UnitPrice
 	order.Quantity = quantity
 	order.UserID = userID
-	if err := order.Insert(); err != nil {
+	if err := own.orders.Save(context.Background(), order); err != nil {
 		return nil, err
 	}
 	return &OrderChange{Action: "created", Order: order}, nil
@@ -54,7 +66,7 @@ func (own *OrderService) ListUserOrders(userID string) ([]*models.Order, error) 
 	if strings.TrimSpace(userID) == "" {
 		return nil, models.NewBusinessError("用户身份无效")
 	}
-	return models.QueryVisibleOrders(userID)
+	return own.orders.QueryVisibleOrders(context.Background(), userID)
 }
 
 // DeleteUnpaidOrder 只物理删除未支付或支付失败的本人订单。
@@ -65,7 +77,7 @@ func (own *OrderService) DeleteUnpaidOrder(userID string, orderID uint) (*OrderC
 	}
 	switch order.PaymentStatus {
 	case models.PaymentStatusUnpaid, models.PaymentStatusFailed:
-		if err := order.Delete(); err != nil {
+		if err := own.orders.DeleteAndSync(context.Background(), order); err != nil {
 			return nil, err
 		}
 		return &OrderChange{Action: "deleted", Order: order}, nil
@@ -78,7 +90,7 @@ func (own *OrderService) DeleteUnpaidOrder(userID string, orderID uint) (*OrderC
 
 // RequestCancellation 把已支付订单和当前流水同时置为退款中。
 func (own *OrderService) RequestCancellation(userID string, orderID uint) (*OrderChange, error) {
-	if err := models.FlushPendingOrder(userID, orderID); err != nil {
+	if err := own.orders.FlushPendingOrder(context.Background(), userID, orderID); err != nil {
 		return nil, err
 	}
 	var order *models.Order
@@ -117,7 +129,7 @@ func (own *OrderService) RequestCancellation(userID string, orderID uint) (*Orde
 
 // findOwned 使用统一错误隐藏其他用户的订单存在性。
 func (own *OrderService) findOwned(orderID uint, userID string) (*models.Order, error) {
-	if err := models.FlushPendingOrder(userID, orderID); err != nil {
+	if err := own.orders.FlushPendingOrder(context.Background(), userID, orderID); err != nil {
 		return nil, err
 	}
 	return own.findOwnedWith(nil, orderID, userID)

@@ -14,7 +14,16 @@ import (
 type CreatePayment struct {
 	OrderID       uint `json:"orderID,string"`
 	PaymentTypeID uint `json:"paymentTypeID,string"`
+	service       *business.PaymentService
 }
+
+// NewCreatePayment 创建绑定实例级支付服务的路由。
+func NewCreatePayment(service *business.PaymentService) *CreatePayment {
+	return &CreatePayment{service: service}
+}
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *CreatePayment) New(interface{}) servertypes.IRouter { return NewCreatePayment(own.service) }
 
 // Parse 绑定订单和支付类型 ID。
 func (own *CreatePayment) Parse(req servertypes.IRequest) error { return req.Bind(own) }
@@ -31,7 +40,7 @@ func (own *CreatePayment) Validation(req servertypes.IRequest) error {
 // Do 创建支付流水、更新订单并发送支付中通知。
 func (own *CreatePayment) Do(req servertypes.IRequest) (interface{}, error) {
 	userID, _ := req.GetUser()
-	change, err := business.NewPaymentService().CreatePayment(userID, own.OrderID, own.PaymentTypeID, req.NewID())
+	change, err := own.service.CreatePayment(userID, own.OrderID, own.PaymentTypeID, req.NewID())
 	if err != nil {
 		return nil, err
 	}
@@ -44,3 +53,9 @@ func (own *CreatePayment) GetResponse() interface{} { return &dto.OrderResponse{
 
 // RouterInfo 注册认证 POST 路由。
 func (own *CreatePayment) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }
+
+// Reset 清理请求字段并保留实例级支付服务。
+func (own *CreatePayment) Reset() {
+	own.OrderID = 0
+	own.PaymentTypeID = 0
+}

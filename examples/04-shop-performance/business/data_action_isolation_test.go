@@ -1,6 +1,7 @@
 package business
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -15,6 +16,8 @@ import (
 // TestTransactionDoesNotCaptureConcurrentOrderInsert 验证普通写入不会串入另一个业务事务。
 func TestTransactionDoesNotCaptureConcurrentOrderInsert(t *testing.T) {
 	utils.TESTPATH = t.TempDir()
+	runtime := newBusinessOrderRuntime(t)
+	orders := NewOrderService(runtime)
 
 	supplier := insertEnabledSupplier(t, 1100, "isolation-supplier")
 	product := models.NewProduct()
@@ -51,14 +54,14 @@ func TestTransactionDoesNotCaptureConcurrentOrderInsert(t *testing.T) {
 	}()
 
 	<-transactionStarted
-	created, err := NewOrderService().CreateOrder("isolation-user", product.ID, 1, 1201)
+	created, err := orders.CreateOrder("isolation-user", product.ID, 1, 1201)
 	require.NoError(t, err)
 	close(orderInserted)
 	require.ErrorContains(t, <-transactionResult, "主动回滚")
-	visible, err := NewOrderService().ListUserOrders("isolation-user")
+	visible, err := orders.ListUserOrders("isolation-user")
 	require.NoError(t, err)
 	require.Len(t, visible, 1, "合并读必须立即看到本地持久订单")
-	require.NoError(t, models.FlushPendingOrder("isolation-user", created.Order.ID))
+	require.NoError(t, runtime.FlushPendingOrder(context.Background(), "isolation-user", created.Order.ID))
 
 	persisted, err := models.NewOrder().FindByID(created.Order.ID)
 	require.NoError(t, err)

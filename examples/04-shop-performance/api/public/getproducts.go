@@ -44,7 +44,7 @@ func (own *GetProducts) Validation(servertypes.IRequest) error { return nil }
 
 // Do 查询有效商品并转换为公开 DTO。
 func (own *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
-	items, err := business.NewProductService().ListAvailable(own.ID, own.Code, own.Name, own.SupplierID, own.SupplierCode)
+	items, err := business.NewProductQueryService().ListAvailable(own.ID, own.Code, own.Name, own.SupplierID, own.SupplierCode)
 	if err != nil {
 		return nil, err
 	}

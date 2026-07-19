@@ -11,7 +11,7 @@ import (
 )
 
 func TestBaseDataManageForcesAddDisabledAndRejectsEditStateChange(t *testing.T) {
-	productManage := NewProductManage()
+	productManage := NewProductManage(nil)
 	added := models.NewProduct()
 	added.Code = "product-add"
 	added.Name = "新增商品"
@@ -35,7 +35,7 @@ func TestBaseDataManageForcesAddDisabledAndRejectsEditStateChange(t *testing.T) 
 }
 
 func TestProductManageKeepsConcreteOwnerAcrossInheritance(t *testing.T) {
-	productManage := NewProductManage()
+	productManage := NewProductManage(nil)
 
 	assert.Same(t, productManage, productManage.View.GetInstance())
 	assert.Same(t, productManage, productManage.Search.GetInstance())
@@ -43,7 +43,7 @@ func TestProductManageKeepsConcreteOwnerAcrossInheritance(t *testing.T) {
 }
 
 func TestProductManageCombinesParentAndConcreteFieldRules(t *testing.T) {
-	productManage := NewProductManage()
+	productManage := NewProductManage(nil)
 
 	enabled := &view.FieldModel{Field: "enabled", PropField: "Enabled", IsEdit: true}
 	productManage.ViewFieldModel(nil, enabled)
@@ -76,7 +76,7 @@ func TestSupplierProductsChildIsReadOnly(t *testing.T) {
 func TestRemainingManageTypesExposeInheritedAndControlledCommands(t *testing.T) {
 	paymentTypeManage := NewPaymentTypeManage()
 	orderManage := NewOrderManage()
-	paymentRecordManage := NewPaymentRecordManage()
+	paymentRecordManage := NewPaymentRecordManage(nil)
 
 	assert.Same(t, paymentTypeManage, paymentTypeManage.View.GetInstance())
 	assert.Len(t, paymentTypeManage.Routers(), 7)

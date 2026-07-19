@@ -1,6 +1,7 @@
 package business
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -9,15 +10,19 @@ import (
 )
 
 // PaymentService 处理支付创建及后台支付结果确认。
-type PaymentService struct{}
+type PaymentService struct {
+	orders OrderWriteAccess
+}
 
-// NewPaymentService 创建无状态支付业务服务。
-func NewPaymentService() *PaymentService { return &PaymentService{} }
+// NewPaymentService 创建显式绑定实例级订单写入能力的支付服务。
+func NewPaymentService(orders OrderWriteAccess) *PaymentService {
+	return &PaymentService{orders: orders}
+}
 
 // CreatePayment 为本人未支付或支付失败订单创建新的支付尝试。
 func (own *PaymentService) CreatePayment(userID string, orderID, paymentTypeID, paymentID uint) (*PaymentChange, error) {
 	userID = strings.TrimSpace(userID)
-	if err := models.FlushPendingOrder(userID, orderID); err != nil {
+	if err := own.orders.FlushPendingOrder(context.Background(), userID, orderID); err != nil {
 		return nil, err
 	}
 	var order *models.Order

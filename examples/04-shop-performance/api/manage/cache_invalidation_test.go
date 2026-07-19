@@ -44,7 +44,7 @@ func TestManageDoAfterInvalidatesDependentPublicCaches(t *testing.T) {
 	(&publicapi.GetSuppliers{}).RouterInfo().SetCacheManager("performanceshop", spy)
 	(&publicapi.GetPaymentTypes{}).RouterInfo().SetCacheManager("performanceshop", spy)
 
-	if _, err := NewProductManage().DoAfter(nil, nil); err != nil {
+	if _, err := NewProductManage(nil).DoAfter(nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := NewSupplierManage().DoAfter(nil, nil); err != nil {

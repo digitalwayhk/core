@@ -1,12 +1,23 @@
 package business
 
-import "github.com/digitalwayhk/core/examples/04-shop-performance/models"
+import (
+	"context"
+
+	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
+)
 
 // ProductService 处理商品校验和引用保护。
-type ProductService struct{}
+type ProductService struct {
+	orders OrderWriteAccess
+}
 
-// NewProductService 创建无状态商品业务服务。
-func NewProductService() *ProductService { return &ProductService{} }
+// NewProductService 创建显式绑定订单引用检查能力的商品服务。
+func NewProductService(orders OrderWriteAccess) *ProductService {
+	return &ProductService{orders: orders}
+}
+
+// NewProductQueryService 创建不依赖订单 runtime 的只读商品服务。
+func NewProductQueryService() *ProductService { return &ProductService{} }
 
 // ListAvailable 查询商品和供应商均启用的公开商品。
 func (own *ProductService) ListAvailable(id uint, code, name string, supplierID uint, supplierCode string) ([]*models.Product, error) {
@@ -31,7 +42,10 @@ func (own *ProductService) ValidateUpdate(product *models.Product, old interface
 
 // EnsureRemovable 阻止删除已被历史订单引用的商品。
 func (own *ProductService) EnsureRemovable(productID uint) error {
-	if err := models.FlushOrders(); err != nil {
+	if own.orders == nil {
+		return models.ErrOrderWriteStoreUnavailable
+	}
+	if err := own.orders.FlushOrders(context.Background()); err != nil {
 		return err
 	}
 	used, err := models.NewOrder().ExistsByProductID(productID)

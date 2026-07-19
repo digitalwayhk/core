@@ -14,7 +14,14 @@ import (
 type AddOrder struct {
 	ProductID uint `json:"productID"`
 	Quantity  int  `json:"quantity"`
+	service   *business.OrderService
 }
+
+// NewAddOrder 创建绑定实例级订单服务的路由。
+func NewAddOrder(service *business.OrderService) *AddOrder { return &AddOrder{service: service} }
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *AddOrder) New(interface{}) servertypes.IRouter { return NewAddOrder(own.service) }
 
 // Parse 绑定商品和数量，不接受用户字段。
 func (own *AddOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
@@ -36,7 +43,7 @@ func (own *AddOrder) Validation(req servertypes.IRequest) error {
 func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	userID, _ := req.GetUser()
 	orderID := req.NewID()
-	change, err := business.NewOrderService().CreateOrder(userID, own.ProductID, own.Quantity, orderID)
+	change, err := own.service.CreateOrder(userID, own.ProductID, own.Quantity, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -49,3 +56,9 @@ func (own *AddOrder) GetResponse() interface{} { return &dto.OrderResponse{} }
 
 // RouterInfo 注册认证 POST 路由。
 func (own *AddOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }
+
+// Reset 清理请求字段并保留实例级订单服务。
+func (own *AddOrder) Reset() {
+	own.ProductID = 0
+	own.Quantity = 0
+}

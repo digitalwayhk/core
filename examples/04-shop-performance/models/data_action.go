@@ -32,6 +32,9 @@ func cloneDataAction() persistencetypes.IDataAction {
 	return getDataAction()
 }
 
+// CloneDataAction 返回供实例级订单 WriteBehind target 使用的隔离数据操作器。
+func CloneDataAction() persistencetypes.IDataAction { return cloneDataAction() }
+
 // ensureModel 确保首次查询发生在模型表初始化之后。
 func ensureModel(model interface{}) error {
 	return ensureModelWith(cloneDataAction(), model)

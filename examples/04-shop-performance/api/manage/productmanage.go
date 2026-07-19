@@ -12,11 +12,12 @@ import (
 // ProductManage 继承基础资料 CRUD、启停能力并追加商品规则。
 type ProductManage struct {
 	*BaseDataManage[models.Product]
+	service *business.ProductService
 }
 
 // NewProductManage 创建以具体商品 Manage 为最终 owner 的管理服务。
-func NewProductManage() *ProductManage {
-	own := &ProductManage{}
+func NewProductManage(orders business.OrderWriteAccess) *ProductManage {
+	own := &ProductManage{service: business.NewProductService(orders)}
 	own.BaseDataManage = NewBaseDataManage[models.Product](own)
 	return own
 }
@@ -45,19 +46,18 @@ func (own *ProductManage) ValidationAfter(sender interface{}, req servertypes.IR
 	if err := own.BaseDataManage.ValidationAfter(sender, req); err != nil {
 		return err
 	}
-	service := business.NewProductService()
 	switch operation := sender.(type) {
 	case *managepkg.Add[models.Product]:
 		if operation.Model != nil {
-			return service.ValidateCreate(operation.Model)
+			return own.service.ValidateCreate(operation.Model)
 		}
 	case *managepkg.Edit[models.Product]:
 		if operation.Model != nil {
-			return service.ValidateUpdate(operation.Model, operation.OldItem)
+			return own.service.ValidateUpdate(operation.Model, operation.OldItem)
 		}
 	case *managepkg.Remove[models.Product]:
 		if operation.Model != nil {
-			return service.EnsureRemovable(operation.Model.ID)
+			return own.service.EnsureRemovable(operation.Model.ID)
 		}
 	}
 	return nil
@@ -65,7 +65,7 @@ func (own *ProductManage) ValidationAfter(sender interface{}, req servertypes.IR
 
 // SetBaseDataEnabled 供继承的通用启停命令调用。
 func (own *ProductManage) SetBaseDataEnabled(id uint, enabled bool) (*models.Product, error) {
-	model, err := business.NewProductService().SetEnabled(id, enabled)
+	model, err := own.service.SetEnabled(id, enabled)
 	if err == nil {
 		publicapi.InvalidateProductCache()
 		invalidateOrderReferenceBestEffort("product_set_enabled")

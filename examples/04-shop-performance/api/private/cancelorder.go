@@ -12,8 +12,17 @@ import (
 
 // CancelOrder 为当前用户已支付订单申请撤销退款。
 type CancelOrder struct {
-	ID uint `json:"id,string"`
+	ID      uint `json:"id,string"`
+	service *business.OrderService
 }
+
+// NewCancelOrder 创建绑定实例级订单服务的撤销路由。
+func NewCancelOrder(service *business.OrderService) *CancelOrder {
+	return &CancelOrder{service: service}
+}
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *CancelOrder) New(interface{}) servertypes.IRouter { return NewCancelOrder(own.service) }
 
 // Parse 绑定订单 ID。
 func (own *CancelOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
@@ -30,7 +39,7 @@ func (own *CancelOrder) Validation(req servertypes.IRequest) error {
 // Do 申请撤销并发送退款中通知。
 func (own *CancelOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	userID, _ := req.GetUser()
-	change, err := business.NewOrderService().RequestCancellation(userID, own.ID)
+	change, err := own.service.RequestCancellation(userID, own.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -43,3 +52,6 @@ func (own *CancelOrder) GetResponse() interface{} { return &dto.OrderResponse{} 
 
 // RouterInfo 注册认证 POST 路由。
 func (own *CancelOrder) RouterInfo() *servertypes.RouterInfo { return router.DefaultRouterInfo(own) }
+
+// Reset 清理请求字段并保留实例级订单服务。
+func (own *CancelOrder) Reset() { own.ID = 0 }

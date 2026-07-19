@@ -1,6 +1,7 @@
 package manage
 
 import (
+	"github.com/digitalwayhk/core/examples/04-shop-performance/business"
 	"github.com/digitalwayhk/core/examples/04-shop-performance/models"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -12,15 +13,16 @@ type PaymentRecordManage struct {
 	Confirm *ConfirmPayment
 	Fail    *FailPayment
 	Refund  *ConfirmRefund
+	service *business.PaymentService
 }
 
 // NewPaymentRecordManage 创建支付流水管理服务和受控命令。
-func NewPaymentRecordManage() *PaymentRecordManage {
-	own := &PaymentRecordManage{}
+func NewPaymentRecordManage(orders business.OrderWriteAccess) *PaymentRecordManage {
+	own := &PaymentRecordManage{service: business.NewPaymentService(orders)}
 	own.BusinessManage = NewBusinessManage[models.PaymentRecord](own)
-	own.Confirm = NewConfirmPayment(own)
-	own.Fail = NewFailPayment(own)
-	own.Refund = NewConfirmRefund(own)
+	own.Confirm = NewConfirmPayment(own, own.service)
+	own.Fail = NewFailPayment(own, own.service)
+	own.Refund = NewConfirmRefund(own, own.service)
 	return own
 }
 

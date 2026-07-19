@@ -7,18 +7,6 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-// Insert 将订单写入 Badger 写后同步层；Hashcode 由 ID 派生，调用方须先 SetID（如 req.NewID）。
-func (own *Order) Insert() error {
-	if own.GetID() == 0 {
-		return NewValidationError("订单 ID 不能为空")
-	}
-	store, err := getOrderWriteStore()
-	if err != nil {
-		return err
-	}
-	return store.Add(own)
-}
-
 func (own *Order) prepareForInsert() {
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	if own.CreatedAt != nil {
@@ -38,19 +26,6 @@ func (own *Order) Update() error {
 func (own *Order) UpdateWith(action persistencetypes.IDataAction) error {
 	own.SetUpdatedAt(time.Now().UTC())
 	return action.Update(own)
-}
-
-// Delete 物理删除订单。
-// 先清本地 Badger 与同步队列，再删 SQLite，避免本地 pending 在合并读中复活已删订单。
-func (own *Order) Delete() error {
-	store, err := getOrderWriteStore()
-	if err != nil {
-		return err
-	}
-	if err := store.RemoveLocal(own); err != nil {
-		return err
-	}
-	return cloneDataAction().Delete(own)
 }
 
 // FindByID 按 ID 查询订单。
