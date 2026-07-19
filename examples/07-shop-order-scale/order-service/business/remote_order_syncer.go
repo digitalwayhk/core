@@ -7,30 +7,28 @@ import (
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 )
 
-// RemoteOrderStore 定义同步器写入远程权威库所需的最小接口。
-type RemoteOrderStore interface {
-	Upsert(context.Context, *models.Order) (*models.Order, error)
+// OrderSyncStore 定义同步器所需的有界 pending 同步能力。
+type OrderSyncStore interface {
+	ForceSyncBatch(context.Context, int) (nosql.ForceSyncResult, error)
 }
 
 // RemoteOrderSyncer 将本地 pending 批量同步到远程 order 权威库。
 type RemoteOrderSyncer struct {
-	Remote RemoteOrderStore
+	Store OrderSyncStore
 }
 
-// DrainOnce 尝试同步一批 Badger 本地订单，成功后删除本地副本。
-func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) error {
+// DrainOnce 触发一次 Badger pending 汇合；成功 key 由框架 ACK 并按模型策略清理。
+func (s RemoteOrderSyncer) DrainOnce(ctx context.Context, limit int) (nosql.ForceSyncResult, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nosql.ForceSyncResult{}, err
 	}
-	if s.Remote != nil {
-		if err := models.UseOrderWriteBehind(OrderWriteBehindTarget{Remote: s.Remote}); err != nil {
-			return err
-		}
+	if s.Store == nil {
+		return nosql.ForceSyncResult{}, models.ErrOrderWriteStoreUnavailable
 	}
-	_ = limit
-	return models.SyncLocalOrders()
+	return s.Store.ForceSyncBatch(ctx, limit)
 }
 
 func orderEventID(orderID uint, eventType string) string {

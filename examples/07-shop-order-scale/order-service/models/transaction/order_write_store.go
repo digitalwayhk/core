@@ -1,78 +1,56 @@
-// Package transaction 提供 07 订单服务的专用业务写入存储。
+// Package transaction 提供 07 订单服务到框架 ReliableWriteStore 的领域适配。
 package transaction
 
 import (
+	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"sort"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 )
 
-const (
-	orderCommitMaxBatch = 128
-	orderCommitWait     = time.Millisecond
+var (
+	// ErrOrderWriteStoreUnavailable 表示当前服务实例尚未绑定订单可靠 store。
+	ErrOrderWriteStoreUnavailable = errors.New("订单可靠写入存储不可用")
 )
 
-// OrderWriteStore 使用 Badger 承接订单热路径写入，再由业务同步器汇合到 MySQL。
-type OrderWriteStore struct {
-	db               *nosql.PrefixedBadgerDB[Order]
-	batcher          *orderBatcher
-	guard            *orderWriteGuard
-	path             string
-	startedAt        time.Time
-	pendingCount     atomic.Int64
-	diskBytes        atomic.Int64
-	diskScanFailures atomic.Uint64
-	monitorStop      chan struct{}
-	monitorDone      chan struct{}
-	closeMu          sync.Mutex
-	closed           bool
+// OrderWriteAccess 定义订单业务所需的最小实例级本地可靠写入能力。
+type OrderWriteAccess interface {
+	Save(context.Context, *Order) error
+	FindLocalByRequest(context.Context, uint, string) (*Order, error)
+	PendingByUser(context.Context, uint) ([]*Order, error)
+	ForceSyncBatch(context.Context, int) (nosql.ForceSyncResult, error)
+	Metrics() nosql.ReliableWriteMetrics
 }
 
-func newOrderWriteStore(path string, config nosql.BadgerDBConfig) (*OrderWriteStore, error) {
-	db, err := nosql.NewSharedBadgerDB[Order](path, config)
+// OrderWriteStore 负责订单校验、用户维度本地查询和 ReliableWriteStore 委托。
+type OrderWriteStore struct {
+	reliable *nosql.ReliableWriteStore[Order]
+}
+
+// NewOrderWriteStore 创建按服务实例身份隔离的订单可靠写入适配器。
+func NewOrderWriteStore(
+	identity nosql.ServiceIdentity,
+	config nosql.ReliableWriteStoreConfig,
+) (*OrderWriteStore, error) {
+	reliable, _, err := nosql.NewReliableWriteStore[Order](identity, config)
 	if err != nil {
 		return nil, err
 	}
-	store := &OrderWriteStore{
-		db:          db,
-		guard:       newOrderWriteGuard(defaultOrderWriteGuardConfig()),
-		path:        path,
-		startedAt:   time.Now(),
-		monitorStop: make(chan struct{}),
-		monitorDone: make(chan struct{}),
-	}
-	store.batcher = newOrderBatcher(orderCommitMaxBatch, orderCommitWait, db.BatchInsert)
-	store.refreshPendingCount()
-	store.refreshDiskUsage()
-	go store.monitorDiskUsage()
-	return store, nil
+	return &OrderWriteStore{reliable: reliable}, nil
 }
 
-// UseWriteBehind 绑定当前订单本地写入层的远端汇合目标。
-func (s *OrderWriteStore) UseWriteBehind(target nosql.WriteBehindTarget[Order]) error {
-	if s == nil {
-		return errors.New("订单写入存储未初始化")
+// UseWriteBehind 绑定当前实例唯一的远端订单写回目标。
+func (store *OrderWriteStore) UseWriteBehind(target nosql.WriteBehindTarget[Order]) error {
+	if store == nil || store.reliable == nil {
+		return ErrOrderWriteStoreUnavailable
 	}
-	return s.db.UseWriteBehind(target)
+	return store.reliable.UseWriteBehind(target)
 }
 
-// SyncPending 触发当前实例 Badger pending 到远端目标的同步。
-func (s *OrderWriteStore) SyncPending() error {
-	if s == nil {
-		return errors.New("订单写入存储未初始化")
-	}
-	return s.db.ForceSyncAll()
-}
-
-// Add 将订单可靠提交到当前实例本地 Badger。
-func (s *OrderWriteStore) Add(order *Order) error {
+// Save 校验并可靠保存订单；成功只表示当前实例本地提交完成。
+func (store *OrderWriteStore) Save(ctx context.Context, order *Order) error {
 	if order == nil {
 		return errors.New("订单不能为空")
 	}
@@ -83,21 +61,30 @@ func (s *OrderWriteStore) Add(order *Order) error {
 		return err
 	}
 	order.prepareForLocalInsert()
-	release, err := s.guard.Acquire(s.PendingCount(), s.diskBytes.Load(), time.Now())
-	if err != nil {
-		return err
-	}
-	defer release()
-	if err := s.batcher.Submit(order); err != nil {
-		return err
-	}
-	s.pendingCount.Add(1)
-	return nil
+	return store.reliable.Save(ctx, order)
 }
 
-// PendingByUser 返回本地尚未汇合到 MySQL 的指定用户订单。
-func (s *OrderWriteStore) PendingByUser(userID uint) ([]*Order, error) {
-	items, err := s.db.Scan(OrderPendingUserPrefix(userID), 0)
+// FindLocalByRequest 按用户幂等键查找当前实例本地订单。
+func (store *OrderWriteStore) FindLocalByRequest(
+	ctx context.Context,
+	userID uint,
+	requestID string,
+) (*Order, error) {
+	items, err := store.PendingByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item != nil && item.RequestID == requestID {
+			return item, nil
+		}
+	}
+	return nil, nil
+}
+
+// PendingByUser 返回当前实例本地可见的指定用户订单。
+func (store *OrderWriteStore) PendingByUser(ctx context.Context, userID uint) ([]*Order, error) {
+	items, err := store.reliable.ScanLocal(ctx, nosql.LocalScanOptions{Prefix: OrderPendingUserPrefix(userID)})
 	if err != nil {
 		return nil, err
 	}
@@ -111,160 +98,39 @@ func (s *OrderWriteStore) PendingByUser(userID uint) ([]*Order, error) {
 	return result, nil
 }
 
-// FindPendingByRequest 按用户幂等键查找本地订单。
-func (s *OrderWriteStore) FindPendingByRequest(userID uint, requestID string) (*Order, error) {
-	items, err := s.PendingByUser(userID)
-	if err != nil {
-		return nil, err
+// ForceSyncBatch 最多同步 limit 条本地 pending。
+func (store *OrderWriteStore) ForceSyncBatch(ctx context.Context, limit int) (nosql.ForceSyncResult, error) {
+	if store == nil || store.reliable == nil {
+		return nosql.ForceSyncResult{}, ErrOrderWriteStoreUnavailable
 	}
-	for _, item := range items {
-		if item != nil && item.RequestID == requestID {
-			return item, nil
-		}
-	}
-	return nil, nil
+	return store.reliable.ForceSyncBatch(ctx, limit)
 }
 
-// PendingOrders 返回当前实例待汇合的本地订单批次。
-func (s *OrderWriteStore) PendingOrders(limit int) ([]*Order, error) {
-	return s.db.Scan("", limit)
+// Metrics 返回当前实例的统一可靠写入指标。
+func (store *OrderWriteStore) Metrics() nosql.ReliableWriteMetrics {
+	if store == nil || store.reliable == nil {
+		return nosql.ReliableWriteMetrics{}
+	}
+	return store.reliable.Metrics()
 }
 
-// RemoveLocal 删除已成功汇合或不再需要的本地订单。
-func (s *OrderWriteStore) RemoveLocal(order *Order) error {
-	if order == nil {
+// Close 排空已接收本地提交并关闭当前订单 prefix，不强制访问远端 MySQL。
+func (store *OrderWriteStore) Close(ctx context.Context) error {
+	if store == nil || store.reliable == nil {
 		return nil
 	}
-	err := s.db.ForceDeleteLocal(order)
-	if errors.Is(err, badger.ErrKeyNotFound) {
-		return nil
-	}
-	if err == nil {
-		s.pendingCount.Add(-1)
-	}
-	return err
+	return store.reliable.Close(ctx)
 }
 
-// PendingCount 返回当前实例本地待汇合订单数量。
-func (s *OrderWriteStore) PendingCount() int {
-	value := s.pendingCount.Load()
-	if value < 0 {
-		return 0
-	}
-	return int(value)
-}
-
-func (s *OrderWriteStore) refreshPendingCount() {
-	items, err := s.PendingOrders(0)
-	if err != nil {
-		s.diskScanFailures.Add(1)
-		return
-	}
-	s.pendingCount.Store(int64(len(items)))
-}
-
-// OrderWritePerformanceSnapshot 展示本地接单和同步积压状态。
-type OrderWritePerformanceSnapshot struct {
-	Uptime                  time.Duration
-	PendingOrders           int
-	BadgerDiskBytes         int64
-	DiskScanFailures        uint64
-	LifetimeAPIConfirmedTPS float64
-	GroupCommit             OrderBatcherSnapshot
-	Backpressure            OrderWriteGuardSnapshot
-}
-
-// PerformanceSnapshot 返回本实例订单写入存储的运行快照。
-func (s *OrderWriteStore) PerformanceSnapshot() OrderWritePerformanceSnapshot {
-	if s == nil {
-		return OrderWritePerformanceSnapshot{}
-	}
-	s.refreshDiskUsage()
-	uptime := time.Since(s.startedAt)
-	batch := s.batcher.Snapshot()
-	snapshot := OrderWritePerformanceSnapshot{
-		Uptime:           uptime,
-		PendingOrders:    s.PendingCount(),
-		BadgerDiskBytes:  s.diskBytes.Load(),
-		DiskScanFailures: s.diskScanFailures.Load(),
-		GroupCommit:      batch,
-		Backpressure:     s.guard.Snapshot(),
-	}
-	if seconds := uptime.Seconds(); seconds > 0 {
-		snapshot.LifetimeAPIConfirmedTPS = float64(batch.CommittedOrders) / seconds
-	}
-	return snapshot
-}
-
-// Close 停止接收新订单并关闭 Badger。
-func (s *OrderWriteStore) Close(timeout time.Duration) error {
-	s.closeMu.Lock()
-	defer s.closeMu.Unlock()
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	close(s.monitorStop)
-	<-s.monitorDone
-	batchErr := s.batcher.Close()
-	closeErr := s.db.CloseWithTimeout(timeout, timeout)
-	return errors.Join(batchErr, closeErr)
-}
-
-func (s *OrderWriteStore) monitorDiskUsage() {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	defer close(s.monitorDone)
-	for {
-		select {
-		case <-ticker.C:
-			s.refreshDiskUsage()
-		case <-s.monitorStop:
-			return
-		}
-	}
-}
-
-func (s *OrderWriteStore) refreshDiskUsage() {
-	size, err := directorySize(s.path)
-	if err != nil {
-		s.diskScanFailures.Add(1)
-		return
-	}
-	s.diskBytes.Store(size)
-}
-
-func directorySize(root string) (int64, error) {
-	var size int64
-	err := filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		size += info.Size()
-		return nil
-	})
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	return size, err
-}
-
-func (o *Order) prepareForLocalInsert() {
+func (order *Order) prepareForLocalInsert() {
 	now := time.Now().UTC().Truncate(time.Second)
-	if o.CreatedAt != nil {
-		now = o.CreatedAt.UTC().Truncate(time.Second)
+	if order.CreatedAt != nil {
+		now = order.CreatedAt.UTC().Truncate(time.Second)
 	}
-	o.SetCreatedAt(now)
-	o.SetUpdatedAt(now)
-	o.SetHashcode(o.GetHash())
-	if o.AcceptedAt.IsZero() {
-		o.AcceptedAt = now
+	order.SetCreatedAt(now)
+	order.SetUpdatedAt(now)
+	order.SetHashcode(order.GetHash())
+	if order.AcceptedAt.IsZero() {
+		order.AcceptedAt = now
 	}
 }

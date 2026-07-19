@@ -9,7 +9,6 @@ import (
 	"time"
 
 	orderbusiness "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
-	ordermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -19,11 +18,9 @@ func Benchmark07LocalOrderAccept(b *testing.B) {
 	for _, concurrency := range benchmarkConcurrencies() {
 		concurrency := concurrency
 		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
-			b.Setenv("SHOP_LOCAL_PENDING_DIR", b.TempDir())
-			require.NoError(b, ordermodels.StartOrderWriteStore())
-			b.Cleanup(func() { require.NoError(b, ordermodels.StopOrderWriteStore()) })
+			runtime := newIntegrationOrderRuntime(b, nil)
 			commands := make07OrderCommands("bench-07-local", newBenchmarkIDFactory(21), 100000000, b.N)
-			writer := orderbusiness.LocalOrderWriter{}
+			writer := orderbusiness.LocalOrderWriter{Store: runtime}
 			runBusinessBenchmarkSingleConcurrency(b, concurrency, "orders/s", func(index int) error {
 				_, err := writer.Accept(context.Background(), commands[index])
 				return err
@@ -35,20 +32,18 @@ func Benchmark07LocalOrderAccept(b *testing.B) {
 // Benchmark07DrainPendingOnce 测量 07 从本地 pending 同步到远程权威库的批量成本。
 func Benchmark07DrainPendingOnce(b *testing.B) {
 	requireOrderMySQL(b)
-	b.Setenv("SHOP_LOCAL_PENDING_DIR", b.TempDir())
-	require.NoError(b, ordermodels.StartOrderWriteStore())
-	b.Cleanup(func() { require.NoError(b, ordermodels.StopOrderWriteStore()) })
-	writer := orderbusiness.LocalOrderWriter{}
+	runtime := newIntegrationOrderRuntime(b, nil)
+	writer := orderbusiness.LocalOrderWriter{Store: runtime}
 	commands := make07OrderCommands("bench-07-drain", newBenchmarkIDFactory(22), 120000000, b.N)
 	for index := range commands {
 		_, err := writer.Accept(context.Background(), commands[index])
 		require.NoError(b, err)
 	}
-	syncer := orderbusiness.RemoteOrderSyncer{}
+	syncer := orderbusiness.RemoteOrderSyncer{Store: runtime}
 	b.ReportAllocs()
 	b.ResetTimer()
 	startedAt := time.Now()
-	if err := syncer.DrainOnce(context.Background(), b.N); err != nil {
+	if _, err := syncer.DrainOnce(context.Background(), b.N); err != nil {
 		b.Fatal(err)
 	}
 	elapsed := time.Since(startedAt)

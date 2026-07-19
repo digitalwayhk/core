@@ -19,7 +19,14 @@ type GetOrders struct {
 	SupplierID uint `json:"supplierID"`
 	Page       int  `json:"page"`
 	Size       int  `json:"size"`
+	store      models.OrderWriteAccess
 }
+
+// NewGetOrders 创建绑定当前实例订单 runtime 的查询路由。
+func NewGetOrders(store models.OrderWriteAccess) *GetOrders { return &GetOrders{store: store} }
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *GetOrders) New(interface{}) servertypes.IRouter { return NewGetOrders(own.store) }
 
 // Parse 绑定订单查询请求。
 func (own *GetOrders) Parse(req servertypes.IRequest) error { return req.Bind(own) }
@@ -34,7 +41,7 @@ func (own *GetOrders) Validation(servertypes.IRequest) error {
 
 // Do 从共享远程权威库查询订单。
 func (own *GetOrders) Do(servertypes.IRequest) (interface{}, error) {
-	items, _, err := business.ListOrders(models.OrderQueryFilter{UserID: own.UserID, SupplierID: own.SupplierID}, own.Page, own.Size)
+	items, _, err := business.ListOrders(own.store, models.OrderQueryFilter{UserID: own.UserID, SupplierID: own.SupplierID}, own.Page, own.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +58,12 @@ func (*GetOrders) GetResponse() interface{} { return []*orderdto.Order{} }
 // RouterInfo 返回订单查询内部 Public 路由信息。
 func (own *GetOrders) RouterInfo() *servertypes.RouterInfo {
 	return orderPublicRoute(own, "getorders", http.MethodPost, contract.UserServiceName, contract.SupplierServiceName)
+}
+
+// Reset 清理请求字段并保留实例级订单 store。
+func (own *GetOrders) Reset() {
+	store := own.store
+	*own = GetOrders{store: store}
 }
 
 func orderToDTO(item *models.Order) *orderdto.Order {

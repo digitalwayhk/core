@@ -11,6 +11,7 @@ import (
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	userdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/user"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/shopspring/decimal"
@@ -31,6 +32,17 @@ type CreateOrder struct {
 	ProductName        string                  `json:"productName"`
 	UnitPrice          decimal.Decimal         `json:"unitPrice"`
 	Address            userdto.AddressSnapshot `json:"address"`
+	writer             business.LocalOrderWriter
+}
+
+// NewCreateOrder 创建绑定当前实例订单 runtime 的下单路由。
+func NewCreateOrder(store models.OrderWriteAccess) *CreateOrder {
+	return &CreateOrder{writer: business.LocalOrderWriter{Store: store}}
+}
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *CreateOrder) New(interface{}) servertypes.IRouter {
+	return &CreateOrder{writer: own.writer}
 }
 
 // Parse 绑定下单请求。
@@ -79,7 +91,7 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		ServiceInstanceIP:       serviceInstanceIP,
 		EnableRemoteIdempotency: true,
 	}
-	orderID, err := (business.LocalOrderWriter{}).Accept(context.Background(), command)
+	orderID, err := own.writer.Accept(context.Background(), command)
 	if err != nil {
 		return nil, err
 	}
@@ -115,4 +127,10 @@ func (*CreateOrder) GetResponse() interface{} { return &orderdto.Order{} }
 // RouterInfo 返回下单内部 Public 路由信息。
 func (own *CreateOrder) RouterInfo() *servertypes.RouterInfo {
 	return orderPublicRoute(own, "createorder", http.MethodPost)
+}
+
+// Reset 清理请求字段并保留实例级 writer。
+func (own *CreateOrder) Reset() {
+	writer := own.writer
+	*own = CreateOrder{writer: writer}
 }

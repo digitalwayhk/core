@@ -8,6 +8,7 @@ import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -16,7 +17,14 @@ import (
 type CancelOrder struct {
 	UserID  uint `json:"userID"`
 	OrderID uint `json:"orderID"`
+	store   models.OrderWriteAccess
 }
+
+// NewCancelOrder 创建绑定当前实例订单 runtime 的撤单路由。
+func NewCancelOrder(store models.OrderWriteAccess) *CancelOrder { return &CancelOrder{store: store} }
+
+// New 为请求池创建保留实例依赖的新路由。
+func (own *CancelOrder) New(interface{}) servertypes.IRouter { return NewCancelOrder(own.store) }
 
 // Parse 绑定撤单请求。
 func (own *CancelOrder) Parse(req servertypes.IRequest) error { return req.Bind(own) }
@@ -31,7 +39,7 @@ func (own *CancelOrder) Validation(servertypes.IRequest) error {
 
 // Do 在远程权威库撤销订单并发布订单状态变化事件。
 func (own *CancelOrder) Do(req servertypes.IRequest) (interface{}, error) {
-	item, err := business.CancelOrder(own.OrderID, own.UserID, req.GetTraceId())
+	item, err := business.CancelOrder(own.store, own.OrderID, own.UserID, req.GetTraceId())
 	if err != nil {
 		return nil, err
 	}
@@ -47,4 +55,10 @@ func (*CancelOrder) GetResponse() interface{} { return &orderdto.Order{} }
 // RouterInfo 返回撤单内部 Public 路由信息。
 func (own *CancelOrder) RouterInfo() *servertypes.RouterInfo {
 	return orderPublicRoute(own, "cancelorder", http.MethodPost)
+}
+
+// Reset 清理请求字段并保留实例级订单 store。
+func (own *CancelOrder) Reset() {
+	store := own.store
+	*own = CancelOrder{store: store}
 }

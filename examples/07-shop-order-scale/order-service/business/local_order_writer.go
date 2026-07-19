@@ -10,15 +10,24 @@ import (
 )
 
 // LocalOrderWriter 将订单请求先可靠写入当前实例本地 pending。
-type LocalOrderWriter struct{}
+type LocalOrderWriter struct {
+	Store models.OrderWriteAccess
+}
 
 // Accept 校验订单命令并在本地 pending 持久成功后返回订单 ID。
-func (LocalOrderWriter) Accept(_ context.Context, command CreateOrderCommand) (uint, error) {
+func (writer LocalOrderWriter) Accept(ctx context.Context, command CreateOrderCommand) (uint, error) {
 	if err := command.validate(); err != nil {
 		return 0, err
 	}
+	if writer.Store == nil {
+		return 0, models.ErrOrderWriteStoreUnavailable
+	}
 	order := orderFromCommand(command)
-	if existing, err := models.FindLocalOrderByRequest(command.UserID, strings.TrimSpace(command.RequestID)); err == nil && existing != nil {
+	existing, err := writer.Store.FindLocalByRequest(ctx, command.UserID, strings.TrimSpace(command.RequestID))
+	if err != nil {
+		return 0, err
+	}
+	if existing != nil {
 		if existing.RequestFingerprint != strings.TrimSpace(command.RequestFingerprint) {
 			return 0, errors.New("幂等键已用于不同订单请求")
 		}
@@ -36,7 +45,7 @@ func (LocalOrderWriter) Accept(_ context.Context, command CreateOrderCommand) (u
 			return existing.ID, nil
 		}
 	}
-	if err := models.AddOrder(order); err != nil {
+	if err := writer.Store.Save(ctx, order); err != nil {
 		return 0, err
 	}
 	return command.OrderID, nil

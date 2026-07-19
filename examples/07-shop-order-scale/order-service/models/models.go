@@ -37,6 +37,12 @@ type (
 
 	// OrderQueryFilter 是远程权威订单查询条件别名。
 	OrderQueryFilter = transaction.OrderQueryFilter
+
+	// OrderWriteAccess 是业务所需实例级本地可靠写入接口别名。
+	OrderWriteAccess = transaction.OrderWriteAccess
+
+	// OrderWriteRuntime 是服务实例持有的 typed runtime 别名。
+	OrderWriteRuntime = transaction.OrderWriteRuntime
 )
 
 const (
@@ -57,6 +63,9 @@ const (
 )
 
 var (
+	// ErrOrderWriteStoreUnavailable 表示当前服务实例订单可靠 store 不可用。
+	ErrOrderWriteStoreUnavailable = transaction.ErrOrderWriteStoreUnavailable
+
 	// NewServiceBaseModel 创建服务级基础模型。
 	NewServiceBaseModel = common.NewServiceBaseModel
 
@@ -102,35 +111,8 @@ var (
 	// PayRemoteOrderWith 支付远程权威订单。
 	PayRemoteOrderWith = transaction.PayRemoteOrderWith
 
-	// AddOrder 将订单写入当前实例 Badger 可靠层。
-	AddOrder = transaction.AddOrder
-
-	// UseOrderWriteBehind 绑定本地订单 pending 的远端汇合目标。
-	UseOrderWriteBehind = transaction.UseOrderWriteBehind
-
-	// SyncLocalOrders 触发本地订单 pending 汇合到远端目标。
-	SyncLocalOrders = transaction.SyncLocalOrders
-
-	// FindLocalOrderByRequest 按 UserID + requestID 查询当前实例本地订单。
-	FindLocalOrderByRequest = transaction.FindLocalOrderByRequest
-
-	// PendingLocalOrders 读取当前实例待汇合本地订单。
-	PendingLocalOrders = transaction.PendingLocalOrders
-
-	// RemoveLocalOrder 删除已成功汇合的本地订单。
-	RemoveLocalOrder = transaction.RemoveLocalOrder
-
-	// PendingOrdersByUser 查询当前实例指定用户本地未汇合订单。
-	PendingOrdersByUser = transaction.PendingOrdersByUser
-
-	// StartOrderWriteStore 启动当前实例 Badger 可靠写入层。
-	StartOrderWriteStore = transaction.StartOrderWriteStore
-
-	// StopOrderWriteStore 停止当前实例 Badger 可靠写入层。
-	StopOrderWriteStore = transaction.StopOrderWriteStore
-
-	// GetOrderWritePerformanceSnapshot 返回当前实例写入指标。
-	GetOrderWritePerformanceSnapshot = transaction.GetOrderWritePerformanceSnapshot
+	// NewOrderWriteRuntime 创建实例级订单可靠写入 runtime。
+	NewOrderWriteRuntime = transaction.NewOrderWriteRuntime
 
 	// NewOutbox 创建 MySQL Outbox 模型。
 	NewOutbox = transaction.NewOutbox

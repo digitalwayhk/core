@@ -10,7 +10,7 @@ import (
 )
 
 // ListOrders 从共享远程权威库读取订单列表。
-func ListOrders(filter models.OrderQueryFilter, page, size int) ([]*models.Order, int64, error) {
+func ListOrders(orders models.OrderWriteAccess, filter models.OrderQueryFilter, page, size int) ([]*models.Order, int64, error) {
 	var items []*models.Order
 	var total int64
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
@@ -19,7 +19,7 @@ func ListOrders(filter models.OrderQueryFilter, page, size int) ([]*models.Order
 		return err
 	})
 	if err == nil && filter.UserID > 0 && filter.SupplierID == 0 {
-		if pending, pendingErr := models.PendingOrdersByUser(filter.UserID); pendingErr == nil && len(pending) > 0 {
+		if pending, pendingErr := orders.PendingByUser(context.Background(), filter.UserID); pendingErr == nil && len(pending) > 0 {
 			items = mergeOrders(items, pending)
 			total = int64(len(items))
 		}
@@ -28,7 +28,7 @@ func ListOrders(filter models.OrderQueryFilter, page, size int) ([]*models.Order
 }
 
 // CancelOrder 在远程权威库撤销订单。
-func CancelOrder(orderID, userID uint, traceID string) (*models.Order, error) {
+func CancelOrder(orders models.OrderWriteAccess, orderID, userID uint, traceID string) (*models.Order, error) {
 	var order *models.Order
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
@@ -39,7 +39,7 @@ func CancelOrder(orderID, userID uint, traceID string) (*models.Order, error) {
 		return writeOrderChangedOutboxWith(action, order, contract.EventOrderStatusChanged)
 	})
 	if err != nil {
-		_ = (RemoteOrderSyncer{}).DrainOnce(context.Background(), 100)
+		_, _ = (RemoteOrderSyncer{Store: orders}).DrainOnce(context.Background(), 100)
 		err = models.RunRemoteTransaction(func(action models.DataAction) error {
 			var retryErr error
 			order, retryErr = models.CancelRemoteOrderWith(action, orderID, userID, traceID)
@@ -53,7 +53,7 @@ func CancelOrder(orderID, userID uint, traceID string) (*models.Order, error) {
 }
 
 // PayOrder 在远程权威库标记订单支付成功。
-func PayOrder(orderID, userID uint, paymentID, traceID string) (*models.Order, error) {
+func PayOrder(orders models.OrderWriteAccess, orderID, userID uint, paymentID, traceID string) (*models.Order, error) {
 	var order *models.Order
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
@@ -64,7 +64,7 @@ func PayOrder(orderID, userID uint, paymentID, traceID string) (*models.Order, e
 		return writeOrderChangedOutboxWith(action, order, contract.EventPaymentChanged)
 	})
 	if err != nil {
-		_ = (RemoteOrderSyncer{}).DrainOnce(context.Background(), 100)
+		_, _ = (RemoteOrderSyncer{Store: orders}).DrainOnce(context.Background(), 100)
 		err = models.RunRemoteTransaction(func(action models.DataAction) error {
 			var retryErr error
 			order, retryErr = models.PayRemoteOrderWith(action, orderID, userID, paymentID, traceID)

@@ -9,27 +9,17 @@ import (
 
 	orderbusiness "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	ordermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
-	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
 // TestUATPendingSurvivesRemoteFailure 验证远程失败不会丢失本地可靠订单事实。
 func TestUATPendingSurvivesRemoteFailure(t *testing.T) {
-	t.Setenv("SHOP_LOCAL_PENDING_DIR", t.TempDir())
-	require.NoError(t, ordermodels.StartOrderWriteStore())
-	t.Cleanup(func() {
-		err := ordermodels.StopOrderWriteStore()
-		var pendingErr *nosql.PendingSyncError
-		if errors.As(err, &pendingErr) {
-			return
-		}
-		require.NoError(t, err)
-	})
+	runtime := newIntegrationOrderRuntime(t, failingRemote{})
 	unique := uint(time.Now().UnixNano() % 1000000)
 	requestID := "pending-failure-uat-" + time.Now().Format("150405.000000000")
 	ids := newBenchmarkIDFactory(24)
-	_, err := (orderbusiness.LocalOrderWriter{}).Accept(context.Background(), orderbusiness.CreateOrderCommand{
+	_, err := (orderbusiness.LocalOrderWriter{Store: runtime}).Accept(context.Background(), orderbusiness.CreateOrderCommand{
 		OrderID:            ids.NewID(),
 		UserID:             150000 + unique,
 		SupplierID:         250000 + unique,
@@ -44,9 +34,10 @@ func TestUATPendingSurvivesRemoteFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	syncer := orderbusiness.RemoteOrderSyncer{Remote: failingRemote{}}
-	require.Error(t, syncer.DrainOnce(context.Background(), 10000))
-	pending, err := ordermodels.FindLocalOrderByRequest(150000+unique, requestID)
+	syncer := orderbusiness.RemoteOrderSyncer{Store: runtime}
+	_, err = syncer.DrainOnce(context.Background(), 10000)
+	require.Error(t, err)
+	pending, err := runtime.FindLocalByRequest(context.Background(), 150000+unique, requestID)
 	require.NoError(t, err)
 	require.NotNil(t, pending)
 }

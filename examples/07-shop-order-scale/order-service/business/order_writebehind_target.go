@@ -8,6 +8,11 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 )
 
+// RemoteOrderStore 定义业务 target 写入远程权威库所需的最小接口。
+type RemoteOrderStore interface {
+	Upsert(context.Context, *models.Order) (*models.Order, error)
+}
+
 // OrderWriteBehindTarget 将当前 order 副本的 Badger pending 汇合到共享 MySQL 权威库。
 // 它只表达订单业务同步语义，pending ACK、重试保留和本地删除由 PrefixedBadgerDB 统一处理。
 type OrderWriteBehindTarget struct {
@@ -26,7 +31,7 @@ func (target OrderWriteBehindTarget) SyncBatch(ctx context.Context, items []*nos
 			continue
 		}
 		if _, err := remote.Upsert(ctx, item.Item); err != nil {
-			return nil, err
+			return &nosql.WriteBehindResult{ConfirmedKeys: confirmed}, err
 		}
 		confirmed = append(confirmed, item.Key)
 	}
