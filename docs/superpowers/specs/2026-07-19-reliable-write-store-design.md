@@ -4,11 +4,11 @@
 
 `PrefixedBadgerDB.UseWriteBehind(WriteBehindTarget)` 已把 pending、ACK、重试、关闭恢复和同步指标收敛到框架，但示例 04/07 仍各自维护 Group Commit、背压、磁盘扫描、写入指标和 store 生命周期。07 还保留一份不会随框架 ACK 递减的 `pendingCount`，可能在真实积压已经归零后继续触发错误背压。
 
-本设计把可复用的本地可靠写能力继续收敛为框架级 `ReliableWriteStore[T]`，让业务只保留模型校验、策略配置和远端领域事务。
+本设计把可复用的本地可靠增、改、删能力继续收敛为框架级 `ReliableWriteStore[T]`，让业务只保留模型校验、策略配置和远端领域事务。
 
 ## 2. 目标
 
-1. 框架统一管理可靠本地提交、跨请求 Group Commit、pending/磁盘/并发背压、有界同步、指标和关闭恢复。
+1. 框架统一管理可靠本地保存与删除、跨请求 Group Commit、pending/磁盘/并发背压、有界同步、指标和关闭恢复。
 2. `ServiceContext` 成为 store 的唯一生命周期 owner，不再使用进程级 store registry 或业务包全局 singleton。
 3. 04/07 删除重复 batcher、guard、磁盘扫描和 pending 状态。
 4. 07 的订单与 Outbox 同 MySQL 事务语义继续由 `OrderWriteBehindTarget` 负责。
@@ -50,7 +50,7 @@ func (sc *ServiceContext) UseResource(name string, resource ManagedResource) err
 
 ### 4.2 ReliableWriteStore
 
-`ReliableWriteStore[T]` 是业务高吞吐本地可靠写入口。它组合 `PrefixedBadgerDB[T]`，但不理解订单、MySQL 或 Outbox。
+`ReliableWriteStore[T]` 是业务高吞吐本地可靠增、改、删入口。它组合 `PrefixedBadgerDB[T]`，但不理解订单、MySQL 或 Outbox。
 
 ```go
 type ReliableWriteStore[T types.IModel] struct {
@@ -58,12 +58,20 @@ type ReliableWriteStore[T types.IModel] struct {
 	batcher   *BatchCommitter[T]
 	admission *WriteAdmissionController
 }
+
+type BatchWriteResult struct {
+	Committed int
+}
 ```
 
 主要能力：
 
-- `Add(ctx, item)`：通过背压后进入 Group Commit，Badger 持久成功才返回。
-- `AddBatch(ctx, items)`：显式批量可靠提交。
+- `Save(ctx, item)`：可靠 upsert。新 key 形成 `OpInsert`，已有未删除 key 形成 `OpUpdate`；通过背压并在 Badger 持久成功后才返回。
+- `SaveBatch(ctx, items)`：显式批量可靠 upsert，返回已经本地提交的数量。
+- `Delete(ctx, item)`：写入可靠 `OpDelete` tombstone，远端确认前保留 pending，不做本地物理删除。
+- `DeleteBatch(ctx, items)`：显式批量写入可靠 tombstone，返回已经本地提交的数量。
+- `Add(ctx, item)`、`AddBatch(ctx, items)`：兼容入口，分别委托 `Save`、`SaveBatch`，不另建一套语义。
+- `GetLocal(key)`、`ScanLocal(...)`：读取当前本地可见数据；tombstone 对普通读取表现为不存在。
 - `UseWriteBehind(target)`：一次性绑定远端 target。
 - `ForceSyncBatch(ctx, limit)`：最多处理指定数量 pending。
 - `ForceSyncAll(ctx)`：有界循环同步全部当前 pending。
@@ -72,9 +80,13 @@ type ReliableWriteStore[T types.IModel] struct {
 
 ### 4.3 BatchCommitter
 
-`BatchCommitter[T]` 把多个并发 `Add` 聚合为一次 `PrefixedBadgerDB.BatchInsert`。它是通用并发组件，不保存业务状态。
+`BatchCommitter[T]` 把多个并发保存或删除请求聚合为 Badger 事务。它接收统一的 `WriteOperation[T]`，操作类型仅包含 `Save` 和 `Delete`，不保存业务状态。
 
-配置包括最大 batch、收集窗口和队列容量。每个调用等待自己所在批次的 Badger 提交结果；同一事务失败时该批所有调用收到相同错误。关闭时停止接收新请求并等待已接受请求完成。
+配置包括最大 batch、收集窗口和队列容量。每个调用等待自己所在事务的 Badger 提交结果；同一事务失败时该事务内所有调用收到相同错误。一个批次可包含保存和删除，但同一 key 必须严格保持框架接收顺序，不能因按操作类型分组而重排。框架应在 Badger 事务大小边界内提交混合操作，超过边界时按有序子批拆分，并把已提交与未提交结果准确返回给各调用。关闭时停止接收新请求并等待已接受请求完成。
+
+`Delete` 对不存在或已经是 tombstone 的 key 幂等返回成功。对已经存在 tombstone 的 key，`Save` 返回 `ErrWriteConflictDeleted`，不隐式复活已删除事实。未来若业务需要恢复，必须通过单独、显式的 restore 能力设计，不能把它混入普通 upsert。
+
+本地物理清除不是可靠业务删除。框架提供独立的 `ReliableWriteStoreAdmin[T]` handle，其 `PurgeLocal(ctx, item)` 直接删除本地数据和同步索引。admin handle 只交给生命周期、迁移或修复工具，不嵌入普通 `ReliableWriteStore`，也不得被 Router/Business 依赖。调用方必须明确承担远端不同步和 pending 丢失风险。
 
 ### 4.4 WriteAdmissionController
 
@@ -95,6 +107,7 @@ ErrWriteRejectedConcurrency
 ErrWriteRejectedPending
 ErrWriteRejectedDisk
 ErrWriteBehindNotBound
+ErrWriteConflictDeleted
 ```
 
 ### 4.5 WriteBehindTarget
@@ -162,7 +175,9 @@ func (s *ReliableWriteStore[T]) ForceSyncBatch(
 
 ```go
 type OrderWriteStore interface {
-	Add(context.Context, *models.Order) error
+	Save(context.Context, *models.Order) error
+	Delete(context.Context, *models.Order) error
+	GetLocal(context.Context, string) (*models.Order, error)
 	ForceSyncBatch(context.Context, int) (nosql.ForceSyncResult, error)
 }
 ```
@@ -175,13 +190,14 @@ type OrderWriteStore interface {
 
 - 删除本地 `orderBatcher`、`orderWriteGuard`、磁盘扫描和 store 重复指标。
 - 使用 `ReliableWriteStore[Order]` 和 `ModelListWriteBehindTarget`。
-- 保留 04 的 SQLite 兼容演示、订单本地查询和性能基准语义。
+- 订单保存、更新和删除统一走可靠 store；保留 04 的 SQLite 兼容演示、订单本地查询和性能基准语义。
 
 ### 9.2 示例 07
 
 - 删除 `globalOrderWriteStore`、`activeOrderWriteStore` 和一行式全局门面。
 - 删除业务层 `pendingCount`、batcher、guard 和磁盘扫描。
 - 使用 `ReliableWriteStore[Order]` 与 `OrderWriteBehindTarget`。
+- 下单和后续本地订单变更使用 `Save`；需要同步到权威库的删除使用 `Delete` tombstone，不调用本地物理清除。
 - `RemoteOrderSyncer.DrainOnce(limit)` 调用 `ForceSyncBatch`，成功后唤醒标准 Outbox。
 - `order_persistence.go` 和 `order_query.go` 保留领域实现，可按职责合并但不进入框架。
 
@@ -191,7 +207,10 @@ type OrderWriteStore interface {
 
 ### 10.1 框架单元测试
 
-- Group Commit 聚合、批次失败传播、关闭并发和 panic 转换。
+- `Save` 的 insert/update 判定、tombstone 冲突和 Badger 成功后返回。
+- `Delete`/`DeleteBatch` 可靠写入 tombstone，远端失败保留，确认后 ACK。
+- 混合 Save/Delete Group Commit 聚合、同 key 顺序、分批部分提交结果、批次失败传播、关闭并发和 panic 转换。
+- `GetLocal`/`ScanLocal` 不返回 tombstone；受限 `PurgeLocal` 明确绕过远端且不暴露给业务接口。
 - pending soft/hard limit、持续积压、并发超时和磁盘硬上限。
 - 路径包含 service、DataCenterID 和 MachineID，非法片段 fail closed。
 - `ForceSyncBatch(limit)` 不超量，部分成功正确 ACK，context 可取消。
