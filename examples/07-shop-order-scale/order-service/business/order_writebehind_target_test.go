@@ -1,4 +1,4 @@
-// Package business 验证 07 订单写回目标的部分成功确认语义。
+// Package business 验证 07 订单写回目标的远程原子批次语义。
 package business
 
 import (
@@ -11,22 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type failNthRemoteOrderStore struct {
+type recordingRemoteOrderStore struct {
 	calls  int
-	failAt int
+	orders []*models.Order
+	err    error
 }
 
-func (store *failNthRemoteOrderStore) Upsert(_ context.Context, order *models.Order) (*models.Order, error) {
+func (store *recordingRemoteOrderStore) UpsertBatch(_ context.Context, orders []*models.Order) ([]*models.Order, error) {
 	store.calls++
-	if store.calls == store.failAt {
-		return nil, errors.New("remote failed")
-	}
-	return order, nil
+	store.orders = append(store.orders, orders...)
+	return orders, store.err
 }
 
-// TestOrderWriteBehindTargetConfirmsOrdersBeforeFailure 验证批次中途失败前已写入订单仍返回确认 key。
-func TestOrderWriteBehindTargetConfirmsOrdersBeforeFailure(t *testing.T) {
-	target := OrderWriteBehindTarget{Remote: &failNthRemoteOrderStore{failAt: 2}}
+// TestOrderWriteBehindTargetUsesOneRemoteBatch 验证一个 write-behind 批次只调用一次远程批量写入。
+func TestOrderWriteBehindTargetUsesOneRemoteBatch(t *testing.T) {
+	remote := &recordingRemoteOrderStore{}
+	target := OrderWriteBehindTarget{Remote: remote}
 	first := models.NewOrder()
 	second := models.NewOrder()
 	items := []*nosql.SyncQueueItem[models.Order]{
@@ -35,7 +35,25 @@ func TestOrderWriteBehindTargetConfirmsOrdersBeforeFailure(t *testing.T) {
 	}
 
 	result, err := target.SyncBatch(context.Background(), items)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []string{"order:1", "order:2"}, result.ConfirmedKeys)
+	require.Equal(t, 1, remote.calls)
+	require.Equal(t, []*models.Order{first, second}, remote.orders)
+}
+
+// TestOrderWriteBehindTargetDoesNotConfirmFailedAtomicBatch 验证远程事务失败时整批保留在 Badger。
+func TestOrderWriteBehindTargetDoesNotConfirmFailedAtomicBatch(t *testing.T) {
+	remote := &recordingRemoteOrderStore{err: errors.New("remote failed")}
+	target := OrderWriteBehindTarget{Remote: remote}
+	items := []*nosql.SyncQueueItem[models.Order]{
+		{Key: "order:1", Item: models.NewOrder(), Op: nosql.OpInsert},
+		{Key: "order:2", Item: models.NewOrder(), Op: nosql.OpInsert},
+	}
+
+	result, err := target.SyncBatch(context.Background(), items)
 	require.Error(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, []string{"order:1"}, result.ConfirmedKeys)
+	require.Empty(t, result.ConfirmedKeys)
+	require.Equal(t, 1, remote.calls)
 }

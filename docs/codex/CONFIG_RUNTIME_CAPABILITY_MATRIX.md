@@ -49,6 +49,7 @@
 | `BasePath` + `ServiceIdentity` | 构造时解析为 `<base>/<service>/dc-N/machine-N`；服务名必须是安全目录片段，ID 不能为负数 | `NewReliableWriteStore`，目录在 store 生命周期内固定 | supported |
 | `Badger` | 构造时覆盖 `Path` 为已解析实例目录；`SyncWrites`、冲突检测和损坏策略在绑定 target 时校验 | `SharedBadgerManager`、`PrefixedBadgerDB` | supported |
 | `Badger.AutoSync` | 只控制框架内置 write-behind worker；`false` 仍保留 pending 与手动 `ForceSyncBatch/All` | `PrefixedBadgerDB.startWriteBehindWorker` | supported |
+| `Badger.SyncBatchSize` | 框架 worker 和 `ForceSyncAll` 的单轮批次，同时是手动 `ForceSyncBatch(ctx, limit)` 的硬上限；调用方 limit 更大时自动截断 | `PrefixedBadgerDB.forceSyncBatch`、`ForceSyncAllContext` | supported |
 | `Batch.MaxBatch`、`CollectWindow`、`QueueCapacity` | 构造时补默认值并拒绝 queue 小于 max batch | `BatchCommitter` 从接收写到本地事务完成 | supported |
 | `Admission.MaxConcurrent`、`AcquireTimeout` | 每次进入 Group Commit 前读取 | `WriteAdmissionController` | supported |
 | `Admission.SoftPending`、`HardPending`、`MaxBacklogDuration` | 每次写入用 O(1) pending 快照检查持续积压 | `WriteAdmissionController` | supported |

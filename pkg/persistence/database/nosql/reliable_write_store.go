@@ -110,7 +110,7 @@ func (store *ReliableWriteStore[T]) UseWriteBehind(target WriteBehindTarget[T]) 
 	return nil
 }
 
-// ForceSyncBatch 最多同步 limit 条 pending。
+// ForceSyncBatch 最多同步 limit 条 pending，实际单轮数量不会超过 Badger.SyncBatchSize。
 func (store *ReliableWriteStore[T]) ForceSyncBatch(ctx context.Context, limit int) (ForceSyncResult, error) {
 	if err := store.checkSyncable(ctx); err != nil {
 		return ForceSyncResult{}, err

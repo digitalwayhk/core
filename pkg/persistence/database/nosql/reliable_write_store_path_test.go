@@ -56,6 +56,7 @@ func TestReliableWriteStoreConfigNormalizesDefaultsAndBadgerPath(t *testing.T) {
 	require.Equal(t, normalized.Badger.Path, normalized.BasePath)
 	require.Equal(t, 128, normalized.Batch.MaxBatch)
 	require.Equal(t, time.Millisecond, normalized.Batch.CollectWindow)
+	require.Equal(t, 16, normalized.Batch.CollectBacklog)
 	require.Equal(t, 1024, normalized.Batch.QueueCapacity)
 	require.Equal(t, 10*time.Second, normalized.CloseTimeout)
 }

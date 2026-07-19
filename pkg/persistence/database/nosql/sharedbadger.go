@@ -1057,7 +1057,11 @@ func (p *PrefixedBadgerDB[T]) Scan(prefix string, limit int) ([]*T, error) {
 	prefix = p.prefix + prefix
 	err := p.manager.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		opts.PrefetchSize = 1000 // 增加预取大小
+		opts.Prefix = []byte(prefix)
+		opts.PrefetchSize = 100
+		if limit > 0 && limit < opts.PrefetchSize {
+			opts.PrefetchSize = limit
+		}
 		opts.PrefetchValues = true
 		opts.Reverse = false
 		opts.AllVersions = false // 只读取最新版本

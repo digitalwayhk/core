@@ -37,6 +37,58 @@ func InsertOutboxIfMissingWith(action persistencetypes.IDataAction, item *Outbox
 	return item.InsertWith(action)
 }
 
+// InsertOutboxesIfMissingWith 在当前事务中批量查询 EventID，并用一条批量 INSERT 写入缺失 Outbox。
+func InsertOutboxesIfMissingWith(action persistencetypes.IDataAction, items []*OutboxRecord) error {
+	if action == nil {
+		return errors.New("数据操作器不能为空")
+	}
+	unique := make([]*OutboxRecord, 0, len(items))
+	byHash := make(map[string]*OutboxRecord, len(items))
+	hashes := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			return errors.New("Outbox 事件不能为空")
+		}
+		if strings.TrimSpace(item.EventID) == "" || strings.TrimSpace(item.Subject) == "" || len(item.Payload) == 0 {
+			return errors.New("Outbox 事件参数不完整")
+		}
+		hash := item.GetHash()
+		if _, ok := byHash[hash]; ok {
+			continue
+		}
+		item.SetHashcode(hash)
+		byHash[hash] = item
+		unique = append(unique, item)
+		hashes = append(hashes, hash)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	var existing []*OutboxRecord
+	query := store.NewSearch(NewOutbox(), len(hashes))
+	query.AddWhereNS("Hashcode", persistencetypes.SymbolIn, hashes)
+	if err := action.Load(query, &existing); err != nil {
+		return err
+	}
+	existingHashes := make(map[string]struct{}, len(existing))
+	for _, item := range existing {
+		if item != nil {
+			existingHashes[item.GetHash()] = struct{}{}
+		}
+	}
+	missing := make([]*OutboxRecord, 0, len(unique))
+	for _, item := range unique {
+		if _, ok := existingHashes[item.GetHash()]; !ok {
+			missing = append(missing, item)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return action.Insert(missing)
+}
+
 // MarkOutboxPublished 将 Outbox 事件标记为已发布。
 func MarkOutboxPublished(item *OutboxRecord) error {
 	return MarkOutboxPublishedWith(store.GetRemote(), item)

@@ -61,7 +61,29 @@ func benchmarkConcurrencies() []int {
 	return result
 }
 
-func runBusinessBenchmarkSingleConcurrency(b *testing.B, concurrency int, metricName string, operation func(index int) error) {
+// benchmarkReplicaCounts 返回水平扩容基准需要创建的独立 order-service 副本数。
+func benchmarkReplicaCounts() []int {
+	if configured := strings.TrimSpace(os.Getenv("SHOP_BENCH_REPLICAS")); configured != "" {
+		parts := strings.Split(configured, ",")
+		result := make([]int, 0, len(parts))
+		seen := make(map[int]struct{}, len(parts))
+		for _, part := range parts {
+			value, err := strconv.Atoi(strings.TrimSpace(part))
+			if err != nil || value <= 0 {
+				panic(fmt.Sprintf("SHOP_BENCH_REPLICAS 包含无效副本数 %q", part))
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+		return result
+	}
+	return []int{1, 2, 4}
+}
+
+func runBusinessBenchmarkSingleConcurrency(b *testing.B, concurrency int, metricName string, operation func(index int) error) time.Duration {
 	const maxSamples = 4096
 	samples := make([]int64, 0, benchMin(b.N, maxSamples))
 	var sampleMu sync.Mutex
@@ -112,6 +134,7 @@ func runBusinessBenchmarkSingleConcurrency(b *testing.B, concurrency int, metric
 	}
 	reportLatencyPercentiles(b, samples)
 	benchmetrics.Report(b, throughputStats)
+	return elapsed
 }
 
 func reportLatencyPercentiles(b *testing.B, samples []int64) {

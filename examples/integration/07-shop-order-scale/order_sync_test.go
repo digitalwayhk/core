@@ -44,6 +44,6 @@ func TestUATPendingSurvivesRemoteFailure(t *testing.T) {
 
 type failingRemote struct{}
 
-func (failingRemote) Upsert(context.Context, *ordermodels.Order) (*ordermodels.Order, error) {
+func (failingRemote) UpsertBatch(_ context.Context, _ []*ordermodels.Order) ([]*ordermodels.Order, error) {
 	return nil, errors.New("远程库暂不可用")
 }

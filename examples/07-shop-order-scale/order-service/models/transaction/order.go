@@ -66,16 +66,12 @@ func (o *Order) GetHash() string {
 	return utils.HashCodes(strings.TrimSpace(o.RequestID), strconv.FormatUint(uint64(o.UserID), 10))
 }
 
-// GetLocalKey 返回 Badger 本地可靠写入层的用户隔离键。
+// GetLocalKey 返回兼顾用户前缀扫描和请求幂等点查的 Badger 本地键。
 func (o *Order) GetLocalKey() string {
-	if o == nil || o.GetID() == 0 {
+	if o == nil {
 		return ""
 	}
-	prefix := OrderPendingUserPrefix(o.UserID)
-	if prefix == "" {
-		return ""
-	}
-	return prefix + strconv.FormatUint(uint64(o.GetID()), 10)
+	return orderRequestLocalKey(o.UserID, o.RequestID)
 }
 
 // IsSyncAfterDelete 声明订单同步完成后可从本地 Badger pending 层清除。
@@ -88,6 +84,17 @@ func OrderPendingUserPrefix(userID uint) string {
 	}
 	digest := sha256.Sum256([]byte(strconv.FormatUint(uint64(userID), 10)))
 	return "u:" + hex.EncodeToString(digest[:16]) + ":"
+}
+
+// orderRequestLocalKey 返回不暴露原始 RequestID 的本地幂等点查键。
+func orderRequestLocalKey(userID uint, requestID string) string {
+	prefix := OrderPendingUserPrefix(userID)
+	requestID = strings.TrimSpace(requestID)
+	if prefix == "" || requestID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(requestID))
+	return prefix + "r:" + hex.EncodeToString(digest[:16])
 }
 
 // InsertWith 将订单事实写入指定事务。

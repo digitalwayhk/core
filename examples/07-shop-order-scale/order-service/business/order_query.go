@@ -98,7 +98,9 @@ func mergeOrders(remote []*models.Order, pending []*models.Order) []*models.Orde
 	}
 	for _, item := range pending {
 		if item != nil {
-			byID[item.ID] = item
+			if _, remoteExists := byID[item.ID]; !remoteExists {
+				byID[item.ID] = item
+			}
 		}
 	}
 	result := make([]*models.Order, 0, len(byID))

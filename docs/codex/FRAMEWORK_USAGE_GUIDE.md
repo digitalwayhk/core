@@ -120,7 +120,7 @@ if err := sc.UseResource("order-write-store", store); err != nil {
 _ = admin // 仅交给独立运维入口，不注入业务服务。
 ```
 
-`Save` 同时表示 insert/update，`Delete` 写入可靠 tombstone，二者都只有在本地 Badger 提交完成后才返回成功。`ReliableWriteStoreAdmin.PurgeLocal` 会物理删除本地事实和 pending 索引，不产生远端删除语义，只能用于明确的运维修复。`ForceSyncBatch(ctx, limit)` 是 bounded sync；`Close(ctx)` 排空已接收的本地提交并报告 `PendingSyncError`，不会为了“优雅关闭”偷偷访问远端。
+`Save` 同时表示 insert/update，`Delete` 写入可靠 tombstone，二者都只有在本地 Badger 提交完成后才返回成功。`ReliableWriteStoreAdmin.PurgeLocal` 会物理删除本地事实和 pending 索引，不产生远端删除语义，只能用于明确的运维修复。`ForceSyncBatch(ctx, limit)` 是 bounded sync，实际单轮数量取 `min(limit, Badger.SyncBatchSize)`；`Close(ctx)` 排空已接收的本地提交并报告 `PendingSyncError`，不会为了“优雅关闭”偷偷访问远端。
 
 目录固定为 `<BasePath>/<service>/dc-<DataCenterID>/machine-<MachineID>`。`ServiceContext` 必须持有 store 资源，业务通过同一服务实例的 typed runtime 访问，禁止恢复包级 registry。`AutoMachineID` 重新分配后会解析到新目录，不会自动接管旧 MachineID 的 pending；编排层必须为每个副本提供稳定、独立的持久卷并制定旧目录 drain/接管流程。
 

@@ -22,6 +22,11 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+const (
+	orderPendingSyncBatch    = 100
+	orderPendingSyncMaxBatch = 1000
+)
+
 // Service 是可水平扩展的订单权威服务。
 type Service struct {
 	mu          sync.Mutex
@@ -100,6 +105,8 @@ func (s *Service) newOrderWriteStore(sc *router.ServiceContext) (*transaction.Or
 	badgerConfig.EnableLogger = false
 	// 07 使用业务级 100ms bounded sync，因此关闭框架内置 ticker，避免两套调度同时抢占 pending。
 	badgerConfig.AutoSync = false
+	// 手动 ForceSyncBatch 即使收到更大的 limit，也最多向远端提交 1000 条并在同一轮 ACK。
+	badgerConfig.SyncBatchSize = orderPendingSyncMaxBatch
 
 	return transaction.NewOrderWriteStore(
 		// ServiceIdentity 使本地目录与已领取的副本身份绑定；MachineID 变化时不会隐式接管旧 pending。
@@ -209,7 +216,7 @@ func runPendingSyncLoop(ctx context.Context, sc *router.ServiceContext, store bu
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result, err := syncer.DrainOnce(ctx, 100)
+			result, err := syncer.DrainOnce(ctx, orderPendingSyncBatch)
 			if err != nil {
 				logx.Errorw("shop_order_pending_sync_failed", logx.Field("service", contract.OrderServiceName), logx.Field("error", err))
 				continue

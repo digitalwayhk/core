@@ -132,6 +132,22 @@ func TestBadgerStorageSizeUsesNativeMetrics(t *testing.T) {
 	require.GreaterOrEqual(t, size.VLogBytes, int64(0))
 }
 
+func TestScanMissingNarrowPrefixDoesNotPrefetchUnrelatedValues(t *testing.T) {
+	db := newTestDBLocal(t)
+	items := make([]*testFund, 1024)
+	for index := range items {
+		items[index] = newFund(fmt.Sprintf("scan-%04d", index), "HK", 1)
+	}
+	require.NoError(t, db.BatchInsert(items))
+
+	allocations := testing.AllocsPerRun(5, func() {
+		found, err := db.Scan("scan-0000-not-found", 1)
+		require.NoError(t, err)
+		require.Empty(t, found)
+	})
+	require.Less(t, allocations, float64(200), "空前缀扫描不应预取相邻 key 的 value")
+}
+
 func TestApplyWriteOperationsReturnsCommittedPrefixWhenLaterBatchFails(t *testing.T) {
 	db := newOperationsTestDB(t)
 	operations := make([]WriteOperation[testFund], 0, localWriteTransactionMaxOperations+1)

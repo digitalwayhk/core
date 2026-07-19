@@ -23,7 +23,7 @@ type ForceSyncResult struct {
 	Remaining int
 }
 
-// ForceSyncBatch 最多处理 limit 条 pending，并返回实际确认数和剩余数。
+// ForceSyncBatch 最多处理 limit 条 pending，但不会超过配置的 SyncBatchSize 硬上限。
 func (p *PrefixedBadgerDB[T]) ForceSyncBatch(ctx context.Context, limit int) (ForceSyncResult, error) {
 	return p.forceSyncBatch(ctx, limit, true)
 }
@@ -40,6 +40,13 @@ func (p *PrefixedBadgerDB[T]) forceSyncBatch(ctx context.Context, limit int, reb
 	}
 	if p == nil || p.IsClosed() {
 		return ForceSyncResult{}, errors.New("BadgerDB 实例已关闭")
+	}
+	maxLimit := p.manager.config.SyncBatchSize
+	if maxLimit <= 0 {
+		return ForceSyncResult{Remaining: p.GetCachedPendingSyncCount()}, ErrInvalidSyncLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
 	}
 	p.syncLock.RLock()
 	syncEnabled := p.syncDB && (p.syncList != nil || p.syncTarget != nil)

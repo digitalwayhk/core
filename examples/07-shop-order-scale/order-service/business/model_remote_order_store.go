@@ -10,23 +10,36 @@ import (
 // ModelRemoteOrderStore 使用 models 远程事务实现订单 upsert。
 type ModelRemoteOrderStore struct{}
 
-// Upsert 将订单事实幂等写入共享远程权威库。
-func (ModelRemoteOrderStore) Upsert(_ context.Context, order *models.Order) (*models.Order, error) {
-	var stored *models.Order
+// UpsertBatch 在一个 MySQL 事务内批量写入订单事实及对应 Outbox。
+func (ModelRemoteOrderStore) UpsertBatch(_ context.Context, orders []*models.Order) ([]*models.Order, error) {
+	var stored []*models.Order
 	err := models.RunRemoteTransaction(func(action models.DataAction) error {
 		var err error
-		stored, err = models.UpsertRemoteOrderWith(action, order)
+		stored, err = models.UpsertRemoteOrdersWith(action, orders)
 		if err != nil {
 			return err
 		}
-		outbox, err := newOrderCreatedOutbox(stored)
-		if err != nil {
-			return err
+		outboxes := make([]*models.OutboxRecord, 0, len(stored))
+		for _, order := range stored {
+			outbox, buildErr := newOrderCreatedOutbox(order)
+			if buildErr != nil {
+				return buildErr
+			}
+			outbox.ServiceName = order.ServiceName
+			outbox.ServiceInstanceID = order.ServiceInstanceID
+			outbox.ServiceInstanceIP = order.ServiceInstanceIP
+			outboxes = append(outboxes, outbox)
 		}
-		outbox.ServiceName = stored.ServiceName
-		outbox.ServiceInstanceID = stored.ServiceInstanceID
-		outbox.ServiceInstanceIP = stored.ServiceInstanceIP
-		return models.InsertOutboxIfMissingWith(action, outbox)
+		return models.InsertOutboxesIfMissingWith(action, outboxes)
 	})
 	return stored, err
+}
+
+// Upsert 保留单订单调用能力，内部复用批量事务语义。
+func (store ModelRemoteOrderStore) Upsert(ctx context.Context, order *models.Order) (*models.Order, error) {
+	stored, err := store.UpsertBatch(ctx, []*models.Order{order})
+	if err != nil || len(stored) == 0 {
+		return nil, err
+	}
+	return stored[0], nil
 }

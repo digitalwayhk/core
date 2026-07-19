@@ -103,6 +103,8 @@ var (
 
 	// UpsertRemoteOrderWith 幂等写入远程订单。
 	UpsertRemoteOrderWith = transaction.UpsertRemoteOrderWith
+	// UpsertRemoteOrdersWith 幂等批量写入远程订单。
+	UpsertRemoteOrdersWith = transaction.UpsertRemoteOrdersWith
 
 	// ListRemoteOrdersWith 分页查询远程权威订单。
 	ListRemoteOrdersWith = transaction.ListRemoteOrdersWith
@@ -124,6 +126,8 @@ var (
 
 	// InsertOutboxIfMissingWith 幂等写入 MySQL Outbox。
 	InsertOutboxIfMissingWith = transaction.InsertOutboxIfMissingWith
+	// InsertOutboxesIfMissingWith 幂等批量写入 MySQL Outbox。
+	InsertOutboxesIfMissingWith = transaction.InsertOutboxesIfMissingWith
 )
 
 // EnsureStorage 确保 07 订单服务 MySQL 权威库完成建表。

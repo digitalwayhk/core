@@ -10,7 +10,7 @@ import (
 
 // RemoteOrderStore 定义业务 target 写入远程权威库所需的最小接口。
 type RemoteOrderStore interface {
-	Upsert(context.Context, *models.Order) (*models.Order, error)
+	UpsertBatch(context.Context, []*models.Order) ([]*models.Order, error)
 }
 
 // OrderWriteBehindTarget 将当前 order 副本的 Badger pending 汇合到共享 MySQL 权威库。
@@ -25,15 +25,20 @@ func (target OrderWriteBehindTarget) SyncBatch(ctx context.Context, items []*nos
 	if remote == nil {
 		remote = ModelRemoteOrderStore{}
 	}
+	orders := make([]*models.Order, 0, len(items))
 	confirmed := make([]string, 0, len(items))
 	for _, item := range items {
 		if item == nil || item.Item == nil || item.Key == "" {
 			continue
 		}
-		if _, err := remote.Upsert(ctx, item.Item); err != nil {
-			return &nosql.WriteBehindResult{ConfirmedKeys: confirmed}, err
-		}
+		orders = append(orders, item.Item)
 		confirmed = append(confirmed, item.Key)
+	}
+	if len(orders) == 0 {
+		return &nosql.WriteBehindResult{}, nil
+	}
+	if _, err := remote.UpsertBatch(ctx, orders); err != nil {
+		return &nosql.WriteBehindResult{}, err
 	}
 	return &nosql.WriteBehindResult{ConfirmedKeys: confirmed}, nil
 }

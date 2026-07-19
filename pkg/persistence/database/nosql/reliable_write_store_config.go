@@ -25,9 +25,10 @@ type ServiceIdentity struct {
 
 // BatchCommitConfig 配置跨请求 Group Commit 的批次和排队边界。
 type BatchCommitConfig struct {
-	MaxBatch      int
-	CollectWindow time.Duration
-	QueueCapacity int
+	MaxBatch       int
+	CollectWindow  time.Duration
+	CollectBacklog int
+	QueueCapacity  int
 }
 
 // WriteAdmissionConfig 配置可靠写入的并发、积压和磁盘背压阈值。
@@ -75,6 +76,15 @@ func (config ReliableWriteStoreConfig) normalized(identity ServiceIdentity) (Rel
 	}
 	if config.Batch.CollectWindow <= 0 {
 		config.Batch.CollectWindow = time.Millisecond
+	}
+	if config.Batch.MaxBatch > 1 && config.Batch.CollectBacklog <= 0 {
+		config.Batch.CollectBacklog = 16
+		if config.Batch.CollectBacklog >= config.Batch.MaxBatch {
+			config.Batch.CollectBacklog = config.Batch.MaxBatch - 1
+		}
+	}
+	if config.Batch.CollectBacklog >= config.Batch.MaxBatch && config.Batch.MaxBatch > 1 {
+		return ReliableWriteStoreConfig{}, fmt.Errorf("%w: collect_backlog 必须小于 max_batch", ErrInvalidReliableWriteConfig)
 	}
 	if config.Batch.QueueCapacity <= 0 {
 		config.Batch.QueueCapacity = config.Batch.MaxBatch * 8

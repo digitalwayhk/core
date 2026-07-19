@@ -37,7 +37,7 @@ buyer request
   -> user/supplier 消费事件更新本地投影和缓存失效
 ```
 
-本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用框架 `ReliableWriteStore[Order]`，只绑定一次业务 `OrderWriteBehindTarget`；订单 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox，Group Commit、背压、磁盘指标、pending ACK 与关闭恢复由框架统一处理。后台循环每次调用 `ForceSyncBatch(ctx, 100)`，不会 rebind target，也不会无视 limit 执行全量 drain。
+本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用框架 `ReliableWriteStore[Order]`，只绑定一次业务 `OrderWriteBehindTarget`；订单 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox，Group Commit、背压、磁盘指标、pending ACK 与关闭恢复由框架统一处理。后台循环每次调用 `ForceSyncBatch(ctx, 100)`；`Badger.SyncBatchSize=1000` 同时作为手动同步硬上限，调用方传入更大 limit 时自动截断，不会形成无界远端批次或 Badger ACK 事务。
 
 `Service` 持有实例级 `OrderWriteRuntime`，路由、`LocalOrderWriter`、查询和同步器都通过显式 `OrderWriteAccess` 注入。store 由 `ServiceContext.UseResource` 关闭，不存在包级全局 store registry。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单链路必须走 business + 专用 target。
 
@@ -101,10 +101,11 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 对比项：
 
 - `Benchmark06CreateOrderDirect`：06 同步写远程订单权威库和 Outbox。
-- `Benchmark07LocalOrderAccept`：07 下单入口只写当前副本本地 pending。
+- `Benchmark07LocalOrderAccept`：07 单副本只写本地 pending 的饱和曲线；这里的并发数不是副本数。
+- `Benchmark07HorizontalOrderAccept`：创建 `1/2/4` 个独立 MachineID、独立 Badger 路径的副本，请求轮询分发，报告聚合吞吐和单副本平均吞吐。可通过 `SHOP_BENCH_REPLICAS` 覆盖副本矩阵，`SHOP_BENCH_CONCURRENCIES` 表示每副本并发。
 - `Benchmark07DrainPendingOnce`：07 后台同步 pending 到 MySQL 远程权威库。
 
-benchmark 结果只用于同机同次趋势评估，不作为固定提升倍数门禁；真实容量评估仍需要按部署拓扑、远程库和 MQ 配置重新压测。
+水平扩容 benchmark 的多个 Badger 目录在逻辑和文件路径上完全隔离，但同机运行时仍共享宿主机 CPU 和物理磁盘，因此结果只用于同机同次趋势评估，不作为固定提升倍数门禁；真实容量评估仍需要按部署拓扑、独立卷、远程库和 MQ 配置重新压测。
 
 ## 质量门禁
 

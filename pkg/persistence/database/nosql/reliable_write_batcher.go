@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,6 +77,12 @@ func newBatchCommitter[T types.IModel](
 	}
 	if config.CollectWindow <= 0 {
 		config.CollectWindow = time.Millisecond
+	}
+	if config.MaxBatch > 1 && config.CollectBacklog <= 0 {
+		config.CollectBacklog = 16
+		if config.CollectBacklog >= config.MaxBatch {
+			config.CollectBacklog = config.MaxBatch - 1
+		}
 	}
 	if config.QueueCapacity < config.MaxBatch {
 		config.QueueCapacity = config.MaxBatch
@@ -197,6 +204,11 @@ func (b *BatchCommitter[T]) run() {
 		batch := []batchCommitRequest[T]{first}
 		channelClosed := false
 		if b.config.MaxBatch > 1 {
+			runtime.Gosched()
+			if len(b.requests) < b.config.CollectBacklog {
+				b.finishBatch(batch)
+				continue
+			}
 			timer := time.NewTimer(b.config.CollectWindow)
 		collect:
 			for len(batch) < b.config.MaxBatch {

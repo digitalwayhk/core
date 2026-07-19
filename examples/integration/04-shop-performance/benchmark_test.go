@@ -188,12 +188,9 @@ func BenchmarkAddOrder(b *testing.B) {
 	for _, concurrency := range benchmarkConcurrencies() {
 		concurrency := concurrency
 		b.Run(fmt.Sprintf("concurrency-%d", concurrency), func(b *testing.B) {
-			tokens := make([]string, b.N)
-			for index := range tokens {
-				tokens[index] = suite.TokenFor(b, fmt.Sprintf("bench-order-%d-%d", time.Now().UnixNano(), index), 0)
-			}
+			tokens := suite.TokenPoolFor(b, fmt.Sprintf("bench-order-%d", time.Now().UnixNano()), 128, 0)
 			runHTTPBenchmarkSingleConcurrency(b, concurrency, func(index int) error {
-				return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", tokens[index], map[string]interface{}{
+				return requestSucceeded(http.MethodPost, "/api/performanceshop/addorder", tokens[index%len(tokens)], map[string]interface{}{
 					"productID": uintID(b, fixture.product.ID), "quantity": 1,
 				})
 			})

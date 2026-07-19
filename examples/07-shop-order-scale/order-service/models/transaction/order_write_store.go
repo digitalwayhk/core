@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 )
 
@@ -87,18 +89,23 @@ func (store *OrderWriteStore) FindLocalByRequest(
 	userID uint,
 	requestID string,
 ) (*Order, error) {
-	// 先按用户前缀限制扫描范围，避免为单个幂等查询遍历全副本 pending。
-	items, err := store.PendingByUser(ctx, userID)
+	requestID = strings.TrimSpace(requestID)
+	key := orderRequestLocalKey(userID, requestID)
+	if key == "" {
+		return nil, nil
+	}
+	item, err := store.reliable.GetLocal(ctx, key)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range items {
-		if item != nil && item.RequestID == requestID {
-			// 请求指纹是否一致由 business 判断；store 只返回原始本地事实。
-			return item, nil
-		}
+	if item == nil || item.UserID != userID || strings.TrimSpace(item.RequestID) != requestID {
+		return nil, nil
 	}
-	return nil, nil
+	// 请求指纹是否一致由 business 判断；store 只返回原始本地事实。
+	return item, nil
 }
 
 // PendingByUser 返回当前实例本地可见的指定用户订单。

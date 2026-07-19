@@ -81,6 +81,19 @@ func TestForceSyncBatchHonorsLimitAndPartialConfirmation(t *testing.T) {
 	require.Equal(t, 3, db.GetCachedPendingSyncCount())
 }
 
+func TestForceSyncBatchClampsLimitToConfiguredSyncBatchSize(t *testing.T) {
+	target := &boundedFundTarget{confirm: 5}
+	db := newBoundedSyncFundDB(t, target, 5)
+	db.manager.config.SyncBatchSize = 3
+
+	result, err := db.ForceSyncBatch(context.Background(), 10000)
+	require.NoError(t, err)
+	require.Equal(t, ForceSyncResult{Confirmed: 3, Remaining: 2}, result)
+	calls, received := target.snapshot()
+	require.Equal(t, 1, calls)
+	require.Equal(t, []int{3}, received)
+}
+
 func TestForceSyncBatchRejectsInvalidLimit(t *testing.T) {
 	target := &boundedFundTarget{}
 	db := newBoundedSyncFundDB(t, target, 1)

@@ -3,6 +3,7 @@ package transaction
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -108,4 +109,28 @@ func TestOrderWriteStorePendingFollowsFrameworkAck(t *testing.T) {
 		found, findErr := store.FindLocalByRequest(context.Background(), 8, "pending-request")
 		return findErr == nil && found == nil
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestFindLocalByRequestUsesConstantCostLookup(t *testing.T) {
+	store, _ := newOrderWriteStoreTestRuntime(t, "shop-order-idempotency-lookup")
+	orders := make([]*Order, 256)
+	for index := range orders {
+		orders[index] = newReliableOrder(
+			uint(10_000+index),
+			99,
+			fmt.Sprintf("request-%03d", index),
+		)
+		orders[index].prepareForLocalInsert()
+	}
+	result, err := store.reliable.SaveBatch(context.Background(), orders)
+	require.NoError(t, err)
+	require.Equal(t, len(orders), result.Committed)
+
+	allocations := testing.AllocsPerRun(3, func() {
+		found, findErr := store.FindLocalByRequest(context.Background(), 99, "request-255")
+		require.NoError(t, findErr)
+		require.NotNil(t, found)
+		require.Equal(t, uint(10_255), found.ID)
+	})
+	require.Less(t, allocations, float64(500), "幂等键查询不应扫描并反序列化用户全部 pending")
 }

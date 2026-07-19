@@ -156,15 +156,19 @@ type retryRemoteStore struct {
 	stored *models.Order
 }
 
-func (s *retryRemoteStore) Upsert(ctx context.Context, order *models.Order) (*models.Order, error) {
+func (s *retryRemoteStore) UpsertBatch(ctx context.Context, orders []*models.Order) ([]*models.Order, error) {
 	if s.seen == nil {
 		s.seen = make(map[uint]bool)
 	}
 	s.calls++
-	s.seen[order.ID] = true
+	for _, order := range orders {
+		s.seen[order.ID] = true
+	}
 	if s.fail {
 		return nil, errors.New("remote temporarily unavailable")
 	}
-	s.stored = order
-	return order, nil
+	if len(orders) > 0 {
+		s.stored = orders[0]
+	}
+	return orders, nil
 }
