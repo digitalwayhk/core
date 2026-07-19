@@ -38,10 +38,12 @@ type (
 	// OrderQueryFilter 是远程权威订单查询条件别名。
 	OrderQueryFilter = transaction.OrderQueryFilter
 
-	// OrderWriteAccess 是业务所需实例级本地可靠写入接口别名。
+	// OrderWriteAccess 是 API/business 注入的最小实例级可靠写接口别名。
+	// 别名只稳定跨层依赖方向，不向根 models 包转移 store 创建、绑定或关闭职责。
 	OrderWriteAccess = transaction.OrderWriteAccess
 
 	// OrderWriteRuntime 是服务实例持有的 typed runtime 别名。
+	// 它作为路由构造期的稳定引用，实际 store 仍由 Service.Start 绑定并交给 ServiceContext 托管。
 	OrderWriteRuntime = transaction.OrderWriteRuntime
 )
 
