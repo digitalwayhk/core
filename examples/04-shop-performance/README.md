@@ -16,40 +16,39 @@
 示例 4 在不降低持久化可靠性的前提下，组合两项优化：
 
 1. `OrderReferenceCache` 缓存下单所需的商品、供应商和价格快照；同一商品冷加载使用 go-zero `SingleFlight` 合并。商品或供应商变更后，由 `ServiceEventBridge` 发布控制事件并清理缓存，不依赖 TTL 猜测数据是否过期。
-2. `OrderWriteStore` 通过原子指针提供服务启动后的热路径，避免每个下单请求竞争全局初始化锁。
+2. `ShopService` 为当前 `ServiceContext` 创建一个 `OrderWriteRuntime`，所有路由和业务服务显式注入同一实例，不使用包级 store registry。
 
 事实缓存只保存构造订单所需的最小不可变快照，不缓存请求、用户、响应或完整持久化模型。EventBridge 默认只在当前服务内投递；未来水平扩展时，应显式配置可靠外发控制事件。
 
 ## 可靠 Group Commit 与写后同步
 
 ```text
-AddOrder
+CreateOrder
   -> 本地下单事实缓存（冷加载才查询 SQLite）
-  -> 低积压：单笔立即写入 Badger
-  -> 高积压：最多 1ms / 128 笔合并为一个 Badger 事务
+  -> ReliableWriteStore.Save
+  -> 最多 1ms / 128 个并发请求合并为 Badger 事务
   -> 请求等待本批 Badger SyncWrites 成功
   -> 立即返回 DTO 并推送 WebSocket
   -> 后台批量写入 SQLite
   -> 同步确认后自动删除 Badger 副本
 ```
 
-这里的 Group Commit 不是“内存入队即成功”。每个请求只有在所属批次完成 Badger `SyncWrites` 后才返回，所以已确认订单在进程异常退出后仍可恢复。队列积压少于 16 笔时逐单立即提交，避免低并发固定等待；达到阈值后才短暂聚合，以减少高并发下的 fsync 次数。
+这里的 Group Commit 不是“内存入队即成功”。每个请求只有在所属批次完成 Badger `SyncWrites` 后才返回，所以已确认订单在进程异常退出后仍可恢复。聚合、队列容量、panic 隔离和部分提交前缀统一由框架 `BatchCommitter` 处理。
 
-写后同步通过 `PrefixedBadgerDB.UseWriteBehind(WriteBehindTarget)` 绑定远端汇合目标。04 使用 `ModelListWriteBehindTarget` 兼容 SQLite 示例，业务代码只负责本地可靠提交、背压和指标封装，不再直接管理 pending ACK；`EnableWriteBehind(ModelList)` 仅保留为旧代码兼容入口。
+写后同步通过 `ReliableWriteStore.UseWriteBehind(WriteBehindTarget)` 绑定一次远端汇合目标。04 使用 `ModelListWriteBehindTarget` 兼容 SQLite 示例；Group Commit、背压、pending ACK、磁盘指标与关闭由框架统一处理，业务适配器只保留订单校验、用户前缀查询和 SQLite 可见数据合并。
 
 订单 `GetHash()` 仍是 `orderID`；Badger 通过 `ILocalRowCode` 使用 `Order:u:<UserID摘要>:<orderID>`，因此可直接扫描当前可信用户的 pending 前缀，不再遍历全局积压，也不在磁盘键中暴露原始 UserID。查询合并 SQLite 与 Badger，支付、删除和撤销在进入 SQLite 事务前按需汇合目标订单。
 
-后台同步与强制本地删除按键串行：若同步先开始，删除等待远端提交后再删 SQLite；若删除先开始，同步重新校验发现键已不存在后跳过。这保证已删订单不会被在途快照复活。
+删除先可靠写入 tombstone，再执行有界 `ForceSyncAll`；成功响应表示 SQLite 已确认删除。物理本地清理由框架 ACK 与 `IsSyncAfterDelete` 完成，业务不调用 `PurgeLocal`。
 
 ## 容量保护与可观测性
 
-- go-zero `syncx.TimeoutLimit` 保护单实例最多 500 个在途订单写入；超出部分最多等待 2 秒。
+- 框架 `WriteAdmissionController` 内部使用 go-zero `syncx.TimeoutLimit`，保护单实例最多 500 个在途订单写入；超出部分最多等待 2 秒。
 - pending 软/硬阈值是 10,000/50,000；软阈值持续 30 秒或达到硬阈值时拒绝新写入。
-- Badger 目录每 5 秒采样，示例硬上限是 1 GiB。生产项目必须根据磁盘配额重新配置，不应照搬数字。
-- 高并发基准可临时覆盖示例阈值（子进程继承环境变量）：`SHOP_ORDER_WRITE_MAX_CONCURRENT`、`SHOP_ORDER_WRITE_SOFT_PENDING`、`SHOP_ORDER_WRITE_HARD_PENDING`、`SHOP_ORDER_WRITE_HARD_DISK_BYTES`、`SHOP_ORDER_WRITE_ACQUIRE_TIMEOUT_MS`、`SHOP_ORDER_WRITE_BACKLOG_DURATION_MS`。默认值仍是生产演示用的保守保护，不是跨机器承诺。
-- `models.GetOrderWritePerformanceSnapshot()` 返回 Group Commit、SQLite 同步、pending/磁盘和背压快照。`LifetimeAPIConfirmedTPS` 是 Badger 可靠提交的进程生命周期均值，`LifetimeSQLiteConvergenceTPS` 是 SQLite 墙钟收敛的进程生命周期均值；两者都包含启动和空闲时间，不是当前一秒的瞬时 TPS。`SQLiteActiveSyncTPS` 只表示实际同步忙碌时段的效率。
+- 磁盘硬上限是 1 GiB，每次准入直接读取 Badger 原生 LSM + VLog 大小，不再遍历目录。生产项目必须根据磁盘配额重新配置，不应照搬数字。
+- `OrderWriteRuntime.Metrics()` 映射框架 Group Commit、同步、pending、磁盘和背压快照，不暴露 store 指针。
 
-`ShopService.Start/Stop` 管理订单存储生命周期。服务强制终止后，同一运行目录重启会恢复同步队列；优雅关闭会尝试冲刷积压并返回可观察错误。
+`ShopService.Start` 使用 `ServiceName/DataCenterID/MachineID` 解析实例目录并通过 `ServiceContext.UseResource` 注册 store；`Stop` 先 Unbind runtime，随后由框架逆序关闭资源。关闭不访问 SQLite，未汇合 pending 会保留并返回 `PendingSyncError`。
 
 ## 运行
 

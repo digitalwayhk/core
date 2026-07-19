@@ -37,7 +37,9 @@ buyer request
   -> user/supplier 消费事件更新本地投影和缓存失效
 ```
 
-本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用 `PrefixedBadgerDB.UseWriteBehind(OrderWriteBehindTarget)` 把本地订单 pending 汇合到共享 MySQL，并由框架统一 ACK 与关闭恢复；订单业务 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单 public/private 业务链路必须走 business + 专用 store。
+本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用框架 `ReliableWriteStore[Order]`，只绑定一次业务 `OrderWriteBehindTarget`；订单 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox，Group Commit、背压、磁盘指标、pending ACK 与关闭恢复由框架统一处理。后台循环每次调用 `ForceSyncBatch(ctx, 100)`，不会 rebind target，也不会无视 limit 执行全量 drain。
+
+`Service` 持有实例级 `OrderWriteRuntime`，路由、`LocalOrderWriter`、查询和同步器都通过显式 `OrderWriteAccess` 注入。store 由 `ServiceContext.UseResource` 关闭，不存在包级全局 store registry。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单链路必须走 business + 专用 target。
 
 ## 管理配置同步
 
@@ -55,6 +57,7 @@ buyer request
 - 示例必须启用 `AutoMachineID=true`，不能为 order 副本硬编码 `MachineID=1/2/3`。
 - 框架需要通过当前 ClusterProvider 申请 MachineID lease，并在 Snowflake 初始化前完成绑定。
 - 每个副本必须拥有唯一 `ServiceInstanceID`，并记录到业务事实、pending、Outbox、Inbox、同步状态和诊断日志；`ServiceInstanceIP` 只用于诊断。
+- 本地目录固定追加 `<service>/dc-<DataCenterID>/machine-<MachineID>`。AutoMachineID 变化会进入新目录，不会自动接管旧 MachineID 的 pending；缩容或重新分配前必须完成 drain，或由编排层显式把旧独立卷交给恢复流程。
 - Docker 扩容时不固定暴露多个 order 业务端口；副本通过配置的发现机制注册，调用方只通过 ServiceResolver 选择实例。
 - `shop-order` scale 模板不传固定 `-p/-grpc`；需要覆盖容器内监听端口时使用 `SHOP_ORDER_HTTP_PORT/SHOP_ORDER_GRPC_PORT`。
 - 注册发现机制不应绑定 Redis；Redis、局域网发现或其他中间件由配置决定，示例只验证框架抽象可用。

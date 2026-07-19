@@ -42,6 +42,21 @@
 
 持久化配置由 `pkg/persistence` 各 adapter 拥有，不属于 `ServerConfig`。未来若把 persistence 字段加入 `ServerConfig`，矩阵一致性测试会要求同步更新下面的机器检查清单。
 
+### ReliableWriteStoreConfig
+
+| 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
+| --- | --- | --- | --- |
+| `BasePath` + `ServiceIdentity` | 构造时解析为 `<base>/<service>/dc-N/machine-N`；服务名必须是安全目录片段，ID 不能为负数 | `NewReliableWriteStore`，目录在 store 生命周期内固定 | supported |
+| `Badger` | 构造时覆盖 `Path` 为已解析实例目录；`SyncWrites`、冲突检测和损坏策略在绑定 target 时校验 | `SharedBadgerManager`、`PrefixedBadgerDB` | supported |
+| `Badger.AutoSync` | 只控制框架内置 write-behind worker；`false` 仍保留 pending 与手动 `ForceSyncBatch/All` | `PrefixedBadgerDB.startWriteBehindWorker` | supported |
+| `Batch.MaxBatch`、`CollectWindow`、`QueueCapacity` | 构造时补默认值并拒绝 queue 小于 max batch | `BatchCommitter` 从接收写到本地事务完成 | supported |
+| `Admission.MaxConcurrent`、`AcquireTimeout` | 每次进入 Group Commit 前读取 | `WriteAdmissionController` | supported |
+| `Admission.SoftPending`、`HardPending`、`MaxBacklogDuration` | 每次写入用 O(1) pending 快照检查持续积压 | `WriteAdmissionController` | supported |
+| `Admission.HardDiskBytes` | 每次写入读取 Badger 原生 LSM + VLog 大小 | `WriteAdmissionController` | supported |
+| `CloseTimeout` | `Close(ctx)` 计算等待本地 drain 和 prefix 关闭的上限 | `ReliableWriteStore`，由 `ServiceContext.UseResource` 统一关闭 | supported |
+
+业务自建 ticker 调用 `ForceSyncBatch` 与 `Badger.AutoSync` 是两个不同层次：前者是业务选择的 bounded drain 调度，后者只控制框架内置 worker，不能把 `AutoSync=false` 描述成“禁止所有同步”。
+
 ## 机器检查字段清单
 
 | 字段路径 | 状态 | 生命周期 owner | 运行时/拒绝证据 |

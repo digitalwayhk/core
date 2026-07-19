@@ -93,9 +93,36 @@ func (own *Product) NewModel() {
 
 write-behind 模式使用 `UseWriteBehind(WriteBehindTarget)`，要求 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。待同步记录禁止 TTL；关闭时仍有积压会返回可通过 `errors.As` 识别的 `PendingSyncError`。旧 `EnableWriteBehind(ModelList)` 和 `SetSyncDB` 仅为 `ModelList/IDataAction` 兼容入口，新业务热路径不得使用。
 
+同一 `PrefixedBadgerDB` 生命周期内只允许绑定一次 write-behind 目标，重复调用 `UseWriteBehind` 或 `EnableWriteBehind` 会返回 `ErrWriteBehindAlreadyBound`，不得依赖静默替换 target。`AutoSync=true` 时框架启动 ticker/trigger worker；`AutoSync=false` 时只保留 pending 和手动 `ForceSyncAll` 能力，业务必须自行提供有界同步循环或显式触发。
+
 `DefaultSharedConfig` 面向共享缓存，默认 `SyncWrites=false`，不能直接启用 write-behind。可靠写回必须显式设置 `SyncWrites=true` 并通过 `UseWriteBehind` 校验，不要依赖共享缓存默认值。
 
 write-behind 是 at-least-once：远端成功而本地确认失败时会重试，因此远端 insert/update/delete 必须通过稳定主键、upsert 或操作 ID 保证幂等。同 key 多次更新会合并为最新状态，只适用于账户快照、资料和订单当前状态；资金流水、审计记录等不可合并事件必须使用唯一事件 ID 的 NATS JetStream 或 transactional outbox。
+
+新业务需要“本地可靠确认 + 最终写回”时，应使用 `ReliableWriteStore[T]`，不要在业务包重复实现 batcher、背压、pending 计数、磁盘扫描或全局生命周期：
+
+```go
+identity := nosql.ServiceIdentity{
+	ServiceName:  sc.Service.Name,
+	DataCenterID: int64(sc.Config.DataCenterID),
+	MachineID:    int64(sc.Config.MachineID),
+}
+store, admin, err := nosql.NewReliableWriteStore[Order](identity, config)
+if err != nil {
+	return err
+}
+if err := store.UseWriteBehind(target); err != nil {
+	return err
+}
+if err := sc.UseResource("order-write-store", store); err != nil {
+	return err
+}
+_ = admin // 仅交给独立运维入口，不注入业务服务。
+```
+
+`Save` 同时表示 insert/update，`Delete` 写入可靠 tombstone，二者都只有在本地 Badger 提交完成后才返回成功。`ReliableWriteStoreAdmin.PurgeLocal` 会物理删除本地事实和 pending 索引，不产生远端删除语义，只能用于明确的运维修复。`ForceSyncBatch(ctx, limit)` 是 bounded sync；`Close(ctx)` 排空已接收的本地提交并报告 `PendingSyncError`，不会为了“优雅关闭”偷偷访问远端。
+
+目录固定为 `<BasePath>/<service>/dc-<DataCenterID>/machine-<MachineID>`。`ServiceContext` 必须持有 store 资源，业务通过同一服务实例的 typed runtime 访问，禁止恢复包级 registry。`AutoMachineID` 重新分配后会解析到新目录，不会自动接管旧 MachineID 的 pending；编排层必须为每个副本提供稳定、独立的持久卷并制定旧目录 drain/接管流程。
 
 JetStream 数据库写路径的模式选择、当前能力边界和生产化前置条件见 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`。当前 Provider 只应视为基础事件流能力，不能把尚未实现的重试、死信和 pull consumer 当作已生效。
 

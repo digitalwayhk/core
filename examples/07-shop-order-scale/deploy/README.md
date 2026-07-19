@@ -8,10 +8,12 @@
 - 每个副本通过 `AutoMachineID=true` 自动获得唯一 MachineID。
 - 每个副本拥有唯一 ServiceInstanceID。
 - 每个副本拥有独立本地 pending 目录。
+- store 会在挂载根目录下追加 `<service>/dc-<DataCenterID>/machine-<MachineID>`；MachineID 变化不会自动扫描或接管旧目录。
 - 所有副本共享同一个内部 MySQL 远程 order 权威库，Compose 不向宿主机暴露 MySQL 端口。
 - 注册发现 Provider 由配置决定，业务代码不能写死 Redis。
 - order 副本不暴露宿主机业务端口，内部调用走 ServiceResolver。
 - 缩容时先停止接新请求，再尽量 drain 本地 pending；未 drain 完的 pending 必须可恢复。
+- `Service.Stop` 先停止 bounded sync ticker 并 Unbind runtime，`ServiceContext` 随后关闭 store；关闭本身不连接 MySQL，剩余 pending 以 `PendingSyncError` 报告。
 
 固定双副本：
 
