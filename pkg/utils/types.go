@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-	"unsafe"
 
 	"github.com/shopspring/decimal"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -705,20 +704,17 @@ func Add(v1, v2 reflect.Value) reflect.Value {
 	return num
 }
 
-// ==================== unsafe 转换（Go 1.20+，替换已弃用 API） ====================
+// ==================== 字节与字符串转换 ====================
 
 func String2Bytes(s string) []byte {
 	if s == "" {
 		return nil
 	}
-	return unsafe.Slice(unsafe.StringData(s), len(s))
+	return []byte(s)
 }
 
 func Bytes2String(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(unsafe.SliceData(b), len(b))
+	return string(b)
 }
 
 func IsEqual(v1, v2 interface{}) bool {

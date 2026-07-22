@@ -1,3 +1,4 @@
+// 本文件验证反射、类型转换和兼容入口的稳定行为。
 package utils
 
 import (
@@ -37,6 +38,26 @@ func TestAnyToTypeDataPreservesIntegerBaseAutoDetection(t *testing.T) {
 
 func TestRecycleObjectRemainsSourceCompatible(t *testing.T) {
 	RecycleObject(&deepForNamedStatusFixture{})
+}
+
+func TestBytes2StringReturnsIndependentString(t *testing.T) {
+	input := []byte("abc")
+	got := Bytes2String(input)
+	input[0] = 'z'
+	if got != "abc" {
+		t.Fatalf("Bytes2String() 与输入共享内存，实际=%q", got)
+	}
+}
+
+func TestString2BytesReturnsIndependentBytes(t *testing.T) {
+	source := []byte{'a', 'b', 'c'}
+	input := string(source)
+	source[0] = 'q'
+	got := String2Bytes(input)
+	got[0] = 'z'
+	if input != "abc" {
+		t.Fatalf("String2Bytes() 修改了输入字符串，实际=%q", input)
+	}
 }
 
 func containsString(items []string, target string) bool {

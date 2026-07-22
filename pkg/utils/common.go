@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -110,30 +111,21 @@ func IsTest() bool {
 
 // FirstUpper 字符串首字母大写
 func FirstUpper(s string) string {
-	if s == "" {
+	first, size := utf8.DecodeRuneInString(s)
+	if size == 0 {
 		return ""
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return string(unicode.ToUpper(first)) + s[size:]
 }
 
 // FirstLower 字符串首字母小写
 func FirstLower(s string) string {
-	if s == "" {
+	first, size := utf8.DecodeRuneInString(s)
+	if size == 0 {
 		return ""
 	}
-	return strings.ToLower(s[:1]) + s[1:]
+	return string(unicode.ToLower(first)) + s[size:]
 }
-
-// func hash[A comparable](a A) uintptr {
-// 	var m interface{} = make(map[A]struct{})
-// 	hf := (mh)((*unsafe.Pointer)(unsafe.Pointer(&m))).hf
-// 	return hf(unsafe.Pointer(&a), 0)
-// }
-
-// mh is an inlined combination of runtime._type and runtime.maptype.
-// type mh struct {
-// 	hf func(unsafe.Pointer, uintptr) uintptr
-// }
 
 func IsEmail(device string) bool {
 	if _, err := mail.ParseAddress(device); err == nil {
