@@ -183,6 +183,9 @@ func GetElem(typ reflect.Type) reflect.Type {
 }
 
 func IsPtr(instance interface{}) bool {
+	if instance == nil {
+		return false
+	}
 	return reflect.TypeOf(instance).Kind() == reflect.Ptr
 }
 
