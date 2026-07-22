@@ -15,6 +15,7 @@
 | `pkg/server/safe/twosteps/google.go` | `VerifyCode` 为活跃导出方法；文件尾部 demo 无调用方 | `remove-debug` | 删除 stdout 验证码输出、包内 demo `main/initAuth` 和全局错误变量；行为测试捕获 stdout 并要求为空 |
 | `pkg/server/trans/quic` | 配置校验明确拒绝 QUIC；`run/server.go` 注册代码已注释；包仍导出 `Server/NewServer` | `unsupported/deprecate` | 本轮不删除公共包。配置路径保持 fail-fast；直接导入面的日志、panic 和正式废弃登记转任务 8/9 |
 | `pkg`、`service` 中运行时控制台和异常日志 | 仍存在多处标准输出、标准日志和非结构化 `logx` | `replace` | 转任务 8，以静态门禁和逐包测试统一处理 |
+| `pkg/utils/eventbus.go` | 全仓无生产或示例调用；自 2022 年首次提交后无演进；现行事件入口位于 `pkg/server/event` | `remove-experimental` | 删除 `utils.Publisher`；进程内事件使用 `event.Stream`，服务事件使用 `ServiceContext` 管理的 EventBridge |
 
 ## 已验证契约
 
