@@ -17,6 +17,7 @@
 | 示例 07 `models.RemoveLocalOrder` | `PrefixedBadgerDB` 根据 write-behind ACK 与 `IsSyncAfterDelete` 自动清理 | v0.0.250 | v0.1.0 | examples/07-shop-order-scale | 订单水平扩展示例扩展 | `examples/07-shop-order-scale/order-service/business/order_syncer_test.go` |
 | 示例 04 `StartOrderWriteStore`、`StopOrderWriteStore`、全局查询/指标门面 | `OrderWriteRuntime` + `ServiceContext.UseResource` | v0.0.250 | v0.1.0 | examples/04-shop-performance | 示例扩展与基准 | `examples/04-shop-performance/models/order_write_store_test.go` |
 | 示例 07 `StartOrderWriteStore`、`StopOrderWriteStore`、`AddOrder`、`UseOrderWriteBehind`、`SyncLocalOrders`、本地查询别名 | `transaction.OrderWriteRuntime` + 注入式 `OrderWriteAccess` | v0.0.250 | v0.1.0 | examples/07-shop-order-scale | 订单水平扩展示例扩展 | `examples/07-shop-order-scale/order-service/models/transaction/order_write_store_test.go` |
+| `utils.StopMemoryMonitor` | 由资源 owner 管理指标和内存策略 | v0.0.251 | v0.1.0 | utils | 旧反射工具调用方 | `pkg/utils/lifecycle_test.go` |
 
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。
 

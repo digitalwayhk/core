@@ -3,11 +3,9 @@ package utils
 import (
 	"fmt"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 
 	"github.com/shopspring/decimal"
@@ -54,60 +52,16 @@ const (
 	Invalid
 )
 
-// ==================== 内存监控 ====================
-
-var memMonitorStop = make(chan struct{}, 1)
-
-func init() {
-	startReflectionMemoryMonitor()
-}
-
-// StopMemoryMonitor 优雅停止后台内存监控 goroutine
-func StopMemoryMonitor() {
-	select {
-	case memMonitorStop <- struct{}{}:
-	default:
-	}
-}
-
-func startReflectionMemoryMonitor() {
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-memMonitorStop:
-				return
-			case <-ticker.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				if m.Alloc > 200*1024*1024 { // 仅超过 200MB 时清理并打印
-					cleanReflectionCaches(&m)
-				}
-			}
-		}
-	}()
-}
-
-func cleanReflectionCaches(m *runtime.MemStats) {
-	mappingCount, mappingDeleted := 0, 0
-	fieldMappingCache.Range(func(key, _ interface{}) bool {
-		mappingCount++
-		if mappingCount > 100 {
-			fieldMappingCache.Delete(key)
-			mappingDeleted++
-		}
-		return true
-	})
-
-	runtime.GC()
-	logx.Infof("反射缓存清理 - 内存: %dMB, 映射缓存删除: %d",
-		m.Alloc/1024/1024, mappingDeleted)
-}
+// StopMemoryMonitor 为旧反射缓存监控的兼容入口。
+// Deprecated: utils 不再启动包级内存监控，调用该函数不会执行操作。
+func StopMemoryMonitor() {}
 
 // ==================== 类型实例创建 ====================
 
 func NewInterface(obj interface{}) interface{} {
+	if obj == nil {
+		return nil
+	}
 	tye, _ := GetTypeAndValue(obj)
 	return NewInterfaceByType(tye)
 }
@@ -116,6 +70,9 @@ func NewInterface(obj interface{}) interface{} {
 // 说明：此前基于 sync.Pool 的对象池因缺少归还路径（RecycleObject 从未被调用）而从未生效，
 // 且路由层已有独立对象池，故此处直接用 reflect.New 创建全新零值对象，语义等价且更简洁。
 func NewInterfaceByType(typ reflect.Type) interface{} {
+	if typ == nil {
+		return nil
+	}
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
 	}
@@ -138,10 +95,16 @@ func GetPackageName(target interface{}) string {
 }
 
 func GetTypeName(item interface{}) string {
+	if item == nil {
+		return ""
+	}
 	return getType(reflect.TypeOf(item)).Name()
 }
 
 func GetTypeKind(typ reflect.Type) TypeKind {
+	if typ == nil {
+		return Invalid
+	}
 	switch typ.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16,
 		reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8,
@@ -161,16 +124,25 @@ func GetTypeKind(typ reflect.Type) TypeKind {
 }
 
 func GetTypeAndValue(target interface{}) (reflect.Type, reflect.Value) {
+	if target == nil {
+		return nil, reflect.Value{}
+	}
 	stype := reflect.TypeOf(target)
 	sv := reflect.ValueOf(target)
 	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()
+		if sv.IsNil() {
+			return stype, reflect.Value{}
+		}
 		sv = sv.Elem()
 	}
 	return stype, sv
 }
 
 func getType(typ reflect.Type) reflect.Type {
+	if typ == nil {
+		return nil
+	}
 	if IsTypeKind(typ, Ptr) {
 		return typ.Elem()
 	}
@@ -193,15 +165,24 @@ func IsTypeKind(typ reflect.Type, kind TypeKind) bool {
 }
 
 func HasProperty(target interface{}, name string) bool {
+	if target == nil {
+		return false
+	}
 	stype := reflect.TypeOf(target)
 	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()
+	}
+	if stype.Kind() != reflect.Struct {
+		return false
 	}
 	_, ok := stype.FieldByName(name)
 	return ok
 }
 
 func GetPropertyType(target interface{}, name string) *reflect.StructField {
+	if target == nil {
+		return nil
+	}
 	stype := reflect.TypeOf(target)
 	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()
@@ -228,6 +209,9 @@ func GetPropertyType(target interface{}, name string) *reflect.StructField {
 // GetPropertyTypeByElemName 通过字段元素类型名查找字段
 // 例如字段 PriceSources []*IndexPriceSourceModel，elemTypeName="IndexPriceSourceModel" 可以找到该字段
 func GetPropertyTypeByElemName(target interface{}, elemTypeName string) *reflect.StructField {
+	if target == nil {
+		return nil
+	}
 	stype := reflect.TypeOf(target)
 	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()
@@ -258,7 +242,7 @@ func GetPropertyTypeByElemName(target interface{}, elemTypeName string) *reflect
 
 func GetPropertyValue(target interface{}, name string) interface{} {
 	stype, sv := GetTypeAndValue(target)
-	if stype.Kind() == reflect.Struct {
+	if stype != nil && sv.IsValid() && stype.Kind() == reflect.Struct {
 		if _, ok := stype.FieldByName(name); ok {
 			return sv.FieldByName(name).Interface()
 		}
@@ -268,7 +252,7 @@ func GetPropertyValue(target interface{}, name string) interface{} {
 
 func SetPropertyValue(sender interface{}, name string, value interface{}) error {
 	stype, sv := GetTypeAndValue(sender)
-	if stype.Kind() == reflect.Struct {
+	if stype != nil && sv.IsValid() && stype.Kind() == reflect.Struct {
 		vv := sv.FieldByNameFunc(func(fieldName string) bool {
 			return strings.EqualFold(fieldName, name)
 		})
@@ -297,7 +281,10 @@ func valueToTypeValue(value interface{}, changeType reflect.Type) (reflect.Value
 }
 
 func GetParentType(target interface{}) interface{} {
-	stype := reflect.TypeOf(target)
+	stype := getType(reflect.TypeOf(target))
+	if stype == nil || stype.Kind() != reflect.Struct {
+		return nil
+	}
 	for i := 0; i < stype.NumField(); i++ {
 		t := stype.Field(i).Type
 		if t.Kind() == reflect.Struct && t.Name() == stype.Name() {
@@ -321,6 +308,9 @@ func DeepForItem(item interface{}, forfunc func(field, parent reflect.StructFiel
 }
 
 func DeepFor(stype reflect.Type, forfunc func(field, parent reflect.StructField, kind TypeKind)) {
+	if stype == nil {
+		return
+	}
 	visited := make(map[reflect.Type]bool)
 	deepFor(stype, reflect.StructField{}, forfunc, visited)
 }
@@ -328,7 +318,7 @@ func DeepFor(stype reflect.Type, forfunc func(field, parent reflect.StructField,
 // 修复：通过 visited 集合防止无限递归，defer 解除标记允许同类型在不同路径中正确遍历
 func deepFor(stype reflect.Type, parent reflect.StructField, forfunc func(field, parent reflect.StructField, kind TypeKind), visited map[reflect.Type]bool) {
 	stype = getType(stype)
-	if stype.Kind() != reflect.Struct {
+	if stype == nil || stype.Kind() != reflect.Struct {
 		return
 	}
 	if visited[stype] {
@@ -404,6 +394,9 @@ func ForEach(item interface{}, fn func(name string, value interface{})) {
 }
 
 func ArrayEach(items interface{}, f func(item interface{})) {
+	if items == nil || f == nil {
+		return
+	}
 	stype := reflect.TypeOf(items)
 	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
 		s := reflect.ValueOf(items)
@@ -425,6 +418,9 @@ func IsArray(items interface{}) bool {
 }
 
 func NewArrayItem(items interface{}) interface{} {
+	if items == nil {
+		return nil
+	}
 	stype := reflect.TypeOf(items)
 	if stype.Kind() == reflect.Ptr {
 		stype = stype.Elem()

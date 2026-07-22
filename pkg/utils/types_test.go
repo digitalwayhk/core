@@ -40,6 +40,52 @@ func TestRecycleObjectRemainsSourceCompatible(t *testing.T) {
 	RecycleObject(&deepForNamedStatusFixture{})
 }
 
+func TestReflectionHelpersHandleNilInputs(t *testing.T) {
+	if NewInterface(nil) != nil || NewInterfaceByType(nil) != nil {
+		t.Fatal("nil 类型不应创建实例")
+	}
+	if GetTypeName(nil) != "" || GetTypeKind(nil) != Invalid || GetElem(nil) != nil {
+		t.Fatal("nil 类型应返回稳定零值")
+	}
+	typ, value := GetTypeAndValue(nil)
+	if typ != nil || value.IsValid() {
+		t.Fatalf("GetTypeAndValue(nil)=(%v, %v), want nil and invalid value", typ, value)
+	}
+	if HasProperty(nil, "ID") || GetPropertyType(nil, "ID") != nil ||
+		GetPropertyTypeByElemName(nil, "Item") != nil {
+		t.Fatal("nil 目标不应报告任何字段")
+	}
+	if got := GetPropertyValue(nil, "ID"); got != "" {
+		t.Fatalf("GetPropertyValue(nil)=%v, want empty string", got)
+	}
+	if err := SetPropertyValue(nil, "ID", 1); err != nil {
+		t.Fatalf("SetPropertyValue(nil)=%v, want nil", err)
+	}
+	if GetParentType(nil) != nil || NewArrayItem(nil) != nil {
+		t.Fatal("nil 目标不应生成父类型或集合元素")
+	}
+	DeepFor(nil, func(reflect.StructField, reflect.StructField, TypeKind) {
+		t.Fatal("DeepFor(nil) 不应调用回调")
+	})
+	ArrayEach(nil, func(interface{}) {
+		t.Fatal("ArrayEach(nil) 不应调用回调")
+	})
+
+	var typedNil *deepForNamedStatusFixture
+	if got := GetPropertyValue(typedNil, "NamedStatus"); got != "" {
+		t.Fatalf("GetPropertyValue(typed nil)=%v, want empty string", got)
+	}
+	if err := SetPropertyValue(typedNil, "NamedStatus", NamedStatus(1)); err != nil {
+		t.Fatalf("SetPropertyValue(typed nil)=%v, want nil", err)
+	}
+}
+
+func TestIsPtrReturnsFalseForNilInterface(t *testing.T) {
+	if IsPtr(nil) {
+		t.Fatal("nil interface 不应被识别为指针")
+	}
+}
+
 func TestBytes2StringReturnsIndependentString(t *testing.T) {
 	input := []byte("abc")
 	got := Bytes2String(input)
