@@ -52,6 +52,20 @@ func selectAuthMode(auth config.AuthSecret) authMode {
 	return authModeInternalJWT
 }
 
+// resolveRouteAuthPolicy 返回路由所属认证域及当前启用的认证模式。
+func resolveRouteAuthPolicy(
+	rou *router.ServiceRouter,
+	path string,
+) (config.AuthSecret, types.AuthType, authMode) {
+	auth := rou.Service.Config.Auth
+	authType := types.AuthTypeUser
+	if rou.HasRouter(path, types.ManageType) {
+		auth = rou.Service.Config.ManageAuth
+		authType = types.AuthTypeManage
+	}
+	return auth, authType, selectAuthMode(auth)
+}
+
 func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
 	options, err := restRunOptions(isCors, origin)
 	if err != nil {
@@ -203,13 +217,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 	path := api.GetPath()
 	var handler http.Handler = http.HandlerFunc(RouteHandler(own.context.Router))
 	if api.GetAuth() {
-		auth := own.context.Config.Auth
-		authType := types.AuthTypeUser
-		if own.context.Router.HasRouter(path, types.ManageType) {
-			auth = own.context.Config.ManageAuth
-			authType = types.AuthTypeManage
-		}
-		mode := selectAuthMode(auth)
+		auth, authType, mode := resolveRouteAuthPolicy(own.context.Router, path)
 		handler = authRequestHandler(own.context, api, authType, mode, handler)
 		if mode == authModeLogto {
 			authHandler, err := own.newLogtoHandler(handler.ServeHTTP, auth.Logto)
@@ -359,6 +367,16 @@ func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 		if info == nil {
 			writeErrorResponse(w, StatusNotFound, "Route not found: "+req.GetPath(), nil)
 			return
+		}
+		if info.GetAuth() {
+			_, authType, mode := resolveRouteAuthPolicy(rou, info.GetPath())
+			identity, _, err := verifiedRequestIdentity(r, rou.Service, authType, mode)
+			if err != nil {
+				contract := types.ResolvePublicError(err)
+				logAuthRequestDenied(rou.Service, info, authType, identity, contract)
+				writePublicErrorContract(w, contract)
+				return
+			}
 		}
 
 		// 执行路由处理
