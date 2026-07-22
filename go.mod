@@ -1,6 +1,6 @@
 module github.com/digitalwayhk/core
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/getkin/kin-openapi v0.94.0

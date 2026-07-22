@@ -14,7 +14,7 @@ mkdir -p "$repo/sample"
   cat >go.mod <<'EOF'
 module consumer-contract
 
-go 1.26.0
+go 1.26.5
 EOF
   cat >sample/sample.go <<'EOF'
 package sample
