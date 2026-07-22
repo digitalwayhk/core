@@ -1,3 +1,4 @@
+// 本文件验证客户端 IP 解析的可信代理、安全地址和 IPv6 边界。
 package utils
 
 import (

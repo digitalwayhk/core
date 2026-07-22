@@ -1,3 +1,4 @@
+// 本文件提供运行路径、文件和目录操作的兼容辅助函数。
 package utils
 
 import (
@@ -6,7 +7,8 @@ import (
 	"path/filepath"
 )
 
-var TESTPATH string = ""
+// TESTPATH 指定测试运行时使用的根路径。
+var TESTPATH string
 
 // Getpath 获取当前路径,当为测试运行时，使用TESTPATH
 func Getpath() string {
@@ -60,6 +62,8 @@ func CreateDir(name string) (string, error) {
 	}
 	return folderPath, nil
 }
+
+// ReadFile 读取文件全部内容并返回字符串。
 func ReadFile(file string) (string, error) {
 	f, err := os.Open(file)
 	if err != nil {
@@ -83,6 +87,7 @@ func ReadFile(file string) (string, error) {
 	return string(chunks), nil
 }
 
+// DeleteFile 删除指定文件。
 func DeleteFile(file string) error {
 	return os.Remove(file)
 }

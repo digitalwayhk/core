@@ -1,3 +1,4 @@
+// 本文件保留 Snowflake worker 的兼容构造入口。
 package utils
 
 import (
@@ -6,7 +7,7 @@ import (
 	"github.com/yitter/idgenerator-go/idgen"
 )
 
-//NewAlgorithmSnowFlake machineId,dataCenterId
+// NewAlgorithmSnowFlake 按旧十进制拼接规则组合 machineId 和 dataCenterId。
 func NewAlgorithmSnowFlake(machineId uint, dataCenterId uint) idgen.ISnowWorker {
 	d := strconv.Itoa(int(dataCenterId))
 	m := strconv.Itoa(int(machineId))

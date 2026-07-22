@@ -1,55 +1,23 @@
+// 本文件提供反射类型识别、字段访问、结构遍历和实例创建能力。
 package utils
 
 import (
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
-	"sync"
 	"unicode"
-
-	"github.com/shopspring/decimal"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
-type Decimal decimal.Decimal
-
-func (d Decimal) Equals(other Decimal) bool {
-	return decimal.Decimal(d).Equal(decimal.Decimal(other))
-}
-
-func (d Decimal) Less(other Decimal) bool {
-	return decimal.Decimal(d).LessThan(decimal.Decimal(other))
-}
-
-type AutoMapArge struct {
-	Field       string
-	Value       string
-	FieldValue  interface{}
-	SourceName  string
-	TargetName  string
-	SourceType  reflect.Type
-	TargetType  reflect.Type
-	FieldType   reflect.StructField
-	SourceValue interface{}
-	TargetValue interface{}
-}
-
-type AutoMapHander struct {
-	TargetField string
-	TargetValue interface{}
-	TargetItems map[string]interface{}
-}
-
+// TypeKind 表示工具包归一后的反射类型类别。
 type TypeKind int
 
 const (
-	Base TypeKind = iota
-	Array
-	Ptr
-	Func
-	Struct
-	Invalid
+	Base    TypeKind = iota // Base 表示数字、布尔、字符串和复数等基础类型。
+	Array                   // Array 表示数组、切片、映射和通道等集合类型。
+	Ptr                     // Ptr 表示指针类型。
+	Func                    // Func 表示函数或接口类型。
+	Struct                  // Struct 表示结构体类型。
+	Invalid                 // Invalid 表示未归类或 nil 类型。
 )
 
 // StopMemoryMonitor 为旧反射缓存监控的兼容入口。
@@ -58,6 +26,7 @@ func StopMemoryMonitor() {}
 
 // ==================== 类型实例创建 ====================
 
+// NewInterface 按对象的元素类型创建一个零值指针实例。
 func NewInterface(obj interface{}) interface{} {
 	if obj == nil {
 		return nil
@@ -87,6 +56,7 @@ func RecycleObject(obj interface{}) {}
 
 // ==================== 类型工具 ====================
 
+// GetPackageName 返回对象元素类型的完整包路径。
 func GetPackageName(target interface{}) string {
 	if target == nil {
 		return ""
@@ -94,6 +64,7 @@ func GetPackageName(target interface{}) string {
 	return getType(reflect.TypeOf(target)).PkgPath()
 }
 
+// GetTypeName 返回对象元素类型的名称。
 func GetTypeName(item interface{}) string {
 	if item == nil {
 		return ""
@@ -101,6 +72,7 @@ func GetTypeName(item interface{}) string {
 	return getType(reflect.TypeOf(item)).Name()
 }
 
+// GetTypeKind 将 reflect.Type 归一为 TypeKind。
 func GetTypeKind(typ reflect.Type) TypeKind {
 	if typ == nil {
 		return Invalid
@@ -123,6 +95,7 @@ func GetTypeKind(typ reflect.Type) TypeKind {
 	return Invalid
 }
 
+// GetTypeAndValue 返回对象解引用一层后的类型和值。
 func GetTypeAndValue(target interface{}) (reflect.Type, reflect.Value) {
 	if target == nil {
 		return nil, reflect.Value{}
@@ -149,10 +122,12 @@ func getType(typ reflect.Type) reflect.Type {
 	return typ
 }
 
+// GetElem 返回指针元素类型，非指针类型原样返回。
 func GetElem(typ reflect.Type) reflect.Type {
 	return getType(typ)
 }
 
+// IsPtr 报告对象的直接类型是否为指针。
 func IsPtr(instance interface{}) bool {
 	if instance == nil {
 		return false
@@ -160,10 +135,12 @@ func IsPtr(instance interface{}) bool {
 	return reflect.TypeOf(instance).Kind() == reflect.Ptr
 }
 
+// IsTypeKind 报告反射类型是否属于指定归一类别。
 func IsTypeKind(typ reflect.Type, kind TypeKind) bool {
 	return GetTypeKind(typ) == kind
 }
 
+// HasProperty 报告结构体是否包含指定 Go 字段。
 func HasProperty(target interface{}, name string) bool {
 	if target == nil {
 		return false
@@ -179,6 +156,7 @@ func HasProperty(target interface{}, name string) bool {
 	return ok
 }
 
+// GetPropertyType 按 Go 字段名或 JSON tag 查找结构字段。
 func GetPropertyType(target interface{}, name string) *reflect.StructField {
 	if target == nil {
 		return nil
@@ -240,6 +218,7 @@ func GetPropertyTypeByElemName(target interface{}, elemTypeName string) *reflect
 	return nil
 }
 
+// GetPropertyValue 返回结构体指定字段的值，字段缺失时返回空字符串。
 func GetPropertyValue(target interface{}, name string) interface{} {
 	stype, sv := GetTypeAndValue(target)
 	if stype != nil && sv.IsValid() && stype.Kind() == reflect.Struct {
@@ -250,6 +229,7 @@ func GetPropertyValue(target interface{}, name string) interface{} {
 	return ""
 }
 
+// SetPropertyValue 按不区分大小写的字段名转换并设置值。
 func SetPropertyValue(sender interface{}, name string, value interface{}) error {
 	stype, sv := GetTypeAndValue(sender)
 	if stype != nil && sv.IsValid() && stype.Kind() == reflect.Struct {
@@ -280,6 +260,7 @@ func valueToTypeValue(value interface{}, changeType reflect.Type) (reflect.Value
 	return convertOp1(ss, changeType)
 }
 
+// GetParentType 返回旧继承结构中与当前类型同名的匿名结构字段类型。
 func GetParentType(target interface{}) interface{} {
 	stype := getType(reflect.TypeOf(target))
 	if stype == nil || stype.Kind() != reflect.Struct {
@@ -296,6 +277,7 @@ func GetParentType(target interface{}) interface{} {
 
 // ==================== 深度遍历（修复循环引用问题） ====================
 
+// DeepForItem 深度枚举对象的导出字段。
 func DeepForItem(item interface{}, forfunc func(field, parent reflect.StructField, kind TypeKind)) {
 	if item == nil {
 		return
@@ -307,6 +289,7 @@ func DeepForItem(item interface{}, forfunc func(field, parent reflect.StructFiel
 	DeepFor(t, forfunc)
 }
 
+// DeepFor 深度枚举指定反射类型的导出字段。
 func DeepFor(stype reflect.Type, forfunc func(field, parent reflect.StructField, kind TypeKind)) {
 	if stype == nil {
 		return
@@ -349,6 +332,7 @@ func deepFor(stype reflect.Type, parent reflect.StructField, forfunc func(field,
 
 // ==================== 集合遍历 ====================
 
+// ForItem 使用回调返回值更新对象的可设置字段。
 func ForItem(item interface{}, value func(name string) interface{}) {
 	if item == nil {
 		return
@@ -374,6 +358,7 @@ func ForItem(item interface{}, value func(name string) interface{}) {
 	})
 }
 
+// ForEach 逐个回调对象的导出字段名和值。
 func ForEach(item interface{}, fn func(name string, value interface{})) {
 	if item == nil {
 		return
@@ -393,6 +378,7 @@ func ForEach(item interface{}, fn func(name string, value interface{})) {
 	})
 }
 
+// ArrayEach 逐个回调数组或切片元素。
 func ArrayEach(items interface{}, f func(item interface{})) {
 	if items == nil || f == nil {
 		return
@@ -406,6 +392,7 @@ func ArrayEach(items interface{}, f func(item interface{})) {
 	}
 }
 
+// IsArray 报告对象或其指针元素是否为数组或切片。
 func IsArray(items interface{}) bool {
 	if items == nil {
 		return false
@@ -417,6 +404,7 @@ func IsArray(items interface{}) bool {
 	return stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice
 }
 
+// NewArrayItem 创建数组或切片元素类型的零值指针实例。
 func NewArrayItem(items interface{}) interface{} {
 	if items == nil {
 		return nil
@@ -429,298 +417,4 @@ func NewArrayItem(items interface{}) interface{} {
 		return NewInterfaceByType(stype.Elem())
 	}
 	return nil
-}
-
-// ==================== AutoMap 映射（修复 getmap 被忽略） ====================
-
-var fieldMappingCache sync.Map // key: string, value: []fieldMapping
-
-type fieldMapping struct {
-	SourceField string
-	TargetField string
-	SourceIndex int
-	TargetIndex int
-}
-
-func getCacheKey(sourceType, targetType reflect.Type) string {
-	return sourceType.String() + "->" + targetType.String()
-}
-
-func autoMapConvertList(source, target interface{}, getmap func(*AutoMapArge) *AutoMapHander) []interface{} {
-	targetType := reflect.TypeOf(target)
-	if targetType.Kind() == reflect.Ptr {
-		targetType = reflect.ValueOf(target).Elem().Type()
-	}
-	items := make([]interface{}, 0)
-	if st := reflect.TypeOf(source).Kind(); st == reflect.Array || st == reflect.Slice {
-		s := reflect.ValueOf(source)
-		for i := 0; i < s.Len(); i++ {
-			t := NewInterface(targetType)
-			AutoMapConvert(s.Index(i).Interface(), t, getmap)
-			items = append(items, t)
-		}
-	}
-	return items
-}
-
-func AutoMapConvert(source, target interface{}, getmap func(*AutoMapArge) *AutoMapHander) interface{} {
-	stype, sv := GetTypeAndValue(source)
-	if stype.Kind() == reflect.Array || stype.Kind() == reflect.Slice {
-		return autoMapConvertList(source, target, getmap)
-	}
-
-	_, tv := GetTypeAndValue(target)
-	targetType := tv.Type()
-
-	cacheKey := getCacheKey(stype, targetType)
-	var mappings []fieldMapping
-	if cached, ok := fieldMappingCache.Load(cacheKey); ok {
-		mappings = cached.([]fieldMapping)
-	} else {
-		mappings = buildFieldMappings(stype, targetType)
-		fieldMappingCache.Store(cacheKey, mappings)
-	}
-
-	for _, mapping := range mappings {
-		sourceField := sv.Field(mapping.SourceIndex)
-		targetField := tv.Field(mapping.TargetIndex)
-		if !targetField.CanSet() || !sourceField.IsValid() {
-			continue
-		}
-
-		// 调用自定义映射函数
-		if getmap != nil {
-			arge := &AutoMapArge{
-				Field:       mapping.SourceField,
-				SourceName:  stype.Name(),
-				TargetName:  targetType.Name(),
-				SourceType:  stype,
-				TargetType:  targetType,
-				FieldType:   stype.Field(mapping.SourceIndex),
-				FieldValue:  sourceField.Interface(),
-				SourceValue: source,
-				TargetValue: target,
-			}
-			if handler := getmap(arge); handler != nil {
-				if handler.TargetField != "" {
-					// 设置指定的目标字段
-					if tf := tv.FieldByName(handler.TargetField); tf.CanSet() && handler.TargetValue != nil {
-						if v, err := valueToTypeValue(handler.TargetValue, tf.Type()); err == nil {
-							tf.Set(v)
-						}
-					}
-				} else if handler.TargetValue != nil {
-					if v, err := valueToTypeValue(handler.TargetValue, targetField.Type()); err == nil {
-						targetField.Set(v)
-					}
-				}
-				// 批量设置多个字段
-				for fieldName, val := range handler.TargetItems {
-					if tf := tv.FieldByName(fieldName); tf.CanSet() && val != nil {
-						if v, err := valueToTypeValue(val, tf.Type()); err == nil {
-							tf.Set(v)
-						}
-					}
-				}
-				continue
-			}
-		}
-
-		// 默认映射
-		if sourceField.Type() == targetField.Type() {
-			targetField.Set(sourceField)
-		} else {
-			convertAndSet(sourceField, targetField)
-		}
-	}
-
-	return target
-}
-
-// buildFieldMappings 修复：直接使用 FieldByName 返回的 Index，去掉冗余的 O(n²) 二次循环
-func buildFieldMappings(sourceType, targetType reflect.Type) []fieldMapping {
-	mappings := make([]fieldMapping, 0, sourceType.NumField())
-	for i := 0; i < sourceType.NumField(); i++ {
-		sf := sourceType.Field(i)
-		if tf, ok := targetType.FieldByName(sf.Name); ok {
-			mappings = append(mappings, fieldMapping{
-				SourceField: sf.Name,
-				TargetField: tf.Name,
-				SourceIndex: i,
-				TargetIndex: tf.Index[0], // 直接使用，无需二次遍历
-			})
-		}
-	}
-	return mappings
-}
-
-func convertAndSet(source, target reflect.Value) {
-	if source.Type().ConvertibleTo(target.Type()) {
-		target.Set(source.Convert(target.Type()))
-		return
-	}
-	str := convertString(source)
-	if convertedValue, err := convertOp1(str, target.Type()); err == nil {
-		target.Set(convertedValue)
-	}
-}
-
-// ==================== 类型转换 ====================
-
-func AnyToTypeData(value interface{}, src reflect.Type) (interface{}, error) {
-	if value == nil {
-		return nil, nil
-	}
-	str := convertString(reflect.ValueOf(value))
-	rv, err := convertOp1(str, src)
-	if err != nil {
-		return nil, err
-	}
-	return rv.Interface(), nil
-}
-
-func ConvertToString(value interface{}) string {
-	return convertString(reflect.ValueOf(value))
-}
-
-func convertString(value reflect.Value) string {
-	switch value.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(value.Int(), 10)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(value.Uint(), 10)
-	case reflect.Float32, reflect.Float64:
-		return strconv.FormatFloat(value.Float(), 'f', -1, getIntSize(value.Kind()))
-	case reflect.Bool:
-		return strconv.FormatBool(value.Bool())
-	case reflect.String:
-		return value.String()
-	}
-	return ""
-}
-
-func getIntSize(kind reflect.Kind) int {
-	switch kind {
-	case reflect.Int8, reflect.Uint8:
-		return 8
-	case reflect.Int16, reflect.Uint16:
-		return 16
-	case reflect.Int32, reflect.Uint32, reflect.Float32:
-		return 32
-	default:
-		return 64
-	}
-}
-
-func convertOp1(val string, src reflect.Type) (reflect.Value, error) {
-	ret := reflect.New(src).Elem()
-	switch src.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v, err := strconv.ParseInt(val, 0, getIntSize(src.Kind()))
-		if err == nil {
-			ret.SetInt(v)
-		}
-		return ret, err
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		v, err := strconv.ParseUint(val, 0, getIntSize(src.Kind()))
-		if err == nil {
-			ret.SetUint(v)
-		}
-		return ret, err
-	case reflect.Float32, reflect.Float64:
-		v, err := strconv.ParseFloat(val, getIntSize(src.Kind()))
-		if err == nil {
-			ret.SetFloat(v)
-		}
-		return ret, err
-	case reflect.Bool:
-		v, err := strconv.ParseBool(val)
-		if err == nil {
-			ret.SetBool(v)
-		}
-		return ret, err
-	case reflect.String:
-		ret.SetString(val)
-		return ret, nil
-	}
-	return ret, nil
-}
-
-// ==================== Add（修复 utils.Decimal 支持） ====================
-
-var (
-	decimalType      = reflect.TypeOf(decimal.Decimal{})
-	utilsDecimalType = reflect.TypeOf(Decimal{})
-)
-
-func Add(v1, v2 reflect.Value) reflect.Value {
-	tye := v1.Type()
-	num := reflect.New(tye).Elem()
-
-	// 修复：同时处理 decimal.Decimal 和 utils.Decimal 具名类型
-	if tye == decimalType {
-		d1 := v1.Interface().(decimal.Decimal)
-		d2 := v2.Interface().(decimal.Decimal)
-		num.Set(reflect.ValueOf(d1.Add(d2)))
-		return num
-	}
-	if tye == utilsDecimalType {
-		d1 := decimal.Decimal(v1.Interface().(Decimal))
-		d2 := decimal.Decimal(v2.Interface().(Decimal))
-		num.Set(reflect.ValueOf(Decimal(d1.Add(d2))))
-		return num
-	}
-
-	size := getIntSize(tye.Kind())
-	vs1 := convertString(v1)
-	vs2 := convertString(v2)
-	switch tye.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		vi1, err1 := strconv.ParseInt(vs1, 10, size)
-		vi2, err2 := strconv.ParseInt(vs2, 10, size)
-		if err1 != nil || err2 != nil {
-			logx.Errorf("Add 整型解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
-		}
-		num.SetInt(vi1 + vi2)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		vi1, err1 := strconv.ParseUint(vs1, 10, size)
-		vi2, err2 := strconv.ParseUint(vs2, 10, size)
-		if err1 != nil || err2 != nil {
-			logx.Errorf("Add 无符号整型解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
-		}
-		num.SetUint(vi1 + vi2)
-	case reflect.Float32, reflect.Float64:
-		vi1, err1 := strconv.ParseFloat(vs1, size)
-		vi2, err2 := strconv.ParseFloat(vs2, size)
-		if err1 != nil || err2 != nil {
-			logx.Errorf("Add 浮点解析失败: v1=%q(%v) v2=%q(%v)", vs1, err1, vs2, err2)
-		}
-		num.SetFloat(vi1 + vi2)
-	}
-	return num
-}
-
-// ==================== 字节与字符串转换 ====================
-
-func String2Bytes(s string) []byte {
-	if s == "" {
-		return nil
-	}
-	return []byte(s)
-}
-
-func Bytes2String(b []byte) string {
-	return string(b)
-}
-
-func IsEqual(v1, v2 interface{}) bool {
-	if v1 == nil || v2 == nil {
-		return v1 == v2
-	}
-	t1 := reflect.TypeOf(v1)
-	t2 := reflect.TypeOf(v2)
-	if t1 != t2 {
-		return false
-	}
-	return reflect.DeepEqual(v1, v2)
 }

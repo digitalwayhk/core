@@ -1,3 +1,4 @@
+// 本文件提供本机 IP、可信代理客户端地址和端口探测能力。
 package utils
 
 import (
@@ -9,6 +10,7 @@ import (
 	"time"
 )
 
+// GetOutBoundIP 通过 UDP 路由选择取得默认出口 IP。
 func GetOutBoundIP() (ip string, err error) {
 	conn, err := net.Dial("udp", "8.8.8.8:53")
 	if err != nil {
@@ -19,6 +21,8 @@ func GetOutBoundIP() (ip string, err error) {
 	ip = strings.Split(localAddr.String(), ":")[0]
 	return
 }
+
+// GetLocalIP 返回枚举到的第一个非回环 IPv4 地址。
 func GetLocalIP() string {
 	ips, _ := GetLocalIPs()
 	if len(ips) > 0 {
@@ -26,6 +30,8 @@ func GetLocalIP() string {
 	}
 	return ""
 }
+
+// GetLocalIPs 返回所有非回环 IPv4 地址。
 func GetLocalIPs() ([]string, error) {
 	addr, err := net.InterfaceAddrs()
 	if err != nil {
@@ -66,6 +72,7 @@ func HasLocalIP(ip net.IP) bool {
 		(ip4[0] == 192 && ip4[1] == 168) // 192.168.0.0/16
 }
 
+// ClientPublicIP 按可信代理链解析请求的客户端 IP。
 func ClientPublicIP(r *http.Request, trustedProxies ...string) string {
 	if r == nil {
 		return ""
@@ -158,6 +165,7 @@ func containsIP(prefixes []netip.Prefix, addr netip.Addr) bool {
 	return false
 }
 
+// ScanPort 在三秒超时内探测指定协议和端口能否建立连接。
 func ScanPort(protocol string, hostname string, port int) bool {
 	//fmt.Printf("scanning port %d \n", port)
 	p := strconv.Itoa(port)
