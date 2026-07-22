@@ -4,7 +4,6 @@ package utils
 import "strconv"
 
 // IsInteger 报告文本能否解析为整数。
-// 注意：如果字符串是浮点数形式的，也会返回true
 func IsInteger(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
