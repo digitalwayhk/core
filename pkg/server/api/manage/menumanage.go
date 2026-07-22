@@ -113,8 +113,7 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 				item = smodels.NewMenuModel()
 				item.Name = instanceName
 				name := strings.ToLower(item.Name)
-				endIndex := strings.Index(path, name)
-				item.Url = path[0:endIndex] + name
+				item.Url = buildMenuUrl(path, name)
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
 				if err != nil {
@@ -161,12 +160,23 @@ func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceC
 	return diritem
 }
 
+// buildMenuUrl 依据 path 中 name 出现的位置拼装菜单分组 Url。
+// 当 name 未出现在 path 中时（例如自定义操作的实例名与路径不一致），
+// strings.Index 会返回 -1，直接切片会导致 "slice bounds out of range [:-1]" panic，
+// 因此这里显式兜底，退化为使用完整 path 作为分组依据。
+func buildMenuUrl(path, name string) string {
+	endIndex := strings.Index(path, name)
+	if endIndex < 0 {
+		return path
+	}
+	return path[0:endIndex] + name
+}
+
 func getMenuModel(info *types.RouterInfo, items []*smodels.MenuModel) *smodels.MenuModel {
 	instanceName := info.GetInstanceName()
 	path := info.GetPath()
 	name := strings.ToLower(instanceName)
-	endIndex := strings.Index(path, name)
-	url := path[0:endIndex] + name
+	url := buildMenuUrl(path, name)
 	for _, item := range items {
 		if item.Name == instanceName && item.Url == url {
 			return item
