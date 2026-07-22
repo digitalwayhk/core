@@ -144,7 +144,7 @@ rtk proxy ./scripts/test.sh release-contract
 ```bash
 rtk rg -n '\b(NewPublisher|Publisher|SubscribeTopic)\b' . --glob '*.go' --glob '*.md'
 rtk rg -n 'unsafe' pkg/utils --glob '*.go'
-rtk gofmt -d pkg/utils
+rtk gofmt -d pkg/utils/*.go
 ```
 
 全仓编译或发布契约若因外部数据库、网络或消费方环境失败，交付说明必须区分代码失败与环境阻塞，并保留完整命令和错误证据。
