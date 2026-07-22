@@ -121,21 +121,28 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 	}
 	if r != nil && routers != nil {
 		getRequestInfo(r, req)
-		info := routers.GetRouter(req.apiPath)
-		if info != nil {
-			req.auth = info.GetAuth()
-			req.routerinfo = info
-			getUserIDAndName(req, r)
-			if req.auth {
-				if req.userID == "" && req.userName == "" {
-					logx.Errorf("Auth required but no user info found for api: %s", req.apiPath)
-					return nil
-				}
-				logx.Infof("Auth required for api: %s", req.apiPath)
-			}
-		}
+		req.setRouterInfo(routers)
 	}
 	return req
+}
+func (own *Request) setRouterInfo(routers *ServiceRouter) {
+	info := routers.GetRouter(own.apiPath)
+	if info != nil {
+		own.auth = info.GetAuth()
+		if own.auth {
+			getUserIDAndName(own, own.http)
+			if own.auth {
+				if own.userID == "" && own.userName == "" {
+					logx.Errorf("Auth required but no user info found for api: %s", own.apiPath)
+					return
+				}
+				logx.Infof("Auth required for api: %s", own.apiPath)
+			}
+		} else {
+			own.userID = ""
+			own.userName = ""
+		}
+	}
 }
 func getTraceID(ctx context.Context, r *http.Request) string {
 	if r != nil {
@@ -209,6 +216,10 @@ func (own *Request) GetClaims(key string) interface{} {
 }
 func (own *Request) SetPath(path string) {
 	own.apiPath = path
+	routers := GetContext(own.ServiceName()).Router
+	if routers != nil {
+		own.setRouterInfo(routers)
+	}
 }
 func (own *Request) ServiceName() string {
 	return own.service.Service.Name
