@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -15,7 +16,8 @@ func TestGetOpenAPIWithoutServicesReturnsEmptyDocument(t *testing.T) {
 	doc, ok := GetOpenApi(req).(*openapi3.T)
 	require.True(t, ok)
 	require.NotNil(t, doc.Paths)
-	require.Empty(t, doc.Paths)
+	require.Zero(t, doc.Paths.Len())
 	require.Empty(t, doc.Servers)
 	require.Equal(t, "Bearer token authentication", doc.Components.SecuritySchemes["Bearer"].Value.Description)
+	require.NoError(t, doc.Validate(context.Background()))
 }

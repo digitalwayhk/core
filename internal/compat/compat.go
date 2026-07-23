@@ -115,9 +115,9 @@ func normalizeOpenAPI(doc *openapi3.T) {
 		sort.Slice(doc.Tags, func(i, j int) bool { return doc.Tags[i].Name < doc.Tags[j].Name })
 	}
 	if doc.Paths == nil {
-		doc.Paths = make(openapi3.Paths)
+		doc.Paths = openapi3.NewPaths()
 	}
-	for _, pathItem := range doc.Paths {
+	for _, pathItem := range doc.Paths.Map() {
 		for _, operation := range []*openapi3.Operation{
 			pathItem.Connect, pathItem.Delete, pathItem.Get, pathItem.Head,
 			pathItem.Options, pathItem.Patch, pathItem.Post, pathItem.Put, pathItem.Trace,
@@ -134,7 +134,10 @@ func normalizeOpenAPI(doc *openapi3.T) {
 }
 
 func normalizeOperation(operation *openapi3.Operation) {
-	for _, response := range operation.Responses {
+	if operation.Responses == nil {
+		return
+	}
+	for _, response := range operation.Responses.Map() {
 		if response == nil || response.Value == nil {
 			continue
 		}

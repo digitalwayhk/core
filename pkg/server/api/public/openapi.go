@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/api"
+	"github.com/digitalwayhk/core/pkg/server/internal/openapiutil"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -48,8 +49,10 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 	}
 	doc.Tags = make(openapi3.Tags, 0)
 	doc.Servers = make(openapi3.Servers, 0)
-	doc.Components = openapi3.NewComponents()
+	components := openapi3.NewComponents()
+	doc.Components = &components
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
+	doc.Paths = openapi3.NewPaths()
 
 	host := req.Host
 	if h, _, ok := strings.Cut(host, ":"); ok {
@@ -111,7 +114,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	operation = &openapi3.Operation{
 		Tags:        []string{info.GetServiceName()},
 		Summary:     info.GetStructName(),
-		Responses:   make(openapi3.Responses, 0),
+		Responses:   openapi3.NewResponsesWithCapacity(1),
 		OperationID: strings.TrimPrefix(strings.ReplaceAll(info.GetPath(), "/", "_"), "_"),
 	}
 	api := info.New()
@@ -132,7 +135,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 				Value: &openapi3.Parameter{
 					Name:        name,
 					In:          "query",
-					Schema:      &openapi3.SchemaRef{Value: &openapi3.Schema{Type: utils.GetTypeName(value)}},
+					Schema:      openapiutil.SchemaRefForValue(value),
 					Description: getNameTag(api, name),
 				},
 			})

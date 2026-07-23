@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/digitalwayhk/core/pkg/server/internal/openapiutil"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -41,9 +42,10 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 	}
 	doc.Tags = make(openapi3.Tags, 0)
 	doc.Servers = make(openapi3.Servers, 0)
-	doc.Components = openapi3.NewComponents()
+	components := openapi3.NewComponents()
+	doc.Components = &components
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
-	doc.Paths = make(openapi3.Paths)
+	doc.Paths = openapi3.NewPaths()
 
 	host := req.Host
 	if strings.Index(host, ":") > 0 {
@@ -94,9 +96,9 @@ func GetOpenApi(req *http.Request, srs ...*router.ServiceRouter) interface{} {
 }
 func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.Server) {
 	for _, r := range routers {
-		oper := getrouter(r, doc, server)
+		path, method, oper := getOperation(r, doc)
 		oper.Servers = &openapi3.Servers{server}
-		doc.AddOperation(getOperation(r, doc))
+		doc.AddOperation(path, method, oper)
 	}
 }
 func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method string, operation *openapi3.Operation) {
@@ -105,7 +107,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	operation = &openapi3.Operation{
 		Tags: []string{info.GetServiceName()},
 		//Description: strings.ToUpper(info.StructName),
-		Responses:   make(openapi3.Responses, 0),
+		Responses:   openapi3.NewResponsesWithCapacity(1),
 		OperationID: info.GetPath(),
 	}
 	if callers := info.GetInternalCallers(); len(callers) > 0 {
@@ -131,7 +133,7 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 				Value: &openapi3.Parameter{
 					Name:        name,
 					In:          "query",
-					Schema:      &openapi3.SchemaRef{Value: &openapi3.Schema{Type: utils.GetTypeName(value)}},
+					Schema:      openapiutil.SchemaRefForValue(value),
 					Description: getNameTag(api, name),
 				},
 			})
@@ -159,30 +161,6 @@ func getOperation(info *types.RouterInfo, doc *openapi3.T) (path string, method 
 	return
 }
 
-// todo:不再使用
-func getrouter(info *types.RouterInfo, doc *openapi3.T, server *openapi3.Server) *openapi3.Operation {
-	oper := &openapi3.Operation{
-		Tags:        []string{info.GetServiceName()},
-		Description: strings.ToUpper(info.GetStructName()),
-		Responses:   make(openapi3.Responses, 0),
-		OperationID: info.GetPath(),
-	}
-	api := info.New()
-	oper.RequestBody = getRequestBody(api, doc)
-	req := &router.InitRequest{}
-	data := router.GetTestResult(info.GetPath())
-	ress := getResponse(data, req, doc)
-	for k, v := range ress {
-		oper.AddResponse(k, v)
-	}
-	if info.GetPathType() == types.PrivateType {
-		oper.Security = openapi3.NewSecurityRequirements()
-		nsr := openapi3.NewSecurityRequirement()
-		nsr.Authenticate("Bearer")
-		oper.Security.With(nsr)
-	}
-	return oper
-}
 func getRequestBody(api interface{}, doc *openapi3.T) *openapi3.RequestBodyRef {
 	ref := &openapi3.RequestBodyRef{}
 	schema, _ := openapi3gen.NewSchemaRefForValue(api, nil, openapi3gen.UseAllExportedFields())
