@@ -8,26 +8,33 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/authstate"
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
+	"github.com/digitalwayhk/core/pkg/server/ratelimit"
+	"github.com/digitalwayhk/core/pkg/server/routecache"
+	casdoorauth "github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
+	"github.com/gofrs/uuid"
 	"github.com/yitter/idgenerator-go/idgen"
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/service"
 )
 
 // processLocalRegistry is a shared in-memory cluster registry for all ServiceContexts
 // within the same process. This enables intra-process MachineID conflict detection.
 var processLocalRegistry = cluster.NewLocalProvider(
-	10*time.Second,
-	10*time.Second,
-	30*time.Second,
+	config.DefaultClusterHeartbeatTimeout,
+	config.DefaultClusterSuspectTimeout,
+	config.DefaultClusterInstanceReuseCooldown,
 )
 
 func init() {
@@ -35,34 +42,277 @@ func init() {
 }
 
 type ServiceContext struct {
-	Config            *config.ServerConfig
-	Service           *types.Service
-	snow              idgen.ISnowWorker
-	Router            *ServiceRouter
-	isStart           bool
-	Pid               int
-	Hub               interface{} `json:"-"`
-	StateChan         chan bool   `json:"-"`
-	serverOption      *types.ServerOption
-	TransportSelector transport.TransportSelector    `json:"-"`
-	MQManager         *mq.MQManager                  `json:"-"`
-	EventStream       *event.Stream                  `json:"-"`
-	EventBridge       *event.MQBridge                `json:"-"`
-	ClusterProvider   cluster.DiscoveryProvider      `json:"-"`
-	ClusterSwitcher   cluster.ProviderSwitcher       `json:"-"`
-	membership        *cluster.MembershipManager     `json:"-"`
-	CrossNodeBroker   *cluster.CrossNodeNoticeBroker `json:"-"`
-	nodeID            string
+	Config                   *config.ServerConfig
+	Service                  *types.Service
+	snow                     idgen.ISnowWorker
+	Router                   *ServiceRouter
+	isStart                  atomic.Bool
+	terminated               bool
+	shutdownDone             chan struct{}
+	shutdownOnce             sync.Once
+	lifecycleMu              sync.Mutex
+	lifecycleOpOnce          sync.Once
+	lifecycleOp              chan struct{} // 串行化启停和 Provider 切换，但不在 Provider 调用期间持有状态锁。
+	Pid                      int
+	Hub                      interface{} `json:"-"`
+	StateChan                chan bool   `json:"-"`
+	serverOption             *types.ServerOption
+	serverOptionMu           sync.RWMutex
+	TransportSelector        transport.TransportSelector     `json:"-"`
+	TransportStats           *transport.Stats                `json:"-"`
+	MQManager                *mq.MQManager                   `json:"-"`
+	EventStream              *event.Stream                   `json:"-"`
+	EventBridge              *event.MQBridge                 `json:"-"`
+	ServiceEventBridge       *event.ServiceEventBridge       `json:"-"`
+	RouteWebSocketHub        *types.RouteWebSocketHub        `json:"-"`
+	RouteCacheManager        *routecache.Manager             `json:"-"`
+	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
+	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
+	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
+	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
+	CasdoorClients           *casdoorauth.ClientSet          `json:"-"`
+	AuthRevocationManager    *authstate.Manager              `json:"-"`
+	ClusterProvider          cluster.DiscoveryProvider       `json:"-"`
+	localFallbackProvider    cluster.DiscoveryProvider       `json:"-"`
+	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
+	ServiceResolver          *ServiceResolver                `json:"-"`
+	ServiceInstanceID        string
+	ownsClusterProvider      bool
+	membership               *cluster.MembershipManager     `json:"-"`
+	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
+	nodeID                   string
+	configFingerprint        string
+	grpcServer               types.GRPCServerLifecycle
+	grpcSupervisorOnce       sync.Once
+	runtimeErrMu             sync.RWMutex
+	runtimeErr               error
+	runtimeFailure           chan error
+	lifecycleTimeout         time.Duration
+	shutdownErrMu            sync.RWMutex
+	shutdownErr              error
+	resources                *resourceManager
+}
+
+const grpcLifecycleTimeout = 5 * time.Second
+
+// UseResource 把实例级资源交给当前 ServiceContext 按注册逆序统一关闭。
+func (own *ServiceContext) UseResource(name string, resource ManagedResource) error {
+	if own == nil || own.resources == nil {
+		return ErrResourceManagerClosed
+	}
+	return own.resources.Use(name, resource)
+}
+
+// SetLifecycleTimeout 配置服务注册和停止的有界等待时间。
+func (own *ServiceContext) SetLifecycleTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	own.lifecycleMu.Lock()
+	own.lifecycleTimeout = timeout
+	own.lifecycleMu.Unlock()
+}
+
+func (own *ServiceContext) lifecycleDuration() time.Duration {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.lifecycleTimeout > 0 {
+		return own.lifecycleTimeout
+	}
+	return grpcLifecycleTimeout
+}
+
+// ShutdownError 返回关闭期间首个未恢复错误；重复停止保持同一结果。
+func (own *ServiceContext) ShutdownError() error {
+	own.shutdownErrMu.RLock()
+	defer own.shutdownErrMu.RUnlock()
+	return own.shutdownErr
+}
+
+func (own *ServiceContext) recordShutdownError(err error) {
+	if err == nil {
+		return
+	}
+	own.shutdownErrMu.Lock()
+	if own.shutdownErr == nil {
+		own.shutdownErr = err
+	}
+	own.shutdownErrMu.Unlock()
+}
+
+type managedGRPCService struct {
+	owner  *ServiceContext
+	server types.GRPCServerLifecycle
+}
+
+func (s *managedGRPCService) Start() { s.server.Start() }
+func (s *managedGRPCService) Stop()  { s.owner.SetRunState(false) }
+
+// RuntimeError 返回服务运行期的稳定终态错误。
+func (own *ServiceContext) RuntimeError() error {
+	own.runtimeErrMu.RLock()
+	defer own.runtimeErrMu.RUnlock()
+	return own.runtimeErr
+}
+
+func (own *ServiceContext) setRuntimeError(err error) {
+	if err == nil {
+		return
+	}
+	own.runtimeErrMu.Lock()
+	if own.runtimeErr == nil {
+		own.runtimeErr = err
+		if own.runtimeFailure == nil {
+			own.runtimeFailure = make(chan error, 1)
+		}
+		own.runtimeFailure <- err
+	}
+	own.runtimeErrMu.Unlock()
+}
+
+// Failure 返回服务运行期终态错误。每个 ServiceContext 最多发布一次。
+func (own *ServiceContext) Failure() <-chan error {
+	own.runtimeErrMu.Lock()
+	defer own.runtimeErrMu.Unlock()
+	if own.runtimeFailure == nil {
+		own.runtimeFailure = make(chan error, 1)
+		if own.runtimeErr != nil {
+			own.runtimeFailure <- own.runtimeErr
+		}
+	}
+	return own.runtimeFailure
+}
+
+// SetGRPCServer 将服务专属 gRPC 生命周期交给 ServiceContext 管理。
+func (own *ServiceContext) SetGRPCServer(server types.GRPCServerLifecycle) {
+	own.lifecycleMu.Lock()
+	own.grpcServer = server
+	own.lifecycleMu.Unlock()
+	own.superviseGRPC(server)
+}
+
+func (own *ServiceContext) waitForGRPCReady(ctx context.Context, server types.GRPCServerLifecycle) error {
+	if server == nil {
+		return nil
+	}
+	select {
+	case <-server.Ready():
+		select {
+		case <-server.Done():
+			if err := server.Err(); err != nil {
+				return err
+			}
+			return errors.New("grpc server stopped before discovery registration")
+		default:
+			return nil
+		}
+	case <-server.Done():
+		if err := server.Err(); err != nil {
+			return err
+		}
+		return errors.New("grpc server stopped before becoming ready")
+	case <-ctx.Done():
+		return fmt.Errorf("wait for grpc ready: %w", ctx.Err())
+	}
+}
+
+func (own *ServiceContext) superviseGRPC(server types.GRPCServerLifecycle) {
+	if server == nil {
+		return
+	}
+	own.grpcSupervisorOnce.Do(func() {
+		go func() {
+			<-server.Done()
+			if err := server.Err(); err != nil {
+				own.setRuntimeError(err)
+			}
+			if own.RuntimeError() != nil {
+				own.SetRunState(false)
+			}
+		}()
+	})
+}
+
+func (own *ServiceContext) beginLifecycleOperation() {
+	_ = own.beginLifecycleOperationContext(context.Background())
+}
+
+func (own *ServiceContext) beginLifecycleOperationContext(ctx context.Context) error {
+	own.lifecycleOpOnce.Do(func() {
+		own.lifecycleOp = make(chan struct{}, 1)
+		own.lifecycleOp <- struct{}{}
+	})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-own.lifecycleOp:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (own *ServiceContext) endLifecycleOperation() {
+	own.lifecycleOp <- struct{}{}
+}
+
+func (own *ServiceContext) shutdownWaiter() (<-chan struct{}, bool) {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if !own.terminated {
+		return nil, false
+	}
+	if own.shutdownDone == nil {
+		own.shutdownDone = make(chan struct{})
+	}
+	return own.shutdownDone, true
+}
+
+func (own *ServiceContext) completeShutdown() {
+	own.lifecycleMu.Lock()
+	if !own.terminated {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	if own.shutdownDone == nil {
+		own.shutdownDone = make(chan struct{})
+	}
+	done := own.shutdownDone
+	own.lifecycleMu.Unlock()
+	own.shutdownOnce.Do(func() { close(done) })
 }
 
 func (own *ServiceContext) GetServerOption() *types.ServerOption {
-	if own != nil && own.serverOption != nil && own.Config != nil {
-		own.serverOption.RemoteAccessManageAPI = own.Config.RemoteAccessManageAPI
+	if own == nil {
+		return nil
 	}
-	return own.serverOption
+	own.serverOptionMu.RLock()
+	option := own.serverOption.Clone()
+	own.serverOptionMu.RUnlock()
+	if option != nil && own.Config != nil {
+		option.RemoteAccessManageAPI = own.Config.RemoteAccessManageAPI
+	}
+	return option
 }
 func (own *ServiceContext) SetServerOption(so *types.ServerOption) {
-	own.serverOption = so
+	own.serverOptionMu.Lock()
+	own.serverOption = so.Clone()
+	own.serverOptionMu.Unlock()
+}
+
+// GetAuthRequestRuntime 返回一次请求使用的认证运行时快照。
+// active 为 false 表示 ServiceContext 已进入终止阶段，新认证必须 fail closed。
+func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IAuthRequestHookProvider, bool) {
+	if own == nil {
+		return nil, nil, false
+	}
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.terminated {
+		return nil, nil, false
+	}
+	return own.AuthRevocationManager, own.AuthRequestHookProvider, true
 }
 
 // EnableEventBridge wires an in-process event.Stream to the MQManager so that
@@ -76,7 +326,17 @@ func (own *ServiceContext) EnableEventBridge() {
 	if own.EventStream == nil {
 		own.EventStream = event.NewStream()
 	}
+	if own.ServiceEventBridge == nil {
+		subscriberID := ""
+		if own.Service != nil {
+			subscriberID = own.Service.Name
+		}
+		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{
+			SubscriberID: subscriberID,
+		})
+	}
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
+	own.ServiceEventBridge.SetExternalPublisher(own.EventBridge)
 }
 
 // containsUsage reports whether usage slice contains the given value.
@@ -175,52 +435,221 @@ func (own *ServiceContext) GetSlowestRoutersJSON(
 }
 
 const DEFAULTPORT = 8080
-const DEFAULTSOCKETPORT = 0
 
-var scontext map[string]*ServiceContext
-var TestResult map[string]interface{}
+type contextInitialization struct {
+	ready      chan struct{}
+	result     *ServiceContext
+	panicValue interface{}
+	panicked   bool
+}
 
-func init() {
-	scontext = make(map[string]*ServiceContext)
-	TestResult = make(map[string]interface{})
+type serviceContextRegistry struct {
+	mu                   sync.RWMutex
+	contexts             map[string]*ServiceContext
+	initializing         map[string]*contextInitialization
+	nextDefaultSequence  int
+	freeDefaultSequences []int
+}
+
+func newServiceContextRegistry() *serviceContextRegistry {
+	return &serviceContextRegistry{
+		contexts:     make(map[string]*ServiceContext),
+		initializing: make(map[string]*contextInitialization),
+	}
+}
+
+func (r *serviceContextRegistry) get(name string) *ServiceContext {
+	r.mu.RLock()
+	sc := r.contexts[name]
+	r.mu.RUnlock()
+	if sc != nil {
+		if _, terminated := sc.shutdownWaiter(); terminated {
+			return nil
+		}
+	}
+	return sc
+}
+
+func (r *serviceContextRegistry) snapshot() map[string]*ServiceContext {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	contexts := make(map[string]*ServiceContext, len(r.contexts))
+	for name, sc := range r.contexts {
+		if _, terminated := sc.shutdownWaiter(); !terminated {
+			contexts[name] = sc
+		}
+	}
+	return contexts
+}
+
+func (r *serviceContextRegistry) getOrInitialize(
+	name string,
+	reserveDefaultSequence bool,
+	requestedFingerprint string,
+	initialize func(sequence int) *ServiceContext,
+) *ServiceContext {
+	for {
+		r.mu.Lock()
+		if sc := r.contexts[name]; sc != nil {
+			if done, terminated := sc.shutdownWaiter(); terminated {
+				r.mu.Unlock()
+				<-done
+				continue
+			}
+			r.mu.Unlock()
+			assertServiceContextConfig(name, requestedFingerprint, sc)
+			return sc
+		}
+		if entry := r.initializing[name]; entry != nil {
+			r.mu.Unlock()
+			<-entry.ready
+			if entry.panicked {
+				panic(entry.panicValue)
+			}
+			continue
+		}
+		break
+	}
+
+	sequence := -1
+	if reserveDefaultSequence {
+		sequence = r.reserveDefaultSequence()
+	}
+	entry := &contextInitialization{ready: make(chan struct{})}
+	r.initializing[name] = entry
+	r.mu.Unlock()
+
+	var result *ServiceContext
+	func() {
+		defer func() {
+			if value := recover(); value != nil {
+				entry.panicValue = value
+				entry.panicked = true
+			}
+		}()
+		result = initialize(sequence)
+	}()
+
+	r.mu.Lock()
+	entry.result = result
+	if !entry.panicked && result != nil {
+		r.contexts[name] = result
+	} else if reserveDefaultSequence {
+		r.freeDefaultSequences = append(r.freeDefaultSequences, sequence)
+	}
+	delete(r.initializing, name)
+	close(entry.ready)
+	r.mu.Unlock()
+
+	if entry.panicked {
+		panic(entry.panicValue)
+	}
+	return result
+}
+
+func assertServiceContextConfig(name, requestedFingerprint string, sc *ServiceContext) {
+	if sc == nil || requestedFingerprint == "" || sc.configFingerprint == "" {
+		return
+	}
+	if requestedFingerprint != sc.configFingerprint {
+		panic(fmt.Sprintf("service context config conflict: service=%s", name))
+	}
+}
+
+func (r *serviceContextRegistry) remove(name string, expected *ServiceContext) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contexts[name] != expected {
+		return false
+	}
+	delete(r.contexts, name)
+	return true
+}
+
+// reserveDefaultSequence 必须在持有 r.mu 时调用。
+func (r *serviceContextRegistry) reserveDefaultSequence() int {
+	for len(r.freeDefaultSequences) > 0 {
+		last := len(r.freeDefaultSequences) - 1
+		sequence := r.freeDefaultSequences[last]
+		r.freeDefaultSequences = r.freeDefaultSequences[:last]
+		if sequence >= len(r.contexts) {
+			return sequence
+		}
+	}
+	if r.nextDefaultSequence < len(r.contexts) {
+		r.nextDefaultSequence = len(r.contexts)
+	}
+	sequence := r.nextDefaultSequence
+	r.nextDefaultSequence++
+	return sequence
+}
+
+var contextRegistry = newServiceContextRegistry()
+
+var testResultMu sync.RWMutex
+
+// Deprecated: 为保持源码兼容暂时保留；框架内部请使用 SetTestResult 和 GetTestResult。
+// 外部直接写入此 map 无法受内部锁保护，仍可能产生并发竞态。
+var TestResult = make(map[string]interface{})
+
+func SetTestResult(path string, result interface{}) {
+	testResultMu.Lock()
+	defer testResultMu.Unlock()
+	TestResult[path] = result
+}
+
+func GetTestResult(path string) interface{} {
+	testResultMu.RLock()
+	defer testResultMu.RUnlock()
+	return TestResult[path]
 }
 
 func NewServiceContext(service types.IService) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	if sc, ok := scontext[name]; ok {
-		return sc
-	}
-	sc := &ServiceContext{}
-	sc.StateChan = make(chan bool, 1)
-	sc.Service = initService(service, sc)
 	con := config.ReadConfig(name)
-	if con == nil {
-		count := len(scontext)
-		port := DEFAULTPORT + count
-		con = config.NewServiceDefaultConfig(name, port)
-		con.DataCenterID = uint(count) + 1
-		con.MachineID = 1
-		con.SocketPort = DEFAULTSOCKETPORT + count
-		con.AttachServices = make(map[string]*config.AttachAddress)
-		for _, as := range sc.Service.AttachService {
-			con.SetAttachService(as.ServiceName, "", 0, 0)
+	requestedFingerprint := ""
+	if con != nil {
+		normalized, fingerprint, err := normalizeServerConfig(con)
+		if err != nil {
+			panic(fmt.Sprintf("config validation failed: %v", err))
 		}
-		err := con.Save()
+		con = normalized
+		requestedFingerprint = fingerprint
+	}
+	return contextRegistry.getOrInitialize(name, true, requestedFingerprint, func(sequence int) *ServiceContext {
+		sc := &ServiceContext{resources: newResourceManager()}
+		sc.StateChan = make(chan bool, 1)
+		sc.Service = initService(service, sc)
+		if con == nil {
+			port := DEFAULTPORT + sequence
+			con = config.NewServiceDefaultConfig(name, port)
+			con.DataCenterID = uint(sequence) + 1
+			con.MachineID = 1
+			con.AttachServices = make(map[string]*config.AttachAddress)
+			for _, as := range sc.Service.AttachService {
+				con.SetAttachService(as.ServiceName, "", 0)
+			}
+			if err := con.Save(); err != nil {
+				panic(err)
+			}
+		} else {
+			for _, as := range sc.Service.AttachService {
+				if cas, ok := con.AttachServices[as.ServiceName]; ok {
+					as.Address = cas.Address
+					as.Port = cas.Port
+				}
+			}
+		}
+		sc.Config = con
+		fingerprint, err := serverConfigFingerprint(con)
 		if err != nil {
 			panic(err)
 		}
-
-	} else {
-		for _, as := range sc.Service.AttachService {
-			if cas, ok := con.AttachServices[as.ServiceName]; ok {
-				as.Address = cas.Address
-				as.Port = cas.Port
-			}
-		}
-	}
-	sc.Config = con
-	initServiceContextPost(sc, service, con, name)
-	return scontext[name]
+		sc.configFingerprint = fingerprint
+		initServiceContextPost(sc, service, con)
+		return sc
+	})
 }
 
 // NewServiceContextWithConfig creates a ServiceContext using the provided
@@ -228,45 +657,95 @@ func NewServiceContext(service types.IService) *ServiceContext {
 // and programmatic service bootstrap where the caller manages configuration.
 func NewServiceContextWithConfig(service types.IService, con *config.ServerConfig) *ServiceContext {
 	name := strings.ToLower(service.ServiceName())
-	if sc, ok := scontext[name]; ok {
-		return sc
+	if con == nil {
+		panic("config validation failed: config is nil")
 	}
-	sc := &ServiceContext{}
-	sc.StateChan = make(chan bool, 1)
-	sc.Service = initService(service, sc)
-	sc.Config = con
-	initServiceContextPost(sc, service, con, name)
-	return scontext[name]
+	normalized, fingerprint, err := normalizeServerConfig(con)
+	if err != nil {
+		panic(fmt.Sprintf("config validation failed: %v", err))
+	}
+	con = normalized
+	return contextRegistry.getOrInitialize(name, false, fingerprint, func(_ int) *ServiceContext {
+		sc := &ServiceContext{resources: newResourceManager()}
+		sc.StateChan = make(chan bool, 1)
+		sc.Service = initService(service, sc)
+		sc.Config = con
+		sc.configFingerprint = fingerprint
+		initServiceContextPost(sc, service, con)
+		return sc
+	})
 }
 
 // initServiceContextPost performs the post-config initialisation shared by
 // NewServiceContext and NewServiceContextWithConfig: MachineID claiming,
 // cluster/transport/MQ provider setup, Snowflake, and router wiring.
-func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig, name string) {
-	// Phase 4: claim a unique MachineID in the process-local registry before
-	// initialising Snowflake, preventing ID collisions between services in the
-	// same process or between hot-reload replicas.
+func initServiceContextPost(sc *ServiceContext, service types.IService, con *config.ServerConfig) {
+	initialized := false
+	defer func() {
+		if initialized {
+			return
+		}
+		failure := recover()
+		cleanupInitializedServiceContext(sc)
+		if failure != nil {
+			panic(failure)
+		}
+	}()
+	if provider, ok := service.(types.IAuthHookProvider); ok {
+		sc.AuthHookProvider = provider
+	}
+	if provider, ok := service.(types.IAuthRequestHookProvider); ok {
+		sc.AuthRequestHookProvider = provider
+	}
+	if provider, ok := service.(types.ICasdoorEventHookProvider); ok {
+		sc.CasdoorEventHookProvider = provider
+	}
+	assertServiceRoutesRegistrationMutable(sc.Service.Name, sc.Service.Routers)
+	sc.localFallbackProvider = processLocalRegistry
+	sc.EventStream = event.NewStream()
+	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{
+		SubscriberID: sc.Service.Name,
+	})
+	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
+	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
+
+	if err := initCluster(sc); err != nil {
+		if con.Cluster.Mode == "on" {
+			panic(fmt.Sprintf("cluster: required provider init failed (mode=on): %v", err))
+		}
+		logx.Infow("cluster_degraded",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("error", err),
+		)
+	}
+
+	// Phase 4: claim a unique MachineID before initialising Snowflake.
+	// AutoMachineID uses the configured ClusterProvider; legacy fixed mode keeps
+	// the process-local conflict guard used by earlier examples.
 	if con.Cluster.Mode != "off" {
-		machineID, err := claimMachineID(con, sc.Service.Name)
+		machineID, err := claimMachineID(sc, con)
 		if err != nil {
+			if con.Cluster.Claim.AutoMachineID {
+				panic(fmt.Sprintf("cluster: AutoMachineID claim failed: %v", err))
+			}
 			logx.Errorf("cluster: MachineID claim failed (%v), proceeding with config value", err)
 		} else {
 			con.MachineID = uint(machineID)
 		}
 	}
 
-	if err := initCluster(sc); err != nil {
-		if con.Cluster.Mode == "on" {
-			panic(fmt.Sprintf("cluster: required provider init failed (mode=on): %v", err))
-		}
-		logx.Errorf("cluster: init failed (degraded): %v", err)
-	}
+	protocols := append([]string{con.Transport.Internal}, con.Transport.Fallback...)
+	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext, protocols...)
 	if sel, selErr := transport.BuildSelector(con.Transport); selErr != nil {
 		// Any error from BuildSelector means the user explicitly configured a
 		// transport protocol that cannot be built (e.g. quic, mq not yet implemented).
 		// This is a hard misconfiguration — prevent silent fallback to legacy HTTP.
 		panic(fmt.Sprintf("transport: init failed: %v", selErr))
 	} else if sel != nil {
+		sc.TransportStats = &transport.Stats{}
+		if defaultSelector, ok := sel.(*transport.DefaultSelector); ok {
+			defaultSelector.SetStats(sc.TransportStats)
+		}
 		sc.TransportSelector = sel
 	}
 	{
@@ -274,10 +753,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		mgr, mqErr := mq.BuildManager(ctx, &con.MQ)
 		cancel()
 		if mqErr != nil {
-			if con.MQ.Mode == "on" {
-				panic(fmt.Sprintf("mq: required provider init failed (mode=on): %v", mqErr))
-			}
-			logx.Errorf("mq: init failed (degraded): %v", mqErr)
+			panic(fmt.Sprintf("mq: provider init failed (mode=%s): %v", con.MQ.Mode, mqErr))
 		} else {
 			sc.MQManager = mgr
 			// Wire MQ-backed event stream when usage includes "event-stream".
@@ -287,9 +763,102 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		}
 	}
 
+	casdoorEnabled := con.Auth.CasDoor.Enable || con.ManageAuth.CasDoor.Enable
+	if casdoorEnabled {
+		clients, err := casdoorauth.NewClientSet(con.Auth.CasDoor, con.ManageAuth.CasDoor)
+		if err != nil {
+			panic(fmt.Sprintf("auth lifecycle: Casdoor client init failed: %v", err))
+		}
+		sc.CasdoorClients = clients
+		if con.AuthRevocation.Mode == config.AuthRevocationModeShared && sc.EventBridge == nil {
+			panic("auth lifecycle: shared mode requires MQ event-stream")
+		}
+		manager, err := authstate.NewManager(
+			sc.Service.Name,
+			con.AuthRevocation,
+			authstate.WithEventBridge(sc.ServiceEventBridge),
+			authstate.WithCasdoorEventHook(sc.CasdoorEventHookProvider),
+		)
+		if err != nil {
+			panic(fmt.Sprintf("auth lifecycle: revocation manager init failed: %v", err))
+		}
+		sc.AuthRevocationManager = manager
+	}
+
+	// shared 缓存必须等 MQ/EventBridge 外部适配器装配完成后再初始化，确保
+	// Redis 事实缓存与跨节点失效订阅同时就绪，不允许只启动本地层。
+	cacheManager, cacheErr := routecache.NewManager(
+		sc.Service.Name,
+		con.RouteCache,
+		routecache.WithInvalidationBridge(sc.ServiceEventBridge),
+	)
+	if cacheErr != nil {
+		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
+	}
+	sc.RouteCacheManager = cacheManager
+	sc.PublicRateLimiter = ratelimit.NewManager(sc.Service.Name, 0)
+
 	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
 	sc.Router = NewServiceRouter(sc, service)
-	scontext[name] = sc
+	initialized = true
+}
+
+func cleanupInitializedServiceContext(sc *ServiceContext) {
+	if sc == nil {
+		return
+	}
+	if sc.AuthRevocationManager != nil {
+		sc.AuthRevocationManager.BeginClose()
+	}
+	if sc.RouteWebSocketHub != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sc.RouteWebSocketHub.Close(ctx)
+		cancel()
+	}
+	if sc.RouteCacheManager != nil {
+		sc.RouteCacheManager.Close()
+	}
+	if sc.PublicRateLimiter != nil {
+		sc.PublicRateLimiter.Close()
+	}
+	if sc.ServiceEventBridge != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = sc.ServiceEventBridge.Close(ctx)
+		cancel()
+	}
+	if sc.MQManager != nil {
+		_ = sc.MQManager.Close()
+	}
+	if sc.AuthRevocationManager != nil {
+		_ = sc.AuthRevocationManager.Close()
+	}
+	if sc.ServiceResolver != nil {
+		sc.ServiceResolver.Close()
+	}
+	if sc.ownsClusterProvider && sc.ClusterProvider != nil {
+		_ = sc.ClusterProvider.Close()
+	}
+	sc.AuthRevocationManager = nil
+	sc.CasdoorClients = nil
+	sc.RouteWebSocketHub = nil
+	sc.RouteCacheManager = nil
+	sc.PublicRateLimiter = nil
+	sc.EventBridge = nil
+	sc.ServiceEventBridge = nil
+	sc.MQManager = nil
+	sc.EventStream = nil
+	sc.ServiceResolver = nil
+	sc.ClusterProvider = nil
+	sc.ownsClusterProvider = false
+}
+
+func assertServiceRoutesRegistrationMutable(owner string, routes []types.IRouter) {
+	for _, route := range routes {
+		if route == nil {
+			continue
+		}
+		route.RouterInfo().PrepareRegistration(owner)
+	}
 }
 func initService(iser types.IService, sc *ServiceContext) *types.Service {
 	service := &types.Service{
@@ -348,74 +917,301 @@ func safedo(cs types.IRouter, req types.IRequest) {
 	// 	logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", serviceName, path, err.Error()))
 	// }
 	info := cs.RouterInfo()
-	TestResult[info.GetPath()] = nil
+	SetTestResult(info.GetPath(), nil)
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
 		return nil
 	}
-	return scontext[name]
+	return contextRegistry.get(name)
 }
 func GetContexts() map[string]*ServiceContext {
-	return scontext
+	return contextRegistry.snapshot()
 }
 func (own *ServiceContext) NewID() uint {
 	return uint(own.snow.NextId())
 }
+
+// UseOutbox 启用当前服务的可靠 Outbox 发布器。事件来源服务名固定为当前 ServiceContext。
+func (own *ServiceContext) UseOutbox(store event.OutboxStore) error {
+	if own == nil || own.ServiceEventBridge == nil || own.Service == nil {
+		return event.ErrServiceEventBridgeClosed
+	}
+	return own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
+		SourceService: own.Service.Name,
+		Store:         store,
+		External:      own.ServiceEventBridge.HasExternalPublisher(),
+	})
+}
+
+// NotifyOutbox 唤醒当前服务 Outbox 发布器尽快扫描本地 Outbox 表。
+func (own *ServiceContext) NotifyOutbox() {
+	if own == nil || own.ServiceEventBridge == nil {
+		return
+	}
+	own.ServiceEventBridge.NotifyOutbox()
+}
+
+// SubscribeEvent 注册统一业务事件订阅；运行时负责连接本地事件中心和外部事件桥。
+func (own *ServiceContext) SubscribeEvent(subscription event.Subscription) (func(), error) {
+	if own == nil || own.ServiceEventBridge == nil {
+		return nil, event.ErrServiceEventBridgeClosed
+	}
+	return own.ServiceEventBridge.SubscribeEvent(subscription)
+}
+
 func (own *ServiceContext) SetPid(pid int) {
 	own.Pid = pid
 }
 func (own *ServiceContext) SetRunState(state bool) {
-	own.isStart = state
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
 
-	if state {
-		if own.ClusterProvider != nil && own.membership == nil {
-			nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
-				own.Config.DataCenterID, own.Config.MachineID)
-			own.nodeID = nodeID
-			node := &cluster.NodeInfo{
-				ID:           nodeID,
-				ServiceName:  own.Service.Name,
-				DataCenterID: int64(own.Config.DataCenterID),
-				MachineID:    int64(own.Config.MachineID),
-				Address:      own.Config.RunIp,
-				Port:         own.Config.Port,
-				SocketPort:   own.Config.SocketPort,
-				Weight:       1,
-			}
-			if regErr := own.ClusterProvider.Register(context.Background(), node); regErr != nil {
-				logx.Errorf("cluster: register node %s: %v", nodeID, regErr)
-			} else {
-				interval := own.Config.Cluster.HeartbeatInterval
-				if interval == 0 {
-					interval = 3 * time.Second
-				}
-				own.membership = cluster.NewMembershipManager(own.ClusterProvider, nodeID, interval)
-				own.membership.Start(context.Background())
-			}
-		}
-		if own.ClusterProvider != nil && own.CrossNodeBroker == nil {
-			if own.nodeID == "" {
-				own.nodeID = fmt.Sprintf("%s-%d-%d", own.Service.Name,
-					own.Config.DataCenterID, own.Config.MachineID)
-			}
-			own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
-				own.ClusterProvider, own.Service.Name, own.nodeID,
-			)
-			types.SetCrossNodeForwarder(own.CrossNodeBroker)
+	own.lifecycleMu.Lock()
+	if own.terminated {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	if own.isStart.Load() == state {
+		if state {
+			own.lifecycleMu.Unlock()
+			return
 		}
 	} else {
-		if own.CrossNodeBroker != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			own.CrossNodeBroker.DrainAndStop(ctx)
-			own.CrossNodeBroker = nil
+		own.isStart.Store(state)
+	}
+	if !state {
+		own.terminated = true
+		if own.shutdownDone == nil {
+			own.shutdownDone = make(chan struct{})
 		}
-		if own.membership != nil {
+	}
+	provider := own.ClusterProvider
+	switcher := own.ClusterSwitcher
+	membership := own.membership
+	broker := own.CrossNodeBroker
+	mqManager := own.MQManager
+	serviceEventBridge := own.ServiceEventBridge
+	routeWebSocketHub := own.RouteWebSocketHub
+	routeCacheManager := own.RouteCacheManager
+	publicRateLimiter := own.PublicRateLimiter
+	authRevocationManager := own.AuthRevocationManager
+	serviceResolver := own.ServiceResolver
+	ownsClusterProvider := own.ownsClusterProvider
+	grpcServer := own.grpcServer
+	resources := own.resources
+	if !state {
+		own.membership = nil
+		own.CrossNodeBroker = nil
+		own.MQManager = nil
+		own.EventBridge = nil
+		own.ServiceEventBridge = nil
+		own.RouteWebSocketHub = nil
+		own.RouteCacheManager = nil
+		own.PublicRateLimiter = nil
+		own.AuthRevocationManager = nil
+		own.CasdoorClients = nil
+		own.AuthRequestHookProvider = nil
+		own.CasdoorEventHookProvider = nil
+		own.AuthHookProvider = nil
+		own.EventStream = nil
+		own.ServiceResolver = nil
+		own.ownsClusterProvider = false
+	}
+	own.lifecycleMu.Unlock()
+	if !state && authRevocationManager != nil {
+		authRevocationManager.BeginClose()
+	}
+	if !state && own.Router != nil {
+		own.Router.unregisterRouterInfos()
+	}
+	if !state {
+		defer func() {
+			contextRegistry.remove(own.Service.Name, own)
+			own.completeShutdown()
+		}()
+		if resources != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			if err := resources.Close(ctx); err != nil {
+				own.recordShutdownError(err)
+				logx.Errorw("service_managed_resources_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+	}
+
+	if state {
+		readyCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		readyErr := own.waitForGRPCReady(readyCtx, grpcServer)
+		cancel()
+		if readyErr != nil {
+			own.setRuntimeError(readyErr)
+			own.isStart.Store(false)
+			if own.Config.Cluster.Mode == "on" {
+				panic(fmt.Sprintf("grpc: service %s failed before discovery registration: %v", own.Service.Name, readyErr))
+			}
+			return
+		}
+		nodeID, node, interval := own.clusterMembershipConfig()
+		if provider != nil && membership == nil {
+			var err error
+			membership, err = own.startMembership(provider, node, interval, grpcServer)
+			if err != nil {
+				if own.Config.Cluster.Mode == "auto" && provider != own.localFallback() {
+					failedProvider := provider
+					registerErr := err
+					if cleanupErr := own.cleanupFailedRegistration(failedProvider, node.ID, registerErr); cleanupErr != nil {
+						err = errors.Join(registerErr, cleanupErr)
+					} else {
+						provider = own.localFallback()
+						logx.Infow("cluster_degraded",
+							logx.Field("service", own.Service.Name),
+							logx.Field("provider", failedProvider.Name()),
+							logx.Field("fallback_provider", provider.Name()),
+							logx.Field("error", registerErr),
+						)
+						membership, err = own.startMembership(provider, node, interval, grpcServer)
+					}
+					if err == nil {
+						own.lifecycleMu.Lock()
+						own.ClusterProvider = provider
+						own.ownsClusterProvider = false
+						own.ClusterSwitcher = cluster.NewClusterSwitcher(provider, own.Service.Name)
+						if own.ServiceResolver != nil {
+							own.ServiceResolver.SetProvider(provider)
+						}
+						own.lifecycleMu.Unlock()
+						if ownsClusterProvider {
+							if closeErr := failedProvider.Close(); closeErr != nil {
+								logx.Errorw("cluster_provider_close_failed",
+									logx.Field("service", own.Service.Name),
+									logx.Field("provider", failedProvider.Name()),
+									logx.Field("error", closeErr),
+								)
+							}
+						}
+					}
+				}
+				if err != nil {
+					startupErr := fmt.Errorf("cluster registration failed for service %s using provider %s: %w",
+						own.Service.Name, provider.Name(), err)
+					own.failStartup(startupErr, grpcServer)
+					if own.Config.Cluster.Mode == "on" {
+						panic(startupErr)
+					}
+					return
+				}
+			}
+		}
+		if provider != nil && membership != nil && broker == nil {
+			broker = cluster.NewCrossNodeNoticeBroker(provider, own.Service.Name, nodeID)
+			if own.TransportSelector != nil {
+				broker.SetSender(own.makeCrossNodeSender())
+			}
+			types.SetCrossNodeForwarderForService(own.Service.Name, broker)
+		}
+		own.lifecycleMu.Lock()
+		own.nodeID = nodeID
+		own.membership = membership
+		own.CrossNodeBroker = broker
+		own.lifecycleMu.Unlock()
+		own.superviseGRPC(grpcServer)
+	} else {
+		if shutdown, ok := switcher.(cluster.ProviderSwitchShutdown); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			own.recordShutdownError(shutdown.Shutdown(ctx, provider))
+			cancel()
+		}
+		if grpcServer != nil {
+			grpcServer.BeginShutdown()
+		}
+		if membership != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			own.recordShutdownError(membership.Stop(ctx))
+			cancel()
+			membership = nil
+		}
+		if grpcServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			if err := grpcServer.StopContext(ctx); err != nil {
+				own.recordShutdownError(err)
+				logx.Errorw("grpc_server_stop_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+		if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			if err := stopper.Stop(ctx); err != nil {
+				own.recordShutdownError(err)
+				logx.Errorw("transport_client_pool_stop_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+		if serviceResolver != nil {
+			serviceResolver.Close()
+		}
+		if routeWebSocketHub != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			own.membership.Stop(ctx)
-			own.membership = nil
+			if err := routeWebSocketHub.Close(ctx); err != nil {
+				logx.Errorw("route_websocket_hub_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+		if routeCacheManager != nil {
+			routeCacheManager.Close()
+		}
+		if publicRateLimiter != nil {
+			publicRateLimiter.Close()
+		}
+		if serviceEventBridge != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := serviceEventBridge.Close(ctx); err != nil {
+				logx.Errorw("service_event_bridge_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
+			cancel()
+		}
+		if broker != nil {
+			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			broker.DrainAndStop(ctx)
+			cancel()
+		}
+		if ownsClusterProvider && provider != nil {
+			if err := provider.Close(); err != nil {
+				logx.Errorw("cluster_provider_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("provider", provider.Name()),
+					logx.Field("error", err),
+				)
+			}
+		}
+		if mqManager != nil {
+			if err := mqManager.Close(); err != nil {
+				logx.Errorf("mq: close failed: %v", err)
+			}
+		}
+		if authRevocationManager != nil {
+			if err := authRevocationManager.Close(); err != nil {
+				logx.Errorw("auth_revocation_manager_close_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("error", err),
+				)
+			}
 		}
 	}
 
@@ -433,100 +1229,418 @@ func (own *ServiceContext) SetRunState(state bool) {
 // current provider and, if the service is already running, restarts membership
 // and the CrossNode broker with the new provider.
 func (own *ServiceContext) SyncProviderAfterSwitch() error {
-	if own.ClusterSwitcher == nil {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+	return own.syncProviderAfterSwitch()
+}
+
+// ClusterProviderSnapshot reads provider identity and nodes within the service
+// lifecycle boundary so switching and shutdown cannot replace or close it.
+func (own *ServiceContext) ClusterProviderSnapshot(
+	ctx context.Context,
+	serviceName string,
+	statuses ...cluster.NodeStatus,
+) (string, []*cluster.NodeInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := own.beginLifecycleOperationContext(ctx); err != nil {
+		return "", nil, fmt.Errorf("cluster: wait for provider query: %w", err)
+	}
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	provider := own.ClusterProvider
+	terminated := own.terminated
+	own.lifecycleMu.Unlock()
+	if terminated || provider == nil {
+		return "none", []*cluster.NodeInfo{}, nil
+	}
+	providerName := provider.Name()
+	nodes, err := provider.List(ctx, serviceName, statuses...)
+	if err != nil {
+		return "", nil, err
+	}
+	return providerName, nodes, nil
+}
+
+func (own *ServiceContext) syncProviderAfterSwitch() error {
+
+	own.lifecycleMu.Lock()
+	switcher := own.ClusterSwitcher
+	oldProvider := own.ClusterProvider
+	own.lifecycleMu.Unlock()
+	if switcher == nil {
 		return nil
 	}
-	newProvider := own.ClusterSwitcher.Current()
-	if newProvider == own.ClusterProvider {
+	newProvider := switcher.Current()
+	if newProvider == oldProvider {
 		return nil
 	}
+
+	own.lifecycleMu.Lock()
+	running := own.isStart.Load()
+	membership := own.membership
+	broker := own.CrossNodeBroker
+	nodeID := own.nodeID
+	own.lifecycleMu.Unlock()
+	if !running {
+		own.lifecycleMu.Lock()
+		own.ClusterProvider = newProvider
+		own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
+		if own.ServiceResolver != nil {
+			own.ServiceResolver.SetProvider(newProvider)
+		}
+		own.lifecycleMu.Unlock()
+		return nil
+	}
+
+	if membership != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		stopErr := membership.Stop(stopCtx)
+		cancel()
+		if stopErr != nil {
+			err := fmt.Errorf("switch discovery provider for service %s node %s from %s to %s: stop old membership: %w",
+				own.Service.Name, nodeID, providerName(oldProvider), providerName(newProvider), stopErr)
+			own.setRuntimeError(err)
+			own.isStart.Store(false)
+			return err
+		}
+	}
+
+	nodeID, node, interval := own.clusterMembershipConfig()
+	var newMembership *cluster.MembershipManager
+	var newBroker *cluster.CrossNodeNoticeBroker
+	if newProvider != nil {
+		var err error
+		newMembership, err = own.startMembership(newProvider, node, interval, own.grpcServer)
+		if err != nil {
+			switchErr := fmt.Errorf("switch discovery provider for service %s node %s from %s to %s: register new membership: %w",
+				own.Service.Name, nodeID, providerName(oldProvider), providerName(newProvider), err)
+			own.setRuntimeError(switchErr)
+			own.isStart.Store(false)
+			return switchErr
+		}
+		newBroker = cluster.NewCrossNodeNoticeBroker(newProvider, own.Service.Name, nodeID)
+		if own.TransportSelector != nil {
+			newBroker.SetSender(own.makeCrossNodeSender())
+		}
+	}
+	if broker != nil {
+		types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
+		drainCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		broker.DrainAndStop(drainCtx)
+		cancel()
+	}
+	if newBroker != nil {
+		types.SetCrossNodeForwarderForService(own.Service.Name, newBroker)
+	}
+
+	own.lifecycleMu.Lock()
 	own.ClusterProvider = newProvider
-
-	if !own.isStart {
-		return nil
+	own.ownsClusterProvider = newProvider != nil && newProvider != processLocalRegistry
+	if own.ServiceResolver != nil {
+		own.ServiceResolver.SetProvider(newProvider)
 	}
-
-	if own.membership != nil {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		own.membership.Stop(stopCtx)
-		cancel()
-		own.membership = nil
-	}
-	nodeID := fmt.Sprintf("%s-%d-%d", own.Service.Name,
-		own.Config.DataCenterID, own.Config.MachineID)
 	own.nodeID = nodeID
-	if newProvider != nil {
-		node := &cluster.NodeInfo{
-			ID:           nodeID,
-			ServiceName:  own.Service.Name,
-			DataCenterID: int64(own.Config.DataCenterID),
-			MachineID:    int64(own.Config.MachineID),
-			Address:      own.Config.RunIp,
-			Port:         own.Config.Port,
-			SocketPort:   own.Config.SocketPort,
-			Weight:       1,
-		}
-		if regErr := newProvider.Register(context.Background(), node); regErr != nil {
-			logx.Errorf("cluster: re-register node %s after switch: %v", nodeID, regErr)
-		} else {
-			interval := own.Config.Cluster.HeartbeatInterval
-			if interval == 0 {
-				interval = 3 * time.Second
-			}
-			own.membership = cluster.NewMembershipManager(newProvider, nodeID, interval)
-			own.membership.Start(context.Background())
-		}
-	}
-
-	if own.CrossNodeBroker != nil {
-		drainCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		own.CrossNodeBroker.DrainAndStop(drainCtx)
-		cancel()
-		own.CrossNodeBroker = nil
-	}
-	if newProvider != nil {
-		own.CrossNodeBroker = cluster.NewCrossNodeNoticeBroker(
-			newProvider, own.Service.Name, nodeID,
-		)
-		types.SetCrossNodeForwarder(own.CrossNodeBroker)
-	} else {
-		types.SetCrossNodeForwarder(nil)
-	}
-
+	own.membership = newMembership
+	own.CrossNodeBroker = newBroker
+	own.lifecycleMu.Unlock()
 	return nil
 }
 
+// BeginProviderSwitch starts a provider migration inside the service lifecycle
+// boundary. A target not accepted by Begin is closed before this method returns.
+func (own *ServiceContext) BeginProviderSwitch(ctx context.Context, to cluster.DiscoveryProvider) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := own.beginLifecycleOperationContext(ctx); err != nil {
+		return closeRejectedSwitchTarget(ctx, to, err)
+	}
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return closeRejectedSwitchTarget(ctx, to, errors.New("cluster: service context is terminated"))
+	}
+	if switcher == nil {
+		return closeRejectedSwitchTarget(ctx, to, errors.New("cluster: switcher not initialised"))
+	}
+	return beginProviderSwitch(ctx, switcher, to)
+}
+
+// CompleteProviderSwitch promotes, synchronizes, and finalizes a provider
+// migration as one lifecycle operation, so shutdown cannot interleave.
+func (own *ServiceContext) CompleteProviderSwitch(ctx context.Context) error {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	running := own.isStart.Load()
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return errors.New("cluster: service context is terminated")
+	}
+	if switcher == nil {
+		return errors.New("cluster: switcher not initialised")
+	}
+	if transaction, ok := switcher.(cluster.ProviderSwitchTransaction); ok {
+		if err := transaction.Promote(ctx); err != nil {
+			return err
+		}
+		if err := own.syncProviderAfterSwitch(); err != nil {
+			return err
+		}
+		return transaction.Finalize(ctx)
+	}
+	if running {
+		return errors.New("cluster: running provider switch requires transactional switcher")
+	}
+	if err := switcher.Complete(ctx); err != nil {
+		return err
+	}
+	return own.syncProviderAfterSwitch()
+}
+
+// RollbackProviderSwitch serializes a management rollback with service
+// startup and shutdown.
+func (own *ServiceContext) RollbackProviderSwitch(ctx context.Context) error {
+	own.beginLifecycleOperation()
+	defer own.endLifecycleOperation()
+
+	own.lifecycleMu.Lock()
+	terminated := own.terminated
+	switcher := own.ClusterSwitcher
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return errors.New("cluster: service context is terminated")
+	}
+	if switcher == nil {
+		return errors.New("cluster: switcher not initialised")
+	}
+	return switcher.Rollback(ctx)
+}
+
+func beginProviderSwitch(
+	ctx context.Context,
+	switcher cluster.ProviderSwitcher,
+	to cluster.DiscoveryProvider,
+) error {
+	err := switcher.Begin(ctx, to)
+	if err == nil {
+		return nil
+	}
+	return closeRejectedSwitchTarget(ctx, to, err)
+}
+
+func closeRejectedSwitchTarget(
+	ctx context.Context,
+	to cluster.DiscoveryProvider,
+	beginErr error,
+) error {
+	if to == nil {
+		return beginErr
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	closeDone := make(chan error, 1)
+	go func() {
+		if closer, ok := to.(cluster.ContextCloser); ok {
+			closeDone <- closer.CloseContext(ctx)
+			return
+		}
+		closeDone <- to.Close()
+	}()
+	select {
+	case closeErr := <-closeDone:
+		if closeErr != nil {
+			return errors.Join(beginErr, fmt.Errorf("cluster: close rejected target provider %s: %w", to.Name(), closeErr))
+		}
+		return beginErr
+	case <-ctx.Done():
+		return errors.Join(beginErr, fmt.Errorf("cluster: wait for rejected target provider %s close: %w", to.Name(), ctx.Err()))
+	}
+}
+
+func providerName(provider cluster.DiscoveryProvider) string {
+	if provider == nil {
+		return "off"
+	}
+	return provider.Name()
+}
+
+func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
+	nodeID := own.clusterNodeID(own.Config.MachineID)
+	address := own.Config.RunIp
+	if own.Config.Cluster.AdvertiseAddress != "" {
+		address = own.Config.Cluster.AdvertiseAddress
+	}
+	node := &cluster.NodeInfo{
+		ID:                nodeID,
+		ServiceName:       own.Service.Name,
+		ServiceInstanceID: own.ServiceInstanceID,
+		DataCenterID:      int64(own.Config.DataCenterID),
+		MachineID:         int64(own.Config.MachineID),
+		Address:           address,
+		Port:              own.Config.Port,
+		GRPCPort:          own.Config.Transport.GRPC.Port,
+		Weight:            1,
+	}
+	interval := own.Config.Cluster.HeartbeatInterval
+	if interval == 0 {
+		interval = 3 * time.Second
+	}
+	return nodeID, node, interval
+}
+
+func (own *ServiceContext) clusterNodeID(machineID uint) string {
+	instanceID := own.ServiceInstanceID
+	if instanceID == "" {
+		instanceID = "unknown"
+	}
+	return fmt.Sprintf("%s-%d-%d-%s", own.Service.Name, own.Config.DataCenterID, machineID, instanceID)
+}
+
+func (own *ServiceContext) startMembership(
+	provider cluster.DiscoveryProvider,
+	node *cluster.NodeInfo,
+	interval time.Duration,
+	grpcServer types.GRPCServerLifecycle,
+) (*cluster.MembershipManager, error) {
+	registerCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	defer cancel()
+	registerDone := make(chan struct{})
+	if grpcServer != nil {
+		go func() {
+			select {
+			case <-grpcServer.Done():
+				cancel()
+			case <-registerDone:
+			}
+		}()
+	}
+	if err := provider.Register(registerCtx, node); err != nil {
+		close(registerDone)
+		return nil, fmt.Errorf("register node %s: %w", node.ID, err)
+	}
+	close(registerDone)
+	if grpcServer != nil {
+		select {
+		case <-grpcServer.Done():
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+			cleanupErr := provider.Deregister(cleanupCtx, node.ID)
+			cleanupCancel()
+			serveErr := grpcServer.Err()
+			if serveErr == nil {
+				serveErr = errors.New("grpc server stopped during discovery registration")
+			}
+			if cleanupErr != nil && !errors.Is(cleanupErr, cluster.ErrNodeNotFound) {
+				return nil, errors.Join(serveErr, fmt.Errorf("revoke node %s: %w", node.ID, cleanupErr))
+			}
+			return nil, serveErr
+		default:
+		}
+	}
+	membership := cluster.NewMembershipManager(provider, node.ID, interval)
+	membership.Start(context.Background())
+	return membership, nil
+}
+
+func (own *ServiceContext) cleanupFailedRegistration(
+	provider cluster.DiscoveryProvider,
+	nodeID string,
+	registerErr error,
+) error {
+	var registrationErr *cluster.RegistrationError
+	if errors.As(registerErr, &registrationErr) && registrationErr.Compensated {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	defer cancel()
+	err := provider.Deregister(cleanupCtx, nodeID)
+	if registrationErr != nil {
+		if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
+			return nil
+		}
+		return errors.Join(
+			fmt.Errorf("cluster registration compensation was not confirmed: %w", registerErr),
+			fmt.Errorf("cleanup failed cluster registration for node %s using provider %s: %w",
+				nodeID, provider.Name(), err),
+		)
+	}
+	if err == nil || errors.Is(err, cluster.ErrNodeNotFound) {
+		return nil
+	}
+	return fmt.Errorf("cleanup failed cluster registration for node %s using provider %s: %w",
+		nodeID, provider.Name(), err)
+}
+
+func (own *ServiceContext) localFallback() cluster.DiscoveryProvider {
+	if own.localFallbackProvider != nil {
+		return own.localFallbackProvider
+	}
+	return processLocalRegistry
+}
+
+func (own *ServiceContext) failStartup(err error, grpcServer types.GRPCServerLifecycle) {
+	own.setRuntimeError(err)
+	own.isStart.Store(false)
+	if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+		own.recordShutdownError(stopper.Stop(ctx))
+		cancel()
+	}
+	if grpcServer == nil {
+		return
+	}
+	grpcServer.BeginShutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
+	_ = grpcServer.StopContext(ctx)
+	cancel()
+}
+
 func (own *ServiceContext) IsRun() bool {
-	return own.isStart
+	return own.isStart.Load()
 }
 func (own *ServiceContext) SetHttpServer(server types.IRunServer) {
 	own.Service.HttpServer = server
 }
-func (own *ServiceContext) SetSocketServer(server types.IRunServer) {
-	own.Service.AddInternalServer(server)
-}
-func (own *ServiceContext) GetServers() []types.IRunServer {
-	items := make([]types.IRunServer, 0)
-	items = append(items, own.Service.HttpServer)
-	items = append(items, own.Service.GetInternalServers()...)
+func (own *ServiceContext) GetServers() []service.Service {
+	items := make([]service.Service, 0, 2+len(own.Service.GetInternalServers()))
+	if own.Service.HttpServer != nil {
+		items = append(items, own.Service.HttpServer)
+	}
+	for _, server := range own.Service.GetInternalServers() {
+		if server != nil {
+			items = append(items, server)
+		}
+	}
+	if own.grpcServer != nil {
+		items = append(items, &managedGRPCService{owner: own, server: own.grpcServer})
+	}
 	return items
+}
+
+// HandleInternalPayload 是 gRPC 服务端调用业务路由的入口。
+func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+	own.TransportStats.RecordInboundGRPC()
+	if payload != nil && (own.Service == nil || payload.TargetService != own.Service.Name) {
+		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
+	}
+	return own.invokePayload(ctx, payload)
 }
 func (own *ServiceContext) SetAttachServiceAddress(name string) error {
 	if cas, ok := own.Config.AttachServices[name]; ok {
 		if as, ok := own.Service.AttachService[name]; ok {
 			as.Address = cas.Address
 			as.Port = cas.Port
-			// if cas.SocketPort == 0 {
-			// 	csc := own.GetServerConfig(as.Address, as.Port)
-			// 	if csc != nil {
-			// 		as.SocketPort = csc.SocketPort
-			// 		cas.SocketPort = csc.SocketPort
-			// 		cas.Address = csc.RunIp
-			// 		as.Address = csc.RunIp
-			// 		own.Config.Save()
-			// 	}
-			// }
-			as.SocketPort = cas.SocketPort
 			as.IsAttach = false
 			for _, sr := range as.ObserverRouters {
 				sr.IsOk = false
@@ -571,16 +1685,11 @@ func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types
 func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
 	info := observe.RouterInfo()
 	for _, as := range own.Service.AttachService {
-		if as.Address == "" || as.Port == 0 {
-			continue
-		}
 		for _, oa := range as.ObserverRouters {
-			ti := &types.TargetInfo{}
-			ti.TargetAddress = as.Address
-			ti.TargetPort = as.Port
-			ti.TargetService = as.ServiceName
-			ti.TargetPath = info.GetPath()
-			ti.TargetSocketPort = as.SocketPort
+			ti := &types.TargetInfo{
+				TargetService: as.ServiceName,
+				TargetPath:    info.GetPath(),
+			}
 			ok, err := own.observeCall(oa, ti)
 			if err != nil {
 				return err
@@ -623,16 +1732,36 @@ func runobservemap() {
 			if own == nil {
 				continue
 			}
-			values, err := own.Service.CallService(v)
+			values, err := own.invokePayload(context.Background(), v)
 			if err != nil {
-				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), err.Error())
+				logx.Errorw("observe_call_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+					logx.Field("error", err),
+				)
 			}
 			res := &Response{}
-			json.Unmarshal(values, res)
+			if err := json.Unmarshal(values, res); err != nil {
+				logx.Errorw("observe_response_decode_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("error", err),
+				)
+				continue
+			}
 			if !res.Success {
-				logx.Errorf("%s Observe TargetInfo:%s Error:%s", own.Service.Name, utils.PrintObj(v), res.ErrorMessage)
+				logx.Errorw("observe_response_failed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+				)
 			} else {
-				logx.Infof("%s Observe TargetAddress:%s, TargetService:%s, TargetPath:%s Success", own.Service.Name, v.TargetAddress, v.TargetService, v.TargetPath)
+				logx.Debugw("observe_call_completed",
+					logx.Field("service", own.Service.Name),
+					logx.Field("target_service", v.TargetService),
+					logx.Field("target_route", v.TargetPath),
+				)
 			}
 		}
 		obseLock.Unlock()
@@ -640,33 +1769,23 @@ func runobservemap() {
 }
 func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
 	if oa.ServiceName == "" || oa.Topic == "" {
-		logx.Error(utils.PrintObj(info))
 		return false, errors.New("observeCall ServiceName or Topic is empty")
 	}
-	if info.TargetAddress == "" || info.TargetPort == 0 || info.TargetService == "" || info.TargetPath == "" {
-		logx.Error(utils.PrintObj(info))
-		return false, errors.New("observeCall TargetAddress or TargetPort or TargetService or TargetPath is empty")
+	if info.TargetService == "" || info.TargetPath == "" {
+		return false, errors.New("observeCall TargetService or TargetPath is empty")
 	}
-	oa.OwnAddress = own.Config.RunIp
-	oa.OwnProt = own.Config.Port
-	oa.OwnSocketProt = own.Config.SocketPort
 	oa.ReceiveService = own.Service.Name
 	payload := &types.PayLoad{
-		TraceID:          "1",
-		SourceAddress:    oa.OwnAddress,
-		SourceService:    oa.ReceiveService,
-		TargetAddress:    info.TargetAddress,
-		TargetService:    info.TargetService,
-		TargetPort:       info.TargetPort,
-		TargetSocketPort: info.TargetSocketPort,
-		SourcePath:       "",
-		TargetPath:       info.TargetPath,
-		UserId:           "",
-		ClientIP:         oa.OwnAddress,
-		Auth:             false,
-		Instance:         oa,
+		TraceID:       "1",
+		SourceService: oa.ReceiveService,
+		TargetService: info.TargetService,
+		SourcePath:    "",
+		TargetPath:    info.TargetPath,
+		UserId:        "",
+		Auth:          false,
+		Instance:      oa,
 	}
-	values, err := own.Service.CallService(payload)
+	values, err := own.invokePayload(context.Background(), payload)
 	if err != nil {
 		oa.Error = err
 		return false, err
@@ -696,20 +1815,15 @@ func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
 	}
 	info := notify.RouterInfo()
 	payload := &types.PayLoad{
-		TraceID:          args.TraceID,
-		SourceAddress:    ctx.Config.RunIp,
-		SourceService:    args.SendService,
-		TargetAddress:    args.ReceiveAddress,
-		TargetService:    args.ReceiveService,
-		TargetPort:       args.ReceiveProt,
-		TargetSocketPort: args.ReceiveSocketProt,
-		SourcePath:       args.Topic,
-		TargetPath:       info.GetPath(),
-		ClientIP:         ctx.Config.RunIp,
-		Auth:             false,
-		Instance:         args,
+		TraceID:       args.TraceID,
+		SourceService: args.SendService,
+		TargetService: args.ReceiveService,
+		SourcePath:    args.Topic,
+		TargetPath:    info.GetPath(),
+		Auth:          false,
+		Instance:      args,
 	}
-	values, err := ctx.Service.CallService(payload)
+	values, err := ctx.invokePayload(context.Background(), payload)
 	if err != nil {
 		return err
 	}
@@ -734,11 +1848,6 @@ func (own *ServiceContext) CallTargetService(traceid string, router types.IRoute
 		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
-		if info.TargetSocketPort == 0 {
-			payload.TargetSocketPort = own.Config.SocketPort
-		} else {
-			payload.TargetSocketPort = info.TargetSocketPort
-		}
 		if info.TargetToken != "" {
 			payload.Token = info.TargetToken
 		}
@@ -751,30 +1860,35 @@ func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse
 		TraceID:       strconv.Itoa(int(own.NewID())),
 		SourceService: own.Service.Name,
 		SourcePath:    "",
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        "",
 		UserName:      "",
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,
 		Instance:      api,
-		HttpMethod:    info.Method,
+		HttpMethod:    info.GetMethod(),
 	}
 	return own.CallService(pl)
 }
 func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	res := &Response{}
+	ctx := context.Background()
+	if payload != nil && own != nil && own.Service != nil {
+		payload.SourceService = own.Service.Name
+		ctx = types.ContextWithTrustedInternalCaller(ctx, own.Service.Name)
+	}
 	if callback != nil {
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
-			values, err := own.sendPayload(context.Background(), payload)
-			//TODO:网络错误，进入重试流程，超过重试次数，返回错误
+			values, err := own.invokePayload(ctx, payload)
 			if err != nil {
 				for _, ecb := range errcallback {
 					res.err = err
 					ecb(res)
 				}
-				close(ch)
+				ch <- res
+				return
 			}
 			json.Unmarshal(values, res)
 			ch <- res
@@ -784,37 +1898,134 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 			callback[0](res)
 		}
 	} else {
-		values, err := own.sendPayload(context.Background(), payload)
-		//TODO:网络错误，应该进入重试流程，未实现
+		values, err := own.invokePayload(ctx, payload)
 		if err != nil {
-			logx.Errorf("CallService 网络错误 Payload:%s ,Error:%s", utils.PrintObj(payload), err.Error())
+			logx.Errorw("service_call_failed",
+				logx.Field("service", own.Service.Name),
+				logx.Field("target_service", payload.TargetService),
+				logx.Field("target_route", payload.TargetPath),
+				logx.Field("trace_id", payload.TraceID),
+				logx.Field("error", err),
+			)
 			return nil, err
 		}
 		err = json.Unmarshal(values, res)
 		if err != nil {
-			logx.Errorf("CallService 数据错误 Payload:%s, Values:%s ,Error:%s", utils.PrintObj(payload), string(values), err.Error())
+			logx.Errorw("service_response_decode_failed",
+				logx.Field("service", own.Service.Name),
+				logx.Field("target_service", payload.TargetService),
+				logx.Field("target_route", payload.TargetPath),
+				logx.Field("trace_id", payload.TraceID),
+				logx.Field("response_bytes", len(values)),
+				logx.Field("error", err),
+			)
 			return nil, err
 		}
 	}
 	return res, nil
 }
 
-// sendPayload dispatches a payload. When a TransportSelector is configured,
-// it is used for all payloads regardless of TargetAddress, allowing
-// service-discovery-resolved targets to be used by the selector.
-func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
-	if own.TransportSelector != nil {
-		target := payload.TargetAddress
-		if payload.TargetPort > 0 {
-			target = target + ":" + strconv.Itoa(payload.TargetPort)
-		}
-		result, err := transport.SendWithFallback(ctx, own.TransportSelector, payload, target)
-		if err == nil {
-			return result, nil
-		}
-		logx.Errorf("transport selector failed (%v), falling back to HTTP CallService", err)
+func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
+		return nil, fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
+	if local := GetContext(payload.TargetService); local != nil {
+		return own.dispatchLocal(ctx, payload, local)
+	}
+	var endpoints transport.TransportEndpoints
+	if own.ServiceResolver != nil {
+		resolved, err := own.ServiceResolver.Resolve(ctx, payload.TargetService)
+		if err != nil {
+			return nil, err
+		}
+		payload.TargetAddress = resolved.Info.TargetAddress
+		payload.TargetPort = resolved.Info.TargetPort
+		endpoints = resolved.Endpoints
+	} else if payload.TargetAddress != "" {
+		// 直接指定地址的旧调用只具备 HTTP 端点；gRPC 端点必须来自服务发现。
+		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0)
+	} else {
+		return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
+	}
+	return own.sendPayload(ctx, payload, endpoints)
+}
+
+func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
+	if target == nil || target.Router == nil {
+		return nil, fmt.Errorf("%w: service=%s", ErrTargetServiceUnavailable, payload.TargetService)
+	}
+	info := target.Router.GetRouter(payload.TargetPath)
+	if info == nil {
+		return nil, fmt.Errorf("%w: route=%s", ErrTargetServiceUnavailable, payload.TargetPath)
+	}
+	req := ToRequest(payload)
+	if req == nil {
+		return nil, fmt.Errorf("%w: request context for %s", ErrTargetServiceUnavailable, payload.TargetService)
+	}
+	if caller, trusted := types.TrustedInternalCallerFromContext(ctx); trusted {
+		req = requestWithTrustedInternalCaller(req, caller)
+	}
+	if err := info.AuthorizeInternalCaller(req); err != nil {
+		return nil, err
+	}
+	api, err := info.ParseNew(payload.Instance)
+	if err != nil {
+		return nil, err
+	}
+	response := info.ExecDo(api, req)
+	return json.Marshal(response)
+}
+
+// sendPayload 在发送前完成协议选择和健康预检。MaxRetries 只作用于预检；
+// 一旦 Transport.Send 开始，无论结果是否确定，都不会重试或切换协议。
+func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad, endpoints transport.TransportEndpoints) ([]byte, error) {
+	if own.TransportSelector != nil {
+		maxRetries := own.Config.Transport.MaxRetries
+		if maxRetries <= 0 {
+			maxRetries = 1
+		}
+		selection, err := transport.SelectWithRetry(
+			ctx, own.TransportSelector, payload, endpoints,
+			maxRetries, own.Config.Transport.RetryDelay,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return transport.SendSelection(ctx, own.TransportSelector, selection, payload)
+	}
+	// No TransportSelector: one-shot legacy path, no retry.
 	return own.Service.CallService(payload)
+}
+
+// makeCrossNodeSender creates a cross-node sender that routes through
+// the configured TransportSelector when available.
+func (own *ServiceContext) makeCrossNodeSender() cluster.CrossNodeSender {
+	return func(ctx context.Context, target *cluster.NodeInfo, data []byte, path string) ([]byte, error) {
+		payload := &types.PayLoad{
+			TargetAddress: target.Address,
+			TargetPort:    target.Port,
+			TargetPath:    path,
+			TargetService: target.ServiceName,
+			Data:          data,
+			Instance:      json.RawMessage(data),
+			HttpMethod:    "POST",
+			Auth:          true,
+			SourceService: own.Service.Name,
+		}
+		endpoints := serviceTransportEndpoints(target.Address, target.Port, target.GRPCPort)
+		attempts := own.Config.Transport.MaxRetries
+		if attempts <= 0 {
+			attempts = 1
+		}
+		selection, err := transport.SelectWithRetry(
+			ctx, own.TransportSelector, payload, endpoints,
+			attempts, own.Config.Transport.RetryDelay,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return transport.SendSelection(ctx, own.TransportSelector, selection, payload)
+	}
 }
 
 func initCluster(sc *ServiceContext) error {
@@ -823,6 +2034,7 @@ func initCluster(sc *ServiceContext) error {
 		return err
 	}
 	sc.ClusterProvider = provider
+	sc.ownsClusterProvider = provider != nil && provider != processLocalRegistry
 	if provider != nil {
 		sc.ClusterSwitcher = cluster.NewClusterSwitcher(provider, sc.Service.Name)
 	} else {
@@ -831,24 +2043,69 @@ func initCluster(sc *ServiceContext) error {
 	return nil
 }
 
-// claimMachineID registers this service in the process-local cluster registry.
-// If the configured MachineID is already taken, it auto-allocates the next free ID.
-// Returns the (possibly new) MachineID to use for Snowflake initialisation.
-func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error) {
+func newServiceInstanceID(serviceName string) string {
+	id, err := uuid.NewV4()
+	if err != nil {
+		return fmt.Sprintf("%s-%d", serviceName, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%s", serviceName, id.String())
+}
+
+// claimMachineID registers this service before Snowflake initialisation.
+// AutoMachineID uses the configured provider; fixed mode preserves the
+// process-local expansion behaviour used by existing single-process examples.
+func claimMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
+	if con.Cluster.Claim.AutoMachineID {
+		return claimAutoMachineID(sc, con)
+	}
+	return claimProcessLocalMachineID(sc, con)
+}
+
+func claimAutoMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
+	ctx := context.Background()
+	dc := int64(con.DataCenterID)
+	maxMachineID := int64(con.Cluster.Claim.MachineIDMax)
+	if maxMachineID <= 0 {
+		maxMachineID = 31
+	}
+	provider := sc.ClusterProvider
+	if provider == nil {
+		provider = processLocalRegistry
+	}
+	var lastErr error
+	for attempt := int64(0); attempt <= maxMachineID; attempt++ {
+		machine, err := cluster.AllocateMachineID(ctx, provider, sc.Service.Name, dc, maxMachineID)
+		if err != nil {
+			return int64(con.MachineID), err
+		}
+		node := sc.clusterNodeInfo(uint(machine))
+		if err := provider.Register(ctx, node); err != nil {
+			if errors.Is(err, cluster.ErrSlotConflict) {
+				lastErr = err
+				continue
+			}
+			return int64(con.MachineID), err
+		}
+		logx.Infow("cluster_auto_machine_id_claimed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("service_instance_id", sc.ServiceInstanceID),
+			logx.Field("datacenter_id", dc),
+			logx.Field("machine_id", machine),
+			logx.Field("provider", provider.Name()),
+		)
+		return machine, nil
+	}
+	if lastErr != nil {
+		return int64(con.MachineID), lastErr
+	}
+	return int64(con.MachineID), fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
+}
+
+func claimProcessLocalMachineID(sc *ServiceContext, con *config.ServerConfig) (int64, error) {
 	ctx := context.Background()
 	dc := int64(con.DataCenterID)
 	machine := int64(con.MachineID)
-
-	nodeID := fmt.Sprintf("%s-%d-%d", serviceName, dc, machine)
-	node := &cluster.NodeInfo{
-		ID:           nodeID,
-		ServiceName:  serviceName,
-		DataCenterID: dc,
-		MachineID:    machine,
-		Address:      "127.0.0.1",
-		Port:         con.Port,
-		Weight:       1,
-	}
+	node := sc.clusterNodeInfo(uint(machine))
 
 	err := processLocalRegistry.Register(ctx, node)
 	if err == nil {
@@ -860,17 +2117,35 @@ func claimMachineID(con *config.ServerConfig, serviceName string) (int64, error)
 	if con.Cluster.Claim.MachineIDMax > 0 {
 		maxMachineID = int64(con.Cluster.Claim.MachineIDMax)
 	}
-	newMachine := processLocalRegistry.AllocateMachineID(serviceName, dc, maxMachineID)
+	newMachine := processLocalRegistry.AllocateMachineID(sc.Service.Name, dc, maxMachineID)
 	if newMachine < 0 {
 		return machine, fmt.Errorf("cluster: all MachineID slots are full for DataCenterID=%d", dc)
 	}
-	node.ID = fmt.Sprintf("%s-%d-%d", serviceName, dc, newMachine)
+	node.ID = sc.clusterNodeID(uint(newMachine))
 	node.MachineID = newMachine
 	if regErr := processLocalRegistry.Register(ctx, node); regErr != nil {
 		return machine, regErr
 	}
-	logx.Infof("cluster: auto-allocated MachineID=%d for %s (was %d)", newMachine, serviceName, machine)
+	logx.Infof("cluster: auto-allocated MachineID=%d for %s (was %d)", newMachine, sc.Service.Name, machine)
 	return newMachine, nil
+}
+
+func (own *ServiceContext) clusterNodeInfo(machineID uint) *cluster.NodeInfo {
+	address := own.Config.RunIp
+	if own.Config.Cluster.AdvertiseAddress != "" {
+		address = own.Config.Cluster.AdvertiseAddress
+	}
+	return &cluster.NodeInfo{
+		ID:                own.clusterNodeID(machineID),
+		ServiceName:       own.Service.Name,
+		ServiceInstanceID: own.ServiceInstanceID,
+		DataCenterID:      int64(own.Config.DataCenterID),
+		MachineID:         int64(machineID),
+		Address:           address,
+		Port:              own.Config.Port,
+		GRPCPort:          own.Config.Transport.GRPC.Port,
+		Weight:            1,
+	}
 }
 
 func GetResponseData[T any](response interface{}) *T {

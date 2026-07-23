@@ -30,24 +30,27 @@ func (own *TestToken) Parse(req types.IRequest) error {
 		}
 		own.TokenType = ti
 	}
+	if own.TokenType < 0 || own.TokenType > 2 {
+		return errors.New("token type is invalid")
+	}
 	return nil
 }
 func (own *TestToken) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
-	con := sc.Config
-	jwt := safe.NewClaims(own.UserID, "")
-	token, err := jwt.GetToken(con.Auth.AccessSecret, con.Auth.AccessExpire)
-	if own.TokenType == 1 {
-		token, err = jwt.GetToken(con.ManageAuth.AccessSecret, con.ManageAuth.AccessExpire)
+	authType := types.AuthTypeUser
+	switch own.TokenType {
+	case 1:
+		authType = types.AuthTypeManage
+	case 2:
+		authType = types.AuthTypeServerManage
 	}
-	if own.TokenType == 2 {
-		token, err = jwt.GetToken(con.ServerManageAuth.AccessSecret, con.ServerManageAuth.AccessExpire)
-	}
-	return token, err
+	return issueForService(requestContext(req), sc, own.UserID, "", authType, types.AuthSourceTestToken, nil)
+}
+
+func (*TestToken) GetResponse() interface{} {
+	return &safe.TokenPairResponse{}
 }
 
 func (own *TestToken) RouterInfo() *types.RouterInfo {
-	info := api.ServerRouterInfo(own)
-	info.Method = "GET"
-	return info
+	return api.ServerRouterInfoWithOptions(own, router.WithMethod("GET"))
 }

@@ -41,12 +41,12 @@ func (own *SetServiceAddress) Validation(req types.IRequest) error {
 }
 func (own *SetServiceAddress) Do(req types.IRequest) (interface{}, error) {
 	qc := &public.QueryConfig{}
-	con, err := qc.GetConfigPath(own.ServerAddress, own.ServicePort)
+	_, err := qc.GetConfigPath(own.ServerAddress, own.ServicePort)
 	if err != nil {
 		return nil, err
 	}
 	sc := router.GetContext(req.ServiceName())
-	sc.Config.SetAttachService(own.ServiceName, own.ServerAddress, own.ServicePort, con.SocketPort)
+	sc.Config.SetAttachService(own.ServiceName, own.ServerAddress, own.ServicePort)
 	err = sc.Config.Save()
 	if err != nil {
 		return nil, err

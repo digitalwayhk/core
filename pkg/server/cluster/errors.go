@@ -23,3 +23,25 @@ var (
 	// candidate list is empty.
 	ErrEmptyCandidates = errors.New("cluster: no candidates after filtering")
 )
+
+// RegistrationError reports whether a provider compensated a registration
+// that became uncertain after the remote entry had already been created.
+// Cause remains available through errors.Is/errors.As via Unwrap.
+type RegistrationError struct {
+	Cause       error
+	Compensated bool
+}
+
+func (e *RegistrationError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "cluster: registration failed"
+	}
+	return e.Cause.Error()
+}
+
+func (e *RegistrationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}

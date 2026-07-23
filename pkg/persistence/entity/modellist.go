@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"sync"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
@@ -16,34 +15,8 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var (
-	globalSqliteInstances = make(map[string]*oltp.Sqlite)
-	sqliteInstanceMutex   = sync.RWMutex{}
-)
-
 func GetGlobalSqliteInstance(name string) *oltp.Sqlite {
-	sqliteInstanceMutex.RLock()
-	if instance, exists := globalSqliteInstances[name]; exists {
-		sqliteInstanceMutex.RUnlock()
-		return instance
-	}
-	sqliteInstanceMutex.RUnlock()
-
-	sqliteInstanceMutex.Lock()
-	defer sqliteInstanceMutex.Unlock()
-
-	// 双重检查
-	if instance, exists := globalSqliteInstances[name]; exists {
-		return instance
-	}
-
-	// 创建新实例
-	//logx.Infof("🆕 创建全局Sqlite实例: %s", name)
-	instance := oltp.NewSqlite()
-	instance.Name = name
-	globalSqliteInstances[name] = instance
-
-	return instance
+	return oltp.GetSharedSqliteInstance(name)
 }
 
 type ModelList[T types.IModel] struct {
@@ -438,7 +411,11 @@ func (own *ModelList[T]) SearchWhere(name string, value interface{}, fn ...func(
 		return nil, err
 	}
 	if item.Total > 0 && item.Total > 500 {
-		logx.Error(fmt.Sprintf("%s类型的SearchWhere条件查询数据超过500条,可能会影响性能,建议使用SearchAll方法指定分页查询:%s", utils.GetTypeName(own.hideEntity), utils.PrintObj(item)))
+		logx.Sloww("model_search_result_capped",
+			logx.Field("model", utils.GetTypeName(own.hideEntity)),
+			logx.Field("total", item.Total),
+			logx.Field("limit", item.Size),
+		)
 	}
 	return own.searchList, nil
 

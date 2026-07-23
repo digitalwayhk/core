@@ -10,8 +10,8 @@ type SessionRequest struct {
 	Signature string `json:"signature"`
 	Timestamp int64  `json:"timestamp"`
 	Token     string `json:"token"`
-	userID    string `json:"userId"`
-	userName  string `json:"userName"`
+	userID    string
+	userName  string
 }
 
 func (own *SessionRequest) Response() *SessionResponse {

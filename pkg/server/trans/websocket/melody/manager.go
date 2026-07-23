@@ -3,6 +3,8 @@ package melody
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -41,9 +43,10 @@ type MelodyManager struct {
 	serviceContext *router.ServiceContext
 
 	// 添加关闭通道
-	closeChan chan struct{}
-	closed    bool
-	closeMu   sync.Mutex
+	closeChan   chan struct{}
+	monitorDone chan struct{}
+	closed      bool
+	closeMu     sync.Mutex
 
 	// 客户端订阅管理
 	subscriptions   map[*melody.Session]*SessionSubscriptions
@@ -83,6 +86,7 @@ func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.M
 		serviceContext:  serviceContext,
 		subscriptions:   make(map[*melody.Session]*SessionSubscriptions),
 		closeChan:       make(chan struct{}), // 🔧 添加关闭通道
+		monitorDone:     make(chan struct{}),
 		connectionLimit: NewConnectionRateLimiter(),
 		connCounter:     &ConnectionCounter{},
 		maxConnections:  config.MaxConnections, // 默认最大连接数
@@ -137,6 +141,8 @@ func (mm *MelodyManager) Close() error {
 
 	mm.closed = true
 	close(mm.closeChan) // 关闭统计监控goroutine
+	mm.connectionLimit.Close()
+	<-mm.monitorDone
 
 	return mm.melody.Close()
 }
@@ -187,7 +193,10 @@ func (mm *MelodyManager) setupHandlers() {
 	})
 
 	// 定期统计
-	go mm.startStatsMonitor()
+	go func() {
+		defer close(mm.monitorDone)
+		mm.startStatsMonitor()
+	}()
 }
 
 // 🔧 新增：处理缓冲区满的错误
@@ -386,9 +395,9 @@ func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
 
 	// 🔧 在锁外设置router
 	subscriptions.setServiceRouter(mm.serviceContext.Router)
-	subscriptions.HandleSubscribe(msg)
-
-	logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
+	if subscriptions.HandleSubscribe(msg) {
+		logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
+	}
 }
 
 func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
@@ -407,21 +416,39 @@ func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
 	logx.Infof("客户端退订成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
 }
 
-func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (types.IRouter, error) {
+func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
 	defer func() {
-		if err := recover(); err != nil {
-			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.ServiceName, info.Path, err)
+		if recovered := recover(); recovered != nil {
+			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.GetServiceName(), info.GetPath(), recovered)
+			err = fmt.Errorf("parse websocket call request: %v", recovered)
+			api = nil
 		}
 	}()
 
-	var api types.IRouter
-	var err error
 	if data == nil {
 		api = info.New()
 	} else {
 		api, err = info.ParseNew(data)
 	}
 	return api, err
+}
+
+func (mm *MelodyManager) parseSubscriptionRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logx.Errorf("服务%s的路由%s发生异常:ParseSubscription, error: %v", info.GetServiceName(), info.GetPath(), recovered)
+			err = fmt.Errorf("parse websocket subscription request: %v", recovered)
+			api = nil
+		}
+	}()
+	if data == nil {
+		api = info.NewSubscription()
+		if api == nil {
+			return nil, errors.New("创建 WebSocket 订阅实例失败")
+		}
+		return api, nil
+	}
+	return info.ParseSubscription(data)
 }
 
 func (mm *MelodyManager) cleanupSession(s *melody.Session) {
@@ -454,7 +481,11 @@ func (mm *MelodyManager) cleanupSession(s *melody.Session) {
 }
 func (mm *MelodyManager) sendToSession(s *melody.Session, event, channel string, data interface{}) {
 	if s == nil || s.IsClosed() {
-		logx.Errorf("跳过向已关闭连接发送消息: event=%s, channel=%s", event, channel)
+		logx.Debugw("websocket_send_skipped",
+			logx.Field("event", event),
+			logx.Field("channel", channel),
+			logx.Field("reason", "session_closed"),
+		)
 		return
 	}
 	msg := &Message{

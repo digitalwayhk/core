@@ -30,18 +30,18 @@ type NodeInfo struct {
 	// ID is globally unique, e.g. "<service>-<datacenter>-<machine>-<pid>"
 	ID string `json:"id"`
 
-	ServiceName   string     `json:"service_name"`
-	DataCenterID  int64      `json:"datacenter_id"`
-	MachineID     int64      `json:"machine_id"`
-	Address       string     `json:"address"`
-	Port          int        `json:"port"`
-	SocketPort    int        `json:"socket_port,omitempty"`
-	GRPCPort      int        `json:"grpc_port,omitempty"`
-	Status        NodeStatus `json:"status"`
-	Weight        int        `json:"weight"`       // for weighted balancing; default 1
-	RegisteredAt  time.Time  `json:"registered_at"`
-	LastHeartbeat time.Time  `json:"last_heartbeat"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	ServiceName       string            `json:"service_name"`
+	ServiceInstanceID string            `json:"service_instance_id,omitempty"`
+	DataCenterID      int64             `json:"datacenter_id"`
+	MachineID         int64             `json:"machine_id"`
+	Address           string            `json:"address"`
+	Port              int               `json:"port"`
+	GRPCPort          int               `json:"grpc_port,omitempty"`
+	Status            NodeStatus        `json:"status"`
+	Weight            int               `json:"weight"` // for weighted balancing; default 1
+	RegisteredAt      time.Time         `json:"registered_at"`
+	LastHeartbeat     time.Time         `json:"last_heartbeat"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
 }
 
 // IsHealthy returns true when the node is running and has a recent heartbeat.
@@ -90,9 +90,26 @@ type ProviderSwitcher interface {
 	// Begin starts the migration to the new provider.
 	Begin(ctx context.Context, to DiscoveryProvider) error
 
-	// Complete finalises the migration and shuts down the old provider.
+	// Complete promotes the pending provider and closes the old provider.
+	// Callers that need runtime synchronization between those phases may use
+	// the optional ProviderSwitchTransaction interface.
 	Complete(ctx context.Context) error
 
 	// Rollback aborts and reverts to the old provider.
 	Rollback(ctx context.Context) error
+}
+
+// ProviderSwitchTransaction exposes the two phases required by ServiceContext:
+// Promote changes the discovery authority while retaining the old provider;
+// Finalize closes that retired provider after runtime state is synchronized.
+// It is separate from ProviderSwitcher to preserve legacy implementations.
+type ProviderSwitchTransaction interface {
+	Promote(ctx context.Context) error
+	Finalize(ctx context.Context) error
+}
+
+// ContextCloser is an optional provider capability for cancellable shutdown.
+// DiscoveryProvider intentionally keeps its original Close contract.
+type ContextCloser interface {
+	CloseContext(ctx context.Context) error
 }

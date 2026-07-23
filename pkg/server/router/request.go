@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -32,6 +32,11 @@ type Request struct {
 	service       *ServiceContext
 	servicerouter *ServiceRouter
 	routerinfo    *types.RouterInfo
+	secretClaims  *requestSecretClaims
+}
+
+type requestSecretClaims struct {
+	values map[string]string
 }
 
 func getRequestInfo(r *http.Request, req *Request) {
@@ -42,7 +47,11 @@ func getRequestInfo(r *http.Request, req *Request) {
 	path := strings.Split(url, "?")[0]
 	req.apiPath = path
 	req.http = r
-	req.clientIP = utils.ClientPublicIP(r)
+	trustedProxies := []string(nil)
+	if req.service != nil && req.service.Config != nil {
+		trustedProxies = req.service.Config.TrustedProxies
+	}
+	req.clientIP = utils.ClientPublicIP(r, trustedProxies...)
 	ctext := r.Context()
 	obj := ctext.Value("uid")
 	if obj != nil {
@@ -55,7 +64,29 @@ func getRequestInfo(r *http.Request, req *Request) {
 		req.userName = uname
 	}
 	req.traceID = getTraceID(ctext, r)
+	req.SetSecretClaims(safe.VerifiedSecretClaimsFromContext(ctext))
 	//logx.Infof("api: %s, traceID: %s", req.apiPath, req.traceID)
+}
+
+// GetSecretClaim 返回当前已验签请求的服务端秘密 Claim。
+func (own *Request) GetSecretClaim(key string) (string, bool) {
+	if own == nil || own.secretClaims == nil || own.secretClaims.values == nil {
+		return "", false
+	}
+	value, ok := own.secretClaims.values[key]
+	return value, ok
+}
+
+// SetSecretClaims 仅供框架认证边界注入已验签并解密的 Claim 快照。
+func (own *Request) SetSecretClaims(claims map[string]string) {
+	if own == nil {
+		return
+	}
+	if len(claims) == 0 {
+		own.secretClaims = nil
+		return
+	}
+	own.secretClaims = &requestSecretClaims{values: types.CloneSecretClaims(claims)}
 }
 func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	if r == nil {
@@ -71,15 +102,6 @@ func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	nobj := ctext.Value("uname")
 	if nobj != nil {
 		uname = ctext.Value("uname").(string)
-	}
-	con := GetContext(req.ServiceName())
-	if con != nil && req.auth {
-		if con.Config.Auth.CasDoor.Enable || con.Config.ManageAuth.CasDoor.Enable {
-			if uu, ok := ctext.Value("user").(casdoorsdk.User); ok {
-				uid = uu.Id
-				uname = uu.Email
-			}
-		}
 	}
 	req.userID = uid
 	req.userName = uname
@@ -99,21 +121,28 @@ func NewRequest(routers *ServiceRouter, r *http.Request) *Request {
 	}
 	if r != nil && routers != nil {
 		getRequestInfo(r, req)
-		info := routers.GetRouter(req.apiPath)
-		if info != nil {
-			req.auth = info.Auth
-			req.routerinfo = info
-			getUserIDAndName(req, r)
-			if req.auth {
-				if req.userID == "" && req.userName == "" {
-					logx.Errorf("Auth required but no user info found for api: %s", req.apiPath)
-					return nil
-				}
-				logx.Infof("Auth required for api: %s", req.apiPath)
-			}
-		}
+		req.setRouterInfo(routers)
 	}
 	return req
+}
+func (own *Request) setRouterInfo(routers *ServiceRouter) {
+	info := routers.GetRouter(own.apiPath)
+	if info != nil {
+		own.auth = info.GetAuth()
+		if own.auth {
+			getUserIDAndName(own, own.http)
+			if own.auth {
+				if own.userID == "" && own.userName == "" {
+					logx.Errorf("Auth required but no user info found for api: %s", own.apiPath)
+					return
+				}
+				logx.Infof("Auth required for api: %s", own.apiPath)
+			}
+		} else {
+			own.userID = ""
+			own.userName = ""
+		}
+	}
 }
 func getTraceID(ctx context.Context, r *http.Request) string {
 	if r != nil {
@@ -187,6 +216,10 @@ func (own *Request) GetClaims(key string) interface{} {
 }
 func (own *Request) SetPath(path string) {
 	own.apiPath = path
+	routers := GetContext(own.ServiceName()).Router
+	if routers != nil {
+		own.setRouterInfo(routers)
+	}
 }
 func (own *Request) ServiceName() string {
 	return own.service.Service.Name
@@ -213,15 +246,17 @@ func (own *Request) GetService() *ServiceContext {
 }
 
 func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
-	if sinfo.PathType != tinfo.PathType {
-		if sinfo.PathType != types.ManageType {
-			if sinfo.PathType == types.PublicType {
-				if tinfo.PathType != types.PublicType {
+	sourceType := sinfo.GetPathType()
+	targetType := tinfo.GetPathType()
+	if sourceType != targetType {
+		if sourceType != types.ManageType {
+			if sourceType == types.PublicType {
+				if targetType != types.PublicType {
 					return errors.New("不能调用目标路由,public 路由只能调用 public type的路由!")
 				}
 			}
-			if sinfo.PathType == types.PrivateType {
-				if tinfo.PathType == types.ManageType {
+			if sourceType == types.PrivateType {
+				if targetType == types.ManageType {
 					return errors.New("不能调用目标路由,manage 路由只能由调用 manage type路由调用!")
 				}
 			}
@@ -232,22 +267,27 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 func (own *Request) GetServerInfo() *types.TargetInfo {
 	cont := own.GetService()
 	return &types.TargetInfo{
-		TargetAddress:    cont.Config.RunIp,
-		TargetService:    own.ServiceName(),
-		TargetPort:       cont.Config.Port,
-		TargetSocketPort: cont.Config.SocketPort,
+		TargetAddress: cont.Config.RunIp,
+		TargetService: own.ServiceName(),
+		TargetPort:    cont.Config.Port,
 	}
 }
 func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
+	if own != nil && own.service != nil && own.service.ServiceResolver != nil {
+		resolved, err := own.service.ServiceResolver.Resolve(context.Background(), serviceName)
+		if err == nil {
+			return resolved.Info
+		}
+		return nil
+	}
 	cont := GetContext(serviceName)
 	if cont == nil {
 		return nil
 	}
 	return &types.TargetInfo{
-		TargetAddress:    cont.Config.Host,
-		TargetService:    serviceName,
-		TargetPort:       cont.Config.Port,
-		TargetSocketPort: cont.Config.SocketPort,
+		TargetAddress: cont.Config.Host,
+		TargetService: serviceName,
+		TargetPort:    cont.Config.Port,
 	}
 }
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
@@ -257,17 +297,6 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 	payload, err := own.callPayload(router)
 	if err != nil {
 		return nil, err
-	}
-	if utils.IsTest() {
-		err := router.Validation(own)
-		if err != nil {
-			return own.NewResponse(err, nil), nil
-		}
-		rest := own.NewResponse(router.Do(own))
-		if callback != nil {
-			callback[0](rest)
-		}
-		return rest, nil
 	}
 	if info != nil {
 		if info.TargetAddress == "" || info.TargetPort == 0 {
@@ -281,12 +310,6 @@ func (own *Request) CallTargetService(router types.IRouter, info *types.TargetIn
 		if info.TargetPath != "" {
 			payload.TargetPath = info.TargetPath
 		}
-		// if info.TargetSocketPort == 0 {
-		// 	con := GetContext(own.ServiceName()).GetServerConfig(info.TargetAddress, info.TargetPort)
-		// 	payload.TargetSocketPort = con.SocketPort
-		// } else {
-		// 	payload.TargetSocketPort = info.TargetSocketPort
-		// }
 		if info.TargetToken != "" {
 			payload.Token = info.TargetToken
 		}
@@ -308,14 +331,14 @@ func GetPayLoad(traceid, sourceservice, sourcepath, uname string, uid string, ro
 		TraceID:       traceid,
 		SourceService: sourceservice,
 		SourcePath:    sourcepath,
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        uid,
 		UserName:      uname,
 		ClientIP:      utils.GetLocalIP(),
 		Auth:          false,
 		Instance:      router,
-		HttpMethod:    info.Method,
+		HttpMethod:    info.GetMethod(),
 	}
 }
 
@@ -326,14 +349,14 @@ func ToPayLoad(req *Request, router types.IRouter, tinfo *types.RouterInfo) *typ
 		TraceID:       req.GetTraceId(),
 		SourceService: req.ServiceName(),
 		SourcePath:    req.GetPath(),
-		TargetService: info.ServiceName,
-		TargetPath:    info.Path,
+		TargetService: info.GetServiceName(),
+		TargetPath:    info.GetPath(),
 		UserId:        uid,
 		UserName:      uname,
 		ClientIP:      req.GetClientIP(),
 		Auth:          req.Authorized(),
 		Instance:      router,
-		HttpMethod:    tinfo.Method,
+		HttpMethod:    tinfo.GetMethod(),
 	}
 }
 
@@ -355,7 +378,7 @@ func ToRequest(own *types.PayLoad) types.IRequest {
 	}
 	req.servicerouter = req.service.Router
 	info := req.servicerouter.GetRouter(req.apiPath)
-	req.auth = info.Auth
+	req.auth = info.GetAuth()
 	req.routerinfo = info
 	return req
 }
@@ -372,7 +395,7 @@ func (own *InitRequest) CallService(router types.IRouter, callback ...func(res t
 		own.CallRouters = make(map[string]types.IRouter)
 	}
 	info := router.RouterInfo()
-	own.CallRouters[info.Path] = router
+	own.CallRouters[info.GetPath()] = router
 	return &Response{Success: false}, nil
 }
 

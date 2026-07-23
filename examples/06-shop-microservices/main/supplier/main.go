@@ -1,0 +1,19 @@
+// 本文件提供 06 微服务示例供应商服务独立进程的启动能力。
+package main
+
+import (
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/bootstrap"
+	supplierservice "github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service"
+	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models"
+	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/run"
+)
+
+func main() {
+	if err := models.EnsureStorage(); err != nil {
+		panic(err)
+	}
+	server := run.NewWebServer()
+	server.AddServiceContext(router.NewServiceContextWithConfig(&supplierservice.Service{}, bootstrap.DistributedServiceConfig("shop-supplier", 18082, 2, 2)))
+	server.Start()
+}

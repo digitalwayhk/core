@@ -1,10 +1,22 @@
 package types
 
 import (
+	"context"
 	"errors"
 
 	"github.com/zeromicro/go-zero/core/service"
 )
+
+// GRPCServerLifecycle 是 ServiceContext 管理 gRPC 服务端所需的完整生命周期契约。
+// BeginShutdown 必须同步发布 NOT_SERVING，但不得等待在途 RPC 结束。
+type GRPCServerLifecycle interface {
+	service.Service
+	Ready() <-chan struct{}
+	Done() <-chan struct{}
+	BeginShutdown()
+	StopContext(context.Context) error
+	Err() error
+}
 
 type Service struct {
 	Name             string
@@ -24,38 +36,30 @@ func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
 		if as, ok := own.AttachService[payload.TargetService]; ok {
 			payload.TargetAddress = as.Address
 			payload.TargetPort = as.Port
-			payload.TargetSocketPort = 0
-			//as.SocketPort
 		}
 	}
 	if payload.TargetAddress == "" {
 		return nil, errors.New("target address is empty")
 	}
-	if payload.TargetPort == 0 && payload.TargetSocketPort == 0 {
+	if payload.TargetPort == 0 {
 		return nil, errors.New("target port is empty")
 	}
 	var err error
 	var txt []byte
-	if payload.TraceID != "" {
-		if len(own.internalServer) > 0 {
-			for _, server := range own.internalServer {
-				txt, err = server.Send(payload)
-				if err != nil {
-					return nil, err
-				}
-				return txt, err
-			}
-		}
-	}
 	txt, err = own.HttpServer.Send(payload)
 	return txt, err
 }
+
+// AddInternalServer 注册由 ServiceContext 统一管理的协议扩展服务。
+// 自定义实现必须遵守 IRunServer 生命周期；该入口不代表已删除的 Socket 传输。
 func (own *Service) AddInternalServer(server IRunServer) {
 	if own.internalServer == nil {
 		own.internalServer = make([]IRunServer, 0)
 	}
 	own.internalServer = append(own.internalServer, server)
 }
+
+// GetInternalServers 返回已注册的协议扩展服务。
 func (own *Service) GetInternalServers() []IRunServer {
 	return own.internalServer
 }
@@ -69,7 +73,6 @@ type ServiceAttach struct {
 	IsAttach        bool
 	Address         string
 	Port            int
-	SocketPort      int
 }
 
 func NewServiceAttach(service *Service) *ServiceAttach {

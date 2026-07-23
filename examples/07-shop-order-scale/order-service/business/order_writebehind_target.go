@@ -1,0 +1,44 @@
+// Package business 提供 07 订单本地 pending 的业务级 WriteBehindTarget。
+package business
+
+import (
+	"context"
+
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
+)
+
+// RemoteOrderStore 定义业务 target 写入远程权威库所需的最小接口。
+type RemoteOrderStore interface {
+	UpsertBatch(context.Context, []*models.Order) ([]*models.Order, error)
+}
+
+// OrderWriteBehindTarget 将当前 order 副本的 Badger pending 汇合到共享 MySQL 权威库。
+// 它只表达订单业务同步语义，pending ACK、重试保留和本地删除由 PrefixedBadgerDB 统一处理。
+type OrderWriteBehindTarget struct {
+	Remote RemoteOrderStore
+}
+
+// SyncBatch 将一批本地订单同步到远程权威库，并返回可 ACK 的 Badger key。
+func (target OrderWriteBehindTarget) SyncBatch(ctx context.Context, items []*nosql.SyncQueueItem[models.Order]) (*nosql.WriteBehindResult, error) {
+	remote := target.Remote
+	if remote == nil {
+		remote = ModelRemoteOrderStore{}
+	}
+	orders := make([]*models.Order, 0, len(items))
+	confirmed := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.Item == nil || item.Key == "" {
+			continue
+		}
+		orders = append(orders, item.Item)
+		confirmed = append(confirmed, item.Key)
+	}
+	if len(orders) == 0 {
+		return &nosql.WriteBehindResult{}, nil
+	}
+	if _, err := remote.UpsertBatch(ctx, orders); err != nil {
+		return &nosql.WriteBehindResult{}, err
+	}
+	return &nosql.WriteBehindResult{ConfirmedKeys: confirmed}, nil
+}

@@ -1,6 +1,9 @@
+//go:build integration
+
 package nosql
 
 import (
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -92,6 +95,9 @@ func newInfoTestDB[T types.IModel](t *testing.T) *Us_ModelList[T] {
 var userTypeList = sync.Map{}
 var initLock sync.Mutex // ✅ 添加全局锁
 func TestUserInformation(t *testing.T) {
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后再运行 MySQL 集成测试")
+	}
 	infoList := newInfoTestDB[UserInformation](t)
 	info := NewUserInformation()
 	info.UserID = "1012"

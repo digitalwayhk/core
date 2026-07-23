@@ -1,13 +1,15 @@
 package run
 
 import (
+	"context"
 	"embed"
 	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -15,6 +17,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
@@ -22,10 +25,15 @@ import (
 var html embed.FS
 
 type HTMLServer struct {
-	Port     int
-	services []*router.ServiceRouter
-	Isstart  chan bool
-	Parent   *WebServer
+	Port        int
+	services    []*router.ServiceRouter
+	Isstart     chan bool
+	Parent      *WebServer
+	lifecycleMu sync.Mutex
+	server      *http.Server
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	stopped     bool
 }
 
 func NewHTMLServer(port int) *HTMLServer {
@@ -33,6 +41,7 @@ func NewHTMLServer(port int) *HTMLServer {
 		services: make([]*router.ServiceRouter, 0),
 		Port:     port,
 		Isstart:  make(chan bool, 1),
+		stopCh:   make(chan struct{}),
 	}
 	return ser
 }
@@ -46,62 +55,93 @@ func (own *HTMLServer) Start() {
 	if own.Port == 0 {
 		return
 	}
-	run := <-own.Isstart
+	var run bool
+	select {
+	case run = <-own.Isstart:
+	case <-own.stopCh:
+		return
+	}
 	if !run {
 		return
 	}
 	sfsys, _ := fs.Sub(swagger, "swagger")
-	http.Handle("/swagger/", http.StripPrefix("/swagger/", http.FileServer(http.FS(sfsys))))
+	mux := http.NewServeMux()
+	mux.Handle("/swagger/", http.StripPrefix("/swagger/", http.FileServer(http.FS(sfsys))))
 
 	for _, service := range own.services {
 		for _, router := range service.GetTypeRouters(types.ManageType) {
-			http.Handle(router.Path+"/"+service.Service.Service.Name, htmlHandler(service))
+			mux.Handle(router.GetPath()+"/"+service.Service.Service.Name, htmlHandler(service))
 		}
 		for _, router := range service.GetTypeRouters(types.ServerManagerType) {
-			if router.StructName != "QueryService" {
-				http.Handle(router.Path+"/"+service.Service.Service.Name, htmlHandler(service))
+			if router.GetStructName() != "QueryService" {
+				mux.Handle(router.GetPath()+"/"+service.Service.Service.Name, htmlHandler(service))
 			}
 		}
 	}
-	http.Handle("/api/openapi", htmlHandler(own.services...))
-	http.HandleFunc(qs.RouterInfo().Path, func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/openapi", htmlHandler(own.services...))
+	mux.HandleFunc(qs.RouterInfo().GetPath(), func(w http.ResponseWriter, r *http.Request) {
 		data, _ := qs.Do(nil)
 		httpx.OkJson(w, data)
 	})
-	pts := ""
-	if own.Port != 80 {
-		pts = ":" + strconv.Itoa(own.Port)
-	}
-	fmt.Println("===========================================================")
 	var isview = true
 	if own.Parent != nil {
 		ops := own.Parent.GetServerOptions()
 		for n, op := range ops {
 			if op != nil && op.Demo != nil {
 				if op.Demo.Pattern != "" {
-					http.Handle("/"+op.Demo.Pattern+"/", http.StripPrefix("/"+op.Demo.Pattern+"/", http.FileServer(http.FS(op.Demo.File))))
+					mux.Handle("/"+op.Demo.Pattern+"/", http.StripPrefix("/"+op.Demo.Pattern+"/", http.FileServer(http.FS(op.Demo.File))))
 				} else {
-					http.Handle("/", http.FileServer(http.FS(op.Demo.File)))
+					mux.Handle("/", http.FileServer(http.FS(op.Demo.File)))
 					isview = false
 				}
-				fmt.Printf(n + "的Demo服务已经启动,请访问 http://localhost" + pts + "/" + op.Demo.Pattern + " 查看\n")
+				logx.Infow("demo_server_ready",
+					logx.Field("service", n),
+					logx.Field("port", own.Port),
+					logx.Field("pattern", op.Demo.Pattern),
+				)
 			}
 		}
 	}
 	if isview {
 		fsys, _ := fs.Sub(html, "dist")
-		http.Handle("/", http.FileServer(http.FS(fsys)))
+		mux.Handle("/", http.FileServer(http.FS(fsys)))
 		// 🔧 设置404默认路由 - 必须在最后添加
 		// http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 	http.ServeFile(w, r, "dist/index.html")
 		// })
-		fmt.Printf("开发视图服务已经启动,请访问 http://localhost" + pts + " 查看\n")
+		logx.Infow("development_view_ready", logx.Field("port", own.Port))
 	}
-	fmt.Println("===========================================================")
-	http.ListenAndServe(":"+strconv.Itoa(own.Port), nil)
+	server := &http.Server{
+		Addr:    ":" + strconv.Itoa(own.Port),
+		Handler: mux,
+	}
+	own.lifecycleMu.Lock()
+	if own.stopped {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	own.server = server
+	own.lifecycleMu.Unlock()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logx.Errorf("HTML 服务运行失败，端口：%d，错误：%v", own.Port, err)
+	}
 }
 func (own *HTMLServer) Stop() {
-
+	own.stopOnce.Do(func() {
+		close(own.stopCh)
+		own.lifecycleMu.Lock()
+		own.stopped = true
+		server := own.server
+		own.lifecycleMu.Unlock()
+		if server == nil {
+			return
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logx.Errorf("HTML 服务关闭失败，端口：%d，错误：%v", own.Port, err)
+		}
+	})
 }
 
 func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
@@ -121,7 +161,7 @@ func htmlHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 			path := url[:last]
 			ss := getService(servicename, service)
 			req := router.NewRequest(ss, r)
-			ip := utils.ClientPublicIP(r)
+			ip := utils.ClientPublicIP(r, ss.Service.Config.TrustedProxies...)
 			err := trans.VerifyIPWhiteList(ss.Service.Config, ip)
 			if err != nil {
 				httpx.OkJson(w, req.NewResponse(nil, err))

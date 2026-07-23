@@ -1279,7 +1279,8 @@ func main() {
 ```
 GET  /api/{serviceName}/testtoken      # 获取测试 JWT
 GET  /api/health                       # 健康检查
-POST /api/servermanage/openapi         # OpenAPI 3.0 文档（见第 18 节）
+GET  /api/openapi                      # 匿名外部 OpenAPI 文档（见第 18 节）
+GET  /api/internal/openapi             # 需 ServerManageAuth 的内部 OpenAPI 文档
 POST /api/servermanage/queryservice    # 服务发现
 POST /api/servermanage/queryrouters    # 路由查询
 ...
@@ -1336,35 +1337,39 @@ POST /api/servermanage/queryrouters    # 路由查询
 ### 访问地址
 
 ```
-# 直接访问服务（本地开发）
-POST http://localhost:{port}/api/servermanage/openapi
+# 匿名访问：对外协作、Swagger UI、Postman、Apifox
+GET http://localhost:{port}/api/openapi
 
-# 通过 nginx 网关访问（生产/测试环境）
-POST http://localhost/api/openapi
+# 受保护访问：内部联调与完整接口排查
+GET http://localhost:{port}/api/internal/openapi
+GET http://localhost:{port}/api/internal/openapi?service={serviceName}
 ```
 
-> 返回标准 OpenAPI 3.0.1 JSON，可直接导入 Swagger UI、Postman、Apifox 等工具。
+> 两个端点均返回标准 OpenAPI 3.0.1 JSON。`/api/internal/openapi` 必须通过
+> `ServerManageAuth`，并返回 `Cache-Control: private, no-store`。
 
 ### 包含内容
 
-| 内容 | 说明 |
+| 端点 | 内容 |
 |------|------|
-| **所有 Public 接口** | auth: false 的业务路由，完整请求/响应 schema |
-| **所有 Private 接口** | auth: true 的业务路由，自动标注 Bearer 安全要求 |
+| **`/api/openapi`** | 匿名外部视图；包含常规 Public 与 Private 路由，过滤 `WithInternalCallers()` 非空的内部专用路由，并且不输出 `x-internal-callers` |
+| **`/api/internal/openapi`** | 完整内部视图；包含 Public、Private 和内部专用路由，保留 `x-internal-callers`，支持按 `service` 查询参数过滤 |
 | **服务分组（Tags）** | 每个服务名作为一个 Tag，多服务时分组清晰 |
 | **Server URL** | 每个服务的实际访问地址（含端口） |
-| **TestToken 提示** | Bearer scheme 的 description 中包含 TestToken 获取地址 |
+| **Private 安全要求** | Private 路由自动标注 Bearer 安全要求 |
 
 > ⚠️ **Manage 路由不包含在 OpenAPI 文档中**，仅 Public + Private 路由会被导出。
 
 ### curl 示例
 
 ```bash
-# 获取本地服务的 OpenAPI 文档
-curl -s -X POST http://localhost:8080/api/servermanage/openapi | jq .
+# 匿名获取对外文档
+curl -s http://localhost:8080/api/openapi | jq .
 
-# 通过 nginx 获取（需要指定目标服务名，由网关路由）
-curl -s -X POST http://localhost/api/openapi | jq .
+# 使用 ServerManage token 获取完整内部文档
+curl -s \
+  -H "Authorization: Bearer ${SERVER_MANAGE_TOKEN}" \
+  "http://localhost:8080/api/internal/openapi?service=orders" | jq .
 ```
 
 ### 返回格式（OpenAPI 3.0.1）
@@ -1423,7 +1428,7 @@ curl -s -X POST http://localhost/api/openapi | jq .
 <!-- swagger-ui dist -->
 <script>
   SwaggerUIBundle({
-    url: "http://localhost:8080/api/servermanage/openapi",
+    url: "http://localhost:8080/api/openapi",
     dom_id: '#swagger-ui',
   })
 </script>

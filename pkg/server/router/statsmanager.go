@@ -11,13 +11,13 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-// 🆕 StatsManager 统计管理器
+// StatsManager 统计管理器
 type StatsManager struct {
 	routers     []*types.RouterInfo
 	serviceName string
 }
 
-// 🆕 AggregatedStats 聚合统计信息
+// AggregatedStats 聚合统计信息
 type AggregatedStats struct {
 	ServiceName    string `json:"service_name"`    // 服务名称
 	TotalRouters   int    `json:"total_routers"`   // 总路由数
@@ -45,7 +45,7 @@ type AggregatedStats struct {
 	CollectedAt time.Time `json:"collected_at"` // 收集时间
 }
 
-// 🆕 SortField 排序字段
+// SortField 排序字段
 type SortField string
 
 const (
@@ -63,7 +63,7 @@ const (
 	SortByWSMPS           SortField = "ws_mps"
 )
 
-// 🆕 SortOrder 排序方向
+// SortOrder 排序方向
 type SortOrder string
 
 const (
@@ -71,7 +71,7 @@ const (
 	SortDesc SortOrder = "desc" // 降序
 )
 
-// 🆕 NewStatsManager 创建统计管理器
+// NewStatsManager 创建统计管理器
 func NewStatsManager(serviceName string, routers []*types.RouterInfo) *StatsManager {
 	return &StatsManager{
 		serviceName: serviceName,
@@ -79,7 +79,7 @@ func NewStatsManager(serviceName string, routers []*types.RouterInfo) *StatsMana
 	}
 }
 
-// 🆕 GetAllStats 获取所有路由统计（可过滤和排序）
+// GetAllStats 获取所有路由统计（可过滤和排序）
 func (sm *StatsManager) GetAllStats(
 	filterTypes []types.ApiType,
 	sortBy SortField,
@@ -97,7 +97,7 @@ func (sm *StatsManager) GetAllStats(
 		if len(filterTypes) > 0 {
 			matched := false
 			for _, t := range filterTypes {
-				if router.PathType == t {
+				if router.GetPathType() == t {
 					matched = true
 					break
 				}
@@ -111,7 +111,7 @@ func (sm *StatsManager) GetAllStats(
 		stats.Routers = append(stats.Routers, snapshot)
 
 		// 统计路由类型
-		switch router.PathType {
+		switch router.GetPathType() {
 		case types.PublicType:
 			stats.PublicRouters++
 		case types.PrivateType:
@@ -152,7 +152,7 @@ func (sm *StatsManager) GetAllStats(
 	return stats
 }
 
-// 🆕 sortStats 排序统计列表
+// sortStats 排序统计列表
 func (sm *StatsManager) sortStats(
 	routers []*types.RouterStatsSnapshot,
 	sortBy SortField,
@@ -237,7 +237,7 @@ func (sm *StatsManager) sortStats(
 	})
 }
 
-// 🆕 parseResponseTime 解析响应时间字符串
+// parseResponseTime 解析响应时间字符串
 func parseResponseTime(s string) time.Duration {
 	if s == "N/A" {
 		return time.Duration(0)
@@ -249,7 +249,7 @@ func parseResponseTime(s string) time.Duration {
 	return d
 }
 
-// 🆕 GetTopN 获取排名前N的路由
+// GetTopN 获取排名前N的路由
 func (sm *StatsManager) GetTopN(
 	n int,
 	filterTypes []types.ApiType,
@@ -264,7 +264,7 @@ func (sm *StatsManager) GetTopN(
 	return allStats.Routers[:n]
 }
 
-// 🆕 GetStatsJSON 获取JSON格式的统计信息
+// GetStatsJSON 获取JSON格式的统计信息
 func (sm *StatsManager) GetStatsJSON(
 	filterTypes []types.ApiType,
 	sortBy SortField,
@@ -278,7 +278,7 @@ func (sm *StatsManager) GetStatsJSON(
 	return string(data)
 }
 
-// 🆕 PrintTopStats 打印排名统计
+// PrintTopStats 打印排名统计
 func (sm *StatsManager) PrintTopStats(
 	n int,
 	filterTypes []types.ApiType,
@@ -295,39 +295,36 @@ func (sm *StatsManager) PrintTopStats(
 		typeFilter = strings.Join(types, ", ")
 	}
 
-	logx.Infof(`
-╔═══════════════════════════════════════════════════════════════
-║ Top %d 路由统计 [类型: %s, 排序: %s]
-╠═══════════════════════════════════════════════════════════════`,
-		n, typeFilter, sortBy,
+	logx.Infow("router_top_stats",
+		logx.Field("limit", n),
+		logx.Field("api_types", typeFilter),
+		logx.Field("sort", sortBy),
+		logx.Field("result_count", len(topRouters)),
 	)
 
 	for idx, router := range topRouters {
-		wsInfo := ""
+		websocketConnections := int64(0)
+		websocketMPS := int64(0)
 		if router.WebSocket != nil {
-			wsInfo = fmt.Sprintf(" | WS: %d连接, %d msg/s",
-				router.WebSocket.CurrentConnections,
-				router.WebSocket.CurrentMPS,
-			)
+			websocketConnections = router.WebSocket.CurrentConnections
+			websocketMPS = router.WebSocket.CurrentMPS
 		}
 
-		logx.Infof(`║ %d. %s
-║    QPS: %d (最大: %d, 平均: %.2f) | 请求: %d | 错误: %.2f%%%s`,
-			idx+1,
-			router.Path,
-			router.CurrentQPS,
-			router.MaxQPS,
-			router.AvgQPS,
-			router.TotalRequests,
-			router.ErrorRate,
-			wsInfo,
+		logx.Debugw("router_top_stat",
+			logx.Field("rank", idx+1),
+			logx.Field("route", router.Path),
+			logx.Field("current_qps", router.CurrentQPS),
+			logx.Field("max_qps", router.MaxQPS),
+			logx.Field("average_qps", router.AvgQPS),
+			logx.Field("total_requests", router.TotalRequests),
+			logx.Field("error_rate", router.ErrorRate),
+			logx.Field("websocket_connections", websocketConnections),
+			logx.Field("websocket_mps", websocketMPS),
 		)
 	}
-
-	logx.Info("╚═══════════════════════════════════════════════════════════════")
 }
 
-// 🆕 GetSummary 获取统计摘要
+// GetSummary 获取统计摘要
 func (sm *StatsManager) GetSummary(filterTypes []types.ApiType) string {
 	stats := sm.GetAllStats(filterTypes, SortByPath, SortAsc)
 
@@ -342,29 +339,29 @@ func (sm *StatsManager) GetSummary(filterTypes []types.ApiType) string {
 
 	return fmt.Sprintf(`
 ╔═══════════════════════════════════════════════════════════════
-║ 路由统计摘要 [类型: %s]
+ 路由统计摘要 [类型: %s]
 ╠═══════════════════════════════════════════════════════════════
-║ 路由总数:     %d
-║   - Public:   %d
-║   - Private:  %d
-║   - Manage:   %d
+ 路由总数:     %d
+   - Public:   %d
+   - Private:  %d
+   - Manage:   %d
 ╠───────────────────────────────────────────────────────────────
-║ HTTP 统计:
-║   总请求数:   %d
-║   总错误数:   %d
-║   当前 QPS:   %d
-║   平均 QPS:   %.2f
-║   最大 QPS:   %d
-║   缓存命中:   %d
-║   缓存未命中: %d
+ HTTP 统计:
+   总请求数:   %d
+   总错误数:   %d
+   当前 QPS:   %d
+   平均 QPS:   %.2f
+   最大 QPS:   %d
+   缓存命中:   %d
+   缓存未命中: %d
 ╠───────────────────────────────────────────────────────────────
-║ WebSocket 统计:
-║   总连接数:   %d
-║   总消息数:   %d
-║   总错误数:   %d
+ WebSocket 统计:
+   总连接数:   %d
+   总消息数:   %d
+   总错误数:   %d
 ╠───────────────────────────────────────────────────────────────
-║ 收集时间:     %s
-╚═══════════════════════════════════════════════════════════════`,
+ 收集时间:     %s
+═══════════════════════════════════════════════════════════════`,
 		typeFilter,
 		stats.TotalRouters,
 		stats.PublicRouters,

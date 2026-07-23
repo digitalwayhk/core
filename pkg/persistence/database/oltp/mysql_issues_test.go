@@ -1,3 +1,5 @@
+//go:build integration
+
 package oltp
 
 import (
@@ -25,12 +27,14 @@ import (
 
 func requireMySQLAvailable(t *testing.T) {
 	t.Helper()
-	if os.Getenv("RUN_MYSQL_CONCURRENCY_REPRO") != "1" {
-		t.Skip("设置 RUN_MYSQL_CONCURRENCY_REPRO=1 后再运行该复现测试")
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后再运行 MySQL 集成测试")
 	}
 }
 
 func TestIssue_SetConnectionOverridesMaxOpenConns(t *testing.T) {
+	requireMySQLAvailable(t)
+
 	cfg := &Config{
 		Host:         "127.0.0.1",
 		Port:         3306,
@@ -73,6 +77,8 @@ func TestIssue_SetConnectionOverridesMaxOpenConns(t *testing.T) {
 }
 
 func TestIssue_SetConnectionOverridesMaxIdleConns(t *testing.T) {
+	requireMySQLAvailable(t)
+
 	cfg := &Config{
 		Host:         "127.0.0.1",
 		Port:         3306,
@@ -116,6 +122,8 @@ func TestIssue_SetConnectionOverridesMaxIdleConns(t *testing.T) {
 // ============================================================
 
 func TestIssue_SetConnectionClosesOldForOtherInstances(t *testing.T) {
+	requireMySQLAvailable(t)
+
 	cfg := &Config{
 		Host:         "127.0.0.1",
 		Port:         3306,

@@ -12,6 +12,31 @@ type ServerOption struct {
 	RemoteAccessManageAPI bool         //是否开启远程访问管理API不授权模式,默认不开启
 	WhiteList             []string     //白名单
 }
+
+// Clone 返回可独立修改的服务器选项副本。
+func (own *ServerOption) Clone() *ServerOption {
+	if own == nil {
+		return nil
+	}
+
+	cloned := *own
+	cloned.OriginCors = append([]string(nil), own.OriginCors...)
+	cloned.WhiteList = append([]string(nil), own.WhiteList...)
+	if own.Demo != nil {
+		demo := *own.Demo
+		cloned.Demo = &demo
+	}
+	if own.Trans != nil {
+		trans := *own.Trans
+		cloned.Trans = &trans
+	}
+	if own.Quic != nil {
+		quic := *own.Quic
+		cloned.Quic = &quic
+	}
+	return &cloned
+}
+
 type TransOption struct {
 	IsRest     bool //是否启用默认失败后的rest传输
 	RetryCount int  //重试次数

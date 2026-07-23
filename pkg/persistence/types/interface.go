@@ -83,6 +83,12 @@ type IRowCode interface {
 	GetHash() string
 	SetHashcode(code string)
 }
+
+// ILocalRowCode 允许本地 KV 存储使用与远端持久化 GetHash 不同的索引键。
+// 典型场景是把查询维度编入 Badger 前缀，同时保持 SQL 哈希和业务主键稳定。
+type ILocalRowCode interface {
+	GetLocalKey() string
+}
 type IRowDate interface {
 	SetCreatedAt(t time.Time)
 	SetUpdatedAt(t time.Time)

@@ -2,24 +2,36 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"time"
+)
+
+const (
+	DefaultClusterHeartbeatInterval     = 3 * time.Second
+	DefaultClusterHeartbeatTimeout      = 10 * time.Second
+	DefaultClusterSuspectTimeout        = 15 * time.Second
+	DefaultClusterInstanceReuseCooldown = 30 * time.Second
+	DefaultClusterProviderTTL           = 10 * time.Second
+	DefaultClusterEtcdPrefix            = "/core/cluster"
+	DefaultClusterConsulPrefix          = "digitalway-core"
+	DefaultClusterRedisPrefix           = "core:discovery"
 )
 
 // ClusterConfig 集群配置。Mode=off 时单机运行，Mode=auto 时自动检测，Mode=on 时强制进入集群流程。
 type ClusterConfig struct {
-	Mode                  string                        `json:",optional"` // off | auto | on
-	Provider              string                        `json:",optional"` // local | etcd | consul
-	NodeName              string                        `json:",optional"`
-	AdvertiseAddress      string                        `json:",optional"`
-	HeartbeatInterval     time.Duration                 `json:",optional"`
-	HeartbeatTimeout      time.Duration                 `json:",optional"`
-	SuspectTimeout        time.Duration                 `json:",optional"`
-	InstanceReuseCooldown time.Duration                 `json:",optional"`
-	Claim                 ClusterClaimConfig            `json:",optional"`
-	Discovery             ClusterDiscoveryConfig        `json:",optional"`
-	Shard                 ClusterShardConfig            `json:",optional"`
+	Mode                  string                          `json:",optional"` // off | auto | on
+	Provider              string                          `json:",optional"` // local | etcd | consul
+	NodeName              string                          `json:",optional"`
+	AdvertiseAddress      string                          `json:",optional"`
+	HeartbeatInterval     time.Duration                   `json:",optional"`
+	HeartbeatTimeout      time.Duration                   `json:",optional"`
+	SuspectTimeout        time.Duration                   `json:",optional"`
+	InstanceReuseCooldown time.Duration                   `json:",optional"`
+	Claim                 ClusterClaimConfig              `json:",optional"`
+	Discovery             ClusterDiscoveryConfig          `json:",optional"`
+	Shard                 ClusterShardConfig              `json:",optional"`
 	Services              map[string]ClusterServiceConfig `json:",optional"`
-	Providers             ClusterProviderConfig         `json:",optional"`
+	Providers             ClusterProviderConfig           `json:",optional"`
 }
 
 // ClusterClaimConfig 实例身份认领配置。
@@ -47,8 +59,8 @@ type ClusterShardConfig struct {
 
 // ClusterServiceConfig 单个服务的分片配置。
 type ClusterServiceConfig struct {
-	ShardKeys map[string]ClusterShardKeyConfig    `json:",optional"`
-	Instances []ClusterInstanceShardConfig        `json:",optional"`
+	ShardKeys map[string]ClusterShardKeyConfig `json:",optional"`
+	Instances []ClusterInstanceShardConfig     `json:",optional"`
 }
 
 // ClusterShardKeyConfig 单个 shard key 的规则。
@@ -67,6 +79,15 @@ type ClusterInstanceShardConfig struct {
 type ClusterProviderConfig struct {
 	Etcd   EtcdProviderConfig   `json:",optional"`
 	Consul ConsulProviderConfig `json:",optional"`
+	Redis  RedisProviderConfig  `json:",optional"`
+}
+
+// RedisProviderConfig 配置使用 Redis 键租约和 Stream 事件的服务发现 Provider。
+type RedisProviderConfig struct {
+	Addr   string        `json:",optional"`
+	DB     int           `json:",optional"`
+	Prefix string        `json:",optional"`
+	TTL    time.Duration `json:",optional"`
 }
 
 // EtcdProviderConfig etcd 连接配置。
@@ -92,16 +113,16 @@ func (c *ClusterConfig) ApplyDefaults() {
 		c.Provider = "local"
 	}
 	if c.HeartbeatInterval == 0 {
-		c.HeartbeatInterval = 3 * time.Second
+		c.HeartbeatInterval = DefaultClusterHeartbeatInterval
 	}
 	if c.HeartbeatTimeout == 0 {
-		c.HeartbeatTimeout = 10 * time.Second
+		c.HeartbeatTimeout = DefaultClusterHeartbeatTimeout
 	}
 	if c.SuspectTimeout == 0 {
-		c.SuspectTimeout = 15 * time.Second
+		c.SuspectTimeout = DefaultClusterSuspectTimeout
 	}
 	if c.InstanceReuseCooldown == 0 {
-		c.InstanceReuseCooldown = 30 * time.Second
+		c.InstanceReuseCooldown = DefaultClusterInstanceReuseCooldown
 	}
 	if c.Claim.ConflictPolicy == "" {
 		c.Claim.ConflictPolicy = "expand-machine-id"
@@ -122,16 +143,22 @@ func (c *ClusterConfig) ApplyDefaults() {
 		c.Services = make(map[string]ClusterServiceConfig)
 	}
 	if c.Providers.Etcd.Prefix == "" {
-		c.Providers.Etcd.Prefix = "/digitalway/core"
+		c.Providers.Etcd.Prefix = DefaultClusterEtcdPrefix
 	}
 	if c.Providers.Etcd.TTL == 0 {
-		c.Providers.Etcd.TTL = 10 * time.Second
+		c.Providers.Etcd.TTL = DefaultClusterProviderTTL
 	}
 	if c.Providers.Consul.Prefix == "" {
-		c.Providers.Consul.Prefix = "digitalway-core"
+		c.Providers.Consul.Prefix = DefaultClusterConsulPrefix
 	}
 	if c.Providers.Consul.TTL == 0 {
-		c.Providers.Consul.TTL = 10 * time.Second
+		c.Providers.Consul.TTL = DefaultClusterProviderTTL
+	}
+	if c.Providers.Redis.Prefix == "" {
+		c.Providers.Redis.Prefix = DefaultClusterRedisPrefix
+	}
+	if c.Providers.Redis.TTL == 0 {
+		c.Providers.Redis.TTL = DefaultClusterProviderTTL
 	}
 }
 
@@ -140,12 +167,15 @@ func (c *ClusterConfig) Validate() error {
 	switch c.Mode {
 	case "off", "auto", "on":
 	default:
-		return errors.New("cluster.mode must be off, auto, or on")
+		return fmt.Errorf("cluster.mode=%q is invalid; use off, auto, or on", c.Mode)
+	}
+	if c.Mode == "off" {
+		return nil
 	}
 	switch c.Provider {
-	case "local", "etcd", "consul":
+	case "local", "etcd", "consul", "redis":
 	default:
-		return errors.New("cluster.provider must be local, etcd, or consul")
+		return fmt.Errorf("cluster.provider=%q is invalid; use local, etcd, consul, or redis", c.Provider)
 	}
 	if c.Mode == "on" && c.Provider == "etcd" && len(c.Providers.Etcd.Endpoints) == 0 {
 		return errors.New("cluster.providers.etcd.endpoints is required when provider=etcd and mode=on")
@@ -153,11 +183,71 @@ func (c *ClusterConfig) Validate() error {
 	if c.Mode == "on" && c.Provider == "consul" && c.Providers.Consul.Address == "" {
 		return errors.New("cluster.providers.consul.address is required when provider=consul and mode=on")
 	}
-	// 空字符串表示"未配置，使用 ApplyDefaults 后的默认值"
+	if c.Mode == "on" && c.Provider == "redis" && c.Providers.Redis.Addr == "" {
+		return errors.New("cluster.providers.redis.addr is required when provider=redis and mode=on")
+	}
+
+	if c.NodeName != "" {
+		return fmt.Errorf("cluster.nodeName=%q is not implemented; remove this field", c.NodeName)
+	}
+	if err := requireZeroOrDefaultDuration("cluster.heartbeatTimeout", c.HeartbeatTimeout, DefaultClusterHeartbeatTimeout); err != nil {
+		return err
+	}
+	if err := requireZeroOrDefaultDuration("cluster.suspectTimeout", c.SuspectTimeout, DefaultClusterSuspectTimeout); err != nil {
+		return err
+	}
+	if err := requireZeroOrDefaultDuration("cluster.instanceReuseCooldown", c.InstanceReuseCooldown, DefaultClusterInstanceReuseCooldown); err != nil {
+		return err
+	}
+
+	if c.Claim.AutoDataCenterID {
+		return fmt.Errorf("cluster.claim.autoDataCenterID=%t is not implemented; set it to false", c.Claim.AutoDataCenterID)
+	}
 	switch c.Claim.ConflictPolicy {
-	case "", "expand-machine-id", "expand-data-center-id", "fail":
+	case "", "expand-machine-id":
+	case "expand-data-center-id", "fail":
+		return fmt.Errorf("cluster.claim.conflictPolicy=%q is not implemented; use expand-machine-id", c.Claim.ConflictPolicy)
 	default:
-		return errors.New("cluster.claim.conflictPolicy must be expand-machine-id, expand-data-center-id, or fail")
+		return fmt.Errorf("cluster.claim.conflictPolicy=%q is not implemented; use expand-machine-id", c.Claim.ConflictPolicy)
+	}
+	if c.Claim.DataCenterIDMax != 0 && c.Claim.DataCenterIDMax != 31 {
+		return fmt.Errorf("cluster.claim.dataCenterIDMax is not configurable; use 0 or 31, got %d", c.Claim.DataCenterIDMax)
+	}
+
+	if len(c.Discovery.Seeds) != 0 {
+		return fmt.Errorf("cluster.discovery.seeds=%q is not implemented; remove this field", c.Discovery.Seeds)
+	}
+	if c.Discovery.Multicast {
+		return fmt.Errorf("cluster.discovery.multicast=%t is not implemented; set it to false", c.Discovery.Multicast)
+	}
+	if c.Discovery.MDNS {
+		return fmt.Errorf("cluster.discovery.mdns=%t is not implemented; set it to false", c.Discovery.MDNS)
+	}
+	if len(c.Shard.KeyPriority) != 0 {
+		return fmt.Errorf("cluster.shard.keyPriority=%q is not implemented; remove this field", c.Shard.KeyPriority)
+	}
+	if c.Shard.MissingKeyPolicy != "" && c.Shard.MissingKeyPolicy != "error" {
+		return fmt.Errorf("cluster.shard.missingKeyPolicy=%q is not implemented; use error", c.Shard.MissingKeyPolicy)
+	}
+	if c.Shard.EmptyCandidatePolicy != "" && c.Shard.EmptyCandidatePolicy != "error" {
+		return fmt.Errorf("cluster.shard.emptyCandidatePolicy=%q is not implemented; use error", c.Shard.EmptyCandidatePolicy)
+	}
+	if len(c.Services) != 0 {
+		return fmt.Errorf("cluster.services has %d entries but is not implemented; remove all service entries", len(c.Services))
+	}
+
+	if c.Providers.Consul.Prefix != "" && c.Providers.Consul.Prefix != DefaultClusterConsulPrefix {
+		return fmt.Errorf("cluster.providers.consul.prefix=%q is not configurable; use %q", c.Providers.Consul.Prefix, DefaultClusterConsulPrefix)
+	}
+	if err := requireZeroOrDefaultDuration("cluster.providers.consul.ttl", c.Providers.Consul.TTL, DefaultClusterProviderTTL); err != nil {
+		return err
+	}
+	return nil
+}
+
+func requireZeroOrDefaultDuration(fieldPath string, value, defaultValue time.Duration) error {
+	if value != 0 && value != defaultValue {
+		return fmt.Errorf("%s is not configurable; use 0 or %s, got %s", fieldPath, defaultValue, value)
 	}
 	return nil
 }

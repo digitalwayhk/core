@@ -36,6 +36,7 @@ var (
 type Sqlite struct {
 	Name         string
 	Size         float64
+	MmapSize     int64
 	UpdateTime   int32
 	Path         string
 	db           *gorm.DB
@@ -43,13 +44,25 @@ type Sqlite struct {
 	isTansaction bool
 	tables       map[string]*TableMaster
 	IsLog        bool
-	writeLock    sync.Mutex // 🆕 全局写锁
+	writeLock    sync.Mutex //  全局写锁
 }
 
 func NewSqlite() *Sqlite {
 	return &Sqlite{
 		tables: make(map[string]*TableMaster),
 	}
+}
+
+const defaultSqliteMmapSize int64 = 256 << 20
+
+func (own *Sqlite) effectiveMmapSize() int64 {
+	if own.MmapSize < 0 {
+		return 0
+	}
+	if own.MmapSize == 0 {
+		return defaultSqliteMmapSize
+	}
+	return own.MmapSize
 }
 
 // ============================================================
@@ -68,19 +81,19 @@ func (own *Sqlite) init(data interface{}) error {
 		return err
 	}
 
-	// ✅ 如果数据库文件不存在，清除连接缓存
+	//  如果数据库文件不存在，清除连接缓存
 	if !utils.IsFile(dns) {
 		connManager.SetConnection(dns, nil)
 		own.db = nil
 		own.tx = nil
 	}
 
-	// ✅ 确保连接有效
+	//  确保连接有效
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
 
-	// ✅ 初始化事务
+	//  初始化事务
 	if own.isTansaction {
 		if own.tx == nil {
 			own.tx = own.db.Begin()
@@ -97,14 +110,14 @@ func (own *Sqlite) ensureValidConnection() error {
 		return err
 	}
 
-	// ✅ 检查连接健康状态
+	//  检查连接健康状态
 	sqlDB, err := own.db.DB()
 	if err != nil {
 		logx.Errorf("获取底层数据库连接失败: %v", err)
 		return own.recreateConnection()
 	}
 
-	// ✅ Ping 测试
+	//  Ping 测试
 	if err := sqlDB.Ping(); err != nil {
 		logx.Errorf("数据库连接 ping 失败: %v", err)
 		return own.recreateConnection()
@@ -149,7 +162,7 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// ✅ 检查文件是否存在
+	//  检查文件是否存在
 	if !utils.IsFile(dns) {
 		if db, ok := connManager.GetConnection(dns); ok && db != nil {
 			if sqlDB, err := db.DB(); err == nil {
@@ -160,9 +173,9 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		own.db = nil
 	}
 
-	// ✅ 从连接池获取
+	//  从连接池获取
 	if db, ok := connManager.GetConnection(dns); ok && db != nil {
-		// ✅ 检查连接健康状态
+		//  检查连接健康状态
 		if sqlDB, err := db.DB(); err == nil {
 			if err := sqlDB.Ping(); err == nil {
 				own.db = db
@@ -175,13 +188,13 @@ func (own *Sqlite) GetDB() (*gorm.DB, error) {
 		}
 	}
 
-	// ✅ 创建新连接
+	//  创建新连接
 	own.db, err = own.newDB()
 	if err != nil {
 		return nil, err
 	}
 
-	if !config.INITSERVER {
+	if !config.IsServerInitializing() {
 		connManager.SetConnection(dns, own.db)
 	}
 	return own.db, nil
@@ -207,32 +220,34 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// ✅ 配置连接池（🔧 修复：只允许 1 个写连接）
+	//  配置连接池（ 修复：只允许 1 个写连接）
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, err
 	}
 
 	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetMaxOpenConns(2) // 🔧 修改：从 3 -> 2
+	sqlDB.SetMaxOpenConns(2) //  修改：从 3 -> 2
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(2 * time.Minute)
 
-	// ✅ SQLite 优化（🔧 修复：增加 busy_timeout）
+	//  SQLite 优化（ 修复：增加 busy_timeout）
 	db.Exec("PRAGMA journal_mode=WAL;")
-	db.Exec("PRAGMA busy_timeout=30000;") // 🔧 5秒
+	db.Exec("PRAGMA busy_timeout=30000;") //  5秒
 	db.Exec("PRAGMA synchronous=NORMAL;")
 	db.Exec("PRAGMA cache_size=2000;")
-	db.Exec("PRAGMA temp_store=MEMORY;")     // 🆕 临时表存储在内存
-	db.Exec("PRAGMA mmap_size=30000000000;") // 🆕 启用内存映射（30GB）
+	db.Exec("PRAGMA temp_store=MEMORY;") //  临时表存储在内存
+	if tx := db.Exec(fmt.Sprintf("PRAGMA mmap_size=%d;", own.effectiveMmapSize())); tx.Error != nil {
+		return nil, fmt.Errorf("configure sqlite mmap_size: %w", tx.Error)
+	}
 
-	// 🆕 验证 WAL 模式是否生效
+	//  验证 WAL 模式是否生效
 	var journalMode string
 	db.Raw("PRAGMA journal_mode;").Scan(&journalMode)
 	if journalMode != "wal" {
-		logx.Errorf("⚠️ WAL 模式未生效，当前模式: %s", journalMode)
+		logx.Errorf(" WAL 模式未生效，当前模式: %s", journalMode)
 	} else {
-		logx.Infof("✅ WAL 模式已启用")
+		logx.Infof(" WAL 模式已启用")
 	}
 
 	return db, nil
@@ -244,11 +259,11 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 
 // HasTable 检查表是否存在（只创建主表，不递归处理嵌套表）
 func (own *Sqlite) HasTable(model interface{}) error {
-	if config.INITSERVER || (own.db != nil && own.db.DryRun) {
+	if config.IsServerInitializing() || (own.db != nil && own.db.DryRun) {
 		return nil
 	}
 
-	// ✅ 确保连接有效
+	//  确保连接有效
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -257,7 +272,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
-	// ✅ 处理指针层级
+	//  处理指针层级
 	modelType := reflect.TypeOf(model)
 	if modelType == nil {
 		return fmt.Errorf("model 不能为 nil")
@@ -278,19 +293,19 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		logx.Errorf("HasTable 检测到 %d 层指针: %v -> %v", pointerDepth, modelType, finalType)
 	}
 
-	// ✅ 获取表名
+	//  获取表名
 	tableName := own.db.NamingStrategy.TableName(finalType.Name())
 	cacheKey := TableCacheKey{
 		DBPath:    own.Path,
 		TableName: tableName,
 	}
 
-	// ✅ 检查缓存
+	//  检查缓存
 	if _, exists := tableCache.Load(cacheKey); exists {
 		return nil
 	}
 
-	// ✅ 使用锁防止并发迁移（按表名锁定）
+	//  使用锁防止并发迁移（按表名锁定）
 	lockKey := own.Path + ":" + tableName
 	lock, _ := migrateLocks.LoadOrStore(lockKey, &sync.Mutex{})
 	tableLock := lock.(*sync.Mutex)
@@ -298,12 +313,12 @@ func (own *Sqlite) HasTable(model interface{}) error {
 	tableLock.Lock()
 	defer tableLock.Unlock()
 
-	// ✅ 双重检查
+	//  双重检查
 	if _, exists := tableCache.Load(cacheKey); exists {
 		return nil
 	}
 
-	// ✅ 快速检查表是否存在
+	//  快速检查表是否存在
 	var count int64
 	err := own.db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&count).Error
 	if err == nil && count > 0 {
@@ -311,7 +326,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return nil
 	}
 
-	// ✅ 创建表（使用安全的 AutoMigrate）
+	//  创建表（使用安全的 AutoMigrate）
 	modelForMigration := reflect.New(finalType).Interface()
 	err = own.safeAutoMigrate(modelForMigration)
 	if err != nil {
@@ -319,10 +334,10 @@ func (own *Sqlite) HasTable(model interface{}) error {
 		return err
 	}
 
-	// ✅ 缓存结果
+	//  缓存结果
 	tableCache.Store(cacheKey, true)
 
-	// ✅ 方案 C 关键：不再递归处理嵌套表
+	//  方案 C 关键：不再递归处理嵌套表
 	// 嵌套表会在首次访问时自动创建（通过 ensureTable）
 	return nil
 }
@@ -333,26 +348,26 @@ func (own *Sqlite) safeAutoMigrate(model interface{}) error {
 	var lastErr error
 
 	for i := 0; i < maxRetries; i++ {
-		// ✅ 检查连接状态
+		//  检查连接状态
 		if err := own.ensureValidConnection(); err != nil {
 			lastErr = err
 			time.Sleep(time.Millisecond * 100 * time.Duration(i+1))
 			continue
 		}
 
-		// ✅ 执行迁移
+		//  执行迁移
 		err := own.db.AutoMigrate(model)
 		if err == nil {
 			return nil
 		}
 
-		// ✅ 检查是否是连接关闭错误
+		//  检查是否是连接关闭错误
 		if strings.Contains(err.Error(), "database is closed") ||
 			strings.Contains(err.Error(), "bad connection") {
 			logx.Errorf("AutoMigrate 连接错误 (尝试 %d/%d): %v", i+1, maxRetries, err)
 			lastErr = err
 
-			// ✅ 强制重建连接
+			//  强制重建连接
 			if recreateErr := own.recreateConnection(); recreateErr != nil {
 				logx.Errorf("重建连接失败: %v", recreateErr)
 			}
@@ -377,21 +392,21 @@ func (own *Sqlite) ensureTable(data interface{}) error {
 // CRUD 方法（添加 ensureTable 检查）
 // ============================================================
 
-// Load 查询数据（✅ 关键：Load 时也要确保表存在）
+// Load 查询数据（ 关键：Load 时也要确保表存在）
 func (own *Sqlite) Load(item *types.SearchItem, result interface{}) error {
 	err := own.init(item.Model)
 	if err != nil {
 		return err
 	}
 
-	// ✅ 关键修复：Load 时确保表存在
+	//  关键修复：Load 时确保表存在
 	// 场景：可能先查询再插入，此时表还不存在
 	err = own.ensureTable(item.Model)
 	if err != nil {
 		return err
 	}
 
-	// ✅ 再次检查连接（防止在 ensureTable 中连接被关闭）
+	//  再次检查连接（防止在 ensureTable 中连接被关闭）
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -414,13 +429,13 @@ func (own *Sqlite) Insert(data interface{}) error {
 		return err
 	}
 
-	// ✅ 确保表存在
+	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
 		return err
 	}
 
-	// ✅ 再次检查连接
+	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -432,7 +447,7 @@ func (own *Sqlite) Insert(data interface{}) error {
 		}
 		return nil
 	}
-	// 🆕 非事务操作加写锁
+	//  非事务操作加写锁
 	own.writeLock.Lock()
 	defer own.writeLock.Unlock()
 	err = createData(own.db, data)
@@ -449,13 +464,13 @@ func (own *Sqlite) Update(data interface{}) error {
 		return err
 	}
 
-	// ✅ 确保表存在
+	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
 		return err
 	}
 
-	// ✅ 再次检查连接
+	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -467,7 +482,7 @@ func (own *Sqlite) Update(data interface{}) error {
 		}
 		return nil
 	}
-	// 🆕 非事务操作加写锁
+	//  非事务操作加写锁
 	own.writeLock.Lock()
 	defer own.writeLock.Unlock()
 	err = updateData(own.db, data)
@@ -484,13 +499,13 @@ func (own *Sqlite) Delete(data interface{}) error {
 		return err
 	}
 
-	// ✅ 确保表存在
+	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
 		return err
 	}
 
-	// ✅ 再次检查连接
+	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
@@ -502,7 +517,7 @@ func (own *Sqlite) Delete(data interface{}) error {
 		}
 		return nil
 	}
-	// 🆕 非事务操作加写锁
+	//  非事务操作加写锁
 	own.writeLock.Lock()
 	defer own.writeLock.Unlock()
 	err = deleteData(own.db, data)
@@ -518,17 +533,17 @@ func (own *Sqlite) errorHandler(err error, data interface{}, fn func(db *gorm.DB
 		return nil
 	}
 
-	// ✅ 检查是否是列不存在的错误
+	//  检查是否是列不存在的错误
 	if strings.Contains(err.Error(), "no such column") ||
 		strings.Contains(err.Error(), "has no column named") ||
 		strings.Contains(err.Error(), "ambiguous column name") ||
 		strings.Contains(err.Error(), "no such table") ||
 		strings.Contains(err.Error(), "datatype mismatch") {
 
-		// ✅ 使用安全的 AutoMigrate
+		//  使用安全的 AutoMigrate
 		err := own.safeAutoMigrate(data)
 		if err == nil {
-			// ✅ 迁移成功后检查连接
+			//  迁移成功后检查连接
 			if connErr := own.ensureValidConnection(); connErr != nil {
 				return connErr
 			}
@@ -551,13 +566,12 @@ func (own *Sqlite) Raw(sql string, data interface{}) error {
 		return err
 	}
 
-	// ✅ 确保连接有效
+	//  确保连接有效
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
 
-	own.db.Raw(sql).Scan(data)
-	return own.db.Error
+	return own.db.Raw(sql).Scan(data).Error
 }
 
 // Exec 执行 SQL
@@ -567,13 +581,12 @@ func (own *Sqlite) Exec(sql string, data interface{}) error {
 		return err
 	}
 
-	// ✅ 确保连接有效
+	//  确保连接有效
 	if err := own.ensureValidConnection(); err != nil {
 		return err
 	}
 
-	own.db.Exec(sql, data)
-	return own.db.Error
+	return own.db.Exec(sql, data).Error
 }
 
 // Clone 返回一个共享底层连接池但拥有独立事务状态的新实例，
@@ -586,7 +599,8 @@ func (own *Sqlite) Clone() types.IDataAction {
 		Path:         own.Path,
 		tables:       own.tables,
 		IsLog:        own.IsLog,
-		isTansaction: own.isTansaction,
+		tx:           nil,
+		isTansaction: false,
 	}
 	if own.db != nil {
 		clone.db = own.db.Session(&gorm.Session{NewDB: true})
@@ -650,27 +664,27 @@ func (own *Sqlite) DeleteDB() error {
 		return err
 	}
 
-	// ✅ 关闭所有连接
+	//  关闭所有连接
 	if err := own.closeAllConnections(); err != nil {
 		logx.Errorf("关闭数据库连接失败: %v", err)
 	}
 
-	// ✅ 清除连接缓存
+	//  清除连接缓存
 	connManager.SetConnection(dns, nil)
 
-	// ✅ 重置当前实例
+	//  重置当前实例
 	own.db = nil
 	own.tx = nil
 	own.isTansaction = false
 
-	// ✅ 删除文件
+	//  删除文件
 	err = utils.DeleteFile(dns)
 	if err != nil {
 		logx.Errorf("删除数据库文件失败: %s, 错误: %v", dns, err)
 		return err
 	}
 
-	// ✅ 清除表缓存
+	//  清除表缓存
 	own.clearTableCache()
 
 	return nil
@@ -801,7 +815,7 @@ func (s *Sqlite) Exists(data interface{}) (bool, error) {
 		db = s.db
 	}
 
-	// 🔧 调用通用方法
+	//  调用通用方法
 	return existsData(db, data)
 }
 

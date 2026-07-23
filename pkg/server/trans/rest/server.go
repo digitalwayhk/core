@@ -1,21 +1,24 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
-	"strconv"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/safe/logto"
 	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/websocket/melody"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
-
-	"errors"
-	"fmt"
-	"net/http"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
@@ -23,120 +26,338 @@ import (
 
 type Server struct {
 	*rest.Server
-	context     *router.ServiceContext
-	IsWebSocket bool
-	IsCors      bool
+	context       *router.ServiceContext
+	logtoHandlers *logto.HandlerFactory
+	IsWebSocket   bool
+	IsCors        bool
+	stateMu       sync.Mutex
+	lifecycleMu   sync.Mutex
+	httpServer    *http.Server
+	stopCh        chan struct{}
+	stopOnce      sync.Once
+	stopped       bool
 }
 
-func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) *Server {
+type authMode uint8
+
+const (
+	authModeInternalJWT authMode = iota
+	authModeLogto
+)
+
+func selectAuthMode(auth config.AuthSecret) authMode {
+	if auth.Logto.Enable {
+		return authModeLogto
+	}
+	return authModeInternalJWT
+}
+
+// resolveRouteAuthPolicy 返回路由所属认证域及当前启用的认证模式。
+func resolveRouteAuthPolicy(
+	rou *router.ServiceRouter,
+	path string,
+) (config.AuthSecret, types.AuthType, authMode) {
+	auth := rou.Service.Config.Auth
+	authType := types.AuthTypeUser
+	if rou.HasRouter(path, types.ServerManagerType) {
+		auth = rou.Service.Config.ServerManageAuth
+		authType = types.AuthTypeServerManage
+	} else if rou.HasRouter(path, types.ManageType) {
+		auth = rou.Service.Config.ManageAuth
+		authType = types.AuthTypeManage
+	}
+	return auth, authType, selectAuthMode(auth)
+}
+
+func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
+	options, err := restRunOptions(isCors, origin)
+	if err != nil {
+		return nil, err
+	}
 	ser := &Server{
-		context: context,
+		context:       context,
+		logtoHandlers: logto.NewHandlerFactory(),
+		stopCh:        make(chan struct{}),
 	}
 	ser.IsWebSocket = isWebSocket
 	if ser.IsWebSocket {
 		context.Config.Timeout = 0
 	}
 	ser.IsCors = isCors
-	if ser.IsCors {
-		ser.Server = rest.MustNewServer(context.Config.RestConf, rest.WithCors())
-	} else {
-		ser.Server = rest.MustNewServer(context.Config.RestConf)
+	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
+	if err := ser.register(); err != nil {
+		ser.logtoHandlers.Close()
+		return nil, err
 	}
-	ser.register()
-	return ser
+	return ser, nil
+}
+
+func restRunOptions(isCors bool, origins []string) ([]rest.RunOption, error) {
+	if !isCors {
+		return nil, nil
+	}
+
+	origins = normalizeCorsOrigins(origins)
+	if len(origins) == 0 {
+		return nil, errors.New("at least one CORS origin is required")
+	}
+
+	return []rest.RunOption{rest.WithCors(origins...)}, nil
+}
+
+func normalizeCorsOrigins(origins []string) []string {
+	normalized := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			normalized = append(normalized, origin)
+		}
+	}
+	return normalized
 }
 func (own *Server) Start() {
+	own.lifecycleMu.Lock()
+	if own.stopped {
+		own.lifecycleMu.Unlock()
+		return
+	}
+	own.lifecycleMu.Unlock()
+
 	pid := utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port)
 	if pid {
-		panic(fmt.Sprintf("%s 服务的端口%d被占用,不能启动服务", own.context.Service.Name, own.context.Config.Port))
+		logx.Errorw("service_start_failed",
+			logx.Field("service", own.context.Service.Name),
+			logx.Field("port", own.context.Config.Port),
+			logx.Field("error", "port already in use"),
+		)
+		return
 	}
-	go checkRun(own.context)
-	s1 := fmt.Sprintf("Starting %s server at %s:%d success\n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port)
-	if own.IsWebSocket {
-		s2 := fmt.Sprintf("Starting %s websocket at %s:%d success,path:%s:%d/ws \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		//s3 := fmt.Sprintf("Starting %s websocket auth at %s:%d success,path:%s:%d/wsauth \n", own.context.Config.Name, own.context.Config.Host, own.context.Config.Port, own.context.Config.Host, own.context.Config.Port)
-		fmt.Print(s1, s2)
-	} else {
-		fmt.Print(s1)
-	}
-	own.Server.Start()
+	go own.checkRun()
+	logx.Infow("service_starting",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("host", own.context.Config.Host),
+		logx.Field("port", own.context.Config.Port),
+		logx.Field("websocket", own.IsWebSocket),
+	)
+	own.Server.StartWithOpts(func(server *http.Server) {
+		own.lifecycleMu.Lock()
+		own.httpServer = server
+		stopped := own.stopped
+		own.lifecycleMu.Unlock()
+		if stopped {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdownCtx)
+		}
+	})
 }
-func checkRun(context *router.ServiceContext) {
+func (own *Server) checkRun() {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
-		time.Sleep(time.Millisecond * 10)
-		pid := utils.ScanPort("tcp", context.Config.Host, context.Config.Port)
-		if pid {
-			//context.SetPid(pid)
-			go context.SetRunState(true)
+		select {
+		case <-own.stopCh:
 			return
+		case <-ticker.C:
+			if utils.ScanPort("tcp", own.context.Config.Host, own.context.Config.Port) {
+				own.stateMu.Lock()
+				own.lifecycleMu.Lock()
+				stopped := own.stopped
+				own.lifecycleMu.Unlock()
+				if !stopped {
+					own.context.SetRunState(true)
+				}
+				own.stateMu.Unlock()
+				return
+			}
 		}
 	}
 }
 func (own *Server) Stop() {
-	own.context.SetRunState(false)
-	own.Server.Stop()
+	own.stopOnce.Do(func() {
+		close(own.stopCh)
+		own.stateMu.Lock()
+		own.lifecycleMu.Lock()
+		own.stopped = true
+		server := own.httpServer
+		own.lifecycleMu.Unlock()
+
+		own.context.SetRunState(false)
+		own.stateMu.Unlock()
+		if server != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logx.Errorf("REST 服务关闭失败，服务：%s，错误：%v", own.context.Service.Name, err)
+			}
+			cancel()
+		}
+		own.logtoHandlers.Close()
+	})
 }
-func (own *Server) register() {
+func (own *Server) register() error {
 	routers := own.context.Router.GetRouters()
 	count := len(routers)
-	fmt.Println("===========================================================")
-	fmt.Printf("%s Register Service Routes Start. \n", own.context.Config.Name)
-	fmt.Println("Routes Count : " + strconv.Itoa(count))
+	logx.Debugw("routes_registering",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route_count", count),
+	)
 	for _, api := range routers {
-		handers(own, api)
+		if err := handers(own, api); err != nil {
+			return err
+		}
 	}
 	if own.IsWebSocket {
 		own.websocket()
 		//own.websocketauth()
 	}
-	fmt.Printf("%s Register Service Routes End. \n", own.context.Config.Name)
-	fmt.Println("===========================================================")
+	logx.Debugw("routes_registered",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route_count", count),
+	)
+	return nil
 }
 
-func handers(own *Server, api *types.RouterInfo) {
-	opts := make([]rest.RouteOption, 0)
-	path := api.Path
-	handler := RouteHandler(own.context.Router)
-	if api.Auth {
-		if own.context.Router.HasRouter(path, types.ManageType) {
-			if own.context.Config.ManageAuth.Logto.Enable {
-				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.ManageAuth.Logto.Issuer, own.context.Config.ManageAuth.Logto.ExpectedAudience).ServeHTTP
-			} else if own.context.Config.ManageAuth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
-			} else {
-				opts = append(opts, rest.WithJwt(own.context.Config.ManageAuth.AccessSecret))
+func handers(own *Server, api *types.RouterInfo) error {
+	path := api.GetPath()
+	var handler http.Handler = http.HandlerFunc(RouteHandler(own.context.Router))
+	if api.GetAuth() {
+		auth, authType, mode := resolveRouteAuthPolicy(own.context.Router, path)
+		handler = authRequestHandler(own.context, api, authType, mode, handler)
+		if mode == authModeLogto {
+			authHandler, err := own.newLogtoHandler(handler.ServeHTTP, auth.Logto)
+			if err != nil {
+				return fmt.Errorf("initialize Logto authentication: %w", err)
 			}
-
+			handler = authHandler
 		} else {
-			if own.context.Config.Auth.Logto.Enable {
-				handler = logto.AuthHandler(RouteHandler(own.context.Router), own.context.Config.Auth.Logto.Issuer, own.context.Config.Auth.Logto.ExpectedAudience).ServeHTTP
-			} else if own.context.Config.Auth.CasDoor.Enable {
-				handler = casdoor.AuthHandler(RouteHandler(own.context.Router)).ServeHTTP
-			} else {
-				opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-			}
+			handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
 		}
 	}
+	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))
 
 	own.Server.AddRoutes([]rest.Route{
 		{
-			Method:  api.Method,
+			Method:  api.GetMethod(),
 			Path:    path,
-			Handler: handler,
+			Handler: handler.ServeHTTP,
 		},
-	}, opts...)
-	fmt.Printf("register auth: %t ,method: %s ,route: %s \n", api.Auth, api.Method, path)
+	})
+	logx.Debugw("route_registered",
+		logx.Field("service", own.context.Config.Name),
+		logx.Field("route", path),
+		logx.Field("method", api.GetMethod()),
+		logx.Field("auth", api.GetAuth()),
+	)
+	return nil
 }
+
+func externalRateLimitHandler(sc *router.ServiceContext, api *types.RouterInfo, next http.Handler) http.Handler {
+	if next == nil {
+		next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
+		})
+	}
+	policy := api.GetExternalRateLimit()
+	if policy == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isDirectLoopbackRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if sc == nil || sc.Config == nil || sc.PublicRateLimiter == nil {
+			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
+			return
+		}
+		clientIP := utils.ClientPublicIP(r, sc.Config.TrustedProxies...)
+		if sc.PublicRateLimiter.Allow(api.GetPath(), clientIP, *policy) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		serviceName := sc.Config.Name
+		if sc.Service != nil && sc.Service.Name != "" {
+			serviceName = sc.Service.Name
+		}
+		logx.Infow("external_api_rate_limited",
+			logx.Field("service", serviceName),
+			logx.Field("route", api.GetPath()),
+			logx.Field("client", maskClientIP(clientIP)),
+		)
+		writePublicErrorContract(w, types.NewPublicError(types.ErrorKindRateLimited, 0, "", nil).PublicErrorContract())
+	})
+}
+
+func isDirectLoopbackRequest(r *http.Request) bool {
+	if r == nil || strings.TrimSpace(r.Header.Get("X-Forwarded-For")) != "" || strings.TrimSpace(r.Header.Get("X-Real-IP")) != "" {
+		return false
+	}
+	host := strings.TrimSpace(r.RemoteAddr)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	return err == nil && addr.Unmap().IsLoopback()
+}
+
+func maskClientIP(clientIP string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(clientIP))
+	if err != nil {
+		return "unknown"
+	}
+	addr = addr.Unmap()
+	bits := 64
+	if addr.Is4() {
+		bits = 24
+	}
+	return netip.PrefixFrom(addr, bits).Masked().String()
+}
+
+func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
+	return logto.NewAuthHandler(next, logto.AuthConfig{
+		Issuer:           cfg.Issuer,
+		ExpectedAudience: cfg.ExpectedAudience,
+	})
+}
+
+func (own *Server) newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
+	return own.logtoHandlers.NewAuthHandler(next, logto.AuthConfig{
+		Issuer:           cfg.Issuer,
+		ExpectedAudience: cfg.ExpectedAudience,
+	})
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers := w.Header()
+		setHeaderIfEmpty(headers, "X-Content-Type-Options", "nosniff")
+		setHeaderIfEmpty(headers, "Referrer-Policy", "no-referrer")
+		setHeaderIfEmpty(headers, "X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setHeaderIfEmpty(headers http.Header, name, value string) {
+	if headers.Get(name) == "" {
+		headers.Set(name, value)
+	}
+}
+
 func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 	for _, rou := range routers {
-		handers(own, rou)
+		if err := handers(own, rou); err != nil {
+			panic(err)
+		}
 	}
 }
 
 func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
-		ip := utils.ClientPublicIP(r)
+		if req == nil {
+			writeErrorResponse(w, StatusUnauthorized, "authentication failed", nil)
+			return
+		}
+		ip := utils.ClientPublicIP(r, rou.Service.Config.TrustedProxies...)
 
 		// IP 白名单验证
 		err := trans.VerifyIPWhiteList(rou.Service.Config, ip)
@@ -149,6 +370,16 @@ func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 		if info == nil {
 			writeErrorResponse(w, StatusNotFound, "Route not found: "+req.GetPath(), nil)
 			return
+		}
+		if info.GetAuth() {
+			_, authType, mode := resolveRouteAuthPolicy(rou, info.GetPath())
+			identity, _, err := verifiedRequestIdentity(r, rou.Service, authType, mode)
+			if err != nil {
+				contract := types.ResolvePublicError(err)
+				logAuthRequestDenied(rou.Service, info, authType, identity, contract)
+				writePublicErrorContract(w, contract)
+				return
+			}
 		}
 
 		// 执行路由处理
@@ -201,42 +432,6 @@ func (own *Server) Send(payload *types.PayLoad) ([]byte, error) {
 	return values, nil
 }
 
-// func (own *Server) websocket() {
-// 	hub := NewHub()
-// 	hub.serviceContext = own.context
-// 	go hub.Run()
-// 	own.context.Hub = hub
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/ws",
-// 		Handler: websocketHandler(own.context),
-// 	})
-// 	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/ws")
-// }
-
-// func (own *Server) websocketauth() {
-// 	opts := make([]rest.RouteOption, 0)
-// 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-// 	//opts = append(opts, rest.WithTimeout(0))
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/wsauth",
-// 		Handler: websocketHandler(own.context),
-// 	}, opts...)
-// 	//fmt.Printf("register websocket: %s \n", own.context.Config.RunIp+"/wsauth")
-// }
-
-//	func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			ip := utils.ClientPublicIP(r)
-//			err := trans.VerifyIPWhiteList(sc.Config, ip)
-//			if err != nil {
-//				httpx.OkJson(w, err)
-//				return
-//			}
-//			ServeWs(sc.Hub.(*Hub), w, r)
-//		}
-//	}
 func (own *Server) GetIPandPort() (string, int) {
 	return own.context.Config.Host, own.context.Config.Port
 }
@@ -252,27 +447,15 @@ func (own *Server) websocket() {
 	own.Server.AddRoute(rest.Route{
 		Method:  http.MethodGet,
 		Path:    "/ws",
-		Handler: websocketHandler(own.context),
+		Handler: securityHeaders(websocketHandler(own.context)).ServeHTTP,
 	}, opts...)
 }
-
-// func (own *Server) websocketauth() {
-// 	opts := make([]rest.RouteOption, 0)
-// 	opts = append(opts, rest.WithJwt(own.context.Config.Auth.AccessSecret))
-// 	opts = append(opts, rest.WithTimeout(0)) // 添加：为认证WebSocket路由也禁用超时
-
-// 	own.Server.AddRoute(rest.Route{
-// 		Method:  http.MethodGet,
-// 		Path:    "/wsauth",
-// 		Handler: websocketHandler(own.context),
-// 	}, opts...)
-// }
 
 func websocketHandler(sc *router.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		//startTime := time.Now()
 
-		ip := utils.ClientPublicIP(r)
+		ip := utils.ClientPublicIP(r, sc.Config.TrustedProxies...)
 		melodyManager := sc.Hub.(*melody.MelodyManager)
 		if melodyManager == nil {
 			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)

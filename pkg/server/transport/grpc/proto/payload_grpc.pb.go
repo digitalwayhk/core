@@ -19,8 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CoreTransport_Call_FullMethodName   = "/coretransport.CoreTransport/Call"
-	CoreTransport_Health_FullMethodName = "/coretransport.CoreTransport/Health"
+	CoreTransport_Call_FullMethodName = "/coretransport.CoreTransport/Call"
 )
 
 // CoreTransportClient is the client API for CoreTransport service.
@@ -31,8 +30,6 @@ const (
 type CoreTransportClient interface {
 	// Call forwards a PayloadRequest to the target service and returns its response.
 	Call(ctx context.Context, in *PayloadRequest, opts ...grpc.CallOption) (*PayloadResponse, error)
-	// Health checks whether the remote service is reachable and healthy.
-	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
 type coreTransportClient struct {
@@ -53,16 +50,6 @@ func (c *coreTransportClient) Call(ctx context.Context, in *PayloadRequest, opts
 	return out, nil
 }
 
-func (c *coreTransportClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HealthResponse)
-	err := c.cc.Invoke(ctx, CoreTransport_Health_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // CoreTransportServer is the server API for CoreTransport service.
 // All implementations must embed UnimplementedCoreTransportServer
 // for forward compatibility.
@@ -71,8 +58,6 @@ func (c *coreTransportClient) Health(ctx context.Context, in *HealthRequest, opt
 type CoreTransportServer interface {
 	// Call forwards a PayloadRequest to the target service and returns its response.
 	Call(context.Context, *PayloadRequest) (*PayloadResponse, error)
-	// Health checks whether the remote service is reachable and healthy.
-	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedCoreTransportServer()
 }
 
@@ -85,9 +70,6 @@ type UnimplementedCoreTransportServer struct{}
 
 func (UnimplementedCoreTransportServer) Call(context.Context, *PayloadRequest) (*PayloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Call not implemented")
-}
-func (UnimplementedCoreTransportServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedCoreTransportServer) mustEmbedUnimplementedCoreTransportServer() {}
 func (UnimplementedCoreTransportServer) testEmbeddedByValue()                       {}
@@ -128,24 +110,6 @@ func _CoreTransport_Call_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _CoreTransport_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HealthRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CoreTransportServer).Health(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: CoreTransport_Health_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CoreTransportServer).Health(ctx, req.(*HealthRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // CoreTransport_ServiceDesc is the grpc.ServiceDesc for CoreTransport service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -156,10 +120,6 @@ var CoreTransport_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Call",
 			Handler:    _CoreTransport_Call_Handler,
-		},
-		{
-			MethodName: "Health",
-			Handler:    _CoreTransport_Health_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

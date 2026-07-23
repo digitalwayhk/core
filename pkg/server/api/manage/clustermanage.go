@@ -9,7 +9,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
-	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // ---- ClusterStatus ----
@@ -26,26 +25,28 @@ func (c *ClusterStatus) Validation(_ types.IRequest) error { return nil }
 
 func (c *ClusterStatus) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
-	if sc == nil || sc.ClusterProvider == nil {
+	if sc == nil {
 		return &ClusterStatus{ProviderName: "none"}, nil
 	}
-	nodes, err := sc.ClusterProvider.List(context.Background(), c.ServiceName)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	providerName, nodes, err := sc.ClusterProviderSnapshot(ctx, c.ServiceName)
 	if err != nil {
 		return nil, err
 	}
 	return &ClusterStatus{
 		ServiceName:  c.ServiceName,
-		ProviderName: sc.ClusterProvider.Name(),
+		ProviderName: providerName,
 		Nodes:        nodes,
 	}, nil
 }
 
 func (c *ClusterStatus) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/status"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/status"),
+		router.WithAuth(true),
+	)
 }
 
 // ---- ClusterNodes ----
@@ -62,14 +63,16 @@ func (c *ClusterNodes) Validation(_ types.IRequest) error { return nil }
 
 func (c *ClusterNodes) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
-	if sc == nil || sc.ClusterProvider == nil {
+	if sc == nil {
 		return &ClusterNodes{Nodes: []*cluster.NodeInfo{}}, nil
 	}
 	var statuses []cluster.NodeStatus
 	if c.Status != "" {
 		statuses = []cluster.NodeStatus{cluster.NodeStatus(c.Status)}
 	}
-	nodes, err := sc.ClusterProvider.List(context.Background(), c.ServiceName, statuses...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, nodes, err := sc.ClusterProviderSnapshot(ctx, c.ServiceName, statuses...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,11 +80,11 @@ func (c *ClusterNodes) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (c *ClusterNodes) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/nodes"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/nodes"),
+		router.WithAuth(true),
+	)
 }
 
 // ---- ClusterSwitchProvider ----
@@ -106,7 +109,8 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 		}, nil
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	var err error
 	switch c.Action {
 	case "begin":
@@ -114,21 +118,11 @@ func (c *ClusterSwitchProvider) Do(req types.IRequest) (interface{}, error) {
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		err = sc.ClusterSwitcher.Begin(ctx, to)
+		err = sc.BeginProviderSwitch(ctx, to)
 	case "complete":
-		err = sc.ClusterSwitcher.Complete(ctx)
-		if err == nil {
-			if syncErr := sc.SyncProviderAfterSwitch(); syncErr != nil {
-				logx.Errorf("cluster: sync provider after complete: %v", syncErr)
-			}
-		}
+		err = sc.CompleteProviderSwitch(ctx)
 	case "rollback":
-		err = sc.ClusterSwitcher.Rollback(ctx)
-		if err == nil {
-			if syncErr := sc.SyncProviderAfterSwitch(); syncErr != nil {
-				logx.Errorf("cluster: sync provider after rollback: %v", syncErr)
-			}
-		}
+		err = sc.RollbackProviderSwitch(ctx)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", c.Action)
 	}
@@ -145,7 +139,7 @@ func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProv
 		p.Start()
 		return p, nil
 	case "etcd":
-		return cluster.NewEtcdProvider(endpoints)
+		return cluster.NewEtcdProvider(endpoints, 0)
 	case "consul":
 		addr := ""
 		if len(endpoints) > 0 {
@@ -158,9 +152,9 @@ func buildTargetProvider(name string, endpoints []string) (cluster.DiscoveryProv
 }
 
 func (c *ClusterSwitchProvider) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(c)
-	info.Method = http.MethodPost
-	info.Path = "/api/servermanage/cluster/switchprovider"
-	info.Auth = true
-	return info
+	return router.DefaultRouterInfoWithOptions(c,
+		router.WithMethod(http.MethodPost),
+		router.WithPath("/api/servermanage/cluster/switchprovider"),
+		router.WithAuth(true),
+	)
 }

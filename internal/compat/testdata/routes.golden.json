@@ -1,0 +1,19 @@
+[
+  {
+    "service": "fixture",
+    "method": "POST",
+    "path": "/api/fixture/creatething",
+    "pathType": "private",
+    "auth": true
+  },
+  {
+    "service": "fixture",
+    "method": "GET",
+    "path": "/api/fixture/getthing",
+    "pathType": "public",
+    "auth": false,
+    "internalCallers": [
+      "shop-user"
+    ]
+  }
+]

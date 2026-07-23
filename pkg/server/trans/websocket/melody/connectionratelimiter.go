@@ -9,25 +9,44 @@ import (
 
 // 新增：连接频率限制器
 type ConnectionRateLimiter struct {
-	clients map[string]*rate.Limiter
-	mu      sync.RWMutex
+	clients   map[string]*rate.Limiter
+	mu        sync.RWMutex
+	stopCh    chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewConnectionRateLimiter() *ConnectionRateLimiter {
+	return newConnectionRateLimiter(5 * time.Minute)
+}
+
+func newConnectionRateLimiter(cleanupInterval time.Duration) *ConnectionRateLimiter {
 	crl := &ConnectionRateLimiter{
 		clients: make(map[string]*rate.Limiter),
+		stopCh:  make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 
-	// 定期清理过期的限制器
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		defer close(crl.done)
+		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			crl.cleanup()
+		for {
+			select {
+			case <-ticker.C:
+				crl.cleanup()
+			case <-crl.stopCh:
+				return
+			}
 		}
 	}()
 
 	return crl
+}
+
+func (crl *ConnectionRateLimiter) Close() {
+	crl.closeOnce.Do(func() { close(crl.stopCh) })
+	<-crl.done
 }
 
 func (crl *ConnectionRateLimiter) Allow(ip string) bool {

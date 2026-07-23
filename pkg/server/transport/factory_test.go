@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -20,16 +21,35 @@ func TestBuildSelector_HTTPPrimary(t *testing.T) {
 }
 
 func TestBuildSelector_GRPCWithHTTPFallback(t *testing.T) {
-	sel, err := BuildSelector(config.TransportConfig{Internal: "grpc", Fallback: []string{"http", "socket"}})
+	sel, err := BuildSelector(config.TransportConfig{Internal: "grpc", Fallback: []string{"http"}})
 	require.NoError(t, err)
 	require.NotNil(t, sel)
 
 	ds, ok := sel.(*DefaultSelector)
 	require.True(t, ok)
-	require.Len(t, ds.fallback, 2)
+	require.Len(t, ds.fallback, 1)
 	assert.Equal(t, "grpc", ds.primary.Name())
 	assert.Equal(t, "http", ds.fallback[0].Name())
-	assert.Equal(t, "socket", ds.fallback[1].Name())
+}
+
+func TestBuildSelector_RemovedSocketReturnsError(t *testing.T) {
+	sel, err := BuildSelector(config.TransportConfig{Internal: "socket"})
+	assert.Nil(t, sel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "supported protocols: grpc, http")
+}
+
+func TestBuildSelector_GRPCInjectsSecurityConfig(t *testing.T) {
+	sel, err := BuildSelector(config.TransportConfig{
+		Internal: "grpc",
+		GRPC: config.GRPCTransportConfig{Security: config.GRPCSecurityConfig{
+			Mode: "mtls", CAFile: "/missing/ca.pem", CertFile: "/missing/client.pem", KeyFile: "/missing/client.key",
+		}},
+	})
+	require.NoError(t, err)
+	ds := sel.(*DefaultSelector)
+	err = ds.primary.Health(context.Background(), "127.0.0.1:19090")
+	require.ErrorContains(t, err, "Transport.GRPC.Security.CAFile")
 }
 
 func TestBuildSelector_EmptyConfig(t *testing.T) {
@@ -56,22 +76,15 @@ func TestBuildSelector_MQInternalReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "not implemented")
 }
 
-// TestBuildSelector_FallbackMQSkippedOrderPreserved verifies that an unimplemented
-// fallback entry ("mq") is skipped with a warning while the implemented entries
-// (grpc, http) are built in their configured order.
-func TestBuildSelector_FallbackMQSkippedOrderPreserved(t *testing.T) {
+func TestBuildSelector_UnimplementedFallbackReturnsError(t *testing.T) {
 	sel, err := BuildSelector(config.TransportConfig{
 		Internal: "grpc",
 		Fallback: []string{"mq", "http"},
 	})
-	require.NoError(t, err)
-	require.NotNil(t, sel)
-
-	ds, ok := sel.(*DefaultSelector)
-	require.True(t, ok)
-	assert.Equal(t, "grpc", ds.primary.Name())
-	require.Len(t, ds.fallback, 1, "mq should be skipped; only http remains in fallback")
-	assert.Equal(t, "http", ds.fallback[0].Name())
+	assert.Nil(t, sel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mq")
+	assert.Contains(t, err.Error(), "not implemented")
 }
 
 // TestBuildSelector_AllFallbackUnimplementedReturnsError verifies that when every
@@ -83,6 +96,6 @@ func TestBuildSelector_AllFallbackUnimplementedReturnsError(t *testing.T) {
 	})
 	assert.Nil(t, sel)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no implemented transports")
+	assert.Contains(t, err.Error(), "mq")
+	assert.Contains(t, err.Error(), "not implemented")
 }
-

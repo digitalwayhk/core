@@ -1,74 +1,50 @@
 package casdoor
 
 import (
-	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 )
 
-func AuthMiddleware(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "authHeader is empty", http.StatusUnauthorized)
-		return
-	}
+var ErrClientRequired = errors.New("explicit Casdoor client is required")
 
-	token := strings.Split(authHeader, "Bearer ")
-	if len(token) != 2 {
-		http.Error(w, "token is not valid Bearer token", http.StatusUnauthorized)
-		return
-	}
+// AuthMiddleware 仅为保持旧函数签名而保留。
+// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；
+// 请使用 ServiceContext 注册的 REST 认证链。
+func AuthMiddleware(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "authentication failed", http.StatusUnauthorized)
+}
 
-	claims, err := casdoorsdk.ParseJwtToken(token[1])
-	if err != nil {
-		http.Error(w, "ParseJwtToken() error", http.StatusUnauthorized)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "ok",
-		"data":   claims.User,
+// AuthHandler 仅为保持旧函数签名而保留。
+// Deprecated: 旧签名无法表达 Auth/Manage Client，固定 fail closed；
+// 请使用 ServiceContext 注册的 REST 认证链。
+func AuthHandler(_ http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "authentication failed", http.StatusUnauthorized)
 	})
 }
 
-func AuthHandler(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "authHeader is empty", http.StatusUnauthorized)
-			return
-		}
-
-		token := strings.Split(authHeader, "Bearer ")
-		if len(token) != 2 {
-			http.Error(w, "token is not valid Bearer token", http.StatusUnauthorized)
-			return
-		}
-
-		claims, err := TokenParse(token[1])
-		if err != nil {
-			http.Error(w, "ParseJwtToken() error: "+err.Error(), http.StatusUnauthorized)
-			return
-		}
-		userJson, _ := json.Marshal(claims.User)
-		con := r.Context()
-		// r = r.WithContext(context.WithValue(con, "uid", claims.User.Id))
-		// r = r.WithContext(context.WithValue(con, "uname", claims.User.Email))
-		r = r.WithContext(context.WithValue(con, "user", claims.User))
-		r.Header.Set("Casdoor-User-Json", string(userJson))
-		next.ServeHTTP(w, r)
-	})
+// TokenParse 仅为保持旧函数签名而保留。
+// Deprecated: 使用 TokenParseWithClient，并显式传入认证域 Client。
+func TokenParse(string) (*casdoorsdk.Claims, error) {
+	return nil, ErrClientRequired
 }
 
-func TokenParse(tokenString string) (*casdoorsdk.Claims, error) {
-	claims, err := casdoorsdk.ParseJwtToken(tokenString)
-	if err != nil {
-		return nil, err
+// TokenParseWithClient 仅解析原始 Casdoor JWT，不包含框架 Access Token
+// 的用途隔离、撤销世代和业务授权校验，不得将解析成功作为授权结论。
+func TokenParseWithClient(client *DomainClient, token string) (*casdoorsdk.Claims, error) {
+	if client == nil {
+		return nil, ErrClientRequired
 	}
-	return claims, nil
+	return client.ParseJwtToken(token)
+}
+
+// NewAuthHandler 仅为保持旧函数签名而保留。
+// Deprecated: 该签名无法提供框架 Access Secret、认证域和撤销权威，
+// 因此固定 fail closed。请使用 ServiceContext 注册的 REST 认证链。
+func NewAuthHandler(_ *DomainClient, _ http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "authentication failed", http.StatusUnauthorized)
+	})
 }

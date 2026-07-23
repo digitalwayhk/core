@@ -30,7 +30,7 @@ func (own *DirectoryManage) Routers() []types.IRouter {
 func (own *DirectoryManage) GetDefaultItems() []*smodels.DirectoryModel {
 	qr := &public.QueryRouters{}
 	info := qr.RouterInfo()
-	path := info.Path + "/%s" + "?apitype=3"
+	path := info.GetPath() + "/%s" + "?apitype=3"
 	items := make([]*smodels.DirectoryModel, 0)
 	for _, sc := range router.GetContexts() {
 		if sc.Service.Name == "server" {

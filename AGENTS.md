@@ -1,34 +1,27 @@
-# 项目说明：digitalwayhk/core 框架
+# AGENTS.md
 
-本仓库是 `github.com/digitalwayhk/core` —— 一个商业级 Go 服务框架。
+@/Users/vincent/.codex/RTK.md
 
-## 使用本框架开发后端 API 时
+## 项目说明
 
-**请先阅读** `.github/copilot/skills/core-backend-api.md`，该文件涵盖：
+本仓库是 `github.com/digitalwayhk/core`，一个 Go 服务框架。
 
-- 服务注册与启动方式
-- 数据库模型（`ModelList`、`BaseModel`）的定义规范
-- API handler（Public / Private / Manage）的标准写法
-- 前端调用 API 的 URL 规则与认证方式（TestToken 获取）
-- 各类约定汇总
+使用本框架开发或修改后端 API 前：
 
-**关键原则（agent 必须遵守）：**
+- Codex 必须阅读 `.codex/skills/use-digitalway-core/SKILL.md`，并按该 skill 指向的现行参考资料执行。
+- GitHub Copilot 必须阅读 `.github/copilot/skills/core-backend-api.md`。
+- 当指南与当前代码、测试或公开契约不一致时，以当前代码、测试和公开契约为准，并同步修正文档。
 
-1. **不需要手动建库建表** — 调用 `NewModelList[T](nil)` 时框架会自动 `AutoMigrate`
-2. **每个 model 文件对应一张表** — 所有对该表的操作都写在同一个文件里
-3. **handler 通过 `req.GetUser()` 获取当前用户**（userid, username）
-4. **Private API 需要 Bearer token** — 开发时用 `GET /api/{svc}/public/testtoken?userid=xxx&type=0` 获取
-5. **Manage API 需要 type=1 的 token**（管理员权限）
+关键原则：
 
-## 关于 WayPage / JWT / Umi 路由
+1. 调用 `NewModelList[T](nil)` 时框架会自动执行模型迁移；不要另行建立重复迁移流程。
+2. handler 通过 `req.GetUser()` 获取当前用户信息。
+3. Private、Manage、ServerManage 路由必须遵守各自的认证域，不得用路径猜测或跨域 token 替代。
+4. 路由注册、目录结构和 TestToken 用法以现行 skill、示例与测试为准，不复制旧项目中的路径约定。
 
-这些前端集成功能目前标记为 ⚠️ 暂不使用，不够稳定，agent 不应生成依赖这些的代码。
+## 语言规范
 
-## 目录结构参考
-
-```
-cmd/{serviceName}/          # 服务入口
-internal/core/{domain}/     # 业务逻辑（service / model / api）
-```
-
-参考已有实现：`internal/core/futures/`、`internal/core/trades/`
+- 与用户的所有对话、问题、进度更新、计划、总结和交付说明必须使用中文。
+- 新增或修改项目文档时必须使用中文，除非用户明确要求使用其他语言。
+- 代码标识符、API 名称、协议字段、命令、文件路径、第三方产品名称以及必须保持兼容的原文可以保留英文。
+- 引用已有英文内容时，应优先使用中文解释其含义，避免无必要地整段复制英文。

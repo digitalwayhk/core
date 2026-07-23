@@ -423,7 +423,7 @@ func TestHighConcurrency_ConsistentRead(t *testing.T) {
 
 // TestSyncConfig_DefaultBatchDelay 验证默认积累窗口为 100ms
 func TestSyncConfig_DefaultBatchDelay(t *testing.T) {
-	db := newTestDBLocal(t)
+	db := newTestDBLocalWithConfig(t, DefaultSharedConfig(t.TempDir()))
 	want := 100 * time.Millisecond
 	got := db.manager.config.SyncBatchDelay
 	if got != want {
@@ -433,7 +433,9 @@ func TestSyncConfig_DefaultBatchDelay(t *testing.T) {
 
 // TestSyncSema_AutoSizingFromMaxOpenConns 验证 SetSyncDB 根据 MySQL MaxOpenConns 自动调整信号量容量
 func TestSyncSema_AutoSizingFromMaxOpenConns(t *testing.T) {
-	db := newTestDBLocal(t)
+	config := newTestConfig(t.TempDir())
+	config.SyncWrites = true
+	db := newTestDBLocalWithConfig(t, config)
 
 	// 使用 MaxOpenConns=20 的 MySQL 配置调用 SetSyncDB
 	// 信号量以 adapter 指针为键；期望容量 = 20 * 3/4 = 15
@@ -460,7 +462,9 @@ func TestSyncSema_AutoSizingFromMaxOpenConns(t *testing.T) {
 
 // TestSyncSema_AutoSizing_ZeroMaxOpenConns_KeepsDefault 验证 MaxOpenConns=0 时使用默认容量 8
 func TestSyncSema_AutoSizing_ZeroMaxOpenConns_KeepsDefault(t *testing.T) {
-	db := newTestDBLocal(t)
+	config := newTestConfig(t.TempDir())
+	config.SyncWrites = true
+	db := newTestDBLocalWithConfig(t, config)
 
 	cfg := &oltp.Config{Host: "127.0.0.1", Port: 3306, MaxOpenConns: 0} // 0 = 无限制
 	action := oltp.NewMySQL(cfg)

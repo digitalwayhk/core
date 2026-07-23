@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"errors"
-	"sync"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
@@ -11,34 +10,8 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var (
-	globalSqliteInstances = make(map[string]*oltp.Sqlite)
-	sqliteInstanceMutex   = sync.RWMutex{}
-)
-
 func GetGlobalSqliteInstance(name string) *oltp.Sqlite {
-	sqliteInstanceMutex.RLock()
-	if instance, exists := globalSqliteInstances[name]; exists {
-		sqliteInstanceMutex.RUnlock()
-		return instance
-	}
-	sqliteInstanceMutex.RUnlock()
-
-	sqliteInstanceMutex.Lock()
-	defer sqliteInstanceMutex.Unlock()
-
-	// 双重检查
-	if instance, exists := globalSqliteInstances[name]; exists {
-		return instance
-	}
-
-	// 创建新实例
-	logx.Infof("🆕 创建全局Sqlite实例: %s", name)
-	instance := oltp.NewSqlite()
-	instance.Name = name
-	globalSqliteInstances[name] = instance
-
-	return instance
+	return oltp.GetSharedSqliteInstance(name)
 }
 
 type DefaultAdapter struct {
@@ -110,19 +83,19 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	}
 	name := idb.GetLocalDBName()
 
-	// 🔧 使用全局实例而不是创建新的
+	//  使用全局实例而不是创建新的
 	instance := GetGlobalSqliteInstance(name)
 
-	// 🔧 只在第一次时检查表
+	//  只在第一次时检查表
 	if _, exists := own.localdbs[name]; !exists {
-		if !config.INITSERVER {
+		if !config.IsServerInitializing() {
 			err = instance.HasTable(model)
 			if err != nil {
 				return nil, err
 			}
 		}
 		own.localdbs[name] = instance
-		logx.Infof("🔗 绑定全局Sqlite实例到适配器: %s", name)
+		logx.Infof(" 绑定全局Sqlite实例到适配器: %s", name)
 	}
 
 	return instance, err

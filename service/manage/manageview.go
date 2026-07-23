@@ -21,7 +21,7 @@ func GetViewModel(instance interface{}) *view.ViewModel {
 		if ms, ok := instance.(IManageService); ok {
 			for index, router := range ms.Routers() {
 				info := router.RouterInfo()
-				vm.ServiceName = info.ServiceName
+				vm.ServiceName = info.GetServiceName()
 				cmd := RouterToCommand(info)
 				if cmd != nil {
 					cmd.Index = index
@@ -36,10 +36,11 @@ func GetViewModel(instance interface{}) *view.ViewModel {
 	return vm
 }
 func RouterToCommand(info *types.RouterInfo) *view.CommandModel {
-	count := strings.Index(info.StructName, "[")
-	name := info.StructName
+	structName := info.GetStructName()
+	count := strings.Index(structName, "[")
+	name := structName
 	if count > 0 {
-		name = info.StructName[0:count]
+		name = structName[0:count]
 	}
 	if name == "View" || name == "Search" {
 		return nil

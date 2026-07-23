@@ -26,9 +26,6 @@ func (own *Edit[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *Edit[T]) Validation(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	err, stop := own.Operation.ValidationBefore(own, req)
 	if err != nil {
 		return err
@@ -59,9 +56,6 @@ func modelEditValid(item interface{}) error {
 	return nil
 }
 func (own *Edit[T]) Do(req types.IRequest) (interface{}, error) {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	if edit, ok := own.instance.(IManageService); ok {
 		data, err, stop := edit.DoBefore(own, req)
 		if stop {

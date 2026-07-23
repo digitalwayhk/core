@@ -22,9 +22,6 @@ const (
 
 type ObserveArgs struct {
 	Topic          string                       //订阅路由路径
-	OwnAddress     string                       //订阅者地址
-	OwnProt        int                          //订阅者端口
-	OwnSocketProt  int                          //订阅者socket协议端口
 	State          ObserveState                 //触发时机，0：接收到请求时，1：请求完成时，2：异常发生时
 	ServiceName    string                       //服务名称
 	ReceiveService string                       //接收者服务名称（订阅注册时，订阅者服务名称）
@@ -40,12 +37,12 @@ func (own *ObserveArgs) GetHash() string {
 }
 
 type TargetInfo struct {
-	TargetAddress    string
-	TargetService    string
-	TargetPort       int
-	TargetSocketPort int
-	TargetPath       string
-	TargetToken      string //目标服务的token
+	TargetAddress  string
+	TargetService  string
+	TargetPort     int
+	TargetGRPCPort int
+	TargetPath     string
+	TargetToken    string //目标服务的token
 }
 
 // NewObserveArgs 创建对路由的订阅,router为订阅路由,state为订阅的触发时机，callback为回调函数
@@ -61,16 +58,13 @@ func NewObserveArgs(router IRouter, state ObserveState, callBack func(args *Noti
 }
 
 type NotifyArgs struct {
-	TraceID           string //跟踪ID
-	SendService       string
-	ReceiveAddress    string
-	ReceiveService    string
-	ReceiveProt       int //接收者端口
-	ReceiveSocketProt int //接收者socket协议端口
-	Topic             string
-	Instance          interface{}
-	Response          interface{}
-	State             ObserveState //触发时机，0：接收到请求时，1：请求完成时，2：异常发生时
+	TraceID        string //跟踪ID
+	SendService    string
+	ReceiveService string
+	Topic          string
+	Instance       interface{}
+	Response       interface{}
+	State          ObserveState //触发时机，0：接收到请求时，1：请求完成时，2：异常发生时
 }
 
 func (own *NotifyArgs) GetInstance(instance interface{}) error {
@@ -103,16 +97,19 @@ func (own *ObserveArgs) Notify(args *NotifyArgs) error {
 }
 
 func (own *ObserveArgs) NewNotifyArgs(instance interface{}, resp IResponse) *NotifyArgs {
+	return own.NewNotifyArgsSnapshot(instance, resp)
+}
+
+// NewNotifyArgsSnapshot 使用已经冻结的实例和响应快照创建通知参数。
+// 该方法供异步观察通知使用，避免持有即将归还对象池的 Router。
+func (own *ObserveArgs) NewNotifyArgsSnapshot(instance interface{}, resp interface{}) *NotifyArgs {
 	args := &NotifyArgs{
-		ReceiveAddress:    own.OwnAddress,
-		ReceiveProt:       own.OwnProt,
-		ReceiveSocketProt: own.OwnSocketProt,
-		SendService:       own.ServiceName,
-		ReceiveService:    own.ReceiveService,
-		Topic:             own.Topic,
-		State:             own.State,
-		Instance:          instance,
-		Response:          resp,
+		SendService:    own.ServiceName,
+		ReceiveService: own.ReceiveService,
+		Topic:          own.Topic,
+		State:          own.State,
+		Instance:       instance,
+		Response:       resp,
 	}
 	return args
 }

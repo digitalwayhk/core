@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -56,15 +57,45 @@ func (own *RouterInfo) initChannelPool() {
 	if own.channelPool != nil {
 		return
 	}
-	own.channelPool = NewChannelPool(func() IRouter {
-		instance := utils.NewInterface(own.instance)
-		if instance == nil {
-			logx.Errorf("Failed to create new instance for %s", own.Path)
-			return nil
-		}
-		return instance.(IRouter)
-	}, 100) // 池大小为100
+	// 已持有 RouterInfo 写锁，直接读取注册期快照字段，避免 Getter 重入 RWMutex。
+	size := own.PoolSize
+	if size <= 0 {
+		size = defaultPoolSize()
+	}
+	own.channelPool = NewChannelPool(own.newRouterInstance, size)
 
+}
+
+// newRouterInstance 通过路由工厂或注册类型创建一个独立实例。
+// 该方法只负责创建，不决定实例属于请求池还是长期订阅。
+func (own *RouterInfo) newRouterInstance() IRouter {
+	if factory, ok := own.instance.(IRouterFactory); ok {
+		return factory.New(own.instance)
+	}
+	instance := utils.NewInterface(own.instance)
+	if instance == nil {
+		logx.Errorf("Failed to create new instance for %s", own.Path)
+		return nil
+	}
+	router, ok := instance.(IRouter)
+	if !ok {
+		logx.Errorf("Created instance for %s does not implement IRouter", own.Path)
+		return nil
+	}
+	return router
+}
+
+// defaultPoolSize 返回基于 GOMAXPROCS 的默认对象池大小。
+// 对 I/O 密集型 Handler，乘以 4 可减少 GC 频率；最小 16，最大 256。
+func defaultPoolSize() int {
+	n := runtime.GOMAXPROCS(0) * 4
+	if n < 16 {
+		n = 16
+	}
+	if n > 256 {
+		n = 256
+	}
+	return n
 }
 
 func (own *RouterInfo) getNew() IRouter {
@@ -225,8 +256,18 @@ func (own *RouterInfo) putRouter(router IRouter) {
 	// 🔧 清理敏感数据
 	own.cleanRouter(router)
 
-	// 🔧 放回对象池
-	own.pool.Put(router)
+	// 🔧 放回创建和获取所使用的同一个有界对象池
+	if own.channelPool != nil {
+		own.channelPool.Put(router)
+	}
+}
+
+// releaseSubscription 清理长期 WebSocket 订阅实例，但不将它放入短期请求对象池。
+func (own *RouterInfo) releaseSubscription(router IRouter) {
+	if router == nil {
+		return
+	}
+	own.cleanRouter(router)
 }
 
 // 🔧 新增：清理路由对象的敏感数据

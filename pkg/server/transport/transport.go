@@ -1,5 +1,5 @@
 // Package transport provides a unified interface for all internal service-to-service
-// communication channels. Concrete implementations (HTTP, Socket, gRPC, MQ) live in
+// communication channels. Concrete implementations (HTTP, gRPC, MQ) live in
 // sub-packages and are wired together by a TransportSelector.
 package transport
 
@@ -30,10 +30,17 @@ type Transport interface {
 	Health(ctx context.Context, target string) error
 }
 
+// PayloadHealthTransport optionally performs a health check with the same
+// payload context that will be used by Send. gRPC uses it for target-service
+// certificate identity verification while legacy transports keep Health.
+type PayloadHealthTransport interface {
+	HealthPayload(ctx context.Context, payload *types.PayLoad, target string) error
+}
+
 // TransportSelector chooses the most appropriate Transport for a given call,
 // applying fallback logic when the primary transport is unavailable.
 type TransportSelector interface {
-	// Select returns the best Transport for the payload + target, or an error
+	// Select returns the best protocol-specific selection, or an error
 	// when no healthy transport is available.
-	Select(ctx context.Context, payload *types.PayLoad, target string) (Transport, error)
+	Select(ctx context.Context, payload *types.PayLoad, endpoints TransportEndpoints) (Selection, error)
 }
