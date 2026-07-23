@@ -1,6 +1,8 @@
+// 本文件验证系统 Public API 的限流策略，以及内部 OpenAPI 的路由和响应安全边界。
 package public
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,6 +61,17 @@ func TestInternalOpenAPIResponseIsNotCacheableAndUnwrapped(t *testing.T) {
 
 	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
 	require.JSONEq(t, `{"openapi":"3.0.1"}`, recorder.Body.String())
+}
+
+func TestInternalOpenAPIResponseMapsFailureToPublicErrorContract(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	response := (&router.InitRequest{}).NewResponse(nil, errors.New("sensitive service lookup detail"))
+
+	internalOpenAPIResponse(recorder, httptest.NewRequest(http.MethodGet, "/api/internal/openapi", nil), response)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "internal server error")
+	require.NotContains(t, recorder.Body.String(), "sensitive service lookup detail")
 }
 
 func TestInternalOpenAPIRejectsUnknownServiceFilter(t *testing.T) {

@@ -1,3 +1,4 @@
+// 本文件提供匿名 OpenAPI HTTP 入口、内部兼容入口和 Swagger 静态资源挂载。
 package run
 
 import (
@@ -13,11 +14,13 @@ import (
 //go:embed swagger
 var swagger embed.FS
 
+// SwaggerHandler 返回 Swagger 静态资源的挂载路径和文件系统。
 func SwaggerHandler() (string, http.FileSystem) {
 	sfsys, _ := fs.Sub(swagger, "swagger")
 	return "/swagger/", http.FS(sfsys)
 }
 
+// OpenAPIHandler 返回匿名外部 OpenAPI 文档的挂载路径和处理器。
 func OpenAPIHandler(service ...*router.ServiceRouter) (string, http.Handler) {
 	return "/api/openapi", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpx.OkJson(w, GetOpenApi(r, service...))

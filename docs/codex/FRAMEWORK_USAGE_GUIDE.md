@@ -21,7 +21,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 本地可靠写回 | `NewSharedBadgerDB[T]`、`UseWriteBehind(WriteBehindTarget)` | `examples/04-shop-performance`、`examples/07-shop-order-scale` | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/01-simple-shop/api/manage` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/integration/01-simple-shop -run Manage` | Stable |
 | 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `service/manage` 测试 | 同管理 CRUD | `go test ./service/manage/...` | Stable |
-| OpenAPI 与安全响应 | OpenAPI handler、默认 `Response` | 发布契约文档 | 公共错误契约 | `./scripts/test.sh release-contract` | Stable |
+| OpenAPI 与安全响应 | `GET /api/openapi`、`GET /api/internal/openapi`、默认 `Response` | 发布契约文档 | 内部文档配置 `ServerManageAuth`；公共错误契约 | `./scripts/test.sh release-contract` | Stable |
 | 路由结果缓存 | `RouterInfo.UseCache`、`IRouterCacheKey` | 无独立示例 | local 可选 Badger；shared 要求 Redis + EventBridge 外部 adapter | `go test ./pkg/server/routecache` | Conditional |
 | 本地 WebSocket 通知 | `RegisterWebSocketClient`、`NoticeWebSocket` | `examples/01-simple-shop/api/private/getorders.go` | WebSocket 开启 | `go test -race ./examples/integration/01-simple-shop -run WebSocket` | Stable |
 | 跨节点 WebSocket | ClusterProvider、CrossNodeNoticeBroker | `ROUTERINFO_RUNTIME_GUIDE.md` | 集群 `on/auto`；节点地址可达 | `go test -race ./pkg/server/cluster ./pkg/server/types` | Conditional |
@@ -64,6 +64,16 @@ RouterInfo 所有权、IRouter 对象池、缓存层级、EventBridge 和 WebSoc
 ```text
 /api/servermanage/{structNameLower}
 ```
+
+OpenAPI 文档入口：
+
+```text
+GET /api/openapi
+GET /api/internal/openapi
+GET /api/internal/openapi?service={serviceName}
+```
+
+`/api/openapi` 可匿名访问，只输出普通 Public 与 Private，并过滤声明了 `WithInternalCallers` 的内部专用 Public，不输出 `x-internal-callers`。`/api/internal/openapi` 使用 `ServerManageAuth`，输出完整 Public/Private 和内部调用方扩展，响应禁止共享缓存。两个入口共用唯一生成器，Manage 与 ServerManage 路由都不进入业务 OpenAPI 文档。
 
 Public 只描述路由契约，不天然表示互联网可访问。只供其他服务调用的 Public 应声明 `router.WithInternalCallers("service-a", ...)`。同进程身份来自源 ServiceContext；远程身份必须由已验证 mTLS 客户端证书 SAN 绑定到 `SourceService`。普通 HTTP、伪造字段和未验证的远程身份会在 Parse 前失败。调用方直接构造目标服务已注册 API 并使用 `req.CallService`，不要另建地址型 client 或 `api/call` 副本。
 

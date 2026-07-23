@@ -1,3 +1,4 @@
+// 本文件锁定现行指南、示例和 skill 中必须同步维护的跨服务与 OpenAPI 安全契约。
 package compat
 
 import (
@@ -28,6 +29,14 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 		"docs/codex/ROUTERINFO_RUNTIME_GUIDE.md": {
 			"可信内部调用方",
 			"x-internal-callers",
+			"/api/openapi",
+			"/api/internal/openapi",
+			"ServerManageAuth",
+		},
+		"docs/codex/FRAMEWORK_USAGE_GUIDE.md": {
+			"/api/openapi",
+			"/api/internal/openapi",
+			"ServerManageAuth",
 		},
 		"docs/codex/GRPC_TRANSPORT_MIGRATION.md": {
 			"mTLS SAN",
@@ -36,6 +45,14 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 		".codex/skills/use-digitalway-core/SKILL.md": {
 			"WithInternalCallers",
 			"SupplierOrder",
+			"/api/openapi",
+			"/api/internal/openapi",
+			"ServerManageAuth",
+		},
+		".codex/skills/use-digitalway-core/references/core-backend-api.md": {
+			"/api/openapi",
+			"/api/internal/openapi",
+			"x-internal-callers",
 		},
 	}
 	for name, fragments := range required {

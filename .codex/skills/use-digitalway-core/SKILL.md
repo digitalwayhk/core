@@ -74,7 +74,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 14. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析，新代码不读 `AttachServices`，也不启用第二套 zrpc 服务发现。
 15. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。`OutboxStore` 只实现 `LoadPending/MarkPublished`，不关心服务名、消费者或 MQ；当前服务名由 `ServiceContext` 作为事件 Source，Subject 来自 Outbox 记录，谁订阅谁消费。TraceID 从最外层请求生成并透传到内部调用、业务事实、Outbox、事件 Metadata、Inbox 和本地投影；EventID 仍是事件幂等键，不用 TraceID 代替。
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
-17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。
+17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。匿名 `/api/openapi` 必须过滤这类路由且不得输出 `x-internal-callers`；完整文档只通过使用 `ServerManageAuth` 的 `/api/internal/openapi` 提供。
 18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；权限、日志和通用限域只在抽象层实现一次，具体 Manage 不重复；自定义命令也走 owner `DoBefore`，不增加命令专用 Hook 旁路；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
 19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName`、数据库名和 `TraceID`；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名或 TraceID 字段。
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。

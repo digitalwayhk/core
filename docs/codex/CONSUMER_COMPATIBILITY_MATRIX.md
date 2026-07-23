@@ -53,3 +53,9 @@ go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
 采用 `router.WithInternalCallers` 后，受限 Public 的 HTTP 直连不再是兼容调用方式。消费方应直接构造目标服务注册的 API，通过 `req.CallService` 进入 Core Resolver：同进程由源 ServiceContext 提供身份，跨进程由 mTLS 客户端证书 SAN 绑定 `SourceService`。不得通过 Header、请求字段、静态地址 client 或仅自报服务名绕过。
 
 消费方 smoke 至少覆盖：允许服务成功、错误服务在 Parse 前拒绝、普通 HTTP 拒绝、无证书/错误 SAN 拒绝，以及重试写请求具备业务 `requestID` 幂等。该变化是加性的安全能力；一旦现有路由增加白名单，HTTP 可达性会收紧，必须随迁移说明和路由兼容快照一起发布。
+
+## OpenAPI HTTP 入口迁移
+
+旧 `/api/servermanage/openapi` 已按 `openapi-audience-split-v1` 批准删除。只需普通 Public/Private 描述的工具改用匿名 `GET /api/openapi`；需要内部专用 Public 和 `x-internal-callers` 的联调工具改用 `GET /api/internal/openapi`，携带 ServerManage 域 Token，并可通过 `service` query 筛选服务。
+
+消费方不得继续探测旧路径，也不得把匿名文档缺少内部路由视为接口删除。发布前应分别验证匿名文档不泄露内部调用方，以及内部身份能读取完整文档；当前已登记消费方未声明对旧 OpenAPI HTTP 路径的直接依赖，后续发现实际调用方时必须补充其精确 commit 和 smoke 证据。

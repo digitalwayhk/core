@@ -1,3 +1,4 @@
+// 本文件从生产路由元数据生成确定性的路由与内部 OpenAPI 兼容快照。
 package compat
 
 import (
@@ -14,6 +15,7 @@ import (
 
 const canonicalServerURL = "https://compat.invalid/"
 
+// RouteEntry 是去除运行时噪声后的稳定路由兼容记录。
 type RouteEntry struct {
 	Service         string   `json:"service"`
 	Method          string   `json:"method"`
@@ -23,6 +25,7 @@ type RouteEntry struct {
 	InternalCallers []string `json:"internalCallers,omitempty"`
 }
 
+// SnapshotRoutes 生成按路径、方法和服务稳定排序的路由快照。
 func SnapshotRoutes(services ...*router.ServiceRouter) ([]byte, error) {
 	entries := make([]RouteEntry, 0)
 	seen := make(map[string]struct{})
@@ -63,6 +66,7 @@ func SnapshotRoutes(services ...*router.ServiceRouter) ([]byte, error) {
 	return marshalSnapshot(entries)
 }
 
+// SnapshotOpenAPI 使用内部完整视图生成规范化 OpenAPI 快照。
 func SnapshotOpenAPI(req *http.Request, services ...*router.ServiceRouter) ([]byte, error) {
 	if req == nil {
 		return nil, fmt.Errorf("openapi snapshot: request is nil")

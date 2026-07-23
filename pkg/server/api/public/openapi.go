@@ -1,3 +1,4 @@
+// 本文件实现使用 ServerManage 认证域保护的内部 OpenAPI 文档路由。
 package public
 
 import (
@@ -19,6 +20,7 @@ type InternalOpenAPI struct {
 	Service string `json:"service"`
 }
 
+// Parse 解析可选的 service 文档筛选条件。
 func (own *InternalOpenAPI) Parse(req types.IRequest) error {
 	if err := own.ServerArgs.Parse(req); err != nil {
 		return err
@@ -27,6 +29,7 @@ func (own *InternalOpenAPI) Parse(req types.IRequest) error {
 	return nil
 }
 
+// Do 生成全部服务或指定服务的内部 OpenAPI 文档。
 func (own *InternalOpenAPI) Do(req types.IRequest) (interface{}, error) {
 	httpRequest, ok := req.(types.IRequestHttp)
 	if !ok {
@@ -40,6 +43,7 @@ func (own *InternalOpenAPI) Do(req types.IRequest) (interface{}, error) {
 	return openapidoc.Generate(httpRequest.GetHttpRequest(), openapidoc.InternalAudience, serviceRouters...), nil
 }
 
+// RouterInfo 将内部文档注册为需要 ServerManage 身份的固定路由。
 func (own *InternalOpenAPI) RouterInfo() *types.RouterInfo {
 	return api.ServerRouterInfoWithOptions(
 		own,
@@ -51,6 +55,7 @@ func (own *InternalOpenAPI) RouterInfo() *types.RouterInfo {
 	)
 }
 
+// selectOpenAPIServiceRouters 按稳定服务名顺序选择文档生成所需的路由表。
 func selectOpenAPIServiceRouters(serviceName string) ([]*router.ServiceRouter, error) {
 	contexts := router.GetContexts()
 	if serviceName != "" {
@@ -76,11 +81,16 @@ func selectOpenAPIServiceRouters(serviceName string) ([]*router.ServiceRouter, e
 	return serviceRouters, nil
 }
 
+// internalOpenAPIResponse 成功时输出原始文档，失败时保持统一公共错误契约。
 func internalOpenAPIResponse(w http.ResponseWriter, _ *http.Request, res types.IResponse) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	if res.GetSuccess() {
 		httpx.OkJson(w, res.GetData())
 		return
 	}
-	httpx.OkJson(w, res)
+	contract := types.ResolvePublicError(res.GetError())
+	if setter, ok := res.(types.ISetPublicError); ok {
+		setter.SetPublicError(contract.Code, contract.Message)
+	}
+	httpx.WriteJson(w, contract.HTTPStatus, res)
 }
