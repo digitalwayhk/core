@@ -70,7 +70,7 @@ func SnapshotOpenAPI(req *http.Request, services ...*router.ServiceRouter) ([]by
 	if err := validateOpenAPIInputs(services); err != nil {
 		return nil, err
 	}
-	doc, ok := run.GetOpenApi(req, services...).(*openapi3.T)
+	doc, ok := run.GetInternalOpenApi(req, services...).(*openapi3.T)
 	if !ok || doc == nil {
 		return nil, fmt.Errorf("openapi snapshot: unexpected document type")
 	}

@@ -40,11 +40,12 @@
 | 表面 | 级别 | 契约 | 证据 |
 | --- | --- | --- | --- |
 | 普通 public/private 路由 | Stable | `/api/{service}/{router}`；private 要求认证 | `router.DefaultRouterInfo`、`examples/01-simple-shop` 集成测试 |
-| 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；OpenAPI `x-internal-callers` |
+| 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；受保护的内部 OpenAPI `x-internal-callers` |
 | Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}` | `service/manage.RouterInfo`、CRUD 测试 |
 | ServerManage | Stable | `/api/servermanage/{router}`，注册时按服务重写 | server API 与 `TestToken` 文档 |
 | 路由元数据 | Stable | method、path、pathType、auth、service | `internal/compat/testdata/routes.golden.json` |
 | OpenAPI 结构 | Stable baseline | paths、method、schema、security；Host、端口和运行时 example 不属于契约 | `internal/compat/testdata/openapi.golden.json` |
+| OpenAPI HTTP 入口 | Stable security | `/api/openapi` 匿名且过滤内部专用 Public；`/api/internal/openapi` 使用 ServerManageAuth，可用 `service` 筛选并禁止缓存 | run/public/rest 定向测试 |
 | 默认成功/失败 JSON | Stable baseline | `traceid/errorCode/errorMessage/success/duration/data/host/showType` | `pkg/server/router.Response`；15.2 改造前不得改字段名或含义 |
 | 自定义 `INewResponse` | Stable | 响应实例与 JSON 由服务拥有，框架只依赖 `IResponse` | `pkg/server/router.Request.NewResponse` |
 | 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
@@ -54,7 +55,7 @@
 | Token 刷新 | Stable security | `/api/refresh` 只接受框架 Refresh Token；Auth/Manage 密钥、用途和撤销域严格隔离 | `pkg/server/api/public/refresh.go`、认证生命周期测试 |
 | Casdoor Webhook | Stable security | `/api/casdoor/webhook?type=auth|manage`；独立 Bearer Secret、64KiB 上限、域绑定、幂等控制事件 | `pkg/server/api/public/casdoorwebhook.go`、authstate 测试 |
 
-当前 `run.GetOpenApi` 只输出 Public 与 Private 路由，因此 OpenAPI golden 的稳定范围也仅限这两类。Manage 与 ServerManage 仍属于稳定 HTTP 路由，但本阶段由路由元数据、Manage CRUD 测试和 server API 测试保护；是否纳入 OpenAPI 由后续兼容变更单独评估，不能从当前 golden 推导其已被覆盖。
+`run.GetOpenApi` 输出匿名外部视图：普通 Public 与 Private，不含受限内部 Public。`run.GetInternalOpenApi` 和兼容性 golden 输出内部视图：包含受限内部 Public 及 `x-internal-callers`。两者都只覆盖业务 Public/Private；Manage 与 ServerManage 由路由元数据、Manage CRUD 和 server API 测试保护。
 
 默认 `router.Response` 在 HTTP 边界通过 `ISetPublicError` 写入稳定公共码和安全消息，响应字段名保持不变。服务自定义 `INewResponse` 仍由服务拥有；若希望框架写入标准安全错误，应同时实现 `ISetPublicError`，否则其序列化与脱敏责任由该服务承担。
 
@@ -90,7 +91,7 @@
 
 ## 快照规则
 
-- 路由和 OpenAPI 快照由生产 `RouterInfo`、`ServiceRouter` 和 `run.GetOpenApi` 生成，不维护手写的第二套路由表。
+- 路由和 OpenAPI 快照由生产 `RouterInfo`、`ServiceRouter` 和 `run.GetInternalOpenApi` 生成；外部与内部视图共同委托 `pkg/server/internal/openapidoc`，不维护第二套生成器。
 - 普通测试只读 golden，缺失或漂移立即失败；仅显式设置 `UPDATE_GOLDEN=1` 才会更新测试基线。
 - 更新 golden 必须与对应公共变化、迁移说明和外部审查放在同一小节提交中。
 - 规范化仅删除 Host、端口、trace ID、duration 等运行时噪声；method、path、auth/security、请求/响应 schema 变化必须保留为 diff。

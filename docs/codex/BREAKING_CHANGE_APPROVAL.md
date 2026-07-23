@@ -60,3 +60,34 @@
 - `./scripts/test.sh release-contract`
 - `./scripts/ci.sh required/contracts`
 - 锁定 apidiff 对旧/新基线的报告必须只包含本批准范围内的上述不兼容项。
+
+---
+
+# OpenAPI 受众拆分破坏性变更批准
+
+- 变更 ID：`openapi-audience-split-v1`
+- Owner：`server/internal/openapidoc`、`server/run`、`server/api/public`
+- 批准日期：2026-07-23
+- 目标版本：下一个包含该 HTTP 删除的 MAJOR 候选版本
+
+## 批准范围
+
+1. 删除重复的 `public.OpenAPI` 生成器和旧 HTTP `/api/servermanage/openapi`。
+2. 匿名 `GET /api/openapi` 只展示普通 Public 与 Private，不展示声明了 `WithInternalCallers` 的路由，也不输出 `x-internal-callers`。
+3. 新增 `GET /api/internal/openapi`，使用 `ServerManageAuth`，展示完整 Public/Private 文档和内部调用方扩展；`service` query 可筛选单个服务。
+4. 外部、内部入口和兼容性快照必须共用 `pkg/server/internal/openapidoc`，不得恢复第二套生成器。
+
+## 安全、迁移与回滚
+
+- 旧调用方把 `/api/servermanage/openapi` 改为 `/api/internal/openapi`，并使用 ServerManage 域 Token；无需内部信息的调用方改用匿名 `/api/openapi`。
+- 内部响应设置 `Cache-Control: private, no-store`，代理不得缓存。
+- 回滚会重新暴露旧重复端点和内部元数据，生产回滚前必须确认网络边界与调用方风险。
+
+## 验证证据
+
+- `pkg/server/run/openapi_test.go`
+- `pkg/server/api/public/rate_limit_test.go`
+- `pkg/server/api/release/routes_test.go`
+- `pkg/server/trans/rest/server_security_test.go`
+- `./scripts/test.sh api-compat`
+- `./scripts/test.sh release-contract`

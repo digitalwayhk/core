@@ -1,6 +1,7 @@
 package router
 
 import (
+	"net/http"
 	"sort"
 	"strings"
 
@@ -63,6 +64,13 @@ func WithAuth(auth bool) RouterInfoOption {
 func WithPathType(pathType types.ApiType) RouterInfoOption {
 	return routerInfoOptionFunc(func(info *types.RouterInfo) {
 		info.PathType = pathType
+	})
+}
+
+// WithResponseHandler 设置路由的自定义 HTTP 响应输出。
+func WithResponseHandler(handler func(http.ResponseWriter, *http.Request, types.IResponse)) RouterInfoOption {
+	return routerInfoOptionFunc(func(info *types.RouterInfo) {
+		info.ResponseHandlerFunc = handler
 	})
 }
 

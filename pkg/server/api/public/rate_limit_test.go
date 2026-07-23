@@ -1,8 +1,11 @@
 package public
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +30,7 @@ func TestSystemPublicRateLimitPolicies(t *testing.T) {
 		{name: "attach", router: &Attach{}, rate: 10, burst: 20},
 		{name: "ip-white-list", router: &IpWhiteList{}, rate: 10, burst: 20},
 		{name: "query-service", router: &QueryService{}, rate: 10, burst: 20},
-		{name: "openapi", router: &OpenAPI{}, rate: 10, burst: 20},
+		{name: "internal-openapi", router: &InternalOpenAPI{}, rate: 10, burst: 20},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,6 +40,30 @@ func TestSystemPublicRateLimitPolicies(t *testing.T) {
 			require.Equal(t, tt.burst, policy.Burst)
 		})
 	}
+}
+
+func TestInternalOpenAPIRouteUsesServerManageAuthDomain(t *testing.T) {
+	info := (&InternalOpenAPI{}).RouterInfo()
+
+	require.Equal(t, "/api/internal/openapi", info.GetPath())
+	require.Equal(t, types.ServerManagerType, info.GetPathType())
+	require.True(t, info.GetAuth())
+	require.NotNil(t, info.ResponseHandlerFunc)
+}
+
+func TestInternalOpenAPIResponseIsNotCacheableAndUnwrapped(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	response := (&router.InitRequest{}).NewResponse(map[string]string{"openapi": "3.0.1"}, nil)
+
+	internalOpenAPIResponse(recorder, httptest.NewRequest(http.MethodGet, "/api/internal/openapi", nil), response)
+
+	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+	require.JSONEq(t, `{"openapi":"3.0.1"}`, recorder.Body.String())
+}
+
+func TestInternalOpenAPIRejectsUnknownServiceFilter(t *testing.T) {
+	_, err := selectOpenAPIServiceRouters("service-that-does-not-exist")
+	require.ErrorContains(t, err, "未找到指定服务")
 }
 
 func TestTestTokenHasNoRateLimitPolicy(t *testing.T) {

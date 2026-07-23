@@ -129,6 +129,19 @@ func newExecutableRouteHandlerTestContext(
 	return sc
 }
 
+func TestResolveRouteAuthPolicyUsesServerManageCredentials(t *testing.T) {
+	sc := newExecutableRouteHandlerTestContext(
+		"server-manage-route-test", "/api/internal/openapi", types.ServerManagerType, true,
+	)
+	sc.Config.ServerManageAuth.AccessSecret = "server-manage-access-secret"
+	sc.Router.AddServerRouters(sc.Service.Routers...)
+
+	auth, authType, _ := resolveRouteAuthPolicy(sc.Router, "/api/internal/openapi")
+
+	require.Equal(t, "server-manage-access-secret", auth.AccessSecret)
+	require.Equal(t, types.AuthTypeServerManage, authType)
+}
+
 func setRequestPath(request *http.Request, path string) {
 	request.URL.Path = path
 	request.RequestURI = path

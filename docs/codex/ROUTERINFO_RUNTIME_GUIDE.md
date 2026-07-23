@@ -12,7 +12,7 @@
 
 ## 可信内部调用方
 
-内部专用路由仍使用 Public 的序列化和服务发现能力，但必须用 `router.WithInternalCallers(...)` 声明允许的逻辑服务名。注册完成后白名单随 RouterInfo 一起冻结，`GetInternalCallers()` 返回防御性副本；OpenAPI 路由扩展字段 `x-internal-callers` 用于兼容性审计，不表示浏览器可以直接调用。
+内部专用路由仍使用 Public 的序列化和服务发现能力，但必须用 `router.WithInternalCallers(...)` 声明允许的逻辑服务名。注册完成后白名单随 RouterInfo 一起冻结，`GetInternalCallers()` 返回防御性副本。匿名 `/api/openapi` 不展示这些路由；通过 `ServerManageAuth` 访问的 `/api/internal/openapi` 才输出路由和 `x-internal-callers`，该扩展用于联调和兼容性审计，不表示浏览器可以直接调用业务接口。
 
 ```go
 func (g *GetProducts) RouterInfo() *types.RouterInfo {

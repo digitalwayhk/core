@@ -49,8 +49,8 @@ func (own *FiberServer) Start() {
 	app.Use("/", filesystem.New(filesystem.Config{
 		Root: http.FS(fsys),
 	}))
-	openapi, ohandler := OpenAPIHandler()
-	app.Post(openapi, adaptor.HTTPHandler(ohandler))
+	openapi, ohandler := OpenAPIHandler(own.services...)
+	app.Get(openapi, adaptor.HTTPHandler(ohandler))
 	app.Post("/api/*", adaptor.HTTPHandler(handler(own.services)))
 	swagger, shandler := SwaggerHandler()
 	app.Use("/"+swagger, filesystem.New(filesystem.Config{

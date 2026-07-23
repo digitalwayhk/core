@@ -41,7 +41,7 @@ type IRouterResponse interface {
 }
 ```
 
-这个接口主要服务于 OpenAPI 自动文档。`pkg/server/api/public/openapi.go` 和 `pkg/server/run/openapi.go` 在生成接口响应 schema 时，会先查找 `router.TestResult[info.Path]`；如果没有测试执行结果，就判断路由实例是否实现了 `IRouterResponse`，并调用 `GetResponse()` 取得示例响应数据。
+这个接口主要服务于 OpenAPI 自动文档。唯一生成器 `pkg/server/internal/openapidoc` 在生成接口响应 schema 时，会先查找 `router.TestResult[info.Path]`；如果没有测试执行结果，就判断路由实例是否实现了 `IRouterResponse`，并调用 `GetResponse()` 取得示例响应数据。
 
 适用场景：
 
@@ -329,13 +329,15 @@ REST 注册路由时会根据服务配置决定使用哪种认证方式。
 
 ## OpenAPI 自动文档
 
-`pkg/server/api/public/openapi.go` 提供公开 OpenAPI 文档接口，`pkg/server/run/openapi.go` 提供同类生成能力和 Swagger 静态资源挂载辅助。
+`pkg/server/internal/openapidoc` 是唯一的 OpenAPI 文档生成器；`pkg/server/run/openapi.go` 提供匿名公开入口和 Swagger 静态资源挂载，`pkg/server/api/public/openapi.go` 只实现受保护的内部入口。
 
 OpenAPI 生成逻辑会：
 
 - 遍历当前服务路由。
 - 跳过 `server` 系统服务自身。
-- 只生成 `public` 和 `private` 路由文档，不生成 `manage` 管理端路由。
+- 只生成 `public` 和 `private` 路由文档，不生成 `manage`、`servermanager` 管理端路由。
+- 匿名 `/api/openapi` 过滤声明了 `WithInternalCallers` 的内部专用 Public 路由，并且不输出 `x-internal-callers`。
+- `/api/internal/openapi` 使用 `ServerManageAuth`，保留内部专用 Public 路由和 `x-internal-callers`；可通过 `?service=<name>` 只查看一个服务。
 - 根据 `RouterInfo.Method` 生成 GET query 参数或 POST request body。
 - 读取字段 `json` 和 `desc` tag，生成参数说明。
 - 为 private 路由添加 Bearer JWT 安全声明。
@@ -350,14 +352,16 @@ OpenAPI 生成逻辑会：
 /api/servermanage/testtoken?userid=12345
 ```
 
-常见访问入口：
+访问入口：
 
 ```text
-/api/{service}/openapi
+/api/openapi
+/api/internal/openapi
+/api/internal/openapi?service=<service-name>
 /swagger/
 ```
 
-具体挂载方式取决于运行服务如何注册 `OpenAPIHandler` 和 Swagger 静态文件。
+内部文档响应使用 `Cache-Control: private, no-store`。旧 `/api/servermanage/openapi` 已移除。
 
 ## 主要目录
 

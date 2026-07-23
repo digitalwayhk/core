@@ -22,6 +22,7 @@
 - Casdoor 回调迁移到 `/api/casdoor/callback`；Access/Refresh Token 强制携带认证提供方、外部 Subject 和撤销世代。
 - 路由缓存默认使用 local L1，只有调用 `UseCache` 的 API 会写入；L1 按进程有效内存自动解析共享字节预算，并在所有层统一返回 `json.RawMessage`。
 - BREAKING: 内部同步调用默认改为 gRPC，节点发现发布 `GRPCPort`；HTTP 只允许显式发送前 fallback，发送开始后不跨协议重试。迁移说明：`docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
+- BREAKING: OpenAPI 改为匿名 `/api/openapi` 外部视图和使用 `ServerManageAuth` 的 `/api/internal/openapi` 内部视图；移除 `/api/servermanage/openapi`。迁移说明：`docs/codex/BREAKING_CHANGE_APPROVAL.md` 的 `openapi-audience-split-v1`。
 
 ### Deprecated
 
@@ -35,6 +36,7 @@
 - 旧 Casdoor 回调路由 `/api/callback`；前端从 `/api/casdoor` 响应读取新回调地址。
 - 自定义内部 Socket 的两个实现包、`-socket` 参数、Socket 配置/发现/payload 字段、旧 `GRPCTransportConfig.Enable` 及相关公开 Go API。WebSocket 与 Unix socket 不受影响。
 - 未使用的实验性 `utils.Publisher`。进程内事件改用 `pkg/server/event.Stream`，服务事件改用 `ServiceContext` 管理的 EventBridge。
+- 重复的 `public.OpenAPI` 生成器及 `/api/servermanage/openapi`；内部调用方迁移到 `/api/internal/openapi`。
 
 ### Fixed
 
@@ -46,6 +48,7 @@
 ### Security
 
 - 默认 REST 错误响应不再暴露内部 cause；代理、本地访问、Logto 和 CORS 使用 fail-closed 策略。
+- 匿名 OpenAPI 不再暴露内部专用路由和 `x-internal-callers`；内部文档使用独立 ServerManage 认证域并禁止缓存。
 - 未同步 Badger 数据不再被损坏自动重建或 TTL 静默删除，关闭积压会返回错误。
 - Casdoor Webhook 使用独立 Secret、请求上限、域绑定和幂等持久化；REST/WebSocket 每次认证均校验撤销权威，内部 JWT 失败日志不再转储 Authorization Header。
 - 跨主机 gRPC 默认要求 mTLS；`mesh` 仅适用于已有双向身份校验的服务网格，生产禁止 `insecure`。

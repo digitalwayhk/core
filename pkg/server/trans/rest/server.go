@@ -59,7 +59,10 @@ func resolveRouteAuthPolicy(
 ) (config.AuthSecret, types.AuthType, authMode) {
 	auth := rou.Service.Config.Auth
 	authType := types.AuthTypeUser
-	if rou.HasRouter(path, types.ManageType) {
+	if rou.HasRouter(path, types.ServerManagerType) {
+		auth = rou.Service.Config.ServerManageAuth
+		authType = types.AuthTypeServerManage
+	} else if rou.HasRouter(path, types.ManageType) {
 		auth = rou.Service.Config.ManageAuth
 		authType = types.AuthTypeManage
 	}
