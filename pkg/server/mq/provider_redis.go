@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // RedisStreamProvider implements MQProvider using Redis Streams.
@@ -181,10 +182,9 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	if options.ClaimInterval < 50*time.Millisecond {
 		options.ClaimInterval = 50 * time.Millisecond
 	}
-	// ordered-reliable：单条处理，失败阻断同 stream 后续消息；多实例靠 owner lease 保证单 active。
-	if options.Count <= 0 {
-		options.Count = 1
-	}
+	// ordered-reliable：强制单条处理，失败阻断后续；多实例靠 owner lease 保证单 active。
+	// 显式 Count>1 会被忽略，避免同批入 PEL 后语义与注释不一致。
+	options.Count = 1
 	key := r.streamKey(subject)
 	err := r.client.XGroupCreateMkStream(ctx, key, options.Group, "0").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
@@ -212,43 +212,63 @@ func (r *RedisStreamProvider) ownerLockKey(subject, group string) string {
 	return r.prefix + ":ordered-owner:" + group + ":" + subject
 }
 
-func (r *RedisStreamProvider) tryAcquireOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
-	// TTL 略长于 claim 周期，持有者需周期性续约；崩溃后由其他实例接管。
-	ttl := options.MinIdle
-	if ttl < 2*time.Second {
-		ttl = 2 * time.Second
+// ownerLeaseTTL 与 MinIdle 解耦：lease 必须覆盖单条 handler 执行时间，
+// 避免 handler 慢于 MinIdle 时旧 owner 仍在处理、新 owner 已开始读新消息导致越序。
+// XAutoClaim 仍用 MinIdle 认领崩溃实例的 pending；lease 更长，正常慢 handler 不会丢 owner。
+func ownerLeaseTTL(options ReliableSubscribeOptions) time.Duration {
+	ttl := 3 * options.MinIdle
+	if ttl < 2*time.Minute {
+		ttl = 2 * time.Minute
 	}
-	ok, err := r.client.SetNX(ctx, r.ownerLockKey(subject, options.Group), options.Consumer, ttl).Result()
-	return err == nil && ok
+	if options.MinIdle > 0 && ttl < options.MinIdle+30*time.Second {
+		ttl = options.MinIdle + 30*time.Second
+	}
+	return ttl
 }
 
-func (r *RedisStreamProvider) refreshOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
-	lockKey := r.ownerLockKey(subject, options.Group)
-	val, err := r.client.Get(ctx, lockKey).Result()
-	if err != nil {
-		return r.tryAcquireOwner(ctx, subject, options)
-	}
-	if val != options.Consumer {
-		return false
-	}
-	ttl := options.MinIdle
-	if ttl < 2*time.Second {
-		ttl = 2 * time.Second
-	}
-	_ = r.client.Expire(ctx, lockKey, ttl).Err()
-	return true
-}
+var redisOwnerRefreshScript = redis.NewScript(`
+local cur = redis.call("GET", KEYS[1])
+if not cur then
+  return redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2]) and 1 or 0
+end
+if cur == ARGV[1] then
+  return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+end
+return 0
+`)
 
-func (r *RedisStreamProvider) releaseOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) {
-	lockKey := r.ownerLockKey(subject, options.Group)
-	// 仅删除仍由本 consumer 持有的锁，避免误删后继 owner。
-	script := redis.NewScript(`
+var redisOwnerReleaseScript = redis.NewScript(`
 if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
 end
 return 0
 `)
-	_ = script.Run(ctx, r.client, []string{lockKey}, options.Consumer).Err()
+
+func (r *RedisStreamProvider) tryAcquireOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	ttl := ownerLeaseTTL(options)
+	ok, err := r.client.SetNX(ctx, r.ownerLockKey(subject, options.Group), options.Consumer, ttl).Result()
+	return err == nil && ok
+}
+
+// refreshOwner 原子续约：仅当仍为本 consumer 时 PEXPIRE；锁不存在则尝试抢占。
+func (r *RedisStreamProvider) refreshOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	lockKey := r.ownerLockKey(subject, options.Group)
+	ttlMs := ownerLeaseTTL(options).Milliseconds()
+	n, err := redisOwnerRefreshScript.Run(ctx, r.client, []string{lockKey}, options.Consumer, ttlMs).Int()
+	if err != nil {
+		return false
+	}
+	return n == 1
+}
+
+func (r *RedisStreamProvider) releaseOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) {
+	lockKey := r.ownerLockKey(subject, options.Group)
+	_ = redisOwnerReleaseScript.Run(ctx, r.client, []string{lockKey}, options.Consumer).Err()
+}
+
+// stillOwner 在 handler 完成后做 fencing 检查：已丢 owner 则不得 ACK。
+func (r *RedisStreamProvider) stillOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	return r.refreshOwner(ctx, subject, options)
 }
 
 func (r *RedisStreamProvider) runReliableSubscriber(
@@ -283,11 +303,19 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 		}
 		// 先排空本 consumer 的 pending，失败则不读新消息（同 key / 同 stream 失败屏障）。
 		if blocked := r.processOwnPending(ctx, key, subject, options, handler); blocked {
+			// 仅失败时 backoff；成功排空 pending 不睡，避免 N×50ms 延迟税。
+			if !r.stillOwner(ctx, subject, options) {
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(50 * time.Millisecond):
 			}
+			continue
+		}
+		// 读新消息前再次确认 owner，缩小双 active 窗口。
+		if !r.stillOwner(ctx, subject, options) {
 			continue
 		}
 		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -301,7 +329,7 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			continue
 		}
 		for _, stream := range entries {
-			_ = r.handleReliableMessages(ctx, key, subject, options.Group, stream.Messages, handler)
+			_ = r.handleReliableMessages(ctx, key, subject, options, stream.Messages, handler)
 		}
 	}
 }
@@ -313,24 +341,29 @@ func (r *RedisStreamProvider) processOwnPending(
 	options ReliableSubscribeOptions,
 	handler func(*Message) error,
 ) bool {
-	entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
-		Group: options.Group, Consumer: options.Consumer,
-		Streams: []string{key, "0"}, Count: 1, Block: 0,
-	}).Result()
-	if err != nil || len(entries) == 0 {
-		return false
-	}
-	for _, stream := range entries {
-		if len(stream.Messages) == 0 {
+	// 连续排空 pending，成功路径不人为 sleep。
+	for {
+		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group: options.Group, Consumer: options.Consumer,
+			Streams: []string{key, "0"}, Count: 1, Block: 0,
+		}).Result()
+		if err != nil || len(entries) == 0 {
 			return false
 		}
-		if blocked := r.handleReliableMessages(ctx, key, subject, options.Group, stream.Messages, handler); blocked {
-			return true
+		has := false
+		for _, stream := range entries {
+			if len(stream.Messages) == 0 {
+				continue
+			}
+			has = true
+			if blocked := r.handleReliableMessages(ctx, key, subject, options, stream.Messages, handler); blocked {
+				return true
+			}
 		}
-		// 还有 pending 时继续由上层循环拉取。
-		return true
+		if !has {
+			return false
+		}
 	}
-	return false
 }
 
 // reclaimPending 认领超时 pending。返回 true 表示处理失败应阻断。
@@ -349,7 +382,7 @@ func (r *RedisStreamProvider) reclaimPending(
 		if err != nil || len(messages) == 0 {
 			return false
 		}
-		if blocked := r.handleReliableMessages(ctx, key, subject, options.Group, messages, handler); blocked {
+		if blocked := r.handleReliableMessages(ctx, key, subject, options, messages, handler); blocked {
 			return true
 		}
 		if next == "0-0" || next == start {
@@ -360,18 +393,39 @@ func (r *RedisStreamProvider) reclaimPending(
 }
 
 // handleReliableMessages 按序处理；任一条失败则停止后续（失败屏障），返回 true。
+// handler 成功后若已丢 owner（lease fencing），不 ACK，留给新 owner 重投，避免双写/越序。
 func (r *RedisStreamProvider) handleReliableMessages(
 	ctx context.Context,
-	key, subject, group string,
+	key, subject string,
+	options ReliableSubscribeOptions,
 	messages []redis.XMessage,
 	handler func(*Message) error,
 ) bool {
+	group := options.Group
 	for _, item := range messages {
 		data := redisMessageData(item.Values["data"])
 		messageID := item.ID
+		orderingKey := redisMessageData(item.Values["ordering_key"])
+		idem := redisMessageData(item.Values["idempotency_key"])
 		message := &Message{ID: messageID, Subject: subject, Data: data}
 		message.Ack = func() error { return r.client.XAck(ctx, key, group, messageID).Err() }
 		if err := handler(message); err != nil {
+			logx.Errorw("mq_redis_reliable_handler_failed",
+				logx.Field("subject", subject),
+				logx.Field("message_id", messageID),
+				logx.Field("ordering_key", string(orderingKey)),
+				logx.Field("idempotency_key", string(idem)),
+				logx.Field("error", err),
+			)
+			return true
+		}
+		// fencing：handler 期间若 lease 过期被接管，禁止 ACK。
+		if !r.stillOwner(ctx, subject, options) {
+			logx.Errorw("mq_redis_reliable_lost_owner_skip_ack",
+				logx.Field("subject", subject),
+				logx.Field("message_id", messageID),
+				logx.Field("ordering_key", string(orderingKey)),
+			)
 			return true
 		}
 		_ = message.Ack()

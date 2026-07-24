@@ -3,6 +3,7 @@ package mq_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -112,6 +113,111 @@ func TestManagerRequireOrderedReliable(t *testing.T) {
 	mgr2.Register(plain)
 	require.NoError(t, mgr2.SetCurrent(plain.Name()))
 	require.NoError(t, mgr2.RequireOrderedReliable())
+}
+
+func TestFakeOrderedReliableOneHundredStrictOrder(t *testing.T) {
+	provider := mq.NewFakeOrderedReliableProvider()
+	const n = 100
+	got := make([]int, 0, n)
+	done := make(chan struct{})
+	_, err := provider.SubscribeReliable(context.Background(), "fills", mq.ReliableSubscribeOptions{Group: "g"}, func(msg *mq.Message) error {
+		var v int
+		_, _ = fmt.Sscanf(string(msg.Data), "%d", &v)
+		got = append(got, v)
+		if len(got) == n {
+			close(done)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	for i := 1; i <= n; i++ {
+		body := fmt.Sprintf("%d", i)
+		require.NoError(t, provider.Publish(context.Background(), "fills", []byte(body), &mq.PublishOptions{
+			OrderingKey: "k", IdempotencyKey: body,
+		}))
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timeout got=%d", len(got))
+	}
+	for i := 0; i < n; i++ {
+		require.Equal(t, i+1, got[i])
+	}
+}
+
+func TestFakeOrderedReliableRedeliveryKeepsIdentity(t *testing.T) {
+	provider := mq.NewFakeOrderedReliableProvider()
+	var (
+		attempts atomic.Int32
+		seen     *mq.Message
+		done     = make(chan struct{})
+	)
+	_, err := provider.SubscribeReliable(context.Background(), "fills", mq.ReliableSubscribeOptions{Group: "g"}, func(msg *mq.Message) error {
+		if attempts.Add(1) == 1 {
+			seen = &mq.Message{ID: msg.ID, Subject: msg.Subject, Data: append([]byte(nil), msg.Data...)}
+			return errors.New("retry")
+		}
+		require.Equal(t, seen.ID, msg.ID)
+		require.Equal(t, seen.Subject, msg.Subject)
+		require.Equal(t, seen.Data, msg.Data)
+		close(done)
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, provider.Publish(context.Background(), "fills", []byte(`{"x":1}`), &mq.PublishOptions{
+		OrderingKey: "market-a", IdempotencyKey: "evt-1",
+	}))
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	require.Equal(t, "evt-1", seen.ID)
+}
+
+// lyingOrderedProvider 自报合法 capability，但不做失败阻断（同 key 可越序推进）。
+type lyingOrderedProvider struct {
+	mu   sync.Mutex
+	subs []func(*mq.Message) error
+}
+
+func (*lyingOrderedProvider) Name() string                  { return "lying-ordered" }
+func (*lyingOrderedProvider) Connect(context.Context) error { return nil }
+func (*lyingOrderedProvider) Close() error                  { return nil }
+func (*lyingOrderedProvider) Health(context.Context) error  { return nil }
+func (*lyingOrderedProvider) OrderedReliableInfo() mq.OrderedReliableCapability {
+	return mq.DefaultOrderedReliableCapability()
+}
+func (*lyingOrderedProvider) Subscribe(context.Context, string, func(*mq.Message)) (func(), error) {
+	return func() {}, nil
+}
+func (p *lyingOrderedProvider) Publish(_ context.Context, subject string, data []byte, _ *mq.PublishOptions) error {
+	p.mu.Lock()
+	handlers := append([]func(*mq.Message) error(nil), p.subs...)
+	p.mu.Unlock()
+	msg := &mq.Message{ID: string(data), Subject: subject, Data: data, Ack: func() error { return nil }}
+	for _, h := range handlers {
+		_ = h(msg) // 故意忽略错误并继续——违反失败阻断
+	}
+	return nil
+}
+func (p *lyingOrderedProvider) SubscribeReliable(_ context.Context, _ string, _ mq.ReliableSubscribeOptions, handler func(*mq.Message) error) (func(), error) {
+	p.mu.Lock()
+	p.subs = append(p.subs, handler)
+	p.mu.Unlock()
+	return func() {}, nil
+}
+
+func TestConformanceRejectsLyingOrderedProvider(t *testing.T) {
+	// §7.10：capability 自报合法但实际不阻断 → conformance 必须拒绝。
+	lying := &lyingOrderedProvider{}
+	mgr := mq.NewManager()
+	mgr.Register(lying)
+	require.NoError(t, mgr.SetCurrent(lying.Name()))
+	// 启动门禁仅看 Info，撒谎者可通过（已知限制）；conformance 行为套件必须抓出。
+	require.NoError(t, mgr.RequireOrderedReliable())
+	require.Error(t, mq.VerifyOrderedReliableFailureBarrier(lying))
 }
 
 type basicProvider struct{}

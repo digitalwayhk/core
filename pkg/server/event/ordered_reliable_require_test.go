@@ -79,3 +79,23 @@ func TestRequireOrderedReliableOptionDefersUntilExternalEnsured(t *testing.T) {
 	bridge.SetExternalPublisher(event.NewMQBridge(stream, mgr))
 	require.True(t, bridge.RequiresOrderedReliable())
 }
+
+func TestRequireOrderedReliableOptionWithIncapableProviderFailClosedOnPublish(t *testing.T) {
+	// option=true + 无能力 provider 不得静默降级为无序伪 key 路径。
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID:                     "svc",
+		RequireOrderedReliableByShardKey: true,
+	})
+	bridge.SetExternalPublisher(&plainExternal{})
+	require.False(t, bridge.RequiresOrderedReliable())
+
+	env := event.NewEnvelope("svc", "fill", []byte(`{}`))
+	env.ShardKey = "market-a"
+	err := bridge.Publish(context.Background(), event.PublishRequest{
+		Class:    event.ControlDelivery,
+		External: true,
+		Subject:  "fills",
+		Envelope: env,
+	})
+	require.ErrorIs(t, err, event.ErrOrderedReliableUnsupported)
+}

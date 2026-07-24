@@ -24,9 +24,18 @@ type OutboxMessage struct {
 
 // OutboxStore 只负责访问本服务本地 Outbox 表。
 // 可靠性来自业务事实与 Outbox 在同一数据库事务内提交。
+//
+// LoadPending 必须按持久化 earliest-first 顺序返回 unpublished 记录
+// （通常按主键/创建时间升序）。跨重启的同 key 屏障依赖该顺序；乱序返回会导致越序发布。
 type OutboxStore interface {
 	LoadPending(ctx context.Context, limit int) ([]OutboxMessage, error)
 	MarkPublished(ctx context.Context, message OutboxMessage) error
+}
+
+// OutboxStoreSkipBlocked 是可选扩展：LoadPending 时跳过指定 OrderingKey（ShardKey），
+// 避免单 hot key 卡死占满 batch 后饿死其他 key。实现方应对 skip 后的结果仍保持 earliest-first。
+type OutboxStoreSkipBlocked interface {
+	LoadPendingSkipping(ctx context.Context, limit int, skipOrderingKeys []string) ([]OutboxMessage, error)
 }
 
 type OutboxOptions struct {
@@ -94,10 +103,12 @@ func (p *outboxPublisher) run(ctx context.Context) {
 
 func (p *outboxPublisher) drain(ctx context.Context) {
 	// 本轮同 OrderingKey 失败屏障：最早失败的 key 阻断后续同 key 记录，其他 key 可继续。
-	// 屏障仅用于本轮 drain；跨重启依赖 LoadPending 仍返回 earliest unpublished。
+	// 跨重启依赖 LoadPending 仍按 earliest-first 返回 unpublished。
+	// 若 store 实现 OutboxStoreSkipBlocked，可跳过已 blocked 的 key，避免 hot key 饿死其他 key。
 	blocked := make(map[string]struct{})
+	noProgressRounds := 0
 	for {
-		items, err := p.store.LoadPending(ctx, p.batch)
+		items, err := p.loadPending(ctx, blocked)
 		if err != nil {
 			logx.Errorw("event_outbox_load_failed", logx.Field("service", p.source), logx.Field("error", err))
 			return
@@ -124,10 +135,36 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 			}
 			progressed = true
 		}
-		if len(items) < p.batch || !progressed {
+		if progressed {
+			noProgressRounds = 0
+			if len(items) < p.batch {
+				return
+			}
+			continue
+		}
+		// 本批无进展：若 store 支持 skip blocked key，再拉一轮，避免 hot key 饿死其他 key。
+		noProgressRounds++
+		if noProgressRounds >= 2 {
 			return
 		}
+		if _, ok := p.store.(OutboxStoreSkipBlocked); ok && len(blocked) > 0 {
+			continue
+		}
+		return
 	}
+}
+
+func (p *outboxPublisher) loadPending(ctx context.Context, blocked map[string]struct{}) ([]OutboxMessage, error) {
+	if len(blocked) > 0 {
+		if skipper, ok := p.store.(OutboxStoreSkipBlocked); ok {
+			keys := make([]string, 0, len(blocked))
+			for k := range blocked {
+				keys = append(keys, k)
+			}
+			return skipper.LoadPendingSkipping(ctx, p.batch, keys)
+		}
+	}
+	return p.store.LoadPending(ctx, p.batch)
 }
 
 func outboxOrderingKey(item OutboxMessage) string {
