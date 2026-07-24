@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -233,11 +234,28 @@ func writeCasdoorYAML(t *testing.T, root string, fake *fakeCasdoor, domain fakeD
 
 func reservePort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
-	require.NoError(t, listener.Close())
-	return port
+	const (
+		firstSafeHTTPPort = 20000
+		safeHTTPPortCount = 30000
+		defaultGRPCOffset = 10000
+	)
+	start := int(time.Now().UnixNano() % safeHTTPPortCount)
+	for attempt := 0; attempt < safeHTTPPortCount; attempt++ {
+		port := firstSafeHTTPPort + (start+attempt)%safeHTTPPortCount
+		httpListener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		grpcListener, grpcErr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port+defaultGRPCOffset)))
+		if grpcErr == nil {
+			require.NoError(t, grpcListener.Close())
+			require.NoError(t, httpListener.Close())
+			return port
+		}
+		require.NoError(t, httpListener.Close())
+	}
+	t.Fatal("无法申请可安全派生默认 gRPC 端口的 HTTP 端口")
+	return 0
 }
 
 func waitForHTTP(t *testing.T, endpoint string) {

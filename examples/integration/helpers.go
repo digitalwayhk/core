@@ -146,6 +146,8 @@ var httpClient = &http.Client{
 
 var processStartPortMu sync.Mutex
 
+const defaultProcessReadyTimeout = 30 * time.Second
+
 // WebSocketMessage 对应框架 WebSocket 的 event/channel/data 信封。
 type WebSocketMessage struct {
 	Event   string          `json:"event"`
@@ -233,9 +235,13 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		cleanup()
 		return nil, err
 	}
-	if err := suite.waitBoundPorts(options.ServiceCount, options.GRPCServiceCount, 10*time.Second); err != nil {
-		suite.Stop()
+	if err := suite.waitBoundPorts(options.ServiceCount, options.GRPCServiceCount, defaultProcessReadyTimeout); err != nil {
+		suite.StopProcess()
+		logData, _ := os.ReadFile(filepath.Join(suite.RootDir, "service.log"))
 		cleanup()
+		if len(logData) != 0 {
+			return nil, fmt.Errorf("%w\n--- 集成测试服务日志 ---\n%s", err, logData)
+		}
 		return nil, err
 	}
 	return suite, nil

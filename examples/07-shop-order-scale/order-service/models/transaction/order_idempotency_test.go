@@ -2,7 +2,7 @@
 package transaction_test
 
 import (
-	"strings"
+	"os"
 	"testing"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
@@ -13,12 +13,10 @@ import (
 
 // TestRemoteOrderIdempotency 验证同一买家同一 requestID 只能形成一笔远程权威订单。
 func TestRemoteOrderIdempotency(t *testing.T) {
-	if err := models.EnsureStorage(); err != nil {
-		if strings.Contains(err.Error(), "dial tcp") || strings.Contains(err.Error(), "operation not permitted") {
-			t.Skipf("MySQL 权威库不可用，跳过远程幂等测试: %v", err)
-		}
-		require.NoError(t, err)
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后运行远程幂等 MySQL 集成测试")
 	}
+	require.NoError(t, models.EnsureStorage())
 	firstIDs := utils.NewAlgorithmSnowFlake(26, 4)
 	secondIDs := utils.NewAlgorithmSnowFlake(27, 4)
 
