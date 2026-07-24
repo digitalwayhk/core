@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/mq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +20,18 @@ func newReliableRedisProvider(t *testing.T) *mq.RedisStreamProvider {
 		t.Skip("设置 CORE_TEST_REDIS_ADDR 后运行 Redis Streams 可靠订阅测试")
 	}
 	provider := mq.NewRedisStreamProvider(addr, fmt.Sprintf("core:test:event:%d", time.Now().UnixNano()), 0)
+	require.NoError(t, provider.Connect(context.Background()))
+	t.Cleanup(func() { require.NoError(t, provider.Close()) })
+	return provider
+}
+
+func newReliableRedisProviderWithPrefix(t *testing.T, prefix string) *mq.RedisStreamProvider {
+	t.Helper()
+	addr := os.Getenv("CORE_TEST_REDIS_ADDR")
+	if addr == "" {
+		t.Skip("设置 CORE_TEST_REDIS_ADDR 后运行 Redis Streams 可靠订阅测试")
+	}
+	provider := mq.NewRedisStreamProvider(addr, prefix, 0)
 	require.NoError(t, provider.Connect(context.Background()))
 	t.Cleanup(func() { require.NoError(t, provider.Close()) })
 	return provider
@@ -86,49 +99,46 @@ func TestRedisReliableSubscriptionReclaimsFailedPendingMessage(t *testing.T) {
 }
 
 // TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending 锁定：
-// owner A 失败阻断后留下多条 pending，B 接管后必须先排空 pending 再处理新消息，不得越序。
+// loader 将 01..10 读入 PEL 后不 ACK（多 pending）；B 接管后必须先排空 pending 再处理 11..20。
 func TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending(t *testing.T) {
-	provider := newReliableRedisProvider(t)
+	addr := os.Getenv("CORE_TEST_REDIS_ADDR")
+	if addr == "" {
+		t.Skip("设置 CORE_TEST_REDIS_ADDR 后运行 Redis Streams 可靠订阅测试")
+	}
+	prefix := fmt.Sprintf("core:test:takeover:%d", time.Now().UnixNano())
+	provider := newReliableRedisProviderWithPrefix(t, prefix)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	const total = 20
-	var (
-		aStarted  = make(chan struct{}, 1)
-		aConsumer = "owner-a"
-		bConsumer = "owner-b"
-		group     = "positions-takeover"
-		subject   = "trade.fills"
-	)
+	const pendingN = 10
+	group := "positions-takeover"
+	subject := "trade.fills"
+	streamKey := prefix + ":" + subject
+	loader := "loader-crash"
 
-	// A：全部失败，1..10 进入 PEL；不 ACK。
-	firstCancel, err := provider.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
-		Group: group, Consumer: aConsumer, MinIdle: 30 * time.Millisecond, ClaimInterval: 20 * time.Millisecond,
-	}, func(message *mq.Message) error {
-		select {
-		case aStarted <- struct{}{}:
-		default:
-		}
-		return errors.New("a blocked")
-	})
-	require.NoError(t, err)
-
-	for i := 1; i <= 10; i++ {
+	// 用原始 Redis 把 01..10 读进 loader 的 PEL（不 ACK），构造真正多 pending。
+	raw := redis.NewClient(&redis.Options{Addr: addr})
+	t.Cleanup(func() { _ = raw.Close() })
+	require.NoError(t, raw.XGroupCreateMkStream(ctx, streamKey, group, "0").Err())
+	for i := 1; i <= pendingN; i++ {
 		body := fmt.Sprintf("%02d", i)
-		require.NoError(t, provider.Publish(ctx, subject, []byte(body), &mq.PublishOptions{
-			OrderingKey: "market-a", IdempotencyKey: body,
-		}))
+		require.NoError(t, raw.XAdd(ctx, &redis.XAddArgs{
+			Stream: streamKey,
+			Values: map[string]interface{}{
+				"data": body, "ordering_key": "market-a", "idempotency_key": body,
+			},
+		}).Err())
 	}
-	select {
-	case <-aStarted:
-	case <-ctx.Done():
-		t.Fatal("owner A 未开始消费")
-	}
-	time.Sleep(300 * time.Millisecond)
-	firstCancel()
+	entries, err := raw.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: group, Consumer: loader, Streams: []string{streamKey, ">"}, Count: int64(pendingN), Block: time.Second,
+	}).Result()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Len(t, entries[0].Messages, pendingN)
 
-	// A 退出后再发 11..20；B 接管后应先 01..10 再 11..20。
-	for i := 11; i <= total; i++ {
+	// 再发 11..20 作为「新消息」；B 必须先 reclaim 01..10 再读新。
+	for i := pendingN + 1; i <= total; i++ {
 		body := fmt.Sprintf("%02d", i)
 		require.NoError(t, provider.Publish(ctx, subject, []byte(body), &mq.PublishOptions{
 			OrderingKey: "market-a", IdempotencyKey: body,
@@ -138,7 +148,7 @@ func TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending(t *testing.T) 
 	got := make([]string, 0, total)
 	done := make(chan struct{})
 	secondCancel, err := provider.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
-		Group: group, Consumer: bConsumer, MinIdle: 30 * time.Millisecond, ClaimInterval: 20 * time.Millisecond,
+		Group: group, Consumer: "owner-b", MinIdle: 30 * time.Millisecond, ClaimInterval: 20 * time.Millisecond,
 	}, func(message *mq.Message) error {
 		got = append(got, string(message.Data))
 		if len(got) >= total {

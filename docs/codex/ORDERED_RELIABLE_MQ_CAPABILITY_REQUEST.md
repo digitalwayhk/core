@@ -301,8 +301,9 @@ go test ./pkg/server/mq/ -count=1 -run 'Conformance|OrderedReliable|FakeOrdered'
 CORE_TEST_REDIS_ADDR=127.0.0.1:6379 go test ./pkg/server/mq/ -count=1 -run RedisReliable
 ```
 
-handler 应在 owner lease TTL 内完成（默认约 `max(2m, 3×MinIdle)`）；
-超时后旧 owner 不得 ACK，新 owner 先回收 pending 再读新消息。
+handler 与**单次 pending 排空总时长**均应落在 owner lease TTL 内（默认约
+`max(2m, 3×MinIdle)`）。实现会在每条成功处理后 refresh lease；超时后旧 owner
+不得 ACK，新 owner 先回收 pending（MinIdle=0）再读新消息。
 
 ## 11. Bitzoom 迁移条件
 
