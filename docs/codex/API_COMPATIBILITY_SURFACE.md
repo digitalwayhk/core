@@ -18,6 +18,9 @@
 | `pkg/server/types.IRouter`、`IRequest`、`IResponse`、`RouterInfo` | Stable | server/router | public/private/manage 路由、服务间调用 | `pkg/server/types/router.go`、`interface.go`、examples |
 | `pkg/server/config.ServerConfig` 及项目自有子配置 | Stable（按能力矩阵） | server/config | 服务配置、默认化和启动校验 | 任务 14 配置矩阵与 `config-contract` |
 | `pkg/server/event` 的 EventBus、EventStream 与 Bridge 入口 | Stable（按能力矩阵） | server/event | 进程内事件与受支持 MQ 事件流 | event 单元测试与任务 14 生命周期测试 |
+| `mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable` | Stable（加性） | server/mq | 按 key 有序可靠投递的可选契约；未声明 requirement 时零值兼容 | `pkg/server/mq` unit/conformance；Redis 需 `CORE_TEST_REDIS_ADDR` |
+| `event.MQBridge` 透传 IdempotencyKey/OrderingKey、`EnsureOrderedReliable` | Stable（加性） | server/event | Envelope → provider 元数据；Require 后门禁空 ShardKey | mqbridge 与 ordered-reliable require 测试 |
+| `ServiceEventBridge`/`ServiceContext.RequireOrderedReliableByShardKey`、`OutboxStore` earliest-first 与可选 `OutboxStoreSkipBlocked` | Stable（加性） | server/event、router | 启动 fail-closed、Outbox 同 key barrier、hot-key 可选跳过 | outbox barrier / require 测试 |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |

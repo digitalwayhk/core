@@ -285,6 +285,26 @@ Core 现有 `redis-stream` provider 本身**不**等于上述 ordered-reliable �
 - release-contract、race、vet、format 门禁；
 - 正式版本发布说明。
 
+### 10.1 实现状态（对照 main，截至 residual 修复）
+
+已合入：API/透传/Require fail-closed、Outbox barrier（含可选 SkipBlocked）、
+Redis 单 owner + 读 `>` 前 reclaim pending（MinIdle=0）+ lost-owner 不 ACK、
+`VerifyOrderedReliableFailureBarrier`、能力矩阵与 API 兼容表面登记。
+
+发版门禁（每个生产 provider 必须通过，含自定义 factory）：
+
+```bash
+# 行为套件（fake 或真实 provider）
+go test ./pkg/server/mq/ -count=1 -run 'Conformance|OrderedReliable|FakeOrdered'
+
+# 真 Redis integration（需环境变量）
+CORE_TEST_REDIS_ADDR=127.0.0.1:6379 go test ./pkg/server/mq/ -count=1 -run RedisReliable
+```
+
+handler 与**单次 pending 排空总时长**均应落在 owner lease TTL 内（默认约
+`max(2m, 3×MinIdle)`）。实现会在每条成功处理后 refresh lease；超时后旧 owner
+不得 ACK，新 owner 先回收 pending（MinIdle=0）再读新消息。
+
 ## 11. Bitzoom 迁移条件
 
 Bitzoom 只有在以下条件**同时**满足后，才评估替换项目内 adapter：
