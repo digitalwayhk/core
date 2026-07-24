@@ -66,6 +66,8 @@ func (r *RedisStreamProvider) Close() error {
 }
 
 // OrderedReliableInfo 声明 Redis Streams 在单 active owner 下的 ordered-reliable 能力。
+// 当前实现以整条 stream 串行 + 失败阻断满足契约（比“仅同 key 阻断”更严）；
+// 不同 OrderingKey 的并行优化可后续用 shard stream 加强，不削弱本声明。
 func (r *RedisStreamProvider) OrderedReliableInfo() OrderedReliableCapability {
 	return DefaultOrderedReliableCapability()
 }
@@ -239,10 +241,14 @@ func (r *RedisStreamProvider) refreshOwner(ctx context.Context, subject string, 
 
 func (r *RedisStreamProvider) releaseOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) {
 	lockKey := r.ownerLockKey(subject, options.Group)
-	val, err := r.client.Get(ctx, lockKey).Result()
-	if err == nil && val == options.Consumer {
-		_ = r.client.Del(ctx, lockKey).Err()
-	}
+	// 仅删除仍由本 consumer 持有的锁，避免误删后继 owner。
+	script := redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+	_ = script.Run(ctx, r.client, []string{lockKey}, options.Consumer).Err()
 }
 
 func (r *RedisStreamProvider) runReliableSubscriber(

@@ -84,16 +84,19 @@ type ServiceEventBridge struct {
 	closed atomic.Bool
 	once   sync.Once
 
-	externalMu             sync.RWMutex
-	external               ExternalPublisher
-	subscriber             ExternalSubscriber
-	reliableSubscriber     ReliableExternalSubscriber
-	externalSubMu          sync.Mutex
-	externalSubscriptions  map[string]*externalSubscriptionRef
-	outboxMu               sync.Mutex
-	outbox                 *outboxPublisher
-	subscriberID           string
-	requireOrderedReliable bool
+	externalMu            sync.RWMutex
+	external              ExternalPublisher
+	subscriber            ExternalSubscriber
+	reliableSubscriber    ReliableExternalSubscriber
+	externalSubMu         sync.Mutex
+	externalSubscriptions map[string]*externalSubscriptionRef
+	outboxMu              sync.Mutex
+	outbox                *outboxPublisher
+	subscriberID          string
+	// wantOrderedReliable 来自构造选项，表示意图；真正开启门禁必须 Ensure 成功。
+	wantOrderedReliable bool
+	// requireOrderedReliable 仅在 EnsureOrderedReliable 成功后置位。
+	requireOrderedReliable atomic.Bool
 	dropped                atomic.Uint64
 	controlQueueTimeouts   atomic.Uint64
 }
@@ -116,14 +119,14 @@ func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *S
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &ServiceEventBridge{
-		stream:                 stream,
-		observerQueue:          make(chan PublishRequest, options.ObserverQueueSize),
-		controlQueues:          make([]chan controlEvent, options.ControlShards),
-		controlTimeout:         options.ControlEnqueueTimeout,
-		subscriberID:           options.SubscriberID,
-		requireOrderedReliable: options.RequireOrderedReliableByShardKey,
-		ctx:                    ctx,
-		cancel:                 cancel,
+		stream:              stream,
+		observerQueue:       make(chan PublishRequest, options.ObserverQueueSize),
+		controlQueues:       make([]chan controlEvent, options.ControlShards),
+		controlTimeout:      options.ControlEnqueueTimeout,
+		subscriberID:        options.SubscriberID,
+		wantOrderedReliable: options.RequireOrderedReliableByShardKey,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 	b.wg.Add(1)
 	go b.runObserver()
@@ -150,7 +153,12 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.external = publisher
 	b.subscriber, _ = publisher.(ExternalSubscriber)
 	b.reliableSubscriber, _ = publisher.(ReliableExternalSubscriber)
+	want := b.wantOrderedReliable
 	b.externalMu.Unlock()
+	// 构造时声明了 requirement：装配外部适配器后立即 Ensure，失败则保持未开启（后续 Publish/Require 仍 fail closed）。
+	if want && publisher != nil {
+		_ = b.ensureOrderedReliableOn(publisher)
+	}
 }
 
 // RequireOrderedReliableByShardKey 声明本服务控制事件需要 ordered-reliable 能力。
@@ -159,29 +167,36 @@ func (b *ServiceEventBridge) RequireOrderedReliableByShardKey() error {
 	if b == nil || b.closed.Load() {
 		return ErrServiceEventBridgeClosed
 	}
-	b.externalMu.RLock()
+	b.externalMu.Lock()
+	b.wantOrderedReliable = true
 	publisher := b.external
-	b.externalMu.RUnlock()
+	b.externalMu.Unlock()
 	if publisher == nil {
 		return ErrExternalProviderUnavailable
 	}
+	return b.ensureOrderedReliableOn(publisher)
+}
+
+func (b *ServiceEventBridge) ensureOrderedReliableOn(publisher ExternalPublisher) error {
 	ensurer, ok := publisher.(orderedReliableEnsurer)
 	if !ok {
+		b.requireOrderedReliable.Store(false)
 		return ErrOrderedReliableUnsupported
 	}
 	if err := ensurer.EnsureOrderedReliable(); err != nil {
+		b.requireOrderedReliable.Store(false)
 		return err
 	}
-	b.requireOrderedReliable = true
+	b.requireOrderedReliable.Store(true)
 	return nil
 }
 
-// RequiresOrderedReliable 报告是否已声明 ordered-reliable 需求。
+// RequiresOrderedReliable 报告是否已成功开启 ordered-reliable 发布门禁。
 func (b *ServiceEventBridge) RequiresOrderedReliable() bool {
 	if b == nil {
 		return false
 	}
-	if b.requireOrderedReliable {
+	if b.requireOrderedReliable.Load() {
 		return true
 	}
 	b.externalMu.RLock()
