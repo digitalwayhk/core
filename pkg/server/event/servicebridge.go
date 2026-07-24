@@ -14,7 +14,14 @@ var (
 	ErrServiceEventBridgeClosed    = errors.New("service event bridge closed")
 	ErrInvalidPublishRequest       = errors.New("invalid event publish request")
 	ErrControlQueueTimeout         = errors.New("service event bridge control queue timeout")
+	ErrOrderedReliableUnsupported  = errors.New("event ordered reliable unsupported")
 )
+
+// orderedReliableEnsurer 由外部适配器（如 MQBridge）实现，用于启动 fail-closed 检查。
+type orderedReliableEnsurer interface {
+	EnsureOrderedReliable() error
+	RequiresOrderedReliable() bool
+}
 
 const defaultControlEnqueueTimeout = 5 * time.Second
 
@@ -48,11 +55,12 @@ type ReliableExternalSubscriber interface {
 }
 
 type ServiceEventBridgeOptions struct {
-	ObserverQueueSize     int
-	ControlQueueSize      int
-	ControlShards         int
-	ControlEnqueueTimeout time.Duration
-	SubscriberID          string
+	ObserverQueueSize                int
+	ControlQueueSize                 int
+	ControlShards                    int
+	ControlEnqueueTimeout            time.Duration
+	SubscriberID                     string
+	RequireOrderedReliableByShardKey bool
 }
 
 type controlEvent struct {
@@ -85,8 +93,12 @@ type ServiceEventBridge struct {
 	outboxMu              sync.Mutex
 	outbox                *outboxPublisher
 	subscriberID          string
-	dropped               atomic.Uint64
-	controlQueueTimeouts  atomic.Uint64
+	// wantOrderedReliable 来自构造选项，表示意图；真正开启门禁必须 Ensure 成功。
+	wantOrderedReliable bool
+	// requireOrderedReliable 仅在 EnsureOrderedReliable 成功后置位。
+	requireOrderedReliable atomic.Bool
+	dropped                atomic.Uint64
+	controlQueueTimeouts   atomic.Uint64
 }
 
 func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *ServiceEventBridge {
@@ -107,13 +119,14 @@ func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *S
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &ServiceEventBridge{
-		stream:         stream,
-		observerQueue:  make(chan PublishRequest, options.ObserverQueueSize),
-		controlQueues:  make([]chan controlEvent, options.ControlShards),
-		controlTimeout: options.ControlEnqueueTimeout,
-		subscriberID:   options.SubscriberID,
-		ctx:            ctx,
-		cancel:         cancel,
+		stream:              stream,
+		observerQueue:       make(chan PublishRequest, options.ObserverQueueSize),
+		controlQueues:       make([]chan controlEvent, options.ControlShards),
+		controlTimeout:      options.ControlEnqueueTimeout,
+		subscriberID:        options.SubscriberID,
+		wantOrderedReliable: options.RequireOrderedReliableByShardKey,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 	b.wg.Add(1)
 	go b.runObserver()
@@ -140,7 +153,59 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.external = publisher
 	b.subscriber, _ = publisher.(ExternalSubscriber)
 	b.reliableSubscriber, _ = publisher.(ReliableExternalSubscriber)
+	want := b.wantOrderedReliable
 	b.externalMu.Unlock()
+	// 构造时声明了 requirement：装配外部适配器后立即 Ensure，失败则保持未开启（后续 Publish/Require 仍 fail closed）。
+	if want && publisher != nil {
+		_ = b.ensureOrderedReliableOn(publisher)
+	}
+}
+
+// RequireOrderedReliableByShardKey 声明本服务控制事件需要 ordered-reliable 能力。
+// provider 不具备能力、未装配外部适配器时 fail closed；成功后开启空 ShardKey 发布门禁。
+func (b *ServiceEventBridge) RequireOrderedReliableByShardKey() error {
+	if b == nil || b.closed.Load() {
+		return ErrServiceEventBridgeClosed
+	}
+	b.externalMu.Lock()
+	b.wantOrderedReliable = true
+	publisher := b.external
+	b.externalMu.Unlock()
+	if publisher == nil {
+		return ErrExternalProviderUnavailable
+	}
+	return b.ensureOrderedReliableOn(publisher)
+}
+
+func (b *ServiceEventBridge) ensureOrderedReliableOn(publisher ExternalPublisher) error {
+	ensurer, ok := publisher.(orderedReliableEnsurer)
+	if !ok {
+		b.requireOrderedReliable.Store(false)
+		return ErrOrderedReliableUnsupported
+	}
+	if err := ensurer.EnsureOrderedReliable(); err != nil {
+		b.requireOrderedReliable.Store(false)
+		return err
+	}
+	b.requireOrderedReliable.Store(true)
+	return nil
+}
+
+// RequiresOrderedReliable 报告是否已成功开启 ordered-reliable 发布门禁。
+func (b *ServiceEventBridge) RequiresOrderedReliable() bool {
+	if b == nil {
+		return false
+	}
+	if b.requireOrderedReliable.Load() {
+		return true
+	}
+	b.externalMu.RLock()
+	publisher := b.external
+	b.externalMu.RUnlock()
+	if ensurer, ok := publisher.(orderedReliableEnsurer); ok {
+		return ensurer.RequiresOrderedReliable()
+	}
+	return false
 }
 
 func (b *ServiceEventBridge) HasExternalPublisher() bool {
@@ -276,6 +341,9 @@ func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest
 	}
 	if request.External && b.externalPublisher() == nil {
 		return ErrExternalProviderUnavailable
+	}
+	if request.External && b.RequiresOrderedReliable() && request.Envelope.ShardKey == "" {
+		return ErrOrderingKeyRequired
 	}
 	if request.Class == ObserverDelivery {
 		if !request.External && b.stream.SubscriberCount(request.Envelope.Type) == 0 {

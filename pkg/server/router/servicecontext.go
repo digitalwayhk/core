@@ -944,6 +944,15 @@ func (own *ServiceContext) UseOutbox(store event.OutboxStore) error {
 	})
 }
 
+// RequireOrderedReliableByShardKey 声明控制事件需要 ordered-reliable 能力。
+// 底层 provider 不支持或未装配外部 MQ 时 fail closed。
+func (own *ServiceContext) RequireOrderedReliableByShardKey() error {
+	if own == nil || own.ServiceEventBridge == nil {
+		return event.ErrServiceEventBridgeClosed
+	}
+	return own.ServiceEventBridge.RequireOrderedReliableByShardKey()
+}
+
 // NotifyOutbox 唤醒当前服务 Outbox 发布器尽快扫描本地 Outbox 表。
 func (own *ServiceContext) NotifyOutbox() {
 	if own == nil || own.ServiceEventBridge == nil {

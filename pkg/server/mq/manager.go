@@ -162,3 +162,27 @@ func (m *MQManager) SubscribeReliable(
 	}
 	return provider.SubscribeReliable(ctx, subject, options, handler)
 }
+
+// OrderedReliableInfo 返回当前 provider 的 ordered-reliable 声明；未实现则 ok=false。
+func (m *MQManager) OrderedReliableInfo() (OrderedReliableCapability, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
+		return OrderedReliableCapability{}, false
+	}
+	provider, ok := m.current.(OrderedReliableMQProvider)
+	if !ok {
+		return OrderedReliableCapability{}, false
+	}
+	info := provider.OrderedReliableInfo()
+	return info, info.Valid()
+}
+
+// RequireOrderedReliable 校验当前 provider 已声明并具备合法的 ordered-reliable 能力。
+func (m *MQManager) RequireOrderedReliable() error {
+	info, ok := m.OrderedReliableInfo()
+	if !ok || !info.Valid() {
+		return ErrOrderedReliableUnsupported
+	}
+	return nil
+}
