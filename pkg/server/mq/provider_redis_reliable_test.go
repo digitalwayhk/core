@@ -84,3 +84,83 @@ func TestRedisReliableSubscriptionReclaimsFailedPendingMessage(t *testing.T) {
 		t.Fatal("失败的 Redis pending 消息未被重新认领")
 	}
 }
+
+// TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending 锁定：
+// owner A 失败阻断后留下多条 pending，B 接管后必须先排空 pending 再处理新消息，不得越序。
+func TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending(t *testing.T) {
+	provider := newReliableRedisProvider(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	const total = 20
+	var (
+		aStarted  = make(chan struct{}, 1)
+		aConsumer = "owner-a"
+		bConsumer = "owner-b"
+		group     = "positions-takeover"
+		subject   = "trade.fills"
+	)
+
+	// A：全部失败，1..10 进入 PEL；不 ACK。
+	firstCancel, err := provider.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
+		Group: group, Consumer: aConsumer, MinIdle: 30 * time.Millisecond, ClaimInterval: 20 * time.Millisecond,
+	}, func(message *mq.Message) error {
+		select {
+		case aStarted <- struct{}{}:
+		default:
+		}
+		return errors.New("a blocked")
+	})
+	require.NoError(t, err)
+
+	for i := 1; i <= 10; i++ {
+		body := fmt.Sprintf("%02d", i)
+		require.NoError(t, provider.Publish(ctx, subject, []byte(body), &mq.PublishOptions{
+			OrderingKey: "market-a", IdempotencyKey: body,
+		}))
+	}
+	select {
+	case <-aStarted:
+	case <-ctx.Done():
+		t.Fatal("owner A 未开始消费")
+	}
+	time.Sleep(300 * time.Millisecond)
+	firstCancel()
+
+	// A 退出后再发 11..20；B 接管后应先 01..10 再 11..20。
+	for i := 11; i <= total; i++ {
+		body := fmt.Sprintf("%02d", i)
+		require.NoError(t, provider.Publish(ctx, subject, []byte(body), &mq.PublishOptions{
+			OrderingKey: "market-a", IdempotencyKey: body,
+		}))
+	}
+
+	got := make([]string, 0, total)
+	done := make(chan struct{})
+	secondCancel, err := provider.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
+		Group: group, Consumer: bConsumer, MinIdle: 30 * time.Millisecond, ClaimInterval: 20 * time.Millisecond,
+	}, func(message *mq.Message) error {
+		got = append(got, string(message.Data))
+		if len(got) >= total {
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer secondCancel()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("timeout got=%v (len=%d)", got, len(got))
+	}
+
+	require.Equal(t, total, len(got), "got=%v", got)
+	for i := 0; i < total; i++ {
+		require.Equal(t, fmt.Sprintf("%02d", i+1), got[i], "full=%v", got)
+	}
+}

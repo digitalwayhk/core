@@ -244,6 +244,15 @@ end
 return 0
 `)
 
+// 只读 fencing：不续约、不抢占，仅判断当前锁是否仍为本 consumer。
+var redisOwnerCheckScript = redis.NewScript(`
+local cur = redis.call("GET", KEYS[1])
+if cur == ARGV[1] then
+  return 1
+end
+return 0
+`)
+
 func (r *RedisStreamProvider) tryAcquireOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
 	ttl := ownerLeaseTTL(options)
 	ok, err := r.client.SetNX(ctx, r.ownerLockKey(subject, options.Group), options.Consumer, ttl).Result()
@@ -266,9 +275,14 @@ func (r *RedisStreamProvider) releaseOwner(ctx context.Context, subject string, 
 	_ = redisOwnerReleaseScript.Run(ctx, r.client, []string{lockKey}, options.Consumer).Err()
 }
 
-// stillOwner 在 handler 完成后做 fencing 检查：已丢 owner 则不得 ACK。
+// stillOwner 只读 fencing：已丢 owner 则不得 ACK。不续约、不抢占，避免与 refresh 语义混淆。
 func (r *RedisStreamProvider) stillOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
-	return r.refreshOwner(ctx, subject, options)
+	lockKey := r.ownerLockKey(subject, options.Group)
+	n, err := redisOwnerCheckScript.Run(ctx, r.client, []string{lockKey}, options.Consumer).Int()
+	if err != nil {
+		return false
+	}
+	return n == 1
 }
 
 func (r *RedisStreamProvider) runReliableSubscriber(
@@ -286,8 +300,8 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			return
 		case <-ticker.C:
 			if r.refreshOwner(ctx, subject, options) {
-				// 仅 owner 认领超时 pending，避免多 active 并行越序。
-				if blocked := r.reclaimPending(ctx, key, subject, options, handler); blocked {
+				// 周期认领：MinIdle 控制，避免抢仍活跃的 in-flight。
+				if blocked := r.reclaimPending(ctx, key, subject, options, handler, options.MinIdle); blocked {
 					continue
 				}
 			}
@@ -301,7 +315,7 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
-		// 先排空本 consumer 的 pending，失败则不读新消息（同 key / 同 stream 失败屏障）。
+		// 1) 先排空本 consumer 的 pending。
 		if blocked := r.processOwnPending(ctx, key, subject, options, handler); blocked {
 			// 仅失败时 backoff；成功排空 pending 不睡，避免 N×50ms 延迟税。
 			if !r.stillOwner(ctx, subject, options) {
@@ -314,7 +328,20 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
-		// 读新消息前再次确认 owner，缩小双 active 窗口。
+		// 2) 接管后必须先回收其他 consumer 的 pending（MinIdle=0），再读新消息，
+		//    避免 failover 时 > 越过旧 owner 未 ACK 的消息导致越序。
+		if blocked := r.reclaimPending(ctx, key, subject, options, handler, 0); blocked {
+			if !r.stillOwner(ctx, subject, options) {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+			continue
+		}
+		// 3) 读新消息前再次确认 owner。
 		if !r.stillOwner(ctx, subject, options) {
 			continue
 		}
@@ -366,18 +393,22 @@ func (r *RedisStreamProvider) processOwnPending(
 	}
 }
 
-// reclaimPending 认领超时 pending。返回 true 表示处理失败应阻断。
+// reclaimPending 认领其他 consumer 的 pending。
+// minIdle=0：接管后立即回收，防止 > 越过旧 owner 未 ACK 消息；
+// minIdle=options.MinIdle：周期回收，给崩溃实例一点宽限。
+// 返回 true 表示处理失败应阻断新消息。
 func (r *RedisStreamProvider) reclaimPending(
 	ctx context.Context,
 	key, subject string,
 	options ReliableSubscribeOptions,
 	handler func(*Message) error,
+	minIdle time.Duration,
 ) bool {
 	start := "0-0"
 	for {
 		messages, next, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream: key, Group: options.Group, Consumer: options.Consumer,
-			MinIdle: options.MinIdle, Start: start, Count: 1,
+			MinIdle: minIdle, Start: start, Count: 1,
 		}).Result()
 		if err != nil || len(messages) == 0 {
 			return false
