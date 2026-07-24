@@ -28,22 +28,33 @@ provider，可以用各自机制满足同一行为契约。
 - `mq.MQProvider` 的统一连接、发布、订阅与健康检查；
 - 可选 `mq.ReliableMQProvider`，handler 成功后 ACK，失败时消息保持 pending；
 - `mq.RegisterProviderFactory` 自定义 provider 扩展点；
-- `event.Envelope.ShardKey`；
+- `event.Envelope.ShardKey` / `IdempotencyKey`；
+- `event.ExternalPublisher`、`ExternalSubscriber`、
+  `ReliableExternalSubscriber`；
 - `ServiceEventBridge` 进程内按 `ShardKey` 固定分片串行处理控制事件；
 - Outbox 的 `IdempotencyKey`、`ShardKey`、`LoadPending` 和
   `MarkPublished`；
-- Redis Streams 与 NATS JetStream 基础 provider。
+- Redis Streams 基础 provider，并实现了 `ReliableMQProvider`；
+- NATS JetStream 基础 provider（仅普通 Publish/Subscribe）。
 
-当前缺口：
+当前缺口（已对照源码）：
 
 - `ReliableMQProvider` 只声明可靠 ACK，没有声明同 key 的有序语义；
-- `PublishOptions` 没有显式 `OrderingKey` 或 `PartitionKey`；
-- `MQBridge.Publish` 序列化 Envelope 后，没有把 `Envelope.ShardKey`
-  作为 provider 发布元数据透传；
-- Outbox 一条记录发布失败后，publisher 会继续尝试同批后续记录，没有
+- `PublishOptions` 只有 `Subject` 与 `IdempotencyKey`，没有显式
+  `OrderingKey` / `PartitionKey`；
+- `MQBridge.Publish` 序列化 Envelope 后以 `opts=nil` 调用
+  `MQManager.Publish`，既不透传 `Envelope.IdempotencyKey`，也不把
+  `Envelope.ShardKey` 作为 provider 发布元数据透传；
+- Outbox 一条记录发布失败后，`drain` 会 `continue` 尝试同批后续记录，没有
   “同 key 最早失败记录阻断后续记录”的通用契约；
 - 服务启动时无法声明并验证“必须支持 ordered-reliable by key”；
 - 现有 provider 没有共用的 ordered-reliable conformance suite；
+- 内置 NATS JetStream provider **未实现** `ReliableMQProvider`；
+- 内置 Redis Streams 的 `SubscribeReliable`：
+  - 默认按批 `Count` 拉取，handler 失败后仍会继续处理同批后续消息；
+  - 同 consumer group 多实例会分片消费，不保证全局按 key 顺序；
+  - 因此“可靠 ACK”不能推导为“同 OrderingKey 有序与失败阻断”；
+- Kafka、RabbitMQ、RocketMQ 需自定义 factory，且没有统一有序验收套件；
 - 当前 NATS 指南已经明确：基础 EventBridge/事件流可用，但完整生产级可靠
   写通道仍需补齐确认、重投、背压、DLQ 和真实集成门禁。
 
@@ -58,11 +69,12 @@ provider，可以用各自机制满足同一行为契约。
 
 1. 按 broker 接受的发布顺序交付；
 2. 同一时刻最多一个业务 handler in-flight；
-3. handler N 失败时，N+1 不得越过；
+3. handler N 失败时，N+1 不得越过（含同批拉取内的后续消息）；
 4. handler 成功返回后才能 ACK 或 commit offset；
 5. consumer 故障转移后保持同 key 顺序；
 6. 允许 at-least-once 重复，不允许丢失或越序；
-7. 重投保持原 `EventID`、`IdempotencyKey`、payload 和 OrderingKey；
+7. 重投保持原事件身份（`Envelope.ID` / `OutboxMessage.EventID`）、
+   `IdempotencyKey`、payload 和 OrderingKey；
 8. 消费者以 EventID/Inbox 完成最终业务幂等。
 
 ### 3.2 不同 OrderingKey
@@ -86,17 +98,18 @@ consumer group 还是 owner lease。
 type PublishOptions struct {
     Subject        string
     IdempotencyKey string
-    OrderingKey    string
+    OrderingKey    string // 新增；零值保持现有行为
 }
 ```
 
 `MQBridge.Publish` 应显式完成：
 
 ```text
-Envelope.ShardKey -> PublishOptions.OrderingKey
+Envelope.IdempotencyKey -> PublishOptions.IdempotencyKey
+Envelope.ShardKey       -> PublishOptions.OrderingKey
 ```
 
-provider 不应通过解析业务 JSON 获取分区键。
+provider 不应通过解析业务 JSON 获取分区键或幂等键。
 
 ### 4.2 可选能力接口
 
@@ -109,9 +122,11 @@ type OrderedReliableCapability struct {
     FailoverPolicy string // KEEP_KEY_ORDER
 }
 
+// OrderedReliableMQProvider 是可选扩展。
+// 仅声明能力不够；必须通过 conformance suite 证明实际行为。
 type OrderedReliableMQProvider interface {
     ReliableMQProvider
-    OrderedReliableCapability() OrderedReliableCapability
+    OrderedReliableInfo() OrderedReliableCapability
 }
 ```
 
@@ -161,13 +176,20 @@ Core Outbox publisher 需要定义：
 provider adapter 自己负责 rebalance、pending、ACK、owner 接管和关闭语义。
 Core 不应把 Redis consumer group 或任何单一 broker 的偶然行为当作通用契约。
 
+内置 provider 落地时的特别说明：
+
+- Redis：需从“单 stream + 多 consumer 分片”升级为“按 key 的 shard stream /
+  单 active owner”，并在 handler 失败时阻断同 key 后续消息（含同批）；
+- NATS：需先补齐 `ReliableMQProvider`，再叠加 ordered-by-key 语义；
+- 自定义 factory：同样必须通过同一 conformance suite，不能只注册名字。
+
 ## 7. Conformance suite
 
 Core 应提供所有 ordered-reliable provider 可复用的验收套件：
 
 1. 同 key 100 条严格按序；
 2. 不同 key 可并行；
-3. 第 N 条失败时 N+1 不执行；
+3. 第 N 条失败时 N+1 不执行（含同批拉取场景）；
 4. N 恢复后继续处理 N+1；
 5. handler 成功前不得 ACK；
 6. consumer 退出后另一实例接管；
@@ -217,20 +239,33 @@ Bitzoom 当前为 `TradeFill` 实现了项目内 Redis Streams adapter，作为 
 - 真实 MySQL + Redis 覆盖开仓、加仓、减仓、平仓和 ACK 前退出恢复。
 
 该项目实现只用于证明需求和提供验收样本，不应原样复制为 Core 的通用框架。
+Core 现有 `redis-stream` provider 本身**不**等于上述 ordered-reliable 语义。
 
 ## 10. 实现 PR 的完成定义
 
 后续 Core 实现 PR 至少交付：
 
 - provider-neutral API 与启动能力检查；
-- OrderingKey 从 Event Envelope 到 provider 的完整透传；
+- OrderingKey 与 IdempotencyKey 从 Event Envelope 到 provider 的完整透传；
 - Outbox 同 key failure barrier；
-- 至少一个生产级 provider adapter；
+- 至少一个生产级 provider adapter（含真实 broker integration）；
 - provider-neutral conformance suite；
-- 对应真实 broker integration；
 - 配置矩阵、公共 API、使用指南和能力矩阵更新；
 - release-contract、race、vet、format 门禁；
 - 正式版本发布说明。
 
-Bitzoom 只有在 Core 实现合并、真实 provider 门禁通过且正式版本发布后，才评估
-替换项目内 adapter；不会使用 `go.work`、`replace` 或未发布本地 Core 冒充迁移完成。
+## 11. Bitzoom 迁移条件
+
+Bitzoom 只有在以下条件**同时**满足后，才评估替换项目内 adapter：
+
+1. Core 实现 PR 已合并；
+2. ordered-reliable conformance suite 真实通过；
+3. 至少一个 Bitzoom 生产选用 provider 已实现该能力；
+4. release-contract、race 与外部 integration gate 通过；
+5. 新 Core 正式版本已发布；
+6. Bitzoom `go.mod` 可直接引用该版本；
+7. 不使用 `go.work`、`replace` 或未发布本地 Core 冒充迁移完成；
+8. Bitzoom Trades→Positions 双实例 UAT 通过；
+9. `eventID`、`tradeID`、`matchSequence` 与失败阻断语义保持不变。
+
+PR merged 不是迁移完成的充分条件；必须验证实际发布版本和运行行为。
