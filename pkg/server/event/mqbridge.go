@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 
 	"github.com/digitalwayhk/core/pkg/server/mq"
 )
@@ -19,7 +20,7 @@ var ErrOrderingKeyRequired = errors.New("event: ordering key required")
 type MQBridge struct {
 	stream                 *Stream
 	manager                *mq.MQManager
-	requireOrderedReliable bool
+	requireOrderedReliable atomic.Bool
 }
 
 // NewMQBridge creates a bridge between the given Stream and MQManager.
@@ -35,13 +36,13 @@ func (b *MQBridge) EnsureOrderedReliable() error {
 	if err := b.manager.RequireOrderedReliable(); err != nil {
 		return err
 	}
-	b.requireOrderedReliable = true
+	b.requireOrderedReliable.Store(true)
 	return nil
 }
 
 // RequiresOrderedReliable 报告是否已开启 ordered-reliable 发布门禁。
 func (b *MQBridge) RequiresOrderedReliable() bool {
-	return b != nil && b.requireOrderedReliable
+	return b != nil && b.requireOrderedReliable.Load()
 }
 
 // Publish serialises env to JSON and delivers it to the MQ provider on subject.
@@ -50,7 +51,7 @@ func (b *MQBridge) Publish(ctx context.Context, subject string, env *Envelope) e
 	if env == nil {
 		return ErrInvalidPublishRequest
 	}
-	if b.requireOrderedReliable && env.ShardKey == "" {
+	if b.requireOrderedReliable.Load() && env.ShardKey == "" {
 		return ErrOrderingKeyRequired
 	}
 	data, err := json.Marshal(env)

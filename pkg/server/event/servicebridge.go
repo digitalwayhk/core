@@ -93,13 +93,18 @@ type ServiceEventBridge struct {
 	outboxMu              sync.Mutex
 	outbox                *outboxPublisher
 	subscriberID          string
-	// wantOrderedReliable 来自构造选项，表示意图；真正开启门禁必须 Ensure 成功。
+	// wantOrderedReliable 来自构造选项或显式 Require，表示意图；真正开启门禁必须 Ensure 成功。
 	wantOrderedReliable bool
 	// requireOrderedReliable 仅在 EnsureOrderedReliable 成功后置位。
 	requireOrderedReliable atomic.Bool
-	dropped                atomic.Uint64
-	controlQueueTimeouts   atomic.Uint64
+	// orderedReliableEnsureErr 记录最近一次 Ensure 失败，避免 option 路径静默降级。
+	// 存 *errorBox；nil box 表示尚无失败记录。
+	orderedReliableEnsureErr atomic.Value
+	dropped                  atomic.Uint64
+	controlQueueTimeouts     atomic.Uint64
 }
+
+type errorBox struct{ err error }
 
 func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *ServiceEventBridge {
 	if stream == nil {
@@ -155,7 +160,7 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.reliableSubscriber, _ = publisher.(ReliableExternalSubscriber)
 	want := b.wantOrderedReliable
 	b.externalMu.Unlock()
-	// 构造时声明了 requirement：装配外部适配器后立即 Ensure，失败则保持未开启（后续 Publish/Require 仍 fail closed）。
+	// 构造时声明了 requirement：装配后立即 Ensure；失败暂存错误，外发路径 fail closed（禁止静默降级）。
 	if want && publisher != nil {
 		_ = b.ensureOrderedReliableOn(publisher)
 	}
@@ -172,22 +177,44 @@ func (b *ServiceEventBridge) RequireOrderedReliableByShardKey() error {
 	publisher := b.external
 	b.externalMu.Unlock()
 	if publisher == nil {
-		return ErrExternalProviderUnavailable
+		err := ErrExternalProviderUnavailable
+		b.storeOrderedReliableEnsureErr(err)
+		return err
 	}
 	return b.ensureOrderedReliableOn(publisher)
+}
+
+func (b *ServiceEventBridge) storeOrderedReliableEnsureErr(err error) {
+	b.orderedReliableEnsureErr.Store(errorBox{err: err})
+}
+
+func (b *ServiceEventBridge) loadOrderedReliableEnsureErr() error {
+	v := b.orderedReliableEnsureErr.Load()
+	if v == nil {
+		return nil
+	}
+	box, ok := v.(errorBox)
+	if !ok {
+		return nil
+	}
+	return box.err
 }
 
 func (b *ServiceEventBridge) ensureOrderedReliableOn(publisher ExternalPublisher) error {
 	ensurer, ok := publisher.(orderedReliableEnsurer)
 	if !ok {
 		b.requireOrderedReliable.Store(false)
-		return ErrOrderedReliableUnsupported
+		err := ErrOrderedReliableUnsupported
+		b.storeOrderedReliableEnsureErr(err)
+		return err
 	}
 	if err := ensurer.EnsureOrderedReliable(); err != nil {
 		b.requireOrderedReliable.Store(false)
+		b.storeOrderedReliableEnsureErr(err)
 		return err
 	}
 	b.requireOrderedReliable.Store(true)
+	b.storeOrderedReliableEnsureErr(nil)
 	return nil
 }
 
@@ -206,6 +233,26 @@ func (b *ServiceEventBridge) RequiresOrderedReliable() bool {
 		return ensurer.RequiresOrderedReliable()
 	}
 	return false
+}
+
+// orderedReliableRequiredButUnavailable 为 true 时：已声明 requirement 但 Ensure 未成功，外发必须 fail closed。
+func (b *ServiceEventBridge) orderedReliableRequiredButUnavailable() error {
+	if b == nil {
+		return nil
+	}
+	if b.requireOrderedReliable.Load() {
+		return nil
+	}
+	b.externalMu.RLock()
+	want := b.wantOrderedReliable
+	b.externalMu.RUnlock()
+	if !want {
+		return nil
+	}
+	if err := b.loadOrderedReliableEnsureErr(); err != nil {
+		return err
+	}
+	return ErrOrderedReliableUnsupported
 }
 
 func (b *ServiceEventBridge) HasExternalPublisher() bool {
@@ -341,6 +388,12 @@ func (b *ServiceEventBridge) Publish(ctx context.Context, request PublishRequest
 	}
 	if request.External && b.externalPublisher() == nil {
 		return ErrExternalProviderUnavailable
+	}
+	// 已声明 requirement 但 Ensure 失败：禁止静默降级为无序/伪 key。
+	if request.External {
+		if err := b.orderedReliableRequiredButUnavailable(); err != nil {
+			return err
+		}
 	}
 	if request.External && b.RequiresOrderedReliable() && request.Envelope.ShardKey == "" {
 		return ErrOrderingKeyRequired
