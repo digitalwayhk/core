@@ -93,6 +93,9 @@ func (p *outboxPublisher) run(ctx context.Context) {
 }
 
 func (p *outboxPublisher) drain(ctx context.Context) {
+	// 本轮同 OrderingKey 失败屏障：最早失败的 key 阻断后续同 key 记录，其他 key 可继续。
+	// 屏障仅用于本轮 drain；跨重启依赖 LoadPending 仍返回 earliest unpublished。
+	blocked := make(map[string]struct{})
 	for {
 		items, err := p.store.LoadPending(ctx, p.batch)
 		if err != nil {
@@ -102,19 +105,39 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 		if len(items) == 0 {
 			return
 		}
+		progressed := false
 		for _, item := range items {
+			key := outboxOrderingKey(item)
+			if _, skip := blocked[key]; skip {
+				continue
+			}
 			if err := p.publish(ctx, item); err != nil {
-				logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("error", err))
+				logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
+				blocked[key] = struct{}{}
 				continue
 			}
 			if err := p.store.MarkPublished(ctx, item); err != nil {
 				logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("error", err))
+				// Mark 失败允许同 EventID 重发；本轮仍阻断同 key，避免后续记录抢先发布。
+				blocked[key] = struct{}{}
+				continue
 			}
+			progressed = true
 		}
-		if len(items) < p.batch {
+		if len(items) < p.batch || !progressed {
 			return
 		}
 	}
+}
+
+func outboxOrderingKey(item OutboxMessage) string {
+	if item.ShardKey != "" {
+		return item.ShardKey
+	}
+	if item.EventID != "" {
+		return item.EventType + ":" + item.EventID
+	}
+	return item.EventType + ":unknown"
 }
 
 func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error {
@@ -130,6 +153,9 @@ func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error
 	}
 	env.ShardKey = item.ShardKey
 	if env.ShardKey == "" {
+		if p.bridge != nil && p.bridge.RequiresOrderedReliable() {
+			return ErrOrderingKeyRequired
+		}
 		env.ShardKey = item.EventType + ":" + env.ID
 	}
 	return p.bridge.Publish(ctx, PublishRequest{Class: ControlDelivery, External: p.external, Subject: item.Subject, Envelope: env})

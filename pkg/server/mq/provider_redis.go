@@ -65,6 +65,11 @@ func (r *RedisStreamProvider) Close() error {
 	return nil
 }
 
+// OrderedReliableInfo 声明 Redis Streams 在单 active owner 下的 ordered-reliable 能力。
+func (r *RedisStreamProvider) OrderedReliableInfo() OrderedReliableCapability {
+	return DefaultOrderedReliableCapability()
+}
+
 // Publish appends data to the Redis Stream identified by subject.
 func (r *RedisStreamProvider) Publish(ctx context.Context, subject string, data []byte, opts *PublishOptions) error {
 	if r.client == nil {
@@ -76,6 +81,9 @@ func (r *RedisStreamProvider) Publish(ctx context.Context, subject string, data 
 	}
 	if opts != nil && opts.IdempotencyKey != "" {
 		values["idempotency_key"] = opts.IdempotencyKey
+	}
+	if opts != nil && opts.OrderingKey != "" {
+		values["ordering_key"] = opts.OrderingKey
 	}
 	args := &redis.XAddArgs{
 		Stream: key,
@@ -171,8 +179,9 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	if options.ClaimInterval < 50*time.Millisecond {
 		options.ClaimInterval = 50 * time.Millisecond
 	}
+	// ordered-reliable：单条处理，失败阻断同 stream 后续消息；多实例靠 owner lease 保证单 active。
 	if options.Count <= 0 {
-		options.Count = 10
+		options.Count = 1
 	}
 	key := r.streamKey(subject)
 	err := r.client.XGroupCreateMkStream(ctx, key, options.Group, "0").Err()
@@ -197,12 +206,52 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	}, nil
 }
 
+func (r *RedisStreamProvider) ownerLockKey(subject, group string) string {
+	return r.prefix + ":ordered-owner:" + group + ":" + subject
+}
+
+func (r *RedisStreamProvider) tryAcquireOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	// TTL 略长于 claim 周期，持有者需周期性续约；崩溃后由其他实例接管。
+	ttl := options.MinIdle
+	if ttl < 2*time.Second {
+		ttl = 2 * time.Second
+	}
+	ok, err := r.client.SetNX(ctx, r.ownerLockKey(subject, options.Group), options.Consumer, ttl).Result()
+	return err == nil && ok
+}
+
+func (r *RedisStreamProvider) refreshOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	lockKey := r.ownerLockKey(subject, options.Group)
+	val, err := r.client.Get(ctx, lockKey).Result()
+	if err != nil {
+		return r.tryAcquireOwner(ctx, subject, options)
+	}
+	if val != options.Consumer {
+		return false
+	}
+	ttl := options.MinIdle
+	if ttl < 2*time.Second {
+		ttl = 2 * time.Second
+	}
+	_ = r.client.Expire(ctx, lockKey, ttl).Err()
+	return true
+}
+
+func (r *RedisStreamProvider) releaseOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) {
+	lockKey := r.ownerLockKey(subject, options.Group)
+	val, err := r.client.Get(ctx, lockKey).Result()
+	if err == nil && val == options.Consumer {
+		_ = r.client.Del(ctx, lockKey).Err()
+	}
+}
+
 func (r *RedisStreamProvider) runReliableSubscriber(
 	ctx context.Context,
 	key, subject string,
 	options ReliableSubscribeOptions,
 	handler func(*Message) error,
 ) {
+	defer r.releaseOwner(context.Background(), subject, options)
 	ticker := time.NewTicker(options.ClaimInterval)
 	defer ticker.Stop()
 	for {
@@ -210,12 +259,34 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.reclaimPending(ctx, key, subject, options, handler)
+			if r.refreshOwner(ctx, subject, options) {
+				// 仅 owner 认领超时 pending，避免多 active 并行越序。
+				if blocked := r.reclaimPending(ctx, key, subject, options, handler); blocked {
+					continue
+				}
+			}
 		default:
+		}
+		if !r.refreshOwner(ctx, subject, options) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+			continue
+		}
+		// 先排空本 consumer 的 pending，失败则不读新消息（同 key / 同 stream 失败屏障）。
+		if blocked := r.processOwnPending(ctx, key, subject, options, handler); blocked {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+			continue
 		}
 		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group: options.Group, Consumer: options.Consumer,
-			Streams: []string{key, ">"}, Count: options.Count, Block: 200 * time.Millisecond,
+			Streams: []string{key, ">"}, Count: 1, Block: 200 * time.Millisecond,
 		}).Result()
 		if err != nil {
 			if ctx.Err() != nil {
@@ -224,49 +295,82 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			continue
 		}
 		for _, stream := range entries {
-			r.handleReliableMessages(ctx, key, subject, options.Group, stream.Messages, handler)
+			_ = r.handleReliableMessages(ctx, key, subject, options.Group, stream.Messages, handler)
 		}
 	}
 }
 
+// processOwnPending 处理当前 consumer 的 PEL。返回 true 表示存在未成功消息，应阻断新消息。
+func (r *RedisStreamProvider) processOwnPending(
+	ctx context.Context,
+	key, subject string,
+	options ReliableSubscribeOptions,
+	handler func(*Message) error,
+) bool {
+	entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group: options.Group, Consumer: options.Consumer,
+		Streams: []string{key, "0"}, Count: 1, Block: 0,
+	}).Result()
+	if err != nil || len(entries) == 0 {
+		return false
+	}
+	for _, stream := range entries {
+		if len(stream.Messages) == 0 {
+			return false
+		}
+		if blocked := r.handleReliableMessages(ctx, key, subject, options.Group, stream.Messages, handler); blocked {
+			return true
+		}
+		// 还有 pending 时继续由上层循环拉取。
+		return true
+	}
+	return false
+}
+
+// reclaimPending 认领超时 pending。返回 true 表示处理失败应阻断。
 func (r *RedisStreamProvider) reclaimPending(
 	ctx context.Context,
 	key, subject string,
 	options ReliableSubscribeOptions,
 	handler func(*Message) error,
-) {
+) bool {
 	start := "0-0"
 	for {
 		messages, next, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream: key, Group: options.Group, Consumer: options.Consumer,
-			MinIdle: options.MinIdle, Start: start, Count: options.Count,
+			MinIdle: options.MinIdle, Start: start, Count: 1,
 		}).Result()
 		if err != nil || len(messages) == 0 {
-			return
+			return false
 		}
-		r.handleReliableMessages(ctx, key, subject, options.Group, messages, handler)
+		if blocked := r.handleReliableMessages(ctx, key, subject, options.Group, messages, handler); blocked {
+			return true
+		}
 		if next == "0-0" || next == start {
-			return
+			return false
 		}
 		start = next
 	}
 }
 
+// handleReliableMessages 按序处理；任一条失败则停止后续（失败屏障），返回 true。
 func (r *RedisStreamProvider) handleReliableMessages(
 	ctx context.Context,
 	key, subject, group string,
 	messages []redis.XMessage,
 	handler func(*Message) error,
-) {
+) bool {
 	for _, item := range messages {
 		data := redisMessageData(item.Values["data"])
 		messageID := item.ID
 		message := &Message{ID: messageID, Subject: subject, Data: data}
 		message.Ack = func() error { return r.client.XAck(ctx, key, group, messageID).Err() }
-		if err := handler(message); err == nil {
-			_ = message.Ack()
+		if err := handler(message); err != nil {
+			return true
 		}
+		_ = message.Ack()
 	}
+	return false
 }
 
 func redisMessageData(value interface{}) []byte {
