@@ -88,6 +88,18 @@ provider，可以用各自机制满足同一行为契约。
 Core 规定行为，不规定 provider 内部必须使用 partition、subject、queue、
 consumer group 还是 owner lease。
 
+### 3.3 顺序边界：broker 序、业务序与多写者
+
+本能力默认保证的是 **同一 OrderingKey 在 broker 侧的接受序**，不是任意业务序号：
+
+1. 同 key 的跨进程有序，以 broker 接受并持久化后的顺序为准；
+2. 业务若需要强于 broker 的业务序号（如 Bitzoom `matchSequence`），由业务
+   Inbox / cursor / 业务字段负责最终收敛，不能假设 broker 序等于业务序；
+3. 多写者并发向同一 OrderingKey 发布，不在本能力默认保证内。业务侧应约定
+   单 active publisher（例如每 market 单 actor），或与 provider 共同约定
+   序号合成 / 单写者租约；否则只保证“每个写者各自成功 publish 后的
+   broker 接受序”，不保证跨写者的业务全序。
+
 ## 4. 建议的加性 API
 
 以下名称用于表达需求，最终命名以 Core review 为准；行为契约不应弱化。
@@ -102,14 +114,26 @@ type PublishOptions struct {
 }
 ```
 
-`MQBridge.Publish` 应显式完成：
+`MQBridge.Publish` 应显式完成（默认 ExternalPublisher 路径）：
 
 ```text
-Envelope.IdempotencyKey -> PublishOptions.IdempotencyKey
-Envelope.ShardKey       -> PublishOptions.OrderingKey
+Outbox / ServiceEventBridge
+  -> ExternalPublisher (= MQBridge)
+  -> Envelope.IdempotencyKey -> PublishOptions.IdempotencyKey
+  -> Envelope.ShardKey       -> PublishOptions.OrderingKey
+  -> MQManager.Publish
 ```
 
-provider 不应通过解析业务 JSON 获取分区键或幂等键。
+provider 不应通过解析业务 JSON 获取分区键或幂等键。透传在 `MQBridge`
+内部从 Envelope 提取即可，不必为此修改 `ExternalPublisher` 接口签名。
+
+空 key fail-closed：
+
+- 未声明 ordered-reliable 时，`ShardKey` / `OrderingKey` 零值保持现有行为
+  （含 Outbox 回落到 `eventType:id` 的兼容路径）；
+- 已声明 `RequireOrderedReliableByShardKey`（或等价声明）时，空
+  `ShardKey` / `OrderingKey` 必须在发布路径直接失败，禁止静默回落到
+  每条事件唯一的伪 key，否则“看起来声明了有序，实际无跨事件顺序”。
 
 ### 4.2 可选能力接口
 
@@ -133,6 +157,11 @@ type OrderedReliableMQProvider interface {
 该接口必须是可选扩展，避免破坏现有只实现普通 Pub/Sub 或可靠 ACK 的 provider。
 不能通过 provider 名称白名单推测能力。
 
+启动检查 = 类型断言 + `OrderedReliableInfo` 字段合法 +（可选）最小 smoke；
+**行为以 conformance suite 为准**，禁止只靠 Info 自报放行生产。有序语义同时
+依赖发布侧 `OrderingKey` 透传与消费侧 `SubscribeReliable` 的实际失败阻断，
+不能只实现其中一侧。
+
 ### 4.3 服务启动声明
 
 建议由 `ServiceContext` / `ServiceEventBridge` 提供等价于以下语义的声明：
@@ -148,6 +177,7 @@ RequireOrderedReliableByShardKey
 - provider 支持可靠 ACK，但不保证同 key 顺序：fail closed；
 - 未配置外部 provider：fail closed；
 - 测试可以显式注入满足契约的 fake provider。
+- 发布时若 OrderingKey/ShardKey 为空：fail closed（见 §4.1）。
 
 ## 5. Outbox 同 key 失败屏障
 
@@ -197,8 +227,9 @@ Core 应提供所有 ordered-reliable provider 可复用的验收套件：
 8. 重投保持 EventID、payload、IdempotencyKey 和 OrderingKey；
 9. provider 不具备能力时启动检查明确失败；
 10. capability 声明与实际行为不一致时拒绝；
-11. race 门禁通过；
-12. 每个生产 provider 的真实 broker integration gate 通过。
+11. 已声明 requirement 时，空 ShardKey/OrderingKey 发布失败；
+12. race 门禁通过；
+13. 每个生产 provider 的真实 broker integration gate 通过。
 
 测试层次：
 
