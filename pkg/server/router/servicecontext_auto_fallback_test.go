@@ -23,9 +23,8 @@ import (
 
 type autoFallbackService struct{ name string }
 
-func (s *autoFallbackService) ServiceName() string                  { return s.name }
-func (*autoFallbackService) Routers() []types.IRouter               { return nil }
-func (*autoFallbackService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *autoFallbackService) ServiceName() string    { return s.name }
+func (*autoFallbackService) Routers() []types.IRouter { return nil }
 
 type autoFallbackProvider struct {
 	name             string

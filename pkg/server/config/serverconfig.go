@@ -22,21 +22,14 @@ import (
 
 type ServerConfig struct {
 	rest.RestConf
-	DataCenterID     uint
-	MachineID        uint
-	Auth             AuthSecret
-	ManageAuth       AuthSecret
-	ServerManageAuth AuthSecret
-	RunIp            string
-	ParentServerIP   string
-	// AttachServices 已由 ClusterProvider + ServiceResolver 替代。
-	// Deprecated: 仅保留旧调用链配置兼容，新服务不得再写入。
-	AttachServices        map[string]*AttachAddress
-	Debug                 bool
+	DataCenterID          uint
+	MachineID             uint
+	Auth                  AuthSecret
+	ManageAuth            AuthSecret
+	ServerManageAuth      AuthSecret
 	IsWhiteList           bool
 	WhiteList             []string
 	TrustedProxies        []string
-	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
 	MelodyConfigPath      string               `json:",optional"`
@@ -50,12 +43,6 @@ type ServerConfig struct {
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
 // ReadConfig、NewServiceDefaultConfig、Save 均必须调用此方法。
 func (con *ServerConfig) ApplyDefaults() {
-	if con.AttachServices == nil {
-		con.AttachServices = make(map[string]*AttachAddress)
-	}
-	if con.CustomerDataList == nil {
-		con.CustomerDataList = make([]*CustomerData, 0)
-	}
 	if con.WhiteList == nil {
 		con.WhiteList = make([]string, 0)
 	}
@@ -87,7 +74,7 @@ func (con *ServerConfig) Validate() error {
 	if err := con.Transport.Validate(); err != nil {
 		return err
 	}
-	if err := con.Transport.ValidateForServer(con.Cluster, con.RunIp); err != nil {
+	if err := con.Transport.ValidateForServer(con.Cluster, utils.GetLocalIP()); err != nil {
 		return err
 	}
 	if err := con.MQ.Validate(); err != nil {
@@ -178,21 +165,11 @@ func (con *ServerConfig) ReloadExternalConfigs() {
 	}
 }
 
-func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
-	for _, v := range con.CustomerDataList {
-		if v.Key == key {
-			return v
-		}
-	}
-	return nil
-}
-
 type AuthSecret struct {
 	AccessSecret  string
 	AccessExpire  int64
 	RefreshSecret string
 	RefreshExpire int64
-	Logto         LogtoConfig
 	CasDoor       CasDoorConfig
 }
 
@@ -200,21 +177,6 @@ const (
 	DefaultAccessExpireSeconds  int64 = 7200
 	DefaultRefreshExpireSeconds int64 = 2592000
 )
-
-type AttachAddress struct {
-	Name    string
-	Address string
-	Port    int
-}
-type CustomerData struct {
-	Key   string
-	Value string
-}
-type LogtoConfig struct {
-	ExpectedAudience string
-	Issuer           string
-	Enable           bool
-}
 
 const CONFIGDIR = "/etc/"
 
@@ -266,15 +228,10 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.Log.Level = "info"
 	//con.Log.Mode = "file"
 	//con.Log.Path = "logs/" + servicename
-	con.RunIp = ip
 	con.Auth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.Auth.AccessExpire = DefaultAccessExpireSeconds
 	con.Auth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
 	con.Auth.RefreshExpire = DefaultRefreshExpireSeconds
-	con.Auth.Logto = LogtoConfig{
-		ExpectedAudience: "",
-		Issuer:           "",
-	}
 	con.Auth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
@@ -283,29 +240,19 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.ManageAuth.AccessExpire = DefaultAccessExpireSeconds
 	con.ManageAuth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
 	con.ManageAuth.RefreshExpire = DefaultRefreshExpireSeconds
-	con.ManageAuth.Logto = LogtoConfig{
-		ExpectedAudience: "",
-		Issuer:           "",
-	}
 	con.ManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
 	con.ServerManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
 	con.ServerManageAuth.AccessExpire = 86400
-	con.ServerManageAuth.Logto = LogtoConfig{
-		ExpectedAudience: "",
-		Issuer:           "",
-	}
 	con.ServerManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
-	con.Debug = false
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
 	con.TrustedProxies = make([]string, 0)
-	con.CustomerDataList = make([]*CustomerData, 0)
 	con.MelodyConfigPath = ""
 	con.ApplyDefaults()
 	if err := con.Validate(); err != nil {
@@ -361,6 +308,9 @@ func migrateConfig(file string) error {
 	if migrateRemovedSocketConfig(m) {
 		changed = true
 	}
+	if migrateRetiredTopLevelConfig(m) {
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -372,6 +322,34 @@ func migrateConfig(file string) error {
 		return fmt.Errorf("write migrated config: %w", err)
 	}
 	return nil
+}
+
+// migrateRetiredTopLevelConfig 删除不再参与运行时行为的历史配置，同时保留未知字段。
+func migrateRetiredTopLevelConfig(m map[string]interface{}) bool {
+	changed := false
+	for _, key := range []string{
+		"RunIp",
+		"ParentServerIP",
+		"AttachServices",
+		"Debug",
+		"CustomerDataList",
+	} {
+		if _, ok := m[key]; ok {
+			delete(m, key)
+			changed = true
+		}
+	}
+	for _, key := range []string{"Auth", "ManageAuth", "ServerManageAuth"} {
+		auth, ok := m[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := auth["Logto"]; ok {
+			delete(auth, "Logto")
+			changed = true
+		}
+	}
+	return changed
 }
 
 // migrateRemovedSocketConfig removes retired transport selectors while leaving
@@ -591,25 +569,5 @@ func fixDurations(v reflect.Value, m map[string]interface{}) {
 				fixDurations(fv, nested)
 			}
 		}
-	}
-}
-
-// SetAttachService 写入旧静态服务地址。
-// Deprecated: 新服务使用 ClusterProvider + ServiceResolver 自动解析目标节点。
-func (con *ServerConfig) SetAttachService(name string, address string, port int) {
-	if con.AttachServices == nil {
-		con.AttachServices = make(map[string]*AttachAddress)
-	}
-	as, ok := con.AttachServices[name]
-	if ok {
-		as.Address = address
-		as.Port = port
-	} else {
-		as = &AttachAddress{
-			Name:    name,
-			Address: address,
-			Port:    port,
-		}
-		con.AttachServices[name] = as
 	}
 }

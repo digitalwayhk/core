@@ -30,7 +30,6 @@ func authRequestHandler(
 	sc *router.ServiceContext,
 	info *types.RouterInfo,
 	authType types.AuthType,
-	mode authMode,
 	next http.Handler,
 ) http.Handler {
 	if next == nil {
@@ -46,7 +45,7 @@ func authRequestHandler(
 			writePublicErrorContract(w, contract)
 			return
 		}
-		identity, claims, err := verifiedRequestIdentity(r, sc, authType, mode)
+		identity, claims, err := verifiedRequestIdentity(r, sc, authType)
 		if err == nil && identity.Provider == types.AuthProviderCasdoor {
 			if manager == nil {
 				err = requestAuthenticationError(errors.New("revocation authority unavailable"))
@@ -72,25 +71,10 @@ func verifiedRequestIdentity(
 	r *http.Request,
 	sc *router.ServiceContext,
 	authType types.AuthType,
-	mode authMode,
 ) (types.AuthIdentity, map[string]interface{}, error) {
 	if r == nil || sc == nil || sc.Config == nil {
 		return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("authentication context unavailable"))
 	}
-	if mode == authModeLogto {
-		uid, ok := r.Context().Value("uid").(string)
-		uid = strings.TrimSpace(uid)
-		if !ok || uid == "" {
-			return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("verified Logto identity missing"))
-		}
-		username, _ := r.Context().Value("uname").(string)
-		identity := types.AuthIdentity{
-			UID: uid, Username: username, AuthType: authType,
-			Provider: types.AuthProviderLogto, ProviderSubject: uid,
-		}
-		return identity, map[string]interface{}{"uid": uid, "uname": username}, nil
-	}
-
 	verified, ok := r.Context().Value(verifiedAccessContextKey{}).(verifiedAccessContext)
 	if !ok {
 		return types.AuthIdentity{}, nil, requestAuthenticationError(errors.New("verified access identity missing"))

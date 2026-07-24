@@ -25,7 +25,7 @@ func newRollbackContext(name string) *router.ServiceContext {
 	ctx := newConcurrencyTestContext(service)
 	cfg := config.NewServiceDefaultConfig(name, 0)
 	cfg.Host = "127.0.0.1"
-	cfg.RunIp = "127.0.0.1"
+	cfg.Cluster.AdvertiseAddress = "127.0.0.1"
 	cfg.DataCenterID = 1
 	cfg.Port = 0
 	cfg.Cluster.Mode = "off"

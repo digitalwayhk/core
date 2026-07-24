@@ -39,8 +39,6 @@ func TestRouterInfoCompatibilityMethodsRemain(t *testing.T) {
 	_ = info.NoticeWebSocket
 	_ = info.CleanupDeadConnections
 	_ = info.GetActiveClientCount
-	_ = info.Subscribe
-	_ = info.UnSubscribe
 	_ = info.UseCache
 	_ = types.StartPeriodicCleanup
 	_ = func(ctx context.Context) error { return types.StopPeriodicCleanup(ctx) }

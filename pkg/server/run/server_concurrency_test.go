@@ -2,7 +2,6 @@ package run
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,10 +13,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/stretchr/testify/require"
@@ -143,35 +140,8 @@ type concurrencyTestService struct {
 	started chan struct{}
 }
 
-type observeResolverTransport struct {
-	calls atomic.Int32
-}
-
-func (*observeResolverTransport) Name() string                { return "grpc" }
-func (*observeResolverTransport) Start(context.Context) error { return nil }
-func (*observeResolverTransport) Stop(context.Context) error  { return nil }
-func (*observeResolverTransport) Supports(context.Context, *types.PayLoad, string) bool {
-	return true
-}
-func (*observeResolverTransport) Health(context.Context, string) error { return nil }
-func (t *observeResolverTransport) Send(_ context.Context, _ *types.PayLoad, _ string) ([]byte, error) {
-	t.calls.Add(1)
-	return json.Marshal(&router.Response{Success: true})
-}
-
-type observeResolverSelector struct {
-	transport *observeResolverTransport
-}
-
-func (s *observeResolverSelector) Select(_ context.Context, _ *types.PayLoad, endpoints transport.TransportEndpoints) (transport.Selection, error) {
-	return transport.Selection{Transport: s.transport, Endpoint: endpoints.GRPC}, nil
-}
-
 func (s *concurrencyTestService) ServiceName() string { return s.name }
 func (s *concurrencyTestService) Routers() []types.IRouter {
-	return nil
-}
-func (s *concurrencyTestService) SubscribeRouters() []*types.ObserveArgs {
 	return nil
 }
 func (s *concurrencyTestService) Start() {
@@ -194,9 +164,7 @@ func bareWebServer() *WebServer {
 }
 
 func newConcurrencyTestContext(service *concurrencyTestService) *router.ServiceContext {
-	serverConfig := &config.ServerConfig{
-		AttachServices: make(map[string]*config.AttachAddress),
-	}
+	serverConfig := &config.ServerConfig{}
 	serverConfig.Name = service.name
 	ctx := &router.ServiceContext{
 		StateChan: make(chan bool, 1),
@@ -350,73 +318,6 @@ func TestWebServerStateCallbackAllowsNilHTMLServer(t *testing.T) {
 	webServer.AddServiceContext(ctx)
 	ctx.SetRunState(true)
 	waitForStart(t, started, name)
-}
-
-func TestLinkServiceMatchesAttachNameCaseInsensitively(t *testing.T) {
-	prefix := fmt.Sprintf("attach-case-%d", time.Now().UnixNano())
-	providerName := prefix + "-provider"
-	providerService := &concurrencyTestService{name: providerName, started: make(chan struct{}, 1)}
-	provider := newConcurrencyTestContext(providerService)
-	provider.Config.RunIp = "127.0.0.42"
-	provider.Config.Port = 18442
-
-	consumerName := prefix + "-consumer"
-	consumerService := &concurrencyTestService{name: consumerName, started: make(chan struct{}, 1)}
-	consumer := newConcurrencyTestContext(consumerService)
-	attach := &config.AttachAddress{Name: strings.ToUpper(providerName)}
-	consumer.Config.AttachServices[attach.Name] = attach
-
-	webServer := bareWebServer()
-	webServer.serviceContexts[strings.ToLower(providerName)] = provider
-	webServer.serviceContexts[strings.ToLower(consumerName)] = consumer
-	webServer.linkServiceContexts(webServer.serviceContextSnapshot())
-
-	if attach.Address != provider.Config.RunIp || attach.Port != provider.Config.Port {
-		t.Fatalf("mixed-case attach was not resolved: %#v", attach)
-	}
-}
-
-func TestLinkServiceRegistersLogicalDependencyThroughResolver(t *testing.T) {
-	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
-	provider.Start()
-	t.Cleanup(func() { require.NoError(t, provider.Close()) })
-
-	targetName := fmt.Sprintf("remote-orders-%d", time.Now().UnixNano())
-	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
-		ID: targetName + "-1", ServiceName: targetName,
-		DataCenterID: 1, MachineID: 1,
-		Address: "orders.internal", GRPCPort: 19090,
-	}))
-
-	source := newConcurrencyTestContext(&concurrencyTestService{
-		name: "logical-observer", started: make(chan struct{}, 1),
-	})
-	source.Config.AttachServices[targetName] = &config.AttachAddress{Name: targetName}
-	observer := &types.ObserveArgs{
-		Topic: "/api/orders/changed", ServiceName: targetName,
-		State: types.ObserveResponse, IsUnSub: true,
-	}
-	source.Service.AttachService = map[string]*types.ServiceAttach{
-		targetName: {
-			ServiceName: targetName,
-			ObserverRouters: map[string]*types.ObserveArgs{
-				observer.Topic: observer,
-			},
-		},
-	}
-	resolver := router.NewServiceResolver(provider, func(string) *router.ServiceContext { return nil }, "grpc")
-	t.Cleanup(resolver.Close)
-	capture := &observeResolverTransport{}
-	source.ServiceResolver = resolver
-	source.TransportSelector = &observeResolverSelector{transport: capture}
-	source.Config.Transport.MaxRetries = 1
-
-	bareWebServer().linkServiceContexts([]*router.ServiceContext{source})
-
-	require.True(t, observer.IsOk)
-	require.Equal(t, int32(1), capture.calls.Load())
-	require.Empty(t, source.Config.AttachServices[targetName].Address)
-	require.Zero(t, source.Config.AttachServices[targetName].Port)
 }
 
 func TestGetServerOptionsReturnsDeepSnapshot(t *testing.T) {

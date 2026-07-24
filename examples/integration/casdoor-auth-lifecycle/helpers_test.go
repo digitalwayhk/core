@@ -187,7 +187,7 @@ func startLifecycleApp(t *testing.T) *lifecycleApp {
 	manageYAML := writeCasdoorYAML(t, root, fake, fakeDomainForClient("manage-client"), "manage.yaml")
 	cfg := config.NewServiceDefaultConfig(name, port)
 	cfg.Host = "127.0.0.1"
-	cfg.RunIp = "127.0.0.1"
+	cfg.Cluster.AdvertiseAddress = "127.0.0.1"
 	cfg.Auth.AccessSecret = "integration-auth-access-secret"
 	cfg.Auth.RefreshSecret = "integration-auth-refresh-secret"
 	cfg.ManageAuth.AccessSecret = "integration-manage-access-secret"
@@ -322,8 +322,7 @@ func (a *lifecycleApp) webhook(t *testing.T, authType, action, subject string, b
 
 type lifecycleService struct{ name string }
 
-func (s *lifecycleService) ServiceName() string                  { return s.name }
-func (*lifecycleService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *lifecycleService) ServiceName() string { return s.name }
 func (s *lifecycleService) Routers() []types.IRouter {
 	return []types.IRouter{&publicProbe{service: s.name}, &privateProbe{service: s.name}, &manageProbe{service: s.name}}
 }

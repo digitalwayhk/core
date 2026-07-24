@@ -28,9 +28,8 @@ type openAPITestService struct {
 	routers []types.IRouter
 }
 
-func (*openAPITestService) ServiceName() string                    { return "openapi-test" }
-func (s *openAPITestService) Routers() []types.IRouter             { return s.routers }
-func (*openAPITestService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (*openAPITestService) ServiceName() string        { return "openapi-test" }
+func (s *openAPITestService) Routers() []types.IRouter { return s.routers }
 
 func TestGetOpenAPIWithoutServicesReturnsEmptyDocument(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://compat.example/api/openapi", nil)

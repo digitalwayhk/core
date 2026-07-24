@@ -51,9 +51,6 @@ func (own *ShopService) Routers() []types.IRouter {
 	return routers
 }
 
-// SubscribeRouters 返回内部服务观察订阅；本示例没有跨服务订阅。
-func (own *ShopService) SubscribeRouters() []*types.ObserveArgs { return nil }
-
 // Start 启动两个 ServiceContext 级性能组件：
 //   - OrderWriteStore：通过可靠 Group Commit 写入 Badger，再异步汇合 SQLite。
 //   - OrderReferenceCache：缓存下单所需的商品/供应商事实，失效回调统一经过 EventBridge。

@@ -12,9 +12,8 @@ import (
 
 type rateLimitContextService struct{ name string }
 
-func (s *rateLimitContextService) ServiceName() string                  { return s.name }
-func (*rateLimitContextService) Routers() []types.IRouter               { return nil }
-func (*rateLimitContextService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *rateLimitContextService) ServiceName() string    { return s.name }
+func (*rateLimitContextService) Routers() []types.IRouter { return nil }
 
 func TestServiceContextOwnsAndClosesPublicRateLimiter(t *testing.T) {
 	name := fmt.Sprintf("rate-limit-owner-%d", time.Now().UnixNano())

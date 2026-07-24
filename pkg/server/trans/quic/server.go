@@ -24,7 +24,7 @@ func NewServer(context *router.ServiceContext) *Server {
 	return &Server{
 		server: &http3.Server{
 			Handler:    setupHandler(context),
-			Addr:       context.Config.RunIp + ":" + strconv.Itoa(context.Config.Port+100),
+			Addr:       context.RuntimeAddress() + ":" + strconv.Itoa(context.Config.Port+100),
 			QuicConfig: &quic.Config{},
 		},
 		context: context,

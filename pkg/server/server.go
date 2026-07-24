@@ -27,9 +27,6 @@ func (own *SystemManage) Routers() []types.IRouter {
 	items = append(items, &public.GetMenu{})
 	return items
 }
-func (own *SystemManage) SubscribeRouters() []*types.ObserveArgs {
-	return []*types.ObserveArgs{}
-}
 func (own *SystemManage) IsCloseServerManage() bool {
 	return true
 }

@@ -114,11 +114,7 @@ func orderRuntimeIdentity() (string, string) {
 	if sc == nil {
 		return "", ""
 	}
-	address := ""
-	if sc.Config != nil && sc.Config.Cluster.AdvertiseAddress != "" {
-		address = sc.Config.Cluster.AdvertiseAddress
-	}
-	return sc.ServiceInstanceID, address
+	return sc.ServiceInstanceID, sc.RuntimeAddress()
 }
 
 // GetResponse 返回下单响应 DTO 类型。

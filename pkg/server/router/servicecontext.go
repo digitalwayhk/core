@@ -77,6 +77,7 @@ type ServiceContext struct {
 	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
 	ServiceResolver          *ServiceResolver                `json:"-"`
 	ServiceInstanceID        string
+	runtimeAddress           string
 	ownsClusterProvider      bool
 	membership               *cluster.MembershipManager     `json:"-"`
 	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
@@ -94,6 +95,23 @@ type ServiceContext struct {
 }
 
 const grpcLifecycleTimeout = 5 * time.Second
+
+// RuntimeAddress 返回当前服务实例向其他节点公布的地址。
+// Cluster.AdvertiseAddress 显式配置优先，否则使用 ServiceContext 创建时捕获的本机地址。
+func (own *ServiceContext) RuntimeAddress() string {
+	if own == nil {
+		return ""
+	}
+	if own.Config != nil {
+		if address := strings.TrimSpace(own.Config.Cluster.AdvertiseAddress); address != "" {
+			return address
+		}
+	}
+	if address := strings.TrimSpace(own.runtimeAddress); address != "" {
+		return address
+	}
+	return utils.GetLocalIP()
+}
 
 // UseResource 把实例级资源交给当前 ServiceContext 按注册逆序统一关闭。
 func (own *ServiceContext) UseResource(name string, resource ManagedResource) error {
@@ -618,27 +636,16 @@ func NewServiceContext(service types.IService) *ServiceContext {
 		requestedFingerprint = fingerprint
 	}
 	return contextRegistry.getOrInitialize(name, true, requestedFingerprint, func(sequence int) *ServiceContext {
-		sc := &ServiceContext{resources: newResourceManager()}
+		sc := &ServiceContext{resources: newResourceManager(), runtimeAddress: utils.GetLocalIP()}
 		sc.StateChan = make(chan bool, 1)
-		sc.Service = initService(service, sc)
+		sc.Service = initService(service)
 		if con == nil {
 			port := DEFAULTPORT + sequence
 			con = config.NewServiceDefaultConfig(name, port)
 			con.DataCenterID = uint(sequence) + 1
 			con.MachineID = 1
-			con.AttachServices = make(map[string]*config.AttachAddress)
-			for _, as := range sc.Service.AttachService {
-				con.SetAttachService(as.ServiceName, "", 0)
-			}
 			if err := con.Save(); err != nil {
 				panic(err)
-			}
-		} else {
-			for _, as := range sc.Service.AttachService {
-				if cas, ok := con.AttachServices[as.ServiceName]; ok {
-					as.Address = cas.Address
-					as.Port = cas.Port
-				}
 			}
 		}
 		sc.Config = con
@@ -666,9 +673,9 @@ func NewServiceContextWithConfig(service types.IService, con *config.ServerConfi
 	}
 	con = normalized
 	return contextRegistry.getOrInitialize(name, false, fingerprint, func(_ int) *ServiceContext {
-		sc := &ServiceContext{resources: newResourceManager()}
+		sc := &ServiceContext{resources: newResourceManager(), runtimeAddress: utils.GetLocalIP()}
 		sc.StateChan = make(chan bool, 1)
-		sc.Service = initService(service, sc)
+		sc.Service = initService(service)
 		sc.Config = con
 		sc.configFingerprint = fingerprint
 		initServiceContextPost(sc, service, con)
@@ -860,64 +867,13 @@ func assertServiceRoutesRegistrationMutable(owner string, routes []types.IRouter
 		route.RouterInfo().PrepareRegistration(owner)
 	}
 }
-func initService(iser types.IService, sc *ServiceContext) *types.Service {
+func initService(iser types.IService) *types.Service {
 	service := &types.Service{
-		Name:             strings.ToLower(iser.ServiceName()),
-		Routers:          iser.Routers(),
-		SubscribeRouters: iser.SubscribeRouters(),
-		AttachService:    make(map[string]*types.ServiceAttach),
-		Instance:         iser,
-	}
-	for _, sr := range service.SubscribeRouters {
-		as := addAttachService(service, sr.ServiceName)
-		as.ObserverRouters[sr.Topic] = sr
-	}
-	req := &InitRequest{}
-	for _, cs := range service.Routers {
-		safedo(cs, req)
-	}
-	if req.CallRouters != nil {
-		for path, cr := range req.CallRouters {
-			cinfo := cr.RouterInfo()
-			sname := cinfo.GetServiceName()
-			as := addAttachService(service, sname)
-			if as.CallRouters == nil {
-				as.CallRouters = make(map[string]types.IRouter)
-			}
-			as.CallRouters[path] = cr
-		}
+		Name:     strings.ToLower(iser.ServiceName()),
+		Routers:  iser.Routers(),
+		Instance: iser,
 	}
 	return service
-}
-func addAttachService(service *types.Service, tragetServiceName string) *types.ServiceAttach {
-	if _, ok := service.AttachService[tragetServiceName]; !ok {
-		service.AttachService[tragetServiceName] = &types.ServiceAttach{
-			ServiceName:     tragetServiceName,
-			ObserverRouters: make(map[string]*types.ObserveArgs),
-		}
-	}
-	return service.AttachService[tragetServiceName]
-}
-func safedo(cs types.IRouter, req types.IRequest) {
-	defer func() {
-		if err := recover(); err != nil {
-			//logx.Error(err)
-			// info := cs.RouterInfo()
-			// fmt.Println(fmt.Sprintf("服务%s的路由%s发生异常:", info.ServiceName, info.Path), err)
-		}
-	}()
-	// serviceName := req.ServiceName()
-	// path := req.GetPath()
-	// err := cs.Validation(req)
-	// if err != nil {
-	// 	logx.Error(fmt.Sprintf("服务%s的路由%s验证失败:%s", serviceName, path, err.Error()))
-	// }
-	// data, err := cs.Do(req)
-	// if err != nil {
-	// 	logx.Error(fmt.Sprintf("服务%s的路由%s执行失败:%s", serviceName, path, err.Error()))
-	// }
-	info := cs.RouterInfo()
-	SetTestResult(info.GetPath(), nil)
 }
 func GetContext(name string) *ServiceContext {
 	if name == "" {
@@ -1487,10 +1443,7 @@ func providerName(provider cluster.DiscoveryProvider) string {
 
 func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo, time.Duration) {
 	nodeID := own.clusterNodeID(own.Config.MachineID)
-	address := own.Config.RunIp
-	if own.Config.Cluster.AdvertiseAddress != "" {
-		address = own.Config.Cluster.AdvertiseAddress
-	}
+	address := own.RuntimeAddress()
 	node := &cluster.NodeInfo{
 		ID:                nodeID,
 		ServiceName:       own.Service.Name,
@@ -1644,204 +1597,6 @@ func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *t
 		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
 	}
 	return own.invokePayload(ctx, payload)
-}
-func (own *ServiceContext) SetAttachServiceAddress(name string) error {
-	if cas, ok := own.Config.AttachServices[name]; ok {
-		if as, ok := own.Service.AttachService[name]; ok {
-			as.Address = cas.Address
-			as.Port = cas.Port
-			as.IsAttach = false
-			for _, sr := range as.ObserverRouters {
-				sr.IsOk = false
-			}
-		}
-	}
-	return nil
-}
-func (own *ServiceContext) GetServerConfig(address string, port int) *config.ServerConfig {
-	payload := &types.PayLoad{
-		TraceID:       "",
-		TargetAddress: address,
-		TargetPort:    port,
-		SourcePath:    "",
-		TargetService: "config",
-		TargetPath:    "/api/servermanage/queryconfig",
-	}
-	values, err := own.Service.CallService(payload)
-	if err != nil {
-		logx.Error(err)
-		return nil
-	}
-	res := &Response{}
-	json.Unmarshal(values, res)
-	csc := &config.ServerConfig{}
-	res.GetData(csc)
-	return csc
-}
-func (own *ServiceContext) RegisterObserveSub(oa *types.ObserveArgs, info *types.TargetInfo) error {
-	as := addAttachService(own.Service, oa.ServiceName)
-	if _, ok := as.ObserverRouters[oa.Topic]; !ok {
-		ok, err := own.observeCall(oa, info)
-		if err != nil {
-			return err
-		}
-		as.IsAttach = ok
-		oa.IsOk = ok
-		as.ObserverRouters[oa.Topic] = oa
-	}
-	return nil
-}
-func (own *ServiceContext) RegisterObserve(observe types.IRouter) error {
-	info := observe.RouterInfo()
-	for _, as := range own.Service.AttachService {
-		for _, oa := range as.ObserverRouters {
-			ti := &types.TargetInfo{
-				TargetService: as.ServiceName,
-				TargetPath:    info.GetPath(),
-			}
-			ok, err := own.observeCall(oa, ti)
-			if err != nil {
-				return err
-			}
-			oa.IsOk = ok
-			as.IsAttach = ok
-		}
-	}
-	return nil
-}
-
-var observeMap map[string]*types.PayLoad = make(map[string]*types.PayLoad)
-var obseLock sync.RWMutex
-
-func addObserveMap(own *ServiceContext, payload *types.PayLoad) {
-	obseLock.Lock()
-	defer obseLock.Unlock()
-	observeMap[own.Service.Name] = payload
-}
-func removeObserveMap(own *ServiceContext, payload *types.PayLoad) {
-	obseLock.Lock()
-	defer obseLock.Unlock()
-	for k, v := range observeMap {
-		sv := v.Instance.(*types.ObserveArgs)
-		tv := payload.Instance.(*types.ObserveArgs)
-		if own.Service.Name == k && sv.Topic == tv.Topic {
-			delete(observeMap, k)
-		}
-	}
-}
-
-var runobserve sync.Once
-
-func runobservemap() {
-	for {
-		time.Sleep(time.Second * 60)
-		obseLock.Lock()
-		for k, v := range observeMap {
-			own := GetContext(k)
-			if own == nil {
-				continue
-			}
-			values, err := own.invokePayload(context.Background(), v)
-			if err != nil {
-				logx.Errorw("observe_call_failed",
-					logx.Field("service", own.Service.Name),
-					logx.Field("target_service", v.TargetService),
-					logx.Field("target_route", v.TargetPath),
-					logx.Field("error", err),
-				)
-			}
-			res := &Response{}
-			if err := json.Unmarshal(values, res); err != nil {
-				logx.Errorw("observe_response_decode_failed",
-					logx.Field("service", own.Service.Name),
-					logx.Field("target_service", v.TargetService),
-					logx.Field("error", err),
-				)
-				continue
-			}
-			if !res.Success {
-				logx.Errorw("observe_response_failed",
-					logx.Field("service", own.Service.Name),
-					logx.Field("target_service", v.TargetService),
-					logx.Field("target_route", v.TargetPath),
-				)
-			} else {
-				logx.Debugw("observe_call_completed",
-					logx.Field("service", own.Service.Name),
-					logx.Field("target_service", v.TargetService),
-					logx.Field("target_route", v.TargetPath),
-				)
-			}
-		}
-		obseLock.Unlock()
-	}
-}
-func (own *ServiceContext) observeCall(oa *types.ObserveArgs, info *types.TargetInfo) (bool, error) {
-	if oa.ServiceName == "" || oa.Topic == "" {
-		return false, errors.New("observeCall ServiceName or Topic is empty")
-	}
-	if info.TargetService == "" || info.TargetPath == "" {
-		return false, errors.New("observeCall TargetService or TargetPath is empty")
-	}
-	oa.ReceiveService = own.Service.Name
-	payload := &types.PayLoad{
-		TraceID:       "1",
-		SourceService: oa.ReceiveService,
-		TargetService: info.TargetService,
-		SourcePath:    "",
-		TargetPath:    info.TargetPath,
-		UserId:        "",
-		Auth:          false,
-		Instance:      oa,
-	}
-	values, err := own.invokePayload(context.Background(), payload)
-	if err != nil {
-		oa.Error = err
-		return false, err
-	}
-	res := &Response{}
-	json.Unmarshal(values, res)
-	if !res.Success {
-		oa.Error = errors.New(res.ErrorMessage)
-		return false, oa.Error
-	} else {
-		runobserve.Do(func() {
-			go runobservemap()
-		})
-		if oa.IsUnSub {
-			removeObserveMap(own, payload)
-		} else {
-			addObserveMap(own, payload)
-		}
-	}
-	return true, nil
-}
-
-func SendNotify(notify types.IRouter, args *types.NotifyArgs) error {
-	ctx := GetContext(args.SendService)
-	if ctx == nil {
-		return errors.New(args.SendService + "service not found")
-	}
-	info := notify.RouterInfo()
-	payload := &types.PayLoad{
-		TraceID:       args.TraceID,
-		SourceService: args.SendService,
-		TargetService: args.ReceiveService,
-		SourcePath:    args.Topic,
-		TargetPath:    info.GetPath(),
-		Auth:          false,
-		Instance:      args,
-	}
-	values, err := ctx.invokePayload(context.Background(), payload)
-	if err != nil {
-		return err
-	}
-	res := &Response{}
-	json.Unmarshal(values, res)
-	if !res.Success {
-		return res.GetError()
-	}
-	return nil
 }
 func (own *ServiceContext) CallTargetService(traceid string, router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	payload := GetPayLoad(traceid, own.Service.Name, "", "", "", router)
@@ -2140,10 +1895,7 @@ func claimProcessLocalMachineID(sc *ServiceContext, con *config.ServerConfig) (i
 }
 
 func (own *ServiceContext) clusterNodeInfo(machineID uint) *cluster.NodeInfo {
-	address := own.Config.RunIp
-	if own.Config.Cluster.AdvertiseAddress != "" {
-		address = own.Config.Cluster.AdvertiseAddress
-	}
+	address := own.RuntimeAddress()
 	return &cluster.NodeInfo{
 		ID:                own.clusterNodeID(machineID),
 		ServiceName:       own.Service.Name,

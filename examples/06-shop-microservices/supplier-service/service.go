@@ -54,9 +54,6 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	return nil
 }
 
-// SubscribeRouters 保留旧观察路由兼容入口；供应商服务内部事件统一走 EventBridge。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
-
 // OnAuth 在 TestToken 签发前幂等建立供应商资料；平台管理员不会被误建为供应商。
 func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error {
 	if args == nil || strings.TrimSpace(args.UID) == "" {

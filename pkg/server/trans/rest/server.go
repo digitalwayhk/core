@@ -14,7 +14,6 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
-	"github.com/digitalwayhk/core/pkg/server/safe/logto"
 	"github.com/digitalwayhk/core/pkg/server/trans"
 	"github.com/digitalwayhk/core/pkg/server/trans/websocket/melody"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -26,37 +25,22 @@ import (
 
 type Server struct {
 	*rest.Server
-	context       *router.ServiceContext
-	logtoHandlers *logto.HandlerFactory
-	IsWebSocket   bool
-	IsCors        bool
-	stateMu       sync.Mutex
-	lifecycleMu   sync.Mutex
-	httpServer    *http.Server
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	stopped       bool
+	context     *router.ServiceContext
+	IsWebSocket bool
+	IsCors      bool
+	stateMu     sync.Mutex
+	lifecycleMu sync.Mutex
+	httpServer  *http.Server
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	stopped     bool
 }
 
-type authMode uint8
-
-const (
-	authModeInternalJWT authMode = iota
-	authModeLogto
-)
-
-func selectAuthMode(auth config.AuthSecret) authMode {
-	if auth.Logto.Enable {
-		return authModeLogto
-	}
-	return authModeInternalJWT
-}
-
-// resolveRouteAuthPolicy 返回路由所属认证域及当前启用的认证模式。
+// resolveRouteAuthPolicy 返回路由所属认证域。
 func resolveRouteAuthPolicy(
 	rou *router.ServiceRouter,
 	path string,
-) (config.AuthSecret, types.AuthType, authMode) {
+) (config.AuthSecret, types.AuthType) {
 	auth := rou.Service.Config.Auth
 	authType := types.AuthTypeUser
 	if rou.HasRouter(path, types.ServerManagerType) {
@@ -66,7 +50,7 @@ func resolveRouteAuthPolicy(
 		auth = rou.Service.Config.ManageAuth
 		authType = types.AuthTypeManage
 	}
-	return auth, authType, selectAuthMode(auth)
+	return auth, authType
 }
 
 func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin ...string) (*Server, error) {
@@ -75,9 +59,8 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 		return nil, err
 	}
 	ser := &Server{
-		context:       context,
-		logtoHandlers: logto.NewHandlerFactory(),
-		stopCh:        make(chan struct{}),
+		context: context,
+		stopCh:  make(chan struct{}),
 	}
 	ser.IsWebSocket = isWebSocket
 	if ser.IsWebSocket {
@@ -86,7 +69,6 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	ser.IsCors = isCors
 	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
 	if err := ser.register(); err != nil {
-		ser.logtoHandlers.Close()
 		return nil, err
 	}
 	return ser, nil
@@ -190,7 +172,6 @@ func (own *Server) Stop() {
 			}
 			cancel()
 		}
-		own.logtoHandlers.Close()
 	})
 }
 func (own *Server) register() error {
@@ -220,17 +201,9 @@ func handers(own *Server, api *types.RouterInfo) error {
 	path := api.GetPath()
 	var handler http.Handler = http.HandlerFunc(RouteHandler(own.context.Router))
 	if api.GetAuth() {
-		auth, authType, mode := resolveRouteAuthPolicy(own.context.Router, path)
-		handler = authRequestHandler(own.context, api, authType, mode, handler)
-		if mode == authModeLogto {
-			authHandler, err := own.newLogtoHandler(handler.ServeHTTP, auth.Logto)
-			if err != nil {
-				return fmt.Errorf("initialize Logto authentication: %w", err)
-			}
-			handler = authHandler
-		} else {
-			handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
-		}
+		auth, authType := resolveRouteAuthPolicy(own.context.Router, path)
+		handler = authRequestHandler(own.context, api, authType, handler)
+		handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
 	}
 	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))
 
@@ -312,20 +285,6 @@ func maskClientIP(clientIP string) string {
 	return netip.PrefixFrom(addr, bits).Masked().String()
 }
 
-func newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
-	return logto.NewAuthHandler(next, logto.AuthConfig{
-		Issuer:           cfg.Issuer,
-		ExpectedAudience: cfg.ExpectedAudience,
-	})
-}
-
-func (own *Server) newLogtoHandler(next http.HandlerFunc, cfg config.LogtoConfig) (http.Handler, error) {
-	return own.logtoHandlers.NewAuthHandler(next, logto.AuthConfig{
-		Issuer:           cfg.Issuer,
-		ExpectedAudience: cfg.ExpectedAudience,
-	})
-}
-
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headers := w.Header()
@@ -372,8 +331,8 @@ func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 			return
 		}
 		if info.GetAuth() {
-			_, authType, mode := resolveRouteAuthPolicy(rou, info.GetPath())
-			identity, _, err := verifiedRequestIdentity(r, rou.Service, authType, mode)
+			_, authType := resolveRouteAuthPolicy(rou, info.GetPath())
+			identity, _, err := verifiedRequestIdentity(r, rou.Service, authType)
 			if err != nil {
 				contract := types.ResolvePublicError(err)
 				logAuthRequestDenied(rou.Service, info, authType, identity, contract)

@@ -91,3 +91,37 @@
 - `pkg/server/trans/rest/server_security_test.go`
 - `./scripts/test.sh api-compat`
 - `./scripts/test.sh release-contract`
+
+---
+
+# Logto、旧服务依赖与顶层配置删除批准
+
+- 变更 ID：`logto-legacy-service-config-removal-v1`
+- Owner：`server/config`、`server/router`、`server/trans/rest`
+- 批准日期：2026-07-25
+- 目标版本：下一个包含该删除的 MAJOR 候选版本
+
+## 批准范围
+
+1. 删除 Logto 配置、中间件、身份常量和专用 `keyfunc`、`jwt/v5` 依赖；受保护 REST 路由统一验证框架 Access Token，Casdoor 继续提供外部身份生命周期与撤销事实。
+2. 删除 `Service.AttachService`、`IService.SubscribeRouters`、`ObserveArgs`、`NotifyArgs`、Router Observe 生命周期，以及 Attach/Observe/Notify/动态设置地址的系统 API。
+3. 删除顶层持久配置 `RunIp`、`ParentServerIP`、`AttachServices`、`Debug`、`CustomerDataList`；旧 JSON 读取前幂等移除这些键和三组 Auth 下的 `Logto`，未知字段保持不变。
+4. 服务实例地址由 `ServiceContext.RuntimeAddress()` 提供，`Cluster.AdvertiseAddress` 显式配置优先；REST 监听端口仍由 `RestConf.Host/Port` 拥有。
+5. 同步跨服务调用统一使用同进程 `ServiceContext` 注册表或 `ServiceResolver`，异步事件统一使用显式 `ServiceContext.SubscribeEvent` 和 EventBridge。
+
+## 迁移要求
+
+- Logto 消费方迁移到框架 JWT；需要外部身份生命周期时使用 Casdoor。
+- 删除服务实现中的 `SubscribeRouters()`。领域事件在 `Start()` 中显式订阅，可靠跨进程事件使用 Inbox/Outbox。
+- 不再持久化服务节点地址。显式直连只允许在单次 `PayLoad.TargetAddress/TargetPort` 中表达；常规调用只提供 `TargetService`。
+- 删除旧 Attach/Observe/Notify HTTP 调用和管理界面的依赖地址编辑逻辑。
+
+## 验证证据
+
+- `internal/compat/removed_capabilities_test.go`
+- `pkg/server/config/serverconfig_removed_features_test.go`
+- `pkg/server/router/serviceresolver_test.go`
+- `pkg/server/trans/rest/authrequest_test.go`
+- `./scripts/test.sh config-contract`
+- `./scripts/test.sh public-api`
+- `./scripts/test.sh release-contract`

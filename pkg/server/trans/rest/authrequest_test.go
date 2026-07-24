@@ -57,7 +57,7 @@ func TestInternalJWTAuthorizePassesTrustedVerifiedIdentity(t *testing.T) {
 			called = true
 			verifiedRequest.Header.Del("Authorization")
 			actualIdentity, claims, err := verifiedRequestIdentity(
-				verifiedRequest, sc, types.AuthTypeUser, authModeInternalJWT,
+				verifiedRequest, sc, types.AuthTypeUser,
 			)
 			require.NoError(t, err)
 			require.Equal(t, identity.UID, actualIdentity.UID)
@@ -99,7 +99,7 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 		callsMu.Unlock()
 	})
 	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
-		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, next),
+		authRequestHandler(sc, info, types.AuthTypeUser, next),
 	)
 	request := authenticatedRequest(t, sc.Config.Auth.AccessSecret, types.AuthIdentity{
 		UID: "user-1", Username: "用户一", AuthType: types.AuthTypeUser,
@@ -123,7 +123,7 @@ func TestSecretClaimsOnlyUseVerifiedServerSideChannel(t *testing.T) {
 	sc := authRequestServiceContext(hook)
 	info := authRequestRouterInfo(types.PrivateType)
 	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
-		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 			require.Nil(t, request.Context().Value("api_key"))
 			require.Equal(t, "private-api-key", safe.VerifiedSecretClaimsFromContext(request.Context())["api_key"])
 		})),
@@ -146,7 +146,7 @@ func TestCasdoorAuthorityUnavailableRejectsProtectedRequest(t *testing.T) {
 	info := authRequestRouterInfo(types.PrivateType)
 	called := false
 	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
-		authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
 	)
@@ -169,7 +169,7 @@ func TestAuthRequestRejectsTokenFromWrongAuthDomain(t *testing.T) {
 	info := authRequestRouterInfo(types.ManageType)
 	called := false
 	handler := internalJWTAuthorize(sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
-		authRequestHandler(sc, info, types.AuthTypeManage, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
 	)
@@ -184,25 +184,28 @@ func TestAuthRequestRejectsTokenFromWrongAuthDomain(t *testing.T) {
 	require.False(t, called)
 }
 
-func TestLogtoIdentityRunsBusinessHookWithoutCasdoorAuthority(t *testing.T) {
-	called := false
-	sc := authRequestServiceContext(authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
-		called = true
-		require.Equal(t, types.AuthProviderLogto, args.Identity.Provider)
-		require.Equal(t, "logto-user", args.Identity.ProviderSubject)
-		return nil
-	}))
-	info := authRequestRouterInfo(types.PrivateType)
-	handler := authRequestHandler(sc, info, types.AuthTypeUser, authModeLogto, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	request := httptest.NewRequest(http.MethodGet, info.GetPath(), nil)
-	ctx := context.WithValue(request.Context(), "uid", "logto-user")
-	request = request.WithContext(context.WithValue(ctx, "uname", "Logto User"))
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.True(t, called)
+func TestVerifiedAccessIdentityMustMatchRouteAuthType(t *testing.T) {
+	tests := []struct {
+		name     string
+		route    types.AuthType
+		identity types.AuthType
+	}{
+		{name: "user token cannot enter manage", route: types.AuthTypeManage, identity: types.AuthTypeUser},
+		{name: "manage token cannot enter user", route: types.AuthTypeUser, identity: types.AuthTypeManage},
+		{name: "server-manage token cannot enter manage", route: types.AuthTypeManage, identity: types.AuthTypeServerManage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request = request.WithContext(context.WithValue(
+				request.Context(),
+				verifiedAccessContextKey{},
+				verifiedAccessContext{identity: types.AuthIdentity{UID: "1", AuthType: tt.identity}},
+			))
+			_, _, err := verifiedRequestIdentity(request, authRequestServiceContext(nil), tt.route)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestAuthRequestHookFailureContract(t *testing.T) {
@@ -224,7 +227,7 @@ func TestAuthRequestHookFailureContract(t *testing.T) {
 			sc.Config.Timeout = 10
 			info := authRequestRouterInfo(types.PrivateType)
 			handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
-				authRequestHandler(sc, info, types.AuthTypeUser, authModeInternalJWT, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 					t.Fatal("Hook失败时不得执行Router")
 				})),
 			)
@@ -263,7 +266,7 @@ func TestAuthRequestDeniedLogContainsRedactedIdentityDigest(t *testing.T) {
 		Provider: types.AuthProviderCasdoor, ProviderSubject: "sensitive-subject",
 	}
 	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
-		authRequestHandler(sc, authRequestRouterInfo(types.PrivateType), types.AuthTypeUser, authModeInternalJWT,
+		authRequestHandler(sc, authRequestRouterInfo(types.PrivateType), types.AuthTypeUser,
 			http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("拒绝请求不得进入Router") })),
 	)
 	recorder := httptest.NewRecorder()

@@ -30,7 +30,7 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 			if setres, ok := res.(types.ISetResponseData); ok {
 				setres.SetTraceId(own.GetTraceId())
 				setres.SetDuration(time.Since(own.startTime))
-				setres.SetHost(own.service.Config.RunIp)
+				setres.SetHost(own.service.RuntimeAddress())
 			}
 			return res
 		}
@@ -51,7 +51,7 @@ func (own *Request) NewResponse(data interface{}, err error) types.IResponse {
 		res.ErrorMessage = contract.Message
 	}
 	if own.service != nil {
-		res.Host = own.service.Config.RunIp
+		res.Host = own.service.RuntimeAddress()
 	}
 	return res
 }

@@ -16,9 +16,8 @@ type authHookTestService struct {
 	captured *types.AuthHookArgs
 }
 
-func (s *authHookTestService) ServiceName() string                  { return s.name }
-func (*authHookTestService) Routers() []types.IRouter               { return nil }
-func (*authHookTestService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *authHookTestService) ServiceName() string    { return s.name }
+func (*authHookTestService) Routers() []types.IRouter { return nil }
 func (s *authHookTestService) OnAuth(_ context.Context, args *types.AuthHookArgs) error {
 	s.captured = args
 	return nil

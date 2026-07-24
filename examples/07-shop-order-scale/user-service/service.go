@@ -33,9 +33,6 @@ func (*Service) Routers() []servertypes.IRouter {
 	}
 }
 
-// SubscribeRouters 保留旧观察路由兼容入口；内部事件订阅后续统一用 EventBridge。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
-
 // Start 订阅订单服务发布的可靠事件，用于失效买家订单缓存并通知 WebSocket。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.UserServiceName)

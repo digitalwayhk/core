@@ -17,7 +17,6 @@ case "${1:-quick}" in
   security)
     security_packages=(
       ./pkg/server/config
-      ./pkg/server/safe/logto
       ./pkg/server/safe/casdoor
       ./pkg/server/authstate
       ./pkg/server/api/public

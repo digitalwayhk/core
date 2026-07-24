@@ -15,7 +15,6 @@ func (*privateCacheService) ServiceName() string { return "performanceshop" }
 func (*privateCacheService) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{&GetOrders{}}
 }
-func (*privateCacheService) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 
 type identityRequest struct{ userID string }
 

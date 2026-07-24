@@ -454,10 +454,9 @@ func (*ShopService) Routers() []types.IRouter {
 	return routers
 }
 
-func (*ShopService) SubscribeRouters() []*types.ObserveArgs { return nil }
 ```
 
-`SubscribeRouters` 是旧 Router 生命周期观察订阅兼容入口，不是外部用户 WebSocket 订阅，也不是新业务事件订阅入口。没有内部观察者时返回 nil；新业务统一在 `Start()` 中使用 `sc.SubscribeEvent(...)`。
+`IService` 只声明稳定服务名和路由。内部异步事件统一在 `Start()` 中使用 `sc.SubscribeEvent(...)`；外部用户通知使用 WebSocket 运行时。
 
 main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。单服务运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。示例 06 为了让同进程和三进程使用完全相同的 Redis 契约，由 `bootstrap.ServiceConfig` 在组合根显式构造配置，仍不提交运行后 JSON。
 

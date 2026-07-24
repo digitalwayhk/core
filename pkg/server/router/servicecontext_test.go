@@ -22,9 +22,8 @@ import (
 // fakeService is a minimal types.IService implementation used by lifecycle tests.
 type fakeService struct{ name string }
 
-func (f *fakeService) ServiceName() string                    { return f.name }
-func (f *fakeService) Routers() []types.IRouter               { return nil }
-func (f *fakeService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (f *fakeService) ServiceName() string      { return f.name }
+func (f *fakeService) Routers() []types.IRouter { return nil }
 
 // TestNewServiceContext_SetsClusterProvider verifies that, with the default
 // auto/local configuration, NewServiceContext produces a non-nil ClusterProvider.

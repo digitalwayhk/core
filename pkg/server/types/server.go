@@ -54,12 +54,10 @@ type QuicOption struct {
 // IServer
 type IServer interface {
 	NewID() uint
-	SendNotify(args *NotifyArgs) error
 }
 type IService interface {
-	ServiceName() string              //服务名称
-	Routers() []IRouter               //服务中的业务路由，用于发布api服务
-	SubscribeRouters() []*ObserveArgs //服务中订阅的路由，用于订阅其他服务的api服务
+	ServiceName() string //服务名称
+	Routers() []IRouter  //服务中的业务路由，用于发布api服务
 }
 type IStartService interface {
 	Start() //启动服务完成时调用

@@ -177,9 +177,8 @@ func (r *mockRequest) CallTargetService(types.IRouter, *types.TargetInfo, ...fun
 // fakeManageSvc is a minimal IService used to register a ServiceContext.
 type fakeManageSvc struct{ name string }
 
-func (f *fakeManageSvc) ServiceName() string                    { return f.name }
-func (f *fakeManageSvc) Routers() []types.IRouter               { return nil }
-func (f *fakeManageSvc) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (f *fakeManageSvc) ServiceName() string      { return f.name }
+func (f *fakeManageSvc) Routers() []types.IRouter { return nil }
 
 // mustCreateContext is a test helper that creates (or retrieves the cached)
 // ServiceContext for the given service name.

@@ -226,7 +226,7 @@ func TestResolverFiltersMixedNodesByAllowedProtocols(t *testing.T) {
 	assert.Equal(t, map[string]bool{"orders-grpc": true, "orders-http": true}, selected)
 }
 
-func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing.T) {
+func TestServiceContextRemoteCallUsesDiscovery(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()
 	defer provider.Close()
@@ -243,9 +243,7 @@ func TestServiceContextRemoteCallUsesDiscoveryInsteadOfAttachServices(t *testing
 		Service:           &types.Service{Name: "users"},
 		ServiceResolver:   resolver,
 		TransportSelector: &resolverTestSelector{transport: transport},
-		Config: &config.ServerConfig{AttachServices: map[string]*config.AttachAddress{
-			serviceName: {Name: serviceName, Address: "legacy-orders", Port: 9999},
-		}},
+		Config:            &config.ServerConfig{},
 	}
 
 	response, err := source.CallService(&types.PayLoad{
@@ -287,9 +285,8 @@ type localDispatchService struct {
 	route types.IRouter
 }
 
-func (s *localDispatchService) ServiceName() string                  { return s.name }
-func (s *localDispatchService) Routers() []types.IRouter             { return []types.IRouter{s.route} }
-func (*localDispatchService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *localDispatchService) ServiceName() string      { return s.name }
+func (s *localDispatchService) Routers() []types.IRouter { return []types.IRouter{s.route} }
 
 func TestServiceContextLocalCallExecutesRegisteredTargetRouter(t *testing.T) {
 	serviceName := fmt.Sprintf("local-dispatch-target-%d", time.Now().UnixNano())
@@ -297,7 +294,7 @@ func TestServiceContextLocalCallExecutesRegisteredTargetRouter(t *testing.T) {
 	targetRoute := &localDispatchRoute{}
 	targetRoute.info = &types.RouterInfo{
 		Path: path, ServiceName: serviceName, PathType: types.PrivateType,
-		Method: "POST", Subscriber: make(map[types.ObserveState]map[string]*types.ObserveArgs),
+		Method: "POST",
 	}
 	targetRoute.info.SetInstance(targetRoute)
 	cfg := config.NewServiceDefaultConfig(serviceName, 0)

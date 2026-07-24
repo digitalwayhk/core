@@ -17,9 +17,6 @@ func (own *PersistenceService) Routers() []types.IRouter {
 	// items = append(items, dbc.Routers()...)
 	return items
 }
-func (own *PersistenceService) SubscribeRouters() []*types.ObserveArgs {
-	return []*types.ObserveArgs{}
-}
 func (own *PersistenceService) IsCloseServerManage() bool {
 	return true
 }

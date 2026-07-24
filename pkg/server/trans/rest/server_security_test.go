@@ -2,7 +2,6 @@
 package rest
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,12 +30,6 @@ func TestNormalizeCorsOriginsPreservesExplicitOrigins(t *testing.T) {
 	origins := normalizeCorsOrigins([]string{" https://admin.example.com ", "", "*"})
 
 	require.Equal(t, []string{"https://admin.example.com", "*"}, origins)
-}
-
-func TestNewLogtoHandlerRejectsInvalidConfig(t *testing.T) {
-	_, err := newLogtoHandler(func(http.ResponseWriter, *http.Request) {}, config.LogtoConfig{})
-
-	require.ErrorContains(t, err, "issuer")
 }
 
 func TestSecurityHeaders(t *testing.T) {
@@ -94,9 +87,8 @@ type nilRequestTestService struct {
 	api  types.IRouter
 }
 
-func (s *nilRequestTestService) ServiceName() string                    { return s.name }
-func (s *nilRequestTestService) Routers() []types.IRouter               { return []types.IRouter{s.api} }
-func (s *nilRequestTestService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *nilRequestTestService) ServiceName() string      { return s.name }
+func (s *nilRequestTestService) Routers() []types.IRouter { return []types.IRouter{s.api} }
 
 type nilRequestTestRouter struct {
 	info *types.RouterInfo
@@ -136,7 +128,7 @@ func TestResolveRouteAuthPolicyUsesServerManageCredentials(t *testing.T) {
 	sc.Config.ServerManageAuth.AccessSecret = "server-manage-access-secret"
 	sc.Router.AddServerRouters(sc.Service.Routers...)
 
-	auth, authType, _ := resolveRouteAuthPolicy(sc.Router, "/api/internal/openapi")
+	auth, authType := resolveRouteAuthPolicy(sc.Router, "/api/internal/openapi")
 
 	require.Equal(t, "server-manage-access-secret", auth.AccessSecret)
 	require.Equal(t, types.AuthTypeServerManage, authType)
@@ -177,23 +169,6 @@ func TestRouteHandlerAllowsVerifiedInternalJWTIdentity(t *testing.T) {
 	)
 
 	handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-}
-
-func TestRouteHandlerAllowsVerifiedLogtoIdentity(t *testing.T) {
-	const path = "/private-logto"
-	sc := newExecutableRouteHandlerTestContext(
-		"verified-logto-route-test", path, types.PrivateType, true,
-	)
-	sc.Config.Auth.Logto.Enable = true
-	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.RemoteAddr = "198.51.100.10:4321"
-	ctx := context.WithValue(request.Context(), "uid", "logto-user")
-	request = request.WithContext(context.WithValue(ctx, "uname", "Logto User"))
-	recorder := httptest.NewRecorder()
-
-	RouteHandler(sc.Router).ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 }

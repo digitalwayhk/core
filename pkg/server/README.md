@@ -103,7 +103,6 @@ func (own *GetOrder) GetResponse() interface{} {
 type IService interface {
     ServiceName() string
     Routers() []IRouter
-    SubscribeRouters() []*ObserveArgs
 }
 ```
 
@@ -130,8 +129,7 @@ CORS 启用时必须显式配置至少一个 `OriginCors`。通配符 `"*"` 只�
 - 读取或创建服务配置。
 - 生成服务 Snowflake ID。
 - 初始化服务路由表。
-- 维护服务依赖。
-- 注册 observe 订阅。
+- 维护 ServiceResolver 和显式 EventBridge 运行时。
 - 调用本地或远程服务。
 - 保存 HTTP server、socket server、Hub 等运行对象。
 - 提供路由统计查询。
@@ -142,13 +140,13 @@ CORS 启用时必须显式配置至少一个 `OriginCors`。通配符 `"*"` 只�
 
 `pkg/server/config` 当前通过 `ServerConfig` 表达服务配置，并由 `ReadConfig(servicename)` 读取 `etc/{service}.json`。配置文件不存在时，`NewServiceDefaultConfig(servicename, port)` 会创建默认配置并保存。
 
-新增配置应继续使用 `ServerConfig` 的结构化字段，不应再放入 `CustomerDataList`。推荐处理方式：
+新增配置应继续使用 `ServerConfig` 的结构化字段。推荐处理方式：
 
 1. 在 `ServerConfig` 增加结构化配置字段，例如 `Cluster`、`Transport`、`MQ`。
 2. 在 `pkg/server/config` 中拆出对应配置文件，例如 `clusterconfig.go`、`transportconfig.go`、`mqconfig.go`。
 3. `ReadConfig`、`NewServiceDefaultConfig`、`Save`、`ModifyConfig` 都应调用统一的 `ApplyDefaults()` 和 `Validate()`。
 4. 旧配置缺少新字段时必须自动补默认值，避免旧 `etc/{service}.json` 无法启动。
-5. `CustomerDataList` 只作为历史兼容读取入口，不再承载新规范配置。
+5. 不把运行时派生值或任意键值袋写入持久配置；实例地址由 `ServiceContext.RuntimeAddress()` 提供。
 
 `TrustedProxies` 必须显式配置为反向代理的 IP 或 CIDR，例如 `[]string{"127.0.0.1/32", "10.0.0.0/8"}`。默认空列表不信任 `X-Forwarded-For`/`X-Real-IP`；反代部署如不配置，转发请求不会被当作可信的本地访问。不要把客户端可直接连接的网段加入该列表。
 
@@ -170,7 +168,7 @@ server 新能力应同时规划单元测试和集成测试：
 
 - 遍历 `ServiceRouter.GetRouters()`。
 - 按 `RouterInfo.Method` 和 `RouterInfo.Path` 注册 HTTP route。
-- 对 private/manage 路由启用 JWT、Casdoor 或 Logto 鉴权。
+- 对 private/manage 路由启用框架 JWT，并按配置接入 Casdoor 生命周期。
 - 执行 IP 白名单校验。
 - 创建 `router.Request`。
 - 调用 `RouterInfo.Exec(req)`。
@@ -282,17 +280,9 @@ type IRouterHashKey interface {
 
 高频推送路由应优先实现稳定的 `IRouterHashKey`，否则只能退化为 `routePath` 级别广播，跨节点推送成本会明显上升。
 
-## Observe 订阅
+## 内部事件订阅
 
-服务可以在 `SubscribeRouters()` 返回 `types.ObserveArgs`，订阅另一个路由的请求、响应或错误事件。
-
-典型用途：
-
-- `AddOrder` 成功后通知订阅 `GetOrder` 的 WebSocket 客户端。
-- 跨服务事件通知。
-- 业务操作后的异步联动。
-
-`types.NewObserveArgs(router, types.ObserveResponse, callback)` 是最常用形式。
+服务在 `Start()` 中使用 `ServiceContext.SubscribeEvent(...)` 显式订阅领域事件。跨进程可靠事件由 EventBridge/MQ 和 Inbox/Outbox 负责；WebSocket 通知只面向最终用户，不再复用 Router Observe 生命周期。
 
 ## 内部服务调用
 
@@ -312,7 +302,6 @@ type IRouterHashKey interface {
 - JWT。
 - IP 黑白名单。
 - Casdoor 鉴权。
-- Logto 鉴权。
 - 二次验证。
 - 网关验证。
 

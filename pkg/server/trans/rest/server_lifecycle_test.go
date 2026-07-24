@@ -15,9 +15,8 @@ import (
 
 type lifecycleTestService struct{ name string }
 
-func (s *lifecycleTestService) ServiceName() string                    { return s.name }
-func (s *lifecycleTestService) Routers() []types.IRouter               { return nil }
-func (s *lifecycleTestService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *lifecycleTestService) ServiceName() string      { return s.name }
+func (s *lifecycleTestService) Routers() []types.IRouter { return nil }
 
 func TestServerStopClosesListener(t *testing.T) {
 	port := reserveTCPPort(t)

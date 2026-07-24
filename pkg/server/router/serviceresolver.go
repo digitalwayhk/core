@@ -76,10 +76,7 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 		return nil, fmt.Errorf("%w: service name is empty", ErrTargetServiceUnavailable)
 	}
 	if local := r.local(serviceName); local != nil && local.Config != nil {
-		address := local.Config.RunIp
-		if local.Config.Cluster.AdvertiseAddress != "" {
-			address = local.Config.Cluster.AdvertiseAddress
-		}
+		address := local.RuntimeAddress()
 		grpcPort := local.Config.Transport.GRPC.Port
 		return &ResolvedService{
 			Local: local,
