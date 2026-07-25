@@ -72,7 +72,6 @@ func (own *HTMLServer) Start() {
 	sfsys, _ := fs.Sub(swagger, "swagger")
 	mux := http.NewServeMux()
 	mux.Handle("/swagger/", http.StripPrefix("/swagger/", http.FileServer(http.FS(sfsys))))
-	mux.Handle(webBootstrapPath, newWebBootstrapHandler(own.manageAuthAuthority))
 
 	for _, service := range own.services {
 		for _, router := range service.GetTypeRouters(types.ManageType) {
