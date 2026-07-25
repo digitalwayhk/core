@@ -2,11 +2,9 @@ package manage
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
-	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -57,38 +55,17 @@ func (own *MenuManage) updateMenuModelAll(req types.IRequest) error {
 	if own == nil || own.DmpBase == nil {
 		return errors.New("MenuManage list unavailable")
 	}
-	items := own.GetDefaultItemsWithRequest(req)
 	list, ok := own.GetList().(*entity.ModelList[smodels.MenuModel])
 	if !ok || list == nil {
 		return errors.New("MenuManage list unavailable")
 	}
-	for _, item := range items {
-		old, err := list.SearchOne(func(where *pt.SearchItem) {
-			where.AddWhereN("Name", item.Name)
-			where.AddWhereN("Url", item.Url)
-			where.IsPreload = true
-		})
-		if err != nil {
-			return fmt.Errorf("search menu %s %s: %w", item.Name, item.Url, err)
-		}
-		if old != nil {
-			if permissionSetsChanged(old.Permissions, item.Permissions) {
-				item.DirectoryModelID = old.DirectoryModelID
-				if err := list.Remove(old); err != nil {
-					return fmt.Errorf("remove menu %s %s: %w", item.Name, item.Url, err)
-				}
-			} else {
-				continue // 如果权限数量相同，则不更新
-			}
-		}
-		if err := list.Add(item); err != nil {
-			return fmt.Errorf("add menu %s %s: %w", item.Name, item.Url, err)
-		}
-		if err := list.Save(); err != nil {
-			return fmt.Errorf("save menu %s %s: %w", item.Name, item.Url, err)
-		}
+	search := list.GetSearchItem()
+	search.Model = smodels.NewMenuModel()
+	action := list.GetDBAdapter(search)
+	if action == nil {
+		action = list.GetAction()
 	}
-	return nil
+	return syncMenusAtomic(action, own.GetDefaultItemsWithRequest(req))
 }
 
 // GetDefaultItems 保留用于兼容旧业务扩展。
