@@ -3,7 +3,6 @@ package public
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -106,21 +105,19 @@ func refreshForServiceWithDependenciesAt(
 ) (safe.TokenPairResponse, error) {
 	auth, err := authSecretForType(sc, authType)
 	if err != nil {
-		return safe.TokenPairResponse{}, refreshPublicError(
-			fmt.Errorf("%w: %v", authstate.ErrAuthorityUnavailable, err),
-		)
+		return safe.TokenPairResponse{}, err
 	}
 	identity, err := safe.ValidateRefreshToken(token, auth.RefreshSecret, authType, now)
 	if err != nil {
-		return safe.TokenPairResponse{}, refreshPublicError(err)
+		return safe.TokenPairResponse{}, err
 	}
 	remaining := int64(identity.ExpiresAt.Sub(now).Seconds())
 	if remaining <= 0 {
-		return safe.TokenPairResponse{}, refreshPublicError(errors.New("refresh token expired"))
+		return safe.TokenPairResponse{}, errors.New("Refresh Token 已过期")
 	}
 	if identity.Identity.Provider == types.AuthProviderCasdoor {
 		if err := verifyCasdoorRefreshIdentity(ctx, identity.Identity, client, authority); err != nil {
-			return safe.TokenPairResponse{}, refreshPublicError(err)
+			return safe.TokenPairResponse{}, authBoundaryError(err)
 		}
 	}
 	return issueWithSchedule(
@@ -137,32 +134,6 @@ func refreshForServiceWithDependenciesAt(
 	)
 }
 
-func refreshPublicError(err error) error {
-	switch {
-	case errors.Is(err, authstate.ErrIdentityRevoked), errors.Is(err, authstate.ErrGenerationChanged):
-		return types.NewPublicError(
-			types.ErrorKindUnauthenticated,
-			types.PublicCodeRefreshRevoked,
-			"refresh token rejected",
-			err,
-		)
-	case errors.Is(err, authstate.ErrAuthorityUnavailable):
-		return types.NewPublicError(
-			types.ErrorKindUnavailable,
-			types.PublicCodeAuthDependencyUnavailable,
-			"authentication service unavailable",
-			err,
-		)
-	default:
-		return types.NewPublicError(
-			types.ErrorKindUnauthenticated,
-			types.PublicCodeRefreshInvalid,
-			"refresh token invalid",
-			err,
-		)
-	}
-}
-
 func verifyCasdoorRefreshIdentity(
 	ctx context.Context,
 	identity types.AuthIdentity,
@@ -173,36 +144,21 @@ func verifyCasdoorRefreshIdentity(
 		return authstate.ErrAuthorityUnavailable
 	}
 	current, err := authority.Current(ctx, identity)
-	if err != nil {
-		if errors.Is(err, authstate.ErrAuthorityUnavailable) {
-			return err
-		}
-		return authstate.ErrAuthorityUnavailable
-	}
-	if current.Blocked || current.Generation != identity.Generation {
+	if err != nil || current.Blocked || current.Generation != identity.Generation {
 		return authstate.ErrIdentityRevoked
 	}
 	user, err := client.GetUser(identity.ProviderSubject)
 	if err != nil {
-		return authstate.ErrAuthorityUnavailable
+		return err
 	}
 	if err := casdoorauth.VerifyActiveUser(user, client.Organization(), identity.ProviderSubject); err != nil {
-		return authstate.ErrIdentityRevoked
+		return err
 	}
 	if strings.TrimSpace(user.Id) == "" || strings.TrimSpace(user.Id) != identity.UID {
-		return authstate.ErrIdentityRevoked
+		return casdoorauth.ErrIdentityInactive
 	}
 	confirmed, err := authority.ConfirmActive(ctx, identity, identity.Generation)
-	if errors.Is(err, authstate.ErrGenerationChanged) {
-		return authstate.ErrIdentityRevoked
-	}
-	if err != nil {
-		if errors.Is(err, authstate.ErrAuthorityUnavailable) {
-			return err
-		}
-		return authstate.ErrAuthorityUnavailable
-	}
-	if confirmed.Blocked || confirmed.Generation != identity.Generation {
+	if err != nil || confirmed.Blocked || confirmed.Generation != identity.Generation {
 		return authstate.ErrIdentityRevoked
 	}
 	return nil

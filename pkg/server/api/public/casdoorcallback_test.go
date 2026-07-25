@@ -64,24 +64,6 @@ func TestCasdoorCallbackConfirmsGenerationBeforeIssuing(t *testing.T) {
 	require.Equal(t, uint64(7), hook.captured.Identity.Generation)
 }
 
-func TestCasdoorCallbackBindsNormalizedAuthorityService(t *testing.T) {
-	hook := &authHookRecorder{}
-	sc := authTestServiceContext(hook)
-	sc.Service = &types.Service{Name: " Orders "}
-	authority := &callbackAuthorityStub{
-		current:   authstate.State{Generation: 7},
-		confirmed: authstate.State{Generation: 7},
-	}
-
-	_, err := authenticateCasdoorCallback(
-		context.Background(), sc, activeCallbackClient(), authority,
-		types.AuthTypeManage, "code", "state", time.Unix(1_900_000_000, 0).UTC(),
-	)
-
-	require.NoError(t, err)
-	require.Equal(t, "orders", hook.captured.Identity.AuthorityService)
-}
-
 func TestCasdoorCallbackAllowsVerifiedReloginAfterLogout(t *testing.T) {
 	client := activeCallbackClient()
 	authority := &callbackAuthorityStub{

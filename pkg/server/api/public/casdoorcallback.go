@@ -117,17 +117,12 @@ func authenticateCasdoorCallback(
 	if err != nil || casdoorauth.VerifyActiveUser(user, client.Organization(), claims.Name) != nil || strings.TrimSpace(user.Id) == "" {
 		return safe.TokenPairResponse{}, authBoundaryError(err)
 	}
-	authorityService := ""
-	if sc != nil && sc.Service != nil {
-		authorityService = strings.ToLower(strings.TrimSpace(sc.Service.Name))
-	}
 	identity := types.AuthIdentity{
-		UID:              strings.TrimSpace(user.Id),
-		Username:         casdoorUsername(user),
-		AuthType:         authType,
-		Provider:         types.AuthProviderCasdoor,
-		ProviderSubject:  strings.TrimSpace(user.Name),
-		AuthorityService: authorityService,
+		UID:             strings.TrimSpace(user.Id),
+		Username:        casdoorUsername(user),
+		AuthType:        authType,
+		Provider:        types.AuthProviderCasdoor,
+		ProviderSubject: strings.TrimSpace(user.Name),
 	}
 	current, err := authority.Current(ctx, identity)
 	if err != nil {

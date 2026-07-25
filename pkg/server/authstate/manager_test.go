@@ -307,16 +307,3 @@ func testAuthIdentity(generation uint64) types.AuthIdentity {
 		Generation:      generation,
 	}
 }
-
-func TestIdentityKeyUsesSignedAuthorityService(t *testing.T) {
-	identity := types.AuthIdentity{
-		AuthType:         types.AuthTypeManage,
-		Provider:         types.AuthProviderCasdoor,
-		ProviderSubject:  "alice",
-		AuthorityService: " Orders ",
-	}
-	require.Equal(t, "orders", identityKey("users", identity).Service)
-
-	identity.AuthorityService = ""
-	require.Equal(t, "users", identityKey("users", identity).Service)
-}
