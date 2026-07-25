@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,7 +277,55 @@ func authTestServiceContext(hook types.IAuthHookProvider) *router.ServiceContext
 			},
 		},
 		AuthHookProvider: hook,
+		Service:          &types.Service{Name: "orders"},
 	}
+}
+
+func TestRefreshPublicErrorClassification(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		code   int
+		status int
+	}{
+		{"invalid", errors.New("malformed refresh secret-token-value"), types.PublicCodeRefreshInvalid, 401},
+		{"revoked", authstate.ErrIdentityRevoked, types.PublicCodeRefreshRevoked, 401},
+		{"dependency", authstate.ErrAuthorityUnavailable, types.PublicCodeAuthDependencyUnavailable, 503},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			contract := types.ResolvePublicError(refreshPublicError(tc.err))
+			require.Equal(t, tc.code, contract.Code)
+			require.Equal(t, tc.status, contract.HTTPStatus)
+			require.NotContains(t, contract.Message, "secret-token-value")
+			require.NotContains(t, strings.ToLower(contract.Message), "claim")
+		})
+	}
+}
+
+func TestRefreshPreservesVerifiedAuthorityService(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	sc := authTestServiceContext(&authHookRecorder{})
+	identity := types.AuthIdentity{
+		UID: "user-1", Username: "Alice", AuthType: types.AuthTypeManage,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "alice", Generation: 4,
+		AuthorityService: "orders",
+	}
+	original, err := issueForServiceIdentityAt(context.Background(), sc, identity, types.AuthSourceCallback, nil, now)
+	require.NoError(t, err)
+
+	refreshed, err := refreshForServiceWithDependenciesAt(
+		context.Background(), sc, original.RefreshToken, types.AuthTypeManage, now.Add(time.Hour),
+		activeCallbackClient(), &callbackAuthorityStub{
+			current: authstate.State{Generation: 4}, confirmed: authstate.State{Generation: 4},
+		},
+	)
+	require.NoError(t, err)
+	verified, err := safe.ValidateAccessToken(
+		refreshed.AccessToken, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage, now.Add(time.Hour),
+	)
+	require.NoError(t, err)
+	require.Equal(t, "orders", verified.Identity.AuthorityService)
 }
 
 func decodeAuthToken(t *testing.T, tokenString, secret string) jwt.MapClaims {

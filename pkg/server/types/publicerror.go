@@ -22,6 +22,8 @@ const (
 const (
 	PublicCodeValidation      = 40001
 	PublicCodeUnauthenticated = 40100
+	PublicCodeRefreshInvalid  = 40101
+	PublicCodeRefreshRevoked  = 40102
 	PublicCodeForbidden       = 40300
 	PublicCodeNotFound        = 40400
 	PublicCodeConflict        = 40900
@@ -29,6 +31,7 @@ const (
 	PublicCodeRateLimited     = 42900
 	PublicCodeInternal        = 50000
 	PublicCodeUnavailable     = 50300
+	PublicCodeAuthDependencyUnavailable = 50301
 )
 
 type PublicErrorContract struct {
