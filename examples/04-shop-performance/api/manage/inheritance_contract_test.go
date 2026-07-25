@@ -42,6 +42,33 @@ func TestProductManageKeepsConcreteOwnerAcrossInheritance(t *testing.T) {
 	assert.Len(t, productManage.Routers(), 7)
 }
 
+func TestBaseDataManageViewCommandModelSelectRowSemantics(t *testing.T) {
+	productManage := NewProductManage(nil)
+
+	add := &view.CommandModel{Name: "Add", IsSelectRow: false, IsAlert: false}
+	productManage.ViewCommandModel(add)
+	assert.True(t, add.Visible)
+	assert.False(t, add.IsSelectRow)
+	assert.False(t, add.IsAlert)
+
+	edit := &view.CommandModel{Name: "Edit", IsSelectRow: true, IsAlert: false}
+	productManage.ViewCommandModel(edit)
+	assert.True(t, edit.IsSelectRow)
+	assert.False(t, edit.IsAlert)
+
+	enable := &view.CommandModel{Name: "EnableBaseData"}
+	productManage.ViewCommandModel(enable)
+	assert.Equal(t, "启用", enable.Title)
+	assert.True(t, enable.IsSelectRow)
+	assert.True(t, enable.IsAlert)
+
+	disable := &view.CommandModel{Name: "DisableBaseData"}
+	productManage.ViewCommandModel(disable)
+	assert.Equal(t, "禁用", disable.Title)
+	assert.True(t, disable.IsSelectRow)
+	assert.True(t, disable.IsAlert)
+}
+
 func TestProductManageCombinesParentAndConcreteFieldRules(t *testing.T) {
 	productManage := NewProductManage(nil)
 

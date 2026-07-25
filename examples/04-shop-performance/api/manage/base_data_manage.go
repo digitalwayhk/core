@@ -106,18 +106,23 @@ func (own *BaseDataManage[T]) ViewFieldModel(model interface{}, field *view.Fiel
 	}
 }
 
-// ViewCommandModel 配置通用启用和禁用按钮。
+// ViewCommandModel 配置通用启用和禁用按钮，不覆盖其他命令的默认选中行语义。
 func (own *BaseDataManage[T]) ViewCommandModel(command *view.CommandModel) {
+	if command == nil {
+		return
+	}
 	command.Visible = true
-	command.IsSelectRow = true
-	command.IsAlert = true
 	switch command.Name {
 	case "EnableBaseData":
 		command.Title = "启用"
 		command.Icon = "check"
+		command.IsSelectRow = true
+		command.IsAlert = true
 	case "DisableBaseData":
 		command.Title = "禁用"
 		command.Icon = "ban"
+		command.IsSelectRow = true
+		command.IsAlert = true
 	}
 }
 
