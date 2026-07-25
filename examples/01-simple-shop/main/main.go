@@ -14,7 +14,6 @@ import (
 func main() {
 	const authority = contract.ServiceName
 	server := run.NewWebServer()
-	server.ManageAuthAuthorityService = authority
 	server.AddIService(&simpleshop.ShopService{}, &types.ServerOption{IsWebSocket: true})
 	syncManageAuthFromAuthority(authority, "server")
 	server.Start()

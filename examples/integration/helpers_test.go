@@ -2,10 +2,36 @@ package integration
 
 import (
 	"encoding/json"
+	"net"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestReservePortRangeUsesDedicatedLowRange(t *testing.T) {
+	const (
+		count    = 4
+		rangeMin = 20000
+		rangeMax = 44999
+	)
+	base, err := reservePortRange(count)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, base, rangeMin)
+	require.LessOrEqual(t, base+count-1, rangeMax)
+
+	listeners := make([]net.Listener, 0, count)
+	t.Cleanup(func() {
+		for _, listener := range listeners {
+			_ = listener.Close()
+		}
+	})
+	for offset := 0; offset < count; offset++ {
+		listener, listenErr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(base+offset)))
+		require.NoError(t, listenErr)
+		listeners = append(listeners, listener)
+	}
+}
 
 func TestAccessTokenFromData(t *testing.T) {
 	t.Run("解析结构化响应", func(t *testing.T) {
