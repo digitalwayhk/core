@@ -32,6 +32,12 @@ func GetOpenApi(req *http.Request, services ...*router.ServiceRouter) interface{
 	return openapidoc.Generate(req, openapidoc.ExternalAudience, services...)
 }
 
+// GetOpenApiSameOrigin 返回开发期 HTMLServer 使用的同源业务文档。
+// 它不改变正式 REST OpenAPI 的按服务监听端口语义。
+func GetOpenApiSameOrigin(req *http.Request, services ...*router.ServiceRouter) interface{} {
+	return openapidoc.GenerateSameOrigin(req, openapidoc.ExternalAudience, services...)
+}
+
 // GetInternalOpenApi 返回完整业务文档，供内部兼容性检查和受保护的内部端点使用。
 func GetInternalOpenApi(req *http.Request, services ...*router.ServiceRouter) interface{} {
 	return openapidoc.Generate(req, openapidoc.InternalAudience, services...)

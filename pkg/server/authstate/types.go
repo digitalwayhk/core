@@ -99,9 +99,17 @@ func eventIdentityKey(event types.CasdoorEvent) IdentityKey {
 	}
 }
 
+// identityAuthorityService 解析撤销命名空间：优先使用签名权威服务，否则回退当前服务。
+func identityAuthorityService(managerService string, identity types.AuthIdentity) string {
+	if authority := strings.TrimSpace(identity.AuthorityService); authority != "" {
+		return strings.ToLower(authority)
+	}
+	return managerService
+}
+
 func identityKey(service string, identity types.AuthIdentity) IdentityKey {
 	return IdentityKey{
-		Service:  service,
+		Service:  identityAuthorityService(service, identity),
 		AuthType: identity.AuthType,
 		Provider: identity.Provider,
 		Subject:  identity.ProviderSubject,

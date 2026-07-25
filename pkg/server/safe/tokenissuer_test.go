@@ -2,6 +2,7 @@ package safe
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -349,4 +350,75 @@ func signTokenClaims(t *testing.T, secret string, claims jwt.MapClaims) string {
 	signed, err := token.SignedString([]byte(secret))
 	require.NoError(t, err)
 	return signed
+}
+
+func TestCasdoorTokenPreservesSignedAuthorityService(t *testing.T) {
+	issuedAt := time.Unix(1_700_000_000, 0).UTC()
+	response, err := IssueTokenPair(TokenIssueRequest{
+		Claims: NewClaims("user-1", "Alice"),
+		Identity: types.AuthIdentity{
+			UID:              "user-1",
+			Username:         "Alice",
+			AuthType:         types.AuthTypeManage,
+			Provider:         types.AuthProviderCasdoor,
+			ProviderSubject:  "alice",
+			Generation:       3,
+			AuthorityService: " Orders ",
+		},
+		AuthType:             types.AuthTypeManage,
+		IssuedAt:             issuedAt,
+		AccessSecret:         "access-secret",
+		AccessExpireSeconds:  600,
+		RefreshSecret:        "refresh-secret",
+		RefreshExpireSeconds: 3600,
+		IssueRefresh:         true,
+	})
+	require.NoError(t, err)
+
+	now := issuedAt.Add(100 * time.Second)
+	access, err := ValidateAccessToken(response.AccessToken, "access-secret", types.AuthTypeManage, now)
+	require.NoError(t, err)
+	refresh, err := ValidateRefreshToken(response.RefreshToken, "refresh-secret", types.AuthTypeManage, now)
+	require.NoError(t, err)
+	require.Equal(t, "orders", access.Identity.AuthorityService)
+	require.Equal(t, "orders", refresh.Identity.AuthorityService)
+}
+
+func TestNonCasdoorTokenRejectsAuthorityServiceClaim(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	for _, tokenUse := range []string{"access", "refresh"} {
+		t.Run(tokenUse, func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"uid": "user-1", "uname": "Alice", "auth_type": "manage",
+				"token_use": tokenUse, "auth_authority_service": "orders",
+				"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+			}
+			token := signTokenClaims(t, tokenUse+"-secret", claims)
+			var err error
+			if tokenUse == "access" {
+				_, err = ValidateAccessToken(token, "access-secret", types.AuthTypeManage, now.Add(time.Minute))
+			} else {
+				_, err = ValidateRefreshToken(token, "refresh-secret", types.AuthTypeManage, now.Add(time.Minute))
+			}
+			require.ErrorContains(t, err, "auth_authority_service")
+		})
+	}
+}
+
+func TestCasdoorTokenRejectsAmbiguousAuthorityService(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	for _, authority := range []interface{}{"", "   ", "\t"} {
+		t.Run(fmt.Sprintf("%q", authority), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"uid": "user-1", "uname": "Alice", "auth_type": "manage",
+				"token_use": "access", "auth_provider": "casdoor",
+				"provider_subject": "alice", "auth_generation": 3,
+				"auth_authority_service": authority,
+				"iat":                    now.Unix(), "exp": now.Add(time.Hour).Unix(),
+			}
+			token := signTokenClaims(t, "access-secret", claims)
+			_, err := ValidateAccessToken(token, "access-secret", types.AuthTypeManage, now.Add(time.Minute))
+			require.ErrorContains(t, err, "auth_authority_service")
+		})
+	}
 }

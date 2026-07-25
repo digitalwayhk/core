@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/golang-jwt/jwt/v4"
 )
+
+const authAuthorityServiceClaim = "auth_authority_service"
 
 // TokenPairResponse 是 Callback、TestToken 和 Refresh 共用的 Token 响应。
 type TokenPairResponse struct {
@@ -58,7 +61,8 @@ type AccessTokenIdentity struct {
 
 var reservedTokenClaims = map[string]struct{}{
 	"uid": {}, "uname": {}, "auth_type": {}, "token_use": {}, "iat": {}, "exp": {},
-	"auth_provider": {}, "provider_subject": {}, "auth_generation": {}, "args": {}, "secret_args": {},
+	"auth_provider": {}, "provider_subject": {}, "auth_generation": {},
+	authAuthorityServiceClaim: {}, "args": {}, "secret_args": {},
 }
 
 // IssueTokenPair 使用同一 IssuedAt 颁发 Access Token 和可选的 Refresh Token。
@@ -150,6 +154,9 @@ func validateIssueIdentity(req TokenIssueRequest) error {
 	if identity.AuthType != "" && identity.AuthType != req.AuthType {
 		return errors.New("Token Identity AuthType与签发类型不一致")
 	}
+	if strings.TrimSpace(identity.AuthorityService) != "" && identity.Provider != types.AuthProviderCasdoor {
+		return errors.New("非Casdoor Token Identity不能携带AuthorityService")
+	}
 	if identity.Provider == "" {
 		if identity.ProviderSubject != "" || identity.Generation != 0 {
 			return errors.New("Token Identity Provider不完整")
@@ -173,6 +180,9 @@ func addIdentityClaims(claims jwt.MapClaims, identity types.AuthIdentity) {
 	claims["provider_subject"] = identity.ProviderSubject
 	if identity.Provider == types.AuthProviderCasdoor {
 		claims["auth_generation"] = identity.Generation
+		if authority := strings.ToLower(strings.TrimSpace(identity.AuthorityService)); authority != "" {
+			claims[authAuthorityServiceClaim] = authority
+		}
 	}
 }
 
@@ -326,6 +336,7 @@ func tokenIdentity(
 	subject, subjectOK := subjectValue.(string)
 	generationValue, generationPresent := claims["auth_generation"]
 	generation, generationOK := numericUint(generationValue)
+	authorityValue, authorityPresent := claims[authAuthorityServiceClaim]
 
 	if providerPresent && (!providerOK || provider == "") {
 		return types.AuthIdentity{}, errors.New("auth_provider无效")
@@ -342,16 +353,31 @@ func tokenIdentity(
 	if provider != types.AuthProviderCasdoor && generationPresent {
 		return types.AuthIdentity{}, errors.New("非Casdoor Token不能携带auth_generation")
 	}
+	authorityService := ""
+	if authorityPresent {
+		if provider != types.AuthProviderCasdoor {
+			return types.AuthIdentity{}, errors.New("非Casdoor Token不能携带auth_authority_service")
+		}
+		authority, ok := authorityValue.(string)
+		if !ok {
+			return types.AuthIdentity{}, errors.New("auth_authority_service无效")
+		}
+		authorityService = strings.ToLower(strings.TrimSpace(authority))
+		if authorityService == "" {
+			return types.AuthIdentity{}, errors.New("auth_authority_service无效")
+		}
+	}
 
 	return types.AuthIdentity{
-		UID:             uid,
-		Username:        username,
-		AuthType:        authType,
-		Provider:        provider,
-		ProviderSubject: subject,
-		Generation:      generation,
-		IssuedAt:        time.Unix(issuedAt, 0).UTC(),
-		ExpiresAt:       time.Unix(expiresAt, 0).UTC(),
+		UID:              uid,
+		Username:         username,
+		AuthType:         authType,
+		Provider:         provider,
+		ProviderSubject:  subject,
+		Generation:       generation,
+		AuthorityService: authorityService,
+		IssuedAt:         time.Unix(issuedAt, 0).UTC(),
+		ExpiresAt:        time.Unix(expiresAt, 0).UTC(),
 	}, nil
 }
 

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"reflect"
 	"runtime/debug"
-	"strconv"
-	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/internal/openapiutil"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -29,6 +27,16 @@ const (
 
 // Generate 使用同一套规则生成外部或内部 OpenAPI 文档。
 func Generate(req *http.Request, audience Audience, srs ...*router.ServiceRouter) *openapi3.T {
+	return generate(req, audience, false, srs...)
+}
+
+// GenerateSameOrigin 为开发期 HTMLServer 生成同源 OpenAPI 文档。
+// 正式业务 REST 文档仍由 Generate 按各服务监听端口生成。
+func GenerateSameOrigin(req *http.Request, audience Audience, srs ...*router.ServiceRouter) *openapi3.T {
+	return generate(req, audience, true, srs...)
+}
+
+func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*router.ServiceRouter) *openapi3.T {
 	doc := &openapi3.T{}
 	doc.OpenAPI = "3.0.1"
 	doc.Info = &openapi3.Info{
@@ -43,22 +51,26 @@ func Generate(req *http.Request, audience Audience, srs ...*router.ServiceRouter
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
 	doc.Paths = openapi3.NewPaths()
 
-	host := req.Host
-	if strings.Index(host, ":") > 0 {
-		host = host[:strings.Index(host, ":")]
-	}
 	for _, r := range srs {
+		if r == nil || r.Service == nil || r.Service.Service == nil {
+			continue
+		}
 		if r.Service.Service.Name == "server" {
 			continue
 		}
 
 		con := r.Service.Config
-		var server *openapi3.Server
+		port := 0
+		if con != nil {
+			port = con.Port
+		}
+		serverURL := serviceServerURL(req, port)
+		if sameOrigin {
+			serverURL = sameOriginServerURL(req)
+		}
+		server := &openapi3.Server{URL: serverURL}
 		tagdesc := ""
-		if req.Header.Get("X-Forwarded-Proto") == "https" {
-			server = &openapi3.Server{URL: "https://" + host + "/"}
-		} else {
-			server = &openapi3.Server{URL: "http://" + host + ":" + strconv.Itoa(con.Port) + "/"}
+		if !sameOrigin && requestScheme(req) != "https" {
 			tagdesc = server.URL
 		}
 		doc.Tags = append(doc.Tags, &openapi3.Tag{Name: r.Service.Service.Name, Description: tagdesc})

@@ -62,14 +62,15 @@ type IAuthHookProvider interface {
 // AuthIdentity 是签名验证后可在认证边界间传递的规范身份。
 // Provider 为空表示框架内建或测试 Token，不执行 Casdoor 世代校验。
 type AuthIdentity struct {
-	UID             string
-	Username        string
-	AuthType        AuthType
-	Provider        string
-	ProviderSubject string
-	Generation      uint64
-	IssuedAt        time.Time
-	ExpiresAt       time.Time
+	UID              string
+	Username         string
+	AuthType         AuthType
+	Provider         string
+	ProviderSubject  string
+	Generation       uint64
+	AuthorityService string
+	IssuedAt         time.Time
+	ExpiresAt        time.Time
 }
 
 // AuthRequestArgs 是业务 Router 执行前传给服务授权 Hook 的不可变快照。

@@ -28,34 +28,37 @@ import (
 
 type WebServer struct {
 	sync.RWMutex
-	serviceContexts  map[string]*router.ServiceContext
-	serverOption     map[string]*types.ServerOption
-	childServer      map[int]*WebServer
-	htmls            *HTMLServer
-	ViewPort         int
-	Port             int
-	GRPCPort         int
-	isRun            bool
-	registryVersion  uint64
-	optionApplyMu    sync.Mutex
-	initOnce         sync.Once
-	endOnce          sync.Once
-	initializing     atomic.Bool
-	startOnce        sync.Once
-	runMu            sync.Mutex
-	runOnce          sync.Once
-	runLifecycleOnce sync.Once
-	shutdownOnce     sync.Once
-	runReadyOnce     sync.Once
-	runDoneOnce      sync.Once
-	stopCloseOnce    sync.Once
-	runStarted       atomic.Bool
-	stopped          atomic.Bool
-	runReady         chan struct{}
-	runDone          chan struct{}
-	stopCh           chan struct{}
-	group            *service.ServiceGroup
-	saveConfig       func(*config.ServerConfig) error
+	serviceContexts map[string]*router.ServiceContext
+	serverOption    map[string]*types.ServerOption
+	childServer     map[int]*WebServer
+	htmls           *HTMLServer
+	ViewPort        int
+	// ManageAuthAuthorityService 指定 HTMLServer 使用的 Manage Auth 权威服务名。
+	// 仅有一个 Manage 服务时可留空自动选择；多个 Manage 服务时必须显式配置。
+	ManageAuthAuthorityService string
+	Port                       int
+	GRPCPort                   int
+	isRun                      bool
+	registryVersion            uint64
+	optionApplyMu              sync.Mutex
+	initOnce                   sync.Once
+	endOnce                    sync.Once
+	initializing               atomic.Bool
+	startOnce                  sync.Once
+	runMu                      sync.Mutex
+	runOnce                    sync.Once
+	runLifecycleOnce           sync.Once
+	shutdownOnce               sync.Once
+	runReadyOnce               sync.Once
+	runDoneOnce                sync.Once
+	stopCloseOnce              sync.Once
+	runStarted                 atomic.Bool
+	stopped                    atomic.Bool
+	runReady                   chan struct{}
+	runDone                    chan struct{}
+	stopCh                     chan struct{}
+	group                      *service.ServiceGroup
+	saveConfig                 func(*config.ServerConfig) error
 }
 
 func (own *WebServer) persistConfig(cfg *config.ServerConfig) error {
@@ -386,8 +389,13 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 			return nil, fmt.Errorf("初始化服务配置失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
 	}
+	authority, err := own.resolveViewManageAuthAuthority(ordered)
+	if err != nil {
+		return nil, fmt.Errorf("初始化开发视图管理认证失败：%w", err)
+	}
 	htmls := NewHTMLServer(own.ViewPort)
 	htmls.Parent = own
+	htmls.SetManageAuthAuthority(authority)
 	own.Lock()
 	own.htmls = htmls
 	own.Unlock()
@@ -418,8 +426,29 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 		}
 		htmls.AddServiceRouter(ctx.Router)
 	}
+	if own.ViewPort > 0 {
+		if err := htmls.Prepare(); err != nil {
+			rollback()
+			own.Lock()
+			if own.htmls == htmls {
+				own.htmls = nil
+			}
+			own.Unlock()
+			return nil, fmt.Errorf("准备 Web 路由失败：%w", err)
+		}
+	}
 	return constructed, nil
 }
+
+func (own *WebServer) resolveViewManageAuthAuthority(
+	contexts []*router.ServiceContext,
+) (*manageAuthAuthority, error) {
+	if own.ViewPort <= 0 {
+		return nil, nil
+	}
+	return resolveManageAuthAuthority(contexts, own.ManageAuthAuthorityService)
+}
+
 func (own *WebServer) serverArgs() {
 	port := flag.Int("p", router.DEFAULTPORT, "运行端口,默认8080")
 	grpcPort := flag.Int("grpc", 0, "覆盖gRPC服务端口,为0时使用各服务配置")

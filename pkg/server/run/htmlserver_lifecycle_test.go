@@ -12,6 +12,7 @@ import (
 func TestHTMLServerStopClosesListenerAndUnblocksStart(t *testing.T) {
 	port := reserveHTMLServerPort(t)
 	server := NewHTMLServer(port)
+	require.NoError(t, server.Prepare())
 	server.Isstart <- true
 
 	startDone := make(chan struct{})
@@ -30,6 +31,8 @@ func TestHTMLServerStopClosesListenerAndUnblocksStart(t *testing.T) {
 func TestHTMLServersUseIndependentMuxes(t *testing.T) {
 	first := NewHTMLServer(reserveHTMLServerPort(t))
 	second := NewHTMLServer(reserveHTMLServerPort(t))
+	require.NoError(t, first.Prepare())
+	require.NoError(t, second.Prepare())
 	first.Isstart <- true
 	second.Isstart <- true
 
