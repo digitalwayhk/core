@@ -2,6 +2,7 @@ package manage
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
@@ -52,9 +53,15 @@ func (own *MenuManage) ViewFieldModel(model interface{}, field *view.FieldModel)
 		}
 	}
 }
-func (own *MenuManage) updateMenuModelAll(req types.IRequest) {
+func (own *MenuManage) updateMenuModelAll(req types.IRequest) error {
+	if own == nil || own.DmpBase == nil {
+		return errors.New("MenuManage list unavailable")
+	}
 	items := own.GetDefaultItemsWithRequest(req)
-	list := own.GetList().(*entity.ModelList[smodels.MenuModel])
+	list, ok := own.GetList().(*entity.ModelList[smodels.MenuModel])
+	if !ok || list == nil {
+		return errors.New("MenuManage list unavailable")
+	}
 	for _, item := range items {
 		old, err := list.SearchOne(func(where *pt.SearchItem) {
 			where.AddWhereN("Name", item.Name)
@@ -62,28 +69,26 @@ func (own *MenuManage) updateMenuModelAll(req types.IRequest) {
 			where.IsPreload = true
 		})
 		if err != nil {
-			continue
+			return fmt.Errorf("search menu %s %s: %w", item.Name, item.Url, err)
 		}
 		if old != nil {
-			if len(old.Permissions) != len(item.Permissions) {
+			if permissionSetsChanged(old.Permissions, item.Permissions) {
 				item.DirectoryModelID = old.DirectoryModelID
 				if err := list.Remove(old); err != nil {
-					logx.Errorf("Remove old menu item error: %v", err)
-					continue
+					return fmt.Errorf("remove menu %s %s: %w", item.Name, item.Url, err)
 				}
 			} else {
 				continue // 如果权限数量相同，则不更新
 			}
 		}
 		if err := list.Add(item); err != nil {
-			logx.Errorf("Add menu item error: %v", err)
-			continue
+			return fmt.Errorf("add menu %s %s: %w", item.Name, item.Url, err)
 		}
 		if err := list.Save(); err != nil {
-			logx.Errorf("Save menu item error: %v", err)
-			continue
+			return fmt.Errorf("save menu %s %s: %w", item.Name, item.Url, err)
 		}
 	}
+	return nil
 }
 
 // GetDefaultItems 保留用于兼容旧业务扩展。
@@ -207,8 +212,12 @@ func (own *UpdateMenu) Do(req types.IRequest) (interface{}, error) {
 	if own.GetInstance() == nil {
 		return nil, errors.New("UpdateMenu instance is nil")
 	}
-	if mm, ok := own.GetInstance().(*MenuManage); ok {
-		mm.updateMenuModelAll(req)
+	mm, ok := own.GetInstance().(*MenuManage)
+	if !ok {
+		return nil, errors.New("UpdateMenu instance must be MenuManage")
+	}
+	if err := mm.updateMenuModelAll(req); err != nil {
+		return nil, err
 	}
 	return nil, nil
 }
