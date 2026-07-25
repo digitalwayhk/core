@@ -67,7 +67,7 @@ func manageAuthorityContext(t *testing.T, name string, withManage bool) *router.
 	}
 	service := &manageAuthorityTestService{name: name, route: route}
 	ctx := &router.ServiceContext{
-		Config:  cfg,
+		Config: cfg,
 		Service: &types.Service{Name: name, Routers: service.Routers(), Instance: service},
 	}
 	ctx.Router = router.NewServiceRouter(ctx, service)

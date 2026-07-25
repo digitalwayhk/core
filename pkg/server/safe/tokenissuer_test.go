@@ -414,7 +414,7 @@ func TestCasdoorTokenRejectsAmbiguousAuthorityService(t *testing.T) {
 				"token_use": "access", "auth_provider": "casdoor",
 				"provider_subject": "alice", "auth_generation": 3,
 				"auth_authority_service": authority,
-				"iat":                    now.Unix(), "exp": now.Add(time.Hour).Unix(),
+				"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
 			}
 			token := signTokenClaims(t, "access-secret", claims)
 			_, err := ValidateAccessToken(token, "access-secret", types.AuthTypeManage, now.Add(time.Minute))
