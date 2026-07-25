@@ -17,9 +17,8 @@ import (
 
 type shutdownRegistryService struct{ name string }
 
-func (s *shutdownRegistryService) ServiceName() string                  { return s.name }
-func (*shutdownRegistryService) Routers() []types.IRouter               { return nil }
-func (*shutdownRegistryService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *shutdownRegistryService) ServiceName() string    { return s.name }
+func (*shutdownRegistryService) Routers() []types.IRouter { return nil }
 
 type shutdownBlockingProvider struct {
 	entered chan struct{}

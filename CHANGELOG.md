@@ -23,6 +23,7 @@
 - 路由缓存默认使用 local L1，只有调用 `UseCache` 的 API 会写入；L1 按进程有效内存自动解析共享字节预算，并在所有层统一返回 `json.RawMessage`。
 - BREAKING: 内部同步调用默认改为 gRPC，节点发现发布 `GRPCPort`；HTTP 只允许显式发送前 fallback，发送开始后不跨协议重试。迁移说明：`docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
 - BREAKING: OpenAPI 改为匿名 `/api/openapi` 外部视图和使用 `ServerManageAuth` 的 `/api/internal/openapi` 内部视图；移除 `/api/servermanage/openapi`。迁移说明：`docs/codex/BREAKING_CHANGE_APPROVAL.md` 的 `openapi-audience-split-v1`。
+- BREAKING: REST 认证移除 Logto，仅保留框架 JWT 与 Casdoor 身份生命周期；同步服务发现统一使用 `ServiceResolver`，异步事件统一使用 EventBridge。
 
 ### Deprecated
 
@@ -37,6 +38,9 @@
 - 自定义内部 Socket 的两个实现包、`-socket` 参数、Socket 配置/发现/payload 字段、旧 `GRPCTransportConfig.Enable` 及相关公开 Go API。WebSocket 与 Unix socket 不受影响。
 - 未使用的实验性 `utils.Publisher`。进程内事件改用 `pkg/server/event.Stream`，服务事件改用 `ServiceContext` 管理的 EventBridge。
 - 重复的 `public.OpenAPI` 生成器及 `/api/servermanage/openapi`；内部调用方迁移到 `/api/internal/openapi`。
+- Logto 配置、中间件、身份常量及专用 JWT/JWKS 依赖。
+- `Service.AttachService`、`SubscribeRouters`、Router Observe/Notify 类型与系统路由，以及动态设置服务地址 API。
+- 顶层配置 `RunIp`、`ParentServerIP`、`AttachServices`、`Debug`、`CustomerDataList`；旧 JSON 在读取时幂等删除这些键。
 
 ### Fixed
 
@@ -47,7 +51,7 @@
 
 ### Security
 
-- 默认 REST 错误响应不再暴露内部 cause；代理、本地访问、Logto 和 CORS 使用 fail-closed 策略。
+- 默认 REST 错误响应不再暴露内部 cause；代理、本地访问、JWT/Casdoor 和 CORS 使用 fail-closed 策略。
 - 匿名 OpenAPI 不再暴露内部专用路由和 `x-internal-callers`；内部文档使用独立 ServerManage 认证域并禁止缓存。
 - 未同步 Badger 数据不再被损坏自动重建或 TTL 静默删除，关闭积压会返回错误。
 - Casdoor Webhook 使用独立 Secret、请求上限、域绑定和幂等持久化；REST/WebSocket 每次认证均校验撤销权威，内部 JWT 失败日志不再转储 Authorization Header。

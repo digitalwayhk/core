@@ -12,5 +12,4 @@ func TestPaymentShopServiceRegistersCompleteExample(t *testing.T) {
 
 	assert.Equal(t, contract.ServiceName, service.ServiceName())
 	assert.Len(t, service.Routers(), 26)
-	assert.Nil(t, service.SubscribeRouters())
 }

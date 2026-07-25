@@ -25,10 +25,7 @@ const (
 	AuthTypeServerManage AuthType = "servermanage"
 )
 
-const (
-	AuthProviderCasdoor = "casdoor"
-	AuthProviderLogto   = "logto"
-)
+const AuthProviderCasdoor = "casdoor"
 
 // AuthSource 标识本次颁发请求的发起入口。
 type AuthSource string

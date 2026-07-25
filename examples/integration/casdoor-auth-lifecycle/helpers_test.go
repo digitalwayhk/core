@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -187,7 +188,7 @@ func startLifecycleApp(t *testing.T) *lifecycleApp {
 	manageYAML := writeCasdoorYAML(t, root, fake, fakeDomainForClient("manage-client"), "manage.yaml")
 	cfg := config.NewServiceDefaultConfig(name, port)
 	cfg.Host = "127.0.0.1"
-	cfg.RunIp = "127.0.0.1"
+	cfg.Cluster.AdvertiseAddress = "127.0.0.1"
 	cfg.Auth.AccessSecret = "integration-auth-access-secret"
 	cfg.Auth.RefreshSecret = "integration-auth-refresh-secret"
 	cfg.ManageAuth.AccessSecret = "integration-manage-access-secret"
@@ -233,11 +234,28 @@ func writeCasdoorYAML(t *testing.T, root string, fake *fakeCasdoor, domain fakeD
 
 func reservePort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
-	require.NoError(t, listener.Close())
-	return port
+	const (
+		firstSafeHTTPPort = 20000
+		safeHTTPPortCount = 30000
+		defaultGRPCOffset = 10000
+	)
+	start := int(time.Now().UnixNano() % safeHTTPPortCount)
+	for attempt := 0; attempt < safeHTTPPortCount; attempt++ {
+		port := firstSafeHTTPPort + (start+attempt)%safeHTTPPortCount
+		httpListener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		grpcListener, grpcErr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port+defaultGRPCOffset)))
+		if grpcErr == nil {
+			require.NoError(t, grpcListener.Close())
+			require.NoError(t, httpListener.Close())
+			return port
+		}
+		require.NoError(t, httpListener.Close())
+	}
+	t.Fatal("无法申请可安全派生默认 gRPC 端口的 HTTP 端口")
+	return 0
 }
 
 func waitForHTTP(t *testing.T, endpoint string) {
@@ -322,8 +340,7 @@ func (a *lifecycleApp) webhook(t *testing.T, authType, action, subject string, b
 
 type lifecycleService struct{ name string }
 
-func (s *lifecycleService) ServiceName() string                  { return s.name }
-func (*lifecycleService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *lifecycleService) ServiceName() string { return s.name }
 func (s *lifecycleService) Routers() []types.IRouter {
 	return []types.IRouter{&publicProbe{service: s.name}, &privateProbe{service: s.name}, &manageProbe{service: s.name}}
 }

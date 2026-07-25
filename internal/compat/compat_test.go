@@ -34,9 +34,8 @@ type fixtureService struct {
 	routers []types.IRouter
 }
 
-func (s *fixtureService) ServiceName() string                    { return s.name }
-func (s *fixtureService) Routers() []types.IRouter               { return s.routers }
-func (s *fixtureService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *fixtureService) ServiceName() string      { return s.name }
+func (s *fixtureService) Routers() []types.IRouter { return s.routers }
 
 func newFixtureServiceRouter(name string, port int, specs ...RouteEntry) *router.ServiceRouter {
 	routers := make([]types.IRouter, 0, len(specs))
@@ -51,7 +50,6 @@ func newFixtureServiceRouter(name string, port int, specs ...RouteEntry) *router
 			InternalCallers: append([]string(nil), spec.InternalCallers...),
 			StructName:      "fixtureRouter",
 			InstanceName:    "fixtureRouter",
-			Subscriber:      make(map[types.ObserveState]map[string]*types.ObserveArgs),
 		}
 		api.info.SetInstance(api)
 		routers = append(routers, api)

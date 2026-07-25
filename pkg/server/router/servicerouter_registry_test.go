@@ -1,7 +1,6 @@
 package router_test
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,7 +11,6 @@ import (
 	privateapi "github.com/digitalwayhk/core/examples/01-simple-shop/api/private"
 	publicfixture "github.com/digitalwayhk/core/internal/compat/fixture/api/public"
 	"github.com/digitalwayhk/core/pkg/server/config"
-	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -33,7 +31,6 @@ func (s *registeredRouterService) ServiceName() string { return s.name }
 func (*registeredRouterService) Routers() []types.IRouter {
 	return []types.IRouter{&privateapi.GetOrders{}}
 }
-func (*registeredRouterService) SubscribeRouters() []*types.ObserveArgs { return nil }
 
 type registeredManageService struct {
 	name string
@@ -43,7 +40,6 @@ func (s *registeredManageService) ServiceName() string { return s.name }
 func (*registeredManageService) Routers() []types.IRouter {
 	return manageapi.NewProductManage().Routers()
 }
-func (*registeredManageService) SubscribeRouters() []*types.ObserveArgs { return nil }
 
 type fixedRouter struct {
 	info *types.RouterInfo
@@ -59,19 +55,8 @@ type fixedRouterService struct {
 	route types.IRouter
 }
 
-func (s *fixedRouterService) ServiceName() string                  { return s.name }
-func (s *fixedRouterService) Routers() []types.IRouter             { return []types.IRouter{s.route} }
-func (*fixedRouterService) SubscribeRouters() []*types.ObserveArgs { return nil }
-
-type recordingEventRuntime struct {
-	subscriptions int
-}
-
-func (r *recordingEventRuntime) Subscribe(string, event.Handler) (func(), error) {
-	r.subscriptions++
-	return func() {}, nil
-}
-func (*recordingEventRuntime) Publish(context.Context, event.PublishRequest) error { return nil }
+func (s *fixedRouterService) ServiceName() string      { return s.name }
+func (s *fixedRouterService) Routers() []types.IRouter { return []types.IRouter{s.route} }
 
 type recordingCacheRuntime struct {
 	enabled int
@@ -224,7 +209,6 @@ func TestServiceRouterAddRoutesRejectsFrozenRouterOwnedByAnotherServiceWithoutMu
 
 func TestServiceRouterSameOwnerReuseDoesNotRebindRuntimes(t *testing.T) {
 	const owner = "same-owner"
-	eventRuntime := &recordingEventRuntime{}
 	cacheRuntime := &recordingCacheRuntime{}
 	api := &fixedRouter{}
 	info := &types.RouterInfo{
@@ -236,7 +220,6 @@ func TestServiceRouterSameOwnerReuseDoesNotRebindRuntimes(t *testing.T) {
 	}
 	api.info = info
 	info.SetInstance(api)
-	info.SetEventBridge(owner, eventRuntime)
 	info.SetCacheManager(owner, cacheRuntime)
 	info.Freeze(owner)
 
@@ -252,12 +235,7 @@ func TestServiceRouterSameOwnerReuseDoesNotRebindRuntimes(t *testing.T) {
 	t.Cleanup(func() { serviceContext.SetRunState(false) })
 	require.Same(t, info, serviceRouter.GetRouter(info.GetPath()))
 
-	require.NoError(t, info.Subscribe(&types.ObserveArgs{
-		State:          types.ObserveRequest,
-		ReceiveService: "same-owner-observer",
-	}))
 	info.UseCache(time.Second)
-	assert.Equal(t, 1, eventRuntime.subscriptions, "同 owner 复用不得替换原事件运行时")
 	assert.Equal(t, 1, cacheRuntime.enabled, "同 owner 复用不得替换原缓存运行时")
 }
 

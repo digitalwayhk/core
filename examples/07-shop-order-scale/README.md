@@ -85,9 +85,24 @@ buyer request
 - 多进程 UAT 必须按角色拆分：买家、供应商、管理员分别拥有可单独运行的闭环测试。
 - 角色测试需要其他角色拥有的关键数据时，只能调用对应角色 fixture 准备，例如买家下单前组合管理员基础条件和供应商商品，不在买家测试中隐藏创建逻辑。
 - 多 order 副本 UAT 必须验证自动 MachineID、唯一 ServiceInstanceID、本地 pending 目录隔离、共享 MySQL 远程权威库和 resolver 多节点调用。
+- 依赖远程 MySQL 权威库的测试必须显式设置 `CORE_TEST_MYSQL=1`；未设置时普通全仓测试不会探测开发机的 `127.0.0.1:3306`。启用后 MySQL 不可达、凭据错误或建表失败都会直接令测试失败。
 - Docker 多进程 UAT 默认由 `SHOP_RUN_DOCKER_UAT=1` 显式启用；CI 可把这些测试放到夜间或外部依赖 job，普通单元测试只保留 compose/config 静态约束。
 - 有 WebSocket 的买家角色必须覆盖真实订阅、订单事件投递和其他买家隔离。
 - 07 完成后增加基准性能测试，对比 06 与 07 在订单写入吞吐、延迟分位数和失败恢复上的差异。
+
+使用 `docker-compose.integration.yml` 的 MySQL 运行远程权威库测试：
+
+```bash
+CORE_TEST_MYSQL=1 \
+SHOP_ORDER_REMOTE_MYSQL_HOST=127.0.0.1 \
+SHOP_ORDER_REMOTE_MYSQL_PORT=13306 \
+SHOP_ORDER_REMOTE_MYSQL_USER=core_test \
+SHOP_ORDER_REMOTE_MYSQL_PASSWORD=core_test_password \
+SHOP_ORDER_REMOTE_MYSQL_DATABASE=core_test \
+GOCACHE=/private/tmp/core-codex-gocache \
+rtk proxy go test ./examples/07-shop-order-scale/order-service/... \
+  ./examples/integration/07-shop-order-scale -count=1
+```
 
 ## 基准测试
 

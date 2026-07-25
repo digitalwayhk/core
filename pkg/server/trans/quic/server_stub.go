@@ -19,7 +19,7 @@ type Server struct {
 func NewServer(context *router.ServiceContext) *Server {
 	return &Server{
 		server: &http.Server{
-			Addr:    context.Config.RunIp + ":" + strconv.Itoa(context.Config.Port+100),
+			Addr:    context.RuntimeAddress() + ":" + strconv.Itoa(context.Config.Port+100),
 			Handler: setupHandler(context),
 		},
 		context: context,

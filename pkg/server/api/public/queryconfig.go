@@ -28,6 +28,12 @@ func (own *QueryConfig) Validation(req types.IRequest) error {
 }
 func (own *QueryConfig) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
+	if sc == nil || sc.Config == nil {
+		return nil, errors.New("目标服务不存在")
+	}
+	if req.GetValue("view") == "admin" {
+		return config.AdminView(sc.Config)
+	}
 	return sc.Config, nil
 }
 

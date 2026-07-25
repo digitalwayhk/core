@@ -51,7 +51,8 @@ func startShopSuite() (*shopSuite, error) {
 	base, err := integration.StartProcess(integration.ProcessOptions{
 		BuildPackage: "./examples/02-shop-payment/main", BinaryName: "shop-payment",
 		TempPrefix: "core-shop-payment-", ServiceCount: 2, ServiceIndex: 1,
-		Arguments: []string{"-view", "0"},
+		GRPCServiceCount: 2,
+		Arguments:        []string{"-view", "0"},
 	})
 	if err != nil {
 		return nil, err

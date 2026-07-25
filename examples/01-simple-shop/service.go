@@ -42,8 +42,3 @@ func (own *ShopService) Routers() []types.IRouter {
 	)
 	return routers
 }
-
-// SubscribeRouters 返回内部服务观察订阅；本示例没有跨服务观察者。
-func (own *ShopService) SubscribeRouters() []*types.ObserveArgs {
-	return nil
-}

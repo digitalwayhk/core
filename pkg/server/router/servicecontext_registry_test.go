@@ -41,7 +41,6 @@ func (s *instrumentedService) Routers() []types.IRouter {
 	}
 	return s.routerCall()
 }
-func (s *instrumentedService) SubscribeRouters() []*types.ObserveArgs { return nil }
 
 func testServiceConfig(name string, port int) *config.ServerConfig {
 	con := config.NewServiceDefaultConfig(name, port)

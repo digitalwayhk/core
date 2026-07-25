@@ -12,5 +12,4 @@ func TestShopServiceRegistersCompleteInheritanceExample(t *testing.T) {
 
 	assert.Equal(t, contract.ServiceName, service.ServiceName())
 	assert.Len(t, service.Routers(), 36)
-	assert.Nil(t, service.SubscribeRouters())
 }

@@ -19,24 +19,16 @@ type GRPCServerLifecycle interface {
 }
 
 type Service struct {
-	Name             string
-	Routers          []IRouter `json:"-"`
-	SubscribeRouters []*ObserveArgs
-	AttachService    map[string]*ServiceAttach
-	HttpServer       IRunServer   `json:"-"`
-	internalServer   []IRunServer `json:"-"`
-	Instance         interface{}  `json:"-"`
+	Name           string
+	Routers        []IRouter    `json:"-"`
+	HttpServer     IRunServer   `json:"-"`
+	internalServer []IRunServer `json:"-"`
+	Instance       interface{}  `json:"-"`
 }
 
 func (own *Service) CallService(payload *PayLoad) ([]byte, error) {
 	if payload.TargetService == "" {
 		return nil, errors.New("target service is empty")
-	}
-	if payload.TargetAddress == "" {
-		if as, ok := own.AttachService[payload.TargetService]; ok {
-			payload.TargetAddress = as.Address
-			payload.TargetPort = as.Port
-		}
 	}
 	if payload.TargetAddress == "" {
 		return nil, errors.New("target address is empty")
@@ -64,29 +56,9 @@ func (own *Service) GetInternalServers() []IRunServer {
 	return own.internalServer
 }
 
-// ServiceAttach 附加引用的服务(通过订阅或CallService加载)
-type ServiceAttach struct {
-	service         *Service
-	ServiceName     string
-	ObserverRouters map[string]*ObserveArgs
-	CallRouters     map[string]IRouter
-	IsAttach        bool
-	Address         string
-	Port            int
-}
-
-func NewServiceAttach(service *Service) *ServiceAttach {
-	return &ServiceAttach{
-		service: service,
-	}
-}
-
 type IRunServer interface {
 	service.Service
 	RegisterHandlers(routers []*RouterInfo)
 	Send(payload *PayLoad) ([]byte, error)
 	GetIPandPort() (string, int)
-}
-type IAttachService interface {
-	SetServiceAddress(name, address string, port int) error
 }

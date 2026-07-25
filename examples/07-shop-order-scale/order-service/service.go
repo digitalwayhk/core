@@ -66,9 +66,6 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	return nil
 }
 
-// SubscribeRouters 保留旧观察路由兼容入口；事件订阅统一使用 ServiceEventBridge。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
-
 // Start 启用订单服务标准 Outbox 发布能力。
 func (s *Service) Start() {
 	// ServiceContext 提供当前副本已领取的机房和机器身份，是本地 pending 目录隔离的唯一来源。

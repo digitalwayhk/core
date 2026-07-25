@@ -16,7 +16,6 @@ func TestShopServiceRegistersCompleteInheritanceExample(t *testing.T) {
 
 	assert.Equal(t, contract.ServiceName, service.ServiceName())
 	assert.Len(t, service.Routers(), 38)
-	assert.Nil(t, service.SubscribeRouters())
 }
 
 func TestShopServiceRegistersStableRoutesAfterPackageSplit(t *testing.T) {

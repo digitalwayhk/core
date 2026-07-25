@@ -66,7 +66,6 @@ func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
 				info.ServiceName = own.Service.Service.Name
 			}
 			info.ID = utils.HashCode64(info.Path)
-			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
 			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
 			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
 			info.Freeze(own.Service.Service.Name)
@@ -106,7 +105,6 @@ func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
 		if info.PrepareRegistration(own.Service.Service.Name) {
-			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
 			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
 			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
 			info.Freeze(own.Service.Service.Name)
@@ -251,7 +249,6 @@ func NewRouterInfoWithOptions(item interface{}, pack, name string, options ...Ro
 		PathType:          Pathtype,
 		InstanceName:      name,
 		StructName:        sname,
-		Subscriber:        make(map[types.ObserveState]map[string]*types.ObserveArgs, 3),
 		WebSocketWaitTime: time.Second * 10,
 	}
 	info.SetInstance(item.(types.IRouter))

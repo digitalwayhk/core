@@ -2,7 +2,7 @@
 package shoporderscale
 
 import (
-	"strings"
+	"os"
 	"testing"
 
 	ordermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
@@ -12,10 +12,8 @@ import (
 // requireOrderMySQL 确保依赖 MySQL 远程权威库的测试只在真实权威库可用时运行。
 func requireOrderMySQL(t testing.TB) {
 	t.Helper()
-	if err := ordermodels.EnsureStorage(); err != nil {
-		if strings.Contains(err.Error(), "dial tcp") || strings.Contains(err.Error(), "operation not permitted") {
-			t.Skipf("MySQL 权威库不可用，跳过 07 远程权威库 UAT: %v", err)
-		}
-		require.NoError(t, err)
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后运行 07 远程权威库 UAT")
 	}
+	require.NoError(t, ordermodels.EnsureStorage())
 }

@@ -15,7 +15,6 @@ func (*publicCacheService) ServiceName() string { return "performanceshop" }
 func (*publicCacheService) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{&GetProducts{}, &GetSuppliers{}, &GetPaymentTypes{}}
 }
-func (*publicCacheService) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 
 type cacheRuntimeSpy struct {
 	enabled []string

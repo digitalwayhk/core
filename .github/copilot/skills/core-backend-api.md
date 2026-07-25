@@ -1213,10 +1213,6 @@ func (own *MyService) Routers() []types.IRouter {
     return routers
 }
 
-// SubscribeRouters 订阅其他服务的路由（跨服务通知）
-func (own *MyService) SubscribeRouters() []*types.ObserveArgs {
-    return nil // 无跨服务订阅时返回 nil
-}
 ```
 
 ---
@@ -2247,7 +2243,7 @@ func (own *AddOrder) Do(req types.IRequest) (interface{}, error) {
 }
 ```
 
-**⚠️ 注意：** `TestToken` 是注册在 `public` 包下的无鉴权接口，生产环境应通过网关/防火墙屏蔽该路径，或在正式上线前替换为真实的认证流程（Casdoor / Logto）。
+**⚠️ 注意：** `TestToken` 是注册在 `public` 包下的无鉴权接口，生产环境应通过网关/防火墙屏蔽该路径，或在正式上线前替换为真实的 Casdoor 认证流程。
 
 ### 20.5 直接调用 API（无需 WayPage）
 

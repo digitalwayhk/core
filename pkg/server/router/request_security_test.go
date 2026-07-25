@@ -16,9 +16,8 @@ import (
 
 type requestSecurityService struct{ name string }
 
-func (s *requestSecurityService) ServiceName() string                  { return s.name }
-func (*requestSecurityService) Routers() []types.IRouter               { return nil }
-func (*requestSecurityService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *requestSecurityService) ServiceName() string    { return s.name }
+func (*requestSecurityService) Routers() []types.IRouter { return nil }
 
 func TestRequestIgnoresCasdoorUserContext(t *testing.T) {
 	name := fmt.Sprintf("request-casdoor-boundary-%d", time.Now().UnixNano())

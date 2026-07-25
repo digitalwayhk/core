@@ -80,7 +80,7 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 
 func baseServiceConfig(name string, port, dataCenterID, machineID int) *config.ServerConfig {
 	cfg := config.NewServiceDefaultConfig(name, port)
-	cfg.RunIp = "127.0.0.1"
+	cfg.Cluster.AdvertiseAddress = "127.0.0.1"
 	cfg.DataCenterID = uint(dataCenterID)
 	cfg.MachineID = uint(machineID)
 	cfg.MQ.Mode = "on"

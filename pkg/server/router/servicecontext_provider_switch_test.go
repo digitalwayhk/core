@@ -18,9 +18,8 @@ import (
 
 type providerSwitchService struct{ name string }
 
-func (s *providerSwitchService) ServiceName() string                  { return s.name }
-func (*providerSwitchService) Routers() []types.IRouter               { return nil }
-func (*providerSwitchService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *providerSwitchService) ServiceName() string    { return s.name }
+func (*providerSwitchService) Routers() []types.IRouter { return nil }
 
 type lifecycleBoundarySwitcher struct {
 	current        cluster.DiscoveryProvider

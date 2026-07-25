@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -146,6 +147,15 @@ var httpClient = &http.Client{
 
 var processStartPortMu sync.Mutex
 
+const defaultProcessReadyTimeout = 30 * time.Second
+
+const (
+	integrationPortRangeStart = 20000
+	integrationPortRangeEnd   = 44999
+)
+
+var integrationPortSequence atomic.Uint64
+
 // WebSocketMessage 对应框架 WebSocket 的 event/channel/data 信封。
 type WebSocketMessage struct {
 	Event   string          `json:"event"`
@@ -233,9 +243,13 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		cleanup()
 		return nil, err
 	}
-	if err := suite.waitBoundPorts(options.ServiceCount, options.GRPCServiceCount, 10*time.Second); err != nil {
-		suite.Stop()
+	if err := suite.waitBoundPorts(options.ServiceCount, options.GRPCServiceCount, defaultProcessReadyTimeout); err != nil {
+		suite.StopProcess()
+		logData, _ := os.ReadFile(filepath.Join(suite.RootDir, "service.log"))
 		cleanup()
+		if len(logData) != 0 {
+			return nil, fmt.Errorf("%w\n--- 集成测试服务日志 ---\n%s", err, logData)
+		}
 		return nil, err
 	}
 	return suite, nil
@@ -346,15 +360,17 @@ func repositoryRoot() (string, error) {
 
 // reservePortRange 获取一段连续可用端口，匹配 WebServer 多服务按序分配端口的规则。
 func reservePortRange(count int) (int, error) {
-	for attempt := 0; attempt < 100; attempt++ {
-		first, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return 0, fmt.Errorf("申请测试端口: %w", err)
-		}
-		basePort := first.Addr().(*net.TCPAddr).Port
-		listeners := []net.Listener{first}
-		available := basePort+count-1 <= 65535
-		for offset := 1; available && offset < count; offset++ {
+	rangeSize := integrationPortRangeEnd - integrationPortRangeStart + 1
+	if count <= 0 || count > rangeSize {
+		return 0, fmt.Errorf("测试端口数量必须在 1 到 %d 之间，实际为 %d", rangeSize, count)
+	}
+	candidateCount := rangeSize - count + 1
+	seed := (uint64(os.Getpid())*9973 + integrationPortSequence.Add(1)*7919) % uint64(candidateCount)
+	for attempt := 0; attempt < candidateCount; attempt++ {
+		basePort := integrationPortRangeStart + (int(seed)+attempt)%candidateCount
+		listeners := make([]net.Listener, 0, count)
+		available := true
+		for offset := 0; offset < count; offset++ {
 			listener, listenErr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(basePort+offset)))
 			if listenErr != nil {
 				available = false

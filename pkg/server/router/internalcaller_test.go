@@ -44,9 +44,8 @@ type localInternalCallerService struct {
 	route types.IRouter
 }
 
-func (s *localInternalCallerService) ServiceName() string                  { return s.name }
-func (s *localInternalCallerService) Routers() []types.IRouter             { return []types.IRouter{s.route} }
-func (*localInternalCallerService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *localInternalCallerService) ServiceName() string      { return s.name }
+func (s *localInternalCallerService) Routers() []types.IRouter { return []types.IRouter{s.route} }
 
 func newLocalInternalCallerTarget(t *testing.T) (*ServiceContext, *localInternalCallerRoute) {
 	t.Helper()
@@ -59,7 +58,6 @@ func newLocalInternalCallerTarget(t *testing.T) (*ServiceContext, *localInternal
 		Method:          http.MethodPost,
 		PathType:        types.PublicType,
 		InternalCallers: []string{"shop-user"},
-		Subscriber:      make(map[types.ObserveState]map[string]*types.ObserveArgs),
 	}
 	route.info = info
 	info.SetInstance(route)

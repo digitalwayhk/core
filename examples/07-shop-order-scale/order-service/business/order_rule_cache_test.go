@@ -2,7 +2,7 @@
 package business
 
 import (
-	"strings"
+	"os"
 	"testing"
 	"time"
 
@@ -13,12 +13,10 @@ import (
 
 // TestOrderRuleCacheInvalidatesRemoteAuthorityRule 验证规则变更后失效缓存可读取最新规则。
 func TestOrderRuleCacheInvalidatesRemoteAuthorityRule(t *testing.T) {
-	if err := models.EnsureStorage(); err != nil {
-		if strings.Contains(err.Error(), "dial tcp") || strings.Contains(err.Error(), "operation not permitted") {
-			t.Skipf("MySQL 权威库不可用，跳过规则缓存远程测试: %v", err)
-		}
-		require.NoError(t, err)
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后运行规则缓存 MySQL 集成测试")
 	}
+	require.NoError(t, models.EnsureStorage())
 	ruleID := uint(750000 + time.Now().UnixNano()%1000000)
 
 	cache := NewOrderRuleCache("default")

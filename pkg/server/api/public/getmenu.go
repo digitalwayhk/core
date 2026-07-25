@@ -87,5 +87,16 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu2.Url = "/api/manage/server/menumanage"
 	dir.MenuItems = append(dir.MenuItems, menu2)
 
+	menu3 := smodels.NewMenuModel()
+	menu3.ID = 9987246
+	menu3.DirectoryModelID = dir.ID
+	menu3.Name = "configsettings"
+	menu3.Title = "配置设置"
+	menu3.Description = "查看和编辑各服务的系统配置"
+	menu3.Sort = 2
+	// 配置页是前端专用页面，不是普通 Manage CRUD 页面。
+	menu3.Url = "/config/settings"
+	dir.MenuItems = append(dir.MenuItems, menu3)
+
 	return dir, nil
 }

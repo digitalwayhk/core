@@ -172,6 +172,16 @@ assert_order() {
   fi
 }
 
+run_case persistence_services_only
+if ! grep -q ' up .* mysql mongodb clickhouse' "$TMP/persistence_services_only.log"; then
+  echo "持久化门禁应只显式启动 mysql、mongodb、clickhouse" >&2
+  exit 1
+fi
+if grep -q ' up .* redis' "$TMP/persistence_services_only.log"; then
+  echo "持久化门禁不应启动无关 redis 服务" >&2
+  exit 1
+fi
+
 run_case keep_primary KEEP_CONTAINERS=1 CORE_TEST_KEEP_CONTAINERS=0
 if grep -q ' down ' "$TMP/keep_primary.log"; then
   echo "KEEP_CONTAINERS=1 时不应清理容器" >&2

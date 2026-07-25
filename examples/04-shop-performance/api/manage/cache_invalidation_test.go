@@ -16,7 +16,6 @@ func (*manageCacheService) ServiceName() string { return "performanceshop" }
 func (*manageCacheService) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{&publicapi.GetProducts{}, &publicapi.GetSuppliers{}, &publicapi.GetPaymentTypes{}}
 }
-func (*manageCacheService) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
 
 type manageCacheRuntimeSpy struct{ deletedRoutes []string }
 

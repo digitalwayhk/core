@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 
 	"github.com/digitalwayhk/core/pkg/server"
-	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/api/release"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -34,7 +33,6 @@ type WebServer struct {
 	childServer      map[int]*WebServer
 	htmls            *HTMLServer
 	ViewPort         int
-	serverip         string
 	Port             int
 	GRPCPort         int
 	isRun            bool
@@ -162,7 +160,7 @@ func (own *WebServer) stateCallback(nsc *router.ServiceContext) {
 			if htmls != nil {
 				htmls.Isstart <- viewPort > 0
 			}
-			own.linkServiceContexts(contexts)
+			own.endInitialization()
 			own.serviceStartContexts(contexts)
 		})
 		return
@@ -177,53 +175,6 @@ func (own *WebServer) serviceStartContexts(contexts []*router.ServiceContext) {
 		}
 	}
 }
-func (own *WebServer) linkServiceContexts(contexts []*router.ServiceContext) {
-	defer own.endInitialization()
-	contextsByName := make(map[string]*router.ServiceContext, len(contexts))
-	for _, ctx := range contexts {
-		contextsByName[strings.ToLower(ctx.Service.Name)] = ctx
-	}
-	islink := false
-	for _, ctx := range contexts {
-		if len(ctx.Config.AttachServices) > 0 {
-			islink = true
-			break
-		}
-	}
-	if !islink {
-		return
-	}
-	logx.Infow("service_dependencies_linking", logx.Field("service_count", len(contexts)))
-	for _, ctx := range contexts {
-		for _, cfg := range ctx.Config.AttachServices {
-			if cfg.Address == "" && cfg.Port == 0 {
-				context := contextsByName[strings.ToLower(cfg.Name)]
-				if context != nil {
-					cfg.Address = context.Config.RunIp
-					cfg.Port = context.Config.Port
-				}
-				ctx.Config.Save()
-			}
-			if cfg.Address != "" && cfg.Port != 0 {
-				ctx.SetAttachServiceAddress(cfg.Name)
-			}
-		}
-		if err := ctx.RegisterObserve(&public.Observe{}); err != nil {
-			logx.Errorw("service_dependency_link_failed",
-				logx.Field("service", ctx.Service.Name),
-				logx.Field("error", err),
-			)
-			continue
-		}
-		for _, cfg := range ctx.Config.AttachServices {
-			logx.Infow("service_dependency_linked",
-				logx.Field("service", ctx.Service.Name),
-				logx.Field("dependency", cfg.Name),
-			)
-		}
-	}
-}
-
 func (own *WebServer) AddIService(service types.IService, option ...*types.ServerOption) {
 	sc := router.NewServiceContext(service)
 	own.AddServiceContext(sc)
@@ -422,9 +373,6 @@ func (own *WebServer) initServer() ([]service.Service, error) {
 
 func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]service.Service, error) {
 	for _, ctx := range contexts {
-		if ctx.Config.ParentServerIP != own.serverip {
-			ctx.Config.ParentServerIP = own.serverip
-		}
 		if ctx.Config.Port != own.Port && own.Port != router.DEFAULTPORT {
 			ctx.Config.Port = own.Port + int(ctx.Config.DataCenterID) - 1
 		}
@@ -473,7 +421,6 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 	return constructed, nil
 }
 func (own *WebServer) serverArgs() {
-	parentServer := flag.String("server", "", "主服务器地址,当前服务器的父服务器地址,如果是根服务器，则不需要此参数")
 	port := flag.Int("p", router.DEFAULTPORT, "运行端口,默认8080")
 	grpcPort := flag.Int("grpc", 0, "覆盖gRPC服务端口,为0时使用各服务配置")
 	view := flag.Int("view", 80, "启用视图服务并指定端口,为0时不启用视图服务")
@@ -481,7 +428,6 @@ func (own *WebServer) serverArgs() {
 	if own.ViewPort == 0 {
 		own.ViewPort = *view
 	}
-	own.serverip = *parentServer
 	if own.Port == 0 {
 		own.Port = *port
 	}

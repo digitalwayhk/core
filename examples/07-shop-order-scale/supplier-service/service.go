@@ -21,6 +21,3 @@ func (*Service) Routers() []servertypes.IRouter {
 	routers = append(routers, manageapi.NewProductManage().Routers()...)
 	return routers
 }
-
-// SubscribeRouters 保留旧观察路由兼容入口；内部事件订阅后续统一用 EventBridge。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }

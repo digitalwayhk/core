@@ -39,9 +39,6 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	return nil
 }
 
-// SubscribeRouters 保留旧观察路由兼容入口；订单服务事件发布统一走 Outbox。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
-
 // Start 启用订单服务 Outbox，让订单和支付事实变更可靠发布到 EventBridge。
 func (s *Service) Start() {
 	sc := router.GetContext(contract.OrderServiceName)

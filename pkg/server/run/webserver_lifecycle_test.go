@@ -34,9 +34,8 @@ type lifecycleBusinessService struct {
 	stopOnce    sync.Once
 }
 
-func (s *lifecycleBusinessService) ServiceName() string                    { return s.name }
-func (s *lifecycleBusinessService) Routers() []types.IRouter               { return nil }
-func (s *lifecycleBusinessService) SubscribeRouters() []*types.ObserveArgs { return nil }
+func (s *lifecycleBusinessService) ServiceName() string      { return s.name }
+func (s *lifecycleBusinessService) Routers() []types.IRouter { return nil }
 func (s *lifecycleBusinessService) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopStarted)

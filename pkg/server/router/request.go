@@ -267,7 +267,7 @@ func callrouterpermissions(sinfo, tinfo *types.RouterInfo) error {
 func (own *Request) GetServerInfo() *types.TargetInfo {
 	cont := own.GetService()
 	return &types.TargetInfo{
-		TargetAddress: cont.Config.RunIp,
+		TargetAddress: cont.RuntimeAddress(),
 		TargetService: own.ServiceName(),
 		TargetPort:    cont.Config.Port,
 	}

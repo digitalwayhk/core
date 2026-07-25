@@ -7,8 +7,8 @@
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
 | `ServerConfig.RestConf` | go-zero 默认值和校验 | go-zero rest server | upstream |
-| ID、地址、attach、访问控制和 customer data 字段 | 默认值由构造器或 `ApplyDefaults` 补齐 | ServiceContext、router、REST request、调用方 | supported |
-| 三组 Auth 的 JWT、Logto、CasDoor 字段 | JWT 直接消费；Logto/CasDoor 仅在 Enable=true 时加载，false 为 inactive 默认 | auth middleware；外部认证配置由进程持有 | supported |
+| ID、访问控制和运行时地址字段 | 持久配置只保存稳定输入；实例地址由 ServiceContext 捕获，`Cluster.AdvertiseAddress` 可显式覆盖 | ServiceContext、router、REST request | supported |
+| 三组 Auth 的 JWT、CasDoor 字段 | JWT 直接消费；CasDoor 仅在 Enable=true 时加载，false 为 inactive 默认 | auth middleware；外部认证配置由进程持有 | supported |
 | `MelodyConfigPath` | 空值 inactive；非空时 `ReloadExternalConfigs` 加载 | Melody 全局配置 | supported |
 
 ## Cluster
@@ -16,7 +16,8 @@
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
 | Mode、Provider、HeartbeatInterval、MachineIDMax、Etcd Endpoints/Prefix/TTL、Consul Address | 由 Validate、factory、claim 和 membership 消费；Etcd Prefix 为空时默认 `/core/cluster`，支持自定义 keyspace；未知 provider 是构造错误，仅已知外部 provider 在 `Mode=auto` 连接失败时回退 local | ServiceContext 创建并终止 membership、broker 和 provider | supported |
-| NodeName、AdvertiseAddress、自动 claim、额外 conflict policy、discovery、shard、services | 非零/非默认配置明确返回 not implemented | 无 | rejected |
+| AdvertiseAddress、自动 MachineID claim | 显式广播地址覆盖 ServiceContext 捕获的本机地址；自动 MachineID 在 Snowflake 初始化前通过 Provider 申请 lease | membership、ServiceContext、ClusterProvider | supported |
+| NodeName、自动 DataCenterID claim、额外 conflict policy、discovery、shard、services | 非零/非默认配置明确返回 not implemented | 无 | rejected |
 | HeartbeatTimeout、SuspectTimeout、InstanceReuseCooldown、DataCenterIDMax、Consul Prefix/TTL | 仅固定默认值可通过；自定义值返回 not configurable。固定值用于兼容现有配置，当前 LocalProvider 仍按固定构造值工作 | 固定 LocalProvider 行为 | rejected |
 | `Mode=off` 下的旧字段 | 不创建 cluster runtime，保留旧配置解析兼容 | inactive，无生命周期对象 | rejected |
 
@@ -74,10 +75,6 @@
 | `ServerConfig.Auth.AccessExpire` | supported | JWT auth middleware | JWT 过期时间消费 |
 | `ServerConfig.Auth.RefreshSecret` | supported | auth token issuer | Refresh Token 签名和刷新校验消费 |
 | `ServerConfig.Auth.RefreshExpire` | supported | auth token issuer | Refresh Token 有效期消费 |
-| `ServerConfig.Auth.Logto` | supported | Logto auth middleware | Enable 控制外部认证生命周期 |
-| `ServerConfig.Auth.Logto.ExpectedAudience` | supported | Logto auth middleware | token audience 校验消费 |
-| `ServerConfig.Auth.Logto.Issuer` | supported | Logto auth middleware | token issuer 校验消费 |
-| `ServerConfig.Auth.Logto.Enable` | supported | Logto auth middleware | 显式控制 middleware 启用 |
 | `ServerConfig.Auth.CasDoor` | supported | CasDoor auth middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.Auth.CasDoor.Enable` | supported | CasDoor auth middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.Auth.CasDoor.YamlFilePath` | supported | CasDoor auth middleware | ReloadConfig 加载指定文件 |
@@ -87,10 +84,6 @@
 | `ServerConfig.ManageAuth.AccessExpire` | supported | manage JWT middleware | JWT 过期时间消费 |
 | `ServerConfig.ManageAuth.RefreshSecret` | supported | manage token issuer | 管理端 Refresh Token 签名和刷新校验消费 |
 | `ServerConfig.ManageAuth.RefreshExpire` | supported | manage token issuer | 管理端 Refresh Token 有效期消费 |
-| `ServerConfig.ManageAuth.Logto` | supported | manage Logto middleware | Enable 控制外部认证生命周期 |
-| `ServerConfig.ManageAuth.Logto.ExpectedAudience` | supported | manage Logto middleware | token audience 校验消费 |
-| `ServerConfig.ManageAuth.Logto.Issuer` | supported | manage Logto middleware | token issuer 校验消费 |
-| `ServerConfig.ManageAuth.Logto.Enable` | supported | manage Logto middleware | 显式控制 middleware 启用 |
 | `ServerConfig.ManageAuth.CasDoor` | supported | manage CasDoor middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.ManageAuth.CasDoor.Enable` | supported | manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.ManageAuth.CasDoor.YamlFilePath` | supported | manage CasDoor middleware | ReloadConfig 加载指定文件 |
@@ -100,22 +93,13 @@
 | `ServerConfig.ServerManageAuth.AccessExpire` | supported | server-manage JWT middleware | JWT 过期时间消费 |
 | `ServerConfig.ServerManageAuth.RefreshSecret` | rejected | server-manage token issuer | servermanage 仅颁发 Access Token，默认必须为空 |
 | `ServerConfig.ServerManageAuth.RefreshExpire` | rejected | server-manage token issuer | servermanage 不支持刷新，默认必须为零 |
-| `ServerConfig.ServerManageAuth.Logto` | supported | server-manage Logto middleware | Enable 控制外部认证生命周期 |
-| `ServerConfig.ServerManageAuth.Logto.ExpectedAudience` | supported | server-manage Logto middleware | token audience 校验消费 |
-| `ServerConfig.ServerManageAuth.Logto.Issuer` | supported | server-manage Logto middleware | token issuer 校验消费 |
-| `ServerConfig.ServerManageAuth.Logto.Enable` | supported | server-manage Logto middleware | 显式控制 middleware 启用 |
 | `ServerConfig.ServerManageAuth.CasDoor` | supported | server-manage CasDoor middleware | Enable 控制外部配置生命周期 |
 | `ServerConfig.ServerManageAuth.CasDoor.Enable` | supported | server-manage CasDoor middleware | ReloadExternalConfigs 和 middleware 装配消费 |
 | `ServerConfig.ServerManageAuth.CasDoor.YamlFilePath` | supported | server-manage CasDoor middleware | ReloadConfig 加载指定文件 |
 | `ServerConfig.ServerManageAuth.CasDoor.WebhookSecret` | rejected | ServerConfig.Validate | ServerManage 不接入 Casdoor Webhook，非空配置明确拒绝 |
-| `ServerConfig.RunIp` | supported | ServiceContext | 服务地址与节点信息组装消费 |
-| `ServerConfig.ParentServerIP` | supported | server routing | 父服务连接路由消费 |
-| `ServerConfig.AttachServices` | supported | legacy ServiceContext | 废弃兼容字段；新调用使用 ClusterProvider + ServiceResolver，不读取静态地址表 |
-| `ServerConfig.Debug` | supported | server runtime | debug 运行模式分支消费 |
 | `ServerConfig.IsWhiteList` | supported | access-control middleware | 白名单开关消费 |
 | `ServerConfig.WhiteList` | supported | access-control middleware | 白名单匹配消费 |
 | `ServerConfig.TrustedProxies` | supported | REST request handling | Validate 校验 IP/CIDR，请求来源解析消费 |
-| `ServerConfig.CustomerDataList` | supported | ServerConfig caller | ApplyDefaults 和 GetCustomerData 消费 |
 | `ServerConfig.IsLoaclVisit` | supported | access-control middleware | 本地访问控制分支消费 |
 | `ServerConfig.RemoteAccessManageAPI` | supported | manage access control | 远程管理 API 访问控制消费 |
 | `ServerConfig.MelodyConfigPath` | supported | Melody global config | 非空时 ReloadExternalConfigs 加载 |
@@ -123,7 +107,7 @@
 | `ServerConfig.Cluster.Mode` | supported | ServiceContext | 决定不创建、自动或强制 cluster runtime |
 | `ServerConfig.Cluster.Provider` | supported | cluster factory | 选择 local/etcd/consul/redis provider，未知值拒绝 |
 | `ServerConfig.Cluster.NodeName` | rejected | ClusterConfig.Validate | 非空值返回 not implemented |
-| `ServerConfig.Cluster.AdvertiseAddress` | supported | membership runtime | 非空时作为服务发现广播地址，监听地址仍由 RunIp/Host 决定 |
+| `ServerConfig.Cluster.AdvertiseAddress` | supported | membership runtime | 非空时作为服务发现广播地址；否则使用 ServiceContext 创建时捕获的本机地址，REST 监听仍由 Host 决定 |
 | `ServerConfig.Cluster.HeartbeatInterval` | supported | membership runtime | heartbeat ticker 构造消费 |
 | `ServerConfig.Cluster.HeartbeatTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |
 | `ServerConfig.Cluster.SuspectTimeout` | rejected | ClusterConfig.Validate | 仅允许固定兼容值，自定义值拒绝 |

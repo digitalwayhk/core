@@ -17,13 +17,11 @@ require (
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.35.0
-	github.com/MicahParks/keyfunc/v2 v2.1.0
 	github.com/casdoor/casdoor-go-sdk v1.31.0
 	github.com/cockroachdb/pebble v0.0.0-20220723153705-3fc374e4dc66
 	github.com/dgraph-io/badger/v3 v3.2103.5
 	github.com/gofiber/adaptor/v2 v2.2.1
 	github.com/gofiber/fiber/v2 v2.52.14
-	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.3
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/json-iterator/go v1.1.12

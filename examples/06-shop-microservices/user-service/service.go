@@ -36,9 +36,6 @@ func (*Service) Routers() []servertypes.IRouter {
 	return routers
 }
 
-// SubscribeRouters 保留旧观察路由兼容入口；用户服务内部事件统一走 EventBridge。
-func (*Service) SubscribeRouters() []*servertypes.ObserveArgs { return nil }
-
 // OnAuth 在 TestToken 登录时幂等建立普通用户资料，平台管理员不落入买家资料表。
 func (*Service) OnAuth(_ context.Context, args *servertypes.AuthHookArgs) error {
 	if args == nil || strings.TrimSpace(args.UID) == "" {

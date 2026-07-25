@@ -52,7 +52,6 @@ func TestServerConfigMeshDoesNotRequireApplicationCertificates(t *testing.T) {
 
 func TestServerConfigRejectsRemoteInsecureGRPC(t *testing.T) {
 	cfg := validExternalServerConfig()
-	cfg.RunIp = "127.0.0.1"
 	cfg.Cluster.AdvertiseAddress = "10.20.30.40:18080"
 	cfg.Transport.GRPC.Security.Mode = "insecure"
 	cfg.ApplyDefaults()
@@ -83,7 +82,7 @@ func TestServerConfigAllowsExternalInsecureGRPCOnLoopback(t *testing.T) {
 	}
 }
 
-func TestServerConfigExternalInsecureGRPCFallsBackToRunIP(t *testing.T) {
+func TestTransportExternalInsecureGRPCValidatesRuntimeAddressFallback(t *testing.T) {
 	tests := []struct {
 		name    string
 		runIP   string
@@ -96,11 +95,10 @@ func TestServerConfigExternalInsecureGRPCFallsBackToRunIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := validExternalServerConfig()
 			cfg.Cluster.AdvertiseAddress = ""
-			cfg.RunIp = tt.runIP
 			cfg.Transport.GRPC.Security.Mode = "insecure"
 			cfg.ApplyDefaults()
 
-			err := cfg.Validate()
+			err := cfg.Transport.ValidateForServer(cfg.Cluster, tt.runIP)
 			if tt.wantErr {
 				require.ErrorContains(t, err, "insecure grpc is limited to loopback")
 				return
@@ -338,7 +336,6 @@ func validExternalServerConfig() ServerConfig {
 
 func externalServerConfig(provider string) ServerConfig {
 	cfg := ServerConfig{
-		RunIp: "10.20.30.40",
 		Cluster: ClusterConfig{
 			Mode:     "on",
 			Provider: provider,

@@ -32,7 +32,6 @@ func TestClusterMembershipUsesAdvertiseAddress(t *testing.T) {
 	sc := &ServiceContext{
 		Service: &types.Service{Name: "orders"},
 		Config: &config.ServerConfig{
-			RunIp: "0.0.0.0",
 			Cluster: config.ClusterConfig{
 				AdvertiseAddress: "orders.internal",
 			},
@@ -41,6 +40,17 @@ func TestClusterMembershipUsesAdvertiseAddress(t *testing.T) {
 
 	_, node, _ := sc.clusterMembershipConfig()
 	assert.Equal(t, "orders.internal", node.Address)
+}
+
+func TestRuntimeAddressUsesCapturedAddressUnlessExplicitlyOverridden(t *testing.T) {
+	sc := &ServiceContext{
+		Config:         config.NewServiceDefaultConfig("orders", 0),
+		runtimeAddress: "10.20.30.40",
+	}
+	assert.Equal(t, "10.20.30.40", sc.RuntimeAddress())
+
+	sc.Config.Cluster.AdvertiseAddress = "orders.internal"
+	assert.Equal(t, "orders.internal", sc.RuntimeAddress())
 }
 
 func TestServiceContextClosesOwnedDiscoveryProvider(t *testing.T) {

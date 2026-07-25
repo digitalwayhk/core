@@ -17,7 +17,6 @@ case "${1:-quick}" in
   security)
     security_packages=(
       ./pkg/server/config
-      ./pkg/server/safe/logto
       ./pkg/server/safe/casdoor
       ./pkg/server/authstate
       ./pkg/server/api/public
@@ -359,7 +358,8 @@ case "${1:-quick}" in
     set -m
     (
       trap - INT TERM
-      exec docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence up -d --wait --wait-timeout 120
+      exec docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence up -d --wait --wait-timeout 120 \
+        mysql mongodb clickhouse
     ) &
     compose_up_pid=$!
     compose_up_pgid=$compose_up_pid

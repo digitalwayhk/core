@@ -9,13 +9,11 @@ import (
 	"reflect"
 	"runtime/debug"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
-	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -60,8 +58,8 @@ var (
 // NewSubscription、ParseSubscription 创建独立 WebSocket 订阅实例；它由 Hub 持有到
 // 退订、断线或关闭，最后执行 Clean 并丢弃，绝不能放入请求对象池。
 //
-// UseCache、Subscribe 和 WebSocket 相关方法是框架公开兼容入口。后续实现应委托给所属
-// ServiceContext 的 RouteCacheManager、ServiceEventBridge 和 RouteWebSocketHub，避免
+// UseCache 和 WebSocket 相关方法是框架公开兼容入口。后续实现应委托给所属
+// ServiceContext 的 RouteCacheManager 和 RouteWebSocketHub，避免
 // 在 RouterInfo 内继续累积服务级队列、连接和跨节点状态。Destroy 必须幂等，只关闭
 // 本路由持有的资源，不得影响其他服务或其他 RouterInfo。
 type RouterInfo struct {
@@ -75,10 +73,9 @@ type RouterInfo struct {
 	StructName        string  // Deprecated: 注册后请使用 GetStructName；仅为源码兼容保留导出字段。
 	InstanceName      string  // Deprecated: 注册后请使用 GetInstanceName；仅为源码兼容保留导出字段。
 	instance          IRouter
-	WebSocketWaitTime time.Duration                            //websocket默认通知的循环等待时间 默认:10秒
-	Subscriber        map[ObserveState]map[string]*ObserveArgs //订阅者
-	useCache          bool                                     //是否使用缓存
-	cacheTime         time.Duration                            //缓存时间
+	WebSocketWaitTime time.Duration //websocket默认通知的循环等待时间 默认:10秒
+	useCache          bool          //是否使用缓存
+	cacheTime         time.Duration //缓存时间
 	sync.RWMutex
 	// Deprecated: RouterInfo 不得保存请求、用户、trace 或响应等请求级状态。
 	// 该字段仅为源码兼容保留，框架内部不使用；新代码不得写入。
@@ -90,8 +87,6 @@ type RouterInfo struct {
 	// 必须在路由注册完成（Freeze）前设置，之后修改无效。
 	PoolSize             int // Deprecated: 注册后请使用 GetPoolSize；仅为源码兼容保留导出字段。
 	channelPool          *ChannelPool
-	eventRuntime         RouteEventRuntime
-	eventCancels         map[ObserveState]map[string]func()
 	webSocketHub         *RouteWebSocketHub
 	cacheRuntime         RouteCacheRuntime
 	externalRateLimit    ExternalRateLimitPolicy
@@ -277,33 +272,6 @@ func (own *RouterInfo) SetInstance(instance IRouter) {
 		panic("router instance cannot change after registration")
 	}
 	own.instance = instance
-}
-
-// SetEventBridge 把路由观察事件绑定到所属服务。同一服务关闭并重建时允许替换运行时，
-// 但不同所有者不能接管已经冻结的 RouterInfo。
-func (own *RouterInfo) SetEventBridge(owner string, runtime RouteEventRuntime) {
-	own.Lock()
-	defer own.Unlock()
-	own.assertMetadataFrozenLocked()
-	if own.frozen && own.owner != owner {
-		panic("router event bridge owner conflict")
-	}
-	for _, byAddress := range own.eventCancels {
-		for _, cancel := range byAddress {
-			if cancel != nil {
-				cancel()
-			}
-		}
-	}
-	own.eventCancels = nil
-	own.eventRuntime = runtime
-	for _, byAddress := range own.Subscriber {
-		for _, observer := range byAddress {
-			if err := own.subscribeEventLocked(observer); err != nil {
-				panic("router event bridge subscription failed")
-			}
-		}
-	}
 }
 
 // SetWebSocketHub 绑定所属 ServiceContext 的 WebSocket 运行时。同名服务重建时可以
@@ -539,7 +507,6 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 			own.recordCacheHit()
 
 			resp = req.NewResponse(cache.data, nil)
-			go own.responseNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
 			return resp
 		} else {
 			// 🆕 记录缓存未命中
@@ -547,7 +514,6 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 		}
 	}
 
-	go own.requestNotify(snapshotNotifyValue(api), req.GetTraceId())
 	var data interface{}
 	usedTakeRuntime := false
 	if own.useCache {
@@ -568,11 +534,6 @@ func (own *RouterInfo) ExecDo(api IRouter, req IRequest) (resp IResponse) {
 	}
 
 	resp = req.NewResponse(data, err)
-	if err != nil {
-		go own.errorNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
-	} else {
-		go own.responseNotify(snapshotNotifyValue(api), req.GetTraceId(), snapshotNotifyValue(resp))
-	}
 	return resp
 }
 
@@ -589,189 +550,6 @@ func (own *RouterInfo) takeCache(api IRouter, loader func() (interface{}, error)
 	}
 	value, err := takeRuntime.TakeBestEffort(path, api, ttl, loader)
 	return value, err, true
-}
-
-func (own *RouterInfo) Subscribe(ob *ObserveArgs) error {
-	if ob == nil {
-		return errors.New("subscriber is nil")
-	}
-	own.Lock()
-	defer own.Unlock()
-	own.assertMetadataFrozenLocked()
-	if own.Subscriber == nil {
-		own.Subscriber = make(map[ObserveState]map[string]*ObserveArgs, 3)
-	}
-	if own.Subscriber[ob.State] == nil {
-		own.Subscriber[ob.State] = make(map[string]*ObserveArgs, 0)
-	}
-	if _, ok := own.Subscriber[ob.State][ob.ReceiveService]; ok {
-		return nil //errors.New("subscriber already exists")
-	}
-	copied := *ob
-	copied.ServiceName = own.ServiceName
-	if err := own.subscribeEventLocked(&copied); err != nil {
-		return err
-	}
-	own.Subscriber[ob.State][ob.ReceiveService] = &copied
-	return nil
-}
-
-func (own *RouterInfo) subscribeEventLocked(observer *ObserveArgs) error {
-	if own.eventRuntime == nil || observer == nil {
-		return nil
-	}
-	cancel, err := own.eventRuntime.Subscribe(own.observeEventType(observer.State), func(env *event.Envelope) {
-		args := &NotifyArgs{}
-		if env == nil || json.Unmarshal(env.Data, args) != nil {
-			return
-		}
-		args.ReceiveService = observer.ReceiveService
-		_ = observer.Notify(args)
-	})
-	if err != nil {
-		return err
-	}
-	if own.eventCancels == nil {
-		own.eventCancels = make(map[ObserveState]map[string]func(), 3)
-	}
-	if own.eventCancels[observer.State] == nil {
-		own.eventCancels[observer.State] = make(map[string]func())
-	}
-	own.eventCancels[observer.State][observer.ReceiveService] = cancel
-	return nil
-}
-func (own *RouterInfo) UnSubscribe(ob *ObserveArgs) error {
-	if ob == nil {
-		return errors.New("subscriber is nil")
-	}
-	own.Lock()
-	if own.Subscriber[ob.State] == nil {
-		own.Unlock()
-		return errors.New("subscriber not exists")
-	}
-	delete(own.Subscriber[ob.State], ob.ReceiveService)
-	var cancel func()
-	if own.eventCancels[ob.State] != nil {
-		cancel = own.eventCancels[ob.State][ob.ReceiveService]
-		delete(own.eventCancels[ob.State], ob.ReceiveService)
-	}
-	own.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	return nil
-}
-
-func (own *RouterInfo) observeEventType(state ObserveState) string {
-	return "router.observe:" + own.ServiceName + ":" + own.Path + ":" + strconv.Itoa(int(state))
-}
-func snapshotNotifyValue(value interface{}) interface{} {
-	if value == nil {
-		return nil
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	return json.RawMessage(data)
-}
-
-func (own *RouterInfo) subscriberSnapshot(state ObserveState) []*ObserveArgs {
-	own.RLock()
-	defer own.RUnlock()
-	own.assertMetadataFrozenLocked()
-	source := own.Subscriber[state]
-	items := make([]*ObserveArgs, 0, len(source))
-	for _, item := range source {
-		if item == nil {
-			continue
-		}
-		copied := *item
-		copied.ServiceName = own.ServiceName
-		items = append(items, &copied)
-	}
-	return items
-}
-
-func (own *RouterInfo) requestNotify(api interface{}, traceid string) {
-	if own.publishObservation(ObserveRequest, api, traceid, nil) {
-		return
-	}
-	items := own.subscriberSnapshot(ObserveRequest)
-	for _, item := range items {
-		na := item.NewNotifyArgsSnapshot(api, nil)
-		na.TraceID = traceid
-		err := item.Notify(na)
-		if err != nil {
-			logx.Error(err, item)
-		}
-	}
-}
-func (own *RouterInfo) responseNotify(api interface{}, traceid string, resp interface{}) {
-	if own.publishObservation(ObserveResponse, api, traceid, resp) {
-		return
-	}
-	items := own.subscriberSnapshot(ObserveResponse)
-	for _, item := range items {
-		na := item.NewNotifyArgsSnapshot(api, resp)
-		na.TraceID = traceid
-		err := item.Notify(na)
-		if err != nil {
-			logx.Error(err, item)
-		}
-	}
-}
-func (own *RouterInfo) errorNotify(api interface{}, traceid string, resp interface{}) {
-	if own.publishObservation(ObserveError, api, traceid, resp) {
-		return
-	}
-	items := own.subscriberSnapshot(ObserveError)
-	for _, item := range items {
-		na := item.NewNotifyArgsSnapshot(api, resp)
-		na.TraceID = traceid
-		err := item.Notify(na)
-		if err != nil {
-			logx.Error(err, item)
-		}
-	}
-}
-
-func (own *RouterInfo) publishObservation(state ObserveState, api interface{}, traceID string, response interface{}) bool {
-	own.assertMetadataFrozen()
-	own.RLock()
-	runtime := own.eventRuntime
-	eventType := own.observeEventType(state)
-	serviceName := own.ServiceName
-	path := own.Path
-	own.RUnlock()
-	if runtime == nil {
-		return false
-	}
-	env := event.NewEnvelope(serviceName, eventType, nil)
-	env.Subject = path
-	err := runtime.Publish(context.Background(), event.PublishRequest{
-		Class:    event.ObserverDelivery,
-		Envelope: env,
-		BuildData: func() ([]byte, error) {
-			return json.Marshal(&NotifyArgs{
-				TraceID:     traceID,
-				SendService: serviceName,
-				Topic:       path,
-				State:       state,
-				Instance:    api,
-				Response:    response,
-			})
-		},
-	})
-	if err != nil && !errors.Is(err, event.ErrServiceEventBridgeClosed) {
-		logx.Errorw("router_observer_publish_failed",
-			logx.Field("service", serviceName),
-			logx.Field("route", path),
-			logx.Field("state", state),
-			logx.Field("error", err),
-		)
-	}
-	return true
 }
 
 type cacheObject struct {
