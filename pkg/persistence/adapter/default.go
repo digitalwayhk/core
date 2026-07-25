@@ -10,6 +10,9 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+func GetGlobalSqliteInstance(name string) *oltp.Sqlite {
+	return oltp.GetSharedSqliteInstance(name)
+}
 
 type DefaultAdapter struct {
 	isTansaction  bool                       //是否开启事务
@@ -80,19 +83,19 @@ func (own *DefaultAdapter) getLocalDB(model interface{}) (types.IDataBase, error
 	}
 	name := idb.GetLocalDBName()
 
-	// 🔧 使用全局实例而不是创建新的
-	instance := oltp.GetGlobalSqliteInstance(name)
+	//  使用全局实例而不是创建新的
+	instance := GetGlobalSqliteInstance(name)
 
-	// 🔧 只在第一次时检查表
+	//  只在第一次时检查表
 	if _, exists := own.localdbs[name]; !exists {
-		if !config.INITSERVER {
+		if !config.IsServerInitializing() {
 			err = instance.HasTable(model)
 			if err != nil {
 				return nil, err
 			}
 		}
 		own.localdbs[name] = instance
-		logx.Infof("🔗 绑定全局Sqlite实例到适配器: %s", name)
+		logx.Infof(" 绑定全局Sqlite实例到适配器: %s", name)
 	}
 
 	return instance, err

@@ -9,6 +9,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type GetRouterPath interface {
@@ -26,12 +27,17 @@ type ServiceRouter struct {
 }
 
 func DefaultRouterInfo(item interface{}) *types.RouterInfo {
+	return DefaultRouterInfoWithOptions(item)
+}
+
+// DefaultRouterInfoWithOptions 创建路由元数据，并在注册冻结前应用 options。
+func DefaultRouterInfoWithOptions(item interface{}, options ...RouterInfoOption) *types.RouterInfo {
 	pack, name := GetRouterPackAndTypeName(item)
 	index := strings.Index(pack, "api")
 	if index <= 1 {
 		panic(fmt.Sprintf("api package not found,Path:%s  \n 请修改包名称或手动指定路由路径。", pack))
 	}
-	return NewRouterInfo(item, pack, name)
+	return NewRouterInfoWithOptions(item, pack, name, options...)
 }
 func NewServiceRouter(service *ServiceContext, tis types.IService) *ServiceRouter {
 	sr := &ServiceRouter{
@@ -49,44 +55,73 @@ func NewServiceRouter(service *ServiceContext, tis types.IService) *ServiceRoute
 	return sr
 }
 func (own *ServiceRouter) AddRoutes(routers ...types.IRouter) {
+	registered := make([]*types.RouterInfo, 0, len(routers))
 	for _, router := range routers {
 		info := router.RouterInfo()
-		if info.ServiceName != own.Service.Service.Name {
-			tsn := strings.ToLower(info.ServiceName)
-			ssn := strings.ToLower(own.Service.Service.Name)
-			info.Path = strings.Replace(info.Path, tsn, ssn, -1)
-			info.ServiceName = own.Service.Service.Name
+		if info.PrepareRegistration(own.Service.Service.Name) {
+			if info.ServiceName != own.Service.Service.Name {
+				tsn := strings.ToLower(info.ServiceName)
+				ssn := strings.ToLower(own.Service.Service.Name)
+				info.Path = strings.Replace(info.Path, tsn, ssn, -1)
+				info.ServiceName = own.Service.Service.Name
+			}
+			info.ID = utils.HashCode64(info.Path)
+			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
+			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
+			info.Freeze(own.Service.Service.Name)
 		}
-		if info.PathType == types.PublicType {
-			own.publicAPI[info.Path] = info
+		path := info.GetPath()
+		pathType := info.GetPathType()
+		if pathType == types.PublicType {
+			own.publicAPI[path] = info
 		}
-		if info.PathType == types.PrivateType {
-			own.privateAPI[info.Path] = info
+		if pathType == types.PrivateType {
+			own.privateAPI[path] = info
 		}
-		if info.PathType == types.ManageType {
-			own.manageAPI[info.Path] = info
+		if pathType == types.ManageType {
+			own.manageAPI[path] = info
 		}
-		if _, ok := own.allAPI[info.Path]; !ok {
-			own.allAPI[info.Path] = info
+		if _, ok := own.allAPI[path]; !ok {
+			own.allAPI[path] = info
 		} else {
-			panic(fmt.Sprintf("service :%s router already exists. path:%s", info.ServiceName, info.Path))
+			panic(fmt.Sprintf("service :%s router already exists. path:%s", info.GetServiceName(), path))
 		}
+		registered = append(registered, info)
+	}
+	for _, info := range registered {
+		registeredRouterInfos.register(info)
+	}
+}
+
+func (own *ServiceRouter) unregisterRouterInfos() {
+	if own == nil {
+		return
+	}
+	for _, info := range own.allAPI {
+		registeredRouterInfos.unregister(info)
 	}
 }
 func (own *ServiceRouter) AddServerRouters(routers ...types.IRouter) {
 	for _, router := range routers {
 		info := router.RouterInfo()
-		own.serverManagerAPI[info.Path] = info
+		if info.PrepareRegistration(own.Service.Service.Name) {
+			info.SetEventBridge(own.Service.Service.Name, own.Service.ServiceEventBridge)
+			info.SetWebSocketHub(own.Service.Service.Name, own.Service.RouteWebSocketHub)
+			info.SetCacheManager(own.Service.Service.Name, own.Service.RouteCacheManager)
+			info.Freeze(own.Service.Service.Name)
+		}
+		own.serverManagerAPI[info.GetPath()] = info
 	}
 }
 func (own *ServiceRouter) GetRouters() []*types.RouterInfo {
 	var routes []*types.RouterInfo
 	for _, v := range own.allAPI {
-		routes = append(routes, v)
+		routes = append(routes, checkedRouterInfo(v))
 	}
 	if !own.IsCloseServerManager {
 		for _, v := range own.serverManagerAPI {
-			routes = append(routes, v)
+			routes = append(routes, checkedRouterInfo(v))
 		}
 	}
 	return routes
@@ -105,32 +140,39 @@ func (own *ServiceRouter) GetTypeRouters(t types.ApiType) []*types.RouterInfo {
 		API = own.serverManagerAPI
 	}
 	for _, v := range API {
-		routes = append(routes, v)
+		routes = append(routes, checkedRouterInfo(v))
 	}
 	return routes
 }
 func (own *ServiceRouter) GetRouter(path string) *types.RouterInfo {
 	if v, ok := own.allAPI[path]; ok {
-		return v
+		return checkedRouterInfo(v)
 	}
 	if v, ok := own.serverManagerAPI[path]; ok {
-		return v
+		return checkedRouterInfo(v)
 	}
 	return nil
 }
+
+func checkedRouterInfo(info *types.RouterInfo) *types.RouterInfo {
+	if info != nil {
+		_ = info.GetPath()
+	}
+	return info
+}
 func (own *ServiceRouter) HasRouter(path string, t types.ApiType) bool {
-	res := false
+	var info *types.RouterInfo
 	switch t {
 	case types.PublicType:
-		_, res = own.publicAPI[path]
+		info = own.publicAPI[path]
 	case types.PrivateType:
-		_, res = own.privateAPI[path]
+		info = own.privateAPI[path]
 	case types.ManageType:
-		_, res = own.manageAPI[path]
+		info = own.manageAPI[path]
 	case types.ServerManagerType:
-		_, res = own.serverManagerAPI[path]
+		info = own.serverManagerAPI[path]
 	}
-	return res
+	return checkedRouterInfo(info) != nil
 }
 func GetRouterPackAndTypeName(item interface{}) (string, string) {
 	pack := utils.GetPackageName(item)
@@ -145,9 +187,24 @@ func GetRouterPackAndTypeName(item interface{}) (string, string) {
 	return pack, name
 }
 func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
+	return NewRouterInfoWithOptions(item, pack, name)
+}
+
+// NewRouterInfoWithOptions 使用指定包和类型名称创建路由元数据，并在注册冻结前应用 options。
+func NewRouterInfoWithOptions(item interface{}, pack, name string, options ...RouterInfoOption) *types.RouterInfo {
+	sname := utils.GetTypeName(item)
+	if !config.IsServerInitializing() {
+		if info := registeredRouterInfos.resolve(pack, name, sname); info != nil {
+			return info
+		}
+	}
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Printf("创建路由发生异常，Pack:%s,Name:%s,Error:%v,Item:%s", pack, name, err, utils.PrintObj(item))
+			logx.Errorw("router_creation_panicked",
+				logx.Field("package", pack),
+				logx.Field("router", name),
+				logx.Field("error", err),
+			)
 		}
 	}()
 	index := strings.Index(pack, "api")
@@ -175,7 +232,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 	if item, ok := item.(GetRouterPath); ok {
 		Path = item.GetRouterPathPrefixes() + "/" + strings.ToLower(name)
 	}
-	if !config.INITSERVER {
+	if !config.IsServerInitializing() {
 		sc := GetContext(servername)
 		if sc != nil {
 			info := sc.Router.GetRouter(Path)
@@ -184,7 +241,6 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 			}
 		}
 	}
-	sname := utils.GetTypeName(item)
 	info := &types.RouterInfo{
 		ID:                utils.HashCode64(Path),
 		Path:              Path,
@@ -199,5 +255,7 @@ func NewRouterInfo(item interface{}, pack, name string) *types.RouterInfo {
 		WebSocketWaitTime: time.Second * 10,
 	}
 	info.SetInstance(item.(types.IRouter))
+	applyRouterInfoOptions(info, options)
+	info.ID = utils.HashCode64(info.Path)
 	return info
 }

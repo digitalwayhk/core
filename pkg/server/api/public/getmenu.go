@@ -6,6 +6,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -52,9 +53,10 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *GetMenu) RouterInfo() *types.RouterInfo {
-	info := api.ServerRouterInfo(own)
-	info.Method = http.MethodGet
-	return info
+	return api.ServerRouterInfoWithOptions(own,
+		router.WithMethod(http.MethodGet),
+		withSystemEndpointRateLimit(),
+	)
 }
 
 func getLocalMenu() (*smodels.DirectoryModel, error) {

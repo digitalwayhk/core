@@ -41,7 +41,7 @@ type IRouterResponse interface {
 }
 ```
 
-这个接口主要服务于 OpenAPI 自动文档。`pkg/server/api/public/openapi.go` 和 `pkg/server/run/openapi.go` 在生成接口响应 schema 时，会先查找 `router.TestResult[info.Path]`；如果没有测试执行结果，就判断路由实例是否实现了 `IRouterResponse`，并调用 `GetResponse()` 取得示例响应数据。
+这个接口主要服务于 OpenAPI 自动文档。唯一生成器 `pkg/server/internal/openapidoc` 在生成接口响应 schema 时，会先查找 `router.TestResult[info.Path]`；如果没有测试执行结果，就判断路由实例是否实现了 `IRouterResponse`，并调用 `GetResponse()` 取得示例响应数据。
 
 适用场景：
 
@@ -75,10 +75,10 @@ func (own *GetOrder) GetResponse() interface{} {
 /api/{serviceName}/{routerStructNameLower}
 ```
 
-例如 `examples/demo/api/private/AddOrder` 会生成：
+例如 `examples/01-simple-shop/api/private/AddOrder` 会生成：
 
 ```text
-/api/demo/addorder
+/api/shop/addorder
 ```
 
 `service/manage` 生成的管理路由会使用特殊路径：
@@ -90,9 +90,9 @@ func (own *GetOrder) GetResponse() interface{} {
 例如：
 
 ```text
-/api/manage/demo/tokenmanage/view
-/api/manage/demo/tokenmanage/search
-/api/manage/demo/tokenmanage/add
+/api/manage/shop/productmanage/view
+/api/manage/shop/productmanage/search
+/api/manage/shop/productmanage/add
 ```
 
 ## 服务注册
@@ -112,11 +112,14 @@ type IService interface {
 ```go
 server := run.NewWebServer()
 server.AddIService(&demo.DemoService{}, &types.ServerOption{
-    IsCors: true,
+    IsCors:      true,
+    OriginCors:  []string{"http://localhost:8000"},
     IsWebSocket: true,
 })
 server.Start()
 ```
+
+CORS 启用时必须显式配置至少一个 `OriginCors`。通配符 `"*"` 只有在调用方明确接受任意来源时才可显式使用。
 
 `run.NewWebServer()` 会自动加入 `SystemManage` 服务。`SystemManage` 提供服务管理、配置、菜单、路由查询、日志、OpenAPI、健康检查、测试 token 等内置 API。
 
@@ -146,6 +149,8 @@ server.Start()
 3. `ReadConfig`、`NewServiceDefaultConfig`、`Save`、`ModifyConfig` 都应调用统一的 `ApplyDefaults()` 和 `Validate()`。
 4. 旧配置缺少新字段时必须自动补默认值，避免旧 `etc/{service}.json` 无法启动。
 5. `CustomerDataList` 只作为历史兼容读取入口，不再承载新规范配置。
+
+`TrustedProxies` 必须显式配置为反向代理的 IP 或 CIDR，例如 `[]string{"127.0.0.1/32", "10.0.0.0/8"}`。默认空列表不信任 `X-Forwarded-For`/`X-Real-IP`；反代部署如不配置，转发请求不会被当作可信的本地访问。不要把客户端可直接连接的网段加入该列表。
 
 新增水平扩展、内部传输和 MQ 的完整配置建议见仓库根目录 `OPTIMIZATION_PLAN.md`。
 
@@ -318,19 +323,21 @@ REST 注册路由时会根据服务配置决定使用哪种认证方式。
 `run.WebServer` 支持命令行参数：
 
 - `-p`：HTTP 端口，默认 8080。
-- `-socket`：内部 socket 服务端口，默认为 0，不启用。
+- `-grpc`：覆盖 gRPC 起始端口；同进程多服务按服务名稳定排序使用 `起始端口 + index`，为 0 时分别使用各服务配置及其默认派生值。
 - `-view`：视图服务端口，默认 80。
 - `-server`：父服务器地址。
 
 ## OpenAPI 自动文档
 
-`pkg/server/api/public/openapi.go` 提供公开 OpenAPI 文档接口，`pkg/server/run/openapi.go` 提供同类生成能力和 Swagger 静态资源挂载辅助。
+`pkg/server/internal/openapidoc` 是唯一的 OpenAPI 文档生成器；`pkg/server/run/openapi.go` 提供匿名公开入口和 Swagger 静态资源挂载，`pkg/server/api/public/openapi.go` 只实现受保护的内部入口。
 
 OpenAPI 生成逻辑会：
 
 - 遍历当前服务路由。
 - 跳过 `server` 系统服务自身。
-- 只生成 `public` 和 `private` 路由文档，不生成 `manage` 管理端路由。
+- 只生成 `public` 和 `private` 路由文档，不生成 `manage`、`servermanager` 管理端路由。
+- 匿名 `/api/openapi` 过滤声明了 `WithInternalCallers` 的内部专用 Public 路由，并且不输出 `x-internal-callers`。
+- `/api/internal/openapi` 使用 `ServerManageAuth`，保留内部专用 Public 路由和 `x-internal-callers`；可通过 `?service=<name>` 只查看一个服务。
 - 根据 `RouterInfo.Method` 生成 GET query 参数或 POST request body。
 - 读取字段 `json` 和 `desc` tag，生成参数说明。
 - 为 private 路由添加 Bearer JWT 安全声明。
@@ -345,14 +352,16 @@ OpenAPI 生成逻辑会：
 /api/servermanage/testtoken?userid=12345
 ```
 
-常见访问入口：
+访问入口：
 
 ```text
-/api/{service}/openapi
+/api/openapi
+/api/internal/openapi
+/api/internal/openapi?service=<service-name>
 /swagger/
 ```
 
-具体挂载方式取决于运行服务如何注册 `OpenAPIHandler` 和 Swagger 静态文件。
+内部文档响应使用 `Cache-Control: private, no-store`。旧 `/api/servermanage/openapi` 已移除。
 
 ## 主要目录
 
@@ -361,7 +370,7 @@ OpenAPI 生成逻辑会：
 - `run`：WebServer 启动器、HTML 服务、OpenAPI 支持。
 - `trans/rest`：HTTP 服务和客户端。
 - `trans/websocket`：WebSocket 客户端和 melody 实现。
-- `trans/socket`：内部 socket 通信。
+- `transport/grpc`：默认内部服务通信，复用 go-zero/zrpc 生命周期与标准 gRPC health。
 - `trans/quic`：QUIC 通信实验/实现。
 - `safe`：鉴权和安全控制。
 - `api`：系统内置管理、公开、私有 API。

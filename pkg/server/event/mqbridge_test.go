@@ -26,6 +26,7 @@ type fakeMQProvider struct {
 type fakeMsg struct {
 	subject string
 	data    []byte
+	opts    *mq.PublishOptions
 }
 
 func (f *fakeMQProvider) Name() string                    { return "fake" }
@@ -33,9 +34,14 @@ func (f *fakeMQProvider) Connect(_ context.Context) error { return nil }
 func (f *fakeMQProvider) Close() error                    { return nil }
 func (f *fakeMQProvider) Health(_ context.Context) error  { return nil }
 
-func (f *fakeMQProvider) Publish(_ context.Context, subject string, data []byte, _ *mq.PublishOptions) error {
+func (f *fakeMQProvider) Publish(_ context.Context, subject string, data []byte, opts *mq.PublishOptions) error {
 	f.mu.Lock()
-	f.published = append(f.published, fakeMsg{subject, data})
+	var optsCopy *mq.PublishOptions
+	if opts != nil {
+		cp := *opts
+		optsCopy = &cp
+	}
+	f.published = append(f.published, fakeMsg{subject: subject, data: data, opts: optsCopy})
 	h := f.handler
 	f.mu.Unlock()
 
@@ -84,6 +90,8 @@ func TestMQBridge_Publish_SerializesEnvelopeToMQ(t *testing.T) {
 
 	env := event.NewEnvelope("svc.test", "order.created", []byte(`{"id":1}`))
 	env.TraceID = "trace-xyz"
+	env.IdempotencyKey = "idem-1"
+	env.ShardKey = "user-9"
 
 	ctx := context.Background()
 	require.NoError(t, bridge.Publish(ctx, "order.events", env))
@@ -94,6 +102,9 @@ func TestMQBridge_Publish_SerializesEnvelopeToMQ(t *testing.T) {
 
 	require.Len(t, published, 1, "one message should be published to MQ")
 	assert.Equal(t, "order.events", published[0].subject)
+	require.NotNil(t, published[0].opts)
+	assert.Equal(t, "idem-1", published[0].opts.IdempotencyKey)
+	assert.Equal(t, "user-9", published[0].opts.OrderingKey)
 
 	var got event.Envelope
 	require.NoError(t, json.Unmarshal(published[0].data, &got))
@@ -102,6 +113,20 @@ func TestMQBridge_Publish_SerializesEnvelopeToMQ(t *testing.T) {
 	assert.Equal(t, env.Source, got.Source)
 	assert.Equal(t, env.TraceID, got.TraceID)
 	assert.Equal(t, env.Data, got.Data)
+}
+
+func TestMQBridge_Publish_RequireOrderedRejectsEmptyShardKey(t *testing.T) {
+	stream := event.NewStream()
+	provider := mq.NewFakeOrderedReliableProvider()
+	mgr := mq.NewManager()
+	mgr.Register(provider)
+	require.NoError(t, mgr.SetCurrent(provider.Name()))
+	bridge := event.NewMQBridge(stream, mgr)
+	require.NoError(t, bridge.EnsureOrderedReliable())
+
+	env := event.NewEnvelope("svc.test", "order.created", []byte(`{}`))
+	err := bridge.Publish(context.Background(), "order.events", env)
+	require.ErrorIs(t, err, event.ErrOrderingKeyRequired)
 }
 
 // TestMQBridge_Subscribe_DeserializesAndDeliversToStream verifies that an MQ

@@ -1,8 +1,13 @@
 package adapter
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 )
+
+var ErrCacheAdapterUnavailable = errors.New("cache adapter is unavailable")
 
 type CacheAdapter struct {
 	DbName string
@@ -17,7 +22,6 @@ func (own *CacheAdapter) Get(key string) (interface{}, error) {
 }
 
 func (own *CacheAdapter) Set(key string, value interface{}, seconds int) error {
-	//TODO implement me
 	db, err := own.getCacheDB()
 	if err != nil {
 		return err
@@ -50,9 +54,5 @@ func (own *CacheAdapter) Search(prefix string) ([]string, error) {
 }
 
 func (own *CacheAdapter) getCacheDB() (types.ICache, error) {
-	// idb, err := models.GetRemoteCacheConfig(own.DbName)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	return nil, nil
+	return nil, fmt.Errorf("%w: database %q has no configured provider", ErrCacheAdapterUnavailable, own.DbName)
 }

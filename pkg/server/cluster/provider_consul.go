@@ -3,7 +3,11 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"strconv"
+	"sync"
 	"time"
 
 	consulapi "github.com/hashicorp/consul/api"
@@ -13,6 +17,7 @@ const consulServicePrefix = "core-cluster"
 const consulCheckInterval = "10s"
 const consulCheckTimeout = "3s"
 const consulCheckDeregisterCritical = "30s"
+const consulCleanupTimeout = 3 * time.Second
 
 // ConsulProvider implements DiscoveryProvider using HashiCorp Consul.
 // Each node is registered as a Consul service entry:
@@ -21,7 +26,8 @@ const consulCheckDeregisterCritical = "30s"
 //	Tags: ["core-cluster", "<serviceName>"]
 //	Meta: JSON-encoded extra NodeInfo fields
 type ConsulProvider struct {
-	client *consulapi.Client
+	client       *consulapi.Client
+	nodeServices sync.Map // nodeID → serviceName mapping to avoid O(n) catalog scans
 }
 
 // NewConsulProvider creates a provider connected to the given Consul address.
@@ -58,7 +64,6 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 	extra, _ := json.Marshal(map[string]interface{}{
 		"datacenter_id":  node.DataCenterID,
 		"machine_id":     node.MachineID,
-		"socket_port":    node.SocketPort,
 		"grpc_port":      node.GRPCPort,
 		"weight":         node.Weight,
 		"registered_at":  node.RegisteredAt.Format(time.RFC3339),
@@ -80,24 +85,49 @@ func (c *ConsulProvider) Register(ctx context.Context, node *NodeInfo) error {
 			DeregisterCriticalServiceAfter: consulCheckDeregisterCritical,
 		},
 	}
-	if err := c.client.Agent().ServiceRegister(svc); err != nil {
+	registerOpts := consulapi.ServiceRegisterOpts{}.WithContext(ctx)
+	if err := c.client.Agent().ServiceRegisterOpts(svc, registerOpts); err != nil {
 		return fmt.Errorf("consul: register service: %w", err)
 	}
+	// Cache nodeID→serviceName for O(1) lookup in Heartbeat/Deregister/Get.
+	c.nodeServices.Store(node.ID, node.ServiceName)
 	// Mark passing immediately.
 	checkID := "service:" + svc.ID
-	return c.client.Agent().UpdateTTL(checkID, "registered", consulapi.HealthPassing)
+	if ttlErr := c.client.Agent().UpdateTTLOpts(checkID, "registered", consulapi.HealthPassing,
+		(&consulapi.QueryOptions{}).WithContext(ctx)); ttlErr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), consulCleanupTimeout)
+		cleanupErr := c.client.Agent().ServiceDeregisterOpts(svc.ID,
+			(&consulapi.QueryOptions{}).WithContext(cleanupCtx))
+		cancel()
+		c.nodeServices.Delete(node.ID)
+		compensated := cleanupErr == nil || errors.Is(cleanupErr, ErrNodeNotFound)
+		if cleanupErr != nil && !errors.Is(cleanupErr, ErrNodeNotFound) {
+			cleanupErr = fmt.Errorf("consul: cleanup service after ttl failure: %w", cleanupErr)
+		}
+		return &RegistrationError{
+			Cause: errors.Join(
+				fmt.Errorf("consul: update ttl after register: %w", ttlErr),
+				cleanupErr,
+			),
+			Compensated: compensated,
+		}
+	}
+	return nil
 }
 
 // Deregister removes the node from Consul.
-func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
-	// We need the serviceName to build the service ID; scan registrations to find it.
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+func (c *ConsulProvider) Deregister(ctx context.Context, nodeID string) error {
+	svcName := c.serviceNameForNode(nodeID)
+	query := (&consulapi.QueryOptions{}).WithContext(ctx)
+	entries, _, err := c.client.Health().Service(svcName, "", false, query)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if e.Service.Meta["node_id"] == nodeID {
-			return c.client.Agent().ServiceDeregister(e.Service.ID)
+			c.nodeServices.Delete(nodeID)
+			return c.client.Agent().ServiceDeregisterOpts(e.Service.ID,
+				(&consulapi.QueryOptions{}).WithContext(ctx))
 		}
 	}
 	return ErrNodeNotFound
@@ -105,22 +135,27 @@ func (c *ConsulProvider) Deregister(_ context.Context, nodeID string) error {
 
 // Heartbeat updates the TTL health check to passing.
 func (c *ConsulProvider) Heartbeat(ctx context.Context, nodeID string) error {
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+	svcName := c.serviceNameForNode(nodeID)
+	entries, _, err := c.client.Health().Service(svcName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if e.Service.Meta["node_id"] == nodeID {
 			checkID := "service:" + e.Service.ID
-			return c.client.Agent().UpdateTTL(checkID, "heartbeat", consulapi.HealthPassing)
+			return c.client.Agent().UpdateTTLOpts(checkID, "heartbeat", consulapi.HealthPassing,
+				(&consulapi.QueryOptions{}).WithContext(ctx))
 		}
 	}
 	return ErrNodeNotFound
 }
 
 // Get returns the NodeInfo for the given nodeID.
-func (c *ConsulProvider) Get(_ context.Context, nodeID string) (*NodeInfo, error) {
-	entries, _, err := c.client.Health().Service("", "", false, nil)
+func (c *ConsulProvider) Get(ctx context.Context, nodeID string) (*NodeInfo, error) {
+	svcName := c.serviceNameForNode(nodeID)
+	entries, _, err := c.client.Health().Service(svcName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +167,19 @@ func (c *ConsulProvider) Get(_ context.Context, nodeID string) (*NodeInfo, error
 	return nil, ErrNodeNotFound
 }
 
+// serviceNameForNode returns the cached serviceName for the given nodeID.
+// Falls back to "" (all services) if no cached entry exists.
+func (c *ConsulProvider) serviceNameForNode(nodeID string) string {
+	if v, ok := c.nodeServices.Load(nodeID); ok {
+		return v.(string)
+	}
+	return ""
+}
+
 // List returns nodes for the given service, optionally filtered by status.
-func (c *ConsulProvider) List(_ context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
-	entries, _, err := c.client.Health().Service(serviceName, "", false, nil)
+func (c *ConsulProvider) List(ctx context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
+	entries, _, err := c.client.Health().Service(serviceName, "", false,
+		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("consul: list service %s: %w", serviceName, err)
 	}
@@ -172,7 +217,16 @@ func (c *ConsulProvider) Watch(ctx context.Context, serviceName string, onChange
 			opts = opts.WithContext(ctx)
 			entries, meta, err := c.client.Health().Service(serviceName, "", false, opts)
 			if err != nil {
-				time.Sleep(time.Second)
+				timer := time.NewTimer(time.Second)
+				select {
+				case <-done:
+					timer.Stop()
+					return
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 				continue
 			}
 			if meta.LastIndex > lastIndex {
@@ -217,9 +271,35 @@ func consulEntryToNode(e *consulapi.ServiceEntry) *NodeInfo {
 			if v, ok := m["weight"].(float64); ok {
 				node.Weight = int(v)
 			}
+			if v, ok := consulMetadataPort(m["grpc_port"]); ok {
+				node.GRPCPort = v
+			}
 		}
 	}
 	return node
+}
+
+func consulMetadataPort(value interface{}) (int, bool) {
+	var port int64
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || typed != math.Trunc(typed) {
+			return 0, false
+		}
+		port = int64(typed)
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		port = parsed
+	default:
+		return 0, false
+	}
+	if port <= 0 || port > 65535 {
+		return 0, false
+	}
+	return int(port), true
 }
 
 func consulServiceID(serviceName, nodeID string) string {

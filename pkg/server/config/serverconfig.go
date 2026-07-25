@@ -1,40 +1,50 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/json"
+	"fmt"
+	"net/netip"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/utils"
 
 	"github.com/gofrs/uuid"
 	"github.com/zeromicro/go-zero/core/conf"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest"
 )
 
 type ServerConfig struct {
 	rest.RestConf
-	DataCenterID          uint
-	MachineID             uint
-	Auth                  AuthSecret
-	ManageAuth            AuthSecret
-	ServerManageAuth      AuthSecret
-	RunIp                 string
-	ParentServerIP        string
-	SocketPort            int
+	DataCenterID     uint
+	MachineID        uint
+	Auth             AuthSecret
+	ManageAuth       AuthSecret
+	ServerManageAuth AuthSecret
+	RunIp            string
+	ParentServerIP   string
+	// AttachServices 已由 ClusterProvider + ServiceResolver 替代。
+	// Deprecated: 仅保留旧调用链配置兼容，新服务不得再写入。
 	AttachServices        map[string]*AttachAddress
 	Debug                 bool
 	IsWhiteList           bool
 	WhiteList             []string
+	TrustedProxies        []string
 	CustomerDataList      []*CustomerData
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string          `json:",optional"`
-	Cluster               ClusterConfig   `json:",optional"`
-	Transport             TransportConfig `json:",optional"`
-	MQ                    MQConfig        `json:",optional"`
+	MelodyConfigPath      string               `json:",optional"`
+	Cluster               ClusterConfig        `json:",optional"`
+	Transport             TransportConfig      `json:",optional"`
+	MQ                    MQConfig             `json:",optional"`
+	RouteCache            RouteCacheConfig     `json:",optional"`
+	AuthRevocation        AuthRevocationConfig `json:",optional"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -49,23 +59,99 @@ func (con *ServerConfig) ApplyDefaults() {
 	if con.WhiteList == nil {
 		con.WhiteList = make([]string, 0)
 	}
+	if con.TrustedProxies == nil {
+		con.TrustedProxies = make([]string, 0)
+	}
 	con.Cluster.ApplyDefaults()
 	con.Transport.ApplyDefaults()
+	con.Transport.ApplyServerDefaults(con.Cluster, con.Port)
 	con.MQ.ApplyDefaults()
+	con.RouteCache.ApplyDefaults()
+	con.AuthRevocation.ApplyDefaults(con.Name)
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
 func (con *ServerConfig) Validate() error {
+	for i, proxy := range con.TrustedProxies {
+		proxy = strings.TrimSpace(proxy)
+		if _, err := netip.ParseAddr(proxy); err == nil {
+			continue
+		}
+		if _, err := netip.ParsePrefix(proxy); err != nil {
+			return fmt.Errorf("TrustedProxies[%d] must be an IP address or CIDR: %q", i, proxy)
+		}
+	}
 	if err := con.Cluster.Validate(); err != nil {
 		return err
 	}
 	if err := con.Transport.Validate(); err != nil {
 		return err
 	}
+	if err := con.Transport.ValidateForServer(con.Cluster, con.RunIp); err != nil {
+		return err
+	}
 	if err := con.MQ.Validate(); err != nil {
 		return err
 	}
+	if err := con.RouteCache.Validate(); err != nil {
+		return err
+	}
+	casdoorEnabled := con.Auth.CasDoor.Enable || con.ManageAuth.CasDoor.Enable
+	if err := con.AuthRevocation.Validate(casdoorEnabled); err != nil {
+		return err
+	}
+	if err := con.validateCasdoorSecrets(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (con *ServerConfig) validateCasdoorSecrets() error {
+	authWebhook := strings.TrimSpace(con.Auth.CasDoor.WebhookSecret)
+	manageWebhook := strings.TrimSpace(con.ManageAuth.CasDoor.WebhookSecret)
+	if strings.TrimSpace(con.ServerManageAuth.CasDoor.WebhookSecret) != "" {
+		return fmt.Errorf("ServerManageAuth.CasDoor.WebhookSecret is unsupported")
+	}
+	if con.Auth.CasDoor.Enable && authWebhook == "" {
+		return fmt.Errorf("Auth.CasDoor.WebhookSecret is required")
+	}
+	if con.ManageAuth.CasDoor.Enable && manageWebhook == "" {
+		return fmt.Errorf("ManageAuth.CasDoor.WebhookSecret is required")
+	}
+	if authWebhook != "" && manageWebhook != "" && subtleSecretEqual(authWebhook, manageWebhook) {
+		return fmt.Errorf("Auth and ManageAuth CasDoor WebhookSecret must be different")
+	}
+	protected := []struct {
+		name  string
+		value string
+	}{
+		{"Auth.AccessSecret", con.Auth.AccessSecret},
+		{"Auth.RefreshSecret", con.Auth.RefreshSecret},
+		{"ManageAuth.AccessSecret", con.ManageAuth.AccessSecret},
+		{"ManageAuth.RefreshSecret", con.ManageAuth.RefreshSecret},
+		{"ServerManageAuth.AccessSecret", con.ServerManageAuth.AccessSecret},
+	}
+	for _, webhook := range []struct {
+		name  string
+		value string
+	}{{"Auth.CasDoor.WebhookSecret", authWebhook}, {"ManageAuth.CasDoor.WebhookSecret", manageWebhook}} {
+		if webhook.value == "" {
+			continue
+		}
+		for _, secret := range protected {
+			if secret.value != "" && subtleSecretEqual(webhook.value, secret.value) {
+				return fmt.Errorf("%s must be different from %s", webhook.name, secret.name)
+			}
+		}
+	}
+	return nil
+}
+
+func subtleSecretEqual(left, right string) bool {
+	if len(left) != len(right) || left == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 // ReloadExternalConfigs 加载外部配置文件（Casdoor、Melody）。
@@ -102,16 +188,23 @@ func (con *ServerConfig) GetCustomerData(key string) *CustomerData {
 }
 
 type AuthSecret struct {
-	AccessSecret string
-	AccessExpire int64
-	Logto        LogtoConfig
-	CasDoor      CasDoorConfig
+	AccessSecret  string
+	AccessExpire  int64
+	RefreshSecret string
+	RefreshExpire int64
+	Logto         LogtoConfig
+	CasDoor       CasDoorConfig
 }
+
+const (
+	DefaultAccessExpireSeconds  int64 = 7200
+	DefaultRefreshExpireSeconds int64 = 2592000
+)
+
 type AttachAddress struct {
-	Name       string
-	Address    string
-	Port       int
-	SocketPort int
+	Name    string
+	Address string
+	Port    int
 }
 type CustomerData struct {
 	Key   string
@@ -127,15 +220,46 @@ const CONFIGDIR = "/etc/"
 
 var CONFIGDIRPATH = utils.Getpath() + CONFIGDIR
 
-// 初始化SERVER,true表示系统加载中，未运行，false表示系统已运行
-var INITSERVER = false
+var (
+	serverInitializationMu   sync.RWMutex
+	activeServerInitializers int
+
+	// INITSERVER 仅为保持源码兼容而保留。
+	// Deprecated: 请使用 IsServerInitializing；外部并发直接写入 INITSERVER 不受锁保护。
+	INITSERVER = false
+)
+
+// BeginServerInitialization 登记一个进入初始化阶段的服务器实例。
+func BeginServerInitialization() {
+	serverInitializationMu.Lock()
+	activeServerInitializers++
+	INITSERVER = true
+	serverInitializationMu.Unlock()
+}
+
+// EndServerInitialization 结束一个服务器实例的初始化阶段。
+func EndServerInitialization() {
+	serverInitializationMu.Lock()
+	if activeServerInitializers > 0 {
+		activeServerInitializers--
+	}
+	INITSERVER = activeServerInitializers > 0
+	serverInitializationMu.Unlock()
+}
+
+// IsServerInitializing 返回当前进程是否仍有服务器实例处于初始化阶段。
+func IsServerInitializing() bool {
+	serverInitializationMu.RLock()
+	defer serverInitializationMu.RUnlock()
+	return INITSERVER
+}
 
 func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	var con ServerConfig
 	con.Name = servicename
 	str := "{\"Name\":\"" + servicename + "\",\"Port\":" + strconv.Itoa(port) + ",\"Host\":\"0.0.0.0\"}"
 	conf.LoadConfigFromJsonBytes([]byte(str), &con)
-	con.Telemetry.Batcher = "jaeger"
+	con.Telemetry.Batcher = "zipkin"
 	ip := utils.GetLocalIP()
 	con.Log.ServiceName = servicename + "-" + ip
 	con.Log.KeepDays = 10
@@ -144,7 +268,9 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	//con.Log.Path = "logs/" + servicename
 	con.RunIp = ip
 	con.Auth.AccessSecret = uuid.Must(uuid.NewV4()).String()
-	con.Auth.AccessExpire = 86400
+	con.Auth.AccessExpire = DefaultAccessExpireSeconds
+	con.Auth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
+	con.Auth.RefreshExpire = DefaultRefreshExpireSeconds
 	con.Auth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
@@ -154,12 +280,14 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		YamlFilePath: "",
 	}
 	con.ManageAuth.AccessSecret = uuid.Must(uuid.NewV4()).String()
-	con.ManageAuth.AccessExpire = 86400
+	con.ManageAuth.AccessExpire = DefaultAccessExpireSeconds
+	con.ManageAuth.RefreshSecret = uuid.Must(uuid.NewV4()).String()
+	con.ManageAuth.RefreshExpire = DefaultRefreshExpireSeconds
 	con.ManageAuth.Logto = LogtoConfig{
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
-	con.Auth.CasDoor = CasDoorConfig{
+	con.ManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
@@ -169,14 +297,14 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 		ExpectedAudience: "",
 		Issuer:           "",
 	}
-	con.Auth.CasDoor = CasDoorConfig{
+	con.ServerManageAuth.CasDoor = CasDoorConfig{
 		Enable:       false,
 		YamlFilePath: "",
 	}
-	con.SocketPort = port + 10000
 	con.Debug = false
 	con.IsWhiteList = false
 	con.WhiteList = make([]string, 0)
+	con.TrustedProxies = make([]string, 0)
 	con.CustomerDataList = make([]*CustomerData, 0)
 	con.MelodyConfigPath = ""
 	con.ApplyDefaults()
@@ -190,6 +318,16 @@ func ReadConfig(servicename string) *ServerConfig {
 	if !utils.IsExista(file) {
 		return nil
 	}
+
+	// Auto-migrate old config files whose time.Duration fields were serialized
+	// as int64 nanoseconds (e.g. 3000000000) instead of strings (e.g. "3s").
+	if err := migrateConfig(file); err != nil {
+		logx.Errorw("config_migration_failed",
+			logx.Field("config_path", file),
+			logx.Field("error", err),
+		)
+	}
+
 	con := &ServerConfig{}
 	conf.MustLoad(file, con)
 	con.ApplyDefaults()
@@ -198,6 +336,160 @@ func ReadConfig(servicename string) *ServerConfig {
 	}
 	con.ReloadExternalConfigs()
 	return con
+}
+
+// migrateConfig rewrites the config file in-place to fix known format issues
+// from older core versions: numeric time.Duration fields, null slices that
+// should be empty arrays, etc. Migration errors are logged but non-fatal.
+func migrateConfig(file string) error {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read config migration source: %w", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("decode config migration source: %w", err)
+	}
+
+	changed := migrateDurations(m)
+	if migrateNullSlices(m) {
+		changed = true
+	}
+	if migrateRefreshSecrets(m) {
+		changed = true
+	}
+	if migrateRemovedSocketConfig(m) {
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("encode migrated config: %w", err)
+	}
+	if err := writeConfigFile(file, out); err != nil {
+		return fmt.Errorf("write migrated config: %w", err)
+	}
+	return nil
+}
+
+// migrateRemovedSocketConfig removes retired transport selectors while leaving
+// unrelated and unknown user configuration untouched.
+func migrateRemovedSocketConfig(m map[string]interface{}) bool {
+	changed := false
+	if _, ok := m["SocketPort"]; ok {
+		delete(m, "SocketPort")
+		changed = true
+	}
+	if transportConfig, ok := m["Transport"].(map[string]interface{}); ok {
+		if _, ok := transportConfig["Socket"]; ok {
+			delete(transportConfig, "Socket")
+			changed = true
+		}
+		if grpcConfig, ok := transportConfig["GRPC"].(map[string]interface{}); ok {
+			if _, ok := grpcConfig["Enable"]; ok {
+				delete(grpcConfig, "Enable")
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// migrateRefreshSecrets 为已有 AccessSecret 的历史 auth/manage 配置生成一次性
+// Refresh 密钥。密钥会由 migrateConfig 回写，后续启动不得重新生成。
+func migrateRefreshSecrets(m map[string]interface{}) bool {
+	changed := false
+	for _, key := range []string{"Auth", "ManageAuth"} {
+		auth, ok := m[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		accessSecret, _ := auth["AccessSecret"].(string)
+		if strings.TrimSpace(accessSecret) == "" {
+			continue
+		}
+		refreshSecret, _ := auth["RefreshSecret"].(string)
+		if strings.TrimSpace(refreshSecret) == "" {
+			for refreshSecret == "" || refreshSecret == accessSecret {
+				refreshSecret = uuid.Must(uuid.NewV4()).String()
+			}
+			auth["RefreshSecret"] = refreshSecret
+			changed = true
+		}
+		refreshExpire, ok := auth["RefreshExpire"].(float64)
+		if !ok || refreshExpire <= 0 {
+			auth["RefreshExpire"] = DefaultRefreshExpireSeconds
+			changed = true
+		}
+	}
+	return changed
+}
+
+func writeConfigFile(file string, data []byte) error {
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(file, 0o600)
+}
+
+// migrateNullSlices converts nil JSON values to empty arrays for fields
+// whose Go types are slices that must not be nil (e.g. []string).
+func migrateNullSlices(m map[string]interface{}) bool {
+	changed := false
+	for _, key := range []string{"PrivateKeys", "Endpoints", "Brokers", "NameServers", "TrustedProxies"} {
+		if v, ok := m[key]; ok && v == nil {
+			m[key] = []interface{}{}
+			changed = true
+		}
+	}
+	// Recurse into nested objects.
+	for _, v := range m {
+		if nested, ok := v.(map[string]interface{}); ok {
+			if migrateNullSlices(nested) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// migrateDurations walks a JSON map and converts numeric values at duration
+// keys to their string forms. Returns true if any conversion was done.
+func migrateDurations(m map[string]interface{}) bool {
+	changed := false
+	for k, v := range m {
+		switch v := v.(type) {
+		case float64:
+			if isDurationKey(k) {
+				dur := time.Duration(int64(v))
+				m[k] = dur.String()
+				changed = true
+			}
+		case map[string]interface{}:
+			if migrateDurations(v) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// isDurationKey returns true for JSON keys that are known time.Duration fields.
+// Keep in sync with all time.Duration fields across config structs.
+func isDurationKey(k string) bool {
+	switch k {
+	case
+		"UploadRate", "CheckInterval", "ProfilingDuration",
+		"WrapUpTime", "WaitTime",
+		"HeartbeatInterval", "HeartbeatTimeout", "SuspectTimeout",
+		"InstanceReuseCooldown", "TTL",
+		"RetryDelay", "InitialDelay", "MaxDelay",
+		"DualWriteDuration":
+		return true
+	}
+	return false
 }
 func (own *ServerConfig) Save() error {
 	if utils.IsTest() {
@@ -214,42 +506,97 @@ func (own *ServerConfig) Save() error {
 			panic(err)
 		}
 	}
+
+	// Marshal to a map so we can fix time.Duration fields before writing.
 	data, err := json.Marshal(own)
 	if err != nil {
 		return err
 	}
-	str := string(data)
-	expity := 1
-	if own.Signature.Expiry > 0 {
-		expity = int(own.Signature.Expiry / time.Hour)
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
 	}
-	//,\"Shutdown\": {\"WrapUpTime\": \"1s\",\"WaitTime\": \"5.5s\"}
-	// UploadRate is the duration for which profiling data is uploaded.
-	//UploadRate time.Duration `json:",default=15s"`
-	// CheckInterval is the interval to check if profiling should start.
-	//CheckInterval time.Duration `json:",default=10s"`
-	// ProfilingDuration is the duration for which profiling data is collected.
-	//ProfilingDuration time.Duration `json:",default=2m"`
-	str = strings.Replace(str, "\"UploadRate\":"+strconv.Itoa(int(own.Profiling.UploadRate)), "\"UploadRate\":\"15s\"", -1)
-	str = strings.Replace(str, "\"CheckInterval\":"+strconv.Itoa(int(own.Profiling.CheckInterval)), "\"CheckInterval\":\"10s\"", -1)
-	str = strings.Replace(str, "\"ProfilingDuration\":"+strconv.Itoa(int(own.Profiling.ProfilingDuration)), "\"ProfilingDuration\":\"2m\"", -1)
-	str = strings.Replace(str, "\"WrapUpTime\":"+strconv.Itoa(int(own.Shutdown.WrapUpTime)), "\"WrapUpTime\":\"1s\"", -1)
-	str = strings.Replace(str, "\"WaitTime\":"+strconv.Itoa(int(own.Shutdown.WaitTime)), "\"WaitTime\":\"5.5s\"", -1)
-	str = strings.Replace(str, "\"Expiry\":"+strconv.Itoa(int(own.Signature.Expiry)), "\"Expiry\":\""+strconv.Itoa(int(expity))+"h\"", -1)
-	if own.Signature.PrivateKeys == nil {
-		str = strings.Replace(str, "\"PrivateKeys\":null", "\"PrivateKeys\":[]", -1)
-	}
-	// if own.AttachServices == nil || len(own.AttachServices) == 0 {
-	// 	str = strings.Replace(str, "\"AttachServices\":null", "\"AttachServices\":[]", -1)
-	// }
 
-	err = os.WriteFile(file, utils.String2Bytes(str), 0777)
+	// Walk the config struct with reflection to find all time.Duration fields
+	// and convert them from int64 nanoseconds to their string form (e.g. "3s").
+	fixDurations(reflect.ValueOf(own).Elem(), m)
+
+	// Handle fields that need special treatment.
+	if own.Signature.PrivateKeys == nil {
+		if sig, ok := m["Signature"].(map[string]interface{}); ok {
+			sig["PrivateKeys"] = []interface{}{}
+		}
+	}
+	// Signature.Expiry is serialized as nanoseconds; convert to hours string.
+	if expH := int(own.Signature.Expiry / time.Hour); expH > 0 {
+		if sig, ok := m["Signature"].(map[string]interface{}); ok {
+			sig["Expiry"] = strconv.Itoa(expH) + "h"
+		}
+	}
+
+	out, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return nil
+	return writeConfigFile(file, utils.String2Bytes(string(out)))
 }
-func (con *ServerConfig) SetAttachService(name string, address string, port, socketport int) {
+
+// fixDurations walks v (a struct value) and replaces every time.Duration
+// field's entry in m with the duration's .String() form. Embedded structs
+// are flattened; named struct fields recurse with their json tag as key.
+func fixDurations(v reflect.Value, m map[string]interface{}) {
+	t := v.Type()
+	n := t.NumField()
+	for i := 0; i < n; i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		fv := v.Field(i)
+		ft := f.Type
+
+		// Determine the JSON key for this field.
+		jsonKey := f.Name
+		if tag := f.Tag.Get("json"); tag != "" {
+			if name := strings.Split(tag, ",")[0]; name != "" {
+				jsonKey = name
+			}
+		}
+
+		if ft == reflect.TypeOf(time.Duration(0)) {
+			// time.Duration → convert nanoseconds → string.
+			if fv.IsValid() {
+				dur := time.Duration(fv.Int())
+				if entry, ok := m[jsonKey]; ok {
+					// Only replace if the entry is a number (don't touch strings).
+					if _, isNum := entry.(float64); isNum {
+						m[jsonKey] = dur.String()
+					}
+				}
+			}
+			continue
+		}
+
+		// Handle pointer types — dereference if non-nil.
+		if ft.Kind() == reflect.Ptr && !fv.IsNil() {
+			fv = fv.Elem()
+			ft = fv.Type()
+		}
+
+		if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+			if f.Anonymous {
+				// Embedded struct — flatten its fields into the same map.
+				fixDurations(fv, m)
+			} else if nested, ok := m[jsonKey].(map[string]interface{}); ok {
+				fixDurations(fv, nested)
+			}
+		}
+	}
+}
+
+// SetAttachService 写入旧静态服务地址。
+// Deprecated: 新服务使用 ClusterProvider + ServiceResolver 自动解析目标节点。
+func (con *ServerConfig) SetAttachService(name string, address string, port int) {
 	if con.AttachServices == nil {
 		con.AttachServices = make(map[string]*AttachAddress)
 	}
@@ -257,13 +604,11 @@ func (con *ServerConfig) SetAttachService(name string, address string, port, soc
 	if ok {
 		as.Address = address
 		as.Port = port
-		as.SocketPort = socketport
 	} else {
 		as = &AttachAddress{
-			Name:       name,
-			Address:    address,
-			Port:       port,
-			SocketPort: socketport,
+			Name:    name,
+			Address: address,
+			Port:    port,
 		}
 		con.AttachServices[name] = as
 	}

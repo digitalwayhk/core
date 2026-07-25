@@ -24,9 +24,6 @@ func (own *Remove[T]) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *Remove[T]) Validation(req types.IRequest) error {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	err, stop := own.Operation.ValidationBefore(own, req)
 	if err != nil {
 		return err
@@ -53,9 +50,6 @@ func modelRemoveValid(item interface{}) error {
 	return nil
 }
 func (own *Remove[T]) Do(req types.IRequest) (interface{}, error) {
-	if ms, ok := own.instance.(IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	if remove, ok := own.instance.(IManageService); ok {
 		data, err, stop := remove.DoBefore(own, req)
 		if stop {

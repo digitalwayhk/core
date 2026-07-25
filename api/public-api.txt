@@ -1,0 +1,13 @@
+tool=golang.org/x/exp/cmd/apidiff@v0.0.0-20260410095643-746e56fc9e2f
+package=github.com/digitalwayhk/core/pkg/server/types baseline=github.com_digitalwayhk_core_pkg_server_types.apidiff
+package=github.com/digitalwayhk/core/pkg/server/router baseline=github.com_digitalwayhk_core_pkg_server_router.apidiff
+package=github.com/digitalwayhk/core/pkg/server/config baseline=github.com_digitalwayhk_core_pkg_server_config.apidiff
+package=github.com/digitalwayhk/core/pkg/server/run baseline=github.com_digitalwayhk_core_pkg_server_run.apidiff
+package=github.com/digitalwayhk/core/pkg/server/cluster baseline=github.com_digitalwayhk_core_pkg_server_cluster.apidiff
+package=github.com/digitalwayhk/core/pkg/server/transport baseline=github.com_digitalwayhk_core_pkg_server_transport.apidiff
+package=github.com/digitalwayhk/core/pkg/server/mq baseline=github.com_digitalwayhk_core_pkg_server_mq.apidiff
+package=github.com/digitalwayhk/core/pkg/server/event baseline=github.com_digitalwayhk_core_pkg_server_event.apidiff
+package=github.com/digitalwayhk/core/pkg/persistence/entity baseline=github.com_digitalwayhk_core_pkg_persistence_entity.apidiff
+package=github.com/digitalwayhk/core/pkg/persistence/types baseline=github.com_digitalwayhk_core_pkg_persistence_types.apidiff
+package=github.com/digitalwayhk/core/service/manage baseline=github.com_digitalwayhk_core_service_manage.apidiff
+package=github.com/digitalwayhk/core/service/manage/view baseline=github.com_digitalwayhk_core_service_manage_view.apidiff

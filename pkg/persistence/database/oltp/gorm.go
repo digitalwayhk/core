@@ -88,8 +88,18 @@ func updateData(db *gorm.DB, data interface{}) error {
 		db = db.Session(iss.GetSession())
 	}
 
-	// 使用 hashcode 或 ID 定位记录，Select("*") 确保零值字段也被更新
+	// 有 ID 时始终用 ID 定位旧记录，避免业务字段变更后的新 hash 无法匹配旧行。
+	// 只有无 ID 模型才回退 hashcode；Select("*") 确保零值字段也被更新。
 	if model, ok := data.(types.IModel); ok {
+		if model.GetID() > 0 {
+			tx := db.Model(data).Where("id = ?", model.GetID()).Select("*").Updates(data)
+			if tx.Error != nil {
+				logx.Errorf("update data error: %v", tx.Error)
+				return tx.Error
+			}
+			return nil
+		}
+
 		hashcode := getHashcode(data)
 		if hashcode != "" {
 			tx := db.Model(data).Where("hashcode = ?", hashcode).Select("*").Updates(data)
@@ -206,8 +216,10 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 	runsql := "select count(*) from (" + sqlwhere + ") a"
 	tx := db.Raw(runsql).Count(&item.Total)
 	if tx.Error != nil {
-		runsql = strings.ReplaceAll(runsql, "\n", " ")
-		logx.Errorf("sqlload count error: %v,sql:%s", tx.Error, runsql)
+		logx.Errorw("database_query_failed",
+			logx.Field("operation", "raw_count"),
+			logx.Field("error", tx.Error),
+		)
 		return tx.Error
 	}
 	if item.Total > 0 {
@@ -224,8 +236,10 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
 		tx = db.Raw(sqlwhere).Find(result)
 		if tx.Error != nil {
-			sqlwhere = strings.ReplaceAll(sqlwhere, "\n", " ")
-			logx.Errorf("sqlload find error: %v,sql:%s", tx.Error, sqlwhere)
+			logx.Errorw("database_query_failed",
+				logx.Field("operation", "raw_find"),
+				logx.Field("error", tx.Error),
+			)
 			return tx.Error
 		}
 	}
@@ -243,7 +257,10 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 			return sdb.Where(query, args...)
 		}).Model(item.Model).Count(&item.Total)
 		if tx.Error != nil {
-			logx.Errorf("load count error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
+			logx.Errorw("database_query_failed",
+				logx.Field("operation", "scoped_count"),
+				logx.Field("error", tx.Error),
+			)
 			return tx.Error
 		}
 		if item.Total > 0 {
@@ -256,7 +273,10 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 				return sdb.Where(query, args...)
 			}).Model(item.Model).Order(item.Order()).Find(result)
 			if tx.Error != nil {
-				logx.Errorf("load find error: %v,sql:%s", tx.Error, tx.Statement.SQL.String())
+				logx.Errorw("database_query_failed",
+					logx.Field("operation", "scoped_find"),
+					logx.Field("error", tx.Error),
+				)
 				return tx.Error
 			}
 		}

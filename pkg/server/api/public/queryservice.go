@@ -28,7 +28,7 @@ func (own *QueryService) Do(req types.IRequest) (interface{}, error) {
 	items := make([]*ServiceData, 0)
 	qr := &QueryRouters{}
 	info := qr.RouterInfo()
-	path := info.Path + "/%s" + "?apitype=3"
+	path := info.GetPath() + "/%s" + "?apitype=3"
 	if own.Name != "" {
 		sc := router.GetContext(own.Name)
 		if sc == nil {
@@ -44,7 +44,7 @@ func (own *QueryService) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *QueryService) RouterInfo() *types.RouterInfo {
-	return api.ServerRouterInfo(own)
+	return api.ServerRouterInfoWithOptions(own, withSystemEndpointRateLimit())
 }
 func toData(sr *router.ServiceContext, path string) *ServiceData {
 	title := ""

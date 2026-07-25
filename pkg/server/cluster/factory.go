@@ -19,12 +19,16 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 	case "", "local":
 		return sharedLocal, nil
 	case "etcd":
-		p, err := NewEtcdProvider(cfg.Providers.Etcd.Endpoints)
+		p, err := NewEtcdProviderWithPrefix(cfg.Providers.Etcd.Endpoints, cfg.Providers.Etcd.TTL, cfg.Providers.Etcd.Prefix)
 		if err != nil {
 			if cfg.Mode == "on" {
 				return nil, fmt.Errorf("cluster: etcd required but unavailable: %w", err)
 			}
-			logx.Errorf("cluster: etcd unavailable, falling back to local: %v", err)
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "etcd"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
 			return sharedLocal, nil
 		}
 		return p, nil
@@ -34,12 +38,34 @@ func BuildProvider(cfg *config.ClusterConfig, sharedLocal *LocalProvider) (Disco
 			if cfg.Mode == "on" {
 				return nil, fmt.Errorf("cluster: consul required but unavailable: %w", err)
 			}
-			logx.Errorf("cluster: consul unavailable, falling back to local: %v", err)
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "consul"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
+			return sharedLocal, nil
+		}
+		return p, nil
+	case "redis":
+		p, err := NewRedisProvider(
+			cfg.Providers.Redis.Addr,
+			cfg.Providers.Redis.DB,
+			cfg.Providers.Redis.Prefix,
+			cfg.Providers.Redis.TTL,
+		)
+		if err != nil {
+			if cfg.Mode == "on" {
+				return nil, fmt.Errorf("cluster: redis required but unavailable: %w", err)
+			}
+			logx.Infow("cluster_degraded",
+				logx.Field("provider", "redis"),
+				logx.Field("fallback_provider", "local"),
+				logx.Field("error", err),
+			)
 			return sharedLocal, nil
 		}
 		return p, nil
 	default:
-		logx.Errorf("cluster: unknown provider %q, using local", cfg.Provider)
-		return sharedLocal, nil
+		return nil, fmt.Errorf("cluster: unknown provider %q", cfg.Provider)
 	}
 }

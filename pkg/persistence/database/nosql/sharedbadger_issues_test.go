@@ -2,10 +2,13 @@ package nosql
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,6 +129,7 @@ func TestIssue_BatchUpdateSyncedStatus_SkipsCASOnFirstAttempt(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_cas_e2e"
@@ -235,6 +239,114 @@ func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
 	}
 }
 
+// TestForceDeleteLocalWaitsForInflightSync 确定性制造后台同步已取得快照、
+// 但远端事务尚未提交时的删除。本地删除必须等待该键的在途同步结束，
+// 这样业务紧随其后的远端删除才不会被迟到的 insert 复活。
+func TestForceDeleteLocalWaitsForInflightSync(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("delete-during-sync", "BTC", 100, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	items, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	commitEntered := make(chan struct{}, 1)
+	commitRelease := make(chan struct{})
+	action.blockCommit(commitEntered, commitRelease)
+	syncResult := make(chan error, 1)
+	go func() {
+		_, syncErr := db.syncBatch(items)
+		syncResult <- syncErr
+	}()
+
+	select {
+	case <-commitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("后台同步未进入远端提交阶段")
+	}
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		if deleteErr := db.ForceDeleteLocal(item); deleteErr != nil {
+			deleteDone <- deleteErr
+			return
+		}
+		deleteDone <- action.Delete(item)
+	}()
+
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("在途同步未结束时本地删除不得先返回: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(commitRelease)
+	require.NoError(t, <-syncResult)
+	require.NoError(t, <-deleteDone)
+	_, exists := action.value(item)
+	require.False(t, exists, "远端不得被迟到的同步插入复活")
+}
+
+// TestForceDeleteLocalBeforeSyncSkipsStaleSnapshot 钉住与“同步先行”对称的时序：
+// 删除已经完成后，旧队列快照再进入 syncBatch 也不得写入远端。
+func TestForceDeleteLocalBeforeSyncSkipsStaleSnapshot(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("delete-before-sync", "ETH", 200, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	items, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.NoError(t, db.ForceDeleteLocal(item))
+
+	synced, err := db.syncBatch(items)
+	require.NoError(t, err)
+	require.Empty(t, synced, "已删除键的旧快照必须在远端事务前被过滤")
+	_, exists := action.value(item)
+	require.False(t, exists, "删除先行时远端不得出现该记录")
+	_, err = db.Get(item.GetHash())
+	require.ErrorIs(t, err, badger.ErrKeyNotFound, "旧快照不得使本地记录复活")
+}
+
+// TestSyncBatchSkipsStaleSnapshotWhenUpdatedAtDrifted 钉住锁内重检的 UpdatedAt CAS：
+// 键仍存在但内容已被更新时，旧队列快照不得把过期版本写入远端。
+func TestSyncBatchSkipsStaleSnapshotWhenUpdatedAtDrifted(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("update-during-sync", "SOL", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	stale, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	require.True(t, stale[0].fromSyncQueue)
+
+	// 同键写入更新版本，使旧快照的 UpdatedAt 失效。
+	item.Amount = 99
+	require.NoError(t, db.Set(item, 0))
+
+	synced, err := db.syncBatch(stale)
+	require.NoError(t, err)
+	require.Empty(t, synced, "UpdatedAt 漂移的旧快照必须在远端事务前被过滤")
+	_, exists := action.value(item)
+	require.False(t, exists, "过期快照不得写入远端")
+
+	// 新快照仍应可同步成功，证明键未被误删，只是旧快照被跳过。
+	fresh, err := db.getUnsyncedBatch(1)
+	require.NoError(t, err)
+	require.Len(t, fresh, 1)
+	require.Equal(t, 99.0, fresh[0].Item.Amount)
+	synced, err = db.syncBatch(fresh)
+	require.NoError(t, err)
+	require.Len(t, synced, 1)
+	found, exists := action.value(item)
+	require.True(t, exists)
+	require.Equal(t, 99.0, found.(*testLedger).Amount)
+}
+
 // ============================================================
 // 问题 2: batchInsertWithErrorHandling 缺少致命错误中断检查
 //
@@ -243,108 +355,82 @@ func TestIssue_ConcurrentSetDuringSync_DataNeverSynced(t *testing.T) {
 // 但 batchInsertWithErrorHandling 没有这些检查。
 // ============================================================
 
-type fatalErrorOnNthInsertAction struct {
-	base  types.IDataAction
-	state *fatalInsertState
-}
-
-type fatalInsertState struct {
-	insertCount int32
-	failAfterN  int32
-}
-
-func newFatalErrorOnNthInsertAction(failAfterN int32) *fatalErrorOnNthInsertAction {
-	return &fatalErrorOnNthInsertAction{
-		base: oltp.NewMySQL(&oltp.Config{
-			Host:     "127.0.0.1",
-			Port:     3306,
-			Username: "root",
-			Password: "your_password",
-		}),
-		state: &fatalInsertState{failAfterN: failAfterN},
-	}
-}
-
-func (a *fatalErrorOnNthInsertAction) Clone() types.IDataAction {
-	clonedBase := a.base
-	if cloner, ok := a.base.(IActionCloner); ok {
-		clonedBase = cloner.Clone()
-	}
-	return &fatalErrorOnNthInsertAction{base: clonedBase, state: a.state}
-}
-func (a *fatalErrorOnNthInsertAction) GetMaxOpenConns() int {
-	if h, ok := a.base.(IMaxConcurrencyHint); ok {
-		return h.GetMaxOpenConns()
-	}
-	return 0
-}
-func (a *fatalErrorOnNthInsertAction) GetSyncPoolKey(data interface{}) string {
-	if p, ok := a.base.(ISyncPoolKeyProvider); ok {
-		return p.GetSyncPoolKey(data)
-	}
-	return ""
-}
-func (a *fatalErrorOnNthInsertAction) Exists(data interface{}) (bool, error) {
-	if ec, ok := a.base.(interface {
-		Exists(data interface{}) (bool, error)
-	}); ok {
-		return ec.Exists(data)
-	}
-	return false, nil
-}
-func (a *fatalErrorOnNthInsertAction) Transaction() error { return a.base.Transaction() }
-func (a *fatalErrorOnNthInsertAction) Load(item *types.SearchItem, result interface{}) error {
-	return a.base.Load(item, result)
-}
-func (a *fatalErrorOnNthInsertAction) Insert(data interface{}) error {
-	a.state.insertCount++
-	if a.state.insertCount > a.state.failAfterN {
-		return fatalTxError{}
-	}
-	return a.base.Insert(data)
-}
-func (a *fatalErrorOnNthInsertAction) Update(data interface{}) error { return a.base.Update(data) }
-func (a *fatalErrorOnNthInsertAction) Delete(data interface{}) error { return a.base.Delete(data) }
-func (a *fatalErrorOnNthInsertAction) Raw(s string, d interface{}) error {
-	return a.base.Raw(s, d)
-}
-func (a *fatalErrorOnNthInsertAction) Exec(s string, d interface{}) error {
-	return a.base.Exec(s, d)
-}
-func (a *fatalErrorOnNthInsertAction) GetModelDB(m interface{}) (interface{}, error) {
-	return a.base.GetModelDB(m)
-}
-func (a *fatalErrorOnNthInsertAction) Commit() error         { return a.base.Commit() }
-func (a *fatalErrorOnNthInsertAction) GetRunDB() interface{} { return a.base.GetRunDB() }
-func (a *fatalErrorOnNthInsertAction) Rollback() error       { return a.base.Rollback() }
-
-type fatalTxError struct{}
-
-func (fatalTxError) Error() string { return "transaction has already been rolled back" }
-
 func TestIssue_BatchInsertMissingFatalErrorBreak(t *testing.T) {
-	dir := t.TempDir()
-	config := newTestConfig(dir)
-	dbName := "test_issue_fatal_ins"
-
-	fatalAction := newFatalErrorOnNthInsertAction(2)
-	list := entity.NewModelList[testLedger](fatalAction)
-	db := newManualSyncDBWithConfig(t, config, list)
-	t.Cleanup(func() { cleanupNamedMySQLDB(dbName) })
-
-	for i := 0; i < 10; i++ {
-		ledger := newLedger("user_fatal", "C_"+string(rune('A'+i)), float64(i*100), dbName)
-		require.NoError(t, db.Set(ledger, 0))
+	fatalErrors := []struct {
+		name string
+		err  error
+	}{
+		{name: "连接不可用", err: errors.New("driver: bad connection")},
+		{name: "无效连接", err: errors.New("invalid connection")},
+		{name: "协议失步", err: errors.New("commands out of sync")},
+		{name: "管道断开", err: errors.New("write: broken pipe")},
+		{name: "连接重置", err: errors.New("read: connection reset by peer")},
+		{name: "数据库已关闭", err: errors.New("sql: database is closed")},
+		{name: "事务已回滚", err: errors.New("transaction has already been rolled back")},
+		{name: "context 已取消", err: context.Canceled},
 	}
 
-	db.processSyncQueue()
+	for _, operation := range []string{"insert", "update", "delete"} {
+		for _, fatal := range fatalErrors {
+			t.Run(operation+"/"+fatal.name, func(t *testing.T) {
+				var calls atomic.Int32
+				action := newMemoryAction().withFatal(operation, 2, fatal.err, &calls)
+				db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+				items := make([]*SyncQueueItem[testLedger], 0, 5)
+				for i := 0; i < 5; i++ {
+					ledger := newLedger("fatal_user", fmt.Sprintf("C_%d", i), float64(i), "memory")
+					if operation != "insert" {
+						require.NoError(t, action.store(ledger))
+					}
+					items = append(items, &SyncQueueItem[testLedger]{Key: ledger.GetHash(), Item: ledger})
+				}
 
-	t.Logf("Insert 计数: %d (理想 ≤ 3, 若为 10 则未中断)", fatalAction.state.insertCount)
+				switch operation {
+				case "insert":
+					db.batchInsertWithErrorHandling(items, action)
+				case "update":
+					db.batchUpdateWithErrorHandling(items, action)
+				case "delete":
+					db.batchDeleteWithErrorHandling(items, action)
+				}
 
-	if fatalAction.state.insertCount > 5 {
-		t.Errorf("【问题复现】batchInsertWithErrorHandling 未在致命错误后中断循环，"+
-			"继续执行了 %d 次 Insert (期望 ≤ 3 次)", fatalAction.state.insertCount)
+				require.Equal(t, int32(2), calls.Load(), "致命错误后不得继续调用后续数据操作")
+			})
+		}
 	}
+}
+
+func TestIssue_OneByOneFallbackStopsOnCancellation(t *testing.T) {
+	t.Run("实例关闭后不再执行逐条回退", func(t *testing.T) {
+		config := newTestConfig(t.TempDir())
+		db, err := NewSharedBadgerDB[testLedger](config.Path, config)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+
+		var calls atomic.Int32
+		action := newMemoryAction().withFatal("insert", 100, errors.New("不应触发"), &calls)
+		db.syncDB = true
+		db.syncList = entity.NewModelList[testLedger](action)
+		items := []*SyncQueueItem[testLedger]{{Key: "closed", Item: newLedger("closed", "BTC", 1, "memory")}}
+
+		db.insertItemsOneByOne(items)
+		require.Zero(t, calls.Load())
+	})
+
+	t.Run("逐条回退收到 context 取消后立即停止", func(t *testing.T) {
+		var calls atomic.Int32
+		action := newMemoryAction().withFatal("insert", 2, context.Canceled, &calls)
+		action.setFailTransaction(true)
+		db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+		items := make([]*SyncQueueItem[testLedger], 0, 5)
+		for i := 0; i < 5; i++ {
+			ledger := newLedger("cancel_user", fmt.Sprintf("C_%d", i), float64(i), "memory")
+			items = append(items, &SyncQueueItem[testLedger]{Key: ledger.GetHash(), Item: ledger})
+		}
+
+		db.batchInsertWithErrorHandling(items, action)
+		require.Equal(t, int32(2), calls.Load())
+	})
 }
 
 // ============================================================
@@ -415,6 +501,7 @@ func (a *panicOnInsertAction) GetRunDB() interface{} { return a.base.GetRunDB() 
 func (a *panicOnInsertAction) Rollback() error       { return a.base.Rollback() }
 
 func TestIssue_SyncBatchSemaphoreLeakOnPanic(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_sema"
@@ -476,6 +563,7 @@ func TestIssue_SyncBatchSemaphoreLeakOnPanic(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConnectionManagerOverridesPoolConfig(t *testing.T) {
+	requireMySQLIntegration(t)
 	cfg := &oltp.Config{
 		Host:         "127.0.0.1",
 		Port:         3306,
@@ -556,7 +644,7 @@ func (a *existsFailAction) GetSyncPoolKey(data interface{}) string {
 	return ""
 }
 func (a *existsFailAction) Exists(data interface{}) (bool, error) {
-	return false, fatalTxError{}
+	return false, errors.New("注入的非致命 Exists 查询失败")
 }
 func (a *existsFailAction) Transaction() error { return a.base.Transaction() }
 func (a *existsFailAction) Load(item *types.SearchItem, result interface{}) error {
@@ -579,6 +667,7 @@ func (a *existsFailAction) GetRunDB() interface{} { return a.base.GetRunDB() }
 func (a *existsFailAction) Rollback() error       { return a.base.Rollback() }
 
 func TestIssue_BatchUpdateInsertDuplicateNotHandled(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_dup_upd"
@@ -654,6 +743,7 @@ func TestIssue_BatchUpdateInsertDuplicateNotHandled(t *testing.T) {
 // ============================================================
 
 func TestIssue_ConcurrentSetAndSync_EventualConsistency(t *testing.T) {
+	requireMySQLIntegration(t)
 	dir := t.TempDir()
 	config := newTestConfig(dir)
 	dbName := "test_issue_eventual"
@@ -873,8 +963,8 @@ func TestIssue_SmallValueThreshold_VlogGrowsUnboundedly(t *testing.T) {
 		return
 	}
 
-	// ─── Red：ValueThreshold=64，values(512B) > 64 → 写 vlog → GC 无效 ───
-	t.Run("Red_SmallThreshold_VlogBloats", func(t *testing.T) {
+	// 对照组：旧的小阈值应能稳定复现 vlog 膨胀，用于证明修复参数有效。
+	t.Run("Baseline_SmallThreshold_VlogBloats", func(t *testing.T) {
 		dir := t.TempDir()
 		sizeBefore, sizeAfter, gcRounds := runScenario(t, dir, 64)
 
@@ -884,15 +974,8 @@ func TestIssue_SmallValueThreshold_VlogGrowsUnboundedly(t *testing.T) {
 		const liveDataSize = int64(2500 * 512) // 1.25MB live 数据
 
 		// vlog 远超 live 数据（说明大量历史数据未被 GC 清理）
-		if sizeAfter > liveDataSize*3 {
-			t.Errorf("[问题复现] vlog=%dKB 远超 live 数据 %dKB (>3倍)\n"+
-				"  根因: ValueThreshold=64B，SyncQueueItem(512B)被写入 vlog，\n"+
-				"        BadgerDB GC 因 pickLog 缺陷无法回收废弃的 vlog 空间。\n"+
-				"  线上: fu_funds 1.6GB vlog, positions 2.4GB, CPU 110%%",
-				sizeAfter/1024, liveDataSize/1024)
-		} else {
-			t.Logf("(GC 有效，可能 compaction 自动清理了 discard stats，调整参数重试)")
-		}
+		require.Greater(t, sizeAfter, liveDataSize*3,
+			"小 ValueThreshold 对照组未复现 vlog 膨胀，需重新校准测试参数")
 	})
 
 	// ─── Green：ValueThreshold=64KB，values(512B) < 64KB → inline LSM → vlog 不增长 ───

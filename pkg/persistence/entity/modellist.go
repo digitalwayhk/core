@@ -15,6 +15,9 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+func GetGlobalSqliteInstance(name string) *oltp.Sqlite {
+	return oltp.GetSharedSqliteInstance(name)
+}
 
 type ModelList[T types.IModel] struct {
 	entityType  reflect.Type
@@ -408,7 +411,11 @@ func (own *ModelList[T]) SearchWhere(name string, value interface{}, fn ...func(
 		return nil, err
 	}
 	if item.Total > 0 && item.Total > 500 {
-		logx.Error(fmt.Sprintf("%s类型的SearchWhere条件查询数据超过500条,可能会影响性能,建议使用SearchAll方法指定分页查询:%s", utils.GetTypeName(own.hideEntity), utils.PrintObj(item)))
+		logx.Sloww("model_search_result_capped",
+			logx.Field("model", utils.GetTypeName(own.hideEntity)),
+			logx.Field("total", item.Total),
+			logx.Field("limit", item.Size),
+		)
 	}
 	return own.searchList, nil
 
@@ -624,7 +631,7 @@ func (own *ModelList[T]) Save() error {
 func (own *ModelList[T]) GetDBAdapter(item *types.SearchItem) types.IDataAction {
 	if own.ada == nil && item != nil && item.Model != nil {
 		if name := getdbname(item.Model); name != "" {
-			own.ada = oltp.GetGlobalSqliteInstance(name)
+			own.ada = GetGlobalSqliteInstance(name)
 		}
 	}
 	return own.ada

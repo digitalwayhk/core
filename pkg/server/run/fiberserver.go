@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	publicopenapi "github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
@@ -50,26 +49,8 @@ func (own *FiberServer) Start() {
 	app.Use("/", filesystem.New(filesystem.Config{
 		Root: http.FS(fsys),
 	}))
-	openapi, ohandler := OpenAPIHandler()
-	app.Post(openapi, adaptor.HTTPHandler(ohandler))
-
-	// Per-service OpenAPI endpoint: GET /api/{svc}/openapi.json
-	// Returns the OpenAPI 3.0 document scoped to a single service.
-	services := own.services
-	app.Get("/api/:service/openapi.json", adaptor.HTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract service name from path segment after /api/ and before /openapi.json.
-		rawPath := strings.TrimPrefix(r.URL.Path, "/api/")
-		svcName := strings.TrimSuffix(rawPath, "/openapi.json")
-		for _, sr := range services {
-			if sr.Service.Service.Name == svcName {
-				httpx.OkJson(w, publicopenapi.GetOpenApi(r, sr))
-				return
-			}
-		}
-		w.WriteHeader(http.StatusNotFound)
-		httpx.OkJson(w, map[string]string{"error": "service not found: " + svcName})
-	})))
-
+	openapi, ohandler := OpenAPIHandler(own.services...)
+	app.Get(openapi, adaptor.HTTPHandler(ohandler))
 	app.Post("/api/*", adaptor.HTTPHandler(handler(own.services)))
 	swagger, shandler := SwaggerHandler()
 	app.Use("/"+swagger, filesystem.New(filesystem.Config{

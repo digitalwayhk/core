@@ -1,3 +1,5 @@
+//go:build integration
+
 package oltp
 
 import (
@@ -126,8 +128,8 @@ func cleanupMySQLConcurrencyDB(t *testing.T, dbName string) {
 
 func requireConcurrencyReproEnabled(t *testing.T) {
 	t.Helper()
-	if os.Getenv("RUN_MYSQL_CONCURRENCY_REPRO") != "1" {
-		t.Skip("设置 RUN_MYSQL_CONCURRENCY_REPRO=1 后再运行该复现测试")
+	if os.Getenv("CORE_TEST_MYSQL") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 后再运行 MySQL 集成测试")
 	}
 }
 
@@ -211,6 +213,8 @@ func TestMySQL_SharedInstanceConcurrentUpdateIsRolledBackWithForeignTransaction(
 }
 
 func TestMySQL_TransactionRejectsDifferentDBName(t *testing.T) {
+	requireConcurrencyReproEnabled(t)
+
 	dbNameA := newMySQLConcurrencyDBName(t)
 	dbNameB := newMySQLConcurrencyDBName(t)
 	t.Cleanup(func() { cleanupMySQLConcurrencyDB(t, dbNameA) })

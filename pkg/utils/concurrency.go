@@ -1,96 +1,114 @@
+// 本文件提供保序、有界且可取消的批量任务执行能力。
 package utils
 
 import (
 	"context"
-	"github.com/zeromicro/go-zero/core/logx"
+	"fmt"
 	"sync"
+
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
-const (
-	gConcurrencyCount = 8
-)
+const gConcurrencyCount = 8
 
+// ConcurrencyTasks 按 Params 顺序保存并发任务的结果或错误。
+//
+// Func 已经开始执行后，取消 Ctx 不会强制中断它；Func 需要自行响应业务上下文。
 type ConcurrencyTasks[T interface{}] struct {
 	Ctx         context.Context
 	Params      []T
 	Results     []interface{}
 	Func        func(param T) (interface{}, error)
 	Concurrency int
-	ch          chan struct{}
-	wg          sync.WaitGroup
 }
 
+// Run 使用固定数量的 worker 执行任务，并保持 Results 与 Params 的索引一致。
 func (t *ConcurrencyTasks[T]) Run() {
-	rs := make([]interface{}, len(t.Params))
-	t.Results = rs
+	t.Results = make([]interface{}, len(t.Params))
 	if len(t.Params) == 0 {
 		return
 	}
 
-	var count = gConcurrencyCount
-	if t.Concurrency > 0 {
-		count = t.Concurrency
+	ctx := t.Ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if count == 1 {
-		for i := 0; i < len(t.Params); i++ {
-			t.extFun(i)
+	if err := ctx.Err(); err != nil {
+		for index := range t.Results {
+			t.Results[index] = err
 		}
 		return
 	}
-	t.wg.Add(len(t.Params))
-	t.ch = make(chan struct{}, count)
-	for i := 0; i < len(t.Params); i++ {
-		t.ch <- struct{}{}
-		go t.doFun(i)
+
+	workerCount := t.Concurrency
+	if workerCount <= 0 {
+		workerCount = gConcurrencyCount
 	}
-	close(t.ch)
-	t.wg.Wait()
+	if workerCount > len(t.Params) {
+		workerCount = len(t.Params)
+	}
+
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				t.execute(index)
+			}
+		}()
+	}
+
+	next := 0
+schedule:
+	for ; next < len(t.Params); next++ {
+		select {
+		case jobs <- next:
+		case <-ctx.Done():
+			break schedule
+		}
+	}
+	close(jobs)
+	workers.Wait()
+
+	for ; next < len(t.Params); next++ {
+		t.Results[next] = ctx.Err()
+	}
 }
 
-func (t *ConcurrencyTasks[T]) extFun(i int) {
-	//执行
-	var param = t.Params[i]
-	r, err := t.Func(param)
-	if err != nil {
-		t.Results[i] = err
-	} else {
-		t.Results[i] = r
-	}
-}
-
-func (t *ConcurrencyTasks[T]) doFun(i int) {
-	//logger.LogInfof("doFun start,i=%d", i)
-	var param T
+// execute 将普通错误和 panic 统一写入对应的结果位置。
+func (t *ConcurrencyTasks[T]) execute(index int) {
+	param := t.Params[index]
 	defer func() {
-		// 从panic中恢复
-		if e := recover(); e != nil {
-			err := e.(error)
-			logx.Infof("[PANIC]param=%s,err=%v\n", param, err)
+		if recovered := recover(); recovered != nil {
+			err := fmt.Errorf("panic: %v", recovered)
+			t.Results[index] = err
+			logx.Errorf("[PANIC]param=%v,err=%v", param, err)
 		}
 	}()
-	defer t.wg.Done()
-	//执行
-	param = t.Params[i]
-	r, err := t.Func(param)
+
+	result, err := t.Func(param)
 	if err != nil {
-		t.Results[i] = err
-	} else {
-		t.Results[i] = r
+		t.Results[index] = err
+		return
 	}
-	<-t.ch
+	t.Results[index] = result
 }
 
+// Successes 返回没有保存 error 的结果数量。
 func (t *ConcurrencyTasks[T]) Successes() int {
 	successes := 0
-	for _, r := range t.Results {
-		if _, ok := r.(error); ok {
+	for _, result := range t.Results {
+		if _, ok := result.(error); ok {
 			continue
 		}
-		successes += 1
+		successes++
 	}
 	return successes
 }
 
+// GetErr 返回 Results 中第一个错误；没有错误时返回 nil。
 func (t *ConcurrencyTasks[T]) GetErr() error {
 	for _, result := range t.Results {
 		if err, ok := result.(error); ok {

@@ -190,7 +190,10 @@ func NewBadgerDBWithConfig[T any](config BadgerDBConfig) (*BadgerDB[T], error) {
 			diagnosis := diagnoseLockError(config.Path)
 
 			if i < maxRetries-1 {
-				logx.Errorf("数据库被锁定，等待重试... (%d/%d)\n详情: %s", i+1, maxRetries, diagnosis)
+				logx.Debugw("badger_lock_retry",
+					logx.Field("attempt", i+1),
+					logx.Field("max_attempts", maxRetries),
+				)
 				time.Sleep(time.Second * time.Duration(i+1))
 				continue
 			} else {
@@ -201,8 +204,10 @@ func NewBadgerDBWithConfig[T any](config BadgerDBConfig) (*BadgerDB[T], error) {
 		}
 
 		// 检查是否是 MANIFEST/文件缺失导致的损坏（进程中途 panic 后重启时出现）
-		// BadgerDB 是本地缓存，数据源在 MySQL，清空重建是安全的
 		if isCorruptionError(err) && i == 0 {
+			if !shouldResetCorruptedCache(config) {
+				return nil, fmt.Errorf("BadgerDB 文件损坏且 corruption_policy=%q，已保留原始目录: %w", config.CorruptionPolicy, err)
+			}
 			logx.Errorf("BadgerDB 文件损坏，清空目录重建 [path=%s]: %v", config.Path, err)
 			if clearErr := clearBadgerData(config.Path); clearErr != nil {
 				logx.Errorf("清空BadgerDB目录失败: %v", clearErr)
@@ -265,6 +270,9 @@ func ForceUnlock(dbPath string) error {
 func (b *BadgerDB[T]) generateKey(item *T) string {
 	if item == nil {
 		return ""
+	}
+	if localRowCode, ok := any(item).(types.ILocalRowCode); ok {
+		return localRowCode.GetLocalKey()
 	}
 	if rowCode, ok := any(item).(types.IRowCode); ok {
 		return rowCode.GetHash()

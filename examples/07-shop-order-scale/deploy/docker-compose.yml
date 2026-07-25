@@ -1,0 +1,124 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: shop-root
+      MYSQL_DATABASE: shop_order_scale_remote
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pshop-root --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  shop-user:
+    build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
+    command: ["/app/user", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-user
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-user.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-user.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes: ["${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"]
+    ports: ["18181:18181"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-supplier:
+    build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
+    command: ["/app/supplier", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-supplier
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-supplier.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-supplier.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes: ["${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"]
+    ports: ["18182:18182"]
+    depends_on: {redis: {condition: service_healthy}}
+
+  shop-order-a:
+    build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
+    command: ["/app/order", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-order-a
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "order-a-pending:/data/pending"
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
+
+  shop-order-b:
+    build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
+    command: ["/app/order", "-view", "0"]
+    environment:
+      SHOP_ORDER_HTTP_PORT: 18184
+      SHOP_ORDER_GRPC_PORT: 28184
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_ADVERTISE_ADDRESS: shop-order-b
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "order-b-pending:/data/pending"
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
+
+  shop-order:
+    profiles: ["scale"]
+    build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
+    command: ["/app/order", "-view", "0"]
+    environment:
+      SHOP_REDIS_ADDR: redis:6379
+      SHOP_LOCAL_PENDING_DIR: /data/pending
+      SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
+      SHOP_ORDER_REMOTE_MYSQL_USER: root
+      SHOP_ORDER_REMOTE_MYSQL_PASSWORD: shop-root
+      SHOP_ORDER_REMOTE_MYSQL_DATABASE: shop_order_scale_remote
+      SHOP_GRPC_SECURITY_MODE: mtls
+      SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
+      SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-order.crt
+      SHOP_GRPC_KEY_FILE: /run/secrets/shop-grpc/shop-order.key
+      SHOP_GRPC_SERVER_NAME: "{service}"
+    volumes:
+      - "${SHOP_GRPC_CERTS_DIR:-./certs}:/run/secrets/shop-grpc:ro"
+    depends_on:
+      redis: {condition: service_healthy}
+      mysql: {condition: service_healthy}
+
+volumes:
+  order-a-pending:
+  order-b-pending:

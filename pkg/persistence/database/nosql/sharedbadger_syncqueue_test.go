@@ -10,6 +10,92 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPendingCountUsesUniqueSyncQueueKeys(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newFund("pending-unique", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	item.Balance = 2
+	require.NoError(t, db.Set(item, 0))
+
+	persistent, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, persistent)
+	db.pendingCountMutex.RLock()
+	cached := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Equal(t, persistent, cached)
+}
+
+func TestPendingCountSetThenDeleteDoesNotDoubleCount(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newFund("pending-delete", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	require.NoError(t, db.DeleteByItem(item))
+
+	persistent, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, persistent)
+	db.pendingCountMutex.RLock()
+	cached := db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Equal(t, persistent, cached)
+
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	confirmed, err := db.confirmSyncSuccess(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{key}, confirmed)
+
+	persistent, err = db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, persistent)
+	db.pendingCountMutex.RLock()
+	cached = db.pendingCountCache
+	db.pendingCountMutex.RUnlock()
+	require.Zero(t, cached)
+}
+
+func TestMalformedSyncItemStopsBatchWithoutDeletingEvidence(t *testing.T) {
+	config := newTestConfig(t.TempDir())
+	db := newTestDBLocalWithConfig(t, config)
+	dataKey := db.prefix + "malformed"
+	queueKey := db.syncQueueKey(dataKey)
+
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set([]byte(dataKey), []byte("not-json")); err != nil {
+			return err
+		}
+		return txn.Set([]byte(queueKey), nil)
+	}))
+
+	items, err := db.getUnsyncedBatch(10)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), dataKey)
+	require.Empty(t, items)
+	require.NoError(t, db.manager.db.View(func(txn *badger.Txn) error {
+		if _, err := txn.Get([]byte(dataKey)); err != nil {
+			return err
+		}
+		_, err := txn.Get([]byte(queueKey))
+		return err
+	}))
+}
+
 func newTestFundItem(userID, market string, balance float64) *testFund {
 	return &testFund{
 		Model:   entity.NewModel(),
@@ -172,6 +258,38 @@ func TestSyncQueue_GetUnsyncedBatchUsesIndex(t *testing.T) {
 	unsyncedItems, err := db.getUnsyncedBatch(100)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(unsyncedItems), "应只返回通过 Set 写入的 3 条未同步数据")
+}
+
+func TestSyncMetricsRecordConvergence(t *testing.T) {
+	action := newMemoryAction()
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](action))
+	item := newLedger("metrics-user", "BTC", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+
+	synced, err := db.processSyncQueue()
+	require.NoError(t, err)
+	require.Equal(t, 1, synced)
+
+	metrics := db.GetSyncMetrics()
+	require.Equal(t, uint64(1), metrics.Attempts)
+	require.Equal(t, uint64(1), metrics.SyncedItems)
+	require.Zero(t, metrics.Failures)
+	require.GreaterOrEqual(t, metrics.TotalDuration, time.Duration(0))
+	require.False(t, metrics.LastSuccessAt.IsZero())
+}
+
+func TestForceDeleteLocalDecrementsPendingWhenValueIsCorrupt(t *testing.T) {
+	db := newManualSyncDBWithConfig(t, newTestConfig(t.TempDir()), entity.NewModelList[testLedger](newMemoryAction()))
+	item := newLedger("corrupt-delete", "BTC", 10, "memory")
+	require.NoError(t, db.Set(item, 0))
+	require.Equal(t, 1, db.GetCachedPendingSyncCount())
+	key := db.generateKey(item)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(key), []byte("not-json"))
+	}))
+
+	require.NoError(t, db.ForceDeleteLocal(item))
+	require.Zero(t, db.GetCachedPendingSyncCount(), "同步索引存在时必须扣减 pending，不依赖 value 反序列化")
 }
 
 // TestSyncQueue_RebuildOnUpgrade 验证启动时为旧数据补建队列索引
@@ -342,6 +460,68 @@ func TestSyncQueue_CASMismatchKeepsQueueEntry(t *testing.T) {
 	wrapper2, err := db.getWrapper(key)
 	require.NoError(t, err)
 	require.False(t, wrapper2.IsSynced)
+}
+
+func TestSyncQueue_CASMismatchReportsNoConfirmedSuccess(t *testing.T) {
+	dir := t.TempDir()
+	config := newTestConfig(dir)
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newTestFundItem("sq_cas_count", "BTC", 100)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+
+	time.Sleep(2 * time.Millisecond)
+	require.NoError(t, db.Set(newTestFundItem("sq_cas_count", "BTC", 200), 0))
+
+	confirmed, err := db.batchUpdateSyncedStatusCount(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+	)
+	require.NoError(t, err)
+	require.Zero(t, confirmed, "CAS 不匹配时不得计入确认同步数")
+
+	pending, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, pending)
+}
+
+func TestSyncQueue_RemotelyDeletedMissingKeyCountsAsConfirmed(t *testing.T) {
+	dir := t.TempDir()
+	config := newTestConfig(dir)
+	db, err := NewSharedBadgerDB[testFund](config.Path, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+
+	item := newTestFundItem("sq_delete_count", "BTC", 100)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(key))
+	}))
+
+	confirmed, err := db.batchUpdateSyncedStatusCount(
+		[]string{key},
+		map[string]time.Time{key: wrapper.UpdatedAt},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, confirmed)
+
+	pending, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, pending)
 }
 
 // TestSyncQueue_OrphanCleanup 验证 getUnsyncedBatch 自动清理孤儿队列条目

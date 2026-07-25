@@ -35,6 +35,14 @@ func (mc *MelodyClient) IsClosed() bool {
 	return mc.session.IsClosed()
 }
 
+// Close 实现可选 IWebSocketCloser，使身份撤销可以主动断开外部连接。
+func (mc *MelodyClient) Close() error {
+	if mc == nil || mc.session == nil || mc.session.IsClosed() {
+		return nil
+	}
+	return mc.session.Close()
+}
+
 func (mc *MelodyClient) GetSubscriptions() map[string]map[int]types.IRouter {
 	return mc.manager.GetSessionSubscriptions(mc.session)
 }

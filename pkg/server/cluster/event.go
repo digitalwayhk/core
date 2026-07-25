@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,6 +20,11 @@ type forwardedNotice struct {
 	Hash      uint64          `json:"hash"`
 	Message   json.RawMessage `json:"message"`
 }
+
+// CrossNodeSender is an optional hook for sending cross-node requests.
+// NodeInfo carries every protocol endpoint so protocol selection happens
+// before the request is handed to a transport.
+type CrossNodeSender func(ctx context.Context, target *NodeInfo, data []byte, path string) ([]byte, error)
 
 // subscriptionSummaryPayload is the JSON payload sent to peer nodes
 // when local subscription state changes.
@@ -41,6 +48,7 @@ type CrossNodeNoticeBroker struct {
 	serviceName string
 	localNodeID string
 	httpClient  *http.Client
+	sender      CrossNodeSender // optional transport-level sender; its result is final
 
 	// peer subscription registry: routePath -> hash -> nodeID set
 	subMu sync.RWMutex
@@ -64,6 +72,14 @@ func NewCrossNodeNoticeBroker(provider DiscoveryProvider, serviceName, localNode
 		subs:        make(map[string]map[uint64]map[string]bool),
 		localSubs:   make(map[string]map[uint64]bool),
 	}
+}
+
+// SetSender configures an optional transport-level sender for cross-node
+// requests. When set, notices and subscription summaries are routed through
+// the sender instead of the default http.Client. Sender errors are final;
+// replaying through HTTP could duplicate remote effects.
+func (b *CrossNodeNoticeBroker) SetSender(sender CrossNodeSender) {
+	b.sender = sender
 }
 
 // ForwardNotice implements types.ICrossNodeForwarder.
@@ -235,11 +251,23 @@ func (b *CrossNodeNoticeBroker) post(node *NodeInfo, path string, payload interf
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	url := fmt.Sprintf("http://%s:%d%s", node.Address, node.Port, path)
+	// A configured sender owns the complete protocol choice. Its result is final.
+	if b.sender != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, senderErr := b.sender(ctx, node, data, path)
+		return senderErr
+	}
+
+	target := net.JoinHostPort(node.Address, strconv.Itoa(node.Port))
+	url := "http://" + target + path
 	resp, err := b.httpClient.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("cross-node HTTP POST returned %s", resp.Status)
+	}
 	return nil
 }

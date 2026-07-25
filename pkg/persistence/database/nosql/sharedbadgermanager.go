@@ -51,6 +51,21 @@ type SharedBadgerManager struct {
 	isClosed bool
 }
 
+// BadgerSize 描述 Badger LSM 与 value log 的原生磁盘大小快照。
+type BadgerSize struct {
+	LSMBytes  int64
+	VLogBytes int64
+}
+
+// Size 返回共享 Badger 当前的 LSM 与 value log 大小。
+func (m *SharedBadgerManager) Size() BadgerSize {
+	if m == nil || m.db == nil {
+		return BadgerSize{}
+	}
+	lsm, vlog := m.db.Size()
+	return BadgerSize{LSMBytes: lsm, VLogBytes: vlog}
+}
+
 var (
 	globalManagers = make(map[string]*SharedBadgerManager) // basePath -> manager
 	managerMutex   sync.RWMutex
@@ -151,16 +166,21 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 		if isLockError(err) {
 			diagnosis := diagnoseLockError(basePath)
 			if i < maxRetries-1 {
-				logx.Errorf("共享DB锁定，重试 (%d/%d): %s", i+1, maxRetries, diagnosis)
+				logx.Debugw("badger_lock_retry",
+					logx.Field("attempt", i+1),
+					logx.Field("max_attempts", maxRetries),
+				)
 				time.Sleep(time.Second * time.Duration(i+1))
 				continue
 			}
 			return nil, fmt.Errorf("打开共享DB失败: %s\n原始错误: %w", diagnosis, err)
 		}
 
-		// 检测 MANIFEST/文件缺失导致的损坏（进程中途 panic 后重启时出现）
-		// 共享 BadgerDB 是本地缓存，数据源在 MySQL，清空重建是安全的
+		// 只有调用方明确声明为可重建缓存时，才允许删除损坏目录。
 		if isCorruptionError(err) && i == 0 {
+			if !shouldResetCorruptedCache(cfg) {
+				return nil, fmt.Errorf("共享DB文件损坏且 corruption_policy=%q，已保留原始目录: %w", cfg.CorruptionPolicy, err)
+			}
 			logx.Errorf("共享DB文件损坏，清空目录重建 [path=%s]: %v", basePath, err)
 			if clearErr := clearBadgerData(basePath); clearErr != nil {
 				logx.Errorf("清空BadgerDB目录失败: %v", clearErr)

@@ -52,8 +52,8 @@ func (own *MenuManage) ViewFieldModel(model interface{}, field *view.FieldModel)
 		}
 	}
 }
-func (own *MenuManage) updateMenuModelAll() {
-	items := own.GetDefaultItems()
+func (own *MenuManage) updateMenuModelAll(req types.IRequest) {
+	items := own.GetDefaultItemsWithRequest(req)
 	list := own.GetList().(*entity.ModelList[smodels.MenuModel])
 	for _, item := range items {
 		old, err := list.SearchOne(func(where *pt.SearchItem) {
@@ -85,7 +85,14 @@ func (own *MenuManage) updateMenuModelAll() {
 		}
 	}
 }
+
+// GetDefaultItems 保留用于兼容旧业务扩展。
+// Deprecated: 已废弃，请使用 GetDefaultItemsWithRequest 显式传入请求。
 func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
+	return own.GetDefaultItemsWithRequest(own.Req)
+}
+
+func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels.MenuModel {
 	items := make([]*smodels.MenuModel, 0)
 	dir := NewDirectoryManage()
 	dirList := dir.GetList().(*entity.ModelList[smodels.DirectoryModel])
@@ -96,16 +103,17 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 		}
 		data := sc.Router.GetTypeRouters(types.ApiType(types.ManageType))
 		for _, info := range data {
-			if info.Path == "" {
+			path := info.GetPath()
+			instanceName := info.GetInstanceName()
+			if path == "" {
 				continue
 			}
 			item := getMenuModel(info, items)
 			if item == nil {
 				item = smodels.NewMenuModel()
-				item.Name = info.InstanceName
+				item.Name = instanceName
 				name := strings.ToLower(item.Name)
-				endIndex := strings.Index(info.Path, name)
-				item.Url = info.Path[0:endIndex] + name
+				item.Url = buildMenuUrl(path, name)
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
 				if err != nil {
@@ -114,12 +122,7 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 				if len(dirrows) > 0 {
 					item.DirectoryModelID = dirrows[0].ID
 				} else {
-					diritem := smodels.NewDirectoryModel()
-					diritem.Name = sc.Service.Name
-					diritem.ID = own.Req.NewID()
-					if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
-						diritem.Title = ititle.GetTitle()
-					}
+					diritem := own.newDirectoryModel(req, sc)
 					if err := dirList.Add(diritem); err != nil {
 						logx.Errorf("Add directory model error: %v", err)
 						continue
@@ -132,13 +135,13 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 				}
 				items = append(items, item)
 			}
-			cmds := strings.Split(info.Path, "/")
+			cmds := strings.Split(path, "/")
 			if len(cmds) > 0 {
 				cmd := cmds[len(cmds)-1]
 				if cmd != "" {
 					npm := smodels.NewPermissionsModel()
 					npm.Name = cmd
-					npm.Url = info.Path
+					npm.Url = path
 					item.Permissions = append(item.Permissions, npm)
 				}
 			}
@@ -146,12 +149,36 @@ func (own *MenuManage) GetDefaultItems() []*smodels.MenuModel {
 	}
 	return items
 }
+
+func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceContext) *smodels.DirectoryModel {
+	diritem := smodels.NewDirectoryModel()
+	diritem.Name = sc.Service.Name
+	diritem.ID = req.NewID()
+	if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
+		diritem.Title = ititle.GetTitle()
+	}
+	return diritem
+}
+
+// buildMenuUrl 依据 path 中 name 出现的位置拼装菜单分组 Url。
+// 当 name 未出现在 path 中时（例如自定义操作的实例名与路径不一致），
+// strings.Index 会返回 -1，直接切片会导致 "slice bounds out of range [:-1]" panic，
+// 因此这里显式兜底，退化为使用完整 path 作为分组依据。
+func buildMenuUrl(path, name string) string {
+	endIndex := strings.Index(path, name)
+	if endIndex < 0 {
+		return path
+	}
+	return path[0:endIndex] + name
+}
+
 func getMenuModel(info *types.RouterInfo, items []*smodels.MenuModel) *smodels.MenuModel {
-	name := strings.ToLower(info.InstanceName)
-	endIndex := strings.Index(info.Path, name)
-	url := info.Path[0:endIndex] + name
+	instanceName := info.GetInstanceName()
+	path := info.GetPath()
+	name := strings.ToLower(instanceName)
+	url := buildMenuUrl(path, name)
 	for _, item := range items {
-		if item.Name == info.InstanceName && item.Url == url {
+		if item.Name == instanceName && item.Url == url {
 			return item
 		}
 	}
@@ -174,9 +201,6 @@ func (own *UpdateMenu) New(instance interface{}) types.IRouter {
 	return own
 }
 func (own *UpdateMenu) Validation(req types.IRequest) error {
-	if ms, ok := own.GetInstance().(manage.IRequestSet); ok {
-		ms.SetReq(req)
-	}
 	return nil
 }
 func (own *UpdateMenu) Do(req types.IRequest) (interface{}, error) {
@@ -184,7 +208,7 @@ func (own *UpdateMenu) Do(req types.IRequest) (interface{}, error) {
 		return nil, errors.New("UpdateMenu instance is nil")
 	}
 	if mm, ok := own.GetInstance().(*MenuManage); ok {
-		mm.updateMenuModelAll()
+		mm.updateMenuModelAll(req)
 	}
 	return nil, nil
 }

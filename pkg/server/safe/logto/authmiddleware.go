@@ -1,172 +1,199 @@
 package logto
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var (
-	// 从 Logto 控制台 -> API 资源 -> Identifier=appid
-	expectedAudience = "<appid>"
+type AuthConfig struct {
+	Issuer           string
+	ExpectedAudience string
+}
 
-	// Logto 租户域名 (替换成你自己的域名，比如 https://your-tenant.logto.app)
-	issuer = "https://srph37.logto.app"
+type HandlerFactory struct {
+	mu     sync.Mutex
+	jwks   map[AuthConfig]*keyfunc.JWKS
+	closed bool
+}
 
-	// JWKS URL
-	jwksURL = issuer + "/oidc/jwks"
-)
+func NewHandlerFactory() *HandlerFactory {
+	return &HandlerFactory{jwks: make(map[AuthConfig]*keyfunc.JWKS)}
+}
+
+func (c AuthConfig) validate() error {
+	if strings.TrimSpace(c.Issuer) == "" {
+		return errors.New("Logto issuer is required")
+	}
+	if strings.TrimSpace(c.ExpectedAudience) == "" {
+		return errors.New("Logto expected audience is required")
+	}
+	return nil
+}
+
+func (c AuthConfig) issuerClaim() string {
+	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
+	if strings.HasSuffix(issuer, "/oidc") {
+		return issuer
+	}
+	return issuer + "/oidc"
+}
+
+func (c AuthConfig) jwksURL() string {
+	return c.issuerClaim() + "/jwks"
+}
 
 // AuthMiddleware 验证 JWT
-func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler) http.Handler {
+func AuthMiddleware(jwks *keyfunc.JWKS, next http.Handler, cfg AuthConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		if tokenString == authHeader {
-			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
-		// 使用 JWKS 验证
-		token, err := jwt.Parse(tokenString, jwks.Keyfunc)
+		token, err := jwt.Parse(tokenString, jwks.Keyfunc,
+			jwt.WithAudience(cfg.ExpectedAudience),
+			jwt.WithIssuer(cfg.issuerClaim()),
+		)
 		if err != nil {
-			// ✅ 如果 key 未找到，尝试刷新 JWKS
-			if strings.Contains(err.Error(), "the given key ID was not found in the JWKS") {
-				log.Printf("⚠️ Key ID not found, refreshing JWKS...")
-
-				// 强制刷新 JWKS
-				if refreshErr := jwks.Refresh(r.Context(), keyfunc.RefreshOptions{}); refreshErr != nil {
-					log.Printf("❌ Failed to refresh JWKS: %v", refreshErr)
-					http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-					return
-				}
-
-				// 重新验证 token
-				token, err = jwt.Parse(tokenString, jwks.Keyfunc)
-				if err != nil {
-					log.Printf("❌ Token validation failed after JWKS refresh: %v", err)
-					http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-					return
-				}
-			} else {
-				log.Printf("❌ Token validation error: %v", err)
-				http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-				return
-			}
+			writeAuthenticationFailed(w)
+			return
 		}
 
 		if !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
 
-		// 校验 claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			http.Error(w, "Invalid claims", http.StatusUnauthorized)
+			writeAuthenticationFailed(w)
 			return
 		}
-
-		// 校验 aud
-		if aud, ok := claims["aud"].(string); !ok || aud != expectedAudience {
-			http.Error(w, fmt.Sprintf("Invalid audience: expected %s, got %v", expectedAudience, claims["aud"]), http.StatusUnauthorized)
+		uid := firstStringClaim(claims, "uid", "sub")
+		if uid == "" {
+			writeAuthenticationFailed(w)
 			return
 		}
-		oidc := issuer + "oidc"
-		// 校验 iss
-		if iss, ok := claims["iss"].(string); !ok || iss != oidc {
-			http.Error(w, fmt.Sprintf("Invalid issuer: expected %s, got %v", oidc, claims["iss"]), http.StatusUnauthorized)
-			return
+		ctx := context.WithValue(r.Context(), "uid", uid)
+		if uname := firstStringClaim(claims, "uname", "username", "name"); uname != "" {
+			ctx = context.WithValue(ctx, "uname", uname)
 		}
-		// resp, err := http.Get(oidc + "/me")
-		// if err != nil {
-		// 	http.Error(w, "Failed to get user info: "+err.Error(), http.StatusUnauthorized)
-		// 	return
-		// }
-		// defer resp.Body.Close()
-
-		// if resp.StatusCode != http.StatusOK {
-		// 	http.Error(w, "Failed to get user info: "+resp.Status, http.StatusUnauthorized)
-		// 	return
-		// }
-
-		// ✅ 验证通过
-		//log.Printf("✅ Token validated for user: %v", claims["sub"])
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// AuthHandler 创建带自动刷新的认证处理器
-func AuthHandler(next http.HandlerFunc, _issuer, _expectedAudience string) http.Handler {
-	if _issuer != "" {
-		issuer = _issuer
-		jwksURL = issuer + "/oidc/jwks"
+func firstStringClaim(claims jwt.MapClaims, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := claims[key].(string); ok {
+			if value = strings.TrimSpace(value); value != "" {
+				return value
+			}
+		}
 	}
-	if _expectedAudience != "" {
-		expectedAudience = _expectedAudience
+	return ""
+}
+
+func writeAuthenticationFailed(w http.ResponseWriter) {
+	http.Error(w, "authentication failed", http.StatusUnauthorized)
+}
+
+func NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error) {
+	jwks, err := newJWKS(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return AuthMiddleware(jwks, next, cfg), nil
+}
+
+func newJWKS(cfg AuthConfig) (*keyfunc.JWKS, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
-	// ✅ 配置 JWKS 自动刷新
 	options := keyfunc.Options{
-		// 每 1 小时刷新一次 JWKS
 		RefreshInterval: 1 * time.Hour,
-
-		// 刷新错误时的处理
 		RefreshErrorHandler: func(err error) {
-			log.Printf("⚠️ JWKS refresh error: %v", err)
+			logx.Errorw("jwks_refresh_failed", logx.Field("error", err))
 		},
-
-		// 请求超时
-		RefreshTimeout: 10 * time.Second,
-
-		// 刷新未知的 key ID
+		RefreshTimeout:    10 * time.Second,
+		RefreshRateLimit:  5 * time.Minute,
 		RefreshUnknownKID: true,
 	}
 
-	// 加载 Logto 服务器的 JWKS
-	jwks, err := keyfunc.Get(jwksURL, options)
+	jwks, err := keyfunc.Get(cfg.jwksURL(), options)
 	if err != nil {
-		log.Fatalf("❌ Failed to get JWKS from %s: %v", jwksURL, err)
+		return nil, fmt.Errorf("load Logto JWKS: %w", err)
+	}
+	return jwks, nil
+}
+
+func (f *HandlerFactory) NewAuthHandler(next http.HandlerFunc, cfg AuthConfig) (http.Handler, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
-	log.Printf("✅ JWKS loaded successfully from %s", jwksURL)
-	return AuthMiddleware(jwks, next)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil, errors.New("Logto handler factory is closed")
+	}
+	jwks := f.jwks[cfg]
+	if jwks == nil {
+		var err error
+		jwks, err = newJWKS(cfg)
+		if err != nil {
+			return nil, err
+		}
+		f.jwks[cfg] = jwks
+	}
+	return AuthMiddleware(jwks, next, cfg), nil
+}
+
+func (f *HandlerFactory) Close() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return
+	}
+	for _, jwks := range f.jwks {
+		jwks.EndBackground()
+	}
+	f.jwks = nil
+	f.closed = true
+}
+
+// AuthHandler is kept for source compatibility. New server code must use
+// NewAuthHandler so JWKS initialization errors stop startup explicitly.
+func AuthHandler(next http.HandlerFunc, issuer, expectedAudience string) http.Handler {
+	handler, err := NewAuthHandler(next, AuthConfig{
+		Issuer:           issuer,
+		ExpectedAudience: expectedAudience,
+	})
+	if err == nil {
+		return handler
+	}
+	logx.Errorw("jwks_initialization_failed", logx.Field("error", err))
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+	})
 }
 
 func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, authorized user!")
 }
-
-// func main() {
-// 	// ✅ 配置 JWKS 自动刷新
-// 	options := keyfunc.Options{
-// 		RefreshInterval:   1 * time.Hour,
-// 		RefreshTimeout:    10 * time.Second,
-// 		RefreshUnknownKID: true,
-// 		RefreshErrorHandler: func(err error) {
-// 			log.Printf("⚠️ JWKS refresh error: %v", err)
-// 		},
-// 	}
-
-// 	// 加载 Logto JWKS
-// 	jwks, err := keyfunc.Get(jwksURL, options)
-// 	if err != nil {
-// 		log.Fatalf("❌ Failed to get JWKS from %s: %v", jwksURL, err)
-// 	}
-
-// 	mux := http.NewServeMux()
-// 	mux.Handle("/api/getuser", AuthMiddleware(jwks, http.HandlerFunc(GetUserHandler)))
-
-// 	fmt.Println("✅ API server running on http://localhost:8080")
-// 	log.Fatal(http.ListenAndServe(":8080", mux))
-// }

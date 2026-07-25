@@ -2,23 +2,24 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
 // MQConfig 消息队列配置。Mode=off 不初始化，Mode=auto 自动检测，Mode=on 强制启用。
 type MQConfig struct {
-	Mode          string              `json:",optional"` // off | auto | on
-	Provider      string              `json:",optional"` // redis-stream | nats-jetstream | kafka | rabbitmq | rocketmq
-	Usage         []string            `json:",optional"` // event-stream | transport | websocket | delayed-task
-	RequestReply  MQRequestReplyConfig `json:",optional"`
-	Retry         MQRetryConfig        `json:",optional"`
-	DeadLetter    MQDeadLetterConfig   `json:",optional"`
-	Switch        MQSwitchConfig       `json:",optional"`
-	RedisStream   RedisStreamMQConfig  `json:",optional"`
+	Mode          string                `json:",optional"` // off | auto | on
+	Provider      string                `json:",optional"` // redis-stream | nats-jetstream | kafka | rabbitmq | rocketmq
+	Usage         []string              `json:",optional"` // event-stream | transport | websocket | delayed-task
+	RequestReply  MQRequestReplyConfig  `json:",optional"`
+	Retry         MQRetryConfig         `json:",optional"`
+	DeadLetter    MQDeadLetterConfig    `json:",optional"`
+	Switch        MQSwitchConfig        `json:",optional"`
+	RedisStream   RedisStreamMQConfig   `json:",optional"`
 	NATSJetStream NATSJetStreamMQConfig `json:",optional"`
-	Kafka         KafkaMQConfig        `json:",optional"`
-	RabbitMQ      RabbitMQConfig       `json:",optional"`
-	RocketMQ      RocketMQConfig       `json:",optional"`
+	Kafka         KafkaMQConfig         `json:",optional"`
+	RabbitMQ      RabbitMQConfig        `json:",optional"`
+	RocketMQ      RocketMQConfig        `json:",optional"`
 }
 
 // MQRequestReplyConfig MQ 同步 request/reply 配置。
@@ -136,15 +137,18 @@ func (m *MQConfig) Validate() error {
 	switch m.Mode {
 	case "off", "auto", "on":
 	default:
-		return errors.New("mq.mode must be off, auto, or on")
+		return fmt.Errorf("mq.mode=%q is invalid; use off, auto, or on", m.Mode)
 	}
-	switch m.Provider {
-	case "redis-stream", "nats-jetstream", "kafka", "rabbitmq", "rocketmq":
-	default:
-		return errors.New("mq.provider must be one of: redis-stream, nats-jetstream, kafka, rabbitmq, rocketmq")
+	if m.Mode == "off" {
+		return nil
 	}
 	if m.Mode == "on" && len(m.Usage) == 0 {
 		return errors.New("mq.usage is required when mq.mode is on")
+	}
+	for _, usage := range m.Usage {
+		if usage != "event-stream" {
+			return fmt.Errorf("mq.usage contains unsupported value %q; only event-stream is implemented", usage)
+		}
 	}
 	if m.Mode == "on" {
 		switch m.Provider {
@@ -152,28 +156,25 @@ func (m *MQConfig) Validate() error {
 			if m.NATSJetStream.URL == "" {
 				return errors.New("mq.natsJetStream.url is required when provider=nats-jetstream and mode=on")
 			}
-		case "kafka":
-			if len(m.Kafka.Brokers) == 0 {
-				return errors.New("mq.kafka.brokers is required when provider=kafka and mode=on")
-			}
-		case "rabbitmq":
-			if m.RabbitMQ.URL == "" {
-				return errors.New("mq.rabbitMQ.url is required when provider=rabbitmq and mode=on")
-			}
-		case "rocketmq":
-			if len(m.RocketMQ.NameServers) == 0 {
-				return errors.New("mq.rocketMQ.nameServers is required when provider=rocketmq and mode=on")
-			}
 		}
 	}
-	if m.RequestReply.Enable && m.RequestReply.Timeout <= 0 {
-		return errors.New("mq.requestReply.timeout must be greater than zero when requestReply is enabled")
+	if m.RequestReply.Enable {
+		return fmt.Errorf("mq.requestReply.enable=%t is not implemented; remove it or set it to false", m.RequestReply.Enable)
+	}
+	if m.Retry.Enable {
+		return fmt.Errorf("mq.retry.enable=%t is not implemented; remove it or set it to false", m.Retry.Enable)
+	}
+	if m.DeadLetter.Enable {
+		return fmt.Errorf("mq.deadLetter.enable=%t is not implemented; remove it or set it to false", m.DeadLetter.Enable)
+	}
+	if m.Switch.AllowDynamicSwitch {
+		return fmt.Errorf("mq.switch.allowDynamicSwitch=%t is not implemented; remove it or set it to false", m.Switch.AllowDynamicSwitch)
 	}
 	// 空字符串表示"未配置，使用 ApplyDefaults 后的默认值"
 	switch m.Switch.Strategy {
 	case "", "drain", "dual-write", "maintenance":
 	default:
-		return errors.New("mq.switch.strategy must be drain, dual-write, or maintenance")
+		return fmt.Errorf("mq.switch.strategy=%q is invalid; use drain, dual-write, or maintenance", m.Switch.Strategy)
 	}
 	return nil
 }

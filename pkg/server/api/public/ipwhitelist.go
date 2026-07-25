@@ -8,6 +8,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
+	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -30,28 +31,7 @@ func (own *IpWhiteList) Parse(req types.IRequest) error {
 	return nil
 }
 func (own *IpWhiteList) Validation(req types.IRequest) error {
-	// ip := req.GetClientIP()
-	// index := strings.Index(ip, ":")
-	// if index > 0 {
-	// 	ip = ip[:index]
-	// }
-	// if !req.Authorized() {
-	// 	context := router.GetContext(req.ServiceName())
-	// 	if context != nil {
-	// 		opt := context.GetServerOption()
-	// 		if opt != nil && opt.RemoteAccessManageAPI {
-	// 			return nil
-	// 		}
-	// 	}
-	// 	if !utils.HasLocalIPAddr(ip) {
-	// 		return errors.New("服务管理接口只能在本地机访问！")
-	// 	}
-	// }
-	// if own.Ip == "" {
-	// 	return errors.New("ip不能为空!/r/n")
-	// }
-
-	return nil
+	return own.ServerArgs.Validation(req)
 }
 func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 	list := entity.NewModelList[smodels.IPWhiteModel](nil)
@@ -97,7 +77,8 @@ func (own *IpWhiteList) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *IpWhiteList) RouterInfo() *types.RouterInfo {
-	info := api.ServerRouterInfo(own)
-	info.Method = http.MethodGet
-	return info
+	return api.ServerRouterInfoWithOptions(own,
+		router.WithMethod(http.MethodGet),
+		withSystemEndpointRateLimit(),
+	)
 }

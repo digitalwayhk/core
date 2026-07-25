@@ -5,33 +5,28 @@ import (
 )
 
 type TargetServer struct {
-	IP         string
-	HttpPort   int
-	SocketPort int
-	QUICPort   int
+	IP       string
+	HttpPort int
 }
 
 type PayLoad struct {
-	TraceID          string
-	SourceAddress    string
-	SourcePort       int
-	SourceSocketPort int
-	SourceService    string
-	TargetAddress    string
-	TargetPort       int
-	TargetSocketPort int
-	TargetQUICPort   int
-	TargetService    string
-	SourcePath       string
-	TargetPath       string
-	UserId           string
-	UserName         string
-	ClientIP         string
-	Auth             bool
-	Instance         interface{}
-	Data             []byte
-	HttpMethod       string
-	Token            string `json:"-"`
+	TraceID       string
+	SourceAddress string
+	SourcePort    int
+	SourceService string
+	TargetAddress string
+	TargetPort    int
+	TargetService string
+	SourcePath    string
+	TargetPath    string
+	UserId        string
+	UserName      string
+	ClientIP      string
+	Auth          bool
+	Instance      interface{}
+	Data          []byte
+	HttpMethod    string
+	Token         string `json:"-"`
 }
 
 func (own *PayLoad) InstanceRouter(api IRouter) error {

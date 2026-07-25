@@ -207,10 +207,16 @@ func TestClusterConsul_Watch(t *testing.T) {
 	require.NoError(t, p.Register(ctx, n))
 	defer p.Deregister(context.Background(), n.ID)
 
-	select {
-	case nodes := <-fired:
-		assert.NotEmpty(t, nodes)
-	case <-ctx.Done():
-		t.Fatal("Watch callback not fired within timeout")
+	for {
+		select {
+		case nodes := <-fired:
+			for _, got := range nodes {
+				if got.ID == n.ID {
+					return
+				}
+			}
+		case <-ctx.Done():
+			t.Fatal("Watch callback did not include the registered node within timeout")
+		}
 	}
 }

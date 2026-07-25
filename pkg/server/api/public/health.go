@@ -34,8 +34,9 @@ func (own *Health) Do(req types.IRequest) (interface{}, error) {
 }
 
 func (own *Health) RouterInfo() *types.RouterInfo {
-	info := router.DefaultRouterInfo(own)
-	info.Method = http.MethodGet
-	info.Path = "/api/health"
-	return info
+	return router.DefaultRouterInfoWithOptions(own,
+		router.WithMethod(http.MethodGet),
+		router.WithPath("/api/health"),
+		withHealthEndpointRateLimit(),
+	)
 }
