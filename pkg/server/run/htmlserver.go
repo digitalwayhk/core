@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/trans"
+	"github.com/digitalwayhk/core/pkg/server/trans/rest"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 
@@ -25,16 +27,18 @@ import (
 var html embed.FS
 
 type HTMLServer struct {
-	Port        int
-	services    []*router.ServiceRouter
-	Isstart     chan bool
-	Parent      *WebServer
-	lifecycleMu sync.Mutex
-	server      *http.Server
-	stopCh      chan struct{}
-	stopOnce    sync.Once
-	stopped     bool
+	Port                int
+	services            []*router.ServiceRouter
+	Isstart             chan bool
+	Parent              *WebServer
+	lifecycleMu         sync.Mutex
+	server              *http.Server
+	stopCh              chan struct{}
+	stopOnce            sync.Once
+	stopped             bool
 	manageAuthAuthority *manageAuthAuthority
+	handler             http.Handler
+	prepared            bool
 }
 
 func (own *HTMLServer) SetManageAuthAuthority(authority *manageAuthAuthority) {
@@ -56,23 +60,29 @@ func (own *HTMLServer) AddServiceRouter(sr *router.ServiceRouter) {
 
 var qs = &public.QueryService{}
 
-func (own *HTMLServer) Start() {
-	if own.Port == 0 {
-		return
-	}
-	var run bool
-	select {
-	case run = <-own.Isstart:
-	case <-own.stopCh:
-		return
-	}
-	if !run {
-		return
+var manageAuthProxyRoutes = []struct {
+	external string
+	internal string
+}{
+	{"/api/servermanage/testtoken", "/api/servermanage/testtoken"},
+	{"/api/casdoor", "/api/casdoor"},
+	{"/callback", "/api/casdoor/callback"},
+	{"/api/refresh", "/api/refresh"},
+}
+
+func (own *HTMLServer) Prepare() error {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.prepared && own.handler != nil {
+		return nil
 	}
 	sfsys, _ := fs.Sub(swagger, "swagger")
 	mux := http.NewServeMux()
 	mux.Handle("/swagger/", http.StripPrefix("/swagger/", http.FileServer(http.FS(sfsys))))
 	mux.Handle(webBootstrapPath, newWebBootstrapHandler(own.manageAuthAuthority))
+	if err := own.mountManageAuthProxy(mux); err != nil {
+		return err
+	}
 
 	for _, service := range own.services {
 		for _, router := range service.GetTypeRouters(types.ManageType) {
@@ -117,9 +127,75 @@ func (own *HTMLServer) Start() {
 		// })
 		logx.Infow("development_view_ready", logx.Field("port", own.Port))
 	}
+	own.handler = mux
+	own.prepared = true
+	return nil
+}
+
+func (own *HTMLServer) mountManageAuthProxy(mux *http.ServeMux) error {
+	authority := own.manageAuthAuthority
+	if authority == nil {
+		return nil
+	}
+	if authority.router == nil || authority.context == nil {
+		return fmt.Errorf("Manage Auth 权威服务 %s 未就绪", normalizeBootstrapAuthorityService(authority))
+	}
+	for _, route := range manageAuthProxyRoutes {
+		info := authority.router.GetRouter(route.internal)
+		if info == nil {
+			return fmt.Errorf("Manage Auth 权威服务 %s 缺少同源认证路由 %s",
+				normalizeBootstrapAuthorityService(authority), route.internal)
+		}
+		handler, err := rest.NewExternalRouterHandler(authority.router, info)
+		if err != nil {
+			return fmt.Errorf("构造同源认证路由 %s 失败: %w", route.external, err)
+		}
+		mux.Handle(route.external, rewriteExternalRoutePath(handler, route.internal))
+	}
+	return nil
+}
+
+func rewriteExternalRoutePath(next http.Handler, internalPath string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		cloned := request.Clone(request.Context())
+		urlCopy := *request.URL
+		urlCopy.Path = internalPath
+		urlCopy.RawPath = ""
+		cloned.URL = &urlCopy
+		cloned.RequestURI = internalPath
+		if urlCopy.RawQuery != "" {
+			cloned.RequestURI += "?" + urlCopy.RawQuery
+		}
+		next.ServeHTTP(w, cloned)
+	})
+}
+
+func (own *HTMLServer) Handler() http.Handler {
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	return own.handler
+}
+
+func (own *HTMLServer) Start() {
+	if own.Port == 0 {
+		return
+	}
+	var run bool
+	select {
+	case run = <-own.Isstart:
+	case <-own.stopCh:
+		return
+	}
+	if !run {
+		return
+	}
+	handler := own.Handler()
+	if handler == nil {
+		return
+	}
 	server := &http.Server{
 		Addr:    ":" + strconv.Itoa(own.Port),
-		Handler: mux,
+		Handler: handler,
 	}
 	own.lifecycleMu.Lock()
 	if own.stopped {

@@ -28,35 +28,35 @@ import (
 
 type WebServer struct {
 	sync.RWMutex
-	serviceContexts  map[string]*router.ServiceContext
-	serverOption     map[string]*types.ServerOption
-	childServer      map[int]*WebServer
-	htmls            *HTMLServer
+	serviceContexts            map[string]*router.ServiceContext
+	serverOption               map[string]*types.ServerOption
+	childServer                map[int]*WebServer
+	htmls                      *HTMLServer
 	manageAuthAuthorityService string
-	ViewPort         int
-	Port             int
-	GRPCPort         int
-	isRun            bool
-	registryVersion  uint64
-	optionApplyMu    sync.Mutex
-	initOnce         sync.Once
-	endOnce          sync.Once
-	initializing     atomic.Bool
-	startOnce        sync.Once
-	runMu            sync.Mutex
-	runOnce          sync.Once
-	runLifecycleOnce sync.Once
-	shutdownOnce     sync.Once
-	runReadyOnce     sync.Once
-	runDoneOnce      sync.Once
-	stopCloseOnce    sync.Once
-	runStarted       atomic.Bool
-	stopped          atomic.Bool
-	runReady         chan struct{}
-	runDone          chan struct{}
-	stopCh           chan struct{}
-	group            *service.ServiceGroup
-	saveConfig       func(*config.ServerConfig) error
+	ViewPort                   int
+	Port                       int
+	GRPCPort                   int
+	isRun                      bool
+	registryVersion            uint64
+	optionApplyMu              sync.Mutex
+	initOnce                   sync.Once
+	endOnce                    sync.Once
+	initializing               atomic.Bool
+	startOnce                  sync.Once
+	runMu                      sync.Mutex
+	runOnce                    sync.Once
+	runLifecycleOnce           sync.Once
+	shutdownOnce               sync.Once
+	runReadyOnce               sync.Once
+	runDoneOnce                sync.Once
+	stopCloseOnce              sync.Once
+	runStarted                 atomic.Bool
+	stopped                    atomic.Bool
+	runReady                   chan struct{}
+	runDone                    chan struct{}
+	stopCh                     chan struct{}
+	group                      *service.ServiceGroup
+	saveConfig                 func(*config.ServerConfig) error
 }
 
 func (own *WebServer) persistConfig(cfg *config.ServerConfig) error {
@@ -443,6 +443,15 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 			return nil, fmt.Errorf("初始化服务器异常，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
 		htmls.AddServiceRouter(ctx.Router)
+	}
+	if err := htmls.Prepare(); err != nil {
+		rollback()
+		own.Lock()
+		if own.htmls == htmls {
+			own.htmls = nil
+		}
+		own.Unlock()
+		return nil, fmt.Errorf("初始化 HTML 服务失败：%w", err)
 	}
 	return constructed, nil
 }
