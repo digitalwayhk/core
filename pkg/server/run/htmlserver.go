@@ -34,11 +34,6 @@ type HTMLServer struct {
 	stopCh      chan struct{}
 	stopOnce    sync.Once
 	stopped     bool
-	manageAuthAuthority *manageAuthAuthority
-}
-
-func (own *HTMLServer) SetManageAuthAuthority(authority *manageAuthAuthority) {
-	own.manageAuthAuthority = authority
 }
 
 func NewHTMLServer(port int) *HTMLServer {

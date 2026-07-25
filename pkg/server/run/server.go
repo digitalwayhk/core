@@ -32,7 +32,6 @@ type WebServer struct {
 	serverOption     map[string]*types.ServerOption
 	childServer      map[int]*WebServer
 	htmls            *HTMLServer
-	manageAuthAuthorityService string
 	ViewPort         int
 	Port             int
 	GRPCPort         int
@@ -82,26 +81,6 @@ func (own *WebServer) GetServerOption(name string) *types.ServerOption {
 	own.RLock()
 	defer own.RUnlock()
 	return own.serverOption[strings.ToLower(name)].Clone()
-}
-
-// SetManageAuthAuthority 选择 ViewPort 使用的 Manage Auth 权威服务。
-// 该进程级关系只能在 Start 前设置，不写入任一服务配置。
-func (own *WebServer) SetManageAuthAuthority(serviceName string) error {
-	own.runMu.Lock()
-	defer own.runMu.Unlock()
-	if own.runStarted.Load() {
-		return errors.New("Manage Auth 权威只能在启动前配置")
-	}
-	own.Lock()
-	defer own.Unlock()
-	own.manageAuthAuthorityService = normalizeServiceName(serviceName)
-	return nil
-}
-
-func (own *WebServer) manageAuthAuthoritySnapshot() string {
-	own.RLock()
-	defer own.RUnlock()
-	return own.manageAuthAuthorityService
 }
 
 func NewWebServer() *WebServer {
@@ -407,13 +386,8 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 			return nil, fmt.Errorf("初始化服务配置失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
 	}
-	authority, err := resolveManageAuthAuthority(ordered, own.manageAuthAuthoritySnapshot())
-	if err != nil {
-		return nil, fmt.Errorf("初始化 Manage Auth 权威失败：%w", err)
-	}
 	htmls := NewHTMLServer(own.ViewPort)
 	htmls.Parent = own
-	htmls.SetManageAuthAuthority(authority)
 	own.Lock()
 	own.htmls = htmls
 	own.Unlock()
