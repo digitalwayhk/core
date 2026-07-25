@@ -90,12 +90,12 @@ func TestStartup_Transport_GRPCPrimaryBuilds(t *testing.T) {
 	require.NotNil(t, sel)
 }
 
-// TestStartup_Transport_QUICPrimaryBuilds verifies that the newly added quic
-// transport can be used as the primary.
-func TestStartup_Transport_QUICPrimaryBuilds(t *testing.T) {
+// TestStartup_Transport_QUICPrimaryReturnsError 验证已移除的 QUIC 不会被重新启用。
+func TestStartup_Transport_QUICPrimaryReturnsError(t *testing.T) {
 	sel, err := transport.BuildSelector(config.TransportConfig{Internal: "quic"})
-	require.NoError(t, err)
-	require.NotNil(t, sel)
+	assert.Nil(t, sel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not implemented")
 }
 
 // TestStartup_Transport_MQInternalStillErrors verifies mq is not yet implemented.
@@ -109,10 +109,10 @@ func TestStartup_Transport_MQInternalStillErrors(t *testing.T) {
 // a primary + multiple fallbacks and returns a non-nil selector without error.
 // (Actual transport selection requires a live target and is covered by transport-level tests.)
 func TestStartup_Transport_FallbackOrderPreserved(t *testing.T) {
-	cfg := config.TransportConfig{Internal: "grpc", Fallback: []string{"quic", "http"}}
+	cfg := config.TransportConfig{Internal: "grpc", Fallback: []string{"http"}}
 	sel, err := transport.BuildSelector(cfg)
 	require.NoError(t, err)
-	require.NotNil(t, sel, "grpc primary + quic,http fallbacks should build a non-nil selector")
+	require.NotNil(t, sel, "grpc primary + http fallback should build a non-nil selector")
 }
 
 // ============================================================
@@ -136,16 +136,18 @@ func TestStartup_MQ_ModeAuto_UnavailableProviderReturnsNilWithoutError(t *testin
 		// No Redis address configured; provider will fail to connect.
 	}
 	cfg.ApplyDefaults()
+	cfg.RedisStream.Addr = "127.0.0.1:0"
 	// Ensure ApplyDefaults didn't override Mode.
 	cfg.Mode = "auto"
 
-	mgr, err := mq.BuildManager(context.Background(), cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	mgr, err := mq.BuildManager(ctx, cfg)
 	require.NoError(t, err, "Mode=auto with unavailable Redis should degrade, not error")
 	assert.Nil(t, mgr)
 }
 
-// TestStartup_MQ_ModeOn_UnavailableProviderReturnsError verifies that
-// Mode=on with an unconfigured provider returns an error.
+// TestStartup_MQ_ModeOn_UnavailableProviderReturnsError 验证强制启用时连接失败会 fail closed。
 func TestStartup_MQ_ModeOn_UnavailableProviderReturnsError(t *testing.T) {
 	cfg := &config.MQConfig{
 		Mode:     "on",
@@ -153,8 +155,11 @@ func TestStartup_MQ_ModeOn_UnavailableProviderReturnsError(t *testing.T) {
 	}
 	cfg.ApplyDefaults()
 	cfg.Mode = "on"
+	cfg.RedisStream.Addr = "127.0.0.1:0"
 
-	_, err := mq.BuildManager(context.Background(), cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := mq.BuildManager(ctx, cfg)
 	require.Error(t, err, "Mode=on with unavailable provider must return an error")
 }
 
