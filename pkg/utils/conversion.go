@@ -17,6 +17,9 @@ func AnyToTypeData(value interface{}, src reflect.Type) (interface{}, error) {
 		return nil, nil
 	}
 	str := convertString(reflect.ValueOf(value))
+	if src == decimalType {
+		return decimal.NewFromString(str)
+	}
 	rv, err := convertOp1(str, src)
 	if err != nil {
 		return nil, err
