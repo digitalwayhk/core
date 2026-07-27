@@ -157,6 +157,51 @@ func TestAggregatorAsyncEdgesKeepAllPublishers(t *testing.T) {
 	require.True(t, sources["shop-order-b"], "must keep all publish sources, not only max rate")
 }
 
+func TestAggregatorAsyncEdgesAggregateEventTypes(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"shop-user": {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	t.Cleanup(idx.Register("shop-user", "order.changed", "OrderCreated", true))
+	t.Cleanup(idx.Register("shop-user", "order.changed", "OrderStatusChanged", true))
+	t.Cleanup(idx.Register("shop-user", "order.changed", "PaymentChanged", true))
+	pubQ, err := runtime.EventPublishRateQuery("15s")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		pubQ: {
+			{Value: 2, Metric: map[string]string{"source_service": "shop-order", "subject_family": "order.changed", "event_type": "ordercreated", "result_class": "success"}},
+			{Value: 3, Metric: map[string]string{"source_service": "shop-order", "subject_family": "order.changed", "event_type": "orderstatuschanged", "result_class": "success"}},
+			{Value: 1, Metric: map[string]string{"source_service": "shop-order", "subject_family": "order.changed", "event_type": "paymentchanged", "result_class": "success"}},
+		},
+	}}
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "15s")
+	require.NoError(t, err)
+	var asyncCount int
+	var rate float64
+	for _, e := range resp.Edges {
+		if e.Kind == "async" && e.Source == "shop-order" && e.Target == "shop-user" {
+			asyncCount++
+			if e.RequestRate.Value != nil {
+				rate = *e.RequestRate.Value
+			}
+		}
+	}
+	require.Equal(t, 1, asyncCount, "must aggregate multiple event types into one edge")
+	require.Equal(t, 6.0, rate)
+}
+
+func TestSubscriptionCancelIsIdempotent(t *testing.T) {
+	idx := runtime.NewMemorySubscriptionIndex()
+	cancel := idx.Register("shop-user", "order.changed", "OrderCreated", true)
+	cancel()
+	cancel() // must not panic or underflow
+	list, err := idx.List(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, list)
+}
+
 func TestSubscriptionUnregisterRemovesEdge(t *testing.T) {
 	idx := runtime.NewMemorySubscriptionIndex()
 	cancel := idx.Register("shop-user", "order.changed", "OrderCreated", true)

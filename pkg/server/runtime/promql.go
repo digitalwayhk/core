@@ -115,6 +115,20 @@ func EventSubscriptionInfoQuery() string {
 	return `core_event_subscription_info`
 }
 
+// ServiceLastSampleTimestampQuery 返回服务请求序列的最后样本时间（Unix 秒）。
+// 使用 timestamp() 读取底层 counter 的最后采集时间，而不是 instant 表达式评估时间。
+func ServiceLastSampleTimestampQuery(service string) (string, error) {
+	svc := observability.NormalizeServiceLabel(service)
+	if svc == "unknown" || !observability.IsSafePromLabel(svc) {
+		return "", fmt.Errorf("unsafe service name")
+	}
+	// max 覆盖 HTTP 与 Core 入站；任一有样本即可。
+	return fmt.Sprintf(
+		`max(timestamp(http_server_requests_code_total{service=%q}) or timestamp(core_service_request_requests_total{service=%q}))`,
+		svc, svc,
+	), nil
+}
+
 // ComponentGaugeQuery 查询服务组件 gauge。
 func ComponentGaugeQuery(service string) (string, error) {
 	svc := observability.NormalizeServiceLabel(service)

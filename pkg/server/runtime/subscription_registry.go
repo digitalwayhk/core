@@ -10,8 +10,8 @@ import (
 // MemorySubscriptionIndex 进程内订阅注册表，并同步导出 Prometheus 指标供跨进程查询。
 type MemorySubscriptionIndex struct {
 	mu    sync.RWMutex
-	edges map[string]SubscriptionEdge // key=target|family|type
-	refs  map[string]int              // 引用计数，支持多次订阅/取消
+	edges map[string]SubscriptionEdge // key 与 gauge labels 对齐：target|family|type|reliable
+	refs  map[string]int
 }
 
 // GlobalSubscriptionIndex 全进程默认订阅索引（多服务同进程共享）。
@@ -25,21 +25,30 @@ func NewMemorySubscriptionIndex() *MemorySubscriptionIndex {
 	}
 }
 
-// Register 登记一条已验证的业务订阅，返回注销函数。
+func subscriptionRefKey(target, family, eventType string, reliable bool) string {
+	rel := "false"
+	if reliable {
+		rel = "true"
+	}
+	return target + "|" + family + "|" + eventType + "|" + rel
+}
+
+// Register 登记一条已验证的业务订阅，返回幂等注销函数。
 func (m *MemorySubscriptionIndex) Register(targetService, subject, eventType string, reliable bool) func() {
+	noop := func() {}
 	if m == nil {
-		return func() {}
+		return noop
 	}
 	target := observability.NormalizeServiceLabel(targetService)
 	family := NormalizeSubjectFamily(subject)
 	if target == "unknown" || family == "" {
-		return func() {}
+		return noop
 	}
 	et := observability.NormalizeServiceLabel(eventType)
 	if et == "unknown" {
 		et = "unspecified"
 	}
-	key := target + "|" + family + "|" + et
+	key := subscriptionRefKey(target, family, et, reliable)
 	m.mu.Lock()
 	m.refs[key]++
 	m.edges[key] = SubscriptionEdge{
@@ -50,8 +59,12 @@ func (m *MemorySubscriptionIndex) Register(targetService, subject, eventType str
 	}
 	m.mu.Unlock()
 	observability.SetSubscriptionActive(target, family, et, reliable, true)
+
+	var once sync.Once
 	return func() {
-		m.Unregister(target, family, et, reliable)
+		once.Do(func() {
+			m.Unregister(target, family, et, reliable)
+		})
 	}
 }
 
@@ -66,19 +79,21 @@ func (m *MemorySubscriptionIndex) Unregister(targetService, subjectFamily, event
 	if et == "unknown" {
 		et = "unspecified"
 	}
-	key := target + "|" + family + "|" + et
+	key := subscriptionRefKey(target, family, et, reliable)
 	m.mu.Lock()
-	if m.refs[key] > 0 {
-		m.refs[key]--
-	}
-	if m.refs[key] == 0 {
-		delete(m.refs, key)
-		delete(m.edges, key)
+	if m.refs[key] <= 0 {
 		m.mu.Unlock()
-		observability.SetSubscriptionActive(target, family, et, reliable, false)
 		return
 	}
+	m.refs[key]--
+	if m.refs[key] > 0 {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.refs, key)
+	delete(m.edges, key)
 	m.mu.Unlock()
+	observability.SetSubscriptionActive(target, family, et, reliable, false)
 }
 
 // List 返回当前本进程订阅边。
