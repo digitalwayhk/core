@@ -7,10 +7,11 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/observability"
 )
 
-// MemorySubscriptionIndex 进程内订阅注册表，供异步边拼装。
+// MemorySubscriptionIndex 进程内订阅注册表，并同步导出 Prometheus 指标供跨进程查询。
 type MemorySubscriptionIndex struct {
 	mu    sync.RWMutex
 	edges map[string]SubscriptionEdge // key=target|family|type
+	refs  map[string]int              // 引用计数，支持多次订阅/取消
 }
 
 // GlobalSubscriptionIndex 全进程默认订阅索引（多服务同进程共享）。
@@ -18,25 +19,29 @@ var GlobalSubscriptionIndex = NewMemorySubscriptionIndex()
 
 // NewMemorySubscriptionIndex 创建空索引。
 func NewMemorySubscriptionIndex() *MemorySubscriptionIndex {
-	return &MemorySubscriptionIndex{edges: make(map[string]SubscriptionEdge)}
+	return &MemorySubscriptionIndex{
+		edges: make(map[string]SubscriptionEdge),
+		refs:  make(map[string]int),
+	}
 }
 
-// Register 登记一条已验证的业务订阅。
-func (m *MemorySubscriptionIndex) Register(targetService, subject, eventType string, reliable bool) {
+// Register 登记一条已验证的业务订阅，返回注销函数。
+func (m *MemorySubscriptionIndex) Register(targetService, subject, eventType string, reliable bool) func() {
 	if m == nil {
-		return
+		return func() {}
 	}
 	target := observability.NormalizeServiceLabel(targetService)
 	family := NormalizeSubjectFamily(subject)
 	if target == "unknown" || family == "" {
-		return
+		return func() {}
 	}
 	et := observability.NormalizeServiceLabel(eventType)
 	if et == "unknown" {
-		et = ""
+		et = "unspecified"
 	}
 	key := target + "|" + family + "|" + et
 	m.mu.Lock()
+	m.refs[key]++
 	m.edges[key] = SubscriptionEdge{
 		SourceSubjectFamily: family,
 		EventType:           et,
@@ -44,9 +49,39 @@ func (m *MemorySubscriptionIndex) Register(targetService, subject, eventType str
 		Reliable:            reliable,
 	}
 	m.mu.Unlock()
+	observability.SetSubscriptionActive(target, family, et, reliable, true)
+	return func() {
+		m.Unregister(target, family, et, reliable)
+	}
 }
 
-// List 返回当前订阅边。
+// Unregister 取消订阅；引用归零后删除本地边与 Prom 样本。
+func (m *MemorySubscriptionIndex) Unregister(targetService, subjectFamily, eventType string, reliable bool) {
+	if m == nil {
+		return
+	}
+	target := observability.NormalizeServiceLabel(targetService)
+	family := NormalizeSubjectFamily(subjectFamily)
+	et := observability.NormalizeServiceLabel(eventType)
+	if et == "unknown" {
+		et = "unspecified"
+	}
+	key := target + "|" + family + "|" + et
+	m.mu.Lock()
+	if m.refs[key] > 0 {
+		m.refs[key]--
+	}
+	if m.refs[key] == 0 {
+		delete(m.refs, key)
+		delete(m.edges, key)
+		m.mu.Unlock()
+		observability.SetSubscriptionActive(target, family, et, reliable, false)
+		return
+	}
+	m.mu.Unlock()
+}
+
+// List 返回当前本进程订阅边。
 func (m *MemorySubscriptionIndex) List(context.Context) ([]SubscriptionEdge, error) {
 	if m == nil {
 		return nil, nil
@@ -66,17 +101,20 @@ func (m *MemorySubscriptionIndex) ResetForTest() {
 		return
 	}
 	m.mu.Lock()
+	for _, e := range m.edges {
+		observability.SetSubscriptionActive(e.TargetService, e.SourceSubjectFamily, e.EventType, e.Reliable, false)
+	}
 	m.edges = make(map[string]SubscriptionEdge)
+	m.refs = make(map[string]int)
 	m.mu.Unlock()
 }
 
-// NormalizeSubjectFamily 将 Subject 归一为有界 family（去掉实例级后缀）。
+// NormalizeSubjectFamily 将 Subject 归一为有界 family。
 func NormalizeSubjectFamily(subject string) string {
 	s := observability.NormalizeServiceLabel(subject)
 	if s == "unknown" {
 		return ""
 	}
-	// 仅允许字母数字与 .-_，长度截断防高基数。
 	if len(s) > 64 {
 		s = s[:64]
 	}

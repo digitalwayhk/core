@@ -299,17 +299,37 @@ func (a *Aggregator) fillServiceMetrics(
 		node.ErrorRate = ValueMetric(0, StateOK)
 	}
 	// 百分位：有 HTTP histogram 则取；空则 not_collected（不伪造 0ms）
-	node.P50Ms = a.queryQuantile(ctx, name, window, now, 0.50)
-	node.P95Ms = a.queryQuantile(ctx, name, window, now, 0.95)
-	node.P99Ms = a.queryQuantile(ctx, name, window, now, 0.99)
+	var quantFail bool
+	var latestSample *time.Time
+	node.P50Ms, quantFail = a.queryQuantile(ctx, name, window, now, 0.50, &latestSample)
+	p95, fail95 := a.queryQuantile(ctx, name, window, now, 0.95, &latestSample)
+	node.P95Ms = p95
+	quantFail = quantFail || fail95
+	p99, fail99 := a.queryQuantile(ctx, name, window, now, 0.99, &latestSample)
+	node.P99Ms = p99
+	quantFail = quantFail || fail99
+
 	node.State = StateOK
-	if qerr != nil || coreErr != nil {
+	if qerr != nil || coreErr != nil || quantFail {
 		node.State = StatePartial
 		resp.Status = MergeStates(resp.Status, StatePartial)
 	}
+	// 新鲜度：若有样本时间戳且过期则 stale
+	if latestSample != nil {
+		fresh := Freshness(window, now, latestSample)
+		if fresh == StateStale {
+			node.State = MergeStates(node.State, StateStale)
+			node.RequestRate.State = MergeStates(node.RequestRate.State, StateStale)
+			node.RequestRate.LastSample = latestSample
+			resp.Status = MergeStates(resp.Status, StateStale)
+		} else {
+			node.RequestRate.LastSample = latestSample
+		}
+	}
 }
 
-func (a *Aggregator) queryQuantile(ctx context.Context, name, window string, now time.Time, q float64) MetricValue {
+// queryQuantile 返回百分位值与是否查询失败（失败应上卷 partial）。
+func (a *Aggregator) queryQuantile(ctx context.Context, name, window string, now time.Time, q float64, latest **time.Time) (MetricValue, bool) {
 	var query string
 	var err error
 	switch q {
@@ -321,20 +341,26 @@ func (a *Aggregator) queryQuantile(ctx context.Context, name, window string, now
 		query, err = ServiceHTTPP95Query(name, window)
 	}
 	if err != nil {
-		return NullMetric(StateNotCollected)
+		return NullMetric(StateNotCollected), false
 	}
 	vec, qerr := a.query(ctx, query, now)
 	if qerr != nil {
-		return NullMetric(StateUnavailable)
+		return NullMetric(StateUnavailable), true
 	}
-	if len(vec) == 0 || (len(vec) == 1 && (vec[0].Value != vec[0].Value)) { // NaN
-		return NullMetric(StateNotCollected)
+	if len(vec) == 0 {
+		return NullMetric(StateNotCollected), false
+	}
+	if latest != nil && !vec[0].Timestamp.IsZero() {
+		if *latest == nil || vec[0].Timestamp.After(**latest) {
+			ts := vec[0].Timestamp
+			*latest = &ts
+		}
 	}
 	v := vec[0].Value
 	if v != v { // NaN from histogram_quantile with no data
-		return NullMetric(StateNotCollected)
+		return NullMetric(StateNotCollected), false
 	}
-	return ValueMetric(v, StateOK)
+	return ValueMetric(v, StateOK), false
 }
 
 func sumHTTPByCode(vec Vector) (total, errs float64) {
@@ -364,17 +390,10 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 	anySample := false
 	anyFail := false
 
-	var subs []SubscriptionEdge
-	if a.subs != nil {
-		list, err := a.subs.List(ctx)
-		if err != nil {
-			warnings = append(warnings, RuntimeWarning{Code: "subscription_index_error", Message: "failed to list subscriptions", Scope: "global"})
-		} else {
-			subs = list
-		}
-	}
+	// 优先从 Prometheus 读取跨进程订阅事实；本进程索引作补充。
+	subs := a.loadSubscriptions(ctx, now, &anySample, &anyFail, &warnings)
 	if len(subs) == 0 {
-		return edges, warnings, false, false
+		return edges, warnings, anySample, anyFail
 	}
 
 	publishRates := map[string]float64{} // family|type|source -> rate
@@ -394,11 +413,8 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 		}
 	}
 
-	// 发布存在但无订阅：warning
-	// 订阅存在：与发布 join 成异步边
 	seenPublishFamily := map[string]bool{}
 	for k := range publishRates {
-		// k = family|type|source
 		parts := split3(k)
 		if parts[0] != "" {
 			seenPublishFamily[parts[0]] = true
@@ -406,53 +422,64 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 	}
 
 	subFamilies := map[string]bool{}
+	// 每个订阅 × 每个匹配发布源 生成一条异步边（不再只保留最高速率发布者）。
+	type edgeKey struct{ src, tgt, family, et string }
+	edgeSeen := map[edgeKey]bool{}
 	for _, sub := range subs {
 		subFamilies[sub.SourceSubjectFamily] = true
-		// 找匹配发布
-		var bestSource string
-		var bestRate float64
-		found := false
+		matched := false
 		for k, rate := range publishRates {
 			parts := split3(k)
 			if parts[0] != sub.SourceSubjectFamily {
 				continue
 			}
-			if sub.EventType != "" && parts[1] != sub.EventType && parts[1] != "unspecified" {
+			if sub.EventType != "" && sub.EventType != "unspecified" &&
+				parts[1] != sub.EventType && parts[1] != "unspecified" {
 				continue
 			}
-			if !found || rate > bestRate {
-				found = true
-				bestRate = rate
-				bestSource = parts[2]
+			matched = true
+			ek := edgeKey{src: parts[2], tgt: sub.TargetService, family: sub.SourceSubjectFamily, et: sub.EventType}
+			if edgeSeen[ek] {
+				// 同 key 累加速率
+				for i := range edges {
+					if edges[i].Source == ek.src && edges[i].Target == ek.tgt && edges[i].SubjectFamily == ek.family && edges[i].Kind == "async" {
+						if edges[i].RequestRate.Value != nil {
+							*edges[i].RequestRate.Value += rate
+						}
+						break
+					}
+				}
+				continue
 			}
+			edgeSeen[ek] = true
+			edges = append(edges, ServiceEdge{
+				Source:        parts[2],
+				Target:        sub.TargetService,
+				Kind:          "async",
+				SubjectFamily: sub.SourceSubjectFamily,
+				RequestRate:   ValueMetric(rate, StateOK),
+				ErrorRate:     NullMetric(baseState),
+				P95Ms:         NullMetric(baseState),
+				State:         StateOK,
+			})
 		}
-		edge := ServiceEdge{
-			Source:        bestSource,
-			Target:        sub.TargetService,
-			Kind:          "async",
-			SubjectFamily: sub.SourceSubjectFamily,
-			RequestRate:   NullMetric(baseState),
-			ErrorRate:     NullMetric(baseState),
-			P95Ms:         NullMetric(baseState),
-			State:         baseState,
-		}
-		if found {
-			edge.RequestRate = ValueMetric(bestRate, StateOK)
-			edge.State = StateOK
-			if bestSource == "" {
-				edge.State = StatePartial
-			}
-		} else {
-			// 有订阅无发布样本
-			edge.RequestRate = NullMetric(StateNotCollected)
-			edge.State = StateNotCollected
+		if !matched {
+			edges = append(edges, ServiceEdge{
+				Source:        "",
+				Target:        sub.TargetService,
+				Kind:          "async",
+				SubjectFamily: sub.SourceSubjectFamily,
+				RequestRate:   NullMetric(StateNotCollected),
+				ErrorRate:     NullMetric(StateNotCollected),
+				P95Ms:         NullMetric(StateNotCollected),
+				State:         StateNotCollected,
+			})
 			warnings = append(warnings, RuntimeWarning{
 				Code:    "async_publish_missing",
 				Message: "subscription exists but no publish samples for subject family",
 				Scope:   sub.TargetService,
 			})
 		}
-		edges = append(edges, edge)
 	}
 
 	for family := range seenPublishFamily {
@@ -465,6 +492,52 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 		}
 	}
 	return edges, warnings, anySample, anyFail
+}
+
+func (a *Aggregator) loadSubscriptions(ctx context.Context, now time.Time, anySample *bool, anyFail *bool, warnings *[]RuntimeWarning) []SubscriptionEdge {
+	byKey := map[string]SubscriptionEdge{}
+	// 跨进程：Prom 订阅 gauge
+	if IsPrometheusMode(a.cfg.Mode) && a.prom != nil {
+		vec, err := a.query(ctx, EventSubscriptionInfoQuery(), now)
+		if err != nil {
+			*anyFail = true
+			*warnings = append(*warnings, RuntimeWarning{Code: "subscription_query_partial", Message: "subscription metrics query failed", Scope: "global"})
+		} else {
+			for _, s := range vec {
+				if s.Value <= 0 {
+					continue
+				}
+				*anySample = true
+				target := observability.NormalizeServiceLabel(s.Metric["target_service"])
+				family := NormalizeSubjectFamily(s.Metric["subject_family"])
+				et := observability.NormalizeServiceLabel(s.Metric["event_type"])
+				if et == "unknown" {
+					et = "unspecified"
+				}
+				key := target + "|" + family + "|" + et
+				byKey[key] = SubscriptionEdge{
+					SourceSubjectFamily: family,
+					EventType:           et,
+					TargetService:       target,
+					Reliable:            s.Metric["reliable"] == "true",
+				}
+			}
+		}
+	}
+	// 本进程索引补充
+	if a.subs != nil {
+		if list, err := a.subs.List(ctx); err == nil {
+			for _, e := range list {
+				key := e.TargetService + "|" + e.SourceSubjectFamily + "|" + e.EventType
+				byKey[key] = e
+			}
+		}
+	}
+	out := make([]SubscriptionEdge, 0, len(byKey))
+	for _, e := range byKey {
+		out = append(out, e)
+	}
+	return out
 }
 
 func split3(k string) [3]string {

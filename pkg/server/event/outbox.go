@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
@@ -195,7 +196,18 @@ func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error
 		}
 		env.ShardKey = item.EventType + ":" + env.ID
 	}
-	return p.bridge.Publish(ctx, PublishRequest{Class: ControlDelivery, External: p.external, Subject: item.Subject, Envelope: env})
+	err := p.bridge.Publish(ctx, PublishRequest{Class: ControlDelivery, External: p.external, Subject: item.Subject, Envelope: env})
+	// Outbox 是示例 07 的真实发布路径；必须在此记录发布指标，才能拼出异步边。
+	result := observability.ResultSuccess
+	if err != nil {
+		result = observability.ClassifyError(err)
+	}
+	subject := item.Subject
+	if subject == "" && env != nil {
+		subject = env.Subject
+	}
+	observability.RecordEventPublish(p.source, subject, item.EventType, result)
+	return err
 }
 
 func (p *outboxPublisher) notifyNow() {

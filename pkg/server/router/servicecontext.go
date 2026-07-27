@@ -970,13 +970,18 @@ func (own *ServiceContext) SubscribeEvent(subscription event.Subscription) (func
 	if err != nil {
 		return nil, err
 	}
-	// 登记异步边订阅元数据（仅真实注册，不猜测消费者）。
+	// 登记异步边订阅元数据（仅真实注册，不猜测消费者）；并导出 Prom 指标供跨进程查询。
 	target := ""
 	if own.Service != nil {
 		target = own.Service.Name
 	}
-	runtime.GlobalSubscriptionIndex.Register(target, subscription.Subject, subscription.EventType, subscription.Reliable)
-	return cancel, nil
+	unregister := runtime.GlobalSubscriptionIndex.Register(target, subscription.Subject, subscription.EventType, subscription.Reliable)
+	return func() {
+		unregister()
+		if cancel != nil {
+			cancel()
+		}
+	}, nil
 }
 
 func (own *ServiceContext) SetPid(pid int) {

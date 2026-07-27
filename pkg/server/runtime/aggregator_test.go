@@ -96,7 +96,8 @@ func TestAggregatorAsyncEdgesJoinPublishAndSubscriptions(t *testing.T) {
 		"shop-user":  {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning}},
 	}}
 	idx := runtime.NewMemorySubscriptionIndex()
-	idx.Register("shop-user", "order.changed", "OrderCreated", true)
+	unregister := idx.Register("shop-user", "order.changed", "OrderCreated", true)
+	t.Cleanup(unregister)
 	pubQ, err := runtime.EventPublishRateQuery("15s")
 	require.NoError(t, err)
 	fp := labeledProm{samples: map[string]runtime.Vector{
@@ -126,6 +127,46 @@ func TestAggregatorAsyncEdgesJoinPublishAndSubscriptions(t *testing.T) {
 	require.Equal(t, "shop-user", async.Target)
 	require.NotNil(t, async.RequestRate.Value)
 	require.Equal(t, 5.0, *async.RequestRate.Value)
+}
+
+func TestAggregatorAsyncEdgesKeepAllPublishers(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"shop-user": {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	t.Cleanup(idx.Register("shop-user", "order.changed", "OrderCreated", true))
+	pubQ, err := runtime.EventPublishRateQuery("15s")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		pubQ: {
+			{Value: 5, Metric: map[string]string{"source_service": "shop-order", "subject_family": "order.changed", "event_type": "ordercreated", "result_class": "success"}},
+			{Value: 3, Metric: map[string]string{"source_service": "shop-order-b", "subject_family": "order.changed", "event_type": "ordercreated", "result_class": "success"}},
+		},
+	}}
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "15s")
+	require.NoError(t, err)
+	sources := map[string]bool{}
+	for _, e := range resp.Edges {
+		if e.Kind == "async" {
+			sources[e.Source] = true
+		}
+	}
+	require.True(t, sources["shop-order"])
+	require.True(t, sources["shop-order-b"], "must keep all publish sources, not only max rate")
+}
+
+func TestSubscriptionUnregisterRemovesEdge(t *testing.T) {
+	idx := runtime.NewMemorySubscriptionIndex()
+	cancel := idx.Register("shop-user", "order.changed", "OrderCreated", true)
+	list, err := idx.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	cancel()
+	list, err = idx.List(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, list)
 }
 
 func TestAggregatorModeOffReturnsNotCollectedMetrics(t *testing.T) {

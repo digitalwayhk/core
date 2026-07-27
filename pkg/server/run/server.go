@@ -491,7 +491,15 @@ func (own *WebServer) newWebServer(ctx *router.ServiceContext) error {
 func (own *WebServer) newInternalServer(ctx *router.ServiceContext) error {
 	grpcConfig := ctx.Config.Transport.GRPC
 	address := net.JoinHostPort(ctx.Config.Host, strconv.Itoa(grpcConfig.Port))
-	server, err := grpctransport.NewServer(address, grpcConfig, ctx.HandleInternalPayload)
+	// 生产路径强制 route allowlist：指标标签只接受本服务已注册 RouterInfo 路径。
+	server, err := grpctransport.NewServer(address, grpcConfig, ctx.HandleInternalPayload,
+		grpctransport.WithRouteAllowlist(func(path string) bool {
+			if ctx == nil || ctx.Router == nil {
+				return false
+			}
+			return ctx.Router.GetRouter(path) != nil
+		}),
+	)
 	if err != nil {
 		return err
 	}

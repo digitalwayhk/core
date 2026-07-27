@@ -110,6 +110,11 @@ func EventPublishRateQuery(window string) (string, error) {
 	return fmt.Sprintf(`sum by (source_service,subject_family,event_type,result_class) (rate(core_event_publish_total[%s]))`, window), nil
 }
 
+// EventSubscriptionInfoQuery 跨进程订阅事实。
+func EventSubscriptionInfoQuery() string {
+	return `core_event_subscription_info`
+}
+
 // ComponentGaugeQuery 查询服务组件 gauge。
 func ComponentGaugeQuery(service string) (string, error) {
 	svc := observability.NormalizeServiceLabel(service)
