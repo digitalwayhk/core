@@ -1,16 +1,27 @@
+// 本文件通过真实 REST 端口验证 Casdoor 双认证域生命周期及 500 响应日志的凭据隔离。
 package casdoorauthlifecycle_test
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 func TestCasdoorAuthLifecycleREST(t *testing.T) {
 	app := startLifecycleApp(t)
+
+	var logOutput bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&logOutput))
+	t.Cleanup(func() {
+		logx.SetWriter(previous)
+		logx.Reset()
+	})
 
 	authPair := app.callback(t, string(types.AuthTypeUser), "alice")
 	managePair := app.callback(t, string(types.AuthTypeManage), "manager")
@@ -35,6 +46,9 @@ func TestCasdoorAuthLifecycleREST(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, status)
 	assert.Equal(t, "internal server error", response.publicMessage())
 	assert.NotContains(t, response.publicMessage(), "authorization detail")
+	assert.Contains(t, logOutput.String(), "http_request_failed")
+	assert.NotContains(t, logOutput.String(), internalPair.AccessToken)
+	assert.NotContains(t, logOutput.String(), "Authorization")
 
 	app.webhook(t, string(types.AuthTypeUser), "logout", "alice", true)
 	status, _ = app.request(t, http.MethodGet, "/api/"+app.name+"/private", authPair.AccessToken, nil, nil)

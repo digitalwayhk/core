@@ -20,6 +20,7 @@ require (
 	github.com/casdoor/casdoor-go-sdk v1.31.0
 	github.com/cockroachdb/pebble v0.0.0-20220723153705-3fc374e4dc66
 	github.com/dgraph-io/badger/v3 v3.2103.5
+	github.com/felixge/httpsnoop v1.0.4
 	github.com/gofiber/adaptor/v2 v2.2.1
 	github.com/gofiber/fiber/v2 v2.52.14
 	github.com/hashicorp/consul/api v1.34.3

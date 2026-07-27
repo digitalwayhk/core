@@ -58,6 +58,16 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	if err != nil {
 		return nil, err
 	}
+	restConf, accessLogEnabled := secureRESTLogConfiguration(context.Config.RestConf)
+	serviceName := context.Config.Name
+	if context.Service != nil && context.Service.Name != "" {
+		serviceName = context.Service.Name
+	}
+	if accessLogEnabled {
+		options = append(options, rest.WithNotFoundHandler(
+			safeHTTPAccessLog(serviceName, http.NotFoundHandler()),
+		))
+	}
 	ser := &Server{
 		context: context,
 		stopCh:  make(chan struct{}),
@@ -65,9 +75,15 @@ func NewServer(context *router.ServiceContext, isWebSocket, isCors bool, origin 
 	ser.IsWebSocket = isWebSocket
 	if ser.IsWebSocket {
 		context.Config.Timeout = 0
+		restConf.Timeout = 0
 	}
 	ser.IsCors = isCors
-	ser.Server = rest.MustNewServer(context.Config.RestConf, options...)
+	ser.Server = rest.MustNewServer(restConf, options...)
+	if accessLogEnabled {
+		ser.Server.Use(rest.ToMiddleware(func(next http.Handler) http.Handler {
+			return safeHTTPAccessLog(serviceName, next)
+		}))
+	}
 	if err := ser.register(); err != nil {
 		return nil, err
 	}
