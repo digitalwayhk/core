@@ -188,6 +188,12 @@
 | `ServerConfig.AuthRevocation.Redis.Addr` | supported | AuthRevocationConfig.Validate | shared 且 Casdoor 启用时必须非空 |
 | `ServerConfig.AuthRevocation.Redis.Password` | supported | AuthRevocationManager | 透传 go-zero RedisConf.Pass，不得写入日志 |
 | `ServerConfig.AuthRevocation.Redis.Prefix` | supported | AuthRevocationManager | 撤销状态、幂等事件和世代键命名空间 |
+| `ServerConfig.RuntimeObservability` | supported | runtime aggregator | ApplyDefaults/Validate；Mode off/prometheus |
+| `ServerConfig.RuntimeObservability.Mode` | supported | runtime aggregator | off 默认；prometheus 需 QueryURL |
+| `ServerConfig.RuntimeObservability.QueryURL` | supported | runtime aggregator | 仅查询端；AdminView 脱敏，不进日志 |
+| `ServerConfig.RuntimeObservability.QueryTimeout` | supported | runtime aggregator | 默认 3s |
+| `ServerConfig.RuntimeObservability.MaxConcurrentQueries` | supported | runtime aggregator | 默认 4，上限 32 |
+| `ServerConfig.RuntimeObservability.CacheTTL` | supported | runtime aggregator | 默认 5s 合并相同窗口查询 |
 | `ServerConfig.MQ` | supported | ServiceContext | ApplyDefaults/Validate 并按 Mode 创建和关闭 MQManager |
 | `ServerConfig.MQ.Mode` | supported | ServiceContext | 决定不创建、自动或强制 MQ runtime |
 | `ServerConfig.MQ.Provider` | supported | MQ factory | 选择内建或注册 factory，未实现 provider 拒绝 |

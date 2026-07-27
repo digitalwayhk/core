@@ -16,6 +16,8 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
+	"github.com/digitalwayhk/core/pkg/server/observability"
+	"github.com/digitalwayhk/core/pkg/server/runtime"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/routecache"
 	casdoorauth "github.com/digitalwayhk/core/pkg/server/safe/casdoor"
@@ -77,6 +79,8 @@ type ServiceContext struct {
 	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
 	ServiceResolver          *ServiceResolver                `json:"-"`
 	ServiceInstanceID        string
+	// RuntimeAggregator 由 ServerManage 查询端持有；业务进程可为 nil。
+	RuntimeAggregator *runtime.Aggregator `json:"-"`
 	runtimeAddress           string
 	ownsClusterProvider      bool
 	membership               *cluster.MembershipManager     `json:"-"`
@@ -727,6 +731,16 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	})
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
+	if err := observability.RegisterProcessLabels(sc.Service.Name, sc.ServiceInstanceID); err != nil {
+		// 同进程多服务（测试 / all-in-one）时保留首次注册；非冲突错误才记日志。
+		if !errors.Is(err, observability.ErrProcessLabelsConflict) {
+			logx.Infow("process_labels_register_failed",
+				logx.Field("service", sc.Service.Name),
+				logx.Field("service_instance_id", sc.ServiceInstanceID),
+				logx.Field("error", err),
+			)
+		}
+	}
 
 	if err := initCluster(sc); err != nil {
 		if con.Cluster.Mode == "on" {
@@ -752,6 +766,8 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			con.MachineID = uint(machineID)
 		}
 	}
+
+	sc.RuntimeAggregator = buildRuntimeAggregator(sc)
 
 	protocols := append([]string{con.Transport.Internal}, con.Transport.Fallback...)
 	sc.ServiceResolver = NewServiceResolver(sc.ClusterProvider, GetContext, protocols...)
@@ -1608,7 +1624,9 @@ func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *t
 	if payload != nil && (own.Service == nil || payload.TargetService != own.Service.Name) {
 		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
 	}
-	return own.invokePayload(ctx, payload)
+	// 入站路径不记录 call-edge；调用边仅在 CallService 出站记录。
+	data, _, err := own.invokePayload(ctx, payload)
+	return data, err
 }
 func (own *ServiceContext) CallTargetService(traceid string, router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	payload := GetPayLoad(traceid, own.Service.Name, "", "", "", router)
@@ -1657,7 +1675,9 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	if callback != nil {
 		ch := make(chan types.IResponse)
 		go func(own *ServiceContext, errcallback ...func(res types.IResponse)) {
-			values, err := own.invokePayload(ctx, payload)
+			start := time.Now()
+			values, protocol, err := own.invokePayload(ctx, payload)
+			own.recordServiceCall(payload, protocol, err, time.Since(start))
 			if err != nil {
 				for _, ecb := range errcallback {
 					res.err = err
@@ -1674,7 +1694,9 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 			callback[0](res)
 		}
 	} else {
-		values, err := own.invokePayload(ctx, payload)
+		start := time.Now()
+		values, protocol, err := own.invokePayload(ctx, payload)
+		own.recordServiceCall(payload, protocol, err, time.Since(start))
 		if err != nil {
 			logx.Errorw("service_call_failed",
 				logx.Field("service", own.Service.Name),
@@ -1701,18 +1723,40 @@ func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(
 	return res, nil
 }
 
-func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.PayLoad) ([]byte, error) {
+func (own *ServiceContext) recordServiceCall(payload *types.PayLoad, protocol string, err error, d time.Duration) {
+	if payload == nil {
+		return
+	}
+	src := ""
+	if own != nil && own.Service != nil {
+		src = own.Service.Name
+	}
+	result := observability.ResultSuccess
+	if err != nil {
+		result = observability.ClassifyError(err)
+	}
+	observability.RecordCall(observability.CallLabels{
+		SourceService: src,
+		TargetService: payload.TargetService,
+		TargetRoute:   payload.TargetPath,
+		Protocol:      protocol,
+		ResultClass:   result,
+	}, d)
+}
+
+func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.PayLoad) ([]byte, string, error) {
 	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
-		return nil, fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
+		return nil, "unknown", fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
 	if local := GetContext(payload.TargetService); local != nil {
-		return own.dispatchLocal(ctx, payload, local)
+		data, err := own.dispatchLocal(ctx, payload, local)
+		return data, "local", err
 	}
 	var endpoints transport.TransportEndpoints
 	if own.ServiceResolver != nil {
 		resolved, err := own.ServiceResolver.Resolve(ctx, payload.TargetService)
 		if err != nil {
-			return nil, err
+			return nil, "grpc", err
 		}
 		payload.TargetAddress = resolved.Info.TargetAddress
 		payload.TargetPort = resolved.Info.TargetPort
@@ -1721,7 +1765,7 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		// 直接指定地址的旧调用只具备 HTTP 端点；gRPC 端点必须来自服务发现。
 		endpoints = serviceTransportEndpoints(payload.TargetAddress, payload.TargetPort, 0)
 	} else {
-		return nil, fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
+		return nil, "grpc", fmt.Errorf("%w: resolver is unavailable", ErrTargetServiceUnavailable)
 	}
 	return own.sendPayload(ctx, payload, endpoints)
 }
@@ -1754,7 +1798,7 @@ func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.Pay
 
 // sendPayload 在发送前完成协议选择和健康预检。MaxRetries 只作用于预检；
 // 一旦 Transport.Send 开始，无论结果是否确定，都不会重试或切换协议。
-func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad, endpoints transport.TransportEndpoints) ([]byte, error) {
+func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLoad, endpoints transport.TransportEndpoints) ([]byte, string, error) {
 	if own.TransportSelector != nil {
 		maxRetries := own.Config.Transport.MaxRetries
 		if maxRetries <= 0 {
@@ -1765,12 +1809,34 @@ func (own *ServiceContext) sendPayload(ctx context.Context, payload *types.PayLo
 			maxRetries, own.Config.Transport.RetryDelay,
 		)
 		if err != nil {
-			return nil, err
+			return nil, "grpc", err
 		}
-		return transport.SendSelection(ctx, own.TransportSelector, selection, payload)
+		protocol := "grpc"
+		if selection.Transport != nil {
+			protocol = selection.Transport.Name()
+		}
+		data, err := transport.SendSelection(ctx, own.TransportSelector, selection, payload)
+		return data, protocol, err
 	}
 	// No TransportSelector: one-shot legacy path, no retry.
-	return own.Service.CallService(payload)
+	data, err := own.Service.CallService(payload)
+	return data, "unknown", err
+}
+
+func buildRuntimeAggregator(sc *ServiceContext) *runtime.Aggregator {
+	if sc == nil || sc.Config == nil {
+		return nil
+	}
+	cfg := sc.Config.RuntimeObservability
+	var querier runtime.PromQuerier
+	if cfg.Mode == "prometheus" && strings.TrimSpace(cfg.QueryURL) != "" {
+		querier = runtime.NewPromClient(cfg.QueryURL, cfg.QueryTimeout)
+	}
+	return runtime.NewAggregator(
+		runtime.ProviderClusterView{Provider: sc.ClusterProvider},
+		querier,
+		runtime.Config{Mode: cfg.Mode, CacheTTL: cfg.CacheTTL},
+	)
 }
 
 // makeCrossNodeSender creates a cross-node sender that routes through

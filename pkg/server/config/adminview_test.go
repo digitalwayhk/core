@@ -14,6 +14,8 @@ func TestAdminViewRedactsProtectedValues(t *testing.T) {
 	cfg.ManageAuth.AccessSecret = "manage-access"
 	cfg.Auth.CasDoor.WebhookSecret = "webhook"
 	cfg.Signature.PrivateKeys = []rest.PrivateKeyConf{{KeyFile: "private-key-material"}}
+	cfg.RuntimeObservability.Mode = "prometheus"
+	cfg.RuntimeObservability.QueryURL = "http://prometheus:9090"
 
 	view, err := AdminView(cfg)
 	require.NoError(t, err)
@@ -22,6 +24,7 @@ func TestAdminViewRedactsProtectedValues(t *testing.T) {
 	require.Equal(t, redactedConfigValue, view["ManageAuth"].(map[string]interface{})["AccessSecret"])
 	require.Equal(t, redactedConfigValue, view["Auth"].(map[string]interface{})["CasDoor"].(map[string]interface{})["WebhookSecret"])
 	require.Empty(t, view["Signature"].(map[string]interface{})["PrivateKeys"])
+	require.Equal(t, redactedConfigValue, view["RuntimeObservability"].(map[string]interface{})["QueryURL"])
 }
 
 func TestMergeProtectedFieldsKeepsRuntimeCredentials(t *testing.T) {

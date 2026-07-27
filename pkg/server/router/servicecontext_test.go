@@ -479,6 +479,8 @@ func mustMarshalConfigForReadConfig(t *testing.T, con *config.ServerConfig) []by
 	setConfigString(m, con.MQ.Retry.InitialDelay.String(), "MQ", "Retry", "InitialDelay")
 	setConfigString(m, con.MQ.Retry.MaxDelay.String(), "MQ", "Retry", "MaxDelay")
 	setConfigString(m, con.MQ.Switch.DualWriteDuration.String(), "MQ", "Switch", "DualWriteDuration")
+	setConfigString(m, con.RuntimeObservability.QueryTimeout.String(), "RuntimeObservability", "QueryTimeout")
+	setConfigString(m, con.RuntimeObservability.CacheTTL.String(), "RuntimeObservability", "CacheTTL")
 
 	data, err = json.Marshal(m)
 	require.NoError(t, err)

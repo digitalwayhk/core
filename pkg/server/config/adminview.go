@@ -99,5 +99,7 @@ func isSensitiveConfigKey(key string) bool {
 		strings.Contains(key, "password") ||
 		strings.Contains(key, "privatekey") ||
 		strings.Contains(key, "clientsecret") ||
-		strings.Contains(key, "webhooksecret")
+		strings.Contains(key, "webhooksecret") ||
+		// Runtime Aggregator 查询端地址/凭据不得进入 AdminView。
+		key == "queryurl"
 }

@@ -26,6 +26,8 @@ func Routers() []types.IRouter {
 		&public.Refresh{},
 		&public.CasdoorConfig{},
 		//&public.Statistics{},
+		&public.RuntimeTopology{},
+		&public.RuntimeService{},
 		&public.InternalOpenAPI{},
 	}
 }

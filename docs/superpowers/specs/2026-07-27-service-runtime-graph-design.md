@@ -2,8 +2,9 @@
 
 ## 1. 文档状态
 
-- 状态：待用户审阅
+- 状态：已批准，进入实施计划
 - 日期：2026-07-27
+- 实施计划：`docs/superpowers/plans/2026-07-27-service-runtime-graph.md`
 - 前端入口：Core Web Admin
 - 验收案例：`examples/07-shop-order-scale`
 - 指标基础：go-zero Prometheus、OpenTelemetry 与 zrpc 中间件
@@ -91,7 +92,15 @@ ClusterProvider ------------------------------------+      |
 - Core 组件自己的 Metrics/Snapshot 是 Pending、Outbox、EventBridge 等领域运行指标的来源，并通过 Prometheus Collector 暴露。
 - Runtime Aggregator 只负责查询、合并和返回 Admin DTO，不成为新的指标存储。
 
+部署与数据流钉死：
+
+- Runtime Aggregator 只部署在 ServerManage 可达边界；业务副本负责暴露 scrape 指标，不在请求路径被 Aggregator 直连。
+- `RuntimeMetricProvider` 仅在本进程注册 Collector 并更新指标；查询一律走 Prometheus，禁止 Aggregator 在 API 请求中远程拉取各实例 Provider。
+- 进程启动后必须提供稳定 scrape 标签 `service` 与 `service_instance_id`（应用侧注册优先，示例 07 scrape 配置兜底）。
+
 当 Prometheus 未配置或不可达时，运行图仍可根据 ClusterProvider 展示服务和实例，但所有指标必须返回 `not_collected` 或 `unavailable`，不得回退到旧 `RouterStats`。
+
+状态映射：`Mode=off` 或缺查询配置 → `not_collected`；`Mode=prometheus` 且查询失败/超时 → `unavailable`；有样本但超过新鲜度阈值 → `stale`；部分实例/组件/保留不足 → `partial`。
 
 ### 6.2 时间窗口
 
@@ -132,7 +141,7 @@ Runtime Aggregator 使用 Prometheus Instant Query 和 `query_range` 获取窗�
 
 ### 7.1 复用 go-zero 指标
 
-HTTP 入站继续使用 go-zero REST 中间件提供的请求计数和耗时 Histogram。zrpc Client 继续启用：
+HTTP 入站继续使用 go-zero REST 中间件提供的请求计数和耗时 Histogram（`http_server_requests_*`，标签含注册时的 `path` 模板、`method`、`code`，单位 ms）。Aggregator 用 `path` 对齐 `RouterInfo.GetPath()`。zrpc Client 继续启用：
 
 - Trace；
 - Duration；
@@ -140,7 +149,7 @@ HTTP 入站继续使用 go-zero REST 中间件提供的请求计数和耗时 His
 - Breaker；
 - Timeout。
 
-不复制 go-zero 已提供的通用 HTTP/RPC 指标。新增 Core 指标只补充 go-zero 默认 method 标签无法表达的业务调用维度。
+不复制 go-zero 已提供的通用 HTTP/RPC 指标。新增 Core 指标只补充 go-zero 默认 method 标签无法表达的业务调用维度：跨服务调用边，以及 gRPC 入站在 `/CoreTransport/Call` 之上的稳定 `route` 维度。
 
 ### 7.2 Core 跨服务调用边
 

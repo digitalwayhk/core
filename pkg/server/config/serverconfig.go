@@ -36,8 +36,9 @@ type ServerConfig struct {
 	Cluster               ClusterConfig        `json:",optional"`
 	Transport             TransportConfig      `json:",optional"`
 	MQ                    MQConfig             `json:",optional"`
-	RouteCache            RouteCacheConfig     `json:",optional"`
-	AuthRevocation        AuthRevocationConfig `json:",optional"`
+	RouteCache             RouteCacheConfig             `json:",optional"`
+	AuthRevocation         AuthRevocationConfig         `json:",optional"`
+	RuntimeObservability   RuntimeObservabilityConfig   `json:",optional"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -55,6 +56,7 @@ func (con *ServerConfig) ApplyDefaults() {
 	con.MQ.ApplyDefaults()
 	con.RouteCache.ApplyDefaults()
 	con.AuthRevocation.ApplyDefaults(con.Name)
+	con.RuntimeObservability.ApplyDefaults()
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
@@ -85,6 +87,9 @@ func (con *ServerConfig) Validate() error {
 	}
 	casdoorEnabled := con.Auth.CasDoor.Enable || con.ManageAuth.CasDoor.Enable
 	if err := con.AuthRevocation.Validate(casdoorEnabled); err != nil {
+		return err
+	}
+	if err := con.RuntimeObservability.Validate(); err != nil {
 		return err
 	}
 	if err := con.validateCasdoorSecrets(); err != nil {
@@ -464,7 +469,8 @@ func isDurationKey(k string) bool {
 		"HeartbeatInterval", "HeartbeatTimeout", "SuspectTimeout",
 		"InstanceReuseCooldown", "TTL",
 		"RetryDelay", "InitialDelay", "MaxDelay",
-		"DualWriteDuration":
+		"DualWriteDuration",
+		"QueryTimeout", "CacheTTL":
 		return true
 	}
 	return false
