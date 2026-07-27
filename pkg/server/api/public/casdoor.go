@@ -72,7 +72,7 @@ func (own *CasdoorConfig) Do(req types.IRequest) (interface{}, error) {
 		ClientID:              casdoorConfig.Server.ClientID,
 		Organization:          casdoorConfig.Server.Organization,
 		Application:           casdoorConfig.Server.Application,
-		BackgroundCallbackURL: casdoorCallbackPath(),
+		BackgroundCallbackURL: casdoorCallbackPathForService(req.ServiceName()),
 	}
 	return casdoorRes, nil
 }

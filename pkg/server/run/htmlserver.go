@@ -222,29 +222,90 @@ func (own *HTMLServer) Prepare() error {
 }
 
 func (own *HTMLServer) mountManageAuthProxy(mount *htmlMuxMount) error {
-	authority := own.manageAuthAuthority
-	if authority == nil {
-		return nil
-	}
-	if authority.router == nil || authority.context == nil {
-		return fmt.Errorf("权威服务 %s 未就绪", strings.TrimSpace(authority.name))
-	}
-	serviceName := strings.TrimSpace(authority.name)
-	if serviceName == "" && authority.context.Service != nil {
-		serviceName = authority.context.Service.Name
-	}
-	owner := "manage-auth:" + serviceName
 	for _, path := range manageAuthProxyPaths {
-		info := authority.router.GetRouter(path)
-		if info == nil {
-			return fmt.Errorf("权威服务 %s 缺少同源认证路由 %s", serviceName, path)
+		targets := make(map[string]http.Handler)
+		addTarget := func(sc *router.ServiceContext, service *router.ServiceRouter) {
+			if sc == nil || service == nil {
+				return
+			}
+			name := serviceContextName(sc)
+			if name == "" {
+				return
+			}
+			info := service.GetRouter(path)
+			if info == nil {
+				return
+			}
+			targets[name] = rest.NewExternalRouterHandler(sc, info)
 		}
-		// 固定路径、不追加服务名；只绑定权威服务已注册的 Router。
-		if err := mount.handle(path, owner, rest.NewExternalRouterHandler(authority.context, info)); err != nil {
+		for _, service := range own.services {
+			if service == nil || service.Service == nil {
+				continue
+			}
+			addTarget(service.Service, service)
+		}
+		if own.manageAuthAuthority != nil {
+			addTarget(own.manageAuthAuthority.context, own.manageAuthAuthority.router)
+			authorityName := serviceContextName(own.manageAuthAuthority.context)
+			if _, ok := targets[authorityName]; !ok {
+				return fmt.Errorf("权威服务 %s 缺少同源认证路由 %s", authorityName, path)
+			}
+		}
+		if len(targets) == 0 {
+			continue
+		}
+		proxyPath := path
+		if err := mount.handle(path, "auth-proxy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetName := own.authProxyTargetName(proxyPath, r)
+			handler := targets[targetName]
+			if handler == nil {
+				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// authProxyTargetName 根据认证域选择实际签发或刷新 Token 的服务。
+// 普通用户和 Manage 默认使用业务权威，也可由 service 明确目标；
+// ServerManage TestToken 始终使用框架内置 server。
+func (own *HTMLServer) authProxyTargetName(path string, r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	query := r.URL.Query()
+	if path == "/api/servermanage/testtoken" && strings.TrimSpace(query.Get("type")) == "2" {
+		return "server"
+	}
+	if requested := normalizeServiceName(query.Get("service")); requested != "" {
+		if requested == "server" {
+			return ""
+		}
+		return requested
+	}
+	if own.manageAuthAuthority == nil {
+		return ""
+	}
+	return serviceContextName(own.manageAuthAuthority.context)
+}
+
+func serviceContextName(sc *router.ServiceContext) string {
+	if sc == nil {
+		return ""
+	}
+	if sc.Service != nil {
+		if name := normalizeServiceName(sc.Service.Name); name != "" {
+			return name
+		}
+	}
+	if sc.Config != nil {
+		return normalizeServiceName(sc.Config.Name)
+	}
+	return ""
 }
 
 // serverManageGetMenuPath 是 HTMLServer 唯一允许以规范无后缀挂载的通用 ServerManager 菜单路径。

@@ -91,6 +91,45 @@ func TestHTMLServerManageCanonicalPathRequiresJWT(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
+func TestHTMLServerManageRoutesUseOwningServiceAuthority(t *testing.T) {
+	htmlAuthReset()
+	const (
+		serverSecret = "system-server-manage-secret-value"
+		shopSecret   = "shop-own-manage-secret-value-xx"
+	)
+	system := newHTMLAuthServiceContext(t, "server", true)
+	system.Config.ManageAuth.AccessSecret = serverSecret
+	shop := newHTMLManageServiceContext(t, "shop", shopSecret)
+
+	htmls := NewHTMLServer(0)
+	htmls.SetManageAuthAuthority(&manageAuthAuthority{
+		name:    "server",
+		context: system,
+		router:  system.Router,
+	})
+	htmls.AddServiceRouter(system.Router)
+	htmls.AddServiceRouter(shop.Router)
+	require.NoError(t, htmls.Prepare())
+
+	path := "/api/manage/shop/item/search"
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:9"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+issueManageToken(t, shopSecret, "shop-admin"))
+	rec := httptest.NewRecorder()
+	htmls.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Greater(t, htmlAuthCount("shop:"+path), int32(0))
+
+	req = httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:9"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+issueManageToken(t, serverSecret, "developer"))
+	rec = httptest.NewRecorder()
+	htmls.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+}
+
 func TestHTMLServerGetMenuCanonicalWithoutSuffix(t *testing.T) {
 	htmlAuthReset()
 	sc := newHTMLServerManagePublicContext(t, "server")

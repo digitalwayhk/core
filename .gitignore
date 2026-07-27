@@ -30,3 +30,4 @@ db
 etc
 *.pem
 __debug_bin*
+pkg/server/run/dist.backup/

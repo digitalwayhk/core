@@ -338,8 +338,12 @@ OpenAPI 生成逻辑会：
 测试 private API 时，文档中的 Bearer 说明会指向测试 token 获取方式：
 
 ```text
-/api/servermanage/testtoken?userid=12345
+/api/servermanage/testtoken?userid=12345&type=0&service=<service-name>
 ```
+
+通过 HTMLServer 聚合入口访问时，普通用户和 Manage Token 使用目标业务服务自己的
+`Auth`/`ManageAuth`；`service` 可明确目标。单业务服务可省略 `service` 自动选择，
+只有 `type=2` 的 ServerManage Token 固定使用框架内置 `server`。
 
 访问入口：
 

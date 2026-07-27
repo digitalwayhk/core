@@ -54,8 +54,8 @@
 | 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
 | 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和 600/700/800 保留；parse/validation→400，do→422，panic/未知→500 | `pkg/server/types/typeerror.go`、兼容测试 |
 | 未分类普通错误 | Stable security | 固定返回 HTTP 500、`50000` 和 `internal server error`，不得按错误文字猜状态 | `pkg/server/trans/rest/error.go`、安全测试 |
-| Casdoor 配置与回调 | Stable | `/api/casdoor?type=auth|manage` 返回对应域配置；回调固定为 `/api/casdoor/callback`，旧 `/api/callback` 已删除 | `pkg/server/api/public/casdoor.go`、`casdoorcallback.go`、真实集成测试 |
-| Token 刷新 | Stable security | `/api/refresh` 只接受框架 Refresh Token；Auth/Manage 密钥、用途和撤销域严格隔离 | `pkg/server/api/public/refresh.go`、认证生命周期测试 |
+| Casdoor 配置与回调 | Stable | `/api/casdoor?type=auth|manage&service=<name>` 返回目标服务对应域配置；回调路径为 `/api/casdoor/callback` 并保留可选 `service`；旧 `/api/callback` 已删除 | `pkg/server/api/public/casdoor.go`、`casdoorcallback.go`、真实集成测试 |
+| Token 刷新 | Stable security | `/api/refresh?service=<name>` 只接受目标服务的框架 Refresh Token；Auth/Manage 密钥、用途和撤销域严格隔离 | `pkg/server/api/public/refresh.go`、认证生命周期测试 |
 | Casdoor Webhook | Stable security | `/api/casdoor/webhook?type=auth|manage`；独立 Bearer Secret、64KiB 上限、域绑定、幂等控制事件 | `pkg/server/api/public/casdoorwebhook.go`、authstate 测试 |
 
 `run.GetOpenApi` 输出匿名外部视图：普通 Public 与 Private，不含受限内部 Public。`run.GetInternalOpenApi` 和兼容性 golden 输出内部视图：包含受限内部 Public 及 `x-internal-callers`。两者都只覆盖业务 Public/Private；Manage 与 ServerManage 由路由元数据、Manage CRUD 和 server API 测试保护。

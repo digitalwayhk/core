@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -194,3 +195,11 @@ func authBoundaryError(cause error) error {
 }
 
 func casdoorCallbackPath() string { return callbackPath }
+
+func casdoorCallbackPathForService(service string) string {
+	service = strings.ToLower(strings.TrimSpace(service))
+	if service == "" {
+		return casdoorCallbackPath()
+	}
+	return casdoorCallbackPath() + "?service=" + url.QueryEscape(service)
+}

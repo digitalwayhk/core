@@ -291,3 +291,32 @@ PageContainer
 - 外键、枚举、日期格式优先在后端 `FieldModel` 中描述。
 - 菜单由后端 `servermanage/getmenu` 提供，前端只负责 URL 转换和渲染。
 - 修改动态管理页时优先看 `views/main.tsx`、`WayPage`、`request.ts`。
+
+## 开发视图发布链路
+
+`HTMLServer` 仅用于开发和测试。管理前端必须通过统一脚本发布到它的内嵌目录，
+不要手工覆盖 `pkg/server/run/dist`，否则容易把不同构建的入口、CSS 和异步
+chunk 混在一起，最终表现为浏览器白屏。
+
+```text
+web/admin（Git 子模块，工作树 clean）
+  → scripts/build-web-admin.sh
+       npm ci / jest / tsc:auth / build
+       清理 *.map 和动态路由静态页
+       写入 build-info.json
+  → 原子切换 pkg/server/run/dist
+       上一版保留为 pkg/server/run/dist.backup
+  → HTMLServer //go:embed dist
+```
+
+发布和验收命令：
+
+```bash
+bash scripts/build-web-admin.sh
+./scripts/test.sh web-contract
+```
+
+`pkg/server/run/dist/build-info.json` 中的 `frontend_commit` 必须等于
+`web/admin` 子模块 HEAD；`artifact_sha256` 用于确认被嵌入的整套资源来自同一次
+构建。`web-contract` 会同时验证 Go 路由、内嵌资源闭包、构建脚本契约、前端
+Jest 和认证范围 TypeScript。

@@ -158,6 +158,81 @@ func TestHTMLServerAuthRoutesBindAuthorityWithoutServiceSuffix(t *testing.T) {
 	}
 }
 
+// TestHTMLServerAuthRoutesSelectServiceByDomain 验证普通用户和 Manage 认证使用
+// 目标业务服务，只有 ServerManage TestToken 固定使用内置 server。
+func TestHTMLServerAuthRoutesSelectServiceByDomain(t *testing.T) {
+	htmlAuthReset()
+	shop := newHTMLAuthServiceContext(t, "shop", true)
+	users := newHTMLAuthServiceContext(t, "users", true)
+	system := newHTMLAuthServiceContext(t, "server", true)
+
+	htmls := NewHTMLServer(0)
+	htmls.SetManageAuthAuthority(&manageAuthAuthority{
+		name: "shop", context: shop, router: shop.Router,
+	})
+	htmls.AddServiceRouter(system.Router)
+	htmls.AddServiceRouter(shop.Router)
+	htmls.AddServiceRouter(users.Router)
+	require.NoError(t, htmls.Prepare())
+
+	tests := []struct {
+		name        string
+		method      string
+		target      string
+		wantService string
+	}{
+		{
+			name: "default user uses business authority", method: http.MethodGet,
+			target: "/api/servermanage/testtoken?userid=1&type=0", wantService: "shop",
+		},
+		{
+			name: "explicit user service", method: http.MethodGet,
+			target: "/api/servermanage/testtoken?userid=1&type=0&service=users", wantService: "users",
+		},
+		{
+			name: "explicit manage service", method: http.MethodGet,
+			target: "/api/servermanage/testtoken?userid=1&type=1&service=users", wantService: "users",
+		},
+		{
+			name: "server manage uses system server", method: http.MethodGet,
+			target: "/api/servermanage/testtoken?userid=1&type=2", wantService: "server",
+		},
+		{
+			name: "casdoor auth uses explicit service", method: http.MethodGet,
+			target: "/api/casdoor?type=auth&service=users", wantService: "users",
+		},
+		{
+			name: "refresh uses explicit service", method: http.MethodPost,
+			target: "/api/refresh?service=users", wantService: "users",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.target, nil)
+			req.RemoteAddr = "127.0.0.1:9"
+			rec := httptest.NewRecorder()
+			htmls.Handler().ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), `"service":"`+tc.wantService+`"`)
+		})
+	}
+
+	for _, tokenType := range []string{"0", "1"} {
+		t.Run("business domain rejects system server type "+tokenType, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/api/servermanage/testtoken?userid=1&type="+tokenType+"&service=server",
+				nil,
+			)
+			req.RemoteAddr = "127.0.0.1:9"
+			rec := httptest.NewRecorder()
+			htmls.Handler().ServeHTTP(rec, req)
+			require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+		})
+	}
+}
+
 func TestHTMLServerAuthPrepareFailsClosedWhenRouterMissing(t *testing.T) {
 	name := "orders-missing-refresh"
 	service := &htmlAuthService{name: name}

@@ -11,7 +11,7 @@
 | `config.INITSERVER` 直接并发读写 | `IsServerInitializing` 及受同步初始化入口 | v0.0.248 | v0.1.0 | server/config | 框架启动扩展 | config/router 并发测试 |
 | `PrefixedBadgerDB.SetSyncDB` | `EnableWriteBehind` | v0.0.248 | v0.1.0 | persistence/nosql | 下游本地写回扩展 | `pkg/persistence/database/nosql/sharedbadger_writebehind_test.go` |
 | `public.Callback`、`public.Casdoor` Go 类型 | `public.CasdoorCallback`、`public.CasdoorConfig` | v0.0.249 | v0.1.0 | server/api/public | Casdoor 登录前端、认证扩展 | `pkg/server/api/public/casdoorcallback_test.go` |
-| HTTP `/api/callback` | `/api/casdoor` 返回的 `background_callback_url`，当前为 `/api/casdoor/callback` | v0.0.249 | v0.1.0 | server/api/public | Casdoor 登录前端 | `examples/integration/casdoor-auth-lifecycle/rest_test.go` |
+| HTTP `/api/callback` | `/api/casdoor?service=<name>` 返回的 `background_callback_url`，路径为 `/api/casdoor/callback` 并可附带目标服务 | v0.0.249 | v0.1.0 | server/api/public | Casdoor 登录前端 | `examples/integration/casdoor-auth-lifecycle/rest_test.go` |
 | `RouteCacheL1Config.Limit` | `RouteCacheL1Config.MaxEntries` | v0.0.249 | v0.1.0 | server/routecache | 路由缓存配置消费方 | `pkg/server/config/routecache_test.go` |
 | 示例 07 `models.RemoveLocalOrder` | `PrefixedBadgerDB` 根据 write-behind ACK 与 `IsSyncAfterDelete` 自动清理 | v0.0.250 | v0.1.0 | examples/07-shop-order-scale | 订单水平扩展示例扩展 | `examples/07-shop-order-scale/order-service/business/order_syncer_test.go` |
 | 示例 04 `StartOrderWriteStore`、`StopOrderWriteStore`、全局查询/指标门面 | `OrderWriteRuntime` + `ServiceContext.UseResource` | v0.0.250 | v0.1.0 | examples/04-shop-performance | 示例扩展与基准 | `examples/04-shop-performance/models/order_write_store_test.go` |

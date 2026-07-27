@@ -474,6 +474,15 @@ case "${1:-quick}" in
   integration-external-docker)
     "$ROOT/scripts/test-external-integration.sh"
     ;;
+  web-contract)
+    # Go 定向包 + 前端构建契约 + 全量 Jest + 认证范围 TypeScript 门禁
+    go test ./pkg/server/run ./pkg/server/trans/rest \
+      ./pkg/server/api/public ./pkg/server/safe ./pkg/server/authstate \
+      -count=1
+    bash "$ROOT/scripts/test-build-web-admin.sh"
+    npm --prefix "$ROOT/web/admin" run jest -- --runInBand
+    npm --prefix "$ROOT/web/admin" run tsc:auth
+    ;;
   all)
     "$0" quick
     "$0" server
@@ -482,7 +491,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|web-contract|all}" >&2
     exit 2
     ;;
 esac

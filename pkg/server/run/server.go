@@ -33,8 +33,8 @@ type WebServer struct {
 	childServer     map[int]*WebServer
 	htmls           *HTMLServer
 	ViewPort        int
-	// ManageAuthAuthorityService 指定 HTMLServer 使用的 Manage Auth 权威服务名。
-	// 仅有一个 Manage 服务时可留空自动选择；多个 Manage 服务时必须显式配置。
+	// ManageAuthAuthorityService 指定多业务服务开发视图的默认 Manage Auth 服务。
+	// 单业务服务会自动选择；未指定的多业务服务仍可通过认证端点 service 参数明确目标。
 	ManageAuthAuthorityService string
 	Port                       int
 	GRPCPort                   int
@@ -446,7 +446,17 @@ func (own *WebServer) resolveViewManageAuthAuthority(
 	if own.ViewPort <= 0 {
 		return nil, nil
 	}
-	return resolveManageAuthAuthority(contexts, own.ManageAuthAuthorityService)
+	eligible := make([]*router.ServiceContext, 0, len(contexts))
+	for _, ctx := range manageAuthContexts(contexts) {
+		if !isSystemServerService(ctx, "") {
+			eligible = append(eligible, ctx)
+		}
+	}
+	if len(eligible) > 1 && strings.TrimSpace(own.ManageAuthAuthorityService) == "" {
+		// 多业务服务没有默认权威时不阻止开发视图启动；认证端点必须用 service 明确目标。
+		return nil, nil
+	}
+	return resolveManageAuthAuthority(eligible, own.ManageAuthAuthorityService)
 }
 
 func (own *WebServer) serverArgs() {

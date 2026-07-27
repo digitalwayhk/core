@@ -3,6 +3,7 @@ package run
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/api/public"
@@ -83,27 +84,40 @@ func normalizeBootstrapAuthorityService(authority *manageAuthAuthority) string {
 
 func buildWebBootstrap(authority *manageAuthAuthority, r *http.Request) WebBootstrap {
 	mode := selectManageAuthMode(authority, r)
+	authorityService := normalizeBootstrapAuthorityService(authority)
 	response := WebBootstrap{
 		SchemaVersion: webBootstrapSchemaVersion,
 		Auth: WebBootstrapAuth{
 			Mode:             mode,
 			Type:             webAuthTypeManage,
-			AuthorityService: normalizeBootstrapAuthorityService(authority),
+			AuthorityService: authorityService,
 		},
 		Endpoints: WebBootstrapEndpoints{
 			Callback: webBootstrapCallback,
-			Refresh:  webBootstrapRefresh,
+			Refresh:  authEndpointForService(webBootstrapRefresh, authorityService),
 			OpenAPI:  webBootstrapOpenAPI,
 		},
 		UI: webBootstrapUIForMode(mode),
 	}
 	switch mode {
 	case webAuthModeTestToken:
-		response.Endpoints.AcquireToken = stringPtr(webBootstrapAcquireToken)
+		response.Endpoints.AcquireToken = stringPtr(authEndpointForService(webBootstrapAcquireToken, authorityService))
 	case webAuthModeCasdoor:
-		response.Endpoints.CasdoorConfig = stringPtr(webBootstrapCasdoorConfig)
+		response.Endpoints.CasdoorConfig = stringPtr(authEndpointForService(webBootstrapCasdoorConfig, authorityService))
 	}
 	return response
+}
+
+func authEndpointForService(endpoint, service string) string {
+	service = normalizeServiceName(service)
+	if service == "" {
+		return endpoint
+	}
+	separator := "?"
+	if strings.Contains(endpoint, "?") {
+		separator = "&"
+	}
+	return endpoint + separator + "service=" + url.QueryEscape(service)
 }
 
 func selectManageAuthMode(authority *manageAuthAuthority, r *http.Request) string {

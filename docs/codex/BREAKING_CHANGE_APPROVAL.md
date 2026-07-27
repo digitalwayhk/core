@@ -7,7 +7,7 @@
 
 ## 批准范围
 
-1. 删除旧 HTTP `/api/callback`，前端必须先调用 `/api/casdoor?type=auth|manage`，并使用返回的 `background_callback_url`（当前为 `/api/casdoor/callback`）。
+1. 删除旧 HTTP `/api/callback`，前端必须先调用 `/api/casdoor?type=auth|manage&service=<name>`，并使用返回的 `background_callback_url`（路径为 `/api/casdoor/callback`，HTMLServer 多服务场景会附带 `service`）。
 2. `public.Callback` 和 `public.Casdoor` 只保留 Go 类型别名兼容，新代码使用 `CasdoorCallback` 和 `CasdoorConfig`。
 3. Casdoor Access/Refresh Token 新增并强制校验 `auth_provider`、`provider_subject`、`auth_generation`；Auth 与 Manage 密钥和用途严格隔离。
 4. 升级部署必须轮换 Auth/Manage 的 Access 与 Refresh 四个 Secret，旧 Token 全部失效，用户和管理员重新登录。

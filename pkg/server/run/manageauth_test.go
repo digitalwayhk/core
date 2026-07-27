@@ -559,32 +559,43 @@ func assertManageAuthErrorDoesNotLeak(t *testing.T, message string, forbidden ..
 	require.NotContains(t, message, "Bearer")
 }
 
-// TestWebServerInitializeRejectsInvalidManageAuthAuthority 证明 initializeServers
-// 在 Config.Validate 之后执行 Manage Auth 门禁，失败时不发布 HTMLServer 或业务服务。
-func TestWebServerInitializeRejectsInvalidManageAuthAuthority(t *testing.T) {
-	orders := manageAuthInitContext(t, "init-orders")
-	users := manageAuthInitContext(t, "init-users")
-	// 对齐 ManageAuth 契约，确保失败点是缺少 ManageAuthAuthorityService，而非字段不兼容。
-	users.Config.ManageAuth = orders.Config.ManageAuth
+// TestResolveViewManageAuthAuthorityDefaultsToBusinessService 证明内置 server
+// 不参与业务 Manage Auth 默认选择；单业务服务场景自动选择该业务服务。
+func TestResolveViewManageAuthAuthorityDefaultsToBusinessService(t *testing.T) {
+	system := manageAuthInitContext(t, "server")
+	shop := manageAuthInitContext(t, "shop")
+	shop.Config.ManageAuth.AccessSecret = "shop-manage-access-secret"
+	require.NotEqual(t, system.Config.ManageAuth.AccessSecret, shop.Config.ManageAuth.AccessSecret)
 
-	server := bareWebServer()
-	server.ViewPort = 18081
-	server.saveConfig = func(*config.ServerConfig) error {
-		t.Fatal("Manage Auth 门禁失败后不得保存配置")
-		return nil
-	}
-	// 故意不设置 ManageAuthAuthorityService。
+	web := bareWebServer()
+	web.ViewPort = 18081
 
-	constructed, err := server.initializeServers([]*router.ServiceContext{orders, users})
-	require.Error(t, err)
-	require.Nil(t, constructed)
-	require.ErrorContains(t, err, "初始化开发视图管理认证失败")
-	require.ErrorContains(t, err, "ManageAuthAuthorityService")
-	require.Nil(t, server.htmlServerSnapshot(), "失败时不得发布 HTMLServer")
-	require.Empty(t, orders.GetServers(), "失败时不得构造 HTTP/gRPC 服务")
-	require.Empty(t, users.GetServers(), "失败时不得构造 HTTP/gRPC 服务")
-	require.Nil(t, orders.Service.HttpServer)
-	require.Nil(t, users.Service.HttpServer)
+	authority, err := web.resolveViewManageAuthAuthority(
+		[]*router.ServiceContext{shop, system},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, authority)
+	require.Equal(t, "shop", authority.name)
+	require.Same(t, shop, authority.context)
+	require.Same(t, shop.Router, authority.router)
+}
+
+// TestResolveViewManageAuthAuthorityAllowsExplicitServiceRouting 证明多个独立业务服务
+// 未配置默认权威时不阻止开发视图启动，认证请求改由 service 参数明确目标。
+func TestResolveViewManageAuthAuthorityAllowsExplicitServiceRouting(t *testing.T) {
+	system := manageAuthInitContext(t, "server")
+	orders := manageAuthInitContext(t, "orders")
+	users := manageAuthInitContext(t, "users")
+	users.Config.ManageAuth.AccessSecret = "users-independent-manage-secret"
+
+	web := bareWebServer()
+	web.ViewPort = 18081
+
+	authority, err := web.resolveViewManageAuthAuthority(
+		[]*router.ServiceContext{system, orders, users},
+	)
+	require.NoError(t, err)
+	require.Nil(t, authority)
 }
 
 // TestWebServerInitializeSkipsManageAuthAuthorityWithoutView 证明 HTMLServer

@@ -73,7 +73,7 @@ func TestWebBootstrapModeMatrix(t *testing.T) {
 			require.Equal(t, webAuthTypeManage, response.Auth.Type)
 			require.Equal(t, "shop", response.Auth.AuthorityService)
 			require.Equal(t, webBootstrapCallback, response.Endpoints.Callback)
-			require.Equal(t, webBootstrapRefresh, response.Endpoints.Refresh)
+			require.Equal(t, webBootstrapRefresh+"?service=shop", response.Endpoints.Refresh)
 			require.Equal(t, webBootstrapOpenAPI, response.Endpoints.OpenAPI)
 			require.Equal(t, tc.wantLogin, response.UI.ShowLogin)
 			require.Equal(t, tc.wantLogout, response.UI.ShowLogout)
@@ -81,13 +81,13 @@ func TestWebBootstrapModeMatrix(t *testing.T) {
 
 			if tc.wantAcquire {
 				require.NotNil(t, response.Endpoints.AcquireToken)
-				require.Equal(t, webBootstrapAcquireToken, *response.Endpoints.AcquireToken)
+				require.Equal(t, webBootstrapAcquireToken+"&service=shop", *response.Endpoints.AcquireToken)
 			} else {
 				require.Nil(t, response.Endpoints.AcquireToken)
 			}
 			if tc.wantCasdoor {
 				require.NotNil(t, response.Endpoints.CasdoorConfig)
-				require.Equal(t, webBootstrapCasdoorConfig, *response.Endpoints.CasdoorConfig)
+				require.Equal(t, webBootstrapCasdoorConfig+"&service=shop", *response.Endpoints.CasdoorConfig)
 			} else {
 				require.Nil(t, response.Endpoints.CasdoorConfig)
 			}

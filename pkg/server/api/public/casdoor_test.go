@@ -9,6 +9,7 @@ import (
 func TestCasdoorConfigReturnsNewCallbackPath(t *testing.T) {
 	require.Equal(t, "/api/casdoor", (&CasdoorConfig{}).RouterInfo().GetPath())
 	require.Equal(t, "/api/casdoor/callback", casdoorCallbackPath())
+	require.Equal(t, "/api/casdoor/callback?service=shop", casdoorCallbackPathForService(" Shop "))
 	require.Equal(t, (&CasdoorConfig{}).RouterInfo().GetPath(), (&Casdoor{}).RouterInfo().GetPath())
 }
 
