@@ -1,3 +1,4 @@
 [submodule "web/admin"]
 	path = web/admin
 	url = https://github.com/bitzoom-futures/futures.admin.git
+	branch = core-web-admin
