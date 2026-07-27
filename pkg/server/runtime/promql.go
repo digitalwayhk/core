@@ -45,6 +45,15 @@ func ServiceCallP95Query(service, window string) (string, error) {
 	), nil
 }
 
+// ComponentGaugeQuery 查询服务组件 gauge。
+func ComponentGaugeQuery(service string) (string, error) {
+	svc := observability.NormalizeServiceLabel(service)
+	if svc == "unknown" || !observability.IsSafePromLabel(svc) {
+		return "", fmt.Errorf("unsafe service name")
+	}
+	return fmt.Sprintf(`core_component_gauge{service=%q}`, svc), nil
+}
+
 func validateServiceWindow(service, window string) error {
 	if _, ok := ParseWindow(window); !ok {
 		return fmt.Errorf("unsupported window %q", window)

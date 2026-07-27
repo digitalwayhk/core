@@ -177,22 +177,27 @@ func (a *Aggregator) Topology(ctx context.Context, window string) (*TopologyResp
 		resp.Services = append(resp.Services, node)
 	}
 
-	// 同步边：从 call metrics 聚合（若 Prometheus 可用）。
+	// 同步边：从 call metrics 标签向量聚合。
 	if a.cfg.Mode == "prometheus" && a.prom != nil && metricState != StateUnavailable {
 		if q, err := ServiceCallEdgeRateQuery(window); err == nil {
-			if _, err := a.prom.Query(ctx, q, now); err != nil {
+			vec, qerr := a.prom.Query(ctx, q, now)
+			if qerr != nil {
 				resp.Status = MergeStates(resp.Status, StatePartial)
+				resp.Warnings = append(resp.Warnings, RuntimeWarning{
+					Code: "edge_query_partial", Message: "sync edge metrics query failed", Scope: "global",
+				})
+			} else {
+				resp.Edges = append(resp.Edges, buildSyncEdges(vec, metricState)...)
 			}
-			// 完整向量标签解析留待后续增强；此处保留接口与状态路径。
 		}
 	}
 
-	// 异步边：仅真实订阅。
+	// 异步边：仅真实订阅元数据。
 	if a.subs != nil {
 		if edges, err := a.subs.List(ctx); err == nil {
 			for _, e := range edges {
 				resp.Edges = append(resp.Edges, ServiceEdge{
-					Source:        "", // 发布方由事件指标补齐；元数据边先标 target
+					Source:        "", // 发布方由事件指标补齐；无发布指标时 source 为空
 					Target:        observability.NormalizeServiceLabel(e.TargetService),
 					Kind:          "async",
 					SubjectFamily: e.SourceSubjectFamily,
@@ -236,8 +241,9 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 		}
 	}
 	metricState := MapQueryState(QueryInput{Mode: a.cfg.Mode})
+	now := nowUTC()
 	detail := &ServiceDetailResponse{
-		GeneratedAt: time.Now().UTC(),
+		GeneratedAt: now,
 		Window:      window,
 		Service:     node,
 		Routes:      []RouteMetrics{},
@@ -262,15 +268,142 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 		}
 	}
 
-	// 组件默认 not_collected，直到 Prom 有 core_component_gauge。
+	// 路由指标
+	if a.cfg.Mode == "prometheus" && a.prom != nil {
+		if q, err := ServiceRouteRateQuery(svc, window); err == nil {
+			if vec, qerr := a.prom.Query(ctx, q, now); qerr == nil {
+				detail.Routes = buildRouteMetrics(vec, metricState)
+			} else {
+				detail.Warnings = append(detail.Warnings, RuntimeWarning{
+					Code: "route_query_partial", Message: "route metrics query failed", Scope: svc,
+				})
+			}
+		}
+	}
+
+	// 组件：默认 not_collected；有 Prom 样本则填充。
+	compState := map[string]*ComponentSnapshot{
+		"pending":     {Component: "pending", State: StateNotCollected, Gauges: map[string]*float64{}},
+		"outbox":      {Component: "outbox", State: StateNotCollected, Gauges: map[string]*float64{}},
+		"eventbridge": {Component: "eventbridge", State: StateNotCollected, Gauges: map[string]*float64{}},
+	}
+	if a.cfg.Mode == "prometheus" && a.prom != nil {
+		if q, err := ComponentGaugeQuery(svc); err == nil {
+			if vec, qerr := a.prom.Query(ctx, q, now); qerr == nil {
+				for _, sample := range vec {
+					comp := observability.NormalizeServiceLabel(sample.Metric["component"])
+					name := sample.Metric["name"]
+					if snap, ok := compState[comp]; ok {
+						v := sample.Value
+						if snap.Gauges == nil {
+							snap.Gauges = map[string]*float64{}
+						}
+						snap.Gauges[name] = &v
+						snap.State = StateOK
+					}
+				}
+			}
+		}
+	}
 	for _, name := range []string{"pending", "outbox", "eventbridge"} {
-		detail.Components = append(detail.Components, ComponentSnapshot{
-			Component: name,
-			State:     StateNotCollected,
-		})
+		detail.Components = append(detail.Components, *compState[name])
 	}
 	return detail, nil
 }
+
+func buildSyncEdges(vec Vector, metricState MetricState) []ServiceEdge {
+	type key struct{ src, tgt, proto string }
+	type acc struct {
+		total float64
+		err   float64
+	}
+	bucket := map[key]*acc{}
+	for _, s := range vec {
+		k := key{
+			src:   observability.NormalizeServiceLabel(s.Metric["source_service"]),
+			tgt:   observability.NormalizeServiceLabel(s.Metric["target_service"]),
+			proto: observability.NormalizeProtocol(s.Metric["protocol"]),
+		}
+		if k.src == "unknown" || k.tgt == "unknown" {
+			continue
+		}
+		a := bucket[k]
+		if a == nil {
+			a = &acc{}
+			bucket[k] = a
+		}
+		a.total += s.Value
+		rc := s.Metric["result_class"]
+		if rc != "" && rc != observability.ResultSuccess {
+			a.err += s.Value
+		}
+	}
+	out := make([]ServiceEdge, 0, len(bucket))
+	for k, a := range bucket {
+		var errRate *float64
+		if a.total > 0 {
+			v := a.err / a.total
+			errRate = &v
+		}
+		edge := ServiceEdge{
+			Source:      k.src,
+			Target:      k.tgt,
+			Kind:        "sync",
+			Protocol:    k.proto,
+			RequestRate: ValueMetric(a.total, StateOK),
+			ErrorRate:   MetricValue{Value: errRate, State: StateOK},
+			P95Ms:       NullMetric(metricState),
+			State:       StateOK,
+		}
+		if metricState != StateOK && metricState != StateNotCollected {
+			edge.State = metricState
+			edge.RequestRate.State = metricState
+			edge.ErrorRate.State = metricState
+		}
+		out = append(out, edge)
+	}
+	return out
+}
+
+func buildRouteMetrics(vec Vector, metricState MetricState) []RouteMetrics {
+	type acc struct {
+		total float64
+		err   float64
+	}
+	bucket := map[string]*acc{}
+	for _, s := range vec {
+		route := observability.NormalizeRouteLabel(s.Metric["route"])
+		a := bucket[route]
+		if a == nil {
+			a = &acc{}
+			bucket[route] = a
+		}
+		a.total += s.Value
+		if s.Metric["result_class"] != "" && s.Metric["result_class"] != observability.ResultSuccess {
+			a.err += s.Value
+		}
+	}
+	out := make([]RouteMetrics, 0, len(bucket))
+	for route, a := range bucket {
+		var errRate *float64
+		if a.total > 0 {
+			v := a.err / a.total
+			errRate = &v
+		}
+		out = append(out, RouteMetrics{
+			Route:       route,
+			RequestRate: ValueMetric(a.total, StateOK),
+			ErrorRate:   MetricValue{Value: errRate, State: StateOK},
+			P50Ms:       NullMetric(metricState),
+			P95Ms:       NullMetric(metricState),
+			P99Ms:       NullMetric(metricState),
+			State:       StateOK,
+		})
+	}
+	return out
+}
+
+func nowUTC() time.Time { return time.Now().UTC() }
 
 type simpleError string
 

@@ -16,6 +16,7 @@ import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -157,6 +158,17 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 		_ = store.Close(context.Background())
 		return err
 	}
+	// Pending 组件指标：本进程 Collector → Prometheus；Admin 只查询 Aggregator。
+	_ = sc.RegisterRuntimeMetricProviders(observability.ReliableWriteProvider{
+		Snapshot: func() observability.ReliableWriteMetricsSnapshot {
+			m := store.Metrics()
+			return observability.ReliableWriteMetricsSnapshot{
+				Pending:   m.Pending,
+				DiskBytes: m.BadgerLSMBytes + m.BadgerVLogBytes,
+				SyncFail:  float64(m.Sync.Failures),
+			}
+		},
+	})
 	return nil
 }
 

@@ -6,6 +6,8 @@
 
 ### Added
 
+- 多服务运行图与请求聚合监控（Runtime Observability）：go-zero/Prometheus 历史源、Core 调用边与 gRPC 入站低基数指标、ServerManage `runtimetopology`/`runtimeservice`、示例 07 Prometheus scrape，以及 Admin 运行图视图。详见 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md`。
+- `ServerConfig.RuntimeObservability` 查询端配置（`Mode=off|prometheus`）与能力矩阵登记。
 - 配置到运行时闭集门禁、公共 API/OpenAPI/路由兼容基线和类型化公共错误契约。
 - `PrefixedBadgerDB.EnableWriteBehind`、显式损坏恢复策略和可识别的 `PendingSyncError`。
 - `ReliableWriteStore` 统一封装本地持久写、批量提交、准入背压、服务/实例目录隔离，以及 Insert/Update/Delete 可靠操作。
@@ -28,6 +30,7 @@
 ### Deprecated
 
 - 进程级请求状态、CrossNode 转发和 TestResult 兼容入口，详见 `docs/codex/DEPRECATION_REGISTER.md`。
+- 旧 `RouterStats` / `GetAllRouterStats` / 未注册 `Statistics` 统计链路；生产路径不再产生统计，替代为 Runtime Aggregator + Prometheus。删除须进入批准的破坏性版本。
 - `PrefixedBadgerDB.SetSyncDB`；新代码使用可返回绑定错误的 `EnableWriteBehind`。
 - `public.Callback`、`public.Casdoor` 类型别名；新代码使用 `CasdoorCallback`、`CasdoorConfig`。
 - `RouteCacheL1Config.Limit`；新配置使用 `MaxEntries`，并可通过 `MaxValueBytes` 和 `MaxBytes` 限制序列化缓存数据量。

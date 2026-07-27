@@ -34,6 +34,8 @@
 | `ManageService.Req`、`SetReq`、`IRequestSet` | Deprecated | service/manage | 旧代码读取共享请求状态 | `service/manage/manageservice.go`、请求隔离回归测试 |
 | 进程级 `SetCrossNodeForwarder`、`GetCrossNodeForwarder` | Deprecated | server/types | 旧单服务跨节点转发 | `pkg/server/types/crossnode.go`；替代为 service-scoped API |
 | `router.TestResult` 变量 | Deprecated | server/router | 旧 OpenAPI 测试结果注入 | `SetTestResult/GetTestResult` 为并发安全替代入口 |
+| `types.RouterStats`、`ServiceContext.GetAllRouterStats` 族 | Deprecated | server/router | 旧内存路由统计；生产 `enableStats=false` | Runtime API + Prometheus；见 DEPRECATION_REGISTER |
+| `POST /api/servermanage/runtimetopology`、`runtimeservice` | Experimental → 趋向 Stable | server/api/public、server/runtime | Admin 多服务运行图与请求聚合 | 规格与 runtime 包测试；ServerManageAuth |
 | `pkg/utils` 导出辅助函数 | Experimental | utils | examples 和框架内部通用辅助 | 尚未完成逐符号稳定性登记；不得由包级存在推导全部 Stable |
 | `pkg/server/transport/grpc/proto` 生成类型 | Experimental | server/transport | 内部 gRPC payload | 不纳入 apidiff；生成器与 wire 版本由后续发布/CI 任务锁定 |
 | 未导出符号、测试 helper、`internal/compat` | Internal | 对应包 | 实现与门禁 | 不允许下游直接依赖 |
@@ -46,6 +48,7 @@
 | 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；受保护的内部 OpenAPI `x-internal-callers` |
 | Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}` | `service/manage.RouterInfo`、CRUD 测试 |
 | ServerManage | Stable | `/api/servermanage/{router}`，注册时按服务重写 | server API 与 `TestToken` 文档 |
+| Runtime 运行图 API | Experimental | `POST /api/servermanage/runtimetopology`、`POST /api/servermanage/runtimeservice`；窗口 `15s|5m|1h`；指标 `null+state` 不得伪装为零 | runtime 包与 public 路由测试；浏览器不直连 Prometheus |
 | 路由元数据 | Stable | method、path、pathType、auth、service | `internal/compat/testdata/routes.golden.json` |
 | OpenAPI 结构 | Stable baseline | paths、method、schema、security；Host、端口和运行时 example 不属于契约 | `internal/compat/testdata/openapi.golden.json` |
 | OpenAPI HTTP 入口 | Stable security | `/api/openapi` 匿名且过滤内部专用 Public；`/api/internal/openapi` 使用 ServerManageAuth，可用 `service` 筛选并禁止缓存 | run/public/rest 定向测试 |

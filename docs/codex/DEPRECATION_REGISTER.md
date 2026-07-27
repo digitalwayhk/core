@@ -17,6 +17,8 @@
 | 示例 04 `StartOrderWriteStore`、`StopOrderWriteStore`、全局查询/指标门面 | `OrderWriteRuntime` + `ServiceContext.UseResource` | v0.0.250 | v0.1.0 | examples/04-shop-performance | 示例扩展与基准 | `examples/04-shop-performance/models/order_write_store_test.go` |
 | 示例 07 `StartOrderWriteStore`、`StopOrderWriteStore`、`AddOrder`、`UseOrderWriteBehind`、`SyncLocalOrders`、本地查询别名 | `transaction.OrderWriteRuntime` + 注入式 `OrderWriteAccess` | v0.0.250 | v0.1.0 | examples/07-shop-order-scale | 订单水平扩展示例扩展 | `examples/07-shop-order-scale/order-service/models/transaction/order_write_store_test.go` |
 | `utils.StopMemoryMonitor` | 由资源 owner 管理指标和内存策略 | v0.0.251 | v0.1.0 | utils | 旧反射工具调用方 | `pkg/utils/lifecycle_test.go` |
+| `types.RouterStats`、`RouterStatsSnapshot`、`ServiceContext.GetAllRouterStats`/`GetPublicRouterStats`/`GetPrivateRouterStats`/`PrintRouterStats`、`router.StatsManager` | Runtime Aggregator + `POST /api/servermanage/runtimetopology` / `runtimeservice`（Prometheus 历史源） | v0.0.252 | v0.1.0 | server/router、server/types | futures、旧 Admin Statistics 前端 | 规格与 runtime 测试；生产路径 `enableStats=false`；Statistics 保持不注册 |
+| 未注册的 `public.Statistics` 类型与旧 `/api/servermanage/statistics` 前端约定 | `RuntimeTopology` / `RuntimeService` | v0.0.252 | v0.1.0 | server/api/public、web/admin | Admin MonitorSystem 旧 mock | `web/admin/src/services/runtime.ts` |
 
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。
 

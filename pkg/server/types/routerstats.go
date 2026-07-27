@@ -12,7 +12,11 @@ const (
 	enableStats = false
 )
 
-// RouterStats 路由统计信息
+// RouterStats 路由统计信息。
+//
+// Deprecated: 旧内存统计链路已关闭（enableStats=false），不再作为生产指标源。
+// 请使用 go-zero/Prometheus + Runtime API（runtimetopology/runtimeservice）。
+// 见 docs/codex/DEPRECATION_REGISTER.md。
 type RouterStats struct {
 	Path        string
 	ServiceName string

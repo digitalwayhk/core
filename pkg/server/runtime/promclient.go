@@ -15,10 +15,11 @@ import (
 // ErrPrometheusUnavailable 表示 Prometheus 查询不可用。
 var ErrPrometheusUnavailable = fmt.Errorf("prometheus unavailable")
 
-// Sample 是一个时间点样本。
+// Sample 是一个时间点样本，可携带 Prometheus 指标标签。
 type Sample struct {
 	Timestamp time.Time
 	Value     float64
+	Metric    map[string]string
 }
 
 // Vector 是 instant query 结果。
@@ -83,7 +84,8 @@ type promAPIResponse struct {
 	Data   struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
-			Value []interface{} `json:"value"`
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
 		} `json:"result"`
 	} `json:"data"`
 }
@@ -107,9 +109,14 @@ func parseQueryResponse(body []byte) (Vector, error) {
 		if err != nil {
 			continue
 		}
+		labels := r.Metric
+		if labels == nil {
+			labels = map[string]string{}
+		}
 		out = append(out, Sample{
 			Timestamp: time.Unix(0, int64(ts*1e9)),
 			Value:     v,
+			Metric:    labels,
 		})
 	}
 	return out, nil

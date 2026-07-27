@@ -125,6 +125,15 @@ func (own *ServiceContext) UseResource(name string, resource ManagedResource) er
 	return own.resources.Use(name, resource)
 }
 
+// RegisterRuntimeMetricProviders 注册本进程组件指标 Provider（Pending/Outbox 等）。
+// 只影响本进程 Prometheus Collector；Aggregator 仍只通过 Prometheus 查询历史。
+func (own *ServiceContext) RegisterRuntimeMetricProviders(providers ...observability.RuntimeMetricProvider) error {
+	if own == nil || own.Service == nil {
+		return fmt.Errorf("service context is not ready")
+	}
+	return observability.RegisterComponentProviders(own.Service.Name, providers...)
+}
+
 // SetLifecycleTimeout 配置服务注册和停止的有界等待时间。
 func (own *ServiceContext) SetLifecycleTimeout(timeout time.Duration) {
 	if timeout <= 0 {
@@ -386,7 +395,10 @@ func (own *ServiceContext) getStatsManager() *StatsManager {
 	return NewStatsManager(own.Service.Name, own.Router.GetRouters())
 }
 
-// 🆕 GetAllRouterStats 获取所有路由统计（支持过滤和排序）
+// GetAllRouterStats 获取所有路由统计（支持过滤和排序）。
+//
+// Deprecated: 旧内存 RouterStats 生产路径已关闭；请使用 Runtime Aggregator
+// 与 POST /api/servermanage/runtimeservice。见 docs/codex/DEPRECATION_REGISTER.md。
 func (own *ServiceContext) GetAllRouterStats(
 	filterTypes []types.ApiType,
 	sortBy SortField,

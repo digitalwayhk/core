@@ -104,3 +104,65 @@ func TestAggregatorKnownService(t *testing.T) {
 	require.True(t, agg.KnownService(context.Background(), "shop-order"))
 	require.False(t, agg.KnownService(context.Background(), "nope"))
 }
+
+func TestAggregatorBuildsSyncEdgesFromLabeledVector(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"shop-user":  {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning}},
+		"shop-order": {{ServiceName: "shop-order", Status: cluster.NodeStatusRunning}},
+	}}
+	edgeQ, err := runtime.ServiceCallEdgeRateQuery("15s")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		edgeQ: {
+			{
+				Value: 8,
+				Metric: map[string]string{
+					"source_service": "shop-user",
+					"target_service": "shop-order",
+					"protocol":       "grpc",
+					"result_class":   "success",
+				},
+			},
+			{
+				Value: 2,
+				Metric: map[string]string{
+					"source_service": "shop-user",
+					"target_service": "shop-order",
+					"protocol":       "grpc",
+					"result_class":   "server_error",
+				},
+			},
+		},
+	}}
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	resp, err := agg.Topology(context.Background(), "15s")
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Edges)
+	var sync *runtime.ServiceEdge
+	for i := range resp.Edges {
+		if resp.Edges[i].Kind == "sync" && resp.Edges[i].Source == "shop-user" && resp.Edges[i].Target == "shop-order" {
+			sync = &resp.Edges[i]
+			break
+		}
+	}
+	require.NotNil(t, sync)
+	require.NotNil(t, sync.RequestRate.Value)
+	require.Equal(t, 10.0, *sync.RequestRate.Value)
+	require.NotNil(t, sync.ErrorRate.Value)
+	require.InDelta(t, 0.2, *sync.ErrorRate.Value, 0.001)
+}
+
+type labeledProm struct {
+	samples map[string]runtime.Vector
+	err     error
+}
+
+func (f labeledProm) Query(_ context.Context, query string, _ time.Time) (runtime.Vector, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if v, ok := f.samples[query]; ok {
+		return v, nil
+	}
+	return runtime.Vector{}, nil
+}
