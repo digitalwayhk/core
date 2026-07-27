@@ -8,33 +8,34 @@ import (
 )
 
 var (
-	registryMu       sync.Mutex
-	registeredOnce   bool
-	activeCollector  *ComponentCollector
+	registryMu  sync.Mutex
+	collectors  = map[string]*ComponentCollector{}
 )
 
-// RegisterComponentProviders 注册本进程组件 Collector（幂等：重复调用追加 provider 并重建 collector）。
+// RegisterComponentProviders 按服务名隔离注册本进程组件 Collector。
 func RegisterComponentProviders(service string, providers ...RuntimeMetricProvider) error {
 	if len(providers) == 0 {
 		return fmt.Errorf("no runtime metric providers")
+	}
+	svc := NormalizeServiceLabel(service)
+	if svc == "unknown" {
+		return fmt.Errorf("invalid service for runtime metric providers")
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
 	merged := providers
-	if activeCollector != nil {
-		// 追加到已有列表
-		activeCollector.mu.Lock()
-		merged = append(append([]RuntimeMetricProvider(nil), activeCollector.providers...), providers...)
-		activeCollector.mu.Unlock()
-		prometheus.Unregister(activeCollector)
+	if old := collectors[svc]; old != nil {
+		old.mu.Lock()
+		merged = append(append([]RuntimeMetricProvider(nil), old.providers...), providers...)
+		old.mu.Unlock()
+		prometheus.Unregister(old)
 	}
-	c := NewComponentCollector(service, merged)
+	c := NewComponentCollector(svc, merged)
 	if err := prometheus.Register(c); err != nil {
-		// AlreadyRegistered 时尝试替换
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			if old, ok := are.ExistingCollector.(*ComponentCollector); ok {
-				prometheus.Unregister(old)
+			if existing, ok := are.ExistingCollector.(*ComponentCollector); ok {
+				prometheus.Unregister(existing)
 				if err2 := prometheus.Register(c); err2 != nil {
 					return err2
 				}
@@ -45,8 +46,7 @@ func RegisterComponentProviders(service string, providers ...RuntimeMetricProvid
 			return err
 		}
 	}
-	activeCollector = c
-	registeredOnce = true
+	collectors[svc] = c
 	return nil
 }
 
@@ -54,9 +54,8 @@ func RegisterComponentProviders(service string, providers ...RuntimeMetricProvid
 func ResetComponentRegistryForTest() {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	if activeCollector != nil {
-		prometheus.Unregister(activeCollector)
+	for _, c := range collectors {
+		prometheus.Unregister(c)
 	}
-	activeCollector = nil
-	registeredOnce = false
+	collectors = map[string]*ComponentCollector{}
 }

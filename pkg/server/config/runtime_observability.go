@@ -19,8 +19,9 @@ type RuntimeObservabilityConfig struct {
 	CacheTTL             time.Duration `json:",optional"`
 }
 
-// ApplyDefaults 补充 RuntimeObservability 默认值。
+// ApplyDefaults 补充 RuntimeObservability 默认值，并规范化 Mode。
 func (c *RuntimeObservabilityConfig) ApplyDefaults() {
+	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
 	if c.Mode == "" {
 		c.Mode = "off"
 	}
@@ -67,11 +68,24 @@ func (c RuntimeObservabilityConfig) Validate() error {
 		}
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("RuntimeObservability.QueryURL is invalid: %q", c.QueryURL)
+			return errors.New("RuntimeObservability.QueryURL is invalid")
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
-			return fmt.Errorf("RuntimeObservability.QueryURL scheme must be http or https, got %q", u.Scheme)
+			return errors.New("RuntimeObservability.QueryURL scheme must be http or https")
 		}
 	}
 	return nil
+}
+
+// RedactedQueryURLHost 返回仅 host 的安全摘要（日志用，不含 userinfo/path）。
+func (c RuntimeObservabilityConfig) RedactedQueryURLHost() string {
+	raw := strings.TrimSpace(c.QueryURL)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "[redacted]"
+	}
+	return u.Scheme + "://" + u.Hostname()
 }

@@ -159,7 +159,7 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 		return err
 	}
 	// Pending 组件指标：本进程 Collector → Prometheus；Admin 只查询 Aggregator。
-	_ = sc.RegisterRuntimeMetricProviders(observability.ReliableWriteProvider{
+	if err := sc.RegisterRuntimeMetricProviders(observability.ReliableWriteProvider{
 		Snapshot: func() observability.ReliableWriteMetricsSnapshot {
 			m := store.Metrics()
 			return observability.ReliableWriteMetricsSnapshot{
@@ -168,7 +168,13 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 				SyncFail:  float64(m.Sync.Failures),
 			}
 		},
-	})
+	}); err != nil {
+		logx.Errorw("runtime_metric_provider_register_failed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("component", "pending"),
+			logx.Field("error", err),
+		)
+	}
 	return nil
 }
 

@@ -38,6 +38,7 @@ func RegisterProcessLabels(service, serviceInstanceID string) error {
 	processService = service
 	processInstanceID = serviceInstanceID
 	processLabelsReady = true
+	attachProcessInfoGauge(service, serviceInstanceID)
 	return nil
 }
 

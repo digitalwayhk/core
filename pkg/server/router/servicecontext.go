@@ -379,7 +379,11 @@ func (own *ServiceContext) NewEventPublisher(subject string) event.IPublisher {
 	if own.EventStream == nil && own.EventBridge == nil {
 		return nil
 	}
-	return event.NewPublisher(own.EventStream, own.EventBridge, subject)
+	src := ""
+	if own.Service != nil {
+		src = own.Service.Name
+	}
+	return event.NewPublisher(own.EventStream, own.EventBridge, subject).WithSourceService(src)
 }
 
 // containsUsage reports whether usage slice contains the given value.
@@ -962,7 +966,17 @@ func (own *ServiceContext) SubscribeEvent(subscription event.Subscription) (func
 	if own == nil || own.ServiceEventBridge == nil {
 		return nil, event.ErrServiceEventBridgeClosed
 	}
-	return own.ServiceEventBridge.SubscribeEvent(subscription)
+	cancel, err := own.ServiceEventBridge.SubscribeEvent(subscription)
+	if err != nil {
+		return nil, err
+	}
+	// 登记异步边订阅元数据（仅真实注册，不猜测消费者）。
+	target := ""
+	if own.Service != nil {
+		target = own.Service.Name
+	}
+	runtime.GlobalSubscriptionIndex.Register(target, subscription.Subject, subscription.EventType, subscription.Reliable)
+	return cancel, nil
 }
 
 func (own *ServiceContext) SetPid(pid int) {
@@ -1840,15 +1854,22 @@ func buildRuntimeAggregator(sc *ServiceContext) *runtime.Aggregator {
 		return nil
 	}
 	cfg := sc.Config.RuntimeObservability
+	mode := runtime.NormalizeMode(cfg.Mode)
 	var querier runtime.PromQuerier
-	if cfg.Mode == "prometheus" && strings.TrimSpace(cfg.QueryURL) != "" {
+	if mode == "prometheus" && strings.TrimSpace(cfg.QueryURL) != "" {
 		querier = runtime.NewPromClient(cfg.QueryURL, cfg.QueryTimeout)
 	}
-	return runtime.NewAggregator(
+	agg := runtime.NewAggregator(
 		runtime.ProviderClusterView{Provider: sc.ClusterProvider},
 		querier,
-		runtime.Config{Mode: cfg.Mode, CacheTTL: cfg.CacheTTL},
+		runtime.Config{
+			Mode:                 mode,
+			CacheTTL:             cfg.CacheTTL,
+			MaxConcurrentQueries: cfg.MaxConcurrentQueries,
+		},
 	)
+	agg.SetSubscriptions(runtime.GlobalSubscriptionIndex)
+	return agg
 }
 
 // makeCrossNodeSender creates a cross-node sender that routes through

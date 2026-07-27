@@ -44,7 +44,19 @@ func TestRuntimeObservabilityValidateRejectsBadURL(t *testing.T) {
 		QueryURL: "://bad",
 	}
 	c.ApplyDefaults()
-	require.Error(t, c.Validate())
+	err := c.Validate()
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "://bad")
+}
+
+func TestRuntimeObservabilityApplyDefaultsNormalizesMode(t *testing.T) {
+	c := RuntimeObservabilityConfig{
+		Mode:     " PROMETHEUS ",
+		QueryURL: "http://prometheus:9090",
+	}
+	c.ApplyDefaults()
+	require.Equal(t, "prometheus", c.Mode)
+	require.NoError(t, c.Validate())
 }
 
 func TestServerConfigValidateIncludesRuntimeObservability(t *testing.T) {

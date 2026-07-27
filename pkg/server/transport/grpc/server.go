@@ -59,11 +59,25 @@ type Server struct {
 
 	// handler is called to process incoming Call RPCs.
 	handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error)
+	// routeKnown 可选：仅允许已注册稳定路由进入指标标签。
+	routeKnown func(path string) bool
+}
+
+// ServerOption 配置 gRPC Server 可选行为。
+type ServerOption func(*Server)
+
+// WithRouteAllowlist 限制入站指标 route 标签必须命中已知稳定路由。
+func WithRouteAllowlist(known func(path string) bool) ServerOption {
+	return func(s *Server) {
+		if s != nil {
+			s.routeKnown = known
+		}
+	}
 }
 
 // NewServer pre-binds address and loads server credentials so startup errors are
 // returned before the server is handed to a service lifecycle.
-func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error)) (*Server, error) {
+func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error), opts ...ServerOption) (*Server, error) {
 	if handler == nil {
 		return nil, errors.New("grpc server: handler is required")
 	}
@@ -96,6 +110,11 @@ func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx 
 		stopping: make(chan struct{}),
 		done:     make(chan struct{}),
 		handler:  handler,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(server)
+		}
 	}
 	return server, nil
 }
@@ -272,7 +291,14 @@ func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb
 		if payload != nil {
 			service = payload.TargetService
 			if resultClass != observability.ResultRejected {
-				route = payload.TargetPath
+				candidate := payload.TargetPath
+				// 仅接受稳定模板：NormalizeRouteLabel + 可选 allowlist（已注册 RouterInfo）。
+				normalized := observability.NormalizeRouteLabel(candidate)
+				if normalized != "invalid_route" {
+					if s.routeKnown == nil || s.routeKnown(normalized) {
+						route = normalized
+					}
+				}
 			}
 		}
 		observability.RecordInboundRequest(service, route, "grpc", resultClass, time.Since(start))

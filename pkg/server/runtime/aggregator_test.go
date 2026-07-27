@@ -52,9 +52,14 @@ func TestAggregatorTopologyMergesClusterAndMetrics(t *testing.T) {
 			{ServiceName: "shop-order", Status: cluster.NodeStatusRunning, ID: "b"},
 		},
 	}}
-	rateQ, err := runtime.ServiceRequestRateQuery("shop-order", "15s")
+	rateQ, err := runtime.ServiceHTTPRateByCodeQuery("shop-order", "15s")
 	require.NoError(t, err)
-	fp := fakeProm{vectors: map[string]float64{rateQ: 20}}
+	coreQ, err := runtime.ServiceCoreRateByResultQuery("shop-order", "15s")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		rateQ: {{Value: 20, Metric: map[string]string{"code": "200"}}},
+		coreQ: {},
+	}}
 	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
 	resp, err := agg.Topology(context.Background(), "15s")
 	require.NoError(t, err)
@@ -70,6 +75,57 @@ func TestAggregatorTopologyMergesClusterAndMetrics(t *testing.T) {
 	require.NotNil(t, order.RequestRate.Value)
 	require.Equal(t, 20.0, *order.RequestRate.Value)
 	require.Equal(t, runtime.StateOK, order.State)
+}
+
+func TestAggregatorEmptyVectorIsNotCollectedNotZero(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"shop-user": {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning, ID: "u1"}},
+	}}
+	// prometheus mode but all queries return empty vectors
+	agg := runtime.NewAggregator(fc, labeledProm{samples: map[string]runtime.Vector{}}, runtime.Config{Mode: "prometheus"})
+	resp, err := agg.Topology(context.Background(), "15s")
+	require.NoError(t, err)
+	require.Nil(t, resp.Services[0].RequestRate.Value)
+	require.Equal(t, runtime.StateNotCollected, resp.Services[0].RequestRate.State)
+	require.NotEqual(t, runtime.StateOK, resp.Services[0].State)
+}
+
+func TestAggregatorAsyncEdgesJoinPublishAndSubscriptions(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"shop-order": {{ServiceName: "shop-order", Status: cluster.NodeStatusRunning}},
+		"shop-user":  {{ServiceName: "shop-user", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	idx.Register("shop-user", "order.changed", "OrderCreated", true)
+	pubQ, err := runtime.EventPublishRateQuery("15s")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		pubQ: {{
+			Value: 5,
+			Metric: map[string]string{
+				"source_service": "shop-order",
+				"subject_family": "order.changed",
+				"event_type":     "ordercreated",
+				"result_class":   "success",
+			},
+		}},
+	}}
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "15s")
+	require.NoError(t, err)
+	var async *runtime.ServiceEdge
+	for i := range resp.Edges {
+		if resp.Edges[i].Kind == "async" {
+			async = &resp.Edges[i]
+			break
+		}
+	}
+	require.NotNil(t, async)
+	require.Equal(t, "shop-order", async.Source)
+	require.Equal(t, "shop-user", async.Target)
+	require.NotNil(t, async.RequestRate.Value)
+	require.Equal(t, 5.0, *async.RequestRate.Value)
 }
 
 func TestAggregatorModeOffReturnsNotCollectedMetrics(t *testing.T) {
