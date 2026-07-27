@@ -18,10 +18,17 @@
 固定双副本：
 
 ```bash
-docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml up shop-user shop-supplier shop-order-a shop-order-b
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml up shop-user shop-supplier shop-order-a shop-order-b prometheus
 ```
 
 固定双副本会同时启动 `mysql` 和 `redis` 依赖；`shop-order-a/b` 都通过 `SHOP_ORDER_REMOTE_MYSQL_*` 指向同一个 `shop_order_scale_remote` 权威库。
+
+运行图观测：
+
+- 各服务默认在 `9101/metrics` 暴露 Prometheus 指标（`SHOP_METRICS_*` 可覆盖）。
+- `prometheus.yml` 为 `shop-user` / `shop-supplier` / `shop-order-a` / `shop-order-b` 附加稳定 `service` 与 `service_instance_id` 标签；两个 order 副本共享 `service=shop-order`。
+- 入口服务 `shop-user` 通过 `SHOP_RUNTIME_PROM_URL=http://prometheus:9090` 启用 Runtime Aggregator 查询端。
+- 本地可访问 `http://127.0.0.1:19090` 查看 Prometheus；Admin 只调用 `POST /api/servermanage/runtimetopology` 与 `runtimeservice`，不直连 Prometheus。
 
 scale 模式：
 

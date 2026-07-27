@@ -19,12 +19,30 @@ services:
       timeout: 2s
       retries: 30
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["19090:9090"]
+    depends_on:
+      - shop-user
+      - shop-supplier
+      - shop-order-a
+      - shop-order-b
+
   shop-user:
     build: {context: ../../.., dockerfile: examples/07-shop-order-scale/deploy/Dockerfile}
     command: ["/app/user", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-user
+      SHOP_METRICS_HOST: 0.0.0.0
+      SHOP_METRICS_PORT: 9101
+      SHOP_RUNTIME_PROM_URL: http://prometheus:9090
       SHOP_GRPC_SECURITY_MODE: mtls
       SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
       SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-user.crt
@@ -40,6 +58,8 @@ services:
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-supplier
+      SHOP_METRICS_HOST: 0.0.0.0
+      SHOP_METRICS_PORT: 9101
       SHOP_GRPC_SECURITY_MODE: mtls
       SHOP_GRPC_CA_FILE: /run/secrets/shop-grpc/ca.crt
       SHOP_GRPC_CERT_FILE: /run/secrets/shop-grpc/shop-supplier.crt
@@ -55,6 +75,8 @@ services:
     environment:
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-a
+      SHOP_METRICS_HOST: 0.0.0.0
+      SHOP_METRICS_PORT: 9101
       SHOP_LOCAL_PENDING_DIR: /data/pending
       SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
       SHOP_ORDER_REMOTE_MYSQL_USER: root
@@ -80,6 +102,8 @@ services:
       SHOP_ORDER_GRPC_PORT: 28184
       SHOP_REDIS_ADDR: redis:6379
       SHOP_ADVERTISE_ADDRESS: shop-order-b
+      SHOP_METRICS_HOST: 0.0.0.0
+      SHOP_METRICS_PORT: 9101
       SHOP_LOCAL_PENDING_DIR: /data/pending
       SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
       SHOP_ORDER_REMOTE_MYSQL_USER: root
@@ -103,6 +127,8 @@ services:
     command: ["/app/order", "-view", "0"]
     environment:
       SHOP_REDIS_ADDR: redis:6379
+      SHOP_METRICS_HOST: 0.0.0.0
+      SHOP_METRICS_PORT: 9101
       SHOP_LOCAL_PENDING_DIR: /data/pending
       SHOP_ORDER_REMOTE_MYSQL_HOST: mysql
       SHOP_ORDER_REMOTE_MYSQL_USER: root

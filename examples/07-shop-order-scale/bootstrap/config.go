@@ -91,6 +91,15 @@ func baseServiceConfig(name string, port, dataCenterID, machineID int) *config.S
 	cfg.Transport.Fallback = nil
 	cfg.Transport.MaxRetries = 1
 	cfg.Transport.RetryDelay = 0
+	// 暴露 go-zero Prometheus agent，供示例 07 scrape 与 Runtime Aggregator 使用。
+	cfg.Prometheus.Host = envString("SHOP_METRICS_HOST", "0.0.0.0")
+	cfg.Prometheus.Port = envInt("SHOP_METRICS_PORT", 9101)
+	cfg.Prometheus.Path = envString("SHOP_METRICS_PATH", "/metrics")
+	// 查询端默认挂在入口服务；其它服务保持 Mode=off 仅暴露指标。
+	if queryURL := strings.TrimSpace(os.Getenv("SHOP_RUNTIME_PROM_URL")); queryURL != "" {
+		cfg.RuntimeObservability.Mode = "prometheus"
+		cfg.RuntimeObservability.QueryURL = queryURL
+	}
 	return cfg
 }
 
