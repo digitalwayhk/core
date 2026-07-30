@@ -63,29 +63,9 @@ func (s *Store) List() []Snapshot {
 // DefaultStore 进程默认 Store。
 var DefaultStore = NewStore()
 
-// Refresh 执行 Spec 并写入 Store。
+// Refresh 使用 OLTP 引擎执行 Spec 并写入 Store（兼容旧调用）。
+// 新代码请优先 RefreshWithEngine + 全局 Engine 配置。
 // 失败时若已有成功快照则保留旧数据并返回错误。
 func Refresh(ctx context.Context, store *Store, action types.IDataAction, spec StatSpec, opt ExecOptions) (Snapshot, error) {
-	if store == nil {
-		store = DefaultStore
-	}
-	spec = normalizeSpec(spec)
-	rows, err := Exec(ctx, action, spec, opt)
-	snap := Snapshot{
-		Code:       spec.Code,
-		Title:      spec.Title,
-		Grain:      spec.Grain,
-		ComputedAt: time.Now().UTC(),
-		Rows:       rows,
-	}
-	if err != nil {
-		snap.Error = err.Error()
-		if old, ok := store.Get(spec.Code); ok && old.Error == "" {
-			return old, err
-		}
-		store.Put(snap)
-		return snap, err
-	}
-	store.Put(snap)
-	return snap, nil
+	return RefreshWithEngine(ctx, store, NewOLTPEngine(action), spec, opt)
 }

@@ -144,6 +144,41 @@ func cloneGeneratedMenu(source *smodels.MenuModel) *smodels.MenuModel {
 	return menu
 }
 
+// removeStaleReportAPIMenus 删除把报表 API 误当成导航的菜单（Name=List/View 等）。
+// 不删除 /report/{service}/{code} 业务报表页菜单。
+func removeStaleReportAPIMenus(action persistencetypes.IDataAction) error {
+	if action == nil {
+		return errors.New("menu persistence adapter unavailable")
+	}
+	menuList := entity.NewModelList[smodels.MenuModel](action)
+	rows, _, err := menuList.SearchAll(1, 5000)
+	if err != nil {
+		return fmt.Errorf("load menus for report API cleanup: %w", err)
+	}
+	permissionList := entity.NewModelList[smodels.PermissionsModel](action)
+	for _, row := range rows {
+		if row == nil || !isReportAPIPath(row.Url) {
+			continue
+		}
+		perms, perr := permissionList.SearchWhere("MenuModelID", row.ID)
+		if perr != nil {
+			return fmt.Errorf("load permissions for stale report menu %s: %w", row.Name, perr)
+		}
+		for _, p := range perms {
+			if p == nil || p.ID == 0 {
+				continue
+			}
+			if err := action.Delete(p); err != nil {
+				return fmt.Errorf("delete permission for stale report menu %s: %w", row.Name, err)
+			}
+		}
+		if err := action.Delete(row); err != nil {
+			return fmt.Errorf("delete stale report API menu %s %s: %w", row.Name, row.Url, err)
+		}
+	}
+	return nil
+}
+
 func preparePermissions(menuID uint, items []*smodels.PermissionsModel) []*smodels.PermissionsModel {
 	set := normalizedPermissionSet(items)
 	keys := make([]string, 0, len(set))

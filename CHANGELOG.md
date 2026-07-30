@@ -6,7 +6,7 @@
 
 ### Added
 
-- 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、OLTP 执行、快照 Store、标准看板 `Dashboard`（与 Admin analysis 页对齐）。示例 07：`StatsRunner` + `bizstats/query` + **`POST /api/manage/shop-order/analysis`**；Admin 分析页按 `layout` 动态指标名并拉服务 analysis 接口。
+- 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、Store、Dashboard、**StatsEngine**、`CompileClickHouse`；**服务级报表** `ReportDef`（与 Dashboard 分离，多菜单位于服务下）。示例 07：多报表 API + Admin `/report/:service/:code`（图表/表/钻取/跳转 Manage）。
 - ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。
 - PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
 - 管理端集成 `page-agent`（可选自然语言 GUI Agent）；优先读服务端 AI 配置并经 `customFetch` 注入 Manage JWT，env 仅作 fallback。
@@ -23,6 +23,8 @@
 - 默认内部 gRPC 传输：复用 go-zero zrpc Client、标准 gRPC health、独立 ServiceContext 生命周期、TLS/mTLS/mesh 和协议级三进程验证。
 
 ### Changed
+
+- **UpdateMenu 报表菜单**：不再把 `reports.List` / `reports.View` 扫成 List/View 两行；改为按 `ReportDef` **一个报表一行**（Name=code、Title=菜单名、Url=`/report/{service}/{code}`），并清理历史 API 伪菜单。
 
 - skill 澄清 Manage/`ModelList`、public/private/`IDataAction` 与 04/07 高吞吐写三层数据访问；动态分库与「写死只能 SQLite」脱钩。
 - 未分类 HTTP 错误改为 fail-closed 500；TypeError parse/validation/do 使用稳定状态映射。

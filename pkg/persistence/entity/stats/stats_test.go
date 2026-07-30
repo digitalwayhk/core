@@ -190,6 +190,68 @@ func TestRegisterAndGet(t *testing.T) {
 	require.Equal(t, "CreatedAt", got.TimeField)
 }
 
+func TestCompileClickHouseFromOrderLikeSpec(t *testing.T) {
+	spec := StatSpec{
+		Code:      "order.by_day_product",
+		Fact:      &testOrder{},
+		TimeField: "CreatedAt",
+		Grain:     GrainDay,
+		Title:     "按天×商品",
+		Dimensions: []StatDimension{{
+			Field:           "ProductID",
+			Alias:           "product",
+			DisplayFromFact: []string{"ProductCode", "ProductName"},
+			NoDisplay:       true,
+		}},
+		Metrics: []StatMetric{
+			{Kind: MetricCount, Alias: "row_count"},
+			{Kind: MetricSum, Field: "TotalAmount", Alias: "amount_sum"},
+		},
+	}
+	plan, err := CompileClickHouse(spec, CompileClickHouseOptions{SourceTable: "order"})
+	require.NoError(t, err)
+	require.Equal(t, "stats_order_by_day_product", plan.ViewName)
+	require.Equal(t, "order", plan.SourceTableName)
+	require.Equal(t, "day", plan.TimeGranularity)
+	require.Contains(t, plan.Dimensions, "product_id")
+	require.Contains(t, plan.Dimensions, "product_code")
+	require.NotEmpty(t, plan.MaterializedViewDDL)
+	require.Contains(t, plan.MaterializedViewDDL, "CREATE MATERIALIZED VIEW")
+	require.Contains(t, plan.MaterializedViewDDL, "FROM order")
+
+	cfg := plan.ToBusinessDimensionConfig()
+	require.NotNil(t, cfg)
+	require.Equal(t, plan.ViewName, cfg.ViewName)
+	require.Equal(t, "order", cfg.SourceTableName)
+	require.Contains(t, cfg.Dimensions, "product_id")
+}
+
+func TestRefreshWithEngineOLTP(t *testing.T) {
+	db := openTestDB(t)
+	day := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	o := &testOrder{Model: entity.NewModel(), ProductID: 1, ProductCode: "P1", ProductName: "A", TotalAmount: decimal.NewFromInt(10)}
+	o.CreatedAt = &day
+	o.SetHashcode("o1")
+	require.NoError(t, db.Create(o).Error)
+
+	engine := NewOLTPEngine(&gormAction{db: db})
+	store := NewStore()
+	spec := StatSpec{
+		Code:      "t.e.day",
+		Fact:      &testOrder{},
+		TimeField: "CreatedAt",
+		Grain:     GrainDay,
+		Metrics:   []StatMetric{{Kind: MetricCount, Alias: "row_count"}},
+	}
+	snap, err := RefreshWithEngine(context.Background(), store, engine, spec, ExecOptions{
+		Dialect: DialectSQLite,
+		Range:   QueryRange{From: day.Add(-time.Hour), To: day.Add(24 * time.Hour)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, EngineOLTP, engine.Name())
+	require.NotEmpty(t, snap.Rows)
+}
+
 func TestResolveTableNameUsesGormSchemaNotPluralDefault(t *testing.T) {
 	// 模拟框架 OLTP：SingularTable=true → Order 类名为 "order" 而非 "orders"
 	db, err := gorm.Open(sqlite.Open("file:stats-singular-"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{

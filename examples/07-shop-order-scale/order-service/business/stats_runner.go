@@ -1,5 +1,6 @@
 // 本文件在订单服务内定时执行 models/stats 声明的 Spec，结果写入 stats.Store。
 // API 只读 Store，不得直接查 Order 表做聚合。
+// 默认 OLTP 引擎；可通过 CORE_STATS_ENGINE=clickhouse 与 SetEngine 切换。
 package business
 
 import (
@@ -20,6 +21,13 @@ var OrderStatsStore = stats.NewStore()
 // SharedStatsRunner 服务默认 runner（Start/Stop 与手动 Refresh 共用）。
 var SharedStatsRunner = NewStatsRunner()
 
+func init() {
+	// 默认安装 OLTP 引擎（工厂每次取远程权威库）
+	oltp := stats.NewOLTPEngineFunc(models.RemoteDataAction)
+	stats.SetEngineConfig(stats.DefaultEngineConfig())
+	stats.SetEngine(oltp, oltp)
+}
+
 // StatsRunner 定时刷新已注册的 order.* 统计。
 type StatsRunner struct {
 	mu       sync.Mutex
@@ -28,6 +36,8 @@ type StatsRunner struct {
 	interval time.Duration
 	// lookback 刷新窗口：从 now-lookback 到 now
 	lookback time.Duration
+	// engine 覆盖全局引擎；nil 则用 stats.CurrentEngine()
+	engine stats.StatsEngine
 }
 
 // NewStatsRunner 创建 runner；默认每 2 分钟刷新最近 90 天。
@@ -36,6 +46,16 @@ func NewStatsRunner() *StatsRunner {
 		interval: 2 * time.Minute,
 		lookback: 90 * 24 * time.Hour,
 	}
+}
+
+// UseEngine 覆盖本 runner 的统计引擎（测试或 CH 注入）。
+func (r *StatsRunner) UseEngine(engine stats.StatsEngine) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.engine = engine
+	r.mu.Unlock()
 }
 
 // Start 立即跑一轮并启动 ticker。
@@ -111,7 +131,14 @@ func (r *StatsRunner) refreshOnce(ctx context.Context) []stats.Snapshot {
 			To:   now.Add(time.Second),
 		},
 	}
-	action := models.RemoteDataAction()
+	engine := stats.CurrentEngine()
+	if r != nil {
+		r.mu.Lock()
+		if r.engine != nil {
+			engine = r.engine
+		}
+		r.mu.Unlock()
+	}
 	out := make([]stats.Snapshot, 0)
 	for _, spec := range stats.All() {
 		if err := ctx.Err(); err != nil {
@@ -120,19 +147,20 @@ func (r *StatsRunner) refreshOnce(ctx context.Context) []stats.Snapshot {
 			)
 			break
 		}
-		// 仅处理本服务注册的 order. 前缀
 		if len(spec.Code) < 6 || spec.Code[:6] != "order." {
 			continue
 		}
-		snap, err := stats.Refresh(ctx, OrderStatsStore, action, spec, opt)
+		snap, err := stats.RefreshWithEngine(ctx, OrderStatsStore, engine, spec, opt)
 		if err != nil {
 			logx.Errorw("order_stats_refresh_failed",
 				logx.Field("code", spec.Code),
+				logx.Field("engine", string(engine.Name())),
 				logx.Field("error", err),
 			)
 		} else {
 			logx.Infow("order_stats_refreshed",
 				logx.Field("code", spec.Code),
+				logx.Field("engine", string(engine.Name())),
 				logx.Field("rows", len(snap.Rows)),
 				logx.Field("computedAt", snap.ComputedAt),
 			)

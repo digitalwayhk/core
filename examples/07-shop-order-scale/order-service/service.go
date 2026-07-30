@@ -13,6 +13,7 @@ import (
 	manageapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/analysis"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/bizstats"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/reports"
 	publicapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
@@ -60,6 +61,8 @@ func (s *Service) Routers() []servertypes.IRouter {
 	routers = append(routers, &bizstats.Query{})
 	// 标准经营分析看板：POST /api/manage/shop-order/analysis
 	routers = append(routers, &analysis.Dashboard{})
+	// 服务级报表目录与视图（子菜单 /report/shop-order/*）
+	routers = append(routers, &reports.List{}, &reports.View{})
 	return routers
 }
 

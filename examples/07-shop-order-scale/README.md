@@ -107,6 +107,46 @@ curl -s -X POST 'http://127.0.0.1:<port>/api/manage/shop-order/bizstats/query' \
 
 维度展示：`DisplayFields` 为空且配置了 `BaseModel` 时默认 `Name`；07 商品主数据在 supplier，故商品/供应商用 `DisplayFromFact` 读订单快照列。
 
+### 服务级报表（与 Dashboard 分离）
+
+报表挂在**服务子菜单**下（可多报表），路径 `/report/{service}/{code}`，不占用全局「分析页」。
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/manage/shop-order/reports` | 报表目录（菜单用） |
+| `POST /api/manage/shop-order/reports/view` | 单报表数据（图/表/排名/钻取/跳转） |
+
+预置报表：
+
+| code | 菜单 | 数据 Spec |
+| --- | --- | --- |
+| `order-daily` | 日趋势报表 | `order.by_day` |
+| `order-by-product` | 商品销售 | `order.by_day_product` |
+| `order-by-supplier` | 供应商月报 | `order.by_month_supplier` |
+| `order-product-share` | 商品占比 | `order.by_day_product`（饼图） |
+
+前端：侧栏「订单服务 → 报表 → …」；支持刷新、钻取到下一报表、跳转 Manage 订单列表。
+
+### 统计引擎（OLTP → ClickHouse）
+
+同一 `StatSpec` 可切换后端，API/Store 不变：
+
+| 环境变量 | 含义 | 默认 |
+| --- | --- | --- |
+| `CORE_STATS_ENGINE` | `oltp` 或 `clickhouse` | `oltp` |
+| `CORE_STATS_FALLBACK_OLTP` | CH 失败时是否回退 OLTP | `true` |
+| `CORE_STATS_AUTO_ENSURE` | 刷新前是否 Ensure（CH 建 MV） | `true` |
+
+- **OLTP（默认）**：`stats.OLTPEngine` 扫权威库聚合。  
+- **ClickHouse**：`stats.CompileClickHouse(spec)` → `BusinessDimensionConfig` / MV DDL；`ClickHouseEngine.Ensure` 调现有 `SaveBusinessViewConfig` + `CreateBusinessViewFromConfig`；`Refresh` 读 MV。  
+- **事实表入库**（OLTP→CH）不在引擎内，由 CDC/批量 Ingest 负责；未入库时 CH Refresh 失败可回退 OLTP。
+
+预览全部 MV 计划（无网络）：
+
+```go
+plans, _ := stats.CompileAllClickHouse(stats.CompileClickHouseOptions{SourceTable: "order"})
+```
+
 ## 缓存规则
 
 缓存只放在面向外部流量的入口服务 facade：
