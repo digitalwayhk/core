@@ -21,6 +21,7 @@
 > | WebSocket 用客户端 `UserID` 分片 | private 用登录会话身份；`req.GetUser()` / `IWebSocketUserIdentity` |
 > | public/private 直接 `NewModelList` / 套 Manage CRUD | public/private → models 业务方法 + `IDataAction`（01）；高吞吐写再升级 04/07 本地可靠写+sync 远程 |
 > | 写死「业务只能 SQLite」或换库改遍 API | 多库；在基础 model 的 DataAction 一处切换；与是否 ModelList 无关 |
+> | Manage 分库用 `OnSearchBefore`+`stop=true` 自研列表 | `GetRemoteDBName` + Where 写回 + MySQL `Database=""` + 标准 `LoadList`（见 use-digitalway-core reference） |
 > | 路由统计 `RouterStats` / statistics | `POST /api/servermanage/runtimetopology`、`runtimeservice` |
 > | 仅示例 01–06 | 含 `examples/07-shop-order-scale` 与 Runtime 运行图 |
 >

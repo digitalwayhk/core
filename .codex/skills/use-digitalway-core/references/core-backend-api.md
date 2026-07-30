@@ -391,6 +391,94 @@ func (*ServiceManage[T]) GetList() interface{} {
 
 **再次强调：** `ModelList` 是 Manage 路径的正确默认；public/private 默认用 models 业务方法 + `IDataAction`；仅高吞吐写再上 04/07 专用 store。共用 model 结构，不共用 Manage 列表访问方式。
 
+### Manage 动态分库（IDBName + Where 写回 + 空 Database MySQL）
+
+这是 Core **正统**的 Manage 分库路径：保留 `ModelList` 筛选/排序/分页生命周期，用模型上的 `IDBName` 按请求条件路由到不同库。**不要**用 `OnSearchBefore` + `stop=true` 自研列表（那是历史旁路）。
+
+#### 标准链路（与实现一致）
+
+```text
+Manage Search.Do
+  → SearchItem.ToSearchItem()
+  → item.Model = list.NewItem()          // 空模型，须 NewModel 初始化嵌入指针
+  → list.LoadList(item)
+       → searchHook:
+            IModelSearchHook.SearchWhere(WhereList)  // entity.Model 默认原样返回
+            SetPropertyValue(Model, column, value) // Where 写回模型字段（列名大小写不敏感）
+       → GetDBAdapter → ada.Load
+            MySQL.init/Load → resolveDBName(item.Model):
+              1) config.Database 非空 → 固定库（动态路由关闭）
+              2) model.GetRemoteDBName() / GetLocalDBName() → 动态库（每次重算，不固化）
+              3) m.Name 兜底
+```
+
+证据：
+
+- `types.IDBName`：`pkg/persistence/types/interface.go`
+- `resolveDBName`：`pkg/persistence/database/oltp/mysql.go`（注释明确多交易对与「不固化」）
+- `searchHook`：`pkg/persistence/entity/modellist.go`
+- Manage Search：`service/manage/search.go`（`stop=true` 才跳过 `LoadList`）
+- 字段驱动多库：`sharedbadger_test.go` 多远程 DB 路由（`SearchItem.Model` + `GetRemoteDBName`）
+
+#### 推荐目标形态（分库服务）
+
+```go
+// 服务基础 model（嵌入 *entity.Model 或本服务基座）
+func (m *ServiceBaseModel) GetRemoteDBName() string {
+	if m.MarketCode == "" {
+		return "" // 或固定 UNBOUND 哨兵；禁止返回真实默认业务库
+	}
+	return "bitzoom_positions_" + m.MarketCode // 按服务域命名
+}
+
+// models：可路由 MySQL —— Database 必须为空
+func ManageRoutableMySQL() persistencetypes.IDataAction {
+	return oltp.NewMySQL(&oltp.Config{
+		Host: host, Port: port, User: user, Password: pass,
+		Database: "", // 关键：非空则永远固定库
+	})
+}
+
+// ServiceManage.GetList
+func (*ServiceManage[T]) GetList() interface{} {
+	return entity.NewModelList[T](models.ManageRoutableMySQL())
+}
+
+// OnSearchBefore：只校验 / 补齐 Where，不 stop
+func (own *PositionManage) OnSearchBefore(op *manage.Search[Position], req types.IRequest) (interface{}, error, bool) {
+	if !whereHas(op.SearchItem, "MarketCode") {
+		return nil, errMarketCodeRequired, true // 仅 fail-closed 时可 stop；不要在此查库拼列表
+	}
+	// 可选：校验 market 在目录中活跃
+	return nil, nil, false
+}
+```
+
+前端 Search 请求的 `WhereList` **必须**带分库键（如 `marketCode` / `MarketCode`）。`entity.Model.SearchWhere` 原样返回 Where；`SetPropertyValue` 按字段名 **大小写不敏感** 写回。
+
+#### 硬条件（易踩坑）
+
+| 条件 | 说明 |
+| --- | --- |
+| `config.Database` 必须为空 | 非空时 `resolveDBName` 永远用固定库，`GetRemoteDBName` 不参与 |
+| Adapter 可动态切库 | 同一 host 的 MySQL 实例 + 空 Database；不要 `NewMySQL` 时写死 `bitzoom_trades_BTCUSDT`，也不要用无模型切库语义的全局 SQLite `store.Get()` 冒充分库路由 |
+| Where 字段能写到 hook 字段 | 分库键在基础 model 上；指针嵌入须 `NewModel()`；写失败时 `SetPropertyValue` 可能静默不 set，须靠 `GetRemoteDBName` 空键 fail-closed 兜底 |
+| 缺键 fail-closed | `MarketCode` 空 → 返回空名/错误，禁止默认真库或扫错库 |
+| 单次 Search 单库 | 动态名是「一次查询一个 DB」；跨市场全扫需产品层多次 Search 或非本路径方案 |
+| View / 按 ID | 仅 `Id` 无 market 时库名仍解析不了；View 条件须带 market，或约定别的入口 |
+
+#### 与「旁路」对照
+
+| 做法 | 评价 |
+| --- | --- |
+| `IDBName` + 空 Database MySQL + 标准 `LoadList` | **推荐**：保留筛选/分页/关联与 SearchAfter |
+| `OnSearchBefore` + `stop=true` + per-market 手写 store | **历史适配**：绕过标准管道；长期应迁回上一行 |
+| Manage `GetList` 绑固定 `bitzoom_trades` 控制面库 | 仅控制面/兼容；分库业务数据应走可路由 adapter + `GetRemoteDBName` |
+
+#### public/private 分库写路径
+
+业务高吞吐写仍可按市场分库，但是 **models/business/专用 store** 路径（或 04/07 write-behind 目标绑定分库），**不是** Manage `ModelList` 动态路由。两者可共用「按 MarketCode 拼库名」规则，但 API 访问方式仍分离。
+
 ## Public API
 
 Public API 无需身份，但仍执行参数解析、校验、类型化错误和 DTO 转换。
@@ -840,7 +928,8 @@ go get github.com/digitalwayhk/core@<commit>
 - private WebSocket 未实现可信身份注入和用户级通知过滤。
 - 绕过 models 持久化边界/`ServiceContext`，或在 API 层直接绑定具体数据库驱动。
 - public/private 直接 `NewModelList` 或套用 Manage Search/CRUD 做业务读写（正确：models 业务方法 + `IDataAction`）。
-- Manage 不用 `ModelList` 却手写 Search `stop=true` 破坏筛选分页；或该重写服务级 `GetList` 时未重写。
+- Manage 不用 `ModelList` 却手写 Search `stop=true` 破坏筛选分页；或该重写服务级 `GetList` 时未重写；分库场景用 per-market 自研列表代替 `IDBName` 标准管道。
+- 动态分库时 MySQL `Database` 非空、缺 `marketCode` 仍默认真库、View 只带 ID 却期望命中分库。
 - 在每个具体 model/API 里散落库连接，未在基础 model/store 集中 DataAction；或把「库类型」与「ModelList vs IDataAction」混为一谈。
 - 集成测试重新实现公共 Suite，只测 handler，或依赖开发机已有配置和数据库。
 - 仅因配置字段存在就声明能力稳定。

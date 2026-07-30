@@ -20,6 +20,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 模型持久化 | Manage `ModelList[T]`、模型 `IDataAction` 方法、`NewModel()` | `examples/01-simple-shop/models` | 默认 SQLite；外部数据库显式配置 | `./scripts/test.sh persistence-unit` | Stable |
 | 本地可靠写回 | `NewSharedBadgerDB[T]`、`UseWriteBehind(WriteBehindTarget)` | `examples/04-shop-performance`、`examples/07-shop-order-scale` | `SyncWrites=true`、冲突检测、损坏 fail closed | nosql 单元与 race | Conditional |
 | 标准管理 CRUD | `manage.NewManageService[T](owner)` | `examples/01-simple-shop/api/manage` | manage auth；模型具有正确 Model/BaseModel 语义 | `go test ./service/manage ./examples/integration/01-simple-shop -run Manage` | Stable |
+| Manage 动态分库 | `IDBName.GetRemoteDBName` + `ModelList` Search + MySQL `Database=""` | skill `use-digitalway-core` reference「Manage 动态分库」；`mysql.resolveDBName`、`ModelList.searchHook` | 可路由 MySQL（空 Database）；Search Where 含分库键；禁止 `OnSearchBefore`+`stop=true` 旁路列表 | `go test ./pkg/persistence/database/nosql -run Remote`；`go test ./service/manage/...` | Stable（管道）；业务拼名规则属应用 |
 | 管理 Hook 与视图 | `Parse/Validation/Do` Hooks、`ViewModel` | `service/manage` 测试 | 同管理 CRUD | `go test ./service/manage/...` | Stable |
 | OpenAPI 与安全响应 | `GET /api/openapi`、`GET /api/internal/openapi`、默认 `Response` | 发布契约文档 | 内部文档配置 `ServerManageAuth`；公共错误契约 | `./scripts/test.sh release-contract` | Stable |
 | 路由结果缓存 | `RouterInfo.UseCache`、`IRouterCacheKey` | 无独立示例 | local 可选 Badger；shared 要求 Redis + EventBridge 外部 adapter | `go test ./pkg/server/routecache` | Conditional |

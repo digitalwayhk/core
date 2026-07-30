@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、Model/Manage 继承、认证、WebSocket、缓存、本地可靠写、EventBridge、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、Model/Manage 继承、Manage 动态分库 IDBName、认证、WebSocket、缓存、本地可靠写、EventBridge、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
@@ -49,6 +49,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | RouterInfo、对象池、EventBridge、缓存、WebSocket 和生命周期 | `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md` |
 | 多服务运行图、指标诚实状态、Admin 观测 | `docs/codex/API_COMPATIBILITY_SURFACE.md`（Runtime）、`DEPRECATION_REGISTER.md`（`RouterStats`）、设计 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md` |
 | 消费方安装本 skill | `docs/codex/CONSUMER_AI_SKILL_SETUP.md`、`scripts/link-consumer-skill.sh` |
+| Manage 动态分库（IDBName + Where 写回） | `references/core-backend-api.md`「Manage 动态分库」；证据 `pkg/persistence/database/oltp/mysql.go` `resolveDBName`、`entity.ModelList.searchHook` |
 | 日志级别、字段和敏感信息 | `docs/codex/LOGGING_AUDIT_AND_STANDARD.md` |
 | Docker 外部依赖集成 | `docs/codex/EXTERNAL_INTEGRATION_GUIDE.md` |
 | NATS JetStream 可靠写路径 | `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md` |
@@ -67,7 +68,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 2. 服务名放无依赖 `contract`；RouterInfo 注册后 Path、ServiceName、Method、Auth 等元数据冻结，只通过 Getter 读取。
 3. private 身份只读 `req.GetUser()`/claims，缓存键和 WebSocket 订阅不信任客户端 UserID。
 4. **数据访问分两套，不可混用职责：**
-   - **Manage API（后台配置/查询）必须走 `ModelList`**：获得框架默认筛选、排序、分页、关联与 Search 生命周期；面向管理人员配置与查询，不承担业务高并发。服务级 `ServiceManage[T]`（或本服务最基础 Manage）应重写 `GetList()` 为 `entity.NewModelList[T](models.XxxDataAction())`，让本服务全部 Manage 统一数据源；**未重写 `GetList` 时**默认使用进程工作目录下 `db/` 的本地 SQLite。具体 Manage **不得**在 `OnSearchBefore` 手写列表并以 `stop=true` 绕过标准 Search。
+   - **Manage API（后台配置/查询）必须走 `ModelList`**：获得框架默认筛选、排序、分页、关联与 Search 生命周期；面向管理人员配置与查询，不承担业务高并发。服务级 `ServiceManage[T]`（或本服务最基础 Manage）应重写 `GetList()` 为 `entity.NewModelList[T](models.XxxDataAction())`；**未重写 `GetList` 时**默认使用进程工作目录下 `db/` 的本地 SQLite。
+   - **按字段动态分库（多交易对/多租户库）是 Core 标准 Manage 管道，不是 `OnSearchBefore`+`stop=true` 旁路：** 基础 model 重写 `GetRemoteDBName()`（读 `MarketCode` 等字段拼库名）；`GetList` 绑定**可动态切库**的 MySQL 适配器且 **`config.Database` 必须为空**；Search 的 `WhereList` 必含 hook 用到的字段；`searchHook` 经 `IModelSearchHook.SearchWhere` + `SetPropertyValue` 写回 `item.Model` 后，`MySQL.Load` 每次 `resolveDBName` 再路由。`OnSearchBefore` 只做校验/补齐 Where（**不得 `stop=true` 自研列表**）。一次 Search 只命中一个库；跨库全扫不是本路径。详见 reference「Manage 动态分库」。
    - **public/private（业务 API）不走 Manage 的 `ModelList` 通用 CRUD/列表**：应调用 models 上的业务方法（内部用集中获取的 `IDataAction` 做 `Load`/`Insert`/`Update`/`Delete` 等），复杂编排放 business；与 Manage **可共用 model 结构体**，但 API 层访问方式分离。示例 01 的 `FindByID`/`QueryByUser`/`Insert` 即此模式，不要求一上来就上 04/07。
    - **高吞吐写（下单/支付/撤单等）在业务方法之上再升级**：参考 04/07，专用 store + 本地可靠写 + `UseWriteBehind` 同步远程权威库；这是性能路径，不是“所有 public/private 的唯一定义”。
    - 框架支持多种数据库。SQLite 是零配置默认/开发便利，也可临时当权威库；生产共享库可换 MySQL 等。推荐在最基础 model/store **集中** `LocalDataAction`/`RemoteDataAction`/`ManageDataAction`；换库只改此处。`IDataAction` 只在 models 边界选择驱动。
@@ -99,6 +101,13 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 30. 示例 04/07 的高吞吐写路径必须使用实例级 `OrderWriteRuntime`（或等价注入访问面）+ `ServiceContext.UseResource` 管理 store 生命周期，经 `UseWriteBehind(WriteBehindTarget)` 绑定远端目标；禁止包级全局 store registry，禁止新代码调用已废弃的 `StartOrderWriteStore`/`StopOrderWriteStore`/`SetSyncDB` 作为默认方案。
 31. 有序可靠投递等加性 MQ 契约（如 `OrderingKey`、`RequireOrderedReliable`、Outbox earliest-first / 可选 `OutboxStoreSkipBlocked`）以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前 `pkg/server/mq`、`pkg/server/event` 测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。
 32. **库类型与连接获取集中在 models：** 在服务最基础 model（或 `models/internal/store` / `data_action`）声明 `LocalDataAction`/`RemoteDataAction`/`ManageDataAction` 等明确入口；Manage 经 `GetList()` 引用，public/private 经模型方法或写 store 引用。切换 SQLite→MySQL 等只改 DataAction 实现，不改遍业务 API。
+33. **Manage 动态分库硬条件（与 skill 对齐）：**
+    1. MySQL `config.Database == ""`，否则 `resolveDBName` 永远固定库，`GetRemoteDBName` 不参与。
+    2. `GetList()` 的 adapter 为「同一 host 上的可路由 MySQL」，不是写死 `Database=某分库` 的实例，也不是无法按模型切库的全局 SQLite store。
+    3. 分库键字段（如 `MarketCode`）在基础 model 上，且 `NewModel()` 已初始化指针嵌入，保证 `SetPropertyValue` 能写回。
+    4. Where 缺分库键时 `GetRemoteDBName` fail-closed（空名/错误），禁止默认真库或静默扫错库。
+    5. View/SearchId 若只带 ID、不带分库键，同样解析不了库名；View 条件须带 market 或约定其他入口。
+    6. 禁止用 `OnSearchBefore`+`stop=true` 自研 per-market store 替代 `LoadList`（历史适配应迁回标准管道）。
 
 ## 工作流
 
@@ -121,7 +130,8 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - public/private handler 直接 `NewModelList` 做业务读写，或把 Manage CRUD/Search 当业务接口；正确做法是 models 业务方法 + `IDataAction`（及需要时的 business 编排）。
 - 高吞吐写仍用普通 `IDataAction`/`ModelList` 表轮询，未在需要时采用 04/07「本地可靠写 → `UseWriteBehind` → 远程权威库」。
 - 把库类型与访问路径绑死（例如「业务 API 只能 SQLite」或「换 MySQL 要改遍 API」）：多库由基础 model 的 DataAction 一处切换；SQLite/MySQL 与是否 ModelList 无关。
-- Manage 未在服务级基座重写 `GetList()` 却期望连指定远程库，或在具体 Manage 的 `OnSearchBefore` 手写查询 `stop=true` 破坏标准筛选/排序/分页。
+- Manage 未在服务级基座重写 `GetList()` 却期望连指定远程库；或 `OnSearchBefore`+`stop=true` 手写列表破坏标准筛选/排序/分页（含分库场景自研 per-market store）。
+- 动态分库时 MySQL `config.Database` 非空、`GetRemoteDBName` 在缺键时默认真库、或指望一次 Search 跨多个分库。
 - 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为（含重复写库连接）。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效、内部权威服务 Public 重复缓存入口 facade 已缓存的数据，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
