@@ -28,6 +28,8 @@ func Routers() []types.IRouter {
 		//&public.Statistics{},
 		&public.RuntimeTopology{},
 		&public.RuntimeService{},
+		&public.AIProvider{},
+		&public.SaveAIProvider{},
 		&public.InternalOpenAPI{},
 	}
 }

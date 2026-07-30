@@ -98,5 +98,16 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu3.Url = "/config/settings"
 	dir.MenuItems = append(dir.MenuItems, menu3)
 
+	menu4 := smodels.NewMenuModel()
+	menu4.ID = 9987247
+	menu4.DirectoryModelID = dir.ID
+	menu4.Name = "aiprovider"
+	menu4.Title = "AI 提供商"
+	menu4.Description = "配置管理端 PageAgent 使用的 LLM 提供商（方案 A 运行时下发）"
+	menu4.Sort = 3
+	// 前端专用页面，对应 web/admin/src/pages/config/ai-provider
+	menu4.Url = "/config/ai-provider"
+	dir.MenuItems = append(dir.MenuItems, menu4)
+
 	return dir, nil
 }
