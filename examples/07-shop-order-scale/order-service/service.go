@@ -11,9 +11,13 @@ import (
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	manageapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/analysis"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/bizstats"
 	publicapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	// 注册 order.* StatSpec
+	_ "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/stats"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"github.com/digitalwayhk/core/pkg/server/observability"
@@ -53,6 +57,9 @@ func (s *Service) Routers() []servertypes.IRouter {
 	routers = append(routers, manageapi.NewOrderRuleManage().Routers()...)
 	routers = append(routers, manageapi.NewPaymentTypeManage().Routers()...)
 	routers = append(routers, manageapi.NewOrderManage().Routers()...)
+	routers = append(routers, &bizstats.Query{})
+	// 标准经营分析看板：POST /api/manage/shop-order/analysis
+	routers = append(routers, &analysis.Dashboard{})
 	return routers
 }
 
@@ -186,11 +193,14 @@ func (s *Service) startOrderInfrastructure(sc *router.ServiceContext) error {
 	}
 	// 同步循环每轮只处理有界 pending，成功 ACK 后再唤醒 Outbox 发布器。
 	s.startPendingSync(sc, s.ensureRuntime())
+	// 业务统计：定时聚合 Order → StatsStore，API 只读快照。
+	business.SharedStatsRunner.Start()
 	return nil
 }
 
-// Stop 停止订单本地 pending 同步循环。
+// Stop 停止订单本地 pending 同步循环与统计 runner。
 func (s *Service) Stop() {
+	business.SharedStatsRunner.Stop()
 	s.mu.Lock()
 	cancel := s.cancelSync
 	done := s.syncDone

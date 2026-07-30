@@ -6,6 +6,7 @@
 
 ### Added
 
+- 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、OLTP 执行、快照 Store、标准看板 `Dashboard`（与 Admin analysis 页对齐）。示例 07：`StatsRunner` + `bizstats/query` + **`POST /api/manage/shop-order/analysis`**；Admin 分析页按 `layout` 动态指标名并拉服务 analysis 接口。
 - ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。
 - PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
 - 管理端集成 `page-agent`（可选自然语言 GUI Agent）；优先读服务端 AI 配置并经 `customFetch` 注入 Manage JWT，env 仅作 fallback。
