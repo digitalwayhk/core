@@ -1,4 +1,4 @@
-# 多服务运行图（Service Runtime Graph）外部全面审计提示词
+# 多服务运行（Service Runtime Graph）外部全面审计提示词
 
 请对 `github.com/digitalwayhk/core` 的 **`core-web-admin` 分支**做一次外部全面代码审计。审计必须以当前代码与测试为准，不要只根据 README、计划文档或“测试全绿”下结论。
 
@@ -30,7 +30,7 @@
 
 ## 2. 背景与目标
 
-本轮目标是在 **不恢复旧 RouterStats** 的前提下，建设可用的多服务运行图：
+本轮目标是在 **不恢复旧 RouterStats** 的前提下，建设可用的多服务运行：
 
 1. 复用 go-zero Prometheus / zrpc 观测能力；补齐 Core gRPC Server、服务调用边与可靠写组件低基数指标。
 2. **Prometheus 是唯一历史指标源**；Runtime Aggregator 只查询合并，不成为第二套内存统计。

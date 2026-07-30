@@ -222,6 +222,11 @@ func handers(own *Server, api *types.RouterInfo) error {
 		handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
 	}
 	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))
+	serviceName := own.context.Config.Name
+	if own.context.Service != nil && own.context.Service.Name != "" {
+		serviceName = own.context.Service.Name
+	}
+	handler = runtimeHTTPMetrics(serviceName, path, handler)
 
 	own.Server.AddRoutes([]rest.Route{
 		{
@@ -326,6 +331,10 @@ func (own *Server) RegisterHandlers(routers []*types.RouterInfo) {
 }
 
 func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
+	return routeHandler(rou, nil)
+}
+
+func routeHandler(rou *router.ServiceRouter, authTypeOverride *types.AuthType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := router.NewRequest(rou, r)
 		if req == nil {
@@ -348,6 +357,9 @@ func RouteHandler(rou *router.ServiceRouter) http.HandlerFunc {
 		}
 		if info.GetAuth() {
 			_, authType := resolveRouteAuthPolicy(rou, info.GetPath())
+			if authTypeOverride != nil {
+				authType = *authTypeOverride
+			}
 			identity, _, err := verifiedRequestIdentity(r, rou.Service, authType)
 			if err != nil {
 				contract := types.ResolvePublicError(err)

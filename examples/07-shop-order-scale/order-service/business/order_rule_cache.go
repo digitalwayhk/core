@@ -15,6 +15,7 @@ type OrderRuleCache struct {
 	ruleCode string
 	mu       sync.RWMutex
 	cached   *models.OrderRule
+	loader   func(ruleCode string) (*models.OrderRule, error)
 }
 
 // NewOrderRuleCache 创建指定规则编码的订单规则缓存。
@@ -22,7 +23,10 @@ func NewOrderRuleCache(ruleCode string) *OrderRuleCache {
 	if strings.TrimSpace(ruleCode) == "" {
 		ruleCode = "default"
 	}
-	return &OrderRuleCache{ruleCode: strings.TrimSpace(ruleCode)}
+	return &OrderRuleCache{
+		ruleCode: strings.TrimSpace(ruleCode),
+		loader:   loadEnabledOrderRule,
+	}
 }
 
 // Get 读取订单规则；缓存 miss 时访问共享远程权威库。
@@ -34,12 +38,12 @@ func (c *OrderRuleCache) Get() (*models.OrderRule, error) {
 		return &item, nil
 	}
 	c.mu.RUnlock()
-	var rule *models.OrderRule
-	if err := models.RunRemoteTransaction(func(action models.DataAction) error {
-		var err error
-		rule, err = models.GetEnabledOrderRuleWith(action, c.ruleCode)
-		return err
-	}); err != nil {
+	rule, err := c.loader(c.ruleCode)
+	if errors.Is(err, models.ErrOrderRuleNotFound) {
+		// 权威库尚未配置时使用内建默认值，但不缓存该回退值。
+		// 这样管理员随后新增规则，无需重启服务即可在下一次下单时生效。
+		return models.NewOrderRule(), nil
+	} else if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -47,6 +51,16 @@ func (c *OrderRuleCache) Get() (*models.OrderRule, error) {
 	c.mu.Unlock()
 	item := *rule
 	return &item, nil
+}
+
+func loadEnabledOrderRule(ruleCode string) (*models.OrderRule, error) {
+	var rule *models.OrderRule
+	err := models.RunRemoteTransaction(func(action models.DataAction) error {
+		var err error
+		rule, err = models.GetEnabledOrderRuleWith(action, ruleCode)
+		return err
+	})
+	return rule, err
 }
 
 // Invalidate 失效当前实例的订单规则缓存。

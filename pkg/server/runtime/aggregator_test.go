@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -245,6 +246,104 @@ func TestAggregatorKnownService(t *testing.T) {
 	agg := runtime.NewAggregator(fc, nil, runtime.Config{Mode: "off"})
 	require.True(t, agg.KnownService(context.Background(), "shop-order"))
 	require.False(t, agg.KnownService(context.Background(), "nope"))
+}
+
+func TestServiceDetailTreatsZeroRouteRateAsCollected(t *testing.T) {
+	const (
+		service = "shop-order"
+		window  = "5m"
+		route   = "/api/shop-order/getorders"
+	)
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		service: {{ServiceName: service, Status: cluster.NodeStatusRunning}},
+	}}
+	coreRateQ, err := runtime.ServiceCoreRateByResultQuery(service, window)
+	require.NoError(t, err)
+	routeRateQ, err := runtime.ServiceRouteRateQuery(service, window)
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		coreRateQ: {{
+			Value:  0,
+			Metric: map[string]string{"result_class": "success"},
+		}},
+		routeRateQ: {{
+			Value:  0,
+			Metric: map[string]string{"route": route, "result_class": "success"},
+		}},
+	}}
+
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	detail, err := agg.ServiceDetail(context.Background(), window, service)
+
+	require.NoError(t, err)
+	require.Len(t, detail.Routes, 1)
+	require.Equal(t, runtime.StateNoTraffic, detail.Routes[0].State)
+	require.NotNil(t, detail.Routes[0].RequestRate.Value)
+	require.Zero(t, *detail.Routes[0].RequestRate.Value)
+	require.NotNil(t, detail.Routes[0].ErrorRate.Value)
+	require.Zero(t, *detail.Routes[0].ErrorRate.Value)
+	require.Equal(t, runtime.StateNoTraffic, detail.Routes[0].P50Ms.State)
+	require.Equal(t, runtime.StateNoTraffic, detail.Routes[0].P95Ms.State)
+	require.Equal(t, runtime.StateNoTraffic, detail.Routes[0].P99Ms.State)
+}
+
+func TestServiceDetailUsesCoreDurationQuantiles(t *testing.T) {
+	const (
+		service = "shop-order"
+		window  = "5m"
+		route   = "/api/shop-order/createorder"
+	)
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		service: {{ServiceName: service, Status: cluster.NodeStatusRunning}},
+	}}
+	coreRateQ, err := runtime.ServiceCoreRateByResultQuery(service, window)
+	require.NoError(t, err)
+	routeRateQ, err := runtime.ServiceRouteRateQuery(service, window)
+	require.NoError(t, err)
+	samples := map[string]runtime.Vector{
+		coreRateQ: {{
+			Value:  2,
+			Metric: map[string]string{"result_class": "success"},
+		}},
+		routeRateQ: {{
+			Value:  2,
+			Metric: map[string]string{"route": route, "result_class": "success"},
+		}},
+	}
+	quantiles := []struct {
+		q     float64
+		value float64
+	}{
+		{q: 0.50, value: 4},
+		{q: 0.95, value: 12},
+		{q: 0.99, value: 20},
+	}
+	for _, item := range quantiles {
+		serviceQ := fmt.Sprintf(
+			`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
+			item.q, service, window,
+		)
+		routeQ := fmt.Sprintf(
+			`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
+			item.q, service, window,
+		)
+		samples[serviceQ] = runtime.Vector{{Value: item.value}}
+		samples[routeQ] = runtime.Vector{{
+			Value:  item.value,
+			Metric: map[string]string{"route": route},
+		}}
+	}
+
+	agg := runtime.NewAggregator(fc, labeledProm{samples: samples}, runtime.Config{Mode: "prometheus"})
+	detail, err := agg.ServiceDetail(context.Background(), window, service)
+
+	require.NoError(t, err)
+	require.NotNil(t, detail.Service.P95Ms.Value)
+	require.Equal(t, 12.0, *detail.Service.P95Ms.Value)
+	require.Len(t, detail.Routes, 1)
+	require.Equal(t, 4.0, *detail.Routes[0].P50Ms.Value)
+	require.Equal(t, 12.0, *detail.Routes[0].P95Ms.Value)
+	require.Equal(t, 20.0, *detail.Routes[0].P99Ms.Value)
 }
 
 func TestAggregatorBuildsSyncEdgesFromLabeledVector(t *testing.T) {

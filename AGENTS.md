@@ -12,6 +12,8 @@
 - GitHub Copilot 必须阅读 `.github/copilot/skills/core-backend-api.md`。
 - 当指南与当前代码、测试或公开契约不一致时，以当前代码、测试和公开契约为准，并同步修正文档。
 
+**其他项目依赖本仓库时**：`go get` 不会自动安装 skill。消费方 AI 应按 [README「AI 助手与 Skill」](./README.md) 与 [消费方 AI Skill 安装与识别](./docs/codex/CONSUMER_AI_SKILL_SETUP.md) 先运行 `scripts/link-consumer-skill.sh`，再阅读消费方仓库内的 skill。
+
 关键原则：
 
 1. 调用 `NewModelList[T](nil)` 时框架会自动执行模型迁移；不要另行建立重复迁移流程。

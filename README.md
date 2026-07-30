@@ -13,6 +13,37 @@ Digitalway Core 是构建 Go 商业服务的应用组装框架。它以 go-zero�
 go get github.com/digitalwayhk/core@latest
 ```
 
+## AI 助手与 Skill（消费方）
+
+`go get` **只安装 Go 模块**，不会把 Agent skill 装进业务仓库。依赖本框架开发或审查后端 API 时，消费方（及其 AI）需要先安装 skill，再按规范写代码。
+
+### AI 自动识别与安装（固定流程）
+
+当消费方 `go.mod` 依赖 `github.com/digitalwayhk/core`，或任务要求「按 Core 规范」开发时，Agent **应先检测再安装**，不要因找不到 skill 中断后凭记忆编码：
+
+```bash
+# 1) 是否已安装
+test -f .codex/skills/use-digitalway-core/SKILL.md && echo ready || echo missing
+
+# 2) 缺失则安装（优先本机 core 源码）
+export DIGITALWAY_CORE_PATH=/path/to/digitalway.hk/core   # 与 go.mod replace 一致时最稳
+"$DIGITALWAY_CORE_PATH/scripts/link-consumer-skill.sh" --target . --write-agents
+
+# 或仅有模块依赖时
+CORE="$(go list -m -f '{{.Dir}}' github.com/digitalwayhk/core)"
+"$CORE/scripts/link-consumer-skill.sh" --target . --write-agents
+```
+
+安装后 Agent **必须**阅读：
+
+- 消费方仓库内 `.codex/skills/use-digitalway-core/SKILL.md`
+- skill 内 `references/core-backend-api.md`
+- Core 源码中的 `docs/codex/*` 与最近 `examples/*`（路径：`go list -m -f '{{.Dir}}' github.com/digitalwayhk/core` 或 `DIGITALWAY_CORE_PATH`）
+
+建议在消费方 `AGENTS.md` / `Claude.md` 中写入上述流程（脚本加 `--write-agents` 可自动追加标准段落）。完整说明、软链/复制、用户级安装与故障排查见 [消费方 AI Skill 安装与识别](./docs/codex/CONSUMER_AI_SKILL_SETUP.md)。
+
+本仓库自身的 Agent 约定见 [AGENTS.md](./AGENTS.md)；规范正文在 [use-digitalway-core](./.codex/skills/use-digitalway-core/SKILL.md)。
+
 ## 最小服务
 
 路由实现 `types.IRouter` 的 `Parse`、`Validation`、`Do` 和 `RouterInfo`。普通 public/private 路径为：

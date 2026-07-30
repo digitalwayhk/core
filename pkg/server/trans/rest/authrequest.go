@@ -32,14 +32,28 @@ func authRequestHandler(
 	authType types.AuthType,
 	next http.Handler,
 ) http.Handler {
+	return authRequestHandlerWithAuthority(sc, sc, info, authType, next)
+}
+
+func authRequestHandlerWithAuthority(
+	sc *router.ServiceContext,
+	authAuthority *router.ServiceContext,
+	info *types.RouterInfo,
+	authType types.AuthType,
+	next http.Handler,
+) http.Handler {
+	if authAuthority == nil {
+		authAuthority = sc
+	}
 	if next == nil {
 		next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		manager, hook, active := sc.GetAuthRequestRuntime()
-		if !active {
+		manager, _, authorityActive := authAuthority.GetAuthRequestRuntime()
+		_, hook, serviceActive := sc.GetAuthRequestRuntime()
+		if !authorityActive || !serviceActive {
 			contract := types.ResolvePublicError(requestAuthenticationError(errors.New("service authentication is closing")))
 			logAuthRequestDenied(sc, info, authType, types.AuthIdentity{}, contract)
 			writePublicErrorContract(w, contract)

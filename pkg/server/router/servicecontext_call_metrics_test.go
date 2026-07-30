@@ -76,7 +76,14 @@ func TestCallServiceRecordsEdgeMetrics(t *testing.T) {
 		"protocol":       "local",
 		"result_class":   "success",
 	}
+	inboundLabels := map[string]string{
+		"service":      targetName,
+		"route":        path,
+		"protocol":     "local",
+		"result_class": "success",
+	}
 	before := gatherCounter(t, "core_service_call_requests_total", labels)
+	inboundBefore := gatherCounter(t, "core_service_request_requests_total", inboundLabels)
 
 	resp, err := source.CallService(&types.PayLoad{
 		TargetService: targetName,
@@ -89,6 +96,8 @@ func TestCallServiceRecordsEdgeMetrics(t *testing.T) {
 
 	after := gatherCounter(t, "core_service_call_requests_total", labels)
 	require.Equal(t, before+1, after)
+	inboundAfter := gatherCounter(t, "core_service_request_requests_total", inboundLabels)
+	require.Equal(t, inboundBefore+1, inboundAfter)
 }
 
 func TestCallServiceRecordsUnavailable(t *testing.T) {

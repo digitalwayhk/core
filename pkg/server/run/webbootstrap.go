@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/api/public"
@@ -19,7 +20,8 @@ const (
 	webAuthModeUnavailable = "unavailable"
 	webAuthTypeManage      = "manage"
 
-	webBootstrapAcquireToken  = "/api/servermanage/testtoken?userid=12345&type=1"
+	webBootstrapAcquireToken  = "/api/servermanage/testtoken?userid=platform-admin&type=1"
+	webBootstrapUserToken     = "/api/servermanage/testtoken?userid=12345&type=0"
 	webBootstrapCasdoorConfig = "/api/casdoor?type=manage"
 	webBootstrapCallback      = "/callback"
 	webBootstrapRefresh       = "/api/refresh"
@@ -28,10 +30,11 @@ const (
 
 // WebBootstrap 是前端启动所需的公开运行时能力描述，不得包含密钥或 Token。
 type WebBootstrap struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Auth          WebBootstrapAuth      `json:"auth"`
-	Endpoints     WebBootstrapEndpoints `json:"endpoints"`
-	UI            WebBootstrapUI        `json:"ui"`
+	SchemaVersion int                     `json:"schema_version"`
+	Auth          WebBootstrapAuth        `json:"auth"`
+	Endpoints     WebBootstrapEndpoints   `json:"endpoints"`
+	TestTokens    []WebBootstrapTestToken `json:"test_tokens"`
+	UI            WebBootstrapUI          `json:"ui"`
 }
 
 type WebBootstrapAuth struct {
@@ -48,13 +51,21 @@ type WebBootstrapEndpoints struct {
 	OpenAPI       string  `json:"openapi"`
 }
 
+type WebBootstrapTestToken struct {
+	Service      string `json:"service"`
+	AcquireToken string `json:"acquire_token"`
+}
+
 type WebBootstrapUI struct {
 	ShowLogin        bool `json:"show_login"`
 	ShowLogout       bool `json:"show_logout"`
 	ShowTestIdentity bool `json:"show_test_identity"`
 }
 
-func newWebBootstrapHandler(authority *manageAuthAuthority) http.Handler {
+func newWebBootstrapHandler(
+	authority *manageAuthAuthority,
+	services ...*router.ServiceRouter,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 所有响应均不可缓存（含 405）。
 		w.Header().Set("Cache-Control", "no-store")
@@ -63,7 +74,7 @@ func newWebBootstrapHandler(authority *manageAuthAuthority) http.Handler {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
-		response := buildWebBootstrap(authority, r)
+		response := buildWebBootstrapForServices(authority, r, services)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(response)
 	})
@@ -83,6 +94,14 @@ func normalizeBootstrapAuthorityService(authority *manageAuthAuthority) string {
 }
 
 func buildWebBootstrap(authority *manageAuthAuthority, r *http.Request) WebBootstrap {
+	return buildWebBootstrapForServices(authority, r, nil)
+}
+
+func buildWebBootstrapForServices(
+	authority *manageAuthAuthority,
+	r *http.Request,
+	services []*router.ServiceRouter,
+) WebBootstrap {
 	mode := selectManageAuthMode(authority, r)
 	authorityService := normalizeBootstrapAuthorityService(authority)
 	response := WebBootstrap{
@@ -97,15 +116,44 @@ func buildWebBootstrap(authority *manageAuthAuthority, r *http.Request) WebBoots
 			Refresh:  authEndpointForService(webBootstrapRefresh, authorityService),
 			OpenAPI:  webBootstrapOpenAPI,
 		},
-		UI: webBootstrapUIForMode(mode),
+		TestTokens: []WebBootstrapTestToken{},
+		UI:         webBootstrapUIForMode(mode),
 	}
 	switch mode {
 	case webAuthModeTestToken:
 		response.Endpoints.AcquireToken = stringPtr(authEndpointForService(webBootstrapAcquireToken, authorityService))
+		response.TestTokens = webBootstrapUserTestTokens(services)
 	case webAuthModeCasdoor:
 		response.Endpoints.CasdoorConfig = stringPtr(authEndpointForService(webBootstrapCasdoorConfig, authorityService))
 	}
 	return response
+}
+
+func webBootstrapUserTestTokens(services []*router.ServiceRouter) []WebBootstrapTestToken {
+	byService := make(map[string]WebBootstrapTestToken)
+	for _, service := range services {
+		if service == nil || service.Service == nil {
+			continue
+		}
+		name := serviceContextName(service.Service)
+		if name == "" || name == "server" {
+			continue
+		}
+		byService[name] = WebBootstrapTestToken{
+			Service:      name,
+			AcquireToken: authEndpointForService(webBootstrapUserToken, name),
+		}
+	}
+	names := make([]string, 0, len(byService))
+	for name := range byService {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]WebBootstrapTestToken, 0, len(names))
+	for _, name := range names {
+		result = append(result, byService[name])
+	}
+	return result
 }
 
 func authEndpointForService(endpoint, service string) string {

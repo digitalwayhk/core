@@ -2,6 +2,8 @@
 package common
 
 import (
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -19,6 +21,12 @@ type ServiceManage[T persistencetypes.IModel] struct {
 // NewServiceManage 创建绑定最终 owner 的服务级 Manage 基座。
 func NewServiceManage[T persistencetypes.IModel](owner interface{}) *ServiceManage[T] {
 	return &ServiceManage[T]{HookedManageService: managepkg.NewHookedManageService[T](owner), owner: owner}
+}
+
+// GetList 将 order-service 的标准 Manage CRUD 绑定到共享 MySQL 权威库。
+// 查询仍由 Core ModelList 执行，以完整保留筛选、排序、分页及关联查询能力。
+func (*ServiceManage[T]) GetList() interface{} {
+	return entity.NewModelList[T](models.RemoteDataAction())
 }
 
 // DoBefore 在所有自定义命令前统一执行管理员权限和父级 Hook。

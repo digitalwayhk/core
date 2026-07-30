@@ -18,7 +18,7 @@ func ListOrders(orders models.OrderWriteAccess, filter models.OrderQueryFilter, 
 		items, total, err = models.ListRemoteOrdersWith(action, filter, page, size)
 		return err
 	})
-	if err == nil && filter.UserID > 0 && filter.SupplierID == 0 {
+	if err == nil && orders != nil && filter.UserID > 0 && filter.SupplierID == 0 {
 		if pending, pendingErr := orders.PendingByUser(context.Background(), filter.UserID); pendingErr == nil && len(pending) > 0 {
 			items = mergeOrders(items, pending)
 			total = int64(len(items))

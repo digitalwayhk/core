@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime/debug"
+	"strings"
 
 	"github.com/digitalwayhk/core/pkg/server/internal/openapiutil"
 	"github.com/digitalwayhk/core/pkg/server/router"
@@ -50,6 +51,7 @@ func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*rou
 	doc.Components = &components
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
 	doc.Paths = openapi3.NewPaths()
+	privateTokenIssuers := make([]string, 0)
 
 	for _, r := range srs {
 		if r == nil || r.Service == nil || r.Service.Service == nil {
@@ -85,12 +87,17 @@ func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*rou
 			doc.Servers = append(doc.Servers, server)
 		}
 		eachPublicRouters(r.GetTypeRouters(types.PublicType), doc, server, audience)
-		eachrouters(r.GetTypeRouters(types.PrivateType), doc, server)
+		privateRouters := r.GetTypeRouters(types.PrivateType)
+		if len(privateRouters) > 0 {
+			privateTokenIssuers = append(privateTokenIssuers,
+				r.Service.Service.Name+" "+server.URL+"api/servermanage/testtoken?userid=12345")
+		}
+		eachrouters(privateRouters, doc, server)
 	}
 	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
 	bearerDescription := "Bearer token authentication"
-	if len(doc.Servers) > 0 {
-		bearerDescription = "Get TestToken from " + doc.Servers[0].URL + "api/servermanage/testtoken?userid=12345"
+	if len(privateTokenIssuers) > 0 {
+		bearerDescription = "Get TestToken from target service: " + strings.Join(privateTokenIssuers, "; ")
 	}
 	doc.Components.SecuritySchemes["Bearer"] = &openapi3.SecuritySchemeRef{
 		Value: &openapi3.SecurityScheme{

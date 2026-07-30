@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/observability"
@@ -48,15 +49,18 @@ type OutboxOptions struct {
 }
 
 type outboxPublisher struct {
-	source   string
-	store    OutboxStore
-	interval time.Duration
-	batch    int
-	external bool
-	bridge   *ServiceEventBridge
-	notify   chan struct{}
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	source     string
+	store      OutboxStore
+	interval   time.Duration
+	batch      int
+	external   bool
+	bridge     *ServiceEventBridge
+	notify     chan struct{}
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	depth      atomic.Int64
+	failures   atomic.Uint64
+	loadFailed atomic.Bool
 }
 
 func newOutboxPublisher(bridge *ServiceEventBridge, options OutboxOptions) (*outboxPublisher, error) {
@@ -111,9 +115,13 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 	for {
 		items, err := p.loadPending(ctx, blocked)
 		if err != nil {
+			p.loadFailed.Store(true)
+			p.failures.Add(1)
 			logx.Errorw("event_outbox_load_failed", logx.Field("service", p.source), logx.Field("error", err))
 			return
 		}
+		p.loadFailed.Store(false)
+		p.depth.Store(int64(len(items)))
 		if len(items) == 0 {
 			return
 		}
@@ -124,16 +132,19 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 				continue
 			}
 			if err := p.publish(ctx, item); err != nil {
+				p.failures.Add(1)
 				logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
 				blocked[key] = struct{}{}
 				continue
 			}
 			if err := p.store.MarkPublished(ctx, item); err != nil {
+				p.failures.Add(1)
 				logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("error", err))
 				// Mark 失败允许同 EventID 重发；本轮仍阻断同 key，避免后续记录抢先发布。
 				blocked[key] = struct{}{}
 				continue
 			}
+			p.depth.Add(-1)
 			progressed = true
 		}
 		if progressed {

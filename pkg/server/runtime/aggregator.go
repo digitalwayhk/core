@@ -298,18 +298,28 @@ func (a *Aggregator) fillServiceMetrics(
 	} else {
 		node.ErrorRate = ValueMetric(0, StateOK)
 	}
-	// 百分位：有 HTTP histogram 则取；空则 not_collected（不伪造 0ms）
-	var quantFail bool
-	node.P50Ms, quantFail = a.queryQuantile(ctx, name, window, now, 0.50)
-	p95, fail95 := a.queryQuantile(ctx, name, window, now, 0.95)
-	node.P95Ms = p95
-	quantFail = quantFail || fail95
-	p99, fail99 := a.queryQuantile(ctx, name, window, now, 0.99)
-	node.P99Ms = p99
-	quantFail = quantFail || fail99
-
 	node.State = StateOK
-	if qerr != nil || coreErr != nil || quantFail {
+	if total == 0 {
+		node.P50Ms = NullMetric(StateNoTraffic)
+		node.P95Ms = NullMetric(StateNoTraffic)
+		node.P99Ms = NullMetric(StateNoTraffic)
+	} else {
+		// 百分位：有 histogram 则取；空则 not_collected（不伪造 0ms）
+		var quantFail bool
+		node.P50Ms, quantFail = a.queryQuantile(ctx, name, window, now, 0.50)
+		p95, fail95 := a.queryQuantile(ctx, name, window, now, 0.95)
+		node.P95Ms = p95
+		quantFail = quantFail || fail95
+		p99, fail99 := a.queryQuantile(ctx, name, window, now, 0.99)
+		node.P99Ms = p99
+		quantFail = quantFail || fail99
+		if quantFail {
+			node.State = StatePartial
+			resp.Status = MergeStates(resp.Status, StatePartial)
+		}
+	}
+
+	if qerr != nil || coreErr != nil {
 		node.State = StatePartial
 		resp.Status = MergeStates(resp.Status, StatePartial)
 	}
@@ -326,31 +336,48 @@ func (a *Aggregator) fillServiceMetrics(
 
 // queryQuantile 返回百分位值与是否查询失败（失败应上卷 partial）。
 func (a *Aggregator) queryQuantile(ctx context.Context, name, window string, now time.Time, q float64) (MetricValue, bool) {
-	var query string
-	var err error
+	coreQuery, err := serviceCoreQuantileQuery(name, window, q)
+	if err == nil {
+		vec, qerr := a.query(ctx, coreQuery, now)
+		if qerr == nil {
+			if value, ok := firstFiniteValue(vec); ok {
+				return ValueMetric(value, StateOK), false
+			}
+		}
+	}
+
+	var httpQuery string
 	switch q {
 	case 0.50:
-		query, err = ServiceHTTPP50Query(name, window)
+		httpQuery, err = ServiceHTTPP50Query(name, window)
 	case 0.99:
-		query, err = ServiceHTTPP99Query(name, window)
+		httpQuery, err = ServiceHTTPP99Query(name, window)
 	default:
-		query, err = ServiceHTTPP95Query(name, window)
+		httpQuery, err = ServiceHTTPP95Query(name, window)
 	}
 	if err != nil {
 		return NullMetric(StateNotCollected), false
 	}
-	vec, qerr := a.query(ctx, query, now)
+	vec, qerr := a.query(ctx, httpQuery, now)
 	if qerr != nil {
 		return NullMetric(StateUnavailable), true
+	}
+	if value, ok := firstFiniteValue(vec); ok {
+		return ValueMetric(value, StateOK), false
 	}
 	if len(vec) == 0 {
 		return NullMetric(StateNotCollected), false
 	}
-	v := vec[0].Value
-	if v != v { // NaN from histogram_quantile with no data
-		return NullMetric(StateNotCollected), false
+	return NullMetric(StateNotCollected), false
+}
+
+func firstFiniteValue(vec Vector) (float64, bool) {
+	for _, sample := range vec {
+		if sample.Value == sample.Value {
+			return sample.Value, true
+		}
 	}
-	return ValueMetric(v, StateOK), false
+	return 0, false
 }
 
 // queryLastSampleTime 用白名单 PromQL 读取请求序列最后采集时间。
@@ -651,6 +678,7 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 						acc = &routeAcc{}
 						routes[path] = acc
 					}
+					acc.sampled = true
 					acc.total += s.Value
 					code := s.Metric["code"]
 					if len(code) > 0 && code[0] >= '4' {
@@ -668,6 +696,7 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 						acc = &routeAcc{}
 						routes[path] = acc
 					}
+					acc.sampled = true
 					acc.total += s.Value
 					if s.Metric["result_class"] != "" && s.Metric["result_class"] != observability.ResultSuccess {
 						acc.err += s.Value
@@ -679,23 +708,42 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 				})
 			}
 		}
+		quantiles := a.queryRouteQuantiles(ctx, svc, window, now)
 		for path, acc := range routes {
-			var errRate *float64
-			if acc.total > 0 {
-				v := acc.err / acc.total
-				errRate = &v
+			state := StateNotCollected
+			var requestRate MetricValue
+			var errorRate MetricValue
+			if acc.sampled {
+				state = StateOK
+				requestRate = ValueMetric(acc.total, StateOK)
+				errorValue := float64(0)
+				if acc.total > 0 {
+					errorValue = acc.err / acc.total
+				}
+				errorRate = ValueMetric(errorValue, StateOK)
+				if acc.total == 0 {
+					state = StateNoTraffic
+				}
+			} else {
+				requestRate = NullMetric(StateNotCollected)
+				errorRate = NullMetric(StateNotCollected)
 			}
-			state := StateOK
-			if acc.total == 0 {
-				state = StateNotCollected
+			routeQuantiles := quantiles[path]
+			p50 := routeQuantiles.metric(0.50)
+			p95 := routeQuantiles.metric(0.95)
+			p99 := routeQuantiles.metric(0.99)
+			if state == StateNoTraffic {
+				p50 = NullMetric(StateNoTraffic)
+				p95 = NullMetric(StateNoTraffic)
+				p99 = NullMetric(StateNoTraffic)
 			}
 			detail.Routes = append(detail.Routes, RouteMetrics{
 				Route:       path,
-				RequestRate: metricOrNotCollected(acc.total, state),
-				ErrorRate:   MetricValue{Value: errRate, State: state},
-				P50Ms:       NullMetric(StateNotCollected),
-				P95Ms:       NullMetric(StateNotCollected),
-				P99Ms:       NullMetric(StateNotCollected),
+				RequestRate: requestRate,
+				ErrorRate:   errorRate,
+				P50Ms:       p50,
+				P95Ms:       p95,
+				P99Ms:       p99,
 				State:       state,
 			})
 		}
@@ -735,15 +783,52 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 }
 
 type routeAcc struct {
-	total float64
-	err   float64
+	total   float64
+	err     float64
+	sampled bool
 }
 
-func metricOrNotCollected(v float64, state MetricState) MetricValue {
-	if state == StateNotCollected {
-		return NullMetric(StateNotCollected)
+type routeQuantileAcc map[float64]MetricValue
+
+func (r routeQuantileAcc) metric(q float64) MetricValue {
+	if metric, ok := r[q]; ok {
+		return metric
 	}
-	return ValueMetric(v, state)
+	return NullMetric(StateNotCollected)
+}
+
+func (a *Aggregator) queryRouteQuantiles(
+	ctx context.Context,
+	service, window string,
+	now time.Time,
+) map[string]routeQuantileAcc {
+	out := make(map[string]routeQuantileAcc)
+	for _, q := range []float64{0.50, 0.95, 0.99} {
+		query, err := serviceCoreRouteQuantileQuery(service, window, q)
+		if err != nil {
+			continue
+		}
+		vec, qerr := a.query(ctx, query, now)
+		if qerr != nil {
+			continue
+		}
+		for _, sample := range vec {
+			if sample.Value != sample.Value {
+				continue
+			}
+			route := observability.NormalizeRouteLabel(sample.Metric["route"])
+			if route == "invalid_route" {
+				continue
+			}
+			acc := out[route]
+			if acc == nil {
+				acc = make(routeQuantileAcc)
+				out[route] = acc
+			}
+			acc[q] = ValueMetric(sample.Value, StateOK)
+		}
+	}
+	return out
 }
 
 func buildSyncEdges(vec Vector, metricState MetricState) []ServiceEdge {

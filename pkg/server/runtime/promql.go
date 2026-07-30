@@ -64,6 +64,28 @@ func serviceHTTPQuantileQuery(service, window string, q float64) (string, error)
 	), nil
 }
 
+func serviceCoreQuantileQuery(service, window string, q float64) (string, error) {
+	if err := validateServiceWindow(service, window); err != nil {
+		return "", err
+	}
+	svc := observability.NormalizeServiceLabel(service)
+	return fmt.Sprintf(
+		`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
+		q, svc, window,
+	), nil
+}
+
+func serviceCoreRouteQuantileQuery(service, window string, q float64) (string, error) {
+	if err := validateServiceWindow(service, window); err != nil {
+		return "", err
+	}
+	svc := observability.NormalizeServiceLabel(service)
+	return fmt.Sprintf(
+		`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
+		q, svc, window,
+	), nil
+}
+
 // ServiceCallEdgeRateQuery 生成调用边速率查询。
 func ServiceCallEdgeRateQuery(window string) (string, error) {
 	if _, ok := ParseWindow(window); !ok {

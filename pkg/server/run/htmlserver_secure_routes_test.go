@@ -91,7 +91,7 @@ func TestHTMLServerManageCanonicalPathRequiresJWT(t *testing.T) {
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
-func TestHTMLServerManageRoutesUseOwningServiceAuthority(t *testing.T) {
+func TestHTMLServerManageRoutesUseConfiguredAuthority(t *testing.T) {
 	htmlAuthReset()
 	const (
 		serverSecret = "system-server-manage-secret-value"
@@ -118,8 +118,7 @@ func TestHTMLServerManageRoutesUseOwningServiceAuthority(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+issueManageToken(t, shopSecret, "shop-admin"))
 	rec := httptest.NewRecorder()
 	htmls.Handler().ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Greater(t, htmlAuthCount("shop:"+path), int32(0))
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
 
 	req = httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
 	req.RemoteAddr = "127.0.0.1:9"
@@ -127,7 +126,41 @@ func TestHTMLServerManageRoutesUseOwningServiceAuthority(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+issueManageToken(t, serverSecret, "developer"))
 	rec = httptest.NewRecorder()
 	htmls.Handler().ServeHTTP(rec, req)
-	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Greater(t, htmlAuthCount("shop:"+path), int32(0))
+}
+
+func TestHTMLServerServerManageRoutesUseConfiguredManageAuthority(t *testing.T) {
+	htmlAuthReset()
+	const authoritySecret = "authority-manage-access-secret-value"
+	authority := newHTMLAuthServiceContext(t, "orders", true)
+	authority.Config.ManageAuth.AccessSecret = authoritySecret
+	authority.Config.ManageAuth.RefreshSecret = authoritySecret + "-refresh"
+
+	system := newHTMLAuthenticatedServerManagerRouteContext(
+		t,
+		"server",
+		"/api/servermanage/getmenu",
+		http.MethodGet,
+	)
+	system.Config.ServerManageAuth.AccessSecret = "independent-server-manage-secret"
+
+	htmls := NewHTMLServer(0)
+	htmls.SetManageAuthAuthority(&manageAuthAuthority{
+		name: "orders", context: authority, router: authority.Router,
+	})
+	htmls.AddServiceRouter(system.Router)
+	htmls.AddServiceRouter(authority.Router)
+	require.NoError(t, htmls.Prepare())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/servermanage/getmenu", nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	req.Header.Set("Authorization", "Bearer "+issueManageToken(t, authoritySecret, "developer"))
+	rec := httptest.NewRecorder()
+	htmls.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Greater(t, htmlAuthCount("server:/api/servermanage/getmenu"), int32(0))
 }
 
 func TestHTMLServerGetMenuCanonicalWithoutSuffix(t *testing.T) {
@@ -232,6 +265,31 @@ func TestHTMLServerServerManagerNonGetMenuOnlyCompatPath(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Greater(t, htmlAuthCount("svc-b:/api/servermanage/queryconfig"), int32(0))
+}
+
+func TestHTMLServerRuntimeGraphRoutesHaveCanonicalSystemPath(t *testing.T) {
+	for _, path := range []string{
+		"/api/servermanage/runtimetopology",
+		"/api/servermanage/runtimeservice",
+	} {
+		t.Run(path, func(t *testing.T) {
+			htmlAuthReset()
+			system := newHTMLServerManagerRouteContext(t, "server", path, http.MethodPost)
+
+			htmls := NewHTMLServer(0)
+			htmls.AddServiceRouter(system.Router)
+			require.NoError(t, htmls.Prepare())
+
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+			req.RemoteAddr = "127.0.0.1:9"
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			htmls.Handler().ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Greater(t, htmlAuthCount("server:"+path), int32(0))
+		})
+	}
 }
 
 func TestHTMLServerReservedAuthPathsNotReRegisteredAsCompat(t *testing.T) {
@@ -346,12 +404,27 @@ func newHTMLServerManagePublicContext(t *testing.T, name string) *router.Service
 }
 
 func newHTMLServerManagerRouteContext(t *testing.T, name, path, method string) *router.ServiceContext {
+	return newHTMLServerManagerRouteContextWithAuth(t, name, path, method, false)
+}
+
+func newHTMLAuthenticatedServerManagerRouteContext(
+	t *testing.T,
+	name, path, method string,
+) *router.ServiceContext {
+	return newHTMLServerManagerRouteContextWithAuth(t, name, path, method, true)
+}
+
+func newHTMLServerManagerRouteContextWithAuth(
+	t *testing.T,
+	name, path, method string,
+	auth bool,
+) *router.ServiceContext {
 	t.Helper()
 	api := &markerAuthRouter{}
 	info := &types.RouterInfo{
 		Path: path, Method: method, ServiceName: name,
 		PathType: types.ServerManagerType, InstanceName: "SM-" + name, StructName: "markerAuthRouter",
-		PackPath: "fixture/api/servermanage", Auth: false,
+		PackPath: "fixture/api/servermanage", Auth: auth,
 	}
 	api.info = info
 	info.SetInstance(api)

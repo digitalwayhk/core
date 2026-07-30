@@ -9,6 +9,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	serverruntime "github.com/digitalwayhk/core/pkg/server/runtime"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/stretchr/testify/require"
@@ -233,9 +234,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 				users.Config.ManageAuth = orders.Config.ManageAuth
 				tc.mutate(orders, users)
 
-				_, err := resolveManageAuthAuthority(
+				err := validateManageAuthCompatibility(
+					orders,
 					[]*router.ServiceContext{orders, users},
-					"orders-"+tc.name,
 				)
 				require.Error(t, err)
 				require.ErrorContains(t, err, tc.field)
@@ -305,9 +306,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 				users := manageAuthTestContextWithOptions(t, "users-redis-"+tc.name, true, usersCfg)
 				tc.mutate(users)
 
-				_, err := resolveManageAuthAuthority(
+				err := validateManageAuthCompatibility(
+					orders,
 					[]*router.ServiceContext{orders, users},
-					"orders-redis-"+tc.name,
 				)
 				require.Error(t, err)
 				require.ErrorContains(t, err, tc.field)
@@ -424,9 +425,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 					tc.mutate(orders, users)
 				}
 
-				_, err := resolveManageAuthAuthority(
+				err := validateManageAuthCompatibility(
+					orders,
 					[]*router.ServiceContext{orders, users},
-					"orders-casdoor-"+tc.name,
 				)
 				require.Error(t, err)
 				require.ErrorContains(t, err, tc.field)
@@ -487,9 +488,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 		orders := manageAuthTestContextWithOptions(t, "orders-auth-mode-local", true, ordersCfg)
 		users := manageAuthTestContextWithOptions(t, "users-auth-mode-local", true, usersCfg)
 
-		_, err := resolveManageAuthAuthority(
+		err := validateManageAuthCompatibility(
+			orders,
 			[]*router.ServiceContext{orders, users},
-			"orders-auth-mode-local",
 		)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "AuthRevocation.Mode")
@@ -516,9 +517,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 			orders := manageAuthTestContextWithOptions(t, "orders-casdoor-load-auth", true, ordersCfg)
 			users := manageAuthTestContextWithOptions(t, "users-casdoor-load-auth", true, usersCfg)
 
-			_, err := resolveManageAuthAuthority(
+			err := validateManageAuthCompatibility(
+				orders,
 				[]*router.ServiceContext{orders, users},
-				"orders-casdoor-load-auth",
 			)
 			require.Error(t, err)
 			require.ErrorContains(t, err, "orders-casdoor-load-auth")
@@ -537,9 +538,9 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 			orders := manageAuthTestContextWithOptions(t, "orders-casdoor-load-other", true, ordersCfg)
 			users := manageAuthTestContextWithOptions(t, "users-casdoor-load-other", true, usersCfg)
 
-			_, err := resolveManageAuthAuthority(
+			err := validateManageAuthCompatibility(
+				orders,
 				[]*router.ServiceContext{orders, users},
-				"orders-casdoor-load-other",
 			)
 			require.Error(t, err)
 			require.ErrorContains(t, err, "users-casdoor-load-other")
@@ -548,6 +549,85 @@ func TestResolveManageAuthAuthority(t *testing.T) {
 				"client-secret-value", "test-certificate", "other-webhook-secret-leaked")
 		})
 	})
+}
+
+// TestResolveManageAuthAuthorityPropagatesAuthorityConfig 验证显式权威服务会在
+// Server 创建前统一所有业务服务的 ManageAuth，同时保持 Private 和 ServerManage 域独立。
+func TestResolveManageAuthAuthorityPropagatesAuthorityConfig(t *testing.T) {
+	supplier := manageAuthTestContext(t, "shop-supplier")
+	order := manageAuthTestContext(t, "shop-order")
+	user := plainServiceContext(t, "shop-user")
+	system := manageAuthTestContext(t, "server")
+
+	supplier.Config.ManageAuth.AccessSecret = "supplier-manage-access"
+	supplier.Config.ManageAuth.RefreshSecret = "supplier-manage-refresh"
+	supplier.Config.ManageAuth.AccessExpire = 8100
+	supplier.Config.ManageAuth.RefreshExpire = 9100
+
+	orderAuth := order.Config.Auth
+	orderServerManage := order.Config.ServerManageAuth
+	userAuth := user.Config.Auth
+	userServerManage := user.Config.ServerManageAuth
+	systemManage := system.Config.ManageAuth
+	supplier.RuntimeAggregator = serverruntime.NewAggregator(nil, nil, serverruntime.Config{})
+	system.RuntimeAggregator = serverruntime.NewAggregator(nil, nil, serverruntime.Config{})
+
+	web := bareWebServer()
+	web.ViewPort = 18081
+	web.ManageAuthAuthorityService = "shop-supplier"
+	authority, err := web.resolveViewManageAuthAuthority(
+		[]*router.ServiceContext{system, order, user, supplier},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, authority)
+	require.Same(t, supplier, authority.context)
+	require.Equal(t, supplier.Config.ManageAuth, order.Config.ManageAuth)
+	require.Equal(t, supplier.Config.ManageAuth, user.Config.ManageAuth)
+	require.Equal(t, orderAuth, order.Config.Auth)
+	require.Equal(t, orderServerManage, order.Config.ServerManageAuth)
+	require.Equal(t, userAuth, user.Config.Auth)
+	require.Equal(t, userServerManage, user.Config.ServerManageAuth)
+	require.Equal(t, systemManage, system.Config.ManageAuth)
+	require.Same(t, supplier.RuntimeAggregator, system.RuntimeAggregator)
+}
+
+// TestResolveManageAuthAuthorityPropagatesCasdoorRevocation 验证 Manage Casdoor
+// 继承共享撤销权威，但各服务本地 Badger 快照目录仍保持隔离。
+func TestResolveManageAuthAuthorityPropagatesCasdoorRevocation(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := writeManageCasdoorYAML(
+		t, dir, "authority.yaml",
+		"http://127.0.0.1:18000", "client-id", "client-secret-value",
+		"test-certificate", "org", "app", "http://localhost:3000",
+	)
+	supplierCfg := compatibleManageAuthConfig("shop-supplier-casdoor")
+	enableSharedCasdoor(t, supplierCfg, yamlPath)
+	orderCfg := compatibleManageAuthConfig("shop-order-casdoor")
+	orderBadgerPath := orderCfg.AuthRevocation.BadgerPath
+	orderPrivateAuth := orderCfg.Auth
+	orderCfg.AuthRevocation.Mode = config.AuthRevocationModeLocal
+	orderCfg.AuthRevocation.Redis = config.AuthRevocationRedisConfig{}
+
+	supplier := manageAuthTestContextWithOptions(
+		t, "shop-supplier-casdoor", true, supplierCfg,
+	)
+	order := manageAuthTestContextWithOptions(
+		t, "shop-order-casdoor", true, orderCfg,
+	)
+
+	authority, err := resolveManageAuthAuthority(
+		[]*router.ServiceContext{order, supplier},
+		"shop-supplier-casdoor",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, authority)
+	require.Equal(t, supplier.Config.ManageAuth, order.Config.ManageAuth)
+	require.Equal(t, supplier.Config.AuthRevocation.Mode, order.Config.AuthRevocation.Mode)
+	require.Equal(t, supplier.Config.AuthRevocation.Redis, order.Config.AuthRevocation.Redis)
+	require.Equal(t, orderBadgerPath, order.Config.AuthRevocation.BadgerPath)
+	require.Equal(t, orderPrivateAuth, order.Config.Auth)
 }
 
 func assertManageAuthErrorDoesNotLeak(t *testing.T, message string, forbidden ...string) {
@@ -580,9 +660,9 @@ func TestResolveViewManageAuthAuthorityDefaultsToBusinessService(t *testing.T) {
 	require.Same(t, shop.Router, authority.router)
 }
 
-// TestResolveViewManageAuthAuthorityAllowsExplicitServiceRouting 证明多个独立业务服务
-// 未配置默认权威时不阻止开发视图启动，认证请求改由 service 参数明确目标。
-func TestResolveViewManageAuthAuthorityAllowsExplicitServiceRouting(t *testing.T) {
+// TestResolveViewManageAuthAuthorityRequiresConfiguredAuthority 证明多个业务服务
+// 必须显式指定统一的 Manage Auth 权威，不能退回为每服务独立签发管理凭证。
+func TestResolveViewManageAuthAuthorityRequiresConfiguredAuthority(t *testing.T) {
 	system := manageAuthInitContext(t, "server")
 	orders := manageAuthInitContext(t, "orders")
 	users := manageAuthInitContext(t, "users")
@@ -594,7 +674,7 @@ func TestResolveViewManageAuthAuthorityAllowsExplicitServiceRouting(t *testing.T
 	authority, err := web.resolveViewManageAuthAuthority(
 		[]*router.ServiceContext{system, orders, users},
 	)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "ManageAuthAuthorityService")
 	require.Nil(t, authority)
 }
 

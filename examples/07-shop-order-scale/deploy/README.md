@@ -30,6 +30,19 @@ docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml up shop
 - 入口服务 `shop-user` 通过 `SHOP_RUNTIME_PROM_URL=http://prometheus:9090` 启用 Runtime Aggregator 查询端。
 - 本地可访问 `http://127.0.0.1:19090` 查看 Prometheus；Admin 只调用 `POST /api/servermanage/runtimetopology` 与 `runtimeservice`，不直连 Prometheus。
 
+all-in-one 调试进程默认查询 `http://127.0.0.1:19090`。启动示例前或启动后运行以下
+Prometheus 容器；它从宿主机统一的 `9101/metrics` 采集带逻辑服务标签的 Core 指标：
+
+```bash
+docker run --rm --name shop-07-prometheus \
+  -p 19090:9090 \
+  -v "$PWD/examples/07-shop-order-scale/deploy/prometheus-all-in-one.yml:/etc/prometheus/prometheus.yml:ro" \
+  prom/prometheus:v2.54.1
+```
+
+如果使用非默认地址，可通过 `SHOP_RUNTIME_PROM_URL` 覆盖。运行图聚合器在进程启动时
+创建，因此变更查询地址后需要重启 all-in-one 进程。
+
 scale 模式：
 
 ```bash

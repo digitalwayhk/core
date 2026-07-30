@@ -75,6 +75,7 @@ func ValueMetric(v float64, state MetricState) MetricValue {
 func MergeStates(states ...MetricState) MetricState {
 	rank := map[MetricState]int{
 		StateOK:           0,
+		StateNoTraffic:    0,
 		StatePartial:      1,
 		StateStale:        2,
 		StateNotCollected: 3,

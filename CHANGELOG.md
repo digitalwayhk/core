@@ -6,7 +6,7 @@
 
 ### Added
 
-- 多服务运行图与请求聚合监控（Runtime Observability）：go-zero/Prometheus 历史源、Core 调用边与 gRPC 入站低基数指标、ServerManage `runtimetopology`/`runtimeservice`、示例 07 Prometheus scrape，以及 Admin 运行图视图。详见 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md`。
+- 多服务运行与请求聚合监控（Runtime Observability）：go-zero/Prometheus 历史源、Core 调用边与 gRPC 入站低基数指标、ServerManage `runtimetopology`/`runtimeservice`、示例 07 Prometheus scrape，以及 Admin 运行视图。详见 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md`。
 - `ServerConfig.RuntimeObservability` 查询端配置（`Mode=off|prometheus`）与能力矩阵登记。
 - 配置到运行时闭集门禁、公共 API/OpenAPI/路由兼容基线和类型化公共错误契约。
 - `PrefixedBadgerDB.EnableWriteBehind`、显式损坏恢复策略和可识别的 `PendingSyncError`。

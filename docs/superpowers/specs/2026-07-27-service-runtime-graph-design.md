@@ -1,4 +1,4 @@
-# 多服务运行图与请求聚合监控设计
+# 多服务运行与请求聚合监控设计
 
 ## 1. 文档状态
 
@@ -24,7 +24,7 @@ go-zero `v1.10.2` 已提供 HTTP、zrpc、Prometheus 和 OpenTelemetry 基础能
 
 ## 3. 目标
 
-1. 在 Web Admin 提供多服务运行图，先展示全局服务关系，再进入单个服务查看请求聚合。
+1. 在 Web Admin 提供多服务运行，先展示全局服务关系，再进入单个服务查看请求聚合。
 2. 全局图只展示逻辑服务；MySQL、Pending、Outbox、EventBridge 等组件进入服务内部视图。
 3. 第一版只做聚合指标，不提供单次 Trace 查询或请求回放。
 4. 复用 go-zero 的 HTTP、zrpc、Prometheus Histogram 和 OpenTelemetry 能力，不维护第二套通用路由统计。
@@ -48,7 +48,7 @@ go-zero `v1.10.2` 已提供 HTTP、zrpc、Prometheus 和 OpenTelemetry 基础能
 | 项目 | 决策 |
 | --- | --- |
 | 主界面 | 混合运维台 |
-| 第一层 | 全局服务运行图 |
+| 第一层 | 全局服务运行 |
 | 第二层 | 点击服务后按请求路由查看运行状态 |
 | 默认视角 | 请求优先，不是实例优先 |
 | 数据粒度 | 聚合指标，不做单次 Trace |
@@ -327,7 +327,7 @@ POST /api/servermanage/runtime/service/{service}
 
 ## 10. Web Admin 交互
 
-### 10.1 全局服务运行图
+### 10.1 全局服务运行
 
 - 顶部显示健康服务数、运行实例数、总请求率和全局 p95。
 - 服务节点显示逻辑服务名、健康实例数、QPS、错误率和 p95。

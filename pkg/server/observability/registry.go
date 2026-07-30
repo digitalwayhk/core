@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	registryMu  sync.Mutex
-	collectors  = map[string]*ComponentCollector{}
+	registryMu         sync.Mutex
+	componentCollector *ComponentCollector
 )
 
-// RegisterComponentProviders 按服务名隔离注册本进程组件 Collector。
+// RegisterComponentProviders 将服务组件注册到进程级单例 Collector。
 func RegisterComponentProviders(service string, providers ...RuntimeMetricProvider) error {
 	if len(providers) == 0 {
 		return fmt.Errorf("no runtime metric providers")
@@ -24,29 +24,22 @@ func RegisterComponentProviders(service string, providers ...RuntimeMetricProvid
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	merged := providers
-	if old := collectors[svc]; old != nil {
-		old.mu.Lock()
-		merged = append(append([]RuntimeMetricProvider(nil), old.providers...), providers...)
-		old.mu.Unlock()
-		prometheus.Unregister(old)
-	}
-	c := NewComponentCollector(svc, merged)
-	if err := prometheus.Register(c); err != nil {
-		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			if existing, ok := are.ExistingCollector.(*ComponentCollector); ok {
-				prometheus.Unregister(existing)
-				if err2 := prometheus.Register(c); err2 != nil {
-					return err2
+	if componentCollector == nil {
+		c := NewComponentCollector(svc, nil)
+		if err := prometheus.Register(c); err != nil {
+			if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+				existing, ok := are.ExistingCollector.(*ComponentCollector)
+				if !ok {
+					return err
 				}
+				c = existing
 			} else {
 				return err
 			}
-		} else {
-			return err
 		}
+		componentCollector = c
 	}
-	collectors[svc] = c
+	componentCollector.replaceProviders(svc, providers)
 	return nil
 }
 
@@ -54,8 +47,8 @@ func RegisterComponentProviders(service string, providers ...RuntimeMetricProvid
 func ResetComponentRegistryForTest() {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	for _, c := range collectors {
-		prometheus.Unregister(c)
+	if componentCollector != nil {
+		prometheus.Unregister(componentCollector)
 	}
-	collectors = map[string]*ComponentCollector{}
+	componentCollector = nil
 }

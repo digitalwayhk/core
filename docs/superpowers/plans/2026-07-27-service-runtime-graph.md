@@ -1,9 +1,9 @@
-# 多服务运行图与请求聚合监控 Implementation Plan
+# 多服务运行与请求聚合监控 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.  
 > **本仓库约束：** `Claude.md` 禁止派发子智能体；必须由当前主 Agent 串行执行，不得使用 subagent-driven-development。
 
-**Goal:** 在 go-zero Prometheus/zrpc/OpenTelemetry 之上补齐 Core 调用边、gRPC 服务端与组件指标，经 ServerManage Runtime API 向 Web Admin 提供全局服务运行图与服务请求视图，并以示例 07 做真实多副本验收；稳定后按兼容流程废弃旧 `RouterStats`。
+**Goal:** 在 go-zero Prometheus/zrpc/OpenTelemetry 之上补齐 Core 调用边、gRPC 服务端与组件指标，经 ServerManage Runtime API 向 Web Admin 提供全局服务运行与服务请求视图，并以示例 07 做真实多副本验收；稳定后按兼容流程废弃旧 `RouterStats`。
 
 **Architecture:** 各业务进程只负责**低基数暴露**（go-zero 通用指标 + Core 自定义 Collector）；**Prometheus 是唯一历史指标源**。Runtime Aggregator 部署在 **ServerManage 可达边界**（通常是持有 ServerManage 路由的 Web/管理进程），从 `ClusterProvider` 取全集群拓扑，从 Prometheus 查询窗口指标，合并后返回 Admin DTO。`RuntimeMetricProvider` 只在本进程注册 Collector，Aggregator **不**在请求路径直连各实例 Provider。
 

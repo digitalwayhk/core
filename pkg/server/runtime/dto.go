@@ -10,6 +10,7 @@ const (
 	StatePartial      MetricState = "partial"
 	StateStale        MetricState = "stale"
 	StateUnavailable  MetricState = "unavailable"
+	StateNoTraffic    MetricState = "no_traffic"
 	StateNotCollected MetricState = "not_collected"
 )
 
@@ -88,18 +89,18 @@ type InstanceMetrics struct {
 
 // ComponentSnapshot 服务内部组件。
 type ComponentSnapshot struct {
-	Component string             `json:"component"`
-	State     MetricState        `json:"state"`
+	Component string              `json:"component"`
+	State     MetricState         `json:"state"`
 	Gauges    map[string]*float64 `json:"gauges,omitempty"`
 }
 
 // ServiceDetailResponse 服务详情。
 type ServiceDetailResponse struct {
-	GeneratedAt time.Time            `json:"generated_at"`
-	Window      string               `json:"window"`
-	Service     ServiceNode          `json:"service"`
-	Routes      []RouteMetrics       `json:"routes"`
-	Instances   []InstanceMetrics    `json:"instances"`
-	Components  []ComponentSnapshot  `json:"components"`
-	Warnings    []RuntimeWarning     `json:"warnings"`
+	GeneratedAt time.Time           `json:"generated_at"`
+	Window      string              `json:"window"`
+	Service     ServiceNode         `json:"service"`
+	Routes      []RouteMetrics      `json:"routes"`
+	Instances   []InstanceMetrics   `json:"instances"`
+	Components  []ComponentSnapshot `json:"components"`
+	Warnings    []RuntimeWarning    `json:"warnings"`
 }

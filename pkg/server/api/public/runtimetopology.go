@@ -11,7 +11,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// RuntimeTopology 返回全局服务运行图拓扑。
+// RuntimeTopology 返回全局服务运行拓扑。
 type RuntimeTopology struct {
 	api.ServerArgs
 	Window string `json:"window"`
@@ -19,6 +19,9 @@ type RuntimeTopology struct {
 
 func (own *RuntimeTopology) Parse(req types.IRequest) error {
 	if err := own.ServerArgs.Parse(req); err != nil {
+		return err
+	}
+	if err := req.Bind(own); err != nil {
 		return err
 	}
 	if v := req.GetValue("window"); v != "" {
@@ -75,6 +78,9 @@ type RuntimeService struct {
 
 func (own *RuntimeService) Parse(req types.IRequest) error {
 	if err := own.ServerArgs.Parse(req); err != nil {
+		return err
+	}
+	if err := req.Bind(own); err != nil {
 		return err
 	}
 	if v := req.GetValue("window"); v != "" {

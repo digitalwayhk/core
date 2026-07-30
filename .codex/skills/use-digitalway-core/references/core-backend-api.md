@@ -1,8 +1,8 @@
 # Digitalway Core 后端开发参考
 
-本参考以当前代码和发布契约为准。示例 01–06 依次覆盖最简服务、业务状态机、模型/Manage 继承、性能优化、Casdoor 身份生命周期和 Redis 多服务协同。创建新服务时按复杂度选择最近样例，不另造平行约定。
+本参考以当前代码和发布契约为准。示例 01–07 依次覆盖最简服务、业务状态机、模型/Manage 继承、性能优化、Casdoor 身份生命周期、Redis 多服务协同与订单水平扩展；框架侧多服务运行图见 ServerManage Runtime API。创建新服务时按复杂度选择最近样例，不另造平行约定。
 
-完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。
+完整场景矩阵见 `docs/codex/FRAMEWORK_USAGE_GUIDE.md`。消费方安装本 skill 见 `docs/codex/CONSUMER_AI_SKILL_SETUP.md`。
 
 ## 标准样例目录
 
@@ -65,7 +65,9 @@ examples/04-shop-performance/
 ├── api/public,api/private/       # RouterInfo 结果缓存与可信缓存键
 ├── api/manage/                   # EventBridge 主动失效
 ├── business/                     # 下单事实缓存与 SingleFlight
-└── models/order_write_store.go   # Badger 可靠本地写、Group Commit、SQLite 同步
+├── models/order_write_store.go   # ReliableWriteStore 适配、UseWriteBehind
+├── models/order_write_runtime.go # 实例级 OrderWriteRuntime，禁止全局 store
+└── service.go                    # UseResource 注册 store，Stop 时 Unbind
 
 examples/05-shop-casdoor-rbac/
 ├── models/{common,basedata,transaction,identity,internal/store,schema}
@@ -80,6 +82,18 @@ examples/06-shop-microservices/
 ├── supplier-service             # 供应商/商品权威与受限 Public API
 ├── order-service                # 订单/支付事实与 Outbox
 └── main,deploy                  # 同进程调试和三进程部署
+
+examples/07-shop-order-scale/
+├── contract,dto,bootstrap        # 稳定服务名、错误、配置组装
+├── user-service                  # 入口 facade；幂等边界见 README
+├── supplier-service              # 商品权威与订单投影
+├── order-service                 # 多副本接单、OrderWriteRuntime、OrderRule、Outbox
+├── main/{all-in-one,user,order,supplier}
+├── deploy/                       # Docker、Prometheus scrape 示例
+└── README.md                     # AutoMachineID、共享 MySQL、06/07 对比
+
+examples/integration/07-shop-order-scale/
+examples/integration/07-shop-order-scale-multi-process/
 ```
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
@@ -260,18 +274,32 @@ func (own *Product) UpdateValid(_ interface{}) error {
 
 校验应同时覆盖字段格式、数值范围和业务唯一性。公开错误使用框架的类型化公开错误，不直接暴露数据库错误文本。
 
-### 模型持久化边界
+### 模型持久化边界与双路径访问
 
-Manage CRUD 使用 `entity.NewModelList[T](nil)`。public/private 不直接依赖 GORM、SQLite 或具体数据库类型，而是调用模型封装的方法，例如：
+框架支持多种数据库类型（SQLite、MySQL、PostgreSQL 等）。**SQLite 只是零配置的默认/开发选项**：本地开发与单机测试最简单，无需额外配置即可作为本地库，也可临时当作“远程”权威库；**生产与多进程共享权威库应按 MySQL 等网络库选型**，不是“只能 SQLite”。
+
+推荐在服务**最基础 model 层**（如 `models/common`、`models/data_action.go`、`models/internal/store`）集中定义明确的 `IDataAction` 获取方法，例如 `LocalDataAction()` / `RemoteDataAction()` / `ManageDataAction()`。后续切换库类型时**只改这些方法**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
+
+**Manage API 与 public/private 使用数据库的方式不同，不可混用：**
+
+| 路径 | 访问方式 | 适用 |
+| --- | --- | --- |
+| Manage | `ModelList` + 标准 Search/View/Add… | 管理后台；框架筛选/排序/分页；管理人员配置与查询 |
+| public/private | models 业务方法（内部 `IDataAction`）+ 可选 business | **所有**业务读写默认模式（见 01）；API 不直接 `NewModelList` |
+| public/private 高吞吐写 | 04/07 专用 store：本地可靠写 + `UseWriteBehind` → 远程权威库 | 下单/支付等需水平扩展或极高 TPS 时再升级，不是简单业务的必选项 |
+
+两者可以**共用同一 model 结构体**，通过基础 model 上的 DataAction 取连接。库类型（SQLite/MySQL 等）由 DataAction 决定，与「是否 ModelList」正交。
+
+public/private 默认示例（01：语义方法 + `IDataAction`，不是 ModelList）：
 
 ```go
-product, err := models.NewProduct().FindByID(productID)
+product, err := models.NewProduct().FindByID(productID) // 内部 getDataAction().Load(...)
 orders, err := models.NewOrder().QueryByUser(userID)
 order, err := models.NewOrder().FindOwned(orderID, userID)
-err = order.Delete()
+err = order.Delete() // 内部 getDataAction().Delete(...)
 ```
 
-模型方法内部依赖 `types.IDataAction`。数据库实现只在模型持久化边界选择，不沿 Service -> API -> Model 逐层传递。标准样例在 `models/data_action.go` 中延迟创建并共享 IDataAction：
+集中 DataAction 示例：
 
 ```go
 var (
@@ -279,15 +307,15 @@ var (
 	dataAction     persistencetypes.IDataAction
 )
 
-func getDataAction() persistencetypes.IDataAction {
+// LocalDataAction / RemoteDataAction：切换 SQLite→MySQL 只改此处实现。
+func LocalDataAction() persistencetypes.IDataAction {
 	dataActionOnce.Do(func() {
 		dataAction = entity.GetGlobalSqliteInstance(NewProduct().GetLocalDBName())
+		// 生产示例：dataAction = entity.GetGlobalMysqlInstance(...)
 	})
 	return dataAction
 }
 ```
-
-这里共享的是无请求状态的数据访问能力。模型实例、当前用户、查询条件和响应不得放入该单例。
 
 SQLite 默认 mmap 预算为 256MiB/实例，可通过 `Sqlite.MmapSize` 覆盖；负值关闭。不得恢复机器级 30GB 默认。
 
@@ -335,11 +363,33 @@ func NewProductManage() *ProductManage {
 
 商品管理注册 `view/search/add/edit/remove`，通过模型的 `AddValid`/`UpdateValid` 校验名称、价格和唯一性。自定义操作以值嵌入 `manage.Operation[T]`，不要嵌入指针。
 
+### 指定 Manage 数据源（服务级 `GetList`）
+
+Manage **应当**使用 `ModelList`，以获得默认筛选、排序、分页等标准能力（适合管理人员配置系统，不追求业务级吞吐）。
+
+- **未重写 `GetList()`** 时：框架默认使用进程运行目录下 `db/` 中的**本地 SQLite**（按模型库名）。
+- **生产或共享权威库**：在 models 提供 `ManageDataAction()` / `RemoteDataAction()`，并在本服务最基础的 `common.ServiceManage[T]` **统一重写** `GetList()`，使本服务全部 Manage 连同一数据源。
+- 不要在具体 Manage 的 `OnSearchBefore` 手写列表并 `stop=true`，否则会绕过 `SearchItem`/`LoadList`，破坏前端筛选、排序、分页、关联与 `SearchAfter`。
+
+```go
+// models 包只暴露 IDataAction，不让 api/manage 直接依赖具体驱动。
+func ManageDataAction() persistencetypes.IDataAction {
+	return RemoteDataAction() // 开发可为 SQLite；生产常为共享 MySQL
+}
+
+// common.ServiceManage 为本服务全部 Manage 统一选择数据库。
+func (*ServiceManage[T]) GetList() interface{} {
+	return entity.NewModelList[T](models.ManageDataAction())
+}
+```
+
+具体 `OrderManage`、`ProductManage` 等继续使用框架标准 `Search`，只在确有业务语义时实现 Hook。仅当**单个**模型需要特殊库时，才可在该 Manage 重写 `GetList()`，且仍必须返回绑定目标 `IDataAction` 的 `ModelList`。
+
 ### 只读管理
 
 订单管理只注册 `view/search`，不注册 `add/edit/remove`。只读不是依赖 handler 内拒绝写入，而是根本不把写 command 暴露为路由。集成测试应断言未注册 command 返回 404。
 
-`ModelList` 只用于 Manage 和框架管理能力。public/private 使用面向业务语义的模型方法，不直接暴露通用列表操作。
+**再次强调：** `ModelList` 是 Manage 路径的正确默认；public/private 默认用 models 业务方法 + `IDataAction`；仅高吞吐写再上 04/07 专用 store。共用 model 结构，不共用 Manage 列表访问方式。
 
 ## Public API
 
@@ -387,7 +437,16 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - 商品、供应商、支付类型、订单状态变更后，通过 ServiceContext 专属 EventBridge 执行主动失效；TTL 只是兜底。
 - 同键冷加载使用 RouteCache/`syncx.SingleFlight`，不在 API 自建锁和队列。
 
-`PrefixedBadgerDB` write-behind 与 RouterInfo L2 是两种不同能力：L2 可重建；write-behind pending 在远端数据库确认前是业务事实。高 TPS 路径必须等 Badger `SyncWrites` 成功后才返回，后台同步 SQLite 成功后再删除本地副本。基准必须与对照示例同机、同口径、多轮运行，同时报告 QPS/TPS、p50/p95/p99、错误率、pending 收敛和磁盘上限。
+`PrefixedBadgerDB` / `ReliableWriteStore` 的 write-behind 与 RouterInfo L2 是两种不同能力：L2 可重建；write-behind pending 在远端权威库确认前是业务事实。高 TPS 路径必须等**本地可靠写成功**后才向调用方确认，再异步同步远程；远端 ACK 后才删除 pending。
+
+标准业务热路径（示例 04/07，**不是** Manage/`ModelList`）：
+
+1. public/private → business → 实例级 `OrderWriteRuntime`（或等价注入），不使用包级全局 store registry。
+2. `Start` 中创建 store，调用 `UseWriteBehind(WriteBehindTarget)` 绑定**远程权威库**汇合目标；`ServiceContext.UseResource` 管理关闭。
+3. 远程权威库类型由 models 的 DataAction/`WriteBehindTarget` 决定：开发可用 SQLite；多进程/Docker 应用共享 MySQL 等网络库。04 可用 `ModelListWriteBehindTarget` 作示例目标适配；07 订单权威库应用真正共享 remote。
+4. `EnableWriteBehind(ModelList)` / `SetSyncDB` 仅为兼容层；`StartOrderWriteStore`/`StopOrderWriteStore` 已废弃。
+
+基准必须与对照示例同机、同口径、多轮运行，同时报告 QPS/TPS、p50/p95/p99、错误率、pending 收敛和磁盘上限。
 
 详细运行时契约见 `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`，容量契约见 `docs/codex/PERFORMANCE_SLO_BASELINE.md`。
 
@@ -508,6 +567,41 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 验收必须同时运行 `examples/integration/06-shop-microservices` 和 `examples/integration/06-shop-microservices-three-process`。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
+
+## 订单水平扩展（示例 07）
+
+以 `examples/07-shop-order-scale` 为标准模板，在 06 的多服务边界之上演示可扩容 order 副本：
+
+- `AutoMachineID=true`：MachineID 由 ClusterProvider lease 分配，不得为可扩容副本硬编码固定 MachineID。
+- 每副本本地 pending / Outbox / Inbox / 投影目录隔离；最终订单权威库是**共享**远程库（Docker/多进程下为 MySQL 等），不是每进程 SQLite remote。
+- 下单热路径：public/private → business → `OrderWriteRuntime` → 本地可靠写 → `UseWriteBehind` 同步远程权威库；Manage 继续用 `ModelList` 做后台视图/配置（服务级 `GetList` 绑定同一权威库 DataAction 亦可），但不得替代业务写路径。
+- `OrderRule` 等可配置规则走 Manage + 可靠事件同步到副本本地缓存；下单校验读本地规则快照，不在热路径同步打远程权威库。
+- 多实例诊断字段记录 `TraceID`、`ServiceName`、`ServiceInstanceID`；`ServiceInstanceIP` 仅诊断。
+- 幂等边界必须写进 README：只扩展 order 时 user 入口幂等策略的限制；远程幂等探测在 MySQL 不可达时 fail-closed 或明确文档化降级风险。
+- 部署侧提供 Prometheus scrape 配置（如 `deploy/prometheus*.yml`），标签至少稳定暴露 `service` 与 `service_instance_id`，供 Runtime Aggregator 查询。
+- 集成测试：`examples/integration/07-shop-order-scale` 与 `07-shop-order-scale-multi-process`；多副本 UAT 应采样 discovery 确认 `MachineID`/`ServiceInstanceID` 唯一。
+
+## 多服务运行图（Runtime API）
+
+运维与 Admin 监控使用框架 Runtime 链路，**不要**恢复旧 `RouterStats` 或未注册的 `/api/servermanage/statistics`。
+
+| 入口 | 路径 | 认证 | 用途 |
+| --- | --- | --- | --- |
+| 全局拓扑 | `POST /api/servermanage/runtimetopology` | ServerManageAuth | 逻辑服务节点、同步/异步边、窗口聚合 |
+| 单服务详情 | `POST /api/servermanage/runtimeservice` | ServerManageAuth | 路由请求聚合、实例分布、组件指标 |
+
+契约要点：
+
+- 请求体/查询支持 `window`：仅 `15s`、`5m`、`1h`；`runtimeservice` 另需 `service`。
+- **ClusterProvider** 提供服务实例与地址；**Prometheus** 提供 rate/error/histogram 历史；RouterInfo 提供稳定路由元数据；Pending/Outbox/EventBridge 等通过本进程 Collector 暴露后由 Prom 查询。
+- Runtime Aggregator 只部署在 ServerManage 可达边界：业务副本暴露 scrape 指标，**禁止** Aggregator 在 API 请求中直连各实例 `/metrics` 或 Provider。
+- 指标诚实状态：`ok` / `partial` / `stale` / `unavailable` / `no_traffic` / `not_collected`。缺失时数值为 `null` + `state`，不得把未采集写成 0。
+- 同步边：跨服务 gRPC/内部调用；异步边：Outbox 发布与订阅索引汇合及低基数 gauge。全局图画逻辑服务，组件进入服务内部视图。
+- 标签低基数：禁止 userId、orderId、TraceID、原始 URL、SQL 等作为指标标签。
+- 兼容级别见 `docs/codex/API_COMPATIBILITY_SURFACE.md`（Experimental → 趋向 Stable）与 `docs/codex/DEPRECATION_REGISTER.md`。
+- Web Admin 页面为 `MonitorSystem`，前端经 ServerManage 调 Runtime API，浏览器不直连 Prometheus。
+
+实现位置：`pkg/server/runtime`、`pkg/server/api/public/runtimetopology.go`、`pkg/server/observability`；验收可参考示例 07 的 scrape 配置与 multi-process 集成测试。
 
 ## 标准集成测试模板
 
@@ -651,12 +745,13 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 新服务将路径替换为自身集成测试目录。涉及并发、身份隔离或 WebSocket 时必须运行 race；需要稳定性证据时运行多次，不用无断言 sleep 或 retry 掩盖失败。
 
-## PrefixedBadgerDB
+## PrefixedBadgerDB / ReliableWriteStore
 
 - 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
-- 可靠写回使用 `EnableWriteBehind`，配置必须满足 `SyncWrites=true`、`DetectConflicts=true`、`CorruptionPolicyFail`。
-- `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写并通过 `EnableWriteBehind` 校验。
-- `SetSyncDB` 已废弃，仅保留编译兼容；其绑定错误会在后续写入和关闭时返回。
+- **新业务默认**：`ReliableWriteStore` / `PrefixedBadgerDB.UseWriteBehind(WriteBehindTarget)` 绑定远端汇合目标；配置必须满足可靠写要求（含 `SyncWrites=true`、冲突检测与 fail 策略，以 `EnableWriteBehind`/`UseWriteBehind` 校验为准）。
+- 示例适配：04 使用 `ModelListWriteBehindTarget`；07 使用订单专用 `WriteBehindTarget` 指向共享远程权威库。
+- `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写。
+- `SetSyncDB`、`EnableWriteBehind(ModelList)` 兼容路径已废弃或仅兼容，不得作为新热路径设计中心。
 - 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
 - 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
 
@@ -665,9 +760,10 @@ go test -race ./examples/integration/01-simple-shop -count=1
 - Local cluster：`Stable`。
 - etcd/Consul：`Conditional`，需要显式配置和外部依赖。
 - 内部同步传输默认 gRPC，HTTP 只作为显式备用；自定义 Socket 已删除，迁移见 `docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
-- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。
+- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
+- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge 透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。
 - JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已有 publish ACK、消息 ID 去重和显式 ACK，但重试、死信、pull consumer 与生产 stream 参数尚未实现。
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 
@@ -738,10 +834,18 @@ go get github.com/digitalwayhk/core@<commit>
 - 无稳定 Code 的模型使用 BaseModel。
 - `GetHash` 与业务唯一性、保存时间精度不一致。
 - ManageService 传入内嵌实例而非真实 owner。
+- 为切换 Manage 数据库而在 `OnSearchBefore` 手写查询并返回 `stop=true`，导致标准筛选、排序、分页和关联查询失效。
 - public/private 直接返回持久化模型，或复用 Manage 列表 DTO。
 - WebSocket 把外部用户订阅与内部 EventBridge 混为一谈。
 - private WebSocket 未实现可信身份注入和用户级通知过滤。
-- 绕过 ModelList/模型持久化边界/ServiceContext，或自行实现成熟基础设施能力。
+- 绕过 models 持久化边界/`ServiceContext`，或在 API 层直接绑定具体数据库驱动。
+- public/private 直接 `NewModelList` 或套用 Manage Search/CRUD 做业务读写（正确：models 业务方法 + `IDataAction`）。
+- Manage 不用 `ModelList` 却手写 Search `stop=true` 破坏筛选分页；或该重写服务级 `GetList` 时未重写。
+- 在每个具体 model/API 里散落库连接，未在基础 model/store 集中 DataAction；或把「库类型」与「ModelList vs IDataAction」混为一谈。
 - 集成测试重新实现公共 Suite，只测 handler，或依赖开发机已有配置和数据库。
 - 仅因配置字段存在就声明能力稳定。
 - 单元测试隐式依赖 Docker/本机数据库。
+- 已需要高吞吐写时仍用全局 `StartOrderWriteStore`/`SetSyncDB` 或 Manage 式列表轮询，未采用「本地可靠写 → `UseWriteBehind` → 远程权威库」。
+- 水平扩展把最终业务库按副本分片，或用每进程私有库冒充共享 remote（开发用 SQLite、生产换共享 MySQL 是 DataAction 切换，不是分片）。
+- 恢复 `RouterStats`/`Statistics`；Runtime 把未采集指标写成 0；浏览器直连 Prometheus 或其他实例 `/metrics`。
+- 依赖 core 的业务仓库未安装 `.codex/skills/use-digitalway-core`，凭记忆编码（见 `docs/codex/CONSUMER_AI_SKILL_SETUP.md`）。

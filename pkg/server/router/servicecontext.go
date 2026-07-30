@@ -17,9 +17,9 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/observability"
-	"github.com/digitalwayhk/core/pkg/server/runtime"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/routecache"
+	"github.com/digitalwayhk/core/pkg/server/runtime"
 	casdoorauth "github.com/digitalwayhk/core/pkg/server/safe/casdoor"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -80,22 +80,22 @@ type ServiceContext struct {
 	ServiceResolver          *ServiceResolver                `json:"-"`
 	ServiceInstanceID        string
 	// RuntimeAggregator 由 ServerManage 查询端持有；业务进程可为 nil。
-	RuntimeAggregator *runtime.Aggregator `json:"-"`
-	runtimeAddress           string
-	ownsClusterProvider      bool
-	membership               *cluster.MembershipManager     `json:"-"`
-	CrossNodeBroker          *cluster.CrossNodeNoticeBroker `json:"-"`
-	nodeID                   string
-	configFingerprint        string
-	grpcServer               types.GRPCServerLifecycle
-	grpcSupervisorOnce       sync.Once
-	runtimeErrMu             sync.RWMutex
-	runtimeErr               error
-	runtimeFailure           chan error
-	lifecycleTimeout         time.Duration
-	shutdownErrMu            sync.RWMutex
-	shutdownErr              error
-	resources                *resourceManager
+	RuntimeAggregator   *runtime.Aggregator `json:"-"`
+	runtimeAddress      string
+	ownsClusterProvider bool
+	membership          *cluster.MembershipManager     `json:"-"`
+	CrossNodeBroker     *cluster.CrossNodeNoticeBroker `json:"-"`
+	nodeID              string
+	configFingerprint   string
+	grpcServer          types.GRPCServerLifecycle
+	grpcSupervisorOnce  sync.Once
+	runtimeErrMu        sync.RWMutex
+	runtimeErr          error
+	runtimeFailure      chan error
+	lifecycleTimeout    time.Duration
+	shutdownErrMu       sync.RWMutex
+	shutdownErr         error
+	resources           *resourceManager
 }
 
 const grpcLifecycleTimeout = 5 * time.Second
@@ -745,6 +745,13 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{
 		SubscriberID: sc.Service.Name,
 	})
+	if err := sc.RegisterRuntimeMetricProviders(sc.ServiceEventBridge); err != nil {
+		logx.Infow("runtime_metric_provider_register_failed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("component", "eventbridge"),
+			logx.Field("error", err),
+		)
+	}
 	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
 	if err := observability.RegisterProcessLabels(sc.Service.Name, sc.ServiceInstanceID); err != nil {
@@ -937,11 +944,23 @@ func (own *ServiceContext) UseOutbox(store event.OutboxStore) error {
 	if own == nil || own.ServiceEventBridge == nil || own.Service == nil {
 		return event.ErrServiceEventBridgeClosed
 	}
-	return own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
+	if err := own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
 		SourceService: own.Service.Name,
 		Store:         store,
 		External:      own.ServiceEventBridge.HasExternalPublisher(),
-	})
+	}); err != nil {
+		return err
+	}
+	if provider := own.ServiceEventBridge.OutboxRuntimeMetricProvider(); provider != nil {
+		if err := own.RegisterRuntimeMetricProviders(provider); err != nil {
+			logx.Infow("runtime_metric_provider_register_failed",
+				logx.Field("service", own.Service.Name),
+				logx.Field("component", "outbox"),
+				logx.Field("error", err),
+			)
+		}
+	}
+	return nil
 }
 
 // RequireOrderedReliableByShardKey 声明控制事件需要 ordered-reliable 能力。
@@ -1802,28 +1821,47 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 }
 
 func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.PayLoad, target *ServiceContext) ([]byte, error) {
+	start := time.Now()
+	resultClass := observability.ResultSuccess
+	defer func() {
+		observability.RecordInboundRequest(
+			payload.TargetService,
+			payload.TargetPath,
+			"local",
+			resultClass,
+			time.Since(start),
+		)
+	}()
 	if target == nil || target.Router == nil {
+		resultClass = observability.ResultUnavailable
 		return nil, fmt.Errorf("%w: service=%s", ErrTargetServiceUnavailable, payload.TargetService)
 	}
 	info := target.Router.GetRouter(payload.TargetPath)
 	if info == nil {
+		resultClass = observability.ResultUnavailable
 		return nil, fmt.Errorf("%w: route=%s", ErrTargetServiceUnavailable, payload.TargetPath)
 	}
 	req := ToRequest(payload)
 	if req == nil {
+		resultClass = observability.ResultServerError
 		return nil, fmt.Errorf("%w: request context for %s", ErrTargetServiceUnavailable, payload.TargetService)
 	}
 	if caller, trusted := types.TrustedInternalCallerFromContext(ctx); trusted {
 		req = requestWithTrustedInternalCaller(req, caller)
 	}
 	if err := info.AuthorizeInternalCaller(req); err != nil {
+		resultClass = observability.ClassifyError(err)
 		return nil, err
 	}
 	api, err := info.ParseNew(payload.Instance)
 	if err != nil {
+		resultClass = observability.ClassifyError(err)
 		return nil, err
 	}
 	response := info.ExecDo(api, req)
+	if response != nil && !response.GetSuccess() {
+		resultClass = observability.ClassifyError(response.GetError())
+	}
 	return json.Marshal(response)
 }
 

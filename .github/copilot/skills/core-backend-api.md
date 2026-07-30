@@ -1,17 +1,39 @@
 # Skill: core-backend-api
 
+> ## 权威来源（2026-07 起强制）
+>
+> **本文件为历史消费方速查，不得单独作为现行契约。** 生成或审查后端代码前必须优先阅读仓库内：
+>
+> 1. `.codex/skills/use-digitalway-core/SKILL.md`
+> 2. `.codex/skills/use-digitalway-core/references/core-backend-api.md`
+> 3. 冲突时以**当前代码、测试与** `docs/codex/*` **公开契约**为准
+>
+> 消费方安装 skill：`docs/codex/CONSUMER_AI_SKILL_SETUP.md` 与 `scripts/link-consumer-skill.sh`。
+>
+> ### 本文中常见过时说法（禁止再跟）
+>
+> | 过时/错误 | 现行约定 |
+> | --- | --- |
+> | TestToken：`/api/{svc}/public/testtoken` | `GET /api/servermanage/testtoken?userid=&type=` |
+> | `info.Method = "GET"` 改冻结字段 | `router.DefaultRouterInfoWithOptions(own, router.WithMethod(...))` |
+> | 强制 `api/release/routers.go` | 示例可直接在 `IService.Routers()` 组装；有 release 门面亦可 |
+> | 内部传输 `socket` | 已删除；默认 gRPC，HTTP 显式备用 |
+> | WebSocket 用客户端 `UserID` 分片 | private 用登录会话身份；`req.GetUser()` / `IWebSocketUserIdentity` |
+> | public/private 直接 `NewModelList` / 套 Manage CRUD | public/private → models 业务方法 + `IDataAction`（01）；高吞吐写再升级 04/07 本地可靠写+sync 远程 |
+> | 写死「业务只能 SQLite」或换库改遍 API | 多库；在基础 model 的 DataAction 一处切换；与是否 ModelList 无关 |
+> | 路由统计 `RouterStats` / statistics | `POST /api/servermanage/runtimetopology`、`runtimeservice` |
+> | 仅示例 01–06 | 含 `examples/07-shop-order-scale` 与 Runtime 运行图 |
+>
+> 下文若与上表或 `use-digitalway-core` 冲突，**一律以上表与 use-digitalway-core 为准**。
+
 ## 描述
 
-本 skill 教会 Copilot agent 如何使用 `github.com/digitalwayhk/core` 框架
-生成后端 API、管理服务、WebSocket 推送、MQ 事件流和集群配置。
-读完本文件即可独立生成符合框架规范的后端代码，无需额外询问。
+本 skill 为 GitHub Copilot 的补充入口；现行规范以 `use-digitalway-core` 为准。
+业务代码写在**你自己的仓库**，通过 `go.mod` 引用 `github.com/digitalwayhk/core`。
+Go 版本以 core 的 `go.mod` 为准。
 
-**模块路径：** `github.com/digitalwayhk/core`（通过 `go.mod` 引用，不是直接修改框架仓库）
-**Go 版本：** 1.26+
-
-> ⚠️ **核心原则：** 业务代码写在**你自己的仓库**里，通过 `go.mod` 引用框架。
-> 不要把业务逻辑代码写进 `github.com/digitalwayhk/core` 仓库，
-> 也不要使用 `replace github.com/digitalwayhk/core => ../core`（仅临时本地调试时允许）。
+> ⚠️ **核心原则：** 不要把业务逻辑写进 core 仓库。
+> `replace github.com/digitalwayhk/core => ../core` 仅本地联调；生产用 tag 或精确 commit。
 
 ---
 

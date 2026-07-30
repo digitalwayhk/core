@@ -157,7 +157,6 @@ type internalRegistryValue struct {
 
 func bareWebServer() *WebServer {
 	return &WebServer{
-		childServer:     make(map[int]*WebServer),
 		serviceContexts: make(map[string]*router.ServiceContext),
 		serverOption:    make(map[string]*types.ServerOption),
 	}

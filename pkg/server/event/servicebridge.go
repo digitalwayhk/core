@@ -102,6 +102,7 @@ type ServiceEventBridge struct {
 	orderedReliableEnsureErr atomic.Value
 	dropped                  atomic.Uint64
 	controlQueueTimeouts     atomic.Uint64
+	publishFailures          atomic.Uint64
 }
 
 type errorBox struct{ err error }
@@ -526,7 +527,9 @@ func (b *ServiceEventBridge) runObserver() {
 		case <-b.ctx.Done():
 			return
 		case request := <-b.observerQueue:
-			_ = b.deliver(context.Background(), request)
+			if err := b.deliver(context.Background(), request); err != nil {
+				b.publishFailures.Add(1)
+			}
 		}
 	}
 }
@@ -538,7 +541,11 @@ func (b *ServiceEventBridge) runControl(queue <-chan controlEvent) {
 		case <-b.ctx.Done():
 			return
 		case job := <-queue:
-			job.result <- b.deliver(job.ctx, job.request)
+			err := b.deliver(job.ctx, job.request)
+			if err != nil {
+				b.publishFailures.Add(1)
+			}
+			job.result <- err
 		}
 	}
 }

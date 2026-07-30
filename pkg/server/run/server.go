@@ -30,11 +30,10 @@ type WebServer struct {
 	sync.RWMutex
 	serviceContexts map[string]*router.ServiceContext
 	serverOption    map[string]*types.ServerOption
-	childServer     map[int]*WebServer
 	htmls           *HTMLServer
 	ViewPort        int
 	// ManageAuthAuthorityService 指定多业务服务开发视图的默认 Manage Auth 服务。
-	// 单业务服务会自动选择；未指定的多业务服务仍可通过认证端点 service 参数明确目标。
+	// 单业务服务会自动选择；多个业务 Manage 服务必须显式指定统一权威。
 	ManageAuthAuthorityService string
 	Port                       int
 	GRPCPort                   int
@@ -88,7 +87,6 @@ func (own *WebServer) GetServerOption(name string) *types.ServerOption {
 
 func NewWebServer() *WebServer {
 	ws := &WebServer{
-		childServer:     make(map[int]*WebServer),
 		serviceContexts: make(map[string]*router.ServiceContext),
 		serverOption:    make(map[string]*types.ServerOption),
 	}
@@ -384,14 +382,14 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 	if err != nil {
 		return nil, fmt.Errorf("初始化服务端口失败：%w", err)
 	}
+	authority, err := own.resolveViewManageAuthAuthority(ordered)
+	if err != nil {
+		return nil, fmt.Errorf("初始化开发视图管理认证失败：%w", err)
+	}
 	for _, ctx := range ordered {
 		if err := ctx.Config.Validate(); err != nil {
 			return nil, fmt.Errorf("初始化服务配置失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
-	}
-	authority, err := own.resolveViewManageAuthAuthority(ordered)
-	if err != nil {
-		return nil, fmt.Errorf("初始化开发视图管理认证失败：%w", err)
 	}
 	htmls := NewHTMLServer(own.ViewPort)
 	htmls.Parent = own
@@ -446,17 +444,25 @@ func (own *WebServer) resolveViewManageAuthAuthority(
 	if own.ViewPort <= 0 {
 		return nil, nil
 	}
-	eligible := make([]*router.ServiceContext, 0, len(contexts))
-	for _, ctx := range manageAuthContexts(contexts) {
+	business := make([]*router.ServiceContext, 0, len(contexts))
+	for _, ctx := range contexts {
 		if !isSystemServerService(ctx, "") {
-			eligible = append(eligible, ctx)
+			business = append(business, ctx)
 		}
 	}
-	if len(eligible) > 1 && strings.TrimSpace(own.ManageAuthAuthorityService) == "" {
-		// 多业务服务没有默认权威时不阻止开发视图启动；认证端点必须用 service 明确目标。
-		return nil, nil
+	authority, err := resolveManageAuthAuthority(business, own.ManageAuthAuthorityService)
+	if err != nil || authority == nil || authority.context == nil {
+		return authority, err
 	}
-	return resolveManageAuthAuthority(eligible, own.ManageAuthAuthorityService)
+	// HTMLServer 的 ServerManage 路由绑定在内置 server 服务上。开发视图应复用
+	// 已选权威业务服务的聚合器，否则业务侧即使配置了 Prometheus QueryURL，
+	// /api/servermanage/runtimetopology 仍会落到内置 server 的 Mode=off 聚合器。
+	for _, ctx := range contexts {
+		if isSystemServerService(ctx, "") {
+			ctx.RuntimeAggregator = authority.context.RuntimeAggregator
+		}
+	}
+	return authority, nil
 }
 
 func (own *WebServer) serverArgs() {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -17,8 +16,6 @@ import (
 
 const htmlSwaggerUserSecret = "html-swagger-user-access-secret-xx"
 const htmlSwaggerManageSecret = "html-swagger-manage-access-secret-xx"
-
-var brokenIPv6OpenAPIServerURL = regexp.MustCompile(`https?://\[:[0-9]`)
 
 func openAPITestServiceRouter(name string, port int) *router.ServiceRouter {
 	cfg := &config.ServerConfig{}
@@ -149,30 +146,35 @@ func TestHTMLServerPrivateRouteAuthMatrix(t *testing.T) {
 	require.Equal(t, int32(0), htmlAuthCount("demo:"+privatePath))
 }
 
-func TestHTMLServerOpenAPISameOriginIPv6NoServicePort(t *testing.T) {
+func TestHTMLServerOpenAPIPreservesServicePortsAndPrivateTokenIssuer(t *testing.T) {
 	htmlAuthReset()
-	const publicPath = "/api/demo/getproducts"
-	const privatePath = "/api/demo/getorder"
-	const managePath = "/api/manage/demo/item/search"
-	sc := newHTMLBusinessServiceContext(t, "demo", publicPath, privatePath)
+	const userPublicPath = "/api/shop-user/profile"
+	const userPrivatePath = "/api/shop-user/getorders"
+	const orderPrivatePath = "/api/shop-order/getorder"
+	const managePath = "/api/manage/shop-user/item/search"
+	user := newHTMLBusinessServiceContext(t, "shop-user", userPublicPath, userPrivatePath)
+	user.Config.Port = 8082
+	order := newHTMLBusinessServiceContext(t, "shop-order", "", orderPrivatePath)
+	order.Config.Port = 8083
 	// Attach a manage route to ensure it stays out of OpenAPI document.
 	manageAPI := &markerAuthRouter{}
 	manageInfo := &types.RouterInfo{
-		Path: managePath, Method: http.MethodPost, ServiceName: "demo",
-		PathType: types.ManageType, InstanceName: "Manage-demo", StructName: "markerAuthRouter",
+		Path: managePath, Method: http.MethodPost, ServiceName: "shop-user",
+		PathType: types.ManageType, InstanceName: "Manage-shop-user", StructName: "markerAuthRouter",
 		PackPath: "fixture/api/manage", Auth: true,
 	}
 	manageAPI.info = manageInfo
 	manageInfo.SetInstance(manageAPI)
-	sc.Router.AddRoutes(manageAPI)
+	user.Router.AddRoutes(manageAPI)
 
 	htmls := NewHTMLServer(0)
-	htmls.AddServiceRouter(sc.Router)
+	htmls.AddServiceRouter(order.Router)
+	htmls.AddServiceRouter(user.Router)
 	require.NoError(t, htmls.Prepare())
 	handler := htmls.Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/openapi", nil)
-	req.Host = "[::1]:48080"
+	req.Host = "localhost"
 	req.RemoteAddr = "127.0.0.1:9"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -180,32 +182,26 @@ func TestHTMLServerOpenAPISameOriginIPv6NoServicePort(t *testing.T) {
 
 	var doc openapi3.T
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
-	require.NotEmpty(t, doc.Servers)
-	require.Equal(t, "http://[::1]:48080/", doc.Servers[0].URL,
-		"HTML 聚合 OpenAPI 必须指向请求同源 authority，而非业务服务端口")
-	for _, s := range doc.Servers {
-		require.NotContains(t, s.URL, ":21001")
-		require.False(t, brokenIPv6OpenAPIServerURL.MatchString(s.URL))
-	}
+	require.Len(t, doc.Servers, 2, "多服务 OpenAPI 必须保留每个业务服务的连接")
+	require.Equal(t, []string{"http://localhost:8083/", "http://localhost:8082/"},
+		[]string{doc.Servers[0].URL, doc.Servers[1].URL})
 	// Public + Private in document; Manage excluded.
-	require.NotNil(t, doc.Paths.Find(publicPath))
-	require.NotNil(t, doc.Paths.Find(privatePath))
+	require.NotNil(t, doc.Paths.Find(userPublicPath))
+	require.NotNil(t, doc.Paths.Find(userPrivatePath))
+	require.NotNil(t, doc.Paths.Find(orderPrivatePath))
 	require.Nil(t, doc.Paths.Find(managePath))
-	// Operation servers also same-origin.
-	pubOp := doc.Paths.Find(publicPath).Get
-	require.NotNil(t, pubOp)
-	require.NotNil(t, pubOp.Servers)
-	require.Equal(t, "http://[::1]:48080/", (*pubOp.Servers)[0].URL)
-
-	// X-Forwarded-Proto=https preserves reverse-proxy scheme on same host.
-	req = httptest.NewRequest(http.MethodGet, "/api/openapi", nil)
-	req.Host = "[::1]:48080"
-	req.Header.Set("X-Forwarded-Proto", "https")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
-	require.Equal(t, "https://[::1]:48080/", doc.Servers[0].URL)
+	require.Equal(t, "http://localhost:8082/",
+		(*doc.Paths.Find(userPrivatePath).Get.Servers)[0].URL)
+	require.Equal(t, "http://localhost:8083/",
+		(*doc.Paths.Find(orderPrivatePath).Get.Servers)[0].URL)
+	require.Contains(t,
+		doc.Components.SecuritySchemes["Bearer"].Value.Description,
+		"http://localhost:8082/api/servermanage/testtoken?userid=12345",
+		"shop-user Private 的示例 Token 必须从 shop-user 服务签发")
+	require.Contains(t,
+		doc.Components.SecuritySchemes["Bearer"].Value.Description,
+		"http://localhost:8083/api/servermanage/testtoken?userid=12345",
+		"shop-order Private 的示例 Token 必须从 shop-order 服务签发")
 }
 
 func TestGetOpenApiBusinessServiceStillUsesServicePort(t *testing.T) {

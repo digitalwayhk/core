@@ -164,7 +164,11 @@ func (own *HTMLServer) Prepare() error {
 		return err
 	}
 	// 无缓存运行时 Bootstrap：每次请求现场选择模式，不签发 Token。
-	if err := mount.handle(webBootstrapPath, "system:bootstrap", newWebBootstrapHandler(own.manageAuthAuthority)); err != nil {
+	if err := mount.handle(
+		webBootstrapPath,
+		"system:bootstrap",
+		newWebBootstrapHandler(own.manageAuthAuthority, own.services...),
+	); err != nil {
 		return err
 	}
 
@@ -271,8 +275,8 @@ func (own *HTMLServer) mountManageAuthProxy(mount *htmlMuxMount) error {
 }
 
 // authProxyTargetName 根据认证域选择实际签发或刷新 Token 的服务。
-// 普通用户和 Manage 默认使用业务权威，也可由 service 明确目标；
-// ServerManage TestToken 始终使用框架内置 server。
+// Manage 始终由配置的业务权威签发；普通用户可由 service 明确目标；
+// ServerManage TestToken 作为旧兼容能力仍使用框架内置 server。
 func (own *HTMLServer) authProxyTargetName(path string, r *http.Request) string {
 	if r == nil {
 		return ""
@@ -280,6 +284,12 @@ func (own *HTMLServer) authProxyTargetName(path string, r *http.Request) string 
 	query := r.URL.Query()
 	if path == "/api/servermanage/testtoken" && strings.TrimSpace(query.Get("type")) == "2" {
 		return "server"
+	}
+	if path == "/api/servermanage/testtoken" && strings.TrimSpace(query.Get("type")) == "1" {
+		if own.manageAuthAuthority == nil {
+			return ""
+		}
+		return serviceContextName(own.manageAuthAuthority.context)
 	}
 	if requested := normalizeServiceName(query.Get("service")); requested != "" {
 		if requested == "server" {
@@ -291,6 +301,26 @@ func (own *HTMLServer) authProxyTargetName(path string, r *http.Request) string 
 		return ""
 	}
 	return serviceContextName(own.manageAuthAuthority.context)
+}
+
+// newManagementHandler 将 HTMLServer 作为统一管理入口：业务 Manage 与
+// ServerManage 都校验配置权威服务签发的 Manage token。目标 Router 的方法、
+// 限流、OnAuth 和执行链仍由目标服务负责。
+func (own *HTMLServer) newManagementHandler(
+	sc *router.ServiceContext,
+	info *types.RouterInfo,
+) http.Handler {
+	authority := own.manageAuthAuthority
+	if authority == nil || authority.context == nil || authority.context.Config == nil {
+		return rest.NewExternalRouterHandler(sc, info)
+	}
+	return rest.NewExternalRouterHandlerWithAuthPolicy(
+		sc,
+		info,
+		authority.context,
+		authority.context.Config.ManageAuth,
+		types.AuthTypeManage,
+	)
 }
 
 func serviceContextName(sc *router.ServiceContext) string {
@@ -308,8 +338,17 @@ func serviceContextName(sc *router.ServiceContext) string {
 	return ""
 }
 
-// serverManageGetMenuPath 是 HTMLServer 唯一允许以规范无后缀挂载的通用 ServerManager 菜单路径。
-const serverManageGetMenuPath = "/api/servermanage/getmenu"
+const (
+	serverManageGetMenuPath         = "/api/servermanage/getmenu"
+	serverManageRuntimeTopologyPath = "/api/servermanage/runtimetopology"
+	serverManageRuntimeServicePath  = "/api/servermanage/runtimeservice"
+)
+
+var canonicalSystemServerManagePaths = map[string]struct{}{
+	serverManageGetMenuPath:         {},
+	serverManageRuntimeTopologyPath: {},
+	serverManageRuntimeServicePath:  {},
+}
 
 // mountServiceAPIRoutes 挂载 Public/Private（Swagger 同源）、Manage 规范路径与受限 ServerManager。
 // 安全链一律 NewExternalRouterHandler；禁止直接 Exec。
@@ -318,7 +357,7 @@ const serverManageGetMenuPath = "/api/servermanage/getmenu"
 //
 // 规范无后缀仅允许：
 //  1. 四条权威认证代理（由 mountManageAuthProxy 挂载，此处跳过）
-//  2. GET /api/servermanage/getmenu（确定性选择 system server 或 ManageAuth 权威）
+//  2. system server 的 getmenu 与运行图接口（确定性选择 system server 或 ManageAuth 权威）
 //  3. Manage 业务原始路径（通常含服务段，冲突时 first-wins + 兼容后缀）
 //  4. 各服务 Public/Private 业务路径（冲突 fail-closed）
 //
@@ -328,9 +367,11 @@ func (own *HTMLServer) mountServiceAPIRoutes(mount *htmlMuxMount) error {
 	// path -> 已占用该规范 Manage 路径的服务名（跨服务 first-wins + 兼容后缀）
 	manageCanonicalOwners := make(map[string]string)
 
-	// 先确定性挂载 getmenu 规范路径（若存在）
-	if err := own.mountCanonicalGetMenu(mount); err != nil {
-		return err
+	// 先确定性挂载系统级 ServerManager 规范路径（若存在）
+	for path := range canonicalSystemServerManagePaths {
+		if err := own.mountCanonicalSystemServerManage(mount, path); err != nil {
+			return err
+		}
 	}
 
 	for _, service := range own.services {
@@ -364,25 +405,25 @@ func (own *HTMLServer) mountServiceAPIRoutes(mount *htmlMuxMount) error {
 					)
 					compatPath := path + "/" + serviceName
 					if err := mount.handle(compatPath, "manage-compat:"+serviceName,
-						stripServiceSuffixHandler(serviceName, rest.NewExternalRouterHandler(sc, info))); err != nil {
+						stripServiceSuffixHandler(serviceName, own.newManagementHandler(sc, info))); err != nil {
 						return err
 					}
 				}
 				continue
 			}
 			// 与系统固定路径等冲突时 fail-closed（不改变跨 Manage 服务 first-wins 规则）
-			if err := mount.handle(path, "manage:"+serviceName, rest.NewExternalRouterHandler(sc, info)); err != nil {
+			if err := mount.handle(path, "manage:"+serviceName, own.newManagementHandler(sc, info)); err != nil {
 				return err
 			}
 			manageCanonicalOwners[path] = serviceName
 			compatPath := path + "/" + serviceName
 			if err := mount.handle(compatPath, "manage-compat:"+serviceName,
-				stripServiceSuffixHandler(serviceName, rest.NewExternalRouterHandler(sc, info))); err != nil {
+				stripServiceSuffixHandler(serviceName, own.newManagementHandler(sc, info))); err != nil {
 				return err
 			}
 		}
 
-		// --- ServerManager：默认仅兼容后缀；getmenu 规范已单独挂载 ---
+		// --- ServerManager：默认仅兼容后缀；系统级规范路径已单独挂载 ---
 		for _, info := range service.GetTypeRouters(types.ServerManagerType) {
 			if info == nil {
 				continue
@@ -395,11 +436,11 @@ func (own *HTMLServer) mountServiceAPIRoutes(mount *htmlMuxMount) error {
 				// 权威认证代理已占用，禁止再以兼容路径重复注册
 				continue
 			}
-			// getmenu：规范路径已由 mountCanonicalGetMenu 挂载；各服务仍可保留兼容后缀
-			if path == serverManageGetMenuPath {
+			// 系统级接口：规范路径已确定性挂载；各服务仍可保留兼容后缀
+			if _, canonical := canonicalSystemServerManagePaths[path]; canonical {
 				compatPath := path + "/" + serviceName
 				if err := mount.handle(compatPath, "servermanage-compat:"+serviceName,
-					stripServiceSuffixHandler(serviceName, rest.NewExternalRouterHandler(sc, info))); err != nil {
+					stripServiceSuffixHandler(serviceName, own.newManagementHandler(sc, info))); err != nil {
 					return err
 				}
 				continue
@@ -407,7 +448,7 @@ func (own *HTMLServer) mountServiceAPIRoutes(mount *htmlMuxMount) error {
 			// 其它 ServerManager：禁止挂规范无后缀，仅兼容 /{service}
 			compatPath := path + "/" + serviceName
 			if err := mount.handle(compatPath, "servermanage-compat:"+serviceName,
-				stripServiceSuffixHandler(serviceName, rest.NewExternalRouterHandler(sc, info))); err != nil {
+				stripServiceSuffixHandler(serviceName, own.newManagementHandler(sc, info))); err != nil {
 				return err
 			}
 		}
@@ -473,17 +514,17 @@ func isSystemServerService(sc *router.ServiceContext, serviceName string) bool {
 	return false
 }
 
-// getMenuCandidate 是 getmenu 规范路径的候选服务。
+// getMenuCandidate 是系统级 ServerManager 规范路径的候选服务。
 type getMenuCandidate struct {
 	name string
 	sc   *router.ServiceContext
 	info *types.RouterInfo
 }
 
-// mountCanonicalGetMenu 以确定性规则选择 getmenu 的规范路径 handler。
+// mountCanonicalSystemServerManage 以确定性规则选择系统级 ServerManager 的规范路径 handler。
 // 优先级：服务名 "server" > ManageAuthAuthority 服务名 > 按服务名字典序最小者。
-// 若无一服务注册 getmenu，则跳过（不报错）。
-func (own *HTMLServer) mountCanonicalGetMenu(mount *htmlMuxMount) error {
+// 若无一服务注册目标路径，则跳过（不报错）。
+func (own *HTMLServer) mountCanonicalSystemServerManage(mount *htmlMuxMount, path string) error {
 	var cands []getMenuCandidate
 	for _, service := range own.services {
 		if service == nil || service.Service == nil || service.Service.Config == nil {
@@ -498,7 +539,7 @@ func (own *HTMLServer) mountCanonicalGetMenu(mount *htmlMuxMount) error {
 			if info == nil {
 				continue
 			}
-			if info.GetPath() != serverManageGetMenuPath {
+			if info.GetPath() != path {
 				continue
 			}
 			cands = append(cands, getMenuCandidate{name: name, sc: sc, info: info})
@@ -516,11 +557,12 @@ func (own *HTMLServer) mountCanonicalGetMenu(mount *htmlMuxMount) error {
 	if chosen.sc == nil || chosen.info == nil {
 		return nil
 	}
-	if err := mount.handle(serverManageGetMenuPath, "getmenu:"+chosen.name,
-		rest.NewExternalRouterHandler(chosen.sc, chosen.info)); err != nil {
+	if err := mount.handle(path, "servermanage-system:"+chosen.name,
+		own.newManagementHandler(chosen.sc, chosen.info)); err != nil {
 		return err
 	}
-	logx.Infow("htmlserver_getmenu_canonical_owner",
+	logx.Infow("htmlserver_system_servermanage_canonical_owner",
+		logx.Field("path", path),
 		logx.Field("service", chosen.name),
 		logx.Field("candidates", len(cands)),
 	)
@@ -725,13 +767,13 @@ func (own *HTMLServer) Stop() {
 }
 
 // htmlOpenAPIHandler 仅处理 /api/openapi 聚合文档，不承载 Manage 业务。
-// servers 使用请求同源 authority，配合 HTMLServer 上挂载的 Public/Private。
+// servers 保留各业务服务的监听地址，使 Private API 使用对应服务签发的用户 Token。
 func htmlOpenAPIHandler(service ...*router.ServiceRouter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/openapi" {
 			http.NotFound(w, r)
 			return
 		}
-		httpx.OkJson(w, GetOpenApiSameOrigin(r, service...))
+		httpx.OkJson(w, GetOpenApi(r, service...))
 	}
 }

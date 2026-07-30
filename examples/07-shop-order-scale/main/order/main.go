@@ -14,7 +14,9 @@ func main() {
 		panic(err)
 	}
 	httpPort := bootstrap.OrderHTTPPort()
+	service := &orderservice.Service{}
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&orderservice.Service{}, bootstrap.DistributedOrderConfig(httpPort, 4)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(service, bootstrap.DistributedOrderConfig(httpPort, 4)))
+	server.SetOption(service, bootstrap.SwaggerServerOption(false))
 	server.Start()
 }

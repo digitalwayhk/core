@@ -35,7 +35,7 @@
 | 进程级 `SetCrossNodeForwarder`、`GetCrossNodeForwarder` | Deprecated | server/types | 旧单服务跨节点转发 | `pkg/server/types/crossnode.go`；替代为 service-scoped API |
 | `router.TestResult` 变量 | Deprecated | server/router | 旧 OpenAPI 测试结果注入 | `SetTestResult/GetTestResult` 为并发安全替代入口 |
 | `types.RouterStats`、`ServiceContext.GetAllRouterStats` 族 | Deprecated | server/router | 旧内存路由统计；生产 `enableStats=false` | Runtime API + Prometheus；见 DEPRECATION_REGISTER |
-| `POST /api/servermanage/runtimetopology`、`runtimeservice` | Experimental → 趋向 Stable | server/api/public、server/runtime | Admin 多服务运行图与请求聚合 | 规格与 runtime 包测试；ServerManageAuth |
+| `POST /api/servermanage/runtimetopology`、`runtimeservice` | Experimental → 趋向 Stable | server/api/public、server/runtime | Admin 多服务运行与请求聚合 | 规格与 runtime 包测试；ServerManageAuth |
 | `pkg/utils` 导出辅助函数 | Experimental | utils | examples 和框架内部通用辅助 | 尚未完成逐符号稳定性登记；不得由包级存在推导全部 Stable |
 | `pkg/server/transport/grpc/proto` 生成类型 | Experimental | server/transport | 内部 gRPC payload | 不纳入 apidiff；生成器与 wire 版本由后续发布/CI 任务锁定 |
 | 未导出符号、测试 helper、`internal/compat` | Internal | 对应包 | 实现与门禁 | 不允许下游直接依赖 |

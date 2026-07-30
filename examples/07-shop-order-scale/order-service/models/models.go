@@ -67,6 +67,8 @@ const (
 var (
 	// ErrOrderWriteStoreUnavailable 表示当前服务实例订单可靠 store 不可用。
 	ErrOrderWriteStoreUnavailable = transaction.ErrOrderWriteStoreUnavailable
+	// ErrOrderRuleNotFound 表示权威库尚未配置指定订单规则。
+	ErrOrderRuleNotFound = basedata.ErrOrderRuleNotFound
 
 	// NewServiceBaseModel 创建服务级基础模型。
 	NewServiceBaseModel = common.NewServiceBaseModel
@@ -132,6 +134,10 @@ var (
 
 // EnsureStorage 确保 07 订单服务 MySQL 权威库完成建表。
 func EnsureStorage() error { return schema.EnsureStorage() }
+
+// RemoteDataAction 返回 07 订单服务共享 MySQL 权威库的数据访问器。
+// Manage API 应将其传给 entity.NewModelList，让 Core 保留标准查询、排序和分页语义。
+func RemoteDataAction() persistencetypes.IDataAction { return store.GetRemote() }
 
 // RunRemoteTransaction 在共享远程权威库执行事务。
 func RunRemoteTransaction(operation func(persistencetypes.IDataAction) error) error {

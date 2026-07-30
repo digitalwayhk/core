@@ -138,6 +138,33 @@ func TestWebBootstrapNormalizesAuthorityServiceLikeTokenClaim(t *testing.T) {
 	require.Equal(t, "", normalizeBootstrapAuthorityService(nil))
 }
 
+// TestWebBootstrapManageTestTokenUsesPlatformAdmin 验证开发视图默认签发
+// 平台管理员身份，避免统一 Manage Token 通过验签后被业务管理员 Hook 拒绝。
+func TestWebBootstrapManageTestTokenUsesPlatformAdmin(t *testing.T) {
+	authorityCtx := newBootstrapAuthorityContext(t, "shop-supplier", false)
+	htmls := NewHTMLServer(0)
+	htmls.SetManageAuthAuthority(&manageAuthAuthority{
+		name: "shop-supplier", context: authorityCtx, router: authorityCtx.Router,
+	})
+	htmls.AddServiceRouter(authorityCtx.Router)
+	require.NoError(t, htmls.Prepare())
+
+	req := httptest.NewRequest(http.MethodGet, webBootstrapPath, nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	htmls.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response WebBootstrap
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotNil(t, response.Endpoints.AcquireToken)
+	require.Equal(
+		t,
+		"/api/servermanage/testtoken?userid=platform-admin&type=1&service=shop-supplier",
+		*response.Endpoints.AcquireToken,
+	)
+}
+
 func TestWebBootstrapSetsNoStoreBeforeMethodCheck(t *testing.T) {
 	htmls := NewHTMLServer(0)
 	require.NoError(t, htmls.Prepare())
@@ -169,6 +196,45 @@ func TestWebBootstrapUnavailableWhenAuthorityNil(t *testing.T) {
 	require.False(t, response.UI.ShowLogin)
 	require.False(t, response.UI.ShowLogout)
 	require.False(t, response.UI.ShowTestIdentity)
+}
+
+func TestWebBootstrapPublishesPerServiceUserTestTokens(t *testing.T) {
+	authority := newBootstrapAuthorityContext(t, "orders", false)
+	users := newBootstrapAuthorityContext(t, "users", false)
+	htmls := NewHTMLServer(0)
+	htmls.SetManageAuthAuthority(&manageAuthAuthority{
+		name: "orders", context: authority, router: authority.Router,
+	})
+	htmls.AddServiceRouter(authority.Router)
+	htmls.AddServiceRouter(users.Router)
+	require.NoError(t, htmls.Prepare())
+
+	req := httptest.NewRequest(http.MethodGet, webBootstrapPath, nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	htmls.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		TestTokens []struct {
+			Service      string `json:"service"`
+			AcquireToken string `json:"acquire_token"`
+		} `json:"test_tokens"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, []struct {
+		Service      string `json:"service"`
+		AcquireToken string `json:"acquire_token"`
+	}{
+		{
+			Service:      "orders",
+			AcquireToken: "/api/servermanage/testtoken?userid=12345&type=0&service=orders",
+		},
+		{
+			Service:      "users",
+			AcquireToken: "/api/servermanage/testtoken?userid=12345&type=0&service=users",
+		},
+	}, response.TestTokens)
 }
 
 func TestHTMLServerOpenAPIAggregatesPublicAndPrivateOnly(t *testing.T) {
