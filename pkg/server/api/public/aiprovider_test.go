@@ -17,6 +17,10 @@ func TestAIProviderRouterInfoIsServerManage(t *testing.T) {
 	save := (&SaveAIProvider{}).RouterInfo()
 	require.Equal(t, "/api/servermanage/saveaiprovider", save.GetPath())
 	require.Equal(t, types.ServerManagerType, save.GetPathType())
+
+	test := (&TestAIProvider{}).RouterInfo()
+	require.Equal(t, "/api/servermanage/testaiprovider", test.GetPath())
+	require.Equal(t, types.ServerManagerType, test.GetPathType())
 }
 
 func TestAIProviderDoAdminAndRuntimeViews(t *testing.T) {

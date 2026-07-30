@@ -2,6 +2,7 @@
 package public
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -110,6 +111,61 @@ func (own *SaveAIProvider) Do(req types.IRequest) (interface{}, error) {
 
 // RouterInfo 注册为 ServerManage 路由。
 func (own *SaveAIProvider) RouterInfo() *types.RouterInfo {
+	return api.ServerRouterInfoWithOptions(own,
+		router.WithPathType(types.ServerManagerType),
+		withSystemEndpointRateLimit(),
+	)
+}
+
+// TestAIProvider 探测 LLM 连通性（OpenAI 兼容 chat/completions）。
+// 可传表单草稿；apiKey 为空或 ******** 时使用已保存密钥。
+type TestAIProvider struct {
+	api.ServerArgs
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"baseURL"`
+	APIKey   string `json:"apiKey"`
+	Language string `json:"language"`
+}
+
+// Parse 绑定探测参数。
+func (own *TestAIProvider) Parse(req types.IRequest) error {
+	if err := own.ServerArgs.Parse(req); err != nil {
+		return err
+	}
+	return req.Bind(own)
+}
+
+// Validation 校验本地访问/鉴权。
+func (own *TestAIProvider) Validation(req types.IRequest) error {
+	return own.ServerArgs.Validation(req)
+}
+
+// Do 执行探测并返回结果（不含密钥）。
+func (own *TestAIProvider) Do(req types.IRequest) (interface{}, error) {
+	cfg, err := aiprovider.MergeProbeInput(aiprovider.Config{
+		Provider: own.Provider,
+		Model:    own.Model,
+		BaseURL:  own.BaseURL,
+		APIKey:   own.APIKey,
+		Language: own.Language,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	if req != nil {
+		// 若请求带有可取消上下文则使用（兼容无 Context 的测试桩）
+		type withCtx interface{ Context() context.Context }
+		if c, ok := req.(withCtx); ok && c.Context() != nil {
+			ctx = c.Context()
+		}
+	}
+	return aiprovider.Probe(ctx, cfg), nil
+}
+
+// RouterInfo 注册为 ServerManage 路由。
+func (own *TestAIProvider) RouterInfo() *types.RouterInfo {
 	return api.ServerRouterInfoWithOptions(own,
 		router.WithPathType(types.ServerManagerType),
 		withSystemEndpointRateLimit(),

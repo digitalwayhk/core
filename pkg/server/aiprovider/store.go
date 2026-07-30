@@ -3,12 +3,19 @@
 package aiprovider
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/utils"
 )
@@ -202,4 +209,130 @@ func validate(cfg Config) error {
 		return errors.New("启用时 baseURL 不能为空")
 	}
 	return nil
+}
+
+// ProbeResult 是连通性探测结果（不含密钥）。
+type ProbeResult struct {
+	OK         bool   `json:"ok"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Message    string `json:"message"`
+	LatencyMs  int64  `json:"latencyMs"`
+	Endpoint   string `json:"endpoint,omitempty"`
+}
+
+// Probe 使用 OpenAI 兼容 chat/completions 发一条极短请求验证 baseURL/model/apiKey。
+// 不会把 apiKey 写入返回值。
+func Probe(ctx context.Context, cfg Config) ProbeResult {
+	normalize(&cfg)
+	if cfg.Model == "" || cfg.BaseURL == "" {
+		return ProbeResult{OK: false, Message: "model 与 baseURL 不能为空"}
+	}
+	endpoint, err := chatCompletionsURL(cfg.BaseURL)
+	if err != nil {
+		return ProbeResult{OK: false, Message: err.Error()}
+	}
+	body := map[string]interface{}{
+		"model": cfg.Model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "ping"},
+		},
+		"max_tokens": 1,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return ProbeResult{OK: false, Message: err.Error()}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return ProbeResult{OK: false, Message: err.Error(), Endpoint: endpoint}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return ProbeResult{
+			OK:        false,
+			Message:   "请求失败: " + err.Error(),
+			LatencyMs: latency,
+			Endpoint:  endpoint,
+		}
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return ProbeResult{
+			OK:         true,
+			StatusCode: resp.StatusCode,
+			Message:    "连通成功",
+			LatencyMs:  latency,
+			Endpoint:   endpoint,
+		}
+	}
+	msg := strings.TrimSpace(string(respBody))
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	if msg == "" {
+		msg = resp.Status
+	}
+	return ProbeResult{
+		OK:         false,
+		StatusCode: resp.StatusCode,
+		Message:    fmt.Sprintf("HTTP %d: %s", resp.StatusCode, msg),
+		LatencyMs:  latency,
+		Endpoint:   endpoint,
+	}
+}
+
+// MergeProbeInput 把探测请求与已存配置合并：密钥占位或空则用已存密钥。
+func MergeProbeInput(incoming Config) (Config, error) {
+	existing, err := Load()
+	if err != nil {
+		return Config{}, err
+	}
+	normalize(&incoming)
+	if incoming.Model == "" {
+		incoming.Model = existing.Model
+	}
+	if incoming.BaseURL == "" {
+		incoming.BaseURL = existing.BaseURL
+	}
+	if incoming.APIKey == "" || incoming.APIKey == MaskedAPIKey {
+		incoming.APIKey = existing.APIKey
+	}
+	if incoming.Provider == "" {
+		incoming.Provider = existing.Provider
+	}
+	if incoming.Language == "" {
+		incoming.Language = existing.Language
+	}
+	normalize(&incoming)
+	if incoming.Model == "" || incoming.BaseURL == "" {
+		return Config{}, errors.New("model 与 baseURL 不能为空（可先填写表单或保存配置）")
+	}
+	return incoming, nil
+}
+
+func chatCompletionsURL(base string) (string, error) {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return "", errors.New("baseURL 为空")
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("baseURL 无效: %s", base)
+	}
+	if strings.HasSuffix(base, "/chat/completions") {
+		return base, nil
+	}
+	return base + "/chat/completions", nil
 }

@@ -78,3 +78,34 @@ func TestLoadMissingFileReturnsDefault(t *testing.T) {
 	require.False(t, cfg.Enabled)
 	require.Equal(t, "qwen3.5-plus", cfg.Model)
 }
+
+func TestChatCompletionsURL(t *testing.T) {
+	u, err := chatCompletionsURL("https://example.com/v1/")
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/v1/chat/completions", u)
+	u, err = chatCompletionsURL("https://example.com/v1/chat/completions")
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/v1/chat/completions", u)
+	_, err = chatCompletionsURL("not-a-url")
+	require.Error(t, err)
+}
+
+func TestMergeProbeInputKeepsStoredKey(t *testing.T) {
+	SetConfigPathForTest(filepath.Join(t.TempDir(), FileName))
+	t.Cleanup(ResetPathHookForTest)
+	_, err := Save(Config{
+		Enabled: true,
+		Model:   "m1",
+		BaseURL: "https://example.com/v1",
+		APIKey:  "stored",
+	})
+	require.NoError(t, err)
+	merged, err := MergeProbeInput(Config{
+		Model:   "m2",
+		BaseURL: "https://example.com/v1",
+		APIKey:  MaskedAPIKey,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "m2", merged.Model)
+	require.Equal(t, "stored", merged.APIKey)
+}

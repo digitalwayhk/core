@@ -342,12 +342,19 @@ const (
 	serverManageGetMenuPath         = "/api/servermanage/getmenu"
 	serverManageRuntimeTopologyPath = "/api/servermanage/runtimetopology"
 	serverManageRuntimeServicePath  = "/api/servermanage/runtimeservice"
+	serverManageAIProviderPath      = "/api/servermanage/aiprovider"
+	serverManageSaveAIProviderPath  = "/api/servermanage/saveaiprovider"
+	serverManageTestAIProviderPath  = "/api/servermanage/testaiprovider"
 )
 
 var canonicalSystemServerManagePaths = map[string]struct{}{
 	serverManageGetMenuPath:         {},
 	serverManageRuntimeTopologyPath: {},
 	serverManageRuntimeServicePath:  {},
+	// AI 提供商为进程级配置，不按业务服务后缀挂载；前端固定请求无后缀路径。
+	serverManageAIProviderPath:     {},
+	serverManageSaveAIProviderPath: {},
+	serverManageTestAIProviderPath: {},
 }
 
 // mountServiceAPIRoutes 挂载 Public/Private（Swagger 同源）、Manage 规范路径与受限 ServerManager。
@@ -357,7 +364,7 @@ var canonicalSystemServerManagePaths = map[string]struct{}{
 //
 // 规范无后缀仅允许：
 //  1. 四条权威认证代理（由 mountManageAuthProxy 挂载，此处跳过）
-//  2. system server 的 getmenu 与运行图接口（确定性选择 system server 或 ManageAuth 权威）
+//  2. system server 的 getmenu、运行图与 AI 提供商接口（确定性选择 system server 或 ManageAuth 权威）
 //  3. Manage 业务原始路径（通常含服务段，冲突时 first-wins + 兼容后缀）
 //  4. 各服务 Public/Private 业务路径（冲突 fail-closed）
 //

@@ -30,6 +30,7 @@ func Routers() []types.IRouter {
 		&public.RuntimeService{},
 		&public.AIProvider{},
 		&public.SaveAIProvider{},
+		&public.TestAIProvider{},
 		&public.InternalOpenAPI{},
 	}
 }
