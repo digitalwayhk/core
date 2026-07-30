@@ -1,5 +1,7 @@
-// Package aiprovider 提供管理端 PageAgent 使用的 AI 提供商运行时配置持久化。
-// 配置按方案 A 下发给已认证的 ServerManage 前端；API Key 会进入浏览器，仅适合受控内网。
+// Package aiprovider 提供管理端 PageAgent 使用的 AI 提供商运行时配置与同源 LLM 代理。
+//
+// 密钥与上游 baseURL 仅保存在服务端 etc/aiprovider.json。
+// 已认证的管理端通过 ProxyBasePath 同源代理调用 chat/completions，浏览器不持有上游 API Key。
 package aiprovider
 
 import (
@@ -25,6 +27,13 @@ const (
 	FileName = "aiprovider.json"
 	// MaskedAPIKey 是管理页展示用的脱敏占位，保存时若收到该值则保留旧密钥。
 	MaskedAPIKey = "********"
+	// ProxyBasePath 是 PageAgent 客户端使用的同源 OpenAI 兼容 baseURL（不含 /chat/completions）。
+	// 浏览器请求：{ProxyBasePath}/chat/completions → 服务端附带密钥转发上游。
+	ProxyBasePath = "/api/servermanage/aillm"
+	// ChatCompletionsPath 是代理对外完整路径。
+	ChatCompletionsPath = ProxyBasePath + "/chat/completions"
+	// maxProxyBody 限制代理请求/响应体大小（8 MiB）。
+	maxProxyBody = 8 << 20
 )
 
 // Config 是 AI 提供商运行时配置。
@@ -38,7 +47,8 @@ type Config struct {
 }
 
 // View 是下发给前端的视图。
-// Runtime 含完整密钥供 PageAgent 使用；Admin 脱敏密钥。
+// Admin：展示真实上游 baseURL、脱敏密钥。
+// Runtime：仅下发 PageAgent 所需的 model/language 与同源代理 baseURL，不下发上游密钥。
 type View struct {
 	Enabled    bool   `json:"enabled"`
 	Provider   string `json:"provider"`
@@ -48,6 +58,8 @@ type View struct {
 	APIKeySet  bool   `json:"apiKeySet"`
 	Language   string `json:"language"`
 	ConfigPath string `json:"configPath,omitempty"`
+	// ProxyMode 为 true 表示客户端应走服务端同源 LLM 代理（Runtime 固定为 true）。
+	ProxyMode bool `json:"proxyMode,omitempty"`
 }
 
 var (
@@ -159,26 +171,117 @@ func AdminView(cfg Config) View {
 	return v
 }
 
-// RuntimeView 返回 PageAgent 运行时完整配置（含密钥）。
+// RuntimeView 返回 PageAgent 客户端配置：同源代理 baseURL，不下发上游密钥与真实 baseURL。
 func RuntimeView(cfg Config) View {
 	normalize(&cfg)
 	return View{
 		Enabled:   cfg.Enabled,
 		Provider:  cfg.Provider,
 		Model:     cfg.Model,
-		BaseURL:   cfg.BaseURL,
-		APIKey:    cfg.APIKey,
+		BaseURL:   ProxyBasePath,
+		APIKey:    "",
 		APIKeySet: strings.TrimSpace(cfg.APIKey) != "",
 		Language:  cfg.Language,
+		ProxyMode: true,
 	}
 }
 
-// ReadyForAgent 判断配置是否足以启动 PageAgent。
+// ReadyForAgent 判断服务端配置是否足以代理 LLM 并启动 PageAgent。
 func ReadyForAgent(cfg Config) bool {
 	normalize(&cfg)
 	return cfg.Enabled &&
 		strings.TrimSpace(cfg.Model) != "" &&
 		strings.TrimSpace(cfg.BaseURL) != ""
+}
+
+// ChatProxyResult 是上游 OpenAI 兼容接口的透传结果（含非 2xx 业务错误体）。
+type ChatProxyResult struct {
+	StatusCode  int
+	ContentType string
+	Body        []byte
+}
+
+// ProxyChatCompletions 将浏览器的 chat/completions 请求体转发到已配置上游，由服务端附加 API Key。
+// 上游 HTTP 状态（含 4xx/5xx）原样返回在 ChatProxyResult 中；仅配置错误与网络错误返回 error。
+func ProxyChatCompletions(ctx context.Context, requestBody []byte) (*ChatProxyResult, error) {
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+	normalize(&cfg)
+	if !cfg.Enabled {
+		return nil, errors.New("AI 提供商未启用，请在系统设置中启用并保存")
+	}
+	if cfg.Model == "" || cfg.BaseURL == "" {
+		return nil, errors.New("AI 提供商配置不完整：需要 model 与 baseURL")
+	}
+
+	payload, err := prepareProxyPayload(requestBody, cfg.Model)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := chatCompletionsURL(cfg.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// 页面 Agent 单轮可能较长；与探测区分，给上游更宽的超时。
+	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("上游请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyBody))
+	if err != nil {
+		return nil, fmt.Errorf("读取上游响应失败: %w", err)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	return &ChatProxyResult{
+		StatusCode:  resp.StatusCode,
+		ContentType: ct,
+		Body:        body,
+	}, nil
+}
+
+// prepareProxyPayload 校验 JSON，强制使用服务端 model，并关闭 stream（page-agent 走非流式 JSON）。
+func prepareProxyPayload(requestBody []byte, model string) ([]byte, error) {
+	if len(bytes.TrimSpace(requestBody)) == 0 {
+		return nil, errors.New("请求体不能为空")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		return nil, errors.New("请求体必须是 JSON 对象")
+	}
+	if payload == nil {
+		return nil, errors.New("请求体必须是 JSON 对象")
+	}
+	payload["model"] = model
+	if _, ok := payload["stream"]; ok {
+		payload["stream"] = false
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func normalize(cfg *Config) {

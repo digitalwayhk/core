@@ -345,6 +345,8 @@ const (
 	serverManageAIProviderPath      = "/api/servermanage/aiprovider"
 	serverManageSaveAIProviderPath  = "/api/servermanage/saveaiprovider"
 	serverManageTestAIProviderPath  = "/api/servermanage/testaiprovider"
+	// PageAgent 同源 LLM 代理（OpenAI 兼容 chat/completions）。
+	serverManageAILLMChatPath = "/api/servermanage/aillm/chat/completions"
 )
 
 var canonicalSystemServerManagePaths = map[string]struct{}{
@@ -355,6 +357,7 @@ var canonicalSystemServerManagePaths = map[string]struct{}{
 	serverManageAIProviderPath:     {},
 	serverManageSaveAIProviderPath: {},
 	serverManageTestAIProviderPath: {},
+	serverManageAILLMChatPath:      {},
 }
 
 // mountServiceAPIRoutes 挂载 Public/Private（Swagger 同源）、Manage 规范路径与受限 ServerManager。

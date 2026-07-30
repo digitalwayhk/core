@@ -21,6 +21,11 @@ func TestAIProviderRouterInfoIsServerManage(t *testing.T) {
 	test := (&TestAIProvider{}).RouterInfo()
 	require.Equal(t, "/api/servermanage/testaiprovider", test.GetPath())
 	require.Equal(t, types.ServerManagerType, test.GetPathType())
+
+	llm := (&AILLMChatCompletions{}).RouterInfo()
+	require.Equal(t, aiprovider.ChatCompletionsPath, llm.GetPath())
+	require.Equal(t, types.ServerManagerType, llm.GetPathType())
+	require.NotNil(t, llm.ResponseHandlerFunc)
 }
 
 func TestAIProviderDoAdminAndRuntimeViews(t *testing.T) {
@@ -51,7 +56,12 @@ func TestAIProviderDoAdminAndRuntimeViews(t *testing.T) {
 	require.NoError(t, err)
 	view, ok = data.(aiprovider.View)
 	require.True(t, ok)
-	require.Equal(t, "k-secret", view.APIKey)
+	// runtime 走同源代理，不下发上游密钥
+	require.Equal(t, "", view.APIKey)
+	require.Equal(t, aiprovider.ProxyBasePath, view.BaseURL)
+	require.True(t, view.ProxyMode)
+	require.True(t, view.APIKeySet)
+	require.Equal(t, "qwen3.5-plus", view.Model)
 }
 
 func TestSaveAIProviderDo(t *testing.T) {

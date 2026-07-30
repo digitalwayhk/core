@@ -274,6 +274,7 @@ func TestHTMLServerRuntimeGraphRoutesHaveCanonicalSystemPath(t *testing.T) {
 		"/api/servermanage/aiprovider",
 		"/api/servermanage/saveaiprovider",
 		"/api/servermanage/testaiprovider",
+		"/api/servermanage/aillm/chat/completions",
 	} {
 		t.Run(path, func(t *testing.T) {
 			htmlAuthReset()

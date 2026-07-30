@@ -6,8 +6,9 @@
 
 ### Added
 
-- ServerManage AI 提供商运行时配置（方案 A）：`POST /api/servermanage/aiprovider`、`saveaiprovider`，持久化 `etc/aiprovider.json`；管理端「系统设置 → AI 提供商」下发配置给 PageAgent。
-- 管理端集成 `page-agent`（可选自然语言 GUI Agent）；优先读服务端 AI 配置，env 仅作 fallback。
+- ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。
+- PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
+- 管理端集成 `page-agent`（可选自然语言 GUI Agent）；优先读服务端 AI 配置并经 `customFetch` 注入 Manage JWT，env 仅作 fallback。
 - 消费方 AI skill 安装说明与脚本：`docs/codex/CONSUMER_AI_SKILL_SETUP.md`、`scripts/link-consumer-skill.sh`；README「AI 助手与 Skill」。
 - skill / 场景指南登记 **Manage 动态分库** 标准管道：`IDBName` + Where 写回 `searchHook` + MySQL `config.Database=""`；明确禁止 `OnSearchBefore`+`stop=true` 旁路列表。详见 `.codex/skills/use-digitalway-core/references/core-backend-api.md`。
 - 多服务运行与请求聚合监控（Runtime Observability）：go-zero/Prometheus 历史源、Core 调用边与 gRPC 入站低基数指标、ServerManage `runtimetopology`/`runtimeservice`、示例 07 Prometheus scrape，以及 Admin 运行视图。详见 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md`。
