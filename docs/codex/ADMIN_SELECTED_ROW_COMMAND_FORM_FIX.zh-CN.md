@@ -22,8 +22,9 @@ POST /api/manage/positions/jobconfigmanage/updatejobconfig
 
 `WayPage.fromshow()` 会先执行 `form.clear()`，再调用 `form.setValues(row)`。
 `WayForm` 原来的 `setValues` 只更新 React state，没有同步调用 Ant Form 的
-`setFieldsValue`。紧接着提交时，`getFormValue()` 读取到的是 clear 后的空表单与空状态，
-因此序列化结果为 `{}`。
+`setFieldsValue`。同时 React state 更新是异步的；紧接着提交时，
+`getFormValue()` 仍可能读取 clear 后的旧空状态。而 `marketCode/jobType` 不是可编辑字段，
+不能指望挂载的 Ant Form 自行重建完整行，因此序列化结果仍可能为 `{}`。
 
 ## 修复
 
@@ -32,6 +33,10 @@ POST /api/manage/positions/jobconfigmanage/updatejobconfig
 - WayForm 的 React `values` 状态；
 - Ant Form 的字段状态。
 
+同时用 `programmaticValuesRef` 同步保留选中行的完整快照。提交时以该快照为底稿，
+再覆盖 React 状态、Ant Form 字段和当次提交字段；这样不可编辑的行身份不会因
+弹窗挂载时序或 React 异步状态而丢失。`clear()` 会同时清空该快照，不会泄漏上一行。
+
 没有改变 Manage API URL、请求/响应 JSON 契约、Gateway 或交易前端。修复仅作用于后台
 Admin 程序化装载表单值，手机端和 futures web 不引用该组件。
 
@@ -39,6 +44,8 @@ Admin 程序化装载表单值，手机端和 futures web 不引用该组件。
 
 - 单元测试锁定：程序化装载后 React state 与 Ant Form 都收到包含
   `marketCode/jobType` 的完整选择行模型。
+- 单元测试锁定：表单只提交可编辑字段时，仍保留完整行的
+  `marketCode/jobType`，并使用用户编辑后的新值覆盖原值。
 - Ego Lite 必须重新验证：编辑弹窗提交体包含完整选择行，而不是 `{}`；后端仍只从
   `command.Model` 读取目标身份。
 - 回滚时还原 `WayForm/index.tsx` 的 `form.setValues`，并删除
