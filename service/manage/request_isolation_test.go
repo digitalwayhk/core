@@ -95,8 +95,10 @@ func (d *legacyDefaults) GetDefaultItems() []*testItem {
 func TestSearchAfterDefaultItemsLegacyFallback(t *testing.T) {
 	defaults := &legacyDefaults{}
 	svc := manage.NewManageService[testItem](defaults)
+	sender := manage.NewSearch[testItem](defaults)
+	sender.SearchItem = &view.SearchItem{Page: 1, Size: 10}
 
-	_, err := svc.SearchAfter(nil, &view.TableData{}, &requestWithID{
+	_, err := svc.SearchAfter(sender, &view.TableData{}, &requestWithID{
 		crudRequest: &crudRequest{},
 		id:          303,
 	})
@@ -105,6 +107,78 @@ func TestSearchAfterDefaultItemsLegacyFallback(t *testing.T) {
 	defaults.mu.Lock()
 	defer defaults.mu.Unlock()
 	assert.Equal(t, 1, defaults.calls)
+}
+
+// TestSearchAfterZeroPageBootstrapsDefaults 验证尚未归一化的 Page=0 仍按
+// 第一页处理；只有 Page>1 才属于后续分页。
+func TestSearchAfterZeroPageBootstrapsDefaults(t *testing.T) {
+	defaults := &legacyDefaults{}
+	svc := manage.NewManageService[testItem](defaults)
+	sender := manage.NewSearch[testItem](defaults)
+	sender.SearchItem = &view.SearchItem{Page: 0, Size: 10}
+
+	_, err := svc.SearchAfter(sender, &view.TableData{}, &requestWithID{
+		crudRequest: &crudRequest{},
+		id:          306,
+	})
+	require.NoError(t, err)
+
+	defaults.mu.Lock()
+	defer defaults.mu.Unlock()
+	assert.Equal(t, 1, defaults.calls)
+}
+
+// TestSearchAfterFilteredEmptyResultDoesNotBootstrapDefaults 验证带筛选条件的
+// 空结果就是诚实的空列表，不得触发仅用于首次空表初始化的默认数据写入。
+func TestSearchAfterFilteredEmptyResultDoesNotBootstrapDefaults(t *testing.T) {
+	defaults := &legacyDefaults{}
+	svc := manage.NewManageService[testItem](defaults)
+	sender := manage.NewSearch[testItem](defaults)
+	sender.SearchItem = &view.SearchItem{
+		Page: 1,
+		Size: 10,
+		WhereList: []*view.SearchWhere{{
+			Name:  "Name",
+			Value: "deleted-menu",
+		}},
+	}
+	empty := &view.TableData{Rows: []*testItem{}, Total: 0}
+
+	result, err := svc.SearchAfter(sender, empty, &requestWithID{
+		crudRequest: &crudRequest{},
+		id:          304,
+	})
+	require.NoError(t, err)
+	require.Same(t, empty, result)
+
+	defaults.mu.Lock()
+	defer defaults.mu.Unlock()
+	assert.Zero(t, defaults.calls)
+	assert.Zero(t, empty.Total)
+	assert.Empty(t, empty.Rows)
+}
+
+// TestSearchAfterLaterPageEmptyResultDoesNotBootstrapDefaults 验证后续分页的
+// 空结果不会触发默认数据初始化；初始化只允许发生在无筛选的第一页。
+func TestSearchAfterLaterPageEmptyResultDoesNotBootstrapDefaults(t *testing.T) {
+	defaults := &legacyDefaults{}
+	svc := manage.NewManageService[testItem](defaults)
+	sender := manage.NewSearch[testItem](defaults)
+	sender.SearchItem = &view.SearchItem{Page: 2, Size: 10}
+	empty := &view.TableData{Rows: []*testItem{}, Total: 0}
+
+	result, err := svc.SearchAfter(sender, empty, &requestWithID{
+		crudRequest: &crudRequest{},
+		id:          305,
+	})
+	require.NoError(t, err)
+	require.Same(t, empty, result)
+
+	defaults.mu.Lock()
+	defer defaults.mu.Unlock()
+	assert.Zero(t, defaults.calls)
+	assert.Zero(t, empty.Total)
+	assert.Empty(t, empty.Rows)
 }
 
 func TestManageServiceLegacyRequestAPIStillCompiles(t *testing.T) {
