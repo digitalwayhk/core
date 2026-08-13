@@ -108,6 +108,7 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 				item = smodels.NewMenuModel()
 				item.Name = instanceName
 				name := strings.ToLower(item.Name)
+				item.Title=item.Name
 				item.Url = buildMenuUrl(path, name)
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
@@ -280,6 +281,7 @@ func clonePermissions(src []*smodels.PermissionsModel) []*smodels.PermissionsMod
 func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceContext) *smodels.DirectoryModel {
 	diritem := smodels.NewDirectoryModel()
 	diritem.Name = sc.Service.Name
+	diritem.Title=diritem.Name
 	diritem.ID = req.NewID()
 	if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
 		diritem.Title = ititle.GetTitle()

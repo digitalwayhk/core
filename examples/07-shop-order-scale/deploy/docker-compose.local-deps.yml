@@ -1,0 +1,49 @@
+# 07 all-in-one / 本机调试：仅启动 MySQL 权威库 + Redis（事件/可选发现）
+# 用法（仓库根目录）：
+#   docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml up -d
+# 环境变量见 README「本机 Docker 依赖」。
+name: shop-07-local-deps
+
+services:
+  # 本机已有 6379 Redis 时可只起 mysql：docker compose ... up -d mysql
+  # 若 6379 空闲再 up redis；或改端口后设置 SHOP_REDIS_ADDR=127.0.0.1:16379
+  redis:
+    image: redis:7-alpine
+    container_name: shop-07-redis
+    profiles: ["with-redis"]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+    volumes:
+      - shop-07-redis-data:/data
+
+  mysql:
+    image: mysql:8.4
+    container_name: shop-07-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: shop-root
+      MYSQL_DATABASE: shop_order_scale_remote
+      # 与代码默认库名一致；root 密码需通过环境变量注入应用
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pshop-root --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - shop-07-mysql-data:/var/lib/mysql
+
+volumes:
+  shop-07-redis-data:
+  shop-07-mysql-data:

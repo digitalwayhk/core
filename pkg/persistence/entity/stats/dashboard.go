@@ -88,6 +88,8 @@ type ChartValue struct {
 	X    string `json:"x"`
 	Y    string `json:"y"`
 	Date string `json:"date"`
+	// Name 序列名（多折线/双轴时标识「订单笔数」「金额」等业务名）
+	Name string `json:"name,omitempty"`
 }
 
 // TrendItem 同比/footer。

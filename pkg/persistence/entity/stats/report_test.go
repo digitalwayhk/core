@@ -12,13 +12,19 @@ func TestRegisterAndBuildReportView(t *testing.T) {
 	t.Cleanup(ResetReportsForTest)
 
 	RegisterReports(ReportDef{
-		Code:        "demo-daily",
-		Service:     "shop-order",
-		Title:       "日趋势",
-		Kind:        ReportKindLine,
-		SpecCode:    "order.by_day",
-		MetricAlias: "amount_sum",
-		Sort:        1,
+		Code:          "demo-daily",
+		Service:       "shop-order",
+		Title:         "订单日趋势",
+		Kind:          ReportKindLine,
+		SpecCode:      "order.by_day",
+		MetricAliases: []string{"row_count", "amount_sum"},
+		MetricTitles: map[string]string{
+			"row_count":  "订单笔数",
+			"amount_sum": "金额",
+		},
+		ChartTitle: "订单日趋势",
+		TableTitle: "订单明细",
+		Sort:       1,
 	})
 
 	menus := ListReportMenus("shop-order")
@@ -39,8 +45,19 @@ func TestRegisterAndBuildReportView(t *testing.T) {
 	view, err := BuildReportView(store, "shop-order", "demo-daily")
 	require.NoError(t, err)
 	require.False(t, view.Empty)
-	require.Len(t, view.Series, 2)
+	// 2 天 × 2 指标 = 4 个序列点
+	require.Len(t, view.Series, 4)
+	require.Equal(t, "订单笔数", view.Series[0].Name)
+	require.Equal(t, "金额", view.Series[2].Name)
+	require.Len(t, view.Summary, 2)
+	require.Equal(t, "订单笔数", view.Summary[0].DataName)
+	require.Equal(t, "3", view.Summary[0].Value)
+	require.Equal(t, "金额", view.Summary[1].DataName)
+	require.Equal(t, "150", view.Summary[1].Value)
+	require.Equal(t, []string{"日期", "订单笔数", "金额"}, view.TableHeaders)
 	require.NotEmpty(t, view.TableRows)
+	require.Equal(t, "订单日趋势", view.Def.ChartTitleOf())
+	require.Equal(t, "订单明细", view.Def.TableTitleOf())
 }
 
 func TestBuildReportViewEmpty(t *testing.T) {

@@ -2,6 +2,41 @@
 
 本目录演示 07 订单服务的多副本部署约束。Compose 文件提供固定 `shop-order-a/b` 便于 UAT 断言，也提供 `shop-order` scale 模板用于编排层扩容实验。
 
+## 本机 all-in-one：仅 MySQL + Redis
+
+Compose 文件：`docker-compose.local-deps.yml`（只起依赖，不起业务进程）。
+
+```bash
+# 必选：共享订单权威库（127.0.0.1:3306）
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml up -d mysql
+
+# 可选：若本机没有 Redis，再起容器 Redis（需 6379 空闲）
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml --profile with-redis up -d redis
+```
+
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| MySQL | `127.0.0.1:3306` | 库 `shop_order_scale_remote`，`root` / `shop-root` |
+| Redis | `127.0.0.1:6379` | 事件 `redis-stream`；本机已有 Redis 可直接用，不必起容器 |
+
+启动 all-in-one 前设置（密码与 compose 一致；代码默认密码为空，必须显式导出）：
+
+```bash
+export SHOP_REDIS_ADDR=127.0.0.1:6379
+export SHOP_ORDER_REMOTE_MYSQL_HOST=127.0.0.1
+export SHOP_ORDER_REMOTE_MYSQL_PORT=3306
+export SHOP_ORDER_REMOTE_MYSQL_USER=root
+export SHOP_ORDER_REMOTE_MYSQL_PASSWORD=shop-root
+export SHOP_ORDER_REMOTE_MYSQL_DATABASE=shop_order_scale_remote
+```
+
+停止：
+
+```bash
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml down
+# 连同数据卷：down -v
+```
+
 水平扩容必须满足：
 
 - 所有 order 副本使用相同 `ServiceName=shop-order`。

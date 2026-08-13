@@ -33,10 +33,18 @@ type ReportDef struct {
 	Kind ReportKind `json:"kind"`
 	// SpecCode 绑定的 StatSpec.Code（数据源）
 	SpecCode string `json:"specCode"`
-	// MetricAlias 主指标（默认 row_count 或 Spec 第一项）
+	// MetricAlias 主指标（默认 row_count 或 Spec 第一项）；多指标时用 MetricAliases
 	MetricAlias string `json:"metricAlias,omitempty"`
+	// MetricAliases 多序列指标（如 ["row_count","amount_sum"] 画双折线）；优先于 MetricAlias
+	MetricAliases []string `json:"metricAliases,omitempty"`
+	// MetricTitles 指标业务名，key 为 alias（如 row_count→订单笔数）
+	MetricTitles map[string]string `json:"metricTitles,omitempty"`
 	// DimAlias 主维度（空=仅时间轴）
 	DimAlias string `json:"dimAlias,omitempty"`
+	// ChartTitle 图表卡片标题，空则用 Title
+	ChartTitle string `json:"chartTitle,omitempty"`
+	// TableTitle 明细表标题，空则「明细」
+	TableTitle string `json:"tableTitle,omitempty"`
 	// MenuTitle 菜单文案，空则用 Title
 	MenuTitle string `json:"menuTitle,omitempty"`
 	// Sort 菜单排序，小在前
@@ -197,6 +205,79 @@ func validateReportDef(d ReportDef) error {
 	return nil
 }
 
+// ChartTitleOf 图表卡片标题。
+func (d ReportDef) ChartTitleOf() string {
+	if strings.TrimSpace(d.ChartTitle) != "" {
+		return d.ChartTitle
+	}
+	return d.Title
+}
+
+// TableTitleOf 明细表标题。
+func (d ReportDef) TableTitleOf() string {
+	if strings.TrimSpace(d.TableTitle) != "" {
+		return d.TableTitle
+	}
+	return "明细"
+}
+
+// ResolveMetrics 解析要展示的指标列表（有序）。
+func (d ReportDef) ResolveMetrics(snap Snapshot) []string {
+	if len(d.MetricAliases) > 0 {
+		out := make([]string, 0, len(d.MetricAliases))
+		for _, m := range d.MetricAliases {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				out = append(out, m)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if strings.TrimSpace(d.MetricAlias) != "" {
+		return []string{strings.TrimSpace(d.MetricAlias)}
+	}
+	// 默认：优先 row_count + amount_sum（若存在），否则第一个 metric
+	if len(snap.Rows) == 0 {
+		return []string{"row_count"}
+	}
+	metrics := snap.Rows[0].Metrics
+	out := make([]string, 0, 2)
+	if _, ok := metrics["row_count"]; ok {
+		out = append(out, "row_count")
+	}
+	if _, ok := metrics["amount_sum"]; ok {
+		out = append(out, "amount_sum")
+	}
+	if len(out) > 0 {
+		return out
+	}
+	for k := range metrics {
+		return []string{k}
+	}
+	return []string{"row_count"}
+}
+
+// MetricTitleOf 指标业务展示名。
+func (d ReportDef) MetricTitleOf(alias string) string {
+	if d.MetricTitles != nil {
+		if t := strings.TrimSpace(d.MetricTitles[alias]); t != "" {
+			return t
+		}
+	}
+	switch alias {
+	case "row_count":
+		return "订单笔数"
+	case "amount_sum":
+		return "金额"
+	case "qty_sum":
+		return "销量"
+	default:
+		return alias
+	}
+}
+
 // BuildReportView 从 StatsStore 快照组装报表视图（不查库）。
 func BuildReportView(store *Store, service, code string) (ReportView, error) {
 	def, ok := GetReportDef(service, code)
@@ -218,53 +299,45 @@ func BuildReportView(store *Store, service, code string) (ReportView, error) {
 		return view, nil
 	}
 	view.ComputedAt = snap.ComputedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
-	metric := def.MetricAlias
-	if metric == "" {
-		metric = "row_count"
-		if len(snap.Rows) > 0 {
-			for k := range snap.Rows[0].Metrics {
-				if k != "row_count" {
-					metric = k
-					break
-				}
-			}
-			if _, ok := snap.Rows[0].Metrics["row_count"]; ok {
-				// prefer amount if exists
-				if _, ok2 := snap.Rows[0].Metrics["amount_sum"]; ok2 {
-					metric = "amount_sum"
-				}
-			}
-		}
-	}
-	if def.MetricAlias != "" {
-		metric = def.MetricAlias
-	}
+	metrics := def.ResolveMetrics(snap)
+	primary := metrics[0]
 
-	view.Series = seriesFromSnapshot(snap, def.DimAlias, metric)
-	view.TableHeaders, view.TableRows = tableFromSnapshot(snap, def.DimAlias, metric)
-	view.Ranking = rankingFromSnapshot(snap, def.DimAlias, metric, 10)
-	view.Summary = []StatisticItem{
-		{
-			DataName:    "行数",
-			Description: "快照聚合行数",
-			Value:       fmt.Sprintf("%d", len(snap.Rows)),
+	view.Series = multiSeriesFromSnapshot(snap, def.DimAlias, metrics, def)
+	view.TableHeaders, view.TableRows = multiTableFromSnapshot(snap, def.DimAlias, metrics, def)
+	view.Ranking = rankingFromSnapshot(snap, def.DimAlias, primary, 10)
+	// 摘要卡片：各业务指标合计（不是「快照行数」）
+	view.Summary = make([]StatisticItem, 0, len(metrics))
+	for _, m := range metrics {
+		view.Summary = append(view.Summary, StatisticItem{
+			Code:        m,
+			DataName:    def.MetricTitleOf(m),
+			Description: m,
+			Value:       sumMetricAlias(snap, m),
 			ValueFormat: "number",
-		},
-		{
-			DataName:    "指标",
-			Description: metric,
-			Value:       sumMetricAlias(snap, metric),
-			ValueFormat: "number",
-		},
+		})
 	}
 	return view, nil
 }
 
-func seriesFromSnapshot(snap Snapshot, dimAlias, metric string) []ChartValue {
-	type agg struct {
-		x string
-		y float64
+func multiSeriesFromSnapshot(snap Snapshot, dimAlias string, metrics []string, def ReportDef) []ChartValue {
+	if len(metrics) == 0 {
+		return nil
 	}
+	// 有维度：仍按主指标做分类汇总（饼/柱/排名）
+	if strings.TrimSpace(dimAlias) != "" {
+		return seriesFromSnapshot(snap, dimAlias, metrics[0], def.MetricTitleOf(metrics[0]))
+	}
+	// 无维度：每个指标一条时间序列（双折线）
+	out := make([]ChartValue, 0)
+	for _, metric := range metrics {
+		title := def.MetricTitleOf(metric)
+		part := seriesFromSnapshot(snap, "", metric, title)
+		out = append(out, part...)
+	}
+	return out
+}
+
+func seriesFromSnapshot(snap Snapshot, dimAlias, metric, seriesName string) []ChartValue {
 	// 无维度：按 bucket
 	if strings.TrimSpace(dimAlias) == "" {
 		m := map[string]float64{}
@@ -278,7 +351,12 @@ func seriesFromSnapshot(snap Snapshot, dimAlias, metric string) []ChartValue {
 		sort.Strings(keys)
 		out := make([]ChartValue, 0, len(keys))
 		for _, k := range keys {
-			out = append(out, ChartValue{X: formatBucketLabelSimple(k), Y: fmt.Sprintf("%.0f", m[k]), Date: k})
+			out = append(out, ChartValue{
+				X:    formatBucketLabelSimple(k),
+				Y:    fmt.Sprintf("%.0f", m[k]),
+				Date: k,
+				Name: seriesName,
+			})
 		}
 		return out
 	}
@@ -299,31 +377,69 @@ func seriesFromSnapshot(snap Snapshot, dimAlias, metric string) []ChartValue {
 	sort.Slice(list, func(i, j int) bool { return list[i].v > list[j].v })
 	out := make([]ChartValue, 0, len(list))
 	for _, it := range list {
-		out = append(out, ChartValue{X: it.k, Y: fmt.Sprintf("%.0f", it.v)})
+		out = append(out, ChartValue{X: it.k, Y: fmt.Sprintf("%.0f", it.v), Name: seriesName})
 	}
 	return out
 }
 
-func tableFromSnapshot(snap Snapshot, dimAlias, metric string) ([]string, []map[string]string) {
-	headers := []string{"bucket", "metric"}
-	if dimAlias != "" {
-		headers = []string{"bucket", "dim", "metric"}
+func multiTableFromSnapshot(snap Snapshot, dimAlias string, metrics []string, def ReportDef) ([]string, []map[string]string) {
+	if len(metrics) == 0 {
+		return nil, nil
 	}
-	rows := make([]map[string]string, 0, len(snap.Rows))
-	sorted := append([]StatRow(nil), snap.Rows...)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Bucket == sorted[j].Bucket {
-			return dimLabel(sorted[i], dimAlias) < dimLabel(sorted[j], dimAlias)
+	// 有维度：逐行明细（bucket + dim + 各指标）
+	if strings.TrimSpace(dimAlias) != "" {
+		headers := []string{"日期", "维度"}
+		for _, m := range metrics {
+			headers = append(headers, def.MetricTitleOf(m))
 		}
-		return sorted[i].Bucket < sorted[j].Bucket
-	})
-	for _, r := range sorted {
-		row := map[string]string{
-			"bucket": r.Bucket,
-			"metric": r.Metrics[metric],
+		sorted := append([]StatRow(nil), snap.Rows...)
+		sort.Slice(sorted, func(i, j int) bool {
+			if sorted[i].Bucket == sorted[j].Bucket {
+				return dimLabel(sorted[i], dimAlias) < dimLabel(sorted[j], dimAlias)
+			}
+			return sorted[i].Bucket < sorted[j].Bucket
+		})
+		rows := make([]map[string]string, 0, len(sorted))
+		for _, r := range sorted {
+			row := map[string]string{
+				"日期": r.Bucket,
+				"维度": dimLabel(r, dimAlias),
+			}
+			for _, m := range metrics {
+				row[def.MetricTitleOf(m)] = r.Metrics[m]
+			}
+			rows = append(rows, row)
 		}
-		if dimAlias != "" {
-			row["dim"] = dimLabel(r, dimAlias)
+		return headers, rows
+	}
+	// 无维度：按日期聚合各指标一列
+	headers := []string{"日期"}
+	for _, m := range metrics {
+		headers = append(headers, def.MetricTitleOf(m))
+	}
+	// bucket -> metric -> sum
+	type cell map[string]float64
+	byBucket := map[string]cell{}
+	for _, r := range snap.Rows {
+		c, ok := byBucket[r.Bucket]
+		if !ok {
+			c = cell{}
+			byBucket[r.Bucket] = c
+		}
+		for _, m := range metrics {
+			c[m] += parseFloat(r.Metrics[m])
+		}
+	}
+	keys := make([]string, 0, len(byBucket))
+	for k := range byBucket {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	rows := make([]map[string]string, 0, len(keys))
+	for _, k := range keys {
+		row := map[string]string{"日期": k}
+		for _, m := range metrics {
+			row[def.MetricTitleOf(m)] = fmt.Sprintf("%.0f", byBucket[k][m])
 		}
 		rows = append(rows, row)
 	}
