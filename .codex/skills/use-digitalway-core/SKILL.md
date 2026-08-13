@@ -46,6 +46,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | --- | --- |
 | 场景和能力选择 | `docs/codex/FRAMEWORK_USAGE_GUIDE.md` |
 | 配置是否真正接入运行时 | `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md` |
+| Web Admin 启动认证、Casdoor 登录与 HTMLServer 边界 | `references/core-backend-api.md`「Web Admin bootstrap 与 Casdoor 部署边界」 |
 | RouterInfo、对象池、EventBridge、缓存、WebSocket 和生命周期 | `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md` |
 | 多服务运行图、指标诚实状态、Admin 观测 | `docs/codex/API_COMPATIBILITY_SURFACE.md`（Runtime）、`DEPRECATION_REGISTER.md`（`RouterStats`）、设计 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md` |
 | 消费方安装本 skill | `docs/codex/CONSUMER_AI_SKILL_SETUP.md`、`scripts/link-consumer-skill.sh` |
@@ -78,7 +79,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。服务发布事件只在 `Start()` 中声明 `sc.UseOutbox(models.OutboxStore{})`，订阅只使用统一 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})`；业务不再手写 Outbox worker、`SubscribeExternalControl` 或同时注册内外两套订阅。`EventType` 可为空，表示订阅该 Subject 下全部事件类型。
 8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。多服务 public/private 缓存只放在面向外部流量的入口服务 facade，例如 06 的 user-service；supplier/order 这类内部权威服务的 Public API 不再重复缓存，避免展示缓存与权威校验缓存双层失效。
 9. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
-10. Casdoor Auth/Manage 是独立域，分离 Client、Access/Refresh/Webhook Secret；Callback、Refresh、REST 和 WebSocket 共享撤销权威。
+10. Casdoor Auth/Manage 是可在同一服务同时启用的两个独立认证域，分别持有 Client、Access/Refresh/Webhook Secret；Auth Token 只进入 Private/用户 WebSocket，Manage Token 只进入 Manage，Callback、Refresh 和 Webhook 用 `type=auth|manage` 选择域并共享服务级撤销权威。Web Admin 的 `/api/web/bootstrap` 只属于启用 `ViewPort` 的 HTMLServer 开发/测试视图；`ui.show_login` 只反映所选权威服务的 `ManageAuth.CasDoor.Enable`，不反映 `Auth.CasDoor.Enable`。`ManageAuthAuthorityService` 和认证 URL 上的 `service` 参数也是 HTMLServer 聚合代理能力，不得当作正式直连服务的 Casdoor 协议或动态启用开关；完整矩阵和重启边界见 reference。
 11. 优先复用 go-zero/成熟客户端；不支持的配置值 fail closed，不得伪装可用。
 12. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump；Manage 生命周期日志参考 05 的 `ShopManage.logManageResult`，统一事件名 `shop_manage_operation_failed/succeeded` 和字段 `owner/phase/service/route/trace_id/code`，不要按服务发明 `shop_user_manage...` 之类事件。
 13. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
