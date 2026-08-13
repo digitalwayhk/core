@@ -67,12 +67,48 @@ func (own *Ping) RouterInfo() *types.RouterInfo {
 
 ## 模型与管理 CRUD
 
-- Manage CRUD 使用 `entity.NewModelList[T](nil)`；public/private 路由调用模型封装的 `IDataAction` 查询与操作方法。
-- 嵌入 `*entity.Model` 或 `*entity.BaseModel` 的类型必须在 `NewModel()` 中初始化嵌入字段。
-- 只有天然具有稳定 `Code` 语义的资料模型才使用 `BaseModel`。
+- Model 层是业务设计的第一层。先按数据生命周期拆成两类：商品、商户、订单类型等稳定且增长可预期的数据属于基础资料 Model；订单、支付/库存流水等依赖基础资料 ID、由业务持续产生且规模不可预知的数据属于业务事实 Model。
+- 两类模型必须建立平行继承支路：`ServiceModel → BaseDataModel → Product` 与 `ServiceModel → BusinessModel → Order`。服务公共基座只承载数据库名、TraceID 等能力，不是基础资料 Model；业务事实不得继承基础资料支路。
+- 基础资料通常使用稳定 Code、启停和引用保护；业务事实保存基础资料 ID 与必要历史快照，使用幂等、状态机、受控命令、分页/索引/归档，不能按普通 CRUD 任意修改删除。
+- `entity.Model` 是中性持久化根；只有天然具有稳定 `Code` 语义的资料模型才使用 `entity.BaseModel`，业务单据/记录按需选择 `BaseOrderModel`/`BaseRecordModel`。
+- Manage 使用 `entity.NewModelList[T](nil)` 保留标准筛选、排序和分页；public/private 路由调用模型封装的 `IDataAction` 查询与操作方法。
+- 嵌入框架或项目模型指针的类型必须在 `NewModel()` 中初始化完整继承链。
 - 管理 CRUD 路径为 `/api/manage/{service}/{manageStructLower}/{operationLower}`。
 
-模型、Manage CRUD 和私有订单接口见 [最简商城示例](./examples/01-simple-shop)。
+简单模型、Manage CRUD 和私有订单接口见 [最简商城示例](./examples/01-simple-shop)；两类模型与 Manage 分支见 [模型继承示例](./examples/03-shop-inheritance) 和 [完整 Skill 参考](./.codex/skills/use-digitalway-core/references/core-backend-api.md#先按数据生命周期分类)。
+
+## 业务统计、经营分析与服务报表
+
+Core 提供声明式业务统计、管理端经营分析和服务级报表能力，统一入口为
+`pkg/persistence/entity/stats`。完整模板见
+[07 订单服务](./examples/07-shop-order-scale/order-service)，实现契约见
+[use-digitalway-core 参考](./.codex/skills/use-digitalway-core/references/core-backend-api.md#业务统计经营分析与服务报表)。
+
+最小接入流程：
+
+1. 用 `stats.StatSpec` 声明事实表、时间粒度、维度和 `count|sum|avg` 指标，并在启动期调用 `stats.Register`。
+2. 为服务创建独立 `stats.Store`，注入 OLTP 或 ClickHouse `StatsEngine`，由后台 Runner 定时调用 `stats.RefreshWithEngine` 刷新快照。
+3. 注册 Manage 接口 `POST /api/manage/{service}/analysis`，返回标准 `stats.Dashboard`。
+4. 用 `stats.RegisterReports` 注册服务报表，再注册 `POST /api/manage/{service}/reports` 和 `/reports/view`。
+5. 执行菜单同步后，报表会挂在对应服务子菜单，前端路径为 `/report/{service}/{code}`。
+
+`ReportDef` 只定义报表展示与 `StatSpec` 的绑定，不会自动创建事实数据、Runner
+或 API；analysis/reports API 应只读统计快照，不得在请求路径临时扫描业务表。
+同一进程承载多个服务时，Spec Code 必须带稳定业务前缀，每个服务使用独立 Store。
+这些接口属于 Manage 认证域。
+
+### 消费项目版本要求
+
+消费项目需要同时满足：
+
+- `go.mod` 使用的 Core 版本包含 `pkg/persistence/entity/stats`；
+- Core 嵌入的 `web/admin` 与分析、报表 JSON 契约匹配；
+- 已按上方“AI 助手与 Skill”运行 `scripts/link-consumer-skill.sh`，让项目内 AI 读取现行接入规范。
+
+当前分析与报表能力位于 `core-web-admin` 开发分支，尚未进入稳定 tag。因此不能仅执行
+`go get github.com/digitalwayhk/core@latest` 后假定该能力可用；正式消费应等待包含该能力的
+发布版本，或在明确评审和锁定提交的前提下使用对应开发版本。不得通过复制 Core 实现或
+长期 `replace` 伪装成已发布能力。
 
 ## 安全与配置
 

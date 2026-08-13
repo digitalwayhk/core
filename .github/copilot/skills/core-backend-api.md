@@ -272,30 +272,52 @@ type IRouter interface {
 
 ### 🔑 核心约定（必读）
 
-1. **自动建表建库**：调用 `entity.NewModelList[T](nil)` 时框架自动检测并创建表（GORM AutoMigrate），
+1. **先按生命周期分类**：设计 API 前先把领域数据拆成基础资料 Model 与业务事实 Model；“基础”不是继承树上层，也不由 `entity.BaseModel` 的名字决定。
+2. **两条继承支路分开**：服务公共模型基座之下分别建立 `BaseDataModel` 与 `BusinessModel`；具体模型只能进入一条支路，业务事实不得继承基础资料支路。
+3. **自动建表建库**：调用 `entity.NewModelList[T](nil)` 时框架自动检测并创建表（GORM AutoMigrate），
    无需编写 SQL 或手动迁移脚本。新增字段后重启即自动补列。
-2. **一个 model 文件 = 一张表**：每个 Go 文件只定义一个业务模型结构体，
+4. **一个 model 文件 = 一张表**：每个 Go 文件只定义一个业务模型结构体，
    对该表的所有字段、索引、关联关系、业务验证逻辑，全部写在同一文件。
    修改表结构时只需改一个文件。
-3. **可无缝切换数据库**：默认 SQLite（开发），配置 MySQL 后业务代码零改动。
+5. **可无缝切换数据库**：默认 SQLite（开发），配置 MySQL 后业务代码零改动。
    切换方式通过 `IDBName` 或配置文件实现，不侵入 model 代码。
-4. **表名默认规则**：`entity.Model.GetLocalDBName()` 返回 `"models"`，即所有模型默认存储在
+6. **表名默认规则**：`entity.Model.GetLocalDBName()` 返回 `"models"`，即所有模型默认存储在
    同一个 `models` 数据库。实现 `IDBName` 接口可路由到独立库/表。
 
 ---
 
-### 基础类型选择指南
+### 业务语义分类
+
+| 分类 | 判定 | 例子 | 默认治理 |
+|------|------|------|----------|
+| 基础资料 Model（主数据/原数据） | 相对稳定，集合规模与增长速度可预期，供其他业务引用 | 商品、商户/供应商、订单类型、支付类型 | 稳定 ID/Code、启停、引用保护；被引用后通常禁用而非删除 |
+| 业务事实 Model | 必须依赖基础资料 ID，由业务持续产生，数量无上限且增长频率不可预知 | 订单、支付流水、库存流水、结算记录 | 幂等、状态机、只读/受控命令、分页上限、索引、归档/分区 |
+
+标准继承形状：
+
+```text
+entity.Model
+└── ServiceModel             # 公共持久化能力，不是基础资料
+    ├── BaseDataModel        # Product/Supplier/OrderType
+    └── BusinessModel        # Order/PaymentRecord
+```
+
+业务事实保存基础资料 ID，并按审计需要保存名称、编码、价格等历史快照。不要把无限增长的库存/价格变动直接塞入 Product；拆成稳定基础资料与 `InventoryRecord`/`PriceRecord`。Outbox、Inbox、审计日志是基础设施记录，单独放 store/audit，不用于模糊两类业务 Model。
+
+### 框架结构体选择指南
 
 | 嵌入类型 | 适用场景 | 包含字段 | GetHash 默认值 |
 |----------|----------|----------|---------------|
-| `*entity.Model` | 通用实体（商品、用户、菜单等） | ID, CreatedAt, UpdatedAt, Hashcode | ID |
-| `*entity.BaseModel` | 带业务状态的实体（有 Code 唯一标识） | + State, Code, Name, Describe, 操作人 | Code |
-| `*entity.BaseOrderModel` | 单据/交易（不可删除，TraceID+UserID 唯一） | + TraceID, Code, UserID, State | TraceID+UserID |
-| `*entity.BaseRecordModel` | 日志/记录（只写不改不删） | + TraceID | TraceID |
+| `*entity.Model` | 中性最小持久化根；两类公共根或简单模型 | ID, CreatedAt, UpdatedAt, Hashcode | ID |
+| `*entity.BaseModel` | 有稳定 Code/Name/State 的基础资料 | + State, Code, Name, Describe, 操作人 | Code |
+| `*entity.BaseOrderModel` | 业务事实中的单据/交易 | + TraceID, Code, UserID, State | TraceID+UserID |
+| `*entity.BaseRecordModel` | 只追加的业务事实或技术记录 | + TraceID | TraceID |
+
+先做业务分类，再选框架结构体；不得从结构体名字反推分类。
 
 ---
 
-### entity.Model（通用实体）
+### entity.Model（中性持久化根）
 
 ```go
 // models/product.go
@@ -303,9 +325,15 @@ package models
 
 import "github.com/digitalwayhk/core/pkg/persistence/entity"
 
-// Product 商品表。一个 model 文件对应一张表，所有字段、关联、验证都在此文件。
+// ServiceModel 是服务公共模型基座，不代表基础资料。
+type ServiceModel struct { *entity.Model }
+
+// BaseDataModel 是基础资料支路。
+type BaseDataModel struct { *ServiceModel }
+
+// Product 商品基础资料。具体模型继承语义支路，不直接把框架根当分类。
 type Product struct {
-    *entity.Model
+    *BaseDataModel
     Name     string  `json:"name"  desc:"商品名称"`
     Price    int64   `json:"price" desc:"价格（分）"`
     Category string  `json:"category" desc:"分类"`
@@ -313,12 +341,16 @@ type Product struct {
     OrderLines []*OrderLine `json:"orderlines,omitempty" gorm:"foreignkey:ProductID"`
 }
 
-func NewProduct() *Product { return &Product{Model: entity.NewModel()} }
+func NewProduct() *Product {
+    return &Product{BaseDataModel: &BaseDataModel{
+        ServiceModel: &ServiceModel{Model: entity.NewModel()},
+    }}
+}
 
 // NewModel 必须实现，供 ModelList.NewItem() 调用
 func (own *Product) NewModel() {
-    if own.Model == nil {
-        own.Model = entity.NewModel()
+    if own.BaseDataModel == nil || own.ServiceModel == nil || own.Model == nil {
+        own.BaseDataModel = NewProduct().BaseDataModel
     }
 }
 ```
@@ -346,50 +378,13 @@ func (own *Token) NewModel() {
     }
 }
 // GetHash 默认使用 Code（由 BaseModel 提供），Code 唯一即不需要覆写。
-// ⚠️ 若实体没有业务 Code，必须覆写为 ID 哈希（见下方 Order 示例）。
 ```
 
-### entity.BaseModel 无 Code 时的 GetHash 修复
+### 不要让业务事实误用 entity.BaseModel
 
-```go
-// models/order.go
-package models
+`entity.BaseModel` 的 `GetHash` 基于 Code，语义是稳定资料。订单、流水等业务事实不能因为想复用 `State` 就继承它再修补空 Code；应进入项目 `BusinessModel` 支路，并按事实类型选择 `entity.BaseOrderModel`、`entity.BaseRecordModel` 或中性 `entity.Model`。业务唯一键必须由 requestID、订单号等真实幂等契约表达。
 
-import (
-    "github.com/digitalwayhk/core/pkg/persistence/entity"
-    "github.com/shopspring/decimal"
-)
-
-// Order 订单表。无 Code 字段，GetHash 必须委托给 Model（ID 哈希），否则所有空 Code 会哈希碰撞。
-type Order struct {
-    *entity.BaseModel
-    UserID  string          `json:"userid"  desc:"用户ID"`
-    Price   decimal.Decimal `json:"price"   desc:"成交价"`
-    Amount  decimal.Decimal `json:"amount"  desc:"成交量"`
-    TokenID uint            `json:"tokenid" desc:"币种ID"`
-    // 自关联：子订单
-    ChildDetail []*Order `json:"childdetail,omitempty" gorm:"foreignkey:ParentID"`
-    ParentID    uint     `json:"parentid"`
-}
-
-func NewOrder() *Order { return &Order{BaseModel: entity.NewBaseModel()} }
-
-func (own *Order) NewModel() {
-    if own.BaseModel == nil {
-        own.BaseModel = entity.NewBaseModel()
-    }
-}
-
-// ⚠️ 覆写 GetHash：无 Code 时委托给 Model.GetHash()（ID 哈希），防止碰撞
-func (own *Order) GetHash() string {
-    if own.BaseModel != nil && own.BaseModel.Model != nil {
-        return own.BaseModel.Model.GetHash()
-    }
-    return own.BaseModel.GetHash()
-}
-```
-
-### entity.BaseOrderModel（单据，不可删除）
+### 单据能力放入 BusinessModel 支路
 
 ```go
 // models/tradeorder.go
@@ -400,24 +395,33 @@ import (
     "github.com/shopspring/decimal"
 )
 
-// TradeOrder 交易单据。TraceID+UserID 构成唯一键，不允许删除。
+// OrderBusinessModel 是订单域业务事实支路，可按需复用 BaseOrderModel。
+type OrderBusinessModel struct {
+    *entity.BaseOrderModel
+}
+
+// TradeOrder 交易单据。它继承业务事实支路，而不是基础资料支路。
 type TradeOrder struct {
-    *entity.BaseOrderModel          // TraceID, Code, UserID, State；RemoveValid 返回错误
+    *OrderBusinessModel
+    ProductID   uint            `json:"productId"`
+    OrderTypeID uint            `json:"orderTypeId"`
     Price  decimal.Decimal `json:"price"`
     Amount decimal.Decimal `json:"amount"`
 }
 
-func NewTradeOrder() *TradeOrder { return &TradeOrder{BaseOrderModel: entity.NewBaseOrderModel()} }
+func NewTradeOrder() *TradeOrder {
+    return &TradeOrder{OrderBusinessModel: &OrderBusinessModel{BaseOrderModel: entity.NewBaseOrderModel()}}
+}
 
 func (own *TradeOrder) NewModel() {
-    if own.BaseOrderModel == nil {
-        own.BaseOrderModel = entity.NewBaseOrderModel()
+    if own.OrderBusinessModel == nil || own.BaseOrderModel == nil {
+        own.OrderBusinessModel = &OrderBusinessModel{BaseOrderModel: entity.NewBaseOrderModel()}
     }
 }
 // GetHash 由 BaseOrderModel 提供：utils.HashCodes(TraceID, UserID) —— 不需要覆写
 ```
 
-### entity.BaseRecordModel（日志，只写不改不删）
+### 只追加记录放入 BusinessModel 或技术记录支路
 
 ```go
 // models/auditlog.go
@@ -425,19 +429,24 @@ package models
 
 import "github.com/digitalwayhk/core/pkg/persistence/entity"
 
+// AuditRecordModel 是技术审计记录支路，不属于基础资料。
+type AuditRecordModel struct { *entity.BaseRecordModel }
+
 // AuditLog 审计日志。只允许写入，UpdateValid/RemoveValid 均返回错误。
 type AuditLog struct {
-    *entity.BaseRecordModel         // TraceID；UpdateValid/RemoveValid 直接报错
+    *AuditRecordModel
     Action   string `json:"action"   desc:"操作"`
     Operator string `json:"operator" desc:"操作人"`
     Detail   string `json:"detail"   desc:"详情"`
 }
 
-func NewAuditLog() *AuditLog { return &AuditLog{BaseRecordModel: entity.NewBaseRecordModel()} }
+func NewAuditLog() *AuditLog {
+    return &AuditLog{AuditRecordModel: &AuditRecordModel{BaseRecordModel: entity.NewBaseRecordModel()}}
+}
 
 func (own *AuditLog) NewModel() {
-    if own.BaseRecordModel == nil {
-        own.BaseRecordModel = entity.NewBaseRecordModel()
+    if own.AuditRecordModel == nil || own.BaseRecordModel == nil {
+        own.AuditRecordModel = &AuditRecordModel{BaseRecordModel: entity.NewBaseRecordModel()}
     }
 }
 // GetHash 由 BaseRecordModel 提供：utils.HashCodes(TraceID) —— 不需要覆写
@@ -1319,9 +1328,10 @@ POST /api/servermanage/queryrouters    # 路由查询
 | **自动建表，无需 migration** | `NewModelList[T](nil)` 首次使用时自动 `AutoMigrate`；新增字段重启即生效 |
 | **数据库可替换，代码零改动** | 默认 SQLite；改配置文件即切 MySQL；实现 `IDBName` 可按模型路由到不同库 |
 | **`NewModel()` 方法必须实现** | 供 `ModelList.NewItem()` 调用，负责初始化嵌入的 `*entity.Model` / `*entity.BaseModel` |
-| **`entity.BaseModel` 覆写 `GetHash()`** | 若实体无 `Code`，必须委托 `Model.GetHash()`（ID哈希）防止碰撞 |
-| **BaseOrderModel 不可删除** | `RemoveValid()` 已内置返回错误；单据类型永远用此基类 |
-| **BaseRecordModel 不可改不可删** | `UpdateValid/RemoveValid` 已内置返回错误；日志/流水永远用此基类 |
+| **先分基础资料与业务事实** | 分类依据是数据生命周期；两条模型与 Manage 继承支路必须分开 |
+| **业务事实保存基础资料 ID** | 订单/流水保存依赖资料 ID，并按审计需要保存名称、编码、价格快照 |
+| **BaseOrderModel 不可删除** | 可作为业务事实支路的单据能力；不要求所有单据直接继承它 |
+| **BaseRecordModel 不可改不可删** | 可作为业务事实或技术记录支路的只追加能力 |
 | **写操作验证放在 Valid 方法** | `AddValid/UpdateValid/RemoveValid` 在 DB 操作前自动调用 |
 | **默认库名 "models"** | 所有模型默认存入 `models` DB；实现 `GetLocalDBName()` 可改为独立库 |
 | **外键关联用 gorm 标签** | `gorm:"foreignkey:XxxID"` 或 `gorm:"foreignkey:ID;references:XxxID"` |
@@ -1496,9 +1506,9 @@ type ApiClient struct {} // Api 应为 API
 
 ```go
 // ✅ Model：名词，描述业务实体，无前缀/下划线
-type TradeOrder struct { *BaseModel }        // 交易订单
-type DepositRecord struct { *FundBase }      // 充值记录
-type MarketConfig struct { *entity.Model }   // 市场配置
+type TradeOrder struct { *TradeBusinessModel } // 交易订单：业务事实支路
+type DepositRecord struct { *FundBusinessModel } // 充值记录：业务事实支路
+type MarketConfig struct { *TradeBaseDataModel } // 市场配置：基础资料支路
 
 // ❌ 避免
 type Tr_Order struct {}     // 下划线 + 缩写前缀不可读
@@ -1528,9 +1538,10 @@ type ExportData[T pt.IModel] struct {}
 ```go
 // TradeOrder 表示一笔已成交的交易订单。
 // 状态由 State 字段控制：0=待处理 1=已提交 2=已完成。
-// 不可删除（继承 BaseOrderModel）；TraceID+UserID 构成唯一键。
+// 不可删除；继承 TradeBusinessModel，业务唯一键由订单幂等契约决定。
 type TradeOrder struct {
-    *entity.BaseOrderModel
+    *TradeBusinessModel
+    MarketID uint            `json:"marketId"`
     Price  decimal.Decimal `json:"price"  desc:"成交价格"`
     Amount decimal.Decimal `json:"amount" desc:"成交数量"`
 }
@@ -1559,10 +1570,10 @@ type Com_ModelList[T] struct {} // 下划线
 type TrApi struct {}            // 无意义缩写 + Api（应为 API）
 type ComApi struct {}           // 同上
 
-// ✅ 对应的正确写法
-type TradeBaseModel struct {}
-type BaseModel struct {}        // 或 ProjectBaseModel
-type BaseModelList[T] struct {}
+// ✅ 对应的正确写法；公共基座命名不能与基础资料分类混淆
+type TradeServiceModel struct {}
+type ProjectModel struct {}
+type ProjectModelList[T] struct {}
 type TradeAPI struct {}
 type BaseAPI struct {}
 ```
@@ -1657,11 +1668,10 @@ internal/
 
 ---
 
-## 19.3 基础类型分层
+## 19.3 模型与 Manage 分层
 
 多服务项目中，**不要让各服务直接继承框架类型**。
-建立三层继承结构，把公共行为封装在各层基础类型中，
-修改时只改一处即可传播到所有服务。
+先按数据生命周期建立基础资料与业务事实两条支路，再把真正对所有模型都成立的公共持久化能力放在中性基座中。
 
 ### 三层继承结构
 
@@ -1672,12 +1682,14 @@ internal/
   └── types.IRouter / types.IRequest
 
 项目共享层（internal/pkg/）           ← 所有服务公用
-  └── models/base_model.go          →  BaseModel（含全项目公共字段、DB 连接工厂）
+  └── models/project_model.go       →  ProjectModel（仅全项目公共字段、DB 连接工厂）
   └── api/base_api.go               →  BaseAPI（含公共 Parse/Validation 及工具方法）
   └── services/base_manage_service.go → BaseManageService[T]（含公共 ViewFieldModel、DoBefore 分发）
 
 服务专属层（internal/core/{serviceName}/）  ← 仅该服务使用
-  └── models/trade_base_model.go    →  TradeBaseModel（设置该服务 DB 名、Model 缓存策略）
+  └── models/trade_service_model.go →  TradeServiceModel（设置服务 DB 名等公共能力）
+      ├── TradeBaseDataModel        →  基础资料支路
+      └── TradeBusinessModel        →  业务事实支路
   └── api/trade_api.go              →  TradeAPI（含该服务公共请求字段如 MarketID）
 ```
 
@@ -1685,13 +1697,15 @@ internal/
 
 ```
 entity.Model
-  └── BaseModel                (internal/pkg/models)
-        └── TradeBaseModel     (internal/core/trades/models)
-              └── TradeOrder   (业务模型)
+  └── ProjectModel             (internal/pkg/models)
+        └── TradeServiceModel  (internal/core/trades/models)
+              ├── TradeBaseDataModel  ── Token / Market / OrderType
+              └── TradeBusinessModel  ── TradeOrder / TradeFill
 
 manage.ManageService[T]
   └── BaseManageService[T]     (internal/pkg/services)
-        └── TradeOrderManage   (具体 Manage 控制器)
+        ├── BaseDataManage[T]  ── TokenManage / MarketManage
+        └── BusinessManage[T]  ── TradeOrderManage / TradeFillManage
 
 BaseAPI                        (internal/pkg/api)
   └── TradeAPI                 (internal/core/trades/api)
@@ -1702,43 +1716,44 @@ BaseAPI                        (internal/pkg/api)
 
 ### 19.2 项目共享层 `internal/pkg/`
 
-#### `internal/pkg/models/base_model.go`
+#### `internal/pkg/models/project_model.go`
 
-所有服务模型的公共基类。集中定义：
+所有服务模型的中性公共基座。只集中定义：
 - 全项目公共字段（如 `TraceID`）
 - 数据库连接工厂（从环境变量读 DSN，统一切换 MySQL）
 
+不要在这里放 Code/Name/Enabled 等基础资料专属字段，也不要放业务状态机字段。
+
 ```go
-// internal/pkg/models/base_model.go
+// internal/pkg/models/project_model.go
 package models
 
 import "github.com/digitalwayhk/core/pkg/persistence/entity"
 import persisttypes "github.com/digitalwayhk/core/pkg/persistence/types"
 
-// BaseModel 全项目基础模型。所有业务模型应从此派生。
-// 修改此处字段/行为，整个项目所有模型自动生效。
-type BaseModel struct {
+// ProjectModel 是全项目中性持久化基座，不代表基础资料 Model。
+type ProjectModel struct {
     *entity.Model
     TraceID string `json:"traceId"` // 请求追踪ID
 }
 
-func NewBaseModel() *BaseModel {
-    return &BaseModel{Model: entity.NewModel()}
+func NewProjectModel() *ProjectModel {
+    return &ProjectModel{Model: entity.NewModel()}
 }
 
-func (own *BaseModel) NewModel() {
+func (own *ProjectModel) NewModel() {
     if own.Model == nil {
         own.Model = entity.NewModel()
     }
 }
 
-// BaseModelList 全项目公共 ModelList，封装连接获取逻辑
-type BaseModelList[T persisttypes.IModel] struct {
+// ProjectModelList 封装全项目公共连接获取逻辑。
+type ProjectModelList[T persisttypes.IModel] struct {
     *entity.ModelList[T]
 }
 
-func NewBaseModelList[T persisttypes.IModel](action persisttypes.IDataAction) *BaseModelList[T] {
-    return &BaseModelList[T]{
+func NewProjectModelList[T persisttypes.IModel](action persisttypes.IDataAction) *ProjectModelList[T] {
+    return &ProjectModelList[T]{
         ModelList: entity.NewModelList[T](action),
     }
 }
@@ -1875,14 +1890,14 @@ func (own *BaseManageService[T]) DoBefore(sender interface{}, req stypes.IReques
 
 ---
 
-### 19.3 服务专属基础类型
+### 19.3 服务公共模型与两条业务支路
 
-每个服务在自己的目录下建立服务级基础类型，**嵌入项目共享层**，添加本服务独有的公共行为。
+每个服务先建立中性的服务公共模型，**嵌入项目共享层**并添加数据库名等公共行为；再分别建立基础资料与业务事实支路。
 
-#### `internal/core/{serviceName}/models/trade_base_model.go`
+#### `internal/core/{serviceName}/models/trade_service_model.go`
 
 ```go
-// internal/core/trades/models/trade_base_model.go
+// internal/core/trades/models/trade_service_model.go
 package models
 
 import (
@@ -1890,36 +1905,61 @@ import (
     persisttypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
-// TradeBaseModel 是 trades 服务基础模型。
-// 设置该服务专属的 DB 名称；所有 trades 业务模型应从此派生。
-type TradeBaseModel struct {
-    *basemodels.BaseModel
+// TradeServiceModel 是 trades 服务的中性公共持久化基座。
+type TradeServiceModel struct {
+    *basemodels.ProjectModel
 }
 
-func NewTradeBaseModel() *TradeBaseModel {
-    return &TradeBaseModel{BaseModel: basemodels.NewBaseModel()}
+func NewTradeServiceModel() *TradeServiceModel {
+    return &TradeServiceModel{ProjectModel: basemodels.NewProjectModel()}
 }
 
-func (own *TradeBaseModel) NewModel() {
-    if own.BaseModel == nil {
-        own.BaseModel = basemodels.NewBaseModel()
+func (own *TradeServiceModel) NewModel() {
+    if own.ProjectModel == nil {
+        own.ProjectModel = basemodels.NewProjectModel()
     }
 }
 
 // GetLocalDBName 该服务所有模型默认存入同一个本地 DB
-func (own *TradeBaseModel) GetLocalDBName() string { return "tr_trades" }
+func (own *TradeServiceModel) GetLocalDBName() string { return "tr_trades" }
 
 // GetRemoteDBName 该服务所有模型默认存入同一个远程 DB
-func (own *TradeBaseModel) GetRemoteDBName() string { return "db_trades" }
+func (own *TradeServiceModel) GetRemoteDBName() string { return "db_trades" }
+
+// TradeBaseDataModel 是 Token/Market/OrderType 等稳定资料的继承支路。
+type TradeBaseDataModel struct { *TradeServiceModel }
+
+func NewTradeBaseDataModel() *TradeBaseDataModel {
+    return &TradeBaseDataModel{TradeServiceModel: NewTradeServiceModel()}
+}
+
+func (own *TradeBaseDataModel) NewModel() {
+    if own.TradeServiceModel == nil || own.ProjectModel == nil || own.Model == nil {
+        own.TradeServiceModel = NewTradeServiceModel()
+    }
+}
+
+// TradeBusinessModel 是 TradeOrder/TradeFill 等持续增长事实的继承支路。
+type TradeBusinessModel struct { *TradeServiceModel }
+
+func NewTradeBusinessModel() *TradeBusinessModel {
+    return &TradeBusinessModel{TradeServiceModel: NewTradeServiceModel()}
+}
+
+func (own *TradeBusinessModel) NewModel() {
+    if own.TradeServiceModel == nil || own.ProjectModel == nil || own.Model == nil {
+        own.TradeServiceModel = NewTradeServiceModel()
+    }
+}
 
 // TradeModelList 封装该服务的 ModelList，统一注入服务专属的 DB 连接
 type TradeModelList[T persisttypes.IModel] struct {
-    *basemodels.BaseModelList[T]
+    *basemodels.ProjectModelList[T]
 }
 
 func NewTradeModelList[T persisttypes.IModel]() *TradeModelList[T] {
     return &TradeModelList[T]{
-        BaseModelList: basemodels.NewBaseModelList[T](getTradesDBAction()),
+        ProjectModelList: basemodels.NewProjectModelList[T](getTradesDBAction()),
     }
 }
 
@@ -2027,11 +2067,13 @@ func (own *PlaceOrder) RouterInfo() *stypes.RouterInfo {
 
 | 需求 | 修改位置 | 影响范围 |
 |------|----------|----------|
-| 全项目所有模型新增公共字段（如审计字段） | `internal/pkg/models/base_model.go` | 全部服务所有模型 |
-| 切换全项目默认数据库连接逻辑 | `internal/pkg/models/base_model.go` 的连接工厂 | 全部服务 |
+| 全项目所有模型新增公共字段（如审计字段） | `internal/pkg/models/project_model.go` | 全部服务所有模型 |
+| 切换全项目默认数据库连接逻辑 | `internal/pkg/models/project_model.go` 的连接工厂 | 全部服务 |
 | Manage 列表统一隐藏/展示某字段 | `internal/pkg/services/base_manage_service.go` 的 `ViewFieldModel` | 全部服务所有 Manage 页 |
 | 全项目 handler 新增公共工具方法 | `internal/pkg/api/base_api.go` | 全部服务所有 handler |
-| 某服务所有模型切换 DB 名称 | `internal/core/{svc}/models/trade_base_model.go` 的 `GetLocalDBName` | 该服务所有模型 |
+| 某服务所有模型切换 DB 名称 | `internal/core/{svc}/models/trade_service_model.go` 的 `GetLocalDBName` | 该服务所有模型 |
+| 基础资料统一启停/引用保护 | `models/basedata` + `BaseDataManage[T]` | 该服务基础资料 |
+| 业务事实统一只读/状态机/分页上限 | `models/transaction` + `BusinessManage[T]` | 该服务业务事实 |
 | 某服务所有接口新增公共请求字段 | `internal/core/{svc}/api/trade_api.go` | 该服务所有 handler |
 | 某个具体接口的逻辑 | 具体 handler 文件 | 仅该接口 |
 
@@ -2346,12 +2388,46 @@ interface CommandAttribute {
 }
 ```
 
+## 21. 业务统计、经营分析与服务报表
+
+使用 `github.com/digitalwayhk/core/pkg/persistence/entity/stats`。标准模板是
+`examples/07-shop-order-scale/order-service`，完整契约见项目 Codex Skill 的
+`references/core-backend-api.md`「业务统计、经营分析与服务报表」。
+
+### 21.1 能力边界
+
+| 能力 | Core 提供 | 业务服务负责 |
+| --- | --- | --- |
+| 统计 | `StatSpec`、OLTP/ClickHouse `StatsEngine`、`Store` | 声明 Spec、注入权威库、运行刷新任务 |
+| 分析 | `stats.Dashboard` 响应模型 | 注册 `/api/manage/{service}/analysis` 并从 Store 组装 Dashboard |
+| 报表 | `ReportDef`、`BuildReportView`、菜单项 | 注册报表及 `/reports`、`/reports/view` Manage API |
+
+`ReportDef` 不是自动代码生成器：它不会创建事实数据、Runner 或 Router。analysis/reports
+请求只读统计快照，不得在 HTTP 请求内临时扫描事实表做聚合，也不得代替标准 Manage
+`ModelList` 的筛选、排序和分页。
+
+### 21.2 最小接入顺序
+
+1. 用全局唯一 `StatSpec.Code` 声明事实 model、`TimeField`、粒度、维度和 `count|sum|avg` 指标，启动期调用 `stats.Register`。
+2. 用 `stats.NewOLTPEngineFunc(models.RemoteDataAction)` 安装 OLTP 引擎；Runner 周期调用 `RefreshWithEngine` 写入本服务独立 `stats.Store`。
+3. 注册 Manage `POST /api/manage/{service}/analysis`，返回非 nil `stats.Dashboard`。
+4. 用服务内唯一 `ReportDef.Code` 和已注册 `SpecCode` 调用 `stats.RegisterReports`。
+5. 注册 Manage `POST /api/manage/{service}/reports`，返回 `stats.ListReportMenus(service)`。
+6. 注册 Manage `POST /api/manage/{service}/reports/view`，返回 `stats.BuildReportView(serviceStore, service, code)`。
+7. 确保定义包在菜单同步前 import，再执行菜单更新；报表页路径为 `/report/{service}/{code}`。
+
+所有这些 API 都属于 Manage 认证域。一个进程承载多个服务时，Spec Code 使用稳定服务/业务前缀，Runner 只刷新本服务 Spec，各服务使用独立 Store，避免全局注册表导致跨服务数据混用。
+
+消费项目必须依赖同时包含 stats 后端契约和匹配嵌入 Admin 的 Core 版本。稳定 tag 未发布时，不得把分支能力描述成已发布能力，也不得复制 Core 实现或用 `replace` 绕过版本边界。
+
 ---
 
 > **⚠️ 不要依赖 core 仓库内置前端集成：**
 >
 > 以下前端能力存在于 core 仓库的 `web/admin` 子模块中，尚不稳定，
 > 业务项目**不应依赖**这些组件或集成方式：
+> 这里指业务项目复制、import 或二次绑定 Admin 内部组件；不包括通过匹配版本的
+> Core 嵌入 Admin 使用已经公开约定的 analysis/report 页面与 Manage API。
 >
 > - **WayPage 组件**（`src/components/WayPlus/WayPage`）：自动渲染完整 CRUD 页面，集成规范待稳定。
 > - **JWT 前端拦截器**（`requestErrorConfig.ts`）：依赖 `casdoor_token` 的 localStorage 方案待完善。

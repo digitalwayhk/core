@@ -98,7 +98,7 @@ examples/integration/07-shop-order-scale-multi-process/
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
 
-示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务级基础模型、数据库名和 TraceID，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影和 Outbox/Inbox 等业务事实，`models/internal/store` 统一 `IDataAction` 和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。具体模型通过基础资料模型或业务事实模型继承服务级基础模型，自动获得 `GetLocalDBName/GetRemoteDBName` 和 `TraceID`；不要在每个具体模型上重复声明库名或 TraceID 字段。写路径从入口 `req.GetTraceId()` 传到 business，再写入业务事实、Outbox、Inbox 和投影；事件 Metadata 同步携带 TraceID，但 EventID 仍负责事件幂等。
+示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务公共模型基座、数据库名和 TraceID，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影等业务事实，`models/internal/store` 放 DataAction、Outbox/Inbox 等基础设施持久化模型和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。基础资料模型与业务事实模型是继承服务公共基座的两条平行支路；这个公共基座不是“基础资料 Model”。写路径从入口 `req.GetTraceId()` 传到 business，再写入业务事实、Outbox、Inbox 和投影；事件 Metadata 同步携带 TraceID，但 EventID 仍负责事件幂等。
 
 示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域和全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 与受控命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
 
@@ -226,29 +226,82 @@ userID, userName := req.GetUser()
 
 ## 模型默认能力
 
-### 选择 Model 或 BaseModel
+### 先按数据生命周期分类
 
-普通业务记录使用 `entity.Model`：
+模型层是需求落地的第一层。设计 API 前，先把用户需要的数据结构拆成两类：
+
+| 分类 | 业务判断 | 典型例子 | 数据与管理特性 |
+| --- | --- | --- | --- |
+| 基础资料 Model（主数据/原数据） | 相对稳定；集合规模、增长速度可预期；被其他业务长期引用 | 商品、商户/供应商、订单类型、支付类型 | 稳定 ID/Code、启用/禁用、引用保护；被引用后通常不允许物理删除 |
+| 业务事实 Model | 必须依赖一个或多个基础资料 ID；由用户业务事件持续产生；数量无上限、增长频率不可预知 | 订单、支付流水、库存流水、结算记录 | 幂等创建、状态机、不可任意编辑/删除；需要分页上限、索引、归档/分区及按需高吞吐写 |
+
+“基础”描述的是数据生命周期，不是继承层级，也不等于 Go 类型名中出现 `Base`。推荐继承树：
+
+```text
+entity.Model
+└── ServiceModel               # 数据库名、TraceID、租户、DataAction 等公共能力
+    ├── BaseDataModel          # 基础资料支路
+    │   ├── Product
+    │   ├── Supplier
+    │   └── OrderType
+    └── BusinessModel          # 业务事实支路
+        ├── Order              # ProductID/SupplierID/OrderTypeID
+        └── PaymentRecord      # OrderID/PaymentTypeID
+```
+
+两条支路必须分开：具体模型不能跨支路继承，`BusinessModel` 不能继承 `BaseDataModel`。相同的数据库名、TraceID 等放在中性的 `ServiceModel`，不要把它称为基础资料。基础资料 Manage 可提供 CRUD、启停和引用删除保护；业务 Manage 默认只提供 View/Search，新增来自业务 API，状态变化通过受控命令，禁止通用 Edit/Remove 绕过状态机。
+
+业务事实必须保存关联基础资料的 ID；为保证历史可审计，还应按业务需要保存名称、编码、成交价等快照。基础资料后续改名不能改变历史订单。若 Product 同时承担无限增长的库存或价格历史，应拆成 `Product` 基础资料与 `InventoryRecord`/`PriceRecord` 业务事实。
+
+Outbox、Inbox、审计日志属于基础设施/技术记录，可使用独立 store/audit 支路；它们不是第三种业务主数据，也不能用来取消上述业务域两分法。
+
+### 再选择框架结构体
+
+`entity.Model` 是中性、最小持久化根，不代表“业务 Model”。新业务应把它包装进服务公共基座，再建立两条语义支路；不要让 Product 和 Order 都直接嵌入框架根而失去分类：
 
 ```go
-type Product struct {
+type ServiceModel struct {
 	*entity.Model
+}
+
+type BaseDataModel struct {
+	*ServiceModel
+}
+
+type Product struct {
+	*BaseDataModel
 	Name  string
 	Price decimal.Decimal
 }
 
 func NewProduct() *Product {
-	return &Product{Model: entity.NewModel()}
+	return &Product{BaseDataModel: &BaseDataModel{
+		ServiceModel: &ServiceModel{Model: entity.NewModel()},
+	}}
 }
 
 func (own *Product) NewModel() {
-	if own.Model == nil {
-		own.Model = entity.NewModel()
+	if own.BaseDataModel == nil || own.ServiceModel == nil || own.Model == nil {
+		fresh := NewProduct()
+		own.BaseDataModel = fresh.BaseDataModel
 	}
 }
 ```
 
-只有具有稳定唯一 `Code`、`Name` 和资料状态语义时才使用 `BaseModel`。`BaseModel.GetHash()` 基于 Code；没有 Code 的模型不要为了复用字段而误用 `BaseModel`。
+示例 01 的直接嵌入只用于展示最小框架机械能力；同时具有基础资料与业务事实的新项目，以示例 03 的分支结构为准。
+
+具有稳定唯一 `Code`、`Name` 和资料状态语义的基础资料可以使用 `entity.BaseModel`；`BaseModel.GetHash()` 基于 Code。业务事实不要为了复用 State/Code 字段而继承 `entity.BaseModel`：单据可选 `entity.BaseOrderModel`，只追加记录可选 `entity.BaseRecordModel`，其他业务事实从项目 `BusinessModel`/`entity.Model` 建模。
+
+框架结构体与业务分类的关系：
+
+| 框架结构体 | 含义 | 常见业务分类 |
+| --- | --- | --- |
+| `entity.Model` | 中性最小持久化能力 | 两类的公共根或简单模型 |
+| `entity.BaseModel` | Code/Name/State 的资料能力 | 基础资料 Model |
+| `entity.BaseOrderModel` | UserID/TraceID、单据不可删除 | 业务事实 Model（单据） |
+| `entity.BaseRecordModel` | 只写、不可修改删除 | 业务事实或技术审计记录 |
+
+先做业务分类，再选结构体；不得从结构体名称反推分类。
 
 嵌入指针必须在显式构造器和 `NewModel()` 中初始化。前者供业务代码使用，后者供 ModelList 反射创建实例。
 
@@ -278,7 +331,7 @@ func (own *Product) UpdateValid(_ interface{}) error {
 
 框架支持多种数据库类型（SQLite、MySQL、PostgreSQL 等）。**SQLite 只是零配置的默认/开发选项**：本地开发与单机测试最简单，无需额外配置即可作为本地库，也可临时当作“远程”权威库；**生产与多进程共享权威库应按 MySQL 等网络库选型**，不是“只能 SQLite”。
 
-推荐在服务**最基础 model 层**（如 `models/common`、`models/data_action.go`、`models/internal/store`）集中定义明确的 `IDataAction` 获取方法，例如 `LocalDataAction()` / `RemoteDataAction()` / `ManageDataAction()`。后续切换库类型时**只改这些方法**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
+推荐在服务**公共模型/持久化组合根**（如 `models/common`、`models/data_action.go`、`models/internal/store`）集中定义明确的 `IDataAction` 获取方法，例如 `LocalDataAction()` / `RemoteDataAction()` / `ManageDataAction()`。后续切换库类型时**只改这些方法**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
 
 **Manage API 与 public/private 使用数据库的方式不同，不可混用：**
 
@@ -288,7 +341,7 @@ func (own *Product) UpdateValid(_ interface{}) error {
 | public/private | models 业务方法（内部 `IDataAction`）+ 可选 business | **所有**业务读写默认模式（见 01）；API 不直接 `NewModelList` |
 | public/private 高吞吐写 | 04/07 专用 store：本地可靠写 + `UseWriteBehind` → 远程权威库 | 下单/支付等需水平扩展或极高 TPS 时再升级，不是简单业务的必选项 |
 
-两者可以**共用同一 model 结构体**，通过基础 model 上的 DataAction 取连接。库类型（SQLite/MySQL 等）由 DataAction 决定，与「是否 ModelList」正交。
+两者可以**共用同一 model 结构体**，通过服务公共持久化组合根的 DataAction 取连接。库类型（SQLite/MySQL 等）由 DataAction 决定，与「是否 ModelList」正交。
 
 public/private 默认示例（01：语义方法 + `IDataAction`，不是 ModelList）：
 
@@ -668,6 +721,162 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 - 幂等边界必须写进 README：只扩展 order 时 user 入口幂等策略的限制；远程幂等探测在 MySQL 不可达时 fail-closed 或明确文档化降级风险。
 - 部署侧提供 Prometheus scrape 配置（如 `deploy/prometheus*.yml`），标签至少稳定暴露 `service` 与 `service_instance_id`，供 Runtime Aggregator 查询。
 - 集成测试：`examples/integration/07-shop-order-scale` 与 `07-shop-order-scale-multi-process`；多副本 UAT 应采样 discovery 确认 `MachineID`/`ServiceInstanceID` 唯一。
+
+## 业务统计、经营分析与服务报表
+
+框架包 `pkg/persistence/entity/stats` 把“事实聚合”“分析看板”“服务报表”分成三层。标准模板是 `examples/07-shop-order-scale/order-service`。
+
+| 层 | Core 能力 | 业务服务必须完成 |
+| --- | --- | --- |
+| 统计快照 | `StatSpec`、`StatsEngine`、`RefreshWithEngine`、`Store` | 声明事实/时间/维度/指标，安装数据引擎，启动定时刷新 |
+| 经营分析 | `stats.Dashboard` 标准响应契约 | 把本服务快照组装为 Dashboard，注册 Manage `analysis` API |
+| 服务报表 | `ReportDef`、`BuildReportView`、报表菜单生成 | 注册 ReportDef，注册 Manage `reports` 目录与 `reports/view` API |
+
+这不是 Manage CRUD 的替代品，也不是零接线自动生成器。Manage 列表继续使用 `ModelList`；统计任务聚合权威事实表并覆盖写快照；analysis/reports API 只读快照，不在请求路径临时扫描事实表。
+
+### 1. 声明并注册统计 Spec
+
+每份 `StatSpec.Code` 必须在进程内全局唯一。当前支持 `year|quarter|month|week|day` 粒度及 `count|sum|avg` 指标；指标值在 JSON 中使用 decimal 字符串，避免精度丢失。
+
+```go
+package orderstats
+
+import (
+	"github.com/acme/shop/order/models/transaction"
+	corestats "github.com/digitalwayhk/core/pkg/persistence/entity/stats"
+)
+
+var OrderByDay = corestats.StatSpec{
+	Code:      "order.by_day",
+	Fact:      &transaction.Order{},
+	TimeField: "CreatedAt",
+	Grain:     corestats.GrainDay,
+	Title:     "订单按天汇总",
+	Metrics: []corestats.StatMetric{
+		{Kind: corestats.MetricCount, Alias: "row_count"},
+		{Kind: corestats.MetricSum, Field: "TotalAmount", Alias: "amount_sum"},
+	},
+}
+
+func init() {
+	corestats.Register(OrderByDay)
+}
+```
+
+维度有两种展示来源：
+
+- 同库基础资料：设置 `BaseModel`；`DisplayFields` 为空时默认读取 `Name`。
+- 跨服务快照字段：设置 `DisplayFromFact`，并用 `NoDisplay=true` 禁止查询不存在于本库的基础 model。
+
+不要让统计任务跨服务同步查维度名称。跨服务展示字段应在写入事实时保存快照，或通过可靠事件维护本地投影。
+
+### 2. 安装引擎并刷新服务专属 Store
+
+OLTP 默认支持当前 Gorm 连接的 MySQL/SQLite 聚合。服务启动时注入能取得权威库 `IDataAction` 的工厂，并让 Runner 周期调用 `RefreshWithEngine`：
+
+```go
+var OrderStatsStore = corestats.NewStore()
+
+func init() {
+	oltp := corestats.NewOLTPEngineFunc(models.RemoteDataAction)
+	corestats.SetEngineConfig(corestats.DefaultEngineConfig())
+	corestats.SetEngine(oltp, oltp)
+}
+
+func refresh(ctx context.Context) {
+	opt := corestats.ExecOptions{Range: corestats.QueryRange{
+		From: time.Now().UTC().Add(-90 * 24 * time.Hour),
+		To:   time.Now().UTC().Add(time.Second),
+	}}
+	for _, spec := range corestats.All() {
+		if !strings.HasPrefix(spec.Code, "order.") {
+			continue
+		}
+		_, _ = corestats.RefreshWithEngine(
+			ctx, OrderStatsStore, corestats.CurrentEngine(), spec, opt,
+		)
+	}
+}
+```
+
+注册表和默认引擎是进程级全局对象；同一进程承载多个服务时，`Code` 必须带稳定业务前缀，Runner 必须筛选本服务的 Spec，每个服务使用独立 `Store`。不要让一个服务的 API 返回另一个服务的快照。
+
+环境变量：
+
+| 变量 | 值 | 默认 |
+| --- | --- | --- |
+| `CORE_STATS_ENGINE` | `oltp` / `clickhouse` | `oltp` |
+| `CORE_STATS_FALLBACK_OLTP` | ClickHouse 失败是否回退 OLTP | `true` |
+| `CORE_STATS_AUTO_ENSURE` | 刷新前是否 Ensure | `true` |
+
+ClickHouse 只负责聚合视图与读取；事实表从 OLTP 进入 ClickHouse 仍需 CDC 或批量 Ingest。可先用 `CompileAllClickHouse` 离线预览计划，再注入 `ClickHouseEngine`。
+
+### 3. 注册经营分析 Manage API
+
+每个业务服务提供：
+
+```text
+POST /api/manage/{service}/analysis
+```
+
+路由必须是 `ManageType`、`WithAuth(true)`，并按本服务管理员规则校验；响应返回非 nil 的 `stats.Dashboard`。Dashboard 的标题、卡片、趋势、排名、分类和 `Layout` 都由服务端动态下发，Admin 不应写死某个业务的指标名。
+
+推荐请求体支持 `refresh` 与时间/粒度条件。`refresh=true` 只触发 Runner 的刷新入口并设置短超时；真正聚合仍在任务层。没有快照时也返回结构完整的空 Dashboard，不返回伪造指标。
+
+原始快照诊断接口不是前端必需，但服务可按示例提供：
+
+```text
+POST /api/manage/{service}/bizstats/query
+```
+
+该接口只读服务专属 Store；`code` 为空返回本服务快照，指定 code 返回 ready/snapshot。它同样属于 Manage 认证域。
+
+### 4. 注册服务报表和 API
+
+`ReportDef.Code` 在服务内唯一，`SpecCode` 必须指向已注册且会写入同一 Store 的 `StatSpec.Code`：
+
+```go
+func init() {
+	corestats.RegisterReports(corestats.ReportDef{
+		Code:          "order-daily",
+		Service:       contract.OrderServiceName,
+		Title:         "订单日趋势",
+		MenuTitle:     "日趋势报表",
+		Kind:          corestats.ReportKindLine,
+		SpecCode:      "order.by_day",
+		MetricAliases: []string{"row_count", "amount_sum"},
+		MetricTitles:  map[string]string{"row_count": "订单笔数", "amount_sum": "金额"},
+		Sort:          10,
+	})
+}
+```
+
+支持 `bar|line|pie|table|mixed`。`DimAlias` 绑定维度；`MetricAlias`/`MetricAliases` 绑定指标；可用 `DrillReportCode` 下钻同服务报表，用 `LinkManagePath` 跳回 Manage 列表。
+
+业务服务还必须注册两个 Manage API：
+
+| 路径 | 标准实现 |
+| --- | --- |
+| `POST /api/manage/{service}/reports` | 返回 `stats.ListReportMenus(service)` |
+| `POST /api/manage/{service}/reports/view` | 校验 code 后返回 `stats.BuildReportView(serviceStore, service, code)` |
+
+`RegisterReports` 不会自动创建 API、刷新任务或事实数据。`BuildReportView` 只转换 Store 中已有快照；快照缺失时返回 `Empty=true` 与提示信息。
+
+菜单同步会读取已注册 `ReportDef`，在对应服务目录下为每张报表生成一项，前端路径固定为 `/report/{service}/{code}`，并复用 reports 两个 Manage API 的权限。因此：
+
+1. 报表定义包必须在服务启动和菜单同步前被 import。
+2. reports 两个 Router 必须加入该服务路由。
+3. 执行菜单同步/更新后再检查侧栏；不要手工维护同名报表菜单。
+4. 后端 Core 与嵌入的 `web/admin` 必须来自包含同一报表契约的版本。
+
+### 5. 最低验收
+
+- `StatSpec`：缺字段、重复 Code、维度展示、MySQL/SQLite 编译与聚合结果。
+- Runner：只刷新本服务前缀、首次立即刷新、停止、刷新失败保留旧成功快照。
+- analysis：无快照、已有快照、手动刷新超时、Manage 权限。
+- reports：目录排序、未知 code、空快照、图/表/排名映射、钻取和 Manage 跳转。
+- 菜单：一份 `ReportDef` 只生成一行，旧 reports API 伪菜单会被清理。
+- 消费仓先确认 `go.mod` 所用 Core 版本确实包含 `pkg/persistence/entity/stats` 和匹配 Admin；若稳定 tag 尚未发布，不得把仅分支可用描述成已发布能力，也不要用复制框架代码或 `replace` 伪装升级。
 
 ## 多服务运行图（Runtime API）
 

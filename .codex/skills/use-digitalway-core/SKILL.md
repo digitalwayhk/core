@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、Model/Manage 继承、Manage 动态分库 IDBName、认证、WebSocket、缓存、本地可靠写、EventBridge、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
@@ -24,15 +24,43 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
 | Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
 | 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、实例级 `OrderWriteRuntime`、共享 MySQL 远程权威库、`OrderRule` 配置同步、Prometheus scrape、Runtime 运行图验收 |
+| 业务统计、经营分析与服务报表 | `examples/07-shop-order-scale/order-service` | `stats.StatSpec`、OLTP/ClickHouse 引擎、快照 `Store`、`stats.Dashboard`、`stats.ReportDef`、Manage API 与服务子菜单 |
 | 多服务运行图（框架） | Admin `MonitorSystem` + ServerManage Runtime API | `POST /api/servermanage/runtimetopology`、`runtimeservice`；ClusterProvider + Prometheus；指标 `null+state`；替代已废弃 `RouterStats` |
 
 对应真实进程测试位于 `examples/integration/01-simple-shop` 至 `05-shop-casdoor-rbac`；多服务还必须同时参考 `examples/integration/06-shop-microservices` 与 `06-shop-microservices-three-process`；水平扩展参考 `examples/integration/07-shop-order-scale` 与 `07-shop-order-scale-multi-process`。通用进程、HTTP、TestToken 和 WebSocket 能力只复用 `examples/integration/helpers.go`。
 
+## 模型分类是首要设计
+
+拿到需求后先拆数据结构，再设计 API。业务域持久化 Model 必须先按**数据生命周期**分成两大类；“基础”不是继承树中的上层，也不等于 Go 类型名带 `Base`：
+
+| 分类 | 判定 | 典型数据 | 默认处理方式 |
+| --- | --- | --- | --- |
+| 基础资料 Model（主数据/原数据） | 用户需要中相对稳定、集合规模和增长速度可预期，供其他业务引用 | 商品、商户/供应商、订单类型、支付类型 | Code/Name 等稳定标识、启用/禁用、引用保护；被业务引用后通常禁用而非删除 |
+| 业务事实 Model | 必须保存所依赖基础资料的 ID，由用户业务事件持续产生；数量无上限、增长频率不可预知 | 订单、支付流水、库存流水、结算记录 | 受控创建、幂等、状态机、只读/受控命令、不可任意删除；按容量设计索引、归档、分区或高吞吐写 |
+
+先画两条**平行**继承支路，再放具体模型：
+
+```text
+entity.Model
+└── ServiceModel                  # 仅承载服务公共持久化能力，不叫“基础资料”
+    ├── BaseDataModel             # 基础资料支路
+    │   ├── Product
+    │   ├── Supplier
+    │   └── OrderType
+    └── BusinessModel             # 业务事实支路
+        ├── Order                 # ProductID/SupplierID/OrderTypeID + 必要快照
+        └── PaymentRecord         # OrderID/PaymentTypeID + 业务事实
+```
+
+两类具体模型不得互相继承，也不得让 `BusinessModel` 继承 `BaseDataModel`。共享数据库名、TraceID、租户字段和 DataAction 的 `ServiceModel` 只是**服务公共模型基座**；它不参与业务分类。`entity.Model` 是中性持久化根，`entity.BaseModel`、`BaseOrderModel`、`BaseRecordModel` 是可选框架结构能力，不能反过来决定领域分类。Outbox、Inbox、审计日志等技术记录属于基础设施持久化模型，单独放 `internal/store`/`audit`，不得用来模糊业务域的两类划分。
+
+业务事实保存基础资料 ID 作为关联权威，并按审计需要保存名称、编码、价格等历史快照；不要只存当前名称，也不要在历史查询时依赖可变基础资料重建当时事实。若一个“商品”结构同时承载无上限的库存或价格变动，应拆成稳定 `Product` 基础资料与 `InventoryRecord`/`PriceRecord` 业务事实。
+
 ## 目录决策
 
-- 最简 CRUD 按 01 平铺 `models/api`；出现跨模型规则时增加无请求状态的 `business`。
+- 01 只用于理解最简 CRUD 和框架机械能力；新业务只要同时存在基础资料与业务事实，就按 03 建立 `ServiceModel → BaseDataModel/BusinessModel` 两条支路。出现跨模型规则时增加无请求状态的 `business`。
 - 出现基础资料、交易业务或身份审计继承时，按 03/05 拆分 `common/basedata/transaction/identity`；根包只做兼容门面。
-- 示例 06 这类多服务也必须按 05 的方式拆每个服务内部目录：`models/common` 定义服务级基础模型、数据库名、TraceID 与集中的 DataAction 获取入口，`models/basedata` 放基础资料，`models/transaction` 或对应业务域放交易事实，`models/internal/store` 统一 `IDataAction` 实现，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。
+- 示例 06 这类多服务也必须按 05 的方式拆每个服务内部目录：`models/common` 定义服务公共模型基座、数据库名、TraceID 与集中的 DataAction 获取入口，`models/basedata` 放基础资料，`models/transaction` 或对应业务域放业务事实，`models/internal/store` 统一 `IDataAction` 实现，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。
 - `api/manage` 同样按 05 语义拆分：`api/manage/common` 放权限、owner、全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 和命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单/支付/投影等业务 Manage，`api/manage/audit` 放审计/身份事件；根 `api/manage` 只保留 `manage.go` 门面和路由注册入口。
 - 多服务示例中每个服务都必须拥有独立的 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 再继承本服务 `ServiceManage[T]`，每个具体 Manage 只能继承本目录的基础资料或业务基座，不能直接嵌入 `manage.ManageService[T]`。服务级权限、owner 限域、禁用主体拦截、分页、审计和日志这类横切逻辑必须写在 `common.ServiceManage[T]` 或更靠近根部的抽象基座，具体 Manage 只描述业务目标对象和业务动作，不到处重复鉴权或日志。自定义 Manage 命令的 `Do` 必须先调用 owner 的 `DoBefore` 复用服务级权限，再执行业务动作；不要另造 `CommandBefore` 这类命令专用旁路。
 - `contract` 必须无依赖；DTO 只放 `api/dto`；API 依赖 business，business 依赖 models，不得反向引用。
@@ -50,7 +78,9 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | RouterInfo、对象池、EventBridge、缓存、WebSocket 和生命周期 | `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md` |
 | 多服务运行图、指标诚实状态、Admin 观测 | `docs/codex/API_COMPATIBILITY_SURFACE.md`（Runtime）、`DEPRECATION_REGISTER.md`（`RouterStats`）、设计 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md` |
 | 消费方安装本 skill | `docs/codex/CONSUMER_AI_SKILL_SETUP.md`、`scripts/link-consumer-skill.sh` |
+| 基础资料 Model / 业务事实 Model 分类与继承 | `references/core-backend-api.md`「先按数据生命周期分类」；模板 `examples/03-shop-inheritance` |
 | Manage 动态分库（IDBName + Where 写回） | `references/core-backend-api.md`「Manage 动态分库」；证据 `pkg/persistence/database/oltp/mysql.go` `resolveDBName`、`entity.ModelList.searchHook` |
+| 业务统计、经营分析与服务报表 | `references/core-backend-api.md`「业务统计、经营分析与服务报表」；模板 `examples/07-shop-order-scale/order-service` |
 | 日志级别、字段和敏感信息 | `docs/codex/LOGGING_AUDIT_AND_STANDARD.md` |
 | Docker 外部依赖集成 | `docs/codex/EXTERNAL_INTEGRATION_GUIDE.md` |
 | NATS JetStream 可靠写路径 | `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md` |
@@ -74,7 +104,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
    - **public/private（业务 API）不走 Manage 的 `ModelList` 通用 CRUD/列表**：应调用 models 上的业务方法（内部用集中获取的 `IDataAction` 做 `Load`/`Insert`/`Update`/`Delete` 等），复杂编排放 business；与 Manage **可共用 model 结构体**，但 API 层访问方式分离。示例 01 的 `FindByID`/`QueryByUser`/`Insert` 即此模式，不要求一上来就上 04/07。
    - **高吞吐写（下单/支付/撤单等）在业务方法之上再升级**：参考 04/07，专用 store + 本地可靠写 + `UseWriteBehind` 同步远程权威库；这是性能路径，不是“所有 public/private 的唯一定义”。
    - 框架支持多种数据库。SQLite 是零配置默认/开发便利，也可临时当权威库；生产共享库可换 MySQL 等。推荐在最基础 model/store **集中** `LocalDataAction`/`RemoteDataAction`/`ManageDataAction`；换库只改此处。`IDataAction` 只在 models 边界选择驱动。
-5. 模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料只能禁用，不能删除。
+5. Model 必须先按生命周期归入基础资料或业务事实两条平行支路，不能按“谁是继承上层”判断。基础资料规模可预期，提供稳定 ID/Code 与启停、引用保护；业务事实必须保存所依赖基础资料 ID，由业务持续产生且规模不可预知，使用幂等、状态机、只读/受控命令和容量治理。两类具体模型及其 Manage 基座不得互相继承。模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料通常只能禁用，不能删除。
 6. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
 7. WebSocket 只面向最终外部用户；内部同步调用默认使用 gRPC，HTTP 仅显式发送前备用，内部异步事件使用 EventBridge。服务发布事件只在 `Start()` 中声明 `sc.UseOutbox(models.OutboxStore{})`，订阅只使用统一 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})`；业务不再手写 Outbox worker、`SubscribeExternalControl` 或同时注册内外两套订阅。`EventType` 可为空，表示订阅该 Subject 下全部事件类型。
 8. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。多服务 public/private 缓存只放在面向外部流量的入口服务 facade，例如 06 的 user-service；supplier/order 这类内部权威服务的 Public API 不再重复缓存，避免展示缓存与权威校验缓存双层失效。
@@ -88,7 +118,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 16. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 17. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；同进程只信源 ServiceContext，远程只信已验证且与 `SourceService` 一致的 mTLS SAN，HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。匿名 `/api/openapi` 必须过滤这类路由且不得输出 `x-internal-callers`；完整文档只通过使用 `ServerManageAuth` 的 `/api/internal/openapi` 提供。
 18. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；复杂服务优先使用 `manage.HookedManageService[T]` 提供的细粒度 `On...Before/On...After` 辅助基类，再由服务级、基础资料级和业务级基座逐层覆盖；权限、日志和通用限域只在抽象层实现一次，具体 Manage 不重复；自定义命令也走 owner `DoBefore`，不增加命令专用 Hook 旁路；跨服务引用删除保护使用可靠事件形成的本地永久 `SupplierOrder`，不在删除 Hook 中同步查询远端。
-19. 每个服务必须有服务级基础模型承载 `GetLocalDBName/GetRemoteDBName`、数据库名和 `TraceID`；基础资料模型和业务事实模型继承它，具体模型再继承基础资料或业务事实模型。不要在每个具体模型上重复写数据库名或 TraceID 字段。
+19. 每个服务必须有服务公共模型基座承载 `GetLocalDBName/GetRemoteDBName`、数据库名和 `TraceID`；基础资料模型和业务事实模型作为两条平行支路继承它，具体模型只能进入其中一条。这个公共基座不是“基础资料 Model”。不要在每个具体模型上重复写数据库名或 TraceID 字段。
 20. 示例 06 三个服务必须使用三个不同本地库名，并由各自 `models/common` 的基础模型决定；不能共享同一 SQLite 文件，也不能把库名散落在具体模型里。
 21. 示例 07 这类水平扩展示例必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。多实例服务的 pending、Outbox、Inbox、同步状态和投影必须记录 TraceID、ServiceName、ServiceInstanceID；ServiceInstanceIP 只用于诊断，不参与业务判断。
 22. 自动水平扩展示例必须启用 `AutoMachineID=true`，并验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得为可扩容副本硬编码固定 MachineID，也不得把注册发现能力写死到 Redis，具体使用 Redis、局域网发现或其他中间件由配置决定。
@@ -101,7 +131,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 29. 多服务运维观测使用 ServerManage Runtime API：`POST /api/servermanage/runtimetopology` 与 `POST /api/servermanage/runtimeservice`（`ServerManageAuth`）。窗口仅 `15s|5m|1h`。ClusterProvider 是实例与地址权威，Prometheus 是历史指标权威；浏览器与业务进程不得直连其他实例 `/metrics` 充当聚合源。指标缺失、不可达、过期必须返回 `null` 并带 `state`（`not_collected`/`unavailable`/`stale`/`partial`/`no_traffic`/`ok`），禁止把未采集伪装成零。Async 边来自 Outbox 发布与订阅索引的汇合及低基数 gauge，不得恢复或依赖已废弃的 `RouterStats`/`/api/servermanage/statistics`。
 30. 示例 04/07 的高吞吐写路径必须使用实例级 `OrderWriteRuntime`（或等价注入访问面）+ `ServiceContext.UseResource` 管理 store 生命周期，经 `UseWriteBehind(WriteBehindTarget)` 绑定远端目标；禁止包级全局 store registry，禁止新代码调用已废弃的 `StartOrderWriteStore`/`StopOrderWriteStore`/`SetSyncDB` 作为默认方案。
 31. 有序可靠投递等加性 MQ 契约（如 `OrderingKey`、`RequireOrderedReliable`、Outbox earliest-first / 可选 `OutboxStoreSkipBlocked`）以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前 `pkg/server/mq`、`pkg/server/event` 测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。
-32. **库类型与连接获取集中在 models：** 在服务最基础 model（或 `models/internal/store` / `data_action`）声明 `LocalDataAction`/`RemoteDataAction`/`ManageDataAction` 等明确入口；Manage 经 `GetList()` 引用，public/private 经模型方法或写 store 引用。切换 SQLite→MySQL 等只改 DataAction 实现，不改遍业务 API。
+32. **库类型与连接获取集中在 models：** 在服务公共模型/持久化组合根（或 `models/internal/store` / `data_action`）声明 `LocalDataAction`/`RemoteDataAction`/`ManageDataAction` 等明确入口；Manage 经 `GetList()` 引用，public/private 经模型方法或写 store 引用。切换 SQLite→MySQL 等只改 DataAction 实现，不改遍业务 API。
 33. **Manage 动态分库硬条件（与 skill 对齐）：**
     1. MySQL `config.Database == ""`，否则 `resolveDBName` 永远固定库，`GetRemoteDBName` 不参与。
     2. `GetList()` 的 adapter 为「同一 host 上的可路由 MySQL」，不是写死 `Database=某分库` 的实例，也不是无法按模型切库的全局 SQLite store。
@@ -109,6 +139,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
     4. Where 缺分库键时 `GetRemoteDBName` fail-closed（空名/错误），禁止默认真库或静默扫错库。
     5. View/SearchId 若只带 ID、不带分库键，同样解析不了库名；View 条件须带 market 或约定其他入口。
     6. 禁止用 `OnSearchBefore`+`stop=true` 自研 per-market store 替代 `LoadList`（历史适配应迁回标准管道）。
+34. **业务统计、经营分析与服务报表不是零接线自动 CRUD：** 业务服务必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层使用 `StatsEngine` 刷新服务自己的 `stats.Store`，API 只读快照；分析页提供 Manage 路径 `POST /api/manage/{service}/analysis` 并返回 `stats.Dashboard`；报表用 `stats.RegisterReports` 注册服务内唯一 `ReportDef.Code`，同时注册 `POST /api/manage/{service}/reports` 与 `/reports/view`。`ReportDef` 只描述展示和绑定的 `SpecCode`，不会自动创建事实数据、Runner 或 API。菜单同步会把已注册报表挂到对应服务子菜单，路径固定为 `/report/{service}/{code}`；注册必须在菜单同步前完成，且消费项目必须使用包含该能力及匹配嵌入 Admin 的 Core 版本。完整模板见 reference 与示例 07。
 
 ## 工作流
 
@@ -121,6 +152,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 
 - RouterInfo 冻结后修改元数据，或在共享单例中保存请求、用户、trace、response。
 - Manage owner 绑定错误、子类覆盖 Hook 却丢失必需父级规则、具体 Manage 直接嵌入框架 `ManageService` 绕过服务级/基础资料级/业务级基座、具体 Manage 重复实现服务级权限/日志、在 `OnSearchBefore` 手写列表查询并提前停止标准搜索，或用通用 CRUD 绕过状态机。
+- 把“基础 Model”理解成继承树最上层或 `entity.BaseModel`；让业务事实继承基础资料支路；把订单、流水当成普通基础资料 CRUD；业务事实不保存基础资料 ID；把无限增长的库存/价格历史塞回 Product 等稳定主数据表。
 - public/private 直接返回持久化模型，DTO 混入公共测试 helpers。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 内部同步调用重新保存静态地址、启用自定义 Socket、让 zrpc 自带发现绕过 Core Resolver，或在生产跨主机使用 insecure gRPC。
@@ -130,12 +162,13 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 - 水平扩展示例把最终业务库按副本做技术分片、为副本硬编码 MachineID、只测试固定端口单实例，或跳过 `AutoMachineID=true` 的真实多副本验证。
 - public/private handler 直接 `NewModelList` 做业务读写，或把 Manage CRUD/Search 当业务接口；正确做法是 models 业务方法 + `IDataAction`（及需要时的 business 编排）。
 - 高吞吐写仍用普通 `IDataAction`/`ModelList` 表轮询，未在需要时采用 04/07「本地可靠写 → `UseWriteBehind` → 远程权威库」。
-- 把库类型与访问路径绑死（例如「业务 API 只能 SQLite」或「换 MySQL 要改遍 API」）：多库由基础 model 的 DataAction 一处切换；SQLite/MySQL 与是否 ModelList 无关。
+- 把库类型与访问路径绑死（例如「业务 API 只能 SQLite」或「换 MySQL 要改遍 API」）：多库由服务公共持久化组合根的 DataAction 一处切换；SQLite/MySQL 与是否 ModelList 无关。
 - Manage 未在服务级基座重写 `GetList()` 却期望连指定远程库；或 `OnSearchBefore`+`stop=true` 手写列表破坏标准筛选/排序/分页（含分库场景自研 per-market store）。
 - 动态分库时 MySQL `config.Database` 非空、`GetRemoteDBName` 在缺键时默认真库、或指望一次 Search 跨多个分库。
-- 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务级基础模型/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为（含重复写库连接）。
+- 把多个模型/Manage/Router/DTO struct 塞进一个大文件，或者把具体模型/Manage 实现留在根 `models`、根 `api/manage`，或者绕过服务公共模型基座/服务级 Manage 基座在具体模型或具体 Manage 上重复声明公共行为（含重复写库连接）。
 - `UseCache` 依赖全局开关、缓存键缺少身份/筛选维度、只靠 TTL 不主动失效、内部权威服务 Public 重复缓存入口 facade 已缓存的数据，或把 write-behind pending 当缓存删除。
 - 集成测试重复实现通用进程/TestToken/WebSocket 能力，只测 handler，或默认依赖 Docker/外部服务。
 - 日志/响应泄露内部错误、Token、Claims、Header、请求或业务数据。
 - 恢复或依赖 `RouterStats`/`Statistics` 旧链路；Runtime 聚合把未采集指标写成 0；浏览器直连 Prometheus 或其他副本 `/metrics`；在请求路径上远程 scrape 各业务实例。
+- 只注册 `ReportDef` 就期待自动产生统计数据、API 或刷新任务；在 analysis/reports 请求中临时扫描事实表聚合；多个服务共用未限域的全局 Store；`SpecCode` 未注册或与 Store 快照不一致；报表注册晚于菜单同步；业务项目依赖不含 stats/报表页面的旧 Core 版本。
 - 新业务继续使用全局 `StartOrderWriteStore` 或 `EnableWriteBehind(ModelList)`/`SetSyncDB` 作为热路径默认，而不绑定显式 `WriteBehindTarget`。
