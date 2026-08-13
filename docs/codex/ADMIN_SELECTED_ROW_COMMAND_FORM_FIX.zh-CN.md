@@ -20,6 +20,10 @@ POST /api/manage/positions/jobconfigmanage/updatejobconfig
 
 ## 根因
 
+`WayPage` 原本只有 `add/edit` 两种表单路由，没有把普通自定义命令的 `EditShow`
+当作表单处理。本地 Docker 曾用文本替换临时开启 `EditShow`，但仍固定调用
+`fromshow(command, null)`，直接丢弃了已选择的行。
+
 `WayPage.fromshow()` 会先执行 `form.clear()`，再调用 `form.setValues(row)`。
 `WayForm` 原来的 `setValues` 只更新 React state，没有同步调用 Ant Form 的
 `setFieldsValue`。同时 React state 更新是异步的；紧接着提交时，
@@ -27,6 +31,12 @@ POST /api/manage/positions/jobconfigmanage/updatejobconfig
 不能指望挂载的 Ant Form 自行重建完整行，因此序列化结果仍可能为 `{}`。
 
 ## 修复
+
+在 Core Admin 正式实现 `EditShow` 路由：
+
+- `add` 仍从空模型打开；
+- `EditShow + IsSelectRow` 把当前完整选中行传入 `fromshow`；
+- 两个工具栏入口复用同一 `commandFormRow` 决策，避免行为分叉。
 
 新增 `applyProgrammaticValues`，将规范化后的同一个完整模型同时写入：
 
@@ -44,6 +54,7 @@ Admin 程序化装载表单值，手机端和 futures web 不引用该组件。
 
 - 单元测试锁定：程序化装载后 React state 与 Ant Form 都收到包含
   `marketCode/jobType` 的完整选择行模型。
+- 单元测试锁定：`EditShow + IsSelectRow` 传入选中行，`add` 传入空模型。
 - 单元测试锁定：表单只提交可编辑字段时，仍保留完整行的
   `marketCode/jobType`，并使用用户编辑后的新值覆盖原值。
 - Ego Lite 必须重新验证：编辑弹窗提交体包含完整选择行，而不是 `{}`；后端仍只从
