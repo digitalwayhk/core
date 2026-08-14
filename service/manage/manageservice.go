@@ -115,7 +115,7 @@ func (own *ManageService[T]) DoAfter(sender interface{}, req st.IRequest) (inter
 	return nil, nil
 }
 
-func (own *ManageService[T]) ViewModel(model *view.ViewModel) {}
+func (own *ManageService[T]) ViewModel(model *view.ViewModel) { model.AutoLoad = true }
 func (own *ManageService[T]) ViewFieldModel(model interface{}, field *view.FieldModel) {
 
 }
