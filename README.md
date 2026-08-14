@@ -36,13 +36,14 @@ CORE="$(go list -m -f '{{.Dir}}' github.com/digitalwayhk/core)"
 
 安装后 Agent **必须**阅读：
 
-- 消费方仓库内 `.codex/skills/use-digitalway-core/SKILL.md`
-- skill 内 `references/core-backend-api.md`
+- 消费方仓库内 `.codex/skills/use-digitalway-core/SKILL.md`（指针，只给出权威源路径）
+- 权威源 `.codex/skills/core-skill/SKILL.md`，以及它「主题分片索引」中按任务需要的分片
+- Claude、Cursor、Copilot 的 skills 目录同构安装（`.claude/skills/`、`.cursor/skills/`、`.github/copilot/skills/`），各自指针都指向同一份权威源，不存在多份正文
 - Core 源码中的 `docs/codex/*` 与最近 `examples/*`（路径：`go list -m -f '{{.Dir}}' github.com/digitalwayhk/core` 或 `DIGITALWAY_CORE_PATH`）
 
 建议在消费方 `AGENTS.md` / `Claude.md` 中写入上述流程（脚本加 `--write-agents` 可自动追加标准段落）。完整说明、软链/复制、用户级安装与故障排查见 [消费方 AI Skill 安装与识别](./docs/codex/CONSUMER_AI_SKILL_SETUP.md)。
 
-本仓库自身的 Agent 约定见 [AGENTS.md](./AGENTS.md)；规范正文在 [use-digitalway-core](./.codex/skills/use-digitalway-core/SKILL.md)。
+本仓库自身的 Agent 约定见 [AGENTS.md](./AGENTS.md)；规范正文的唯一权威源在 [docs/ai/core-skill](./docs/ai/core-skill/SKILL.md)，各 agent 目录下只有指向它的指针文件。
 
 ## 最小服务
 
@@ -75,14 +76,14 @@ func (own *Ping) RouterInfo() *types.RouterInfo {
 - 嵌入框架或项目模型指针的类型必须在 `NewModel()` 中初始化完整继承链。
 - 管理 CRUD 路径为 `/api/manage/{service}/{manageStructLower}/{operationLower}`。
 
-简单模型、Manage CRUD 和私有订单接口见 [最简商城示例](./examples/01-simple-shop)；两类模型与 Manage 分支见 [模型继承示例](./examples/03-shop-inheritance) 和 [完整 Skill 参考](./.codex/skills/use-digitalway-core/references/core-backend-api.md#先按数据生命周期分类)。
+简单模型、Manage CRUD 和私有订单接口见 [最简商城示例](./examples/01-simple-shop)；两类模型与 Manage 分支见 [模型继承示例](./examples/03-shop-inheritance) 和 [模型分片](./docs/ai/core-skill/models.md#先按数据生命周期分类)。
 
 ## 业务统计、经营分析与服务报表
 
 Core 提供声明式业务统计、管理端经营分析和服务级报表能力，统一入口为
 `pkg/persistence/entity/stats`。完整模板见
 [07 订单服务](./examples/07-shop-order-scale/order-service)，实现契约见
-[use-digitalway-core 参考](./.codex/skills/use-digitalway-core/references/core-backend-api.md#业务统计经营分析与服务报表)。
+[业务统计与报表分片](./docs/ai/core-skill/stats-and-reports.md)。
 
 最小接入流程：
 
@@ -123,6 +124,10 @@ Core 提供声明式业务统计、管理端经营分析和服务级报表能力
 
 能力是否可用由配置校验、运行时 factory 和行为测试共同决定，不能仅依据配置字段存在。当前支持范围和外部依赖接入方式见 [配置到运行时能力矩阵](./docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md)。
 
+## 兼容与废弃
+
+公共 API 按 additive 方式演进。已废弃但仍可编译的表面统一登记在 [废弃 API 登记](./docs/codex/DEPRECATION_REGISTER.md)，逐条给出替代入口、最早删除版本、Owner 和迁移证据。表中「最早删除版本」是下限而非自动删除指令：删除前还需仓库内调用清零、已登记消费方完成迁移、CHANGELOG Removed 段完整。升级 Core 版本前应先对照该表检查自己用到的入口。
+
 ## 验证
 
 ```bash
@@ -131,5 +136,7 @@ Core 提供声明式业务统计、管理端经营分析和服务级报表能力
 ./scripts/test.sh release-contract
 ./scripts/test.sh integration-external-docker
 ```
+
+CI 门禁由 `scripts/ci.sh` 按名称执行，如 `./scripts/ci.sh required/quick`、`required/contracts`、`required/ai-skill`（校验 AI skill 权威源结构，防止 agent 目录回流全文副本）、`required/server-manage`、`required/race`。
 
 更完整的场景选择、成熟度和测试命令见 [框架场景使用指南](./docs/codex/FRAMEWORK_USAGE_GUIDE.md)。

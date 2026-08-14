@@ -42,23 +42,22 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 			"mTLS SAN",
 			"SourceService",
 		},
-		".codex/skills/use-digitalway-core/SKILL.md": {
+		// skill 正文的唯一权威源是 docs/ai/core-skill/；各 agent 目录下只有指针文件，
+		// 因此契约片段只在权威源分片中断言。
+		"docs/ai/core-skill/SKILL.md": {
 			"WithInternalCallers",
 			"SupplierOrder",
-			"/api/openapi",
-			"/api/internal/openapi",
-			"ServerManageAuth",
 		},
-		".codex/skills/use-digitalway-core/references/core-backend-api.md": {
+		"docs/ai/core-skill/multiservice-and-observability.md": {
 			"/api/openapi",
 			"/api/internal/openapi",
 			"x-internal-callers",
+			"ServerManageAuth",
 		},
-		".github/copilot/skills/core-backend-api.md": {
+		"docs/ai/core-skill/openapi-and-frontend.md": {
 			"/api/openapi",
 			"/api/internal/openapi",
 			"ServerManageAuth",
-			"x-internal-callers",
 		},
 	}
 	for name, fragments := range required {
@@ -76,7 +75,7 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 
 func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
 	root := repositoryRoot(t)
-	skill, err := os.ReadFile(filepath.Join(root, ".codex/skills/use-digitalway-core/references/core-backend-api.md"))
+	skill, err := os.ReadFile(filepath.Join(root, "docs/ai/core-skill/multiservice-and-observability.md"))
 	require.NoError(t, err)
 	require.NotContains(t, string(skill), "api/call 目标 API")
 

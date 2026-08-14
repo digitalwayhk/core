@@ -8,15 +8,15 @@
 
 使用本框架开发或修改后端 API 前：
 
-- Codex 必须阅读 `.codex/skills/use-digitalway-core/SKILL.md`，并按该 skill 指向的现行参考资料执行。
-- GitHub Copilot 必须阅读 `.github/copilot/skills/core-backend-api.md`。
-- 当指南与当前代码、测试或公开契约不一致时，以当前代码、测试和公开契约为准，并同步修正文档。
+- 规范正文的**唯一权威源**是 `docs/ai/core-skill/`。先读 `docs/ai/core-skill/SKILL.md`，再按其「主题分片索引」按需读取分片。
+- `.codex/skills/`、`.claude/skills/`、`.cursor/skills/`、`.github/copilot/skills/` 下只有指向权威源的指针文件，不含正文；不要在这些目录里保存副本。
+- 当指南与当前代码、测试或公开契约不一致时，以当前代码、测试和公开契约为准，并同步修正 `docs/ai/core-skill/` 下对应分片。
 
 **其他项目依赖本仓库时**：`go get` 不会自动安装 skill。消费方 AI 应按 [README「AI 助手与 Skill」](./README.md) 与 [消费方 AI Skill 安装与识别](./docs/codex/CONSUMER_AI_SKILL_SETUP.md) 先运行 `scripts/link-consumer-skill.sh`，再阅读消费方仓库内的 skill。
 
 关键原则：
 
-1. 调用 `NewModelList[T](nil)` 时框架会自动执行模型迁移；不要另行建立重复迁移流程。
+1. 建库、建表和补列由框架在**首次数据访问时**自动完成（`NewModelList[T](nil)` 只是构造列表，本身不建表）；不要另行建立迁移脚本或调用 GORM `AutoMigrate`。删列、改类型等破坏性变更不自动执行，见 `docs/ai/core-skill/models.md`。
 2. handler 通过 `req.GetUser()` 获取当前用户信息。
 3. Private、Manage、ServerManage 路由必须遵守各自的认证域，不得用路径猜测或跨域 token 替代。
 4. 路由注册、目录结构和 TestToken 用法以现行 skill、示例与测试为准，不复制旧项目中的路径约定。

@@ -11,11 +11,11 @@
 - PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
 - 管理端集成 `page-agent`（可选自然语言 GUI Agent）；优先读服务端 AI 配置并经 `customFetch` 注入 Manage JWT，env 仅作 fallback。
 - 消费方 AI skill 安装说明与脚本：`docs/codex/CONSUMER_AI_SKILL_SETUP.md`、`scripts/link-consumer-skill.sh`；README「AI 助手与 Skill」。
-- skill / 场景指南登记 **Manage 动态分库** 标准管道：`IDBName` + Where 写回 `searchHook` + MySQL `config.Database=""`；明确禁止 `OnSearchBefore`+`stop=true` 旁路列表。详见 `.codex/skills/use-digitalway-core/references/core-backend-api.md`。
+- skill / 场景指南登记 **Manage 动态分库** 标准管道：`IDBName` + Where 写回 `searchHook` + MySQL `config.Database=""`；明确禁止 `OnSearchBefore`+`stop=true` 旁路列表。详见 `docs/ai/core-skill/manage.md`。
 - 多服务运行与请求聚合监控（Runtime Observability）：go-zero/Prometheus 历史源、Core 调用边与 gRPC 入站低基数指标、ServerManage `runtimetopology`/`runtimeservice`、示例 07 Prometheus scrape，以及 Admin 运行视图。详见 `docs/superpowers/specs/2026-07-27-service-runtime-graph-design.md`。
 - `ServerConfig.RuntimeObservability` 查询端配置（`Mode=off|prometheus`）与能力矩阵登记。
 - 配置到运行时闭集门禁、公共 API/OpenAPI/路由兼容基线和类型化公共错误契约。
-- `PrefixedBadgerDB.EnableWriteBehind`、显式损坏恢复策略和可识别的 `PendingSyncError`。
+- `PrefixedBadgerDB.UseWriteBehind` 绑定入口、显式损坏恢复策略和可识别的 `PendingSyncError`。
 - `ReliableWriteStore` 统一封装本地持久写、批量提交、准入背压、服务/实例目录隔离，以及 Insert/Update/Delete 可靠操作。
 - `WriteBehindTarget`、有界 `ForceSyncBatch` 和批次确认协议，支持业务自定义远端幂等汇合。
 - Casdoor Auth/Manage 独立客户端、持久撤销权威、可靠 Webhook 控制事件，以及签发/请求/事件三类服务 Hook。
@@ -40,9 +40,10 @@
 
 - 进程级请求状态、CrossNode 转发和 TestResult 兼容入口，详见 `docs/codex/DEPRECATION_REGISTER.md`。
 - 旧 `RouterStats` / `GetAllRouterStats` / 未注册 `Statistics` 统计链路；生产路径不再产生统计，替代为 Runtime Aggregator + Prometheus。删除须进入批准的破坏性版本。
-- `PrefixedBadgerDB.SetSyncDB`；新代码使用可返回绑定错误的 `EnableWriteBehind`。
+- `PrefixedBadgerDB.SetSyncDB` 与 `EnableWriteBehind`；前者无绑定错误，后者仅为 `ModelList`/`IDataAction` 兼容层，新代码统一使用 `UseWriteBehind(WriteBehindTarget)`。
 - `public.Callback`、`public.Casdoor` 类型别名；新代码使用 `CasdoorCallback`、`CasdoorConfig`。
 - `RouteCacheL1Config.Limit`；新配置使用 `MaxEntries`，并可通过 `MaxValueBytes` 和 `MaxBytes` 限制序列化缓存数据量。
+- 补登此前已在代码标记 Deprecated 但漏登记的表面：`safe.Claims.GetToken` / `ValidateJWTToken`、`RouterInfo` 兼容导出字段、`casdoor` 旧中间件签名、`types.WebSocketNotificationSystem`，以及整包 `pkg/fileserver`、`pkg/dec`、`pkg/localization`。替代入口与迁移证据见 `docs/codex/DEPRECATION_REGISTER.md`。
 
 ### Removed
 

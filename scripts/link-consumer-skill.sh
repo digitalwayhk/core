@@ -11,7 +11,7 @@
 # 选项:
 #   --mode symlink|copy   默认 symlink（推荐）；copy 适合无法使用软链的环境
 #   --target DIR          消费方仓库根，默认当前目录
-#   --user-global         同时安装到 ~/.codex/skills（及存在时的 ~/.claude/skills、~/.grok/skills）
+#   --user-global         同时安装到 ~/.codex/skills（及存在时的 ~/.claude/skills、~/.cursor/skills、~/.grok/skills）
 #   --write-agents        若目标没有 AGENTS.md 中的 Digitalway skill 段落，则追加标准片段
 #   --dry-run             只打印将要执行的操作
 #   -h|--help             帮助
@@ -105,8 +105,14 @@ fi
 
 SKILL_SRC="$CORE_ROOT/.codex/skills/use-digitalway-core"
 COPILOT_SRC="$CORE_ROOT/.github/copilot/skills/core-backend-api.md"
+# 规范正文的唯一权威源。各 agent 目录下只有指向这里的指针文件。
+CORE_SKILL_SRC="$CORE_ROOT/docs/ai/core-skill"
 if [[ ! -f "$SKILL_SRC/SKILL.md" ]]; then
   echo "core skill 不完整: 缺少 $SKILL_SRC/SKILL.md" >&2
+  exit 1
+fi
+if [[ ! -f "$CORE_SKILL_SRC/SKILL.md" ]]; then
+  echo "core skill 不完整: 缺少权威源 $CORE_SKILL_SRC/SKILL.md" >&2
   exit 1
 fi
 
@@ -158,6 +164,21 @@ SKILL_DEST="$TARGET/.codex/skills/use-digitalway-core"
 COPILOT_DEST="$TARGET/.github/copilot/skills/core-backend-api.md"
 
 install_link_or_copy "$SKILL_SRC" "$SKILL_DEST"
+# Claude Code 与 Cursor 只扫描各自的项目级 skill 目录，不会读取 .codex/skills，
+# 未安装时它们会凭通用 GORM 经验编码（例如自建迁移脚本），因此项目级一并安装。
+#
+# 每个 skills 根都要带一份正文：指针用 ../core-skill/ 定位权威源，
+# 只在 .codex 下放正文会让 Claude/Cursor 的第一候选路径落空。
+for agent_skills in \
+  "$TARGET/.codex/skills" \
+  "$TARGET/.claude/skills" \
+  "$TARGET/.cursor/skills"
+do
+  if [[ "$agent_skills" != "$TARGET/.codex/skills" ]]; then
+    install_link_or_copy "$SKILL_SRC" "$agent_skills/use-digitalway-core"
+  fi
+  install_link_or_copy "$CORE_SKILL_SRC" "$agent_skills/core-skill"
+done
 if [[ -f "$COPILOT_SRC" ]]; then
   install_link_or_copy "$COPILOT_SRC" "$COPILOT_DEST"
 fi
@@ -166,11 +187,14 @@ if [[ "$USER_GLOBAL" -eq 1 ]]; then
   for home_skills in \
     "${HOME}/.codex/skills" \
     "${HOME}/.claude/skills" \
+    "${HOME}/.cursor/skills" \
     "${HOME}/.grok/skills"
   do
     if [[ -d "$(dirname "$home_skills")" ]] || [[ "$home_skills" == "${HOME}/.codex/skills" ]]; then
       run mkdir -p "$home_skills"
       install_link_or_copy "$SKILL_SRC" "$home_skills/use-digitalway-core"
+      # 用户级安装同样要带上正文，否则指针的候选路径都落空。
+      install_link_or_copy "$CORE_SKILL_SRC" "$home_skills/core-skill"
     fi
   done
 fi
@@ -186,8 +210,8 @@ AGENTS_SNIPPET=$(cat <<'EOF'
    `DIGITALWAY_CORE_PATH=<core源码路径> <core>/scripts/link-consumer-skill.sh --target . --write-agents`
    或仅有模块依赖时:
    `CORE=$(go list -m -f '{{.Dir}}' github.com/digitalwayhk/core) && "$CORE/scripts/link-consumer-skill.sh" --target . --write-agents`
-2. Codex / 兼容 Agent 必须阅读 `.codex/skills/use-digitalway-core/SKILL.md`，并按其 `references/` 与 core 仓库 `docs/codex`、`examples` 执行。
-3. GitHub Copilot 阅读 `.github/copilot/skills/core-backend-api.md`（若已安装）。
+2. Codex / 兼容 Agent 必须阅读 `.codex/skills/use-digitalway-core/SKILL.md`。它是指针，正文在 `.codex/skills/core-skill/`（本仓库）或 core 仓库 `docs/ai/core-skill/`；按其「主题分片索引」按需读取分片，并结合 core 仓库 `docs/codex`、`examples` 执行。
+3. GitHub Copilot 阅读 `.github/copilot/skills/core-backend-api.md`（若已安装），同样按指针进入权威源。
 4. 当指南与当前代码、测试或公开契约不一致时，以代码、测试和契约为准。
 5. Core 文档与示例路径：优先 `go list -m -f '{{.Dir}}' github.com/digitalwayhk/core`，或 `go.mod` 的 `replace` / 环境变量 `DIGITALWAY_CORE_PATH`。
 
