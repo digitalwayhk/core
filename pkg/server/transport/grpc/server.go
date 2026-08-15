@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	pb "github.com/digitalwayhk/core/pkg/server/transport/grpc/proto"
 	coretypes "github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -58,11 +59,25 @@ type Server struct {
 
 	// handler is called to process incoming Call RPCs.
 	handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error)
+	// routeKnown 可选：仅允许已注册稳定路由进入指标标签。
+	routeKnown func(path string) bool
+}
+
+// ServerOption 配置 gRPC Server 可选行为。
+type ServerOption func(*Server)
+
+// WithRouteAllowlist 限制入站指标 route 标签必须命中已知稳定路由。
+func WithRouteAllowlist(known func(path string) bool) ServerOption {
+	return func(s *Server) {
+		if s != nil {
+			s.routeKnown = known
+		}
+	}
 }
 
 // NewServer pre-binds address and loads server credentials so startup errors are
 // returned before the server is handed to a service lifecycle.
-func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error)) (*Server, error) {
+func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx context.Context, payload *coretypes.PayLoad) ([]byte, error), opts ...ServerOption) (*Server, error) {
 	if handler == nil {
 		return nil, errors.New("grpc server: handler is required")
 	}
@@ -79,6 +94,8 @@ func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx 
 	options = append(options,
 		grpc.MaxRecvMsgSize(cfg.MaxRecvMsgSize),
 		grpc.MaxSendMsgSize(cfg.MaxSendMsgSize),
+		// 不导入 zrpc/internal；使用 Core 等价 unary 拦截器暴露 method 级指标与耗时。
+		grpc.ChainUnaryInterceptor(unaryServerMetricsInterceptor),
 	)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -93,6 +110,11 @@ func NewServer(address string, cfg config.GRPCTransportConfig, handler func(ctx 
 		stopping: make(chan struct{}),
 		done:     make(chan struct{}),
 		handler:  handler,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(server)
+		}
 	}
 	return server, nil
 }
@@ -252,22 +274,49 @@ func (s *Server) Stop() {
 
 // Call implements pb.CoreTransportServer.
 func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb.PayloadResponse, err error) {
+	start := time.Now()
+	var payload *coretypes.PayLoad
+	resultClass := observability.ResultSuccess
 	defer func() {
 		if recover() != nil {
 			logx.Errorw("grpc_handler_panicked", logx.Field("address", s.address))
 			response = nil
 			err = status.Error(codes.Internal, "internal server error")
+			resultClass = observability.ResultServerError
 		}
+		// Core 路由维度：在方法级 prometheus interceptor 之上补充稳定 route。
+		// 身份失败时不使用 payload 原文污染标签。
+		service := ""
+		route := "invalid_route"
+		if payload != nil {
+			service = payload.TargetService
+			if resultClass != observability.ResultRejected {
+				candidate := payload.TargetPath
+				// 仅接受稳定模板：NormalizeRouteLabel + 可选 allowlist（已注册 RouterInfo）。
+				normalized := observability.NormalizeRouteLabel(candidate)
+				if normalized != "invalid_route" {
+					if s.routeKnown == nil || s.routeKnown(normalized) {
+						route = normalized
+					}
+				}
+			}
+		}
+		observability.RecordInboundRequest(service, route, "grpc", resultClass, time.Since(start))
 	}()
-	payload := pbToPayload(req)
+	payload = pbToPayload(req)
 	caller, callerErr := trustedCallerFromPeer(ctx, payload.SourceService)
 	if callerErr == nil {
 		ctx = coretypes.ContextWithTrustedInternalCaller(ctx, caller)
 	} else if errors.Is(callerErr, errCallerIdentityMismatch) {
+		resultClass = observability.ResultRejected
 		return nil, status.Error(codes.Unauthenticated, "internal caller identity mismatch")
 	}
 	data, err := s.handler(ctx, payload)
 	if err != nil {
+		resultClass = observability.ClassifyError(err)
+		if resultClass == observability.ResultUnavailable {
+			resultClass = observability.ResultServerError
+		}
 		return nil, status.Error(codes.Internal, "internal server error")
 	}
 	return &pb.PayloadResponse{Data: data}, nil

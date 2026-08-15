@@ -33,16 +33,24 @@ type CreateOrder struct {
 	UnitPrice          decimal.Decimal         `json:"unitPrice"`
 	Address            userdto.AddressSnapshot `json:"address"`
 	writer             business.LocalOrderWriter
+	ruleValidator      orderRuleValidator
+}
+
+type orderRuleValidator interface {
+	ValidateQuantityAndAmount(quantity int, totalAmount decimal.Decimal) error
 }
 
 // NewCreateOrder 创建绑定当前实例订单 runtime 的下单路由。
 func NewCreateOrder(store models.OrderWriteAccess) *CreateOrder {
-	return &CreateOrder{writer: business.LocalOrderWriter{Store: store}}
+	return &CreateOrder{
+		writer:        business.LocalOrderWriter{Store: store},
+		ruleValidator: business.NewOrderRuleCache("default"),
+	}
 }
 
 // New 为请求池创建保留实例依赖的新路由。
 func (own *CreateOrder) New(interface{}) servertypes.IRouter {
-	return &CreateOrder{writer: own.writer}
+	return &CreateOrder{writer: own.writer, ruleValidator: own.ruleValidator}
 }
 
 // Parse 绑定下单请求。
@@ -61,6 +69,12 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	fingerprint := strings.TrimSpace(own.RequestFingerprint)
 	if fingerprint == "" {
 		fingerprint = own.RequestID
+	}
+	totalAmount := own.UnitPrice.Mul(decimal.NewFromInt(int64(own.Quantity)))
+	if own.ruleValidator != nil {
+		if err := own.ruleValidator.ValidateQuantityAndAmount(own.Quantity, totalAmount); err != nil {
+			return nil, orderRulePublicError(err)
+		}
 	}
 	serviceInstanceID, serviceInstanceIP := orderRuntimeIdentity()
 	orderID := own.OrderID
@@ -102,7 +116,7 @@ func (own *CreateOrder) Do(req servertypes.IRequest) (interface{}, error) {
 		ProductID:     own.ProductID,
 		Quantity:      own.Quantity,
 		UnitPrice:     own.UnitPrice,
-		TotalAmount:   own.UnitPrice.Mul(decimal.NewFromInt(int64(own.Quantity))),
+		TotalAmount:   totalAmount,
 		OrderStatus:   "accepted",
 		PaymentStatus: "unpaid",
 		TraceID:       req.GetTraceId(),
@@ -128,5 +142,31 @@ func (own *CreateOrder) RouterInfo() *servertypes.RouterInfo {
 // Reset 清理请求字段并保留实例级 writer。
 func (own *CreateOrder) Reset() {
 	writer := own.writer
-	*own = CreateOrder{writer: writer}
+	ruleValidator := own.ruleValidator
+	*own = CreateOrder{writer: writer, ruleValidator: ruleValidator}
+}
+
+func orderRulePublicError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch err.Error() {
+	case "订单规则未启用",
+		"订单数量小于最小下单数量",
+		"订单数量超过最大下单数量",
+		"订单金额超过最大下单金额":
+		return servertypes.NewPublicError(
+			servertypes.ErrorKindBusiness,
+			servertypes.PublicCodeBusiness,
+			err.Error(),
+			err,
+		)
+	default:
+		return servertypes.NewPublicError(
+			servertypes.ErrorKindUnavailable,
+			servertypes.PublicCodeUnavailable,
+			"订单规则暂不可用",
+			err,
+		)
+	}
 }

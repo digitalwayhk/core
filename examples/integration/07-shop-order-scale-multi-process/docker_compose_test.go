@@ -59,6 +59,29 @@ func TestDockerOrderReplicasUseInternalMySQL(t *testing.T) {
 	}
 }
 
+// TestComposeDefinesPrometheusScrape 验证 Runtime 图所需的 Prometheus scrape 配置可复现。
+func TestComposeDefinesPrometheusScrape(t *testing.T) {
+	content := read07Compose(t)
+	require.Contains(t, content, "prometheus:")
+	require.Contains(t, content, "SHOP_RUNTIME_PROM_URL: http://prometheus:9090")
+	require.Contains(t, content, "SHOP_METRICS_PORT: 9101")
+
+	userBlock := composeServiceBlock(content, "shop-user")
+	require.Contains(t, userBlock, "SHOP_RUNTIME_PROM_URL")
+
+	promPath := filepath.Join("..", "..", "07-shop-order-scale", "deploy", "prometheus.yml")
+	prom, err := os.ReadFile(promPath)
+	require.NoError(t, err)
+	text := string(prom)
+	require.Contains(t, text, "shop-order-a:9101")
+	require.Contains(t, text, "shop-order-b:9101")
+	require.Contains(t, text, "service: shop-order")
+	require.Contains(t, text, "service_instance_id: shop-order-a")
+	require.Contains(t, text, "service_instance_id: shop-order-b")
+	require.Contains(t, text, "service: shop-user")
+	require.Contains(t, text, "service: shop-supplier")
+}
+
 // read07Compose 读取 07 Docker Compose 文件。
 func read07Compose(t *testing.T) string {
 	t.Helper()

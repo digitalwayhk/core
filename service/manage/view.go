@@ -325,11 +325,16 @@ func getForeignField(field reflect.StructField, model interface{}) (string, *vie
 	if oof == "-" {
 		return "", nil
 	}
+	oneObjectType := field.Type
+	if oneObjectType.Kind() == reflect.Ptr {
+		oneObjectType = oneObjectType.Elem()
+	}
+	oneObjectTypeName := oneObjectType.Name()
 	fm := &view.ForeignModel{
 		IsFkey:             true,
-		OneObjectTypeName:  field.Type.Name(),
+		OneObjectTypeName:  oneObjectTypeName,
 		OneObjectField:     oof,
-		OneObjectName:      field.Type.Name(),
+		OneObjectName:      oneObjectTypeName,
 		OneObjectFieldKey:  foreignkey,
 		OneDisplayName:     "name",
 		ManyObjectTypeName: utils.GetTypeName(model),

@@ -32,9 +32,15 @@ if [[ ! -f "${BUILD_SCRIPT}" ]]; then
   fail "scripts/build-web-admin.sh 不存在"
 fi
 
-# --- 0a) npm ci 必须 HUSKY=0（仅 ci；jest/tsc/build 不得误绑）---
+# --- 0a) 依赖安装必须尊重锁文件，并仅在安装阶段禁用 husky ---
 if ! grep -E '^[[:space:]]*HUSKY=0[[:space:]]+npm[[:space:]].*[[:space:]]ci([[:space:]]|$)' "${BUILD_SCRIPT}" | grep -q .; then
   fail "scripts/build-web-admin.sh 的 npm ci 必须前缀 HUSKY=0，避免 husky prepare 写 git config"
+fi
+if ! grep -q 'yarn.lock' "${BUILD_SCRIPT}"; then
+  fail "scripts/build-web-admin.sh 必须识别 yarn.lock"
+fi
+if ! grep -E '^[[:space:]]*HUSKY=0[[:space:]]+yarn[[:space:]].*install.*--frozen-lockfile' "${BUILD_SCRIPT}" | grep -q .; then
+  fail "scripts/build-web-admin.sh 的 yarn install 必须锁定版本并禁用 husky"
 fi
 # 确保 jest / tsc:auth / build 行不是 HUSKY=0 前缀（只禁用 ci 的 prepare）
 while IFS= read -r line; do
@@ -298,7 +304,7 @@ prod_marker_after="$(shasum -a 256 "${tmp_dir}/prod_marker.txt" | awk '{print $1
 [[ "${prod_marker_before}" == "${prod_marker_after}" ]] || fail "生产拒绝 DIRTY_MARKER 时不得写入 marker 文件"
 fp_after_marker="$(content_tree_hash "${REAL_DIST}")"
 [[ "${fp_before_marker}" == "${fp_after_marker}" ]] || fail "生产 DIRTY_MARKER 拒绝测试改动了真实 dist"
-grep -q '运行 npm' "${tmp_dir}/prod_dirty_marker.out" && fail "生产 DIRTY_MARKER 拒绝不得进入 npm"
+grep -q '运行前端依赖' "${tmp_dir}/prod_dirty_marker.out" && fail "生产 DIRTY_MARKER 拒绝不得进入依赖安装"
 
 # --- 5d) DIRTY_MARKER 拒绝 admin 外路径（SKIP 模式）---
 set +e

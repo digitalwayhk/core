@@ -26,11 +26,7 @@ func (own *GetProducts) Do(servertypes.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*supplierdto.Product, 0, len(items))
-	for _, item := range items {
-		result = append(result, &supplierdto.Product{ID: item.ID, SupplierID: item.SupplierID, Code: item.Code, Name: item.Name, Price: item.Price, Enabled: item.Enabled, TraceID: item.TraceID})
-	}
-	return result, nil
+	return items, nil
 }
 
 // GetResponse 返回商品列表响应 DTO 类型。

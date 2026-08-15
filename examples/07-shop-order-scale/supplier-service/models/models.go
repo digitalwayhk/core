@@ -33,6 +33,9 @@ var (
 	// ListSuppliers 读取供应商列表。
 	ListSuppliers = basedata.ListSuppliers
 
+	// FindSupplierByID 按业务 ID 读取供应商资料。
+	FindSupplierByID = basedata.FindSupplierByID
+
 	// ListProducts 读取商品列表。
 	ListProducts = basedata.ListProducts
 

@@ -56,7 +56,12 @@ func (own *AddOrder) Do(req servertypes.IRequest) (interface{}, error) {
 	var products []*supplierdto.Product
 	productRes.GetData(&products)
 	if len(products) == 0 || products[0] == nil {
-		return nil, errors.New("商品不存在")
+		return nil, servertypes.NewPublicError(
+			servertypes.ErrorKindNotFound,
+			servertypes.PublicCodeNotFound,
+			"商品不存在或不可下单",
+			errors.New("order product is missing or unavailable"),
+		)
 	}
 	orderID := orderIDForRequest(uint(userID64), strings.TrimSpace(own.RequestID), req)
 	orderRes, err := req.CallService(&orderapi.CreateOrder{

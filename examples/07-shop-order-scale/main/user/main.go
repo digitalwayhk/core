@@ -6,12 +6,12 @@ import (
 	userservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/user-service"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/run"
-	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
 
 func main() {
+	service := &userservice.Service{}
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&userservice.Service{}, bootstrap.DistributedServiceConfig("shop-user", 18181, 2, 1)))
-	server.SetOption(&userservice.Service{}, &servertypes.ServerOption{IsWebSocket: true})
+	server.AddServiceContext(router.NewServiceContextWithConfig(service, bootstrap.DistributedServiceConfig("shop-user", 18181, 2, 1)))
+	server.SetOption(service, bootstrap.SwaggerServerOption(true))
 	server.Start()
 }

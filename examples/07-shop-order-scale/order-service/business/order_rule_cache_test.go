@@ -40,6 +40,30 @@ func TestOrderRuleCacheInvalidatesRemoteAuthorityRule(t *testing.T) {
 	require.NoError(t, cache.ValidateQuantityAndAmount(5, decimal.NewFromInt(50)))
 }
 
+func TestOrderRuleCacheUsesBuiltInDefaultWhenAuthorityHasNoRule(t *testing.T) {
+	cache := NewOrderRuleCache("default")
+	loads := 0
+	cache.loader = func(string) (*models.OrderRule, error) {
+		loads++
+		if loads == 1 {
+			return nil, models.ErrOrderRuleNotFound
+		}
+		configured := models.NewOrderRule()
+		configured.MaxQuantity = 200
+		return configured, nil
+	}
+
+	rule, err := cache.Get()
+
+	require.NoError(t, err)
+	require.Equal(t, "default", rule.RuleCode)
+	require.Equal(t, 1, rule.MinQuantity)
+	require.Equal(t, 100, rule.MaxQuantity)
+	require.True(t, rule.Enabled)
+	require.NoError(t, cache.ValidateQuantityAndAmount(130, decimal.NewFromInt(910)))
+	require.Equal(t, 2, loads)
+}
+
 func saveRule(id uint, minQuantity int, revision int) error {
 	rule := models.NewOrderRule()
 	rule.ID = id

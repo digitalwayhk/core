@@ -11,7 +11,6 @@ import (
 )
 
 // manageAuthAuthority 保存当前 HTMLServer 选定的 Manage Auth 权威服务。
-// 本任务只负责选择与兼容校验；后续任务再据此注册同源认证路径。
 type manageAuthAuthority struct {
 	name    string
 	context *router.ServiceContext
@@ -33,7 +32,8 @@ func resolveManageAuthAuthority(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateManageAuthCompatibility(authority, eligible); err != nil {
+	propagateManageAuthAuthority(authority, contexts)
+	if err := validateManageAuthCompatibility(authority, manageAuthContexts(contexts)); err != nil {
 		return nil, err
 	}
 	return &manageAuthAuthority{
@@ -41,6 +41,30 @@ func resolveManageAuthAuthority(
 		context: authority,
 		router:  authority.Router,
 	}, nil
+}
+
+// propagateManageAuthAuthority 让同一进程内的业务服务共享权威服务签发的
+// Manage 凭证。Private Auth、ServerManageAuth 及每个服务的本地 Badger 快照
+// 路径仍由各服务独立持有。
+func propagateManageAuthAuthority(
+	authority *router.ServiceContext,
+	contexts []*router.ServiceContext,
+) {
+	if authority == nil || authority.Config == nil {
+		return
+	}
+	for _, ctx := range contexts {
+		if ctx == nil || ctx == authority || ctx.Config == nil {
+			continue
+		}
+		badgerPath := ctx.Config.AuthRevocation.BadgerPath
+		ctx.Config.ManageAuth = authority.Config.ManageAuth
+		if authority.Config.ManageAuth.CasDoor.Enable {
+			ctx.Config.AuthRevocation.Mode = authority.Config.AuthRevocation.Mode
+			ctx.Config.AuthRevocation.Redis = authority.Config.AuthRevocation.Redis
+			ctx.Config.AuthRevocation.BadgerPath = badgerPath
+		}
+	}
 }
 
 func manageAuthContexts(contexts []*router.ServiceContext) []*router.ServiceContext {

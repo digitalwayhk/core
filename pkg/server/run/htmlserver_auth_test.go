@@ -190,8 +190,8 @@ func TestHTMLServerAuthRoutesSelectServiceByDomain(t *testing.T) {
 			target: "/api/servermanage/testtoken?userid=1&type=0&service=users", wantService: "users",
 		},
 		{
-			name: "explicit manage service", method: http.MethodGet,
-			target: "/api/servermanage/testtoken?userid=1&type=1&service=users", wantService: "users",
+			name: "manage token always uses configured authority", method: http.MethodGet,
+			target: "/api/servermanage/testtoken?userid=1&type=1&service=users", wantService: "shop",
 		},
 		{
 			name: "server manage uses system server", method: http.MethodGet,
@@ -218,7 +218,7 @@ func TestHTMLServerAuthRoutesSelectServiceByDomain(t *testing.T) {
 		})
 	}
 
-	for _, tokenType := range []string{"0", "1"} {
+	for _, tokenType := range []string{"0"} {
 		t.Run("business domain rejects system server type "+tokenType, func(t *testing.T) {
 			req := httptest.NewRequest(
 				http.MethodGet,

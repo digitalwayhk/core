@@ -31,3 +31,5 @@ etc
 *.pem
 __debug_bin*
 pkg/server/run/dist.backup/
+.superpowers/
+examples/07-shop-order-scale/main/all-in-one/data/

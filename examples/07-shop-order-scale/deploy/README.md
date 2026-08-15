@@ -2,6 +2,41 @@
 
 本目录演示 07 订单服务的多副本部署约束。Compose 文件提供固定 `shop-order-a/b` 便于 UAT 断言，也提供 `shop-order` scale 模板用于编排层扩容实验。
 
+## 本机 all-in-one：仅 MySQL + Redis
+
+Compose 文件：`docker-compose.local-deps.yml`（只起依赖，不起业务进程）。
+
+```bash
+# 必选：共享订单权威库（127.0.0.1:3306）
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml up -d mysql
+
+# 可选：若本机没有 Redis，再起容器 Redis（需 6379 空闲）
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml --profile with-redis up -d redis
+```
+
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| MySQL | `127.0.0.1:3306` | 库 `shop_order_scale_remote`，`root` / `shop-root` |
+| Redis | `127.0.0.1:6379` | 事件 `redis-stream`；本机已有 Redis 可直接用，不必起容器 |
+
+启动 all-in-one 前设置（密码与 compose 一致；代码默认密码为空，必须显式导出）：
+
+```bash
+export SHOP_REDIS_ADDR=127.0.0.1:6379
+export SHOP_ORDER_REMOTE_MYSQL_HOST=127.0.0.1
+export SHOP_ORDER_REMOTE_MYSQL_PORT=3306
+export SHOP_ORDER_REMOTE_MYSQL_USER=root
+export SHOP_ORDER_REMOTE_MYSQL_PASSWORD=shop-root
+export SHOP_ORDER_REMOTE_MYSQL_DATABASE=shop_order_scale_remote
+```
+
+停止：
+
+```bash
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.local-deps.yml down
+# 连同数据卷：down -v
+```
+
 水平扩容必须满足：
 
 - 所有 order 副本使用相同 `ServiceName=shop-order`。
@@ -18,10 +53,30 @@
 固定双副本：
 
 ```bash
-docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml up shop-user shop-supplier shop-order-a shop-order-b
+docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml up shop-user shop-supplier shop-order-a shop-order-b prometheus
 ```
 
 固定双副本会同时启动 `mysql` 和 `redis` 依赖；`shop-order-a/b` 都通过 `SHOP_ORDER_REMOTE_MYSQL_*` 指向同一个 `shop_order_scale_remote` 权威库。
+
+运行图观测：
+
+- 各服务默认在 `9101/metrics` 暴露 Prometheus 指标（`SHOP_METRICS_*` 可覆盖）。
+- `prometheus.yml` 为 `shop-user` / `shop-supplier` / `shop-order-a` / `shop-order-b` 附加稳定 `service` 与 `service_instance_id` 标签；两个 order 副本共享 `service=shop-order`。
+- 入口服务 `shop-user` 通过 `SHOP_RUNTIME_PROM_URL=http://prometheus:9090` 启用 Runtime Aggregator 查询端。
+- 本地可访问 `http://127.0.0.1:19090` 查看 Prometheus；Admin 只调用 `POST /api/servermanage/runtimetopology` 与 `runtimeservice`，不直连 Prometheus。
+
+all-in-one 调试进程默认查询 `http://127.0.0.1:19090`。启动示例前或启动后运行以下
+Prometheus 容器；它从宿主机统一的 `9101/metrics` 采集带逻辑服务标签的 Core 指标：
+
+```bash
+docker run --rm --name shop-07-prometheus \
+  -p 19090:9090 \
+  -v "$PWD/examples/07-shop-order-scale/deploy/prometheus-all-in-one.yml:/etc/prometheus/prometheus.yml:ro" \
+  prom/prometheus:v2.54.1
+```
+
+如果使用非默认地址，可通过 `SHOP_RUNTIME_PROM_URL` 覆盖。运行图聚合器在进程启动时
+创建，因此变更查询地址后需要重启 all-in-one 进程。
 
 scale 模式：
 

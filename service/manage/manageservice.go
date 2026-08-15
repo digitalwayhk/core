@@ -115,7 +115,7 @@ func (own *ManageService[T]) DoAfter(sender interface{}, req st.IRequest) (inter
 	return nil, nil
 }
 
-func (own *ManageService[T]) ViewModel(model *view.ViewModel) {}
+func (own *ManageService[T]) ViewModel(model *view.ViewModel) { model.AutoLoad = true }
 func (own *ManageService[T]) ViewFieldModel(model interface{}, field *view.FieldModel) {
 
 }
@@ -127,6 +127,13 @@ func (own *ManageService[T]) SearchBefore(sender interface{}, req st.IRequest) (
 }
 
 func (own *ManageService[T]) SearchAfter(sender interface{}, result *view.TableData, req st.IRequest) (interface{}, error) {
+	// 默认数据只用于无筛选条件的第一页空表初始化。带条件查询或后续分页
+	// 返回 0 行时，结果本身就是有效答案，不得据此重复写入全部默认数据。
+	if search, ok := sender.(*Search[T]); ok && search.SearchItem != nil {
+		if search.SearchItem.Page > 1 || len(search.SearchItem.WhereList) > 0 {
+			return result, nil
+		}
+	}
 	if result.Total == 0 {
 		var items []*T
 		instance := own.Search.GetInstance()

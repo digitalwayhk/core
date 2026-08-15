@@ -13,7 +13,9 @@ func main() {
 	if err := models.EnsureStorage(); err != nil {
 		panic(err)
 	}
+	service := &supplierservice.Service{}
 	server := run.NewWebServer()
-	server.AddServiceContext(router.NewServiceContextWithConfig(&supplierservice.Service{}, bootstrap.DistributedServiceConfig("shop-supplier", 18182, 3, 1)))
+	server.AddServiceContext(router.NewServiceContextWithConfig(service, bootstrap.DistributedServiceConfig("shop-supplier", 18182, 3, 1)))
+	server.SetOption(service, bootstrap.SwaggerServerOption(false))
 	server.Start()
 }

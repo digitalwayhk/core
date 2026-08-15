@@ -31,6 +31,23 @@ func ListSuppliers(enabledOnly bool) ([]*Supplier, error) {
 	return items, err
 }
 
+// FindSupplierByID 按业务 ID 读取供应商资料。
+func FindSupplierByID(id uint) (*Supplier, error) {
+	if id == 0 {
+		return nil, errors.New("供应商不存在")
+	}
+	var items []*Supplier
+	query := store.NewSearch(NewSupplier(), 1)
+	query.AddWhereN("ID", id)
+	if err := store.Get().Load(query, &items); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.New("供应商不存在")
+	}
+	return items[0], nil
+}
+
 // SaveProductWith 新增或更新商品资料。
 func SaveProductWith(action persistencetypes.IDataAction, item *Product) error {
 	if item == nil {

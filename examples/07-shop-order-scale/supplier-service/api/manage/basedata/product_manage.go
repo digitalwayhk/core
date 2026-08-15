@@ -28,3 +28,11 @@ func (own *ProductManage) Routers() []servertypes.IRouter {
 func (*ProductManage) ViewModel(model *view.ViewModel) {
 	model.Title, model.AutoLoad = "商品资料管理", true
 }
+
+// ViewFieldModel 将供应商业务 ID 配置为可搜索的供应商选择字段。
+func (*ProductManage) ViewFieldModel(_ interface{}, field *view.FieldModel) {
+	if field.IsFieldOrTitle("SupplierID") {
+		field.Title = "供应商"
+		field.Required = true
+	}
+}

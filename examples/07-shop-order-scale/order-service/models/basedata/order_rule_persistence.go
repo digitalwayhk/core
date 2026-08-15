@@ -9,6 +9,9 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
+// ErrOrderRuleNotFound 表示权威库尚未配置指定订单规则。
+var ErrOrderRuleNotFound = errors.New("订单规则不存在")
+
 // GetEnabledOrderRuleWith 从远程权威库读取启用的订单规则。
 func GetEnabledOrderRuleWith(action persistencetypes.IDataAction, ruleCode string) (*OrderRule, error) {
 	var items []*OrderRule
@@ -19,7 +22,7 @@ func GetEnabledOrderRuleWith(action persistencetypes.IDataAction, ruleCode strin
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, errors.New("订单规则不存在")
+		return nil, ErrOrderRuleNotFound
 	}
 	return items[0], nil
 }
@@ -45,7 +48,7 @@ func findOrderRuleWith(action persistencetypes.IDataAction, ruleCode string) (*O
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, errors.New("订单规则不存在")
+		return nil, ErrOrderRuleNotFound
 	}
 	return items[0], nil
 }

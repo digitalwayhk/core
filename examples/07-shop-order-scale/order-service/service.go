@@ -11,11 +11,17 @@ import (
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	manageapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/analysis"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/bizstats"
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/manage/reports"
 	publicapi "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/api/public"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
+	// 注册 order.* StatSpec
+	_ "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/stats"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -52,6 +58,11 @@ func (s *Service) Routers() []servertypes.IRouter {
 	routers = append(routers, manageapi.NewOrderRuleManage().Routers()...)
 	routers = append(routers, manageapi.NewPaymentTypeManage().Routers()...)
 	routers = append(routers, manageapi.NewOrderManage().Routers()...)
+	routers = append(routers, &bizstats.Query{})
+	// 标准经营分析看板：POST /api/manage/shop-order/analysis
+	routers = append(routers, &analysis.Dashboard{})
+	// 服务级报表目录与视图（子菜单 /report/shop-order/*）
+	routers = append(routers, &reports.List{}, &reports.View{})
 	return routers
 }
 
@@ -157,6 +168,23 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 		_ = store.Close(context.Background())
 		return err
 	}
+	// Pending 组件指标：本进程 Collector → Prometheus；Admin 只查询 Aggregator。
+	if err := sc.RegisterRuntimeMetricProviders(observability.ReliableWriteProvider{
+		Snapshot: func() observability.ReliableWriteMetricsSnapshot {
+			m := store.Metrics()
+			return observability.ReliableWriteMetricsSnapshot{
+				Pending:   m.Pending,
+				DiskBytes: m.BadgerLSMBytes + m.BadgerVLogBytes,
+				SyncFail:  float64(m.Sync.Failures),
+			}
+		},
+	}); err != nil {
+		logx.Errorw("runtime_metric_provider_register_failed",
+			logx.Field("service", sc.Service.Name),
+			logx.Field("component", "pending"),
+			logx.Field("error", err),
+		)
+	}
 	return nil
 }
 
@@ -168,11 +196,14 @@ func (s *Service) startOrderInfrastructure(sc *router.ServiceContext) error {
 	}
 	// 同步循环每轮只处理有界 pending，成功 ACK 后再唤醒 Outbox 发布器。
 	s.startPendingSync(sc, s.ensureRuntime())
+	// 业务统计：定时聚合 Order → StatsStore，API 只读快照。
+	business.SharedStatsRunner.Start()
 	return nil
 }
 
-// Stop 停止订单本地 pending 同步循环。
+// Stop 停止订单本地 pending 同步循环与统计 runner。
 func (s *Service) Stop() {
+	business.SharedStatsRunner.Stop()
 	s.mu.Lock()
 	cancel := s.cancelSync
 	done := s.syncDone

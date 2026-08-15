@@ -10,10 +10,13 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -185,4 +188,55 @@ func TestExternalRouterHandlerUsesRouterExecNotDirectDo(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), `"success":false`)
 	require.NotContains(t, rec.Body.String(), "local-only")
+}
+
+func TestExternalRouterHandlerRecordsLogicalServiceMetrics(t *testing.T) {
+	observability.EnableMetrics()
+	sc, info := externalRouterTestContext(t)
+	labels := map[string]string{
+		"service":      observability.NormalizeServiceLabel(sc.Service.Name),
+		"route":        info.GetPath(),
+		"protocol":     "http",
+		"result_class": observability.ResultSuccess,
+	}
+	before := gatherRESTCounter(t, "core_service_request_requests_total", labels)
+
+	req := httptest.NewRequest(http.MethodGet, info.GetPath(), nil)
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	NewExternalRouterHandler(sc, info).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	after := gatherRESTCounter(t, "core_service_request_requests_total", labels)
+	require.Equal(t, before+1, after)
+}
+
+func gatherRESTCounter(t *testing.T, name string, want map[string]string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if matchRESTLabels(metric.GetLabel(), want) && metric.GetCounter() != nil {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
+}
+
+func matchRESTLabels(got []*dto.LabelPair, want map[string]string) bool {
+	values := make(map[string]string, len(got))
+	for _, label := range got {
+		values[label.GetName()] = label.GetValue()
+	}
+	for name, value := range want {
+		if values[name] != value {
+			return false
+		}
+	}
+	return true
 }

@@ -132,11 +132,18 @@ if test -n "$(git -C "${admin_dir}" status --porcelain)"; then
 fi
 
 if test "${CORE_WEB_SKIP_NPM:-0}" != "1"; then
-  echo "运行 npm ci / jest / tsc:auth / build …"
-  # 仅 npm ci 禁用 husky prepare：worktree/submodule 场景下 prepare 写父仓 git config
+  echo "运行前端依赖安装 / jest / tsc:auth / build …"
+  # 仅依赖安装禁用 husky prepare：worktree/submodule 场景下 prepare 写父仓 git config
   # 会报 Operation not permitted，污染生产构建日志（即使 npm 最终 exit 0）。
   # jest / tsc:auth / build 不设 HUSKY=0，避免误伤其它生命周期脚本。
-  HUSKY=0 npm --prefix "${admin_dir}" ci
+  if [[ -f "${admin_dir}/yarn.lock" ]]; then
+    HUSKY=0 yarn --cwd "${admin_dir}" install --frozen-lockfile
+  elif [[ -f "${admin_dir}/package-lock.json" ]]; then
+    HUSKY=0 npm --prefix "${admin_dir}" ci
+  else
+    echo "web/admin 缺少 yarn.lock 或 package-lock.json，拒绝不可复现构建" >&2
+    exit 1
+  fi
   npm --prefix "${admin_dir}" run jest -- --runInBand
   npm --prefix "${admin_dir}" run tsc:auth
   npm --prefix "${admin_dir}" run build

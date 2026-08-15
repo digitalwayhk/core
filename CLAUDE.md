@@ -6,6 +6,10 @@
 - 不得调用 `multi_agent`、Subagent、Task Agent 或其他并行 Agent 能力；需要外部审查时，只生成审查提示词并交给用户自行发起。
 - 界面中既有的子智能体条目仅作为历史记录，不得继续复用。
 
+## 规范权威源
+
+本文件是速查摘要。完整规范的**唯一权威源**是 `docs/ai/core-skill/`：先读 `docs/ai/core-skill/SKILL.md`，再按其「主题分片索引」按需读取分片。`.claude/skills/`、`.codex/skills/`、`.cursor/skills/`、`.github/copilot/skills/` 下只有指向该目录的指针文件。本文件与权威源冲突时以权威源和当前代码为准。
+
 ## 项目定位
 
 这不是一个技术框架，而是一个**业务开发标准化方案**。它约束开发者用固定方式开发商业功能，实现业务与技术的分离：
@@ -94,7 +98,7 @@ func (own *TokenModel) NewModel() {
 **规则**:
 - 每个嵌入 `*entity.Model` 或 `*entity.BaseModel` 的结构体必须实现 `NewModel()` 初始化方法
 - `BaseModel.GetHash()` 对 `Code` 取哈希；无稳定 `Code` 的记录用 `entity.Model`
-- `AddValid()` 要求 ID 非零且 Code 非空；`UpdateValid()` 要求 Code 非空；`RemoveValid()` 拒绝 State > 0 的记录
+- 校验语义按基类区分：`BaseModel.AddValid()` 要求 ID 非零且 Code 非空、`UpdateValid()` 要求 Code 非空、`RemoveValid()` 拒绝 State > 0；而 `entity.Model` 三个方法**恒返回 nil**，直接嵌入它的模型必须自己实现校验（另见 `BaseOrderModel` 要求 TraceID+UserID 且禁删、`BaseRecordModel` 禁改禁删）
 
 ### 4. 持久化操作
 

@@ -76,9 +76,42 @@ func (own *Response) GetSuccess() bool {
 }
 func (own *Response) GetError() error {
 	if own.err == nil {
+		if kind, ok := responseErrorKind(own.ErrorCode); ok {
+			return types.NewPublicError(
+				kind,
+				own.ErrorCode,
+				own.ErrorMessage,
+				errors.New("downstream service returned an error"),
+			)
+		}
 		return errors.New(own.ErrorMessage)
 	}
 	return own.err
+}
+
+func responseErrorKind(code int) (types.ErrorKind, bool) {
+	switch code {
+	case 600, 700, types.PublicCodeValidation:
+		return types.ErrorKindValidation, true
+	case 800, types.PublicCodeBusiness:
+		return types.ErrorKindBusiness, true
+	case types.PublicCodeUnauthenticated, types.PublicCodeRefreshInvalid, types.PublicCodeRefreshRevoked:
+		return types.ErrorKindUnauthenticated, true
+	case types.PublicCodeForbidden:
+		return types.ErrorKindForbidden, true
+	case types.PublicCodeNotFound:
+		return types.ErrorKindNotFound, true
+	case types.PublicCodeConflict:
+		return types.ErrorKindConflict, true
+	case types.PublicCodeRateLimited:
+		return types.ErrorKindRateLimited, true
+	case types.PublicCodeUnavailable, types.PublicCodeAuthDependencyUnavailable:
+		return types.ErrorKindUnavailable, true
+	case types.PublicCodeInternal:
+		return types.ErrorKindInternal, true
+	default:
+		return "", false
+	}
 }
 func (own *Response) SetCode(code int) {
 	own.ErrorCode = code

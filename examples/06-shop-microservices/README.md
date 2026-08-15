@@ -116,8 +116,10 @@ docker compose -f docker-compose.integration.yml up -d redis
 
 ```bash
 SHOP_REDIS_ADDR=127.0.0.1:6379 \
-go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -grpc 38080 -view 0
+go run ./examples/06-shop-microservices/main/all-in-one -p 18080 -grpc 38080 -view 8888
 ```
+
+管理后台在 `http://127.0.0.1:8888`，可用它查看三个服务的运行拓扑。`-view` 默认 `80` 属特权端口，所以这里显式指定 `8888`；`-view 0` 表示不启用视图服务，只在正式部署（下面的三进程 Compose）时使用。
 
 all-in-one 使用本地 Resolver 和 `insecure` gRPC，只用于开发。可信调用方仍由 Source `ServiceContext` 注入，不允许用 HTTP 假冒。
 

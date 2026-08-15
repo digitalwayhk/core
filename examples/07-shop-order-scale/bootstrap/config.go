@@ -8,7 +8,20 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 )
+
+var swaggerOrigins = []string{"http://localhost", "http://127.0.0.1"}
+
+// SwaggerServerOption 为 07 开发视图开放本机跨端口 REST 调用。
+// 生产服务应按实际管理站点来源单独配置，不复用本示例选项。
+func SwaggerServerOption(isWebSocket bool) *servertypes.ServerOption {
+	return &servertypes.ServerOption{
+		IsWebSocket: isWebSocket,
+		IsCors:      true,
+		OriginCors:  append([]string(nil), swaggerOrigins...),
+	}
+}
 
 // RedisAddress 返回配置的 Redis 地址。
 func RedisAddress() string {
@@ -45,6 +58,10 @@ func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.
 	cfg.Cluster.Mode = "on"
 	cfg.Cluster.Provider = "local"
 	cfg.Transport.GRPC.Security = config.GRPCSecurityConfig{Mode: "insecure"}
+	if strings.TrimSpace(cfg.RuntimeObservability.QueryURL) == "" {
+		cfg.RuntimeObservability.Mode = "prometheus"
+		cfg.RuntimeObservability.QueryURL = "http://127.0.0.1:19090"
+	}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -91,6 +108,15 @@ func baseServiceConfig(name string, port, dataCenterID, machineID int) *config.S
 	cfg.Transport.Fallback = nil
 	cfg.Transport.MaxRetries = 1
 	cfg.Transport.RetryDelay = 0
+	// 暴露 go-zero Prometheus agent，供示例 07 scrape 与 Runtime Aggregator 使用。
+	cfg.Prometheus.Host = envString("SHOP_METRICS_HOST", "0.0.0.0")
+	cfg.Prometheus.Port = envInt("SHOP_METRICS_PORT", 9101)
+	cfg.Prometheus.Path = envString("SHOP_METRICS_PATH", "/metrics")
+	// 查询端默认挂在入口服务；其它服务保持 Mode=off 仅暴露指标。
+	if queryURL := strings.TrimSpace(os.Getenv("SHOP_RUNTIME_PROM_URL")); queryURL != "" {
+		cfg.RuntimeObservability.Mode = "prometheus"
+		cfg.RuntimeObservability.QueryURL = queryURL
+	}
 	return cfg
 }
 

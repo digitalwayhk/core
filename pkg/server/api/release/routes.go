@@ -26,6 +26,12 @@ func Routers() []types.IRouter {
 		&public.Refresh{},
 		&public.CasdoorConfig{},
 		//&public.Statistics{},
+		&public.RuntimeTopology{},
+		&public.RuntimeService{},
+		&public.AIProvider{},
+		&public.SaveAIProvider{},
+		&public.TestAIProvider{},
+		&public.AILLMChatCompletions{},
 		&public.InternalOpenAPI{},
 	}
 }

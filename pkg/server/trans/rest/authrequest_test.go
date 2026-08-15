@@ -113,6 +113,55 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 	require.Equal(t, []string{"hook", "router"}, calls)
 }
 
+func TestAuthRequestAuthorityUsesAuthorityRevocationAndTargetHook(t *testing.T) {
+	hookCalled := false
+	target := authRequestServiceContext(authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
+		hookCalled = true
+		require.Equal(t, "target-service", args.ServiceName)
+		require.Equal(t, types.AuthTypeManage, args.Identity.AuthType)
+		return nil
+	}))
+	target.Service.Name = "target-service"
+	target.Config.Name = "target-service"
+
+	authority := authRequestServiceContext(nil)
+	authority.Service.Name = "authority-service"
+	authority.Config.Name = "authority-service"
+	manager, err := authstate.NewManager("authority-service", config.AuthRevocationConfig{
+		Mode: config.AuthRevocationModeLocal, BadgerPath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	authority.AuthRevocationManager = manager
+
+	info := authRequestRouterInfo(types.ServerManagerType)
+	nextCalled := false
+	handler := internalJWTAuthorize(
+		authority.Config.ManageAuth.AccessSecret,
+		types.AuthTypeManage,
+		authRequestHandlerWithAuthority(
+			target,
+			authority,
+			info,
+			types.AuthTypeManage,
+			http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				nextCalled = true
+			}),
+		),
+	)
+	request := authenticatedRequest(t, authority.Config.ManageAuth.AccessSecret, types.AuthIdentity{
+		UID: "admin-1", AuthType: types.AuthTypeManage,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "admin-subject",
+	})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, hookCalled)
+	require.True(t, nextCalled)
+}
+
 func TestSecretClaimsOnlyUseVerifiedServerSideChannel(t *testing.T) {
 	hook := authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
 		require.Equal(t, "private-api-key", args.SecretClaims["api_key"])

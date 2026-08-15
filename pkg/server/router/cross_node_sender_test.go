@@ -119,7 +119,7 @@ func TestServiceContextSendPayloadDoesNotReplayAfterSendStarts(t *testing.T) {
 		TransportSelector: selector,
 	}
 
-	_, err := serviceContext.sendPayload(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
+	_, _, err := serviceContext.sendPayload(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{
 		GRPC: "orders:19090", HTTP: "http://orders:8080",
 	})
 
@@ -148,7 +148,7 @@ func TestServiceContextTransportStatsAreIsolated(t *testing.T) {
 		TransportStats:    secondStats,
 	}
 
-	_, err := first.sendPayload(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{GRPC: "orders:19090"})
+	_, _, err := first.sendPayload(context.Background(), &types.PayLoad{}, transport.TransportEndpoints{GRPC: "orders:19090"})
 	require.NoError(t, err)
 
 	assert.Equal(t, transport.StatsSnapshot{GRPCSelected: 1, SendSuccess: 1}, first.TransportStats.Snapshot())

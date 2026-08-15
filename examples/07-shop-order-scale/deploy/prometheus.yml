@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: shop-07
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["shop-user:9101"]
+        labels:
+          service: shop-user
+          service_instance_id: shop-user-1
+      - targets: ["shop-supplier:9101"]
+        labels:
+          service: shop-supplier
+          service_instance_id: shop-supplier-1
+      - targets: ["shop-order-a:9101"]
+        labels:
+          service: shop-order
+          service_instance_id: shop-order-a
+      - targets: ["shop-order-b:9101"]
+        labels:
+          service: shop-order
+          service_instance_id: shop-order-b

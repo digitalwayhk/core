@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/felixge/httpsnoop"
 	"github.com/zeromicro/go-zero/core/logx"
 	zerorest "github.com/zeromicro/go-zero/rest"
@@ -43,6 +44,23 @@ func safeHTTPAccessLog(service string, next http.Handler) http.Handler {
 			return
 		}
 		logger.Infow("http_request_completed", fields...)
+	})
+}
+
+// runtimeHTTPMetrics 使用逻辑服务名和已注册路由记录 Core 入站 HTTP 指标。
+func runtimeHTTPMetrics(service, route string, next http.Handler) http.Handler {
+	if next == nil {
+		next = http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metrics := captureSafeHTTPMetrics(next, w, r)
+		observability.RecordInboundRequest(
+			service,
+			route,
+			"http",
+			observability.ClassifyHTTPStatus(metrics.code),
+			metrics.duration,
+		)
 	})
 }
 

@@ -20,6 +20,7 @@ type Product struct {
 	Name       string          `gorm:"not null" json:"name"`
 	Price      decimal.Decimal `json:"price"`
 	Enabled    bool            `gorm:"index" json:"enabled"`
+	Supplier   *Supplier       `gorm:"-" json:"supplier,omitempty"`
 }
 
 // NewProduct 创建商品模型。
@@ -37,10 +38,26 @@ func (p *Product) NewModel() {
 // GetHash 返回商品业务唯一散列。
 func (p *Product) GetHash() string { return utils.HashCodes(strings.TrimSpace(p.Code)) }
 
+// AddValid 校验 Manage 新增商品所需的完整业务字段。
+func (p *Product) AddValid() error { return p.validate() }
+
+// UpdateValid 校验 Manage 编辑商品所需的完整业务字段。
+func (p *Product) UpdateValid(interface{}) error { return p.validate() }
+
+func (p *Product) validate() error {
+	if p.SupplierID == 0 {
+		return errors.New("商品供应商不能为空")
+	}
+	if strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.Name) == "" || !p.Price.IsPositive() {
+		return errors.New("商品名称、编码和正数价格不能为空")
+	}
+	return nil
+}
+
 // InsertWith 将商品写入指定事务。
 func (p *Product) InsertWith(action persistencetypes.IDataAction) error {
-	if p.SupplierID == 0 || strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.Name) == "" || !p.Price.IsPositive() {
-		return errors.New("商品参数不完整")
+	if err := p.validate(); err != nil {
+		return err
 	}
 	p.SetHashcode(p.GetHash())
 	return action.Insert(p)
@@ -48,6 +65,9 @@ func (p *Product) InsertWith(action persistencetypes.IDataAction) error {
 
 // UpdateWith 更新指定事务中的商品。
 func (p *Product) UpdateWith(action persistencetypes.IDataAction) error {
+	if err := p.validate(); err != nil {
+		return err
+	}
 	p.SetUpdatedAt(time.Now().UTC())
 	p.SetHashcode(p.GetHash())
 	return action.Update(p)

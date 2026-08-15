@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
+	"github.com/digitalwayhk/core/pkg/persistence/entity/stats"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -65,7 +66,11 @@ func (own *MenuManage) updateMenuModelAll(req types.IRequest) error {
 	if action == nil {
 		action = list.GetAction()
 	}
-	return syncMenusAtomic(action, own.GetDefaultItemsWithRequest(req))
+	if err := syncMenusAtomic(action, own.GetDefaultItemsWithRequest(req)); err != nil {
+		return err
+	}
+	// 历史 UpdateMenu 曾把 reports.List/View 扫成菜单行，同步后删除这些 API 伪菜单
+	return removeStaleReportAPIMenus(action)
 }
 
 // GetDefaultItems 保留用于兼容旧业务扩展。
@@ -79,6 +84,9 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 	dir := NewDirectoryManage()
 	dirList := dir.GetList().(*entity.ModelList[smodels.DirectoryModel])
 	scs := router.GetContexts()
+	// 各服务报表 API 路径（List/View），不单独成菜单行，挂到每张报表菜单的权限上
+	reportAPIsByService := map[string][]string{}
+
 	for _, sc := range scs {
 		if sc.Service.Name == "server" {
 			continue // 排除 server 服务
@@ -90,11 +98,17 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 			if path == "" {
 				continue
 			}
+			// 报表目录/视图 API 不是导航菜单，避免出现 List/View 两行
+			if isReportAPIPath(path) {
+				reportAPIsByService[sc.Service.Name] = append(reportAPIsByService[sc.Service.Name], path)
+				continue
+			}
 			item := getMenuModel(info, items)
 			if item == nil {
 				item = smodels.NewMenuModel()
 				item.Name = instanceName
 				name := strings.ToLower(item.Name)
+				item.Title=item.Name
 				item.Url = buildMenuUrl(path, name)
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
@@ -128,13 +142,146 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 				}
 			}
 		}
+		// 一个 ReportDef 一行：挂到服务目录下，Url 为前端 /report/{service}/{code}
+		items = append(items, own.buildReportMenuItems(req, dirList, sc, reportAPIsByService[sc.Service.Name])...)
 	}
 	return items
+}
+
+// buildReportMenuItems 将 stats 已注册的报表定义展开为菜单行（与 Dashboard 分析页分离）。
+func (own *MenuManage) buildReportMenuItems(
+	req types.IRequest,
+	dirList *entity.ModelList[smodels.DirectoryModel],
+	sc *router.ServiceContext,
+	reportAPIPaths []string,
+) []*smodels.MenuModel {
+	if sc == nil || sc.Service == nil {
+		return nil
+	}
+	defs := stats.ListReportMenus(sc.Service.Name)
+	if len(defs) == 0 {
+		return nil
+	}
+	dirID, ok := own.ensureServiceDirectoryID(req, dirList, sc)
+	if !ok {
+		return nil
+	}
+	perms := make([]*smodels.PermissionsModel, 0, len(reportAPIPaths))
+	for _, p := range uniqueStrings(reportAPIPaths) {
+		cmd := pathLastSegment(p)
+		if cmd == "" {
+			continue
+		}
+		npm := smodels.NewPermissionsModel()
+		npm.Name = cmd
+		npm.Url = p
+		perms = append(perms, npm)
+	}
+	out := make([]*smodels.MenuModel, 0, len(defs))
+	for _, m := range defs {
+		item := smodels.NewMenuModel()
+		item.Name = m.Code
+		item.Title = m.Title
+		item.Description = m.Description
+		item.Url = m.Path
+		item.Sort = m.Sort
+		item.DirectoryModelID = dirID
+		// 每张报表复用同一套 reports API 权限（读目录 + 读视图）
+		item.Permissions = clonePermissions(perms)
+		out = append(out, item)
+	}
+	return out
+}
+
+func (own *MenuManage) ensureServiceDirectoryID(
+	req types.IRequest,
+	dirList *entity.ModelList[smodels.DirectoryModel],
+	sc *router.ServiceContext,
+) (uint, bool) {
+	if dirList == nil || sc == nil {
+		return 0, false
+	}
+	dirrows, err := dirList.SearchName(sc.Service.Name)
+	if err != nil {
+		return 0, false
+	}
+	if len(dirrows) > 0 {
+		return dirrows[0].ID, true
+	}
+	if req == nil {
+		return 0, false
+	}
+	diritem := own.newDirectoryModel(req, sc)
+	if err := dirList.Add(diritem); err != nil {
+		logx.Errorf("Add directory model error: %v", err)
+		return 0, false
+	}
+	if err := dirList.Save(); err != nil {
+		logx.Errorf("Save directory model error: %v", err)
+		return 0, false
+	}
+	return diritem.ID, true
+}
+
+// isReportAPIPath 识别报表数据 API（非前端页），UpdateMenu 不得为其生成 List/View 菜单行。
+func isReportAPIPath(path string) bool {
+	p := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if p == "" {
+		return false
+	}
+	return strings.HasSuffix(p, "/reports") || strings.HasSuffix(p, "/reports/view")
+}
+
+func pathLastSegment(path string) string {
+	p := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if p == "" {
+		return ""
+	}
+	parts := strings.Split(p, "/")
+	return parts[len(parts)-1]
+}
+
+func uniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func clonePermissions(src []*smodels.PermissionsModel) []*smodels.PermissionsModel {
+	if len(src) == 0 {
+		return []*smodels.PermissionsModel{}
+	}
+	out := make([]*smodels.PermissionsModel, 0, len(src))
+	for _, p := range src {
+		if p == nil {
+			continue
+		}
+		npm := smodels.NewPermissionsModel()
+		npm.Name = p.Name
+		npm.Url = p.Url
+		out = append(out, npm)
+	}
+	return out
 }
 
 func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceContext) *smodels.DirectoryModel {
 	diritem := smodels.NewDirectoryModel()
 	diritem.Name = sc.Service.Name
+	diritem.Title=diritem.Name
 	diritem.ID = req.NewID()
 	if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
 		diritem.Title = ititle.GetTitle()

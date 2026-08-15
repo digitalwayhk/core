@@ -39,10 +39,12 @@ Public/Private 返回独立 DTO。SQLite 只在 models 的数据访问组合根�
 ## 运行
 
 ```bash
-go run ./examples/03-shop-inheritance/main -view 0
+go run ./examples/03-shop-inheritance/main -view 8888
 ```
 
 首次运行由框架自动生成 `server.json` 和 `inheritanceshop.json`，示例不提交运行时配置。
+
+`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，这里改用 `8888`，启动后可访问 `http://127.0.0.1:8888`。`-view 0` 表示不启用视图服务，只在正式部署时使用。
 
 ## 测试
 

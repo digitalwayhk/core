@@ -70,6 +70,83 @@ buyer request
 - 07 重点验证 `shop-order` 的水平扩展。当前 `shop-user` 的 `UserID+RequestID -> OrderID` 稳定映射是进程内辅助，能覆盖单入口实例的重试；如果生产中 `shop-user` 也要多副本扩容或重启后继续保证未同步窗口内订单号不漂移，应把该映射提升到 Redis/MySQL 等共享幂等存储，或采用可审计的确定性订单号策略。
 - Public 下单打开远程幂等探测后采用 fail-closed：本地 pending 未命中时会先查共享 MySQL 幂等键，MySQL 不可达则拒绝本次接单，而不是降级成可能产生双 pending 的纯本地接单。`Benchmark07LocalOrderAccept` 不打开该探测，只度量 04 风格本地可靠写的热路径。
 
+## 业务统计与经营分析看板
+
+`shop-order` 演示框架 `pkg/persistence/entity/stats`：
+
+1. **Model 层** `order-service/models/stats/order_stats.go` 只声明 `StatSpec`（事实表、时间粒度、维度、count/sum/avg），不写 SQL。  
+2. **任务层** `business.SharedStatsRunner` 定时（默认 2 分钟）执行 Spec，结果写入进程内 `OrderStatsStore`（覆盖写、无 TTL 过期）。  
+3. **原始快照 API** `POST /api/manage/shop-order/bizstats/query` 只读 Store。  
+4. **标准分析 API** `POST /api/manage/shop-order/analysis` 返回 `stats.Dashboard`，与 Admin **分析页**（`/dashboard/analysis`）的 `AnalysisData` 对齐；指标名、Tab 文案、排名标题均由 `layout` 动态下发。
+
+预置 Spec：
+
+| code | 说明 |
+| --- | --- |
+| `order.by_day` | 按天汇总行数与金额 |
+| `order.by_day_product` | 按天×商品（展示用订单快照 ProductCode/Name） |
+| `order.by_month_supplier` | 按月×供应商 |
+
+示例：
+
+```bash
+# 经营分析看板（Admin 分析页同源）
+curl -s -X POST 'http://127.0.0.1:<port>/api/manage/shop-order/analysis' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"refresh":true,"grain":"day"}'
+
+# 原始统计快照
+curl -s -X POST 'http://127.0.0.1:<port>/api/manage/shop-order/bizstats/query' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"order.by_day_product","refresh":true}'
+```
+
+约定：**每个业务服务**应提供 Manage 路径 `/api/manage/{service}/analysis`，响应 `stats.Dashboard`。Admin 通过服务选择器切换数据源。
+
+维度展示：`DisplayFields` 为空且配置了 `BaseModel` 时默认 `Name`；07 商品主数据在 supplier，故商品/供应商用 `DisplayFromFact` 读订单快照列。
+
+### 服务级报表（与 Dashboard 分离）
+
+报表挂在**服务子菜单**下（可多报表），路径 `/report/{service}/{code}`，不占用全局「分析页」。
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/manage/shop-order/reports` | 报表目录（菜单用） |
+| `POST /api/manage/shop-order/reports/view` | 单报表数据（图/表/排名/钻取/跳转） |
+
+预置报表：
+
+| code | 菜单 | 数据 Spec |
+| --- | --- | --- |
+| `order-daily` | 日趋势报表 | `order.by_day` |
+| `order-by-product` | 商品销售 | `order.by_day_product` |
+| `order-by-supplier` | 供应商月报 | `order.by_month_supplier` |
+| `order-product-share` | 商品占比 | `order.by_day_product`（饼图） |
+
+前端：侧栏「订单服务 → 报表 → …」；支持刷新、钻取到下一报表、跳转 Manage 订单列表。
+
+### 统计引擎（OLTP → ClickHouse）
+
+同一 `StatSpec` 可切换后端，API/Store 不变：
+
+| 环境变量 | 含义 | 默认 |
+| --- | --- | --- |
+| `CORE_STATS_ENGINE` | `oltp` 或 `clickhouse` | `oltp` |
+| `CORE_STATS_FALLBACK_OLTP` | CH 失败时是否回退 OLTP | `true` |
+| `CORE_STATS_AUTO_ENSURE` | 刷新前是否 Ensure（CH 建 MV） | `true` |
+
+- **OLTP（默认）**：`stats.OLTPEngine` 扫权威库聚合。  
+- **ClickHouse**：`stats.CompileClickHouse(spec)` → `BusinessDimensionConfig` / MV DDL；`ClickHouseEngine.Ensure` 调现有 `SaveBusinessViewConfig` + `CreateBusinessViewFromConfig`；`Refresh` 读 MV。  
+- **事实表入库**（OLTP→CH）不在引擎内，由 CDC/批量 Ingest 负责；未入库时 CH Refresh 失败可回退 OLTP。
+
+预览全部 MV 计划（无网络）：
+
+```go
+plans, _ := stats.CompileAllClickHouse(stats.CompileClickHouseOptions{SourceTable: "order"})
+```
+
 ## 缓存规则
 
 缓存只放在面向外部流量的入口服务 facade：
