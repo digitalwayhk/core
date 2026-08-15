@@ -14,6 +14,12 @@ go build -o simple-shop .
 
 默认商城地址为 `http://127.0.0.1:8081`，管理后台为 `http://127.0.0.1:8888`。`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，示例改用 `8888`；`-view 0` 表示不启用视图服务，只在正式部署时使用。若日志出现 `port already in use`，说明默认的 `8080`（server）或 `18080`（gRPC）被占用，需用 `-p`、`-grpc` 换端口，否则服务未就绪、管理后台不会启动。
 
+`-view` 不是 `0` 时，优先用管理后台，不必先 curl：
+
+1. 打开 `http://127.0.0.1:8888`，开发模式自动签发管理令牌。
+2. 左侧「内部系统管理」→「菜单管理」→ 工具栏「更新菜单」，把当前进程的全部 Manage API 同步成侧栏菜单（本示例是商品管理、订单管理），点进去即可增删改查。
+3. 侧栏左下角「OpenAPI 文档」打开 `http://127.0.0.1:8888/swagger/`，覆盖全部 Public 和 Private 接口。Manage 不进 OpenAPI，只走菜单。
+
 演示完成后可以删除本地生成的 `simple-shop`、`models.ldb`、`models.ldb-wal` 和 `models.ldb-shm`。
 
 ## 获取令牌
