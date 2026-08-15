@@ -42,15 +42,24 @@ go get github.com/digitalwayhk/core@latest
 
 ```bash
 cd examples/01-simple-shop/main
-go build -o simple-shop . && ./simple-shop -view 0
-# 默认监听 http://127.0.0.1:8081
+go build -o simple-shop . && ./simple-shop -view 8888
 ```
+
+启动后有两个入口：
+
+| 入口 | 地址 | 说明 |
+| :--- | :--- | :--- |
+| 业务 API | `http://127.0.0.1:8081` | 商城服务，下面的 curl 都打到这里 |
+| 管理后台 | `http://127.0.0.1:8888` | 开发视图（HtmlServer），内嵌 `web/admin`，自动走 TestToken 登录 |
+
+> [!TIP]
+> `-view` 指定开发管理后台的端口，**默认 `80`**（属特权端口，普通用户无法绑定，所以示例显式用 `8888`）。`-view 0` 表示不启用视图服务，**只在正式部署时使用**——关闭后没有管理后台，也没有 `/api/web/bootstrap`。
 
 首次启动的两个常见现象：
 
 | 现象 | 原因与处理 |
 | :--- | :--- |
-| 启动失败，提示端口被占用 | 内部 gRPC 默认占用 `18080`，改 `etc/server.json` 的 `Transport.GRPC.Port` |
+| 后台打不开，日志有 `service_start_failed`、`port already in use` | server 默认占 `8080`、内部 gRPC 默认占 `18080`。用 `-p` 和 `-grpc` 换端口，例如 `-view 8888 -p 8099 -grpc 18099`。**任一服务未就绪，开发视图就不会开始监听**，所以端口冲突会表现为后台打不开 |
 | 刷出若干 Redis 连接失败日志 | 未部署 Redis，会自动降级为进程内事件（`mq_degraded`），不影响本示例 |
 
 另开一个终端，走通一次完整下单：

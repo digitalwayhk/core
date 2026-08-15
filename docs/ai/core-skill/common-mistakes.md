@@ -25,4 +25,6 @@
 - 已需要高吞吐写时仍去找已删除的全局 `StartOrderWriteStore`、或使用兼容层 `SetSyncDB` 与 Manage 式列表轮询，未采用「本地可靠写 → `UseWriteBehind` → 远程权威库」。
 - 水平扩展把最终业务库按副本分片，或用每进程私有库冒充共享 remote（开发用 SQLite、生产换共享 MySQL 是 DataAction 切换，不是分片）。
 - 恢复 `RouterStats`/`Statistics`；Runtime 把未采集指标写成 0；浏览器直连 Prometheus 或其他实例 `/metrics`。
+- 开发或测试时用 `-view 0` 启动服务。该参数默认 `80`（`0` 表示不启用视图服务，只用于正式部署），置 0 后没有管理后台，也没有 `/api/web/bootstrap`。默认端口属特权端口，本地应显式指定如 `-view 8888`。
+- 视图端口打不开就断定后台坏了。`HTMLServer.Start()` 阻塞等待 `Isstart`，而该信号只在所有 `ServiceContext.IsRun()` 为真后发出；只要有服务因 `port already in use`（server 默认 `8080`、gRPC 默认 `18080`）启动失败，视图端口就始终不监听。先查日志 `service_start_failed`，用 `-p`、`-grpc` 换端口。
 - 依赖 core 的业务仓库未安装 `.codex/skills/use-digitalway-core`，凭记忆编码（见 `docs/codex/CONSUMER_AI_SKILL_SETUP.md`）。

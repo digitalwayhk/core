@@ -78,8 +78,10 @@ api/manage/
 首次启动：
 
 ```bash
-go run ./examples/05-shop-casdoor-rbac/main -view 0
+go run ./examples/05-shop-casdoor-rbac/main -view 8888
 ```
+
+`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，这里改用 `8888`。`-view 0` 表示不启用视图服务，只在正式部署时使用；本示例的两个 Casdoor 认证域需要通过管理后台验证，因此开发时应保持视图服务开启。
 
 框架会先自动生成 `etc/server.json` 和 `etc/casdoorrbacshop.json`。停止服务后，在 `casdoorrbacshop.json` 中分别配置：
 

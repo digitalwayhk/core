@@ -53,10 +53,12 @@ CreateOrder
 ## 运行
 
 ```bash
-go run ./examples/04-shop-performance/main -view 0
+go run ./examples/04-shop-performance/main -view 8888
 ```
 
 服务名为 `performanceshop`。首次运行会自动生成 `server.json` 和 `performanceshop.json`。
+
+`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，这里改用 `8888`，启动后可访问 `http://127.0.0.1:8888`。`-view 0` 表示不启用视图服务，只在正式部署时使用。
 
 ## 测试
 

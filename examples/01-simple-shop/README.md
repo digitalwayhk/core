@@ -9,10 +9,12 @@
 ```bash
 cd examples/01-simple-shop/main
 go build -o simple-shop .
-./simple-shop -view 0
+./simple-shop -view 8888
 ```
 
-默认商城地址为 `http://127.0.0.1:8081`。演示完成后可以删除本地生成的 `simple-shop`、`models.ldb`、`models.ldb-wal` 和 `models.ldb-shm`。
+默认商城地址为 `http://127.0.0.1:8081`，管理后台为 `http://127.0.0.1:8888`。`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，示例改用 `8888`；`-view 0` 表示不启用视图服务，只在正式部署时使用。若日志出现 `port already in use`，说明默认的 `8080`（server）或 `18080`（gRPC）被占用，需用 `-p`、`-grpc` 换端口，否则服务未就绪、管理后台不会启动。
+
+演示完成后可以删除本地生成的 `simple-shop`、`models.ldb`、`models.ldb-wal` 和 `models.ldb-shm`。
 
 ## 获取令牌
 

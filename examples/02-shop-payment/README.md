@@ -25,10 +25,12 @@ API 不直接操作数据库，business 统一处理所有权、引用保护、�
 ## 运行
 
 ```bash
-go run ./examples/02-shop-payment/main -view 0
+go run ./examples/02-shop-payment/main -view 8888
 ```
 
 首次运行由框架自动生成配置，不需要在示例中提交运行配置文件。
+
+`-view` 是开发管理后台（HtmlServer）的端口，默认 `80` 属特权端口，这里改用 `8888`，启动后可访问 `http://127.0.0.1:8888`。`-view 0` 表示不启用视图服务，只在正式部署时使用。
 
 ## 测试
 
