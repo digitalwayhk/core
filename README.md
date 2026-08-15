@@ -49,8 +49,8 @@ go build -o simple-shop . && ./simple-shop -view 8888
 
 | 入口 | 地址 | 说明 |
 | :--- | :--- | :--- |
-| 业务 API | `http://127.0.0.1:8081` | 商城服务，下面的 curl 都打到这里 |
-| 管理后台 | `http://127.0.0.1:8888` | 开发视图（HtmlServer），内嵌 `web/admin`，自动走 TestToken 登录 |
+| 管理后台 | `http://127.0.0.1:8888` | 开发视图（HtmlServer），内嵌 `web/admin`，自动走 TestToken 登录。**先从这里用界面走通** |
+| 业务 API | `http://127.0.0.1:8081` | 商城服务直连端口，脚本和集成测试打这里 |
 
 > [!TIP]
 > `-view` 指定开发管理后台的端口，**默认 `80`**（属特权端口，普通用户无法绑定，所以示例显式用 `8888`）。`-view 0` 表示不启用视图服务，**只在正式部署时使用**——关闭后没有管理后台，也没有 `/api/web/bootstrap`。
@@ -62,7 +62,21 @@ go build -o simple-shop . && ./simple-shop -view 8888
 | 后台打不开，日志有 `service_start_failed`、`port already in use` | server 默认占 `8080`、内部 gRPC 默认占 `18080`。用 `-p` 和 `-grpc` 换端口，例如 `-view 8888 -p 8099 -grpc 18099`。**任一服务未就绪，开发视图就不会开始监听**，所以端口冲突会表现为后台打不开 |
 | 刷出若干 Redis 连接失败日志 | 未部署 Redis，会自动降级为进程内事件（`mq_degraded`），不影响本示例 |
 
-另开一个终端，走通一次完整下单：
+### 用管理后台走通
+
+打开 [http://127.0.0.1:8888](http://127.0.0.1:8888)。开发模式下权威服务走 `test_token`，页面会自动签发管理令牌，不用先 curl。
+
+| 界面 | 位置 | 能做什么 |
+| :--- | :--- | :--- |
+| 菜单管理 | 左侧「内部系统管理」→「菜单管理」→ 工具栏「更新菜单」 | 把当前进程里所有 Manage API 同步成侧栏菜单。本示例会立刻出现商品管理、订单管理，点进去就能增删改查，不必手写 Manage 路径 |
+| OpenAPI / Swagger | 侧栏**左下角**「OpenAPI 文档」，或直接打开 [http://127.0.0.1:8888/swagger/](http://127.0.0.1:8888/swagger/) | 覆盖全部 Public 和 Private 接口。本示例可在页面上查商品、带用户令牌下单、查本人订单 |
+
+> [!NOTE]
+> Manage 路由**不进** OpenAPI，只通过菜单使用。Public / Private 才出现在 Swagger。Swagger 里调 Private 接口时，用页面上的 Authorize，令牌从 `/api/servermanage/testtoken?userid=user-a` 取 `data.access_token`（`type=0` 用户 / `1` 管理 / `2` 服务管理）。
+
+完整接口清单与 WebSocket 订阅见 [最简商城示例](./examples/01-simple-shop)。
+
+也可以用命令行走同一条 Public / Private 路径（Manage 仍建议走后台菜单）：
 
 ```bash
 BASE=http://127.0.0.1:8081
@@ -87,8 +101,6 @@ curl "$BASE/api/shop/getorders" -H "Authorization: Bearer $TOKEN"
 
 > [!WARNING]
 > `TestToken` 无需登录即可签发 JWT，仅接受本地 IP 请求。生产环境必须在网关屏蔽 `/api/servermanage/*`，并改用真实认证流程。
-
-完整接口清单与 WebSocket 订阅见 [最简商城示例](./examples/01-simple-shop)。
 
 ---
 
