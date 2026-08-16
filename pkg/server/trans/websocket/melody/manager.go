@@ -25,8 +25,6 @@ const (
 	Subscribe MessageEvent = "sub"
 	//取消订阅
 	UnSubscribe MessageEvent = "unsub"
-	//调用，调用后返回结果
-	Call MessageEvent = "call"
 	//获取订阅信息
 	Get MessageEvent = "get"
 )
@@ -274,12 +272,12 @@ func (mm *MelodyManager) onDisconnect(s *melody.Session) {
 }
 
 func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		logx.Errorf("WebSocket消息处理发生恐慌: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
-	// 		mm.sendError(s, "", "服务器内部错误")
-	// 	}
-	// }()
+	defer func() {
+		if err := recover(); err != nil {
+			logx.Errorf("WebSocket消息处理发生恐慌: %v, RemoteAddr: %s", err, s.Request.RemoteAddr)
+			mm.sendError(s, "", "服务器内部错误")
+		}
+	}()
 	dataLen := len(data)
 	preview := string(data)
 	if dataLen > int(mm.melody.Config.MaxMessageSize) {
@@ -337,8 +335,6 @@ func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 	switch MessageEvent(msg.Event) {
 	case Get:
 		mm.handleGet(s, msg)
-	case Call:
-		mm.handleCall(s, msg)
 	case Subscribe:
 		mm.handleSubscribe(s, msg)
 	case UnSubscribe:
@@ -352,34 +348,16 @@ func (mm *MelodyManager) handleGet(s *melody.Session, msg *Message) {
 	subscriptions := mm.subscriptions[s]
 	mm.subscriptionsMu.RUnlock()
 
+	if subscriptions == nil {
+		mm.sendError(s, msg.Channel, "会话未初始化")
+		return
+	}
+
 	if msg.Channel != "" {
 		mm.sendToSession(s, msg.Event, msg.Channel, subscriptions.GetSubscriptions(msg.Channel))
 	} else {
 		mm.sendToSession(s, msg.Event, msg.Channel, subscriptions.GetAllSubscriptions())
 	}
-}
-
-func (mm *MelodyManager) handleCall(s *melody.Session, msg *Message) {
-	mm.subscriptionsMu.RLock()
-	subscriptions := mm.subscriptions[s]
-	mm.subscriptionsMu.RUnlock()
-	channel := strings.TrimSpace(msg.Channel)
-	req := subscriptions.getIRequest(channel)
-	info := mm.serviceContext.Router.GetRouter(channel)
-	if info == nil {
-		mm.sendError(s, channel, "当前服务中未找到对应的路由")
-		return
-	}
-	// 解析请求数据
-	api, err := mm.parseRequest(info, msg.Data)
-	if err != nil {
-		mm.sendError(s, channel, "数据格式不正确: "+err.Error())
-		return
-	}
-
-	// 执行调用
-	res := info.ExecDo(api, req)
-	mm.sendToSession(s, msg.Event, msg.Channel, res)
 }
 
 func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
@@ -393,8 +371,6 @@ func (mm *MelodyManager) handleSubscribe(s *melody.Session, msg *Message) {
 		return
 	}
 
-	// 🔧 在锁外设置router
-	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	if subscriptions.HandleSubscribe(msg) {
 		logx.Infof("客户端订阅成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
 	}
@@ -410,27 +386,9 @@ func (mm *MelodyManager) handleUnsubscribe(s *melody.Session, msg *Message) {
 		return
 	}
 
-	subscriptions.setServiceRouter(mm.serviceContext.Router)
 	subscriptions.HandleUnsubscribe(msg)
 
 	logx.Infof("客户端退订成功: %s, 频道: %s", s.Request.RemoteAddr, msg.Channel)
-}
-
-func (mm *MelodyManager) parseRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			logx.Errorf("服务%s的路由%s发生异常:ParseNew, error: %v", info.GetServiceName(), info.GetPath(), recovered)
-			err = fmt.Errorf("parse websocket call request: %v", recovered)
-			api = nil
-		}
-	}()
-
-	if data == nil {
-		api = info.New()
-	} else {
-		api, err = info.ParseNew(data)
-	}
-	return api, err
 }
 
 func (mm *MelodyManager) parseSubscriptionRequest(info *types.RouterInfo, data interface{}) (api types.IRouter, err error) {

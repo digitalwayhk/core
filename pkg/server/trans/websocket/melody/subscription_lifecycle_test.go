@@ -69,7 +69,7 @@ func TestHandleSubscribeDoesNotLogSuccessWhenRouteIsMissing(t *testing.T) {
 		subscriptions:  make(map[*melody.Session]*SessionSubscriptions),
 	}
 	client := &MelodyClient{session: session, manager: manager}
-	manager.subscriptions[session] = NewSessionSubscriptions(manager, client, nil)
+	manager.subscriptions[session] = NewSessionSubscriptions(manager, client, manager.serviceContext.Router)
 
 	manager.handleSubscribe(session, &Message{Event: string(Subscribe), Channel: "/api/test/missing"})
 
