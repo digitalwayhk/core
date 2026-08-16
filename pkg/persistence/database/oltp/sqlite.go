@@ -294,7 +294,7 @@ func (own *Sqlite) HasTable(model interface{}) error {
 	}
 
 	//  获取表名
-	tableName := own.db.NamingStrategy.TableName(finalType.Name())
+	tableName := modelTableName(own.db.NamingStrategy, finalType)
 	cacheKey := TableCacheKey{
 		DBPath:    own.Path,
 		TableName: tableName,
