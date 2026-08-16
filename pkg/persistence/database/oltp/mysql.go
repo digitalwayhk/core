@@ -793,6 +793,12 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 	processed[typeName] = true
 
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
+		for _, directive := range strings.Split(field.Tag.Get("gorm"), ";") {
+			directive = strings.TrimSpace(strings.ToLower(directive))
+			if directive == "-" || directive == "-:migration" || directive == "-:all" {
+				return
+			}
+		}
 		if kind == utils.Array {
 			t := field.Type.Elem()
 			if t.Kind() == reflect.Ptr {

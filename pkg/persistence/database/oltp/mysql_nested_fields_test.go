@@ -8,12 +8,31 @@ type mysqlNestedPrimitiveArrayModel struct {
 	Payload []byte
 }
 
+type mysqlIgnoredNestedItem struct {
+	ID uint
+}
+
+type mysqlIgnoredNestedArrayModel struct {
+	ID      uint
+	Pending []*mysqlIgnoredNestedItem `gorm:"-"`
+}
+
 func TestMySQLProcessNestedTablesSkipsPrimitiveArrays(t *testing.T) {
 	adapter := &MySQL{}
 	requireNotPanics(t, func() {
 		err := adapter.processNestedTablesOptimized(&mysqlNestedPrimitiveArrayModel{}, map[string]bool{}, 0, 2)
 		if err != nil {
 			t.Fatalf("基础数组字段不应触发嵌套表处理: %v", err)
+		}
+	})
+}
+
+func TestMySQLProcessNestedTablesSkipsGormIgnoredArrays(t *testing.T) {
+	adapter := &MySQL{}
+	requireNotPanics(t, func() {
+		err := adapter.processNestedTablesOptimized(&mysqlIgnoredNestedArrayModel{}, map[string]bool{}, 0, 2)
+		if err != nil {
+			t.Fatalf("gorm 忽略字段不应触发嵌套表处理: %v", err)
 		}
 	})
 }
