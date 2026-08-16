@@ -6,7 +6,7 @@ GATE="${1:-}"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/ci.sh {required/quick|required/contracts|required/ai-skill|required/server-manage|required/race|observational/persistence|observational/shop-microservices|scheduled/stress|scheduled/integration}
+usage: scripts/ci.sh {required/quick|required/contracts|required/ai-skill|required/server-manage|required/simple-shop|required/race|observational/persistence|observational/casdoor-rbac|observational/shop-microservices|scheduled/stress|scheduled/integration|consumer/futures}
 EOF
 }
 
@@ -23,11 +23,17 @@ case "$GATE" in
   required/server-manage)
     command=(go test ./pkg/server/... ./service/manage/... -count=1 -timeout=10m)
     ;;
+  required/simple-shop)
+    command=(go test ./examples/integration/01-simple-shop -count=1 -timeout=10m)
+    ;;
   required/race)
     command=("$ROOT/scripts/test.sh" concurrency-race)
     ;;
   observational/persistence)
     command=("$ROOT/scripts/test.sh" persistence-unit)
+    ;;
+  observational/casdoor-rbac)
+    command=("$ROOT/scripts/test.sh" integration-casdoor-rbac)
     ;;
   observational/shop-microservices)
     command=("$ROOT/scripts/test.sh" integration-shop-microservices)

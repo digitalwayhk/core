@@ -72,8 +72,14 @@ func TestMySQLIntegration_DriverContract(t *testing.T) {
 	if got := sqlDB.Stats().MaxOpenConnections; got != cfg.MaxOpenConns {
 		t.Fatalf("最大连接数不一致: got=%d want=%d", got, cfg.MaxOpenConns)
 	}
-	if err := db.AutoMigrate(&mysqlIntegrationRecord{}); err != nil {
-		t.Fatalf("迁移 MySQL 测试表失败: %v", err)
+	if err := adapter.HasTable(&mysqlIntegrationRecord{}); err != nil {
+		t.Fatalf("Core 首次访问自动创建自定义表名失败: %v", err)
+	}
+	if !db.Migrator().HasTable(mysqlIntegrationRecord{}.TableName()) {
+		t.Fatalf("Core 未创建模型声明的表 %q", mysqlIntegrationRecord{}.TableName())
+	}
+	if db.Migrator().HasTable("mysql_integration_record") {
+		t.Fatal("Core 不应按类型名创建或验证错误的默认表")
 	}
 
 	record := &mysqlIntegrationRecord{Value: "created"}

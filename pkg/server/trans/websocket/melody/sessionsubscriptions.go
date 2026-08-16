@@ -33,6 +33,7 @@ func NewSessionSubscriptions(manage *MelodyManager, client *MelodyClient, sr *ro
 		subscriptions: make(map[string]map[uint64]types.IRouter),
 		client:        client,
 		manage:        manage,
+		sr:            sr,
 		metadata:      make(map[string]interface{}),
 		createdAt:     time.Now(),
 		lastActivity:  time.Now(),
@@ -224,9 +225,6 @@ func (s *SessionSubscriptions) unsubscribeUserLocked() {
 		}
 	}
 	s.lastActivity = time.Now() // 更新最后活动时间
-}
-func (s *SessionSubscriptions) setServiceRouter(sr *router.ServiceRouter) {
-	s.sr = sr
 }
 func (s *SessionSubscriptions) Logon(req *SessionRequest) error {
 	s.mu.Lock()

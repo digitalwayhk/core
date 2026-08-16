@@ -32,6 +32,9 @@ case "${1:-quick}" in
 	  : "${CORE_TEST_REDIS_ADDR:?CORE_TEST_REDIS_ADDR is required}"
 	  CORE_TEST_CASDOOR_AUTH=1 go test -race ./examples/integration/casdoor-auth-lifecycle -count=1 -timeout=15m
 	  ;;
+	integration-casdoor-rbac)
+	  go test ./examples/integration/05-shop-casdoor-rbac -count=1 -timeout=15m
+	  ;;
 	integration-shop-microservices)
 	  : "${CORE_TEST_REDIS_ADDR:?CORE_TEST_REDIS_ADDR is required}"
 	  SHOP_REDIS_ADDR="$CORE_TEST_REDIS_ADDR" go test -p 1 -race \
@@ -60,6 +63,7 @@ case "${1:-quick}" in
     "$ROOT/scripts/check-public-api.sh"
     ;;
   release-contract)
+    "$ROOT/scripts/test-ci-contract.sh"
     "$ROOT/scripts/release-check.sh" --candidate
     ;;
   release-check-contract)
@@ -491,7 +495,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|web-contract|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|integration-casdoor-rbac|web-contract|all}" >&2
     exit 2
     ;;
 esac

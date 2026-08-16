@@ -27,6 +27,7 @@ import (
 )
 
 const (
+	shopServiceName     = "casdoorrbacshop"
 	authClientID        = "shop-auth-client"
 	manageClientID      = "shop-manage-client"
 	authAccessSecret    = "shop-integration-auth-access-secret"

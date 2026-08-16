@@ -162,12 +162,19 @@ func (s *shopSuite) TokenPairFor(t testing.TB, subject string, tokenType int) in
 	var domain casdoorConfigurationResponse
 	require.NoError(t, json.Unmarshal(configuration.Data, &domain))
 	require.Equal(t, expectedClientID, domain.ClientID)
-	require.Equal(t, "/api/casdoor/callback", domain.BackgroundCallbackURL)
 
-	query := url.Values{
-		"type": {authType}, "code": {subject}, "state": {"shop-integration-state"},
-	}
-	callback := s.RequestJSON(t, http.MethodGet, "/api/casdoor/callback?"+query.Encode(), "", nil)
+	// Callback 路径的唯一来源是配置返回的 BackgroundCallbackURL，客户端不得自行拼接。
+	callbackURL, err := url.Parse(domain.BackgroundCallbackURL)
+	require.NoError(t, err)
+	require.Equal(t, "/api/casdoor/callback", callbackURL.Path)
+	require.Equal(t, shopServiceName, callbackURL.Query().Get("service"))
+
+	query := callbackURL.Query()
+	query.Set("type", authType)
+	query.Set("code", subject)
+	query.Set("state", "shop-integration-state")
+	callbackURL.RawQuery = query.Encode()
+	callback := s.RequestJSON(t, http.MethodGet, callbackURL.String(), "", nil)
 	require.True(t, callback.Success, callback.ErrorMessage)
 	var pair integration.TokenResponse
 	require.NoError(t, json.Unmarshal(callback.Data, &pair))

@@ -693,7 +693,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 		return errors.New("模型不能是多级指针")
 	}
 
-	tableName := m.db.NamingStrategy.TableName(finalType.Name())
+	tableName := modelTableName(m.db.NamingStrategy, finalType)
 	cacheKey := TableCacheKey{
 		DBPath:    m.Name,
 		TableName: tableName,
@@ -793,6 +793,12 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 	processed[typeName] = true
 
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
+		for _, directive := range strings.Split(field.Tag.Get("gorm"), ";") {
+			directive = strings.TrimSpace(strings.ToLower(directive))
+			if directive == "-" || directive == "-:migration" || directive == "-:all" {
+				return
+			}
+		}
 		if kind == utils.Array {
 			t := field.Type.Elem()
 			if t.Kind() == reflect.Ptr {
@@ -808,7 +814,7 @@ func (m *MySQL) processNestedTablesOptimized(model interface{}, processed map[st
 				return
 			}
 
-			nestedTableName := m.db.NamingStrategy.TableName(name1)
+			nestedTableName := modelTableName(m.db.NamingStrategy, t)
 			var tableExists int64
 			err := m.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
 				m.Name, nestedTableName).Scan(&tableExists).Error
@@ -927,7 +933,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 		// ensureTable 建表后仍收到 Error 1146（极罕见，如并发 DROP 或路由切库）
 		// 清除缓存强制重建，然后重试一次
 		logx.Infof(" Load 检测到表不存在，尝试重建: %v", loadErr)
-		tableName := m.db.NamingStrategy.TableName(reflect.TypeOf(item.Model).Elem().Name())
+		tableName := modelTableName(m.db.NamingStrategy, reflect.TypeOf(item.Model))
 		tableCache.Delete(TableCacheKey{DBPath: m.Name, TableName: tableName})
 		if rebuildErr := m.ensureTable(item.Model); rebuildErr != nil {
 			return loadErr
@@ -1009,7 +1015,7 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 			if modelType.Kind() == reflect.Ptr {
 				modelType = modelType.Elem()
 			}
-			tableName := m.db.NamingStrategy.TableName(modelType.Name())
+			tableName := modelTableName(m.db.NamingStrategy, modelType)
 			cacheKey := TableCacheKey{
 				DBPath:    m.Name,
 				TableName: tableName,
