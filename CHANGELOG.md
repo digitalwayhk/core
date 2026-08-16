@@ -73,5 +73,6 @@
 - Casdoor Webhook 使用独立 Secret、请求上限、域绑定和幂等持久化；REST/WebSocket 每次认证均校验撤销权威，内部 JWT 失败日志不再转储 Authorization Header。
 - 跨主机 gRPC 默认要求 mTLS；`mesh` 仅适用于已有双向身份校验的服务网格，生产禁止 `insecure`。
 - 修复 `/ws` 的认证绕过：WebSocket `call` 事件直接用客户端给定的 channel 查询 public/private/manage 三张路由表并执行 `ExecDo`，跳过整条 HTTP 中间件链（JWT、限流、访问日志、指标）。未认证会话可借此读取 Manage 列表数据，并以空 UID 执行 Private 路由。该事件已删除，`/ws` 上唯一执行路由代码的事件是 `sub`，它对 `Auth=true` 与 Private 路由在解析请求前强制校验会话身份。回归测试：`examples/integration/01-simple-shop/websocket_auth_boundary_test.go`。
+- 升级 `github.com/getkin/kin-openapi` 至 v0.144.0、`google.golang.org/grpc` 至 v1.82.1，处理三条依赖公告。本仓库只使用 kin-openapi 的 `openapi3` 与 `openapi3gen`，未使用 `openapi3filter` 和 `ValidationHandler`，因此 GHSA-r277-6w6q-xmqw（认证 fail-open，CVSS 9.1）与 GHSA-jpcw-4wr7-c3vq（请求校验空指针）在当前代码中不可达；GHSA-hrxh-6v49-42gf 中真正相关的是 HTTP/2 Rapid Reset 缓解绕过导致的拒绝服务，其 xDS RBAC 部分不适用（未使用 xDS）。
 
 [Unreleased]: https://github.com/digitalwayhk/core/compare/v0.0.247...HEAD
