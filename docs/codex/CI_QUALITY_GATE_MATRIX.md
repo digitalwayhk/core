@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `required/quick` | 已启用 | 是 | PR、push | 5 分钟 | `./scripts/test.sh quick` | 无 | core | 快速包与 server vet 稳定通过 |
 | `required/contracts` | 已启用 | 是 | PR、push | 8 分钟 | `./scripts/test.sh release-contract` | 无 | release tooling | API、安全、配置与发布候选契约全绿 |
+| `required/ai-skill` | 已启用 | 是 | PR、push | 2 分钟 | `./scripts/check-ai-skill.sh` | 无 | docs/ai | 权威 skill 目录与各代理指针文件保持闭合 |
 | `required/server-manage` | 已启用 | 是 | PR、push | 10 分钟 | `go test ./pkg/server/... ./service/manage/... -count=1 -timeout=10m` | 无 | server/manage | 默认测试不连接外部服务 |
 | `required/race` | 已启用 | 是 | PR、push | 12 分钟 | `./scripts/test.sh concurrency-race` | 无 | server/manage | 单轮 race 分片无已知不稳定项 |
 | `observational/persistence` | 观察（本地与 Docker 已通过） | 否 | PR、push | 10 分钟 | `./scripts/test.sh persistence-unit` | 无 | persistence | 连续 CI 稳定后评估提升，不因一次本机通过直接升级 required |
