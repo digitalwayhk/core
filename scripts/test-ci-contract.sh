@@ -56,7 +56,7 @@ grep -q 'CI_GATE_START gate=required/quick commit=' "$tmp_dir/failure.out" || fa
 grep -Eq ' os=[^[:space:]]+' "$tmp_dir/failure.out" || fail "开始元数据缺 OS"
 grep -q ' command="' "$tmp_dir/failure.out" || fail "开始元数据缺命令"
 
-required_commands="$(sed -n '/required\/quick)/,/;;/p; /required\/contracts)/,/;;/p; /required\/server-manage)/,/;;/p; /required\/race)/,/;;/p' "$CI_SCRIPT")"
+required_commands="$(sed -n '/required\/quick)/,/;;/p; /required\/contracts)/,/;;/p; /required\/server-manage)/,/;;/p; /required\/simple-shop)/,/;;/p; /required\/race)/,/;;/p' "$CI_SCRIPT")"
 if grep -Eq 'rtk|git (tag|push)|update-public-api|integration-|CORE_TEST_' <<<"$required_commands"; then
   fail "required gate 包含禁止命令或外部依赖"
 fi
@@ -70,6 +70,12 @@ casdoor_integration_mode="$(sed -n '/^[[:space:]]*integration-casdoor-auth)/,/^[
 grep -q 'CORE_TEST_REDIS_ADDR' <<<"$casdoor_integration_mode" || fail "Casdoor 集成模式未显式要求 Redis 地址"
 grep -q 'CORE_TEST_CASDOOR_AUTH=1' <<<"$casdoor_integration_mode" || fail "Casdoor Redis 测试未使用显式开启标记"
 grep -q 'examples/integration/casdoor-auth-lifecycle' <<<"$casdoor_integration_mode" || fail "Casdoor 集成模式未运行目标测试包"
+
+casdoor_rbac_mode="$(sed -n '/^[[:space:]]*integration-casdoor-rbac)/,/^[[:space:]]*;;/p' "$TEST_SCRIPT")"
+grep -q 'examples/integration/05-shop-casdoor-rbac' <<<"$casdoor_rbac_mode" || fail "Casdoor RBAC 集成模式未运行目标测试包"
+if grep -q 'CORE_TEST_' <<<"$casdoor_rbac_mode"; then
+  fail "Casdoor RBAC 集成模式不应依赖外部服务开关"
+fi
 
 shop_integration_mode="$(sed -n '/^[[:space:]]*integration-shop-microservices)/,/^[[:space:]]*;;/p' "$TEST_SCRIPT")"
 grep -q 'CORE_TEST_REDIS_ADDR' <<<"$shop_integration_mode" || fail "商城多服务集成模式未显式要求 Redis 地址"
