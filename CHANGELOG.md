@@ -6,6 +6,7 @@
 
 ### Added
 
+- 管理后台中英文切换：请求头 `X-Locale`（`zh-CN` / `en-US`，缺省与无法识别一律回退 `zh-CN`）、解析包 `pkg/server/locale`、加性接口 `types.ILocaleTitle`，以及 `DirectoryModel` / `MenuModel` 的 `TitleEN` 列（框架自动补列，无需迁移脚本）。`getmenu` 按当前语言填写 `title`，`View.Do` 的页面标题、标准命令和 `ID`、`CreatedAt` 等框架公共字段也有了中英默认标题。未实现 `ILocaleTitle` 的服务行为不变。详见 `docs/ai/core-skill/manage.md` 与 `docs/ai/core-skill/openapi-and-frontend.md`。
 - 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、Store、Dashboard、**StatsEngine**、`CompileClickHouse`；**服务级报表** `ReportDef`（与 Dashboard 分离，多菜单位于服务下）。示例 07：多报表 API + Admin `/report/:service/:code`（图表/表/钻取/跳转 Manage）。
 - ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。
 - PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
@@ -24,6 +25,8 @@
 
 ### Changed
 
+- **菜单同步刷新展示标题**：`syncOneMenu` 过去在权限集合未变时直接返回，存量菜单的标题永远停留在首次落库的值。现在权限比较与展示标题比较分开判断，权限未变但代码里的中英标题变了也会写库；`Sort`、`Icon`、`Description` 仍是用户字段，不被生成结果覆盖。目录同步遵循同一规则。
+- **标准命令默认标题按语言生成**：`RouterToCommand` 签名不变，但默认语言下 `add`、`edit`、`remove`、`submit`、`release` 的 `Title` 从 `Add`、`Edit` 等英文类型名变为中文；`Command` 与 `Name` 仍是稳定键，消费方可继续用 `ViewCommandModel` 覆盖。需要显式指定语言时使用新增的 `RouterToLocaleCommand`。
 - **UpdateMenu 报表菜单**：不再把 `reports.List` / `reports.View` 扫成 List/View 两行；改为按 `ReportDef` **一个报表一行**（Name=code、Title=菜单名、Url=`/report/{service}/{code}`），并清理历史 API 伪菜单。
 
 - skill 澄清 Manage/`ModelList`、public/private/`IDataAction` 与 04/07 高吞吐写三层数据访问；动态分库与「写死只能 SQLite」脱钩。

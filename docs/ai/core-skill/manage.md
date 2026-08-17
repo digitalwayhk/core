@@ -260,5 +260,60 @@ type CancelOrder[T persisttypes.IModel] struct {
 }
 ```
 
+## 管理后台中英标题（`ILocaleTitle`）
+
+管理端把当前语言放在请求头 `X-Locale`（合法值 `zh-CN`、`en-US`；缺省、空值和无法识别一律回退 `zh-CN`）。后端每个请求当场解析，**不要把语言存进 Manage 单例、全局变量或 `ServiceContext`**。
+
+```go
+import "github.com/digitalwayhk/core/pkg/server/locale"
+
+current := locale.FromRequest(req) // 已规范化的 zh-CN 或 en-US
+```
+
+`locale.Normalize` 接受 `zh`、`zh_CN`、`zh-Hans`、`en`、`en_US` 等写法；`ja-JP`、`pt-BR`、`zh-TW` 第一期回退中文且不报错。请求未实现 `types.IRequestHttp` 时同样返回 `zh-CN`，不 panic。
+
+### 声明中英标题
+
+`ILocaleTitle` 是 `ITitle` 之外的**加性**接口，不实现就保持原有行为。服务实例实现它决定目录标题，Manage 控制器实现它决定菜单和页面标题。
+
+```go
+type ILocaleTitle interface {
+    GetLocaleTitle(locale string) string
+}
+
+func (own *OrderManage) GetLocaleTitle(locale string) string {
+    if locale == "en-US" {
+        return "Orders"
+    }
+    return "订单管理"
+}
+```
+
+回退顺序：`GetLocaleTitle(locale)` 非空 → `ITitle.GetTitle()` → `Name` 或 Go 类型名。某语言没有文案就返回空串由框架回退，不要返回空格或占位符。
+
+返回值**只用于展示**。`Name`、`Url`、权限和路由都是稳定键，不随语言变。
+
+### 落库与同步
+
+`DirectoryModel` 和 `MenuModel` 各有 `Title`（默认中文，兼容旧前端与「菜单管理」编辑器）和 `TitleEN`（英文，空则回退 `Title`）两列。`TitleEN` 由框架首次访问时自动补列，**不要写迁移脚本**。
+
+菜单同步以**代码为翻译权威源**：权限集合未变但代码里的中英标题变了，同步仍会更新 `Title` 和 `TitleEN`。`Sort`、`Icon`、`Description` 是用户字段，生成结果不覆盖。改了 `GetLocaleTitle` 的返回值后，下一次菜单同步即可看到新标题，不需要删表重建。
+
+### 框架默认标题
+
+`View.Do` 在调用 `ViewModel(vm)` 之后，若 Manage 控制器实现 `ILocaleTitle` 且当前语言文案非空，就用它覆盖 `vm.Title`；消费方仍可在 `OnViewAfter` 再覆盖。
+
+标准命令与框架公共字段有内置中英文案，消费方可用 `ViewCommandModel` / `ViewFieldModel` 覆盖：
+
+| 键 | zh-CN | en-US |
+| --- | --- | --- |
+| `add` / `edit` / `remove` | 新增 / 编辑 / 删除 | Add / Edit / Remove |
+| `submit` / `release` | 提交 / 发布 | Submit / Release |
+| `ID` / `TraceID` | 编号 / 追踪号 | ID / Trace ID |
+| `CreatedAt` / `UpdatedAt` | 创建时间 / 更新时间 | Created At / Updated At |
+| `CreatedUserName` / `UpdatedUserName` | 创建人 / 更新人 | Created By / Updated By |
+
+自定义命令不在表内，`Title` 保持类型名。需要在 Manage 之外按指定语言生成命令时用 `manage.RouterToLocaleCommand(info, current)`；`manage.RouterToCommand(info)` 等价于默认语言。
+
 ---
 
