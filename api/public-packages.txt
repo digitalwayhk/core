@@ -1,4 +1,5 @@
 github.com/digitalwayhk/core/pkg/server/types
+github.com/digitalwayhk/core/pkg/server/locale
 github.com/digitalwayhk/core/pkg/server/router
 github.com/digitalwayhk/core/pkg/server/config
 github.com/digitalwayhk/core/pkg/server/run

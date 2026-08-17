@@ -1,5 +1,6 @@
 tool=golang.org/x/exp/cmd/apidiff@v0.0.0-20260410095643-746e56fc9e2f
 package=github.com/digitalwayhk/core/pkg/server/types baseline=github.com_digitalwayhk_core_pkg_server_types.apidiff
+package=github.com/digitalwayhk/core/pkg/server/locale baseline=github.com_digitalwayhk_core_pkg_server_locale.apidiff
 package=github.com/digitalwayhk/core/pkg/server/router baseline=github.com_digitalwayhk_core_pkg_server_router.apidiff
 package=github.com/digitalwayhk/core/pkg/server/config baseline=github.com_digitalwayhk_core_pkg_server_config.apidiff
 package=github.com/digitalwayhk/core/pkg/server/run baseline=github.com_digitalwayhk_core_pkg_server_run.apidiff
