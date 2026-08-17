@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -285,6 +286,21 @@ func sameWebSocketIdentity(left, right *safe.AccessTokenIdentity) bool {
 func routeRequiresWebSocketAuth(info *types.RouterInfo) bool {
 	return info != nil && (info.GetAuth() || info.GetPathType() == types.PrivateType)
 }
+
+// webSocketRouteAuthPolicy 按路由所属的认证域选出验签密钥与 AuthType，与 REST 侧的
+// resolveRouteAuthPolicy 同构。三个域的密钥各不相同，因此本域之外的 Token 会在验签
+// 阶段就被拒绝，而不是依赖订阅链路后面的护栏。
+func webSocketRouteAuthPolicy(cfg *config.ServerConfig, info *types.RouterInfo) (config.AuthSecret, types.AuthType) {
+	if info != nil {
+		switch info.GetPathType() {
+		case types.ServerManagerType:
+			return cfg.ServerManageAuth, types.AuthTypeServerManage
+		case types.ManageType:
+			return cfg.ManageAuth, types.AuthTypeManage
+		}
+	}
+	return cfg.Auth, types.AuthTypeUser
+}
 func (s *SessionSubscriptions) Status() {
 
 }
@@ -331,10 +347,11 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 	if s == nil || s.req == nil || s.manage == nil || s.manage.serviceContext == nil || s.manage.serviceContext.Config == nil {
 		return nil, webSocketAuthenticationError(errors.New("authentication context unavailable"))
 	}
+	secret, authType := webSocketRouteAuthPolicy(s.manage.serviceContext.Config, info)
 	verified, err := safe.ValidateAccessToken(
 		s.req.Token,
-		s.manage.serviceContext.Config.Auth.AccessSecret,
-		types.AuthTypeUser,
+		secret.AccessSecret,
+		authType,
 		time.Now().UTC(),
 	)
 	if err != nil {
