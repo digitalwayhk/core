@@ -3,6 +3,7 @@ package manage
 import (
 	"strings"
 
+	"github.com/digitalwayhk/core/pkg/server/locale"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -35,7 +36,18 @@ func GetViewModel(instance interface{}) *view.ViewModel {
 	}
 	return vm
 }
+
+// RouterToCommand 按默认语言生成命令模型，签名保持不变供既有消费方调用。
 func RouterToCommand(info *types.RouterInfo) *view.CommandModel {
+	return RouterToLocaleCommand(info, locale.Default)
+}
+
+// RouterToLocaleCommand 生成命令模型并按当前语言填写标准命令标题。
+// Command、Name 是稳定键，不随语言变；只有 Title 是展示文案。
+func RouterToLocaleCommand(info *types.RouterInfo, current string) *view.CommandModel {
+	if info == nil {
+		return nil
+	}
 	structName := info.GetStructName()
 	count := strings.Index(structName, "[")
 	name := structName
@@ -49,6 +61,9 @@ func RouterToCommand(info *types.RouterInfo) *view.CommandModel {
 		Command: strings.ToLower(name),
 		Name:    name,
 		Title:   name,
+	}
+	if title := standardCommandTitle(cmd.Command, current); title != "" {
+		cmd.Title = title
 	}
 	if cmd.Command != "add" {
 		cmd.IsSelectRow = true
