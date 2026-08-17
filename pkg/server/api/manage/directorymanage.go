@@ -39,9 +39,8 @@ func (own *DirectoryManage) GetDefaultItems() []*smodels.DirectoryModel {
 		item := smodels.NewDirectoryModel()
 		item.Name = sc.Service.Name
 		item.Url = fmt.Sprintf(path, sc.Service.Name)
-		if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
-			item.Title = ititle.GetTitle()
-		}
+		// 未实现任何标题接口时 Title 保持为空，与本能力之前的行为一致
+		item.Title, item.TitleEN = localeTitles(sc.Service.Instance, "")
 		items = append(items, item)
 	}
 	return items

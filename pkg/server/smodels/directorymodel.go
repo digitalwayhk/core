@@ -8,7 +8,8 @@ import (
 type DirectoryModel struct {
 	*entity.Model
 	Name        string `json:"name"`        //目录名称
-	Title       string `json:"title"`       //目录标题
+	Title       string `json:"title"`       //目录标题，默认中文展示，getmenu 已按当前语言填充
+	TitleEN     string `json:"titleen"`     //目录英文标题，为空时回退 Title
 	Description string `json:"description"` //目录描述
 	ParentID    int64  `json:"parentid"`    //父目录ID
 	Sort        int    `json:"sort"`        //排序

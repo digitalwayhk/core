@@ -58,6 +58,59 @@ func TestMergeGeneratedMenuPreservesUserFields(t *testing.T) {
 	require.Equal(t, "/api/manage/token", merged.Url)
 }
 
+// 翻译的权威源是代码，同步必须把生成的中英标题写回已有行。
+func TestMergeGeneratedMenuOverridesTitlesFromGeneratedResult(t *testing.T) {
+	old := smodels.NewMenuModel()
+	old.Title = "旧标题"
+	old.TitleEN = "Stale"
+	old.Sort = 7
+	old.Icon = "custom"
+
+	generated := smodels.NewMenuModel()
+	generated.Name = "TokenManage"
+	generated.Url = "/api/manage/token"
+	generated.Title = "代币管理"
+	generated.TitleEN = "Tokens"
+
+	merged := mergeGeneratedMenu(old, generated)
+	require.Equal(t, "代币管理", merged.Title)
+	require.Equal(t, "Tokens", merged.TitleEN)
+	require.Equal(t, 7, merged.Sort)
+	require.Equal(t, "custom", merged.Icon)
+}
+
+// 控制器撤回英文标题时英文列必须清空，不能留下陈旧翻译。
+func TestMergeGeneratedMenuClearsStaleEnglishTitle(t *testing.T) {
+	old := smodels.NewMenuModel()
+	old.Title = "代币管理"
+	old.TitleEN = "Stale"
+
+	generated := smodels.NewMenuModel()
+	generated.Title = "代币管理"
+
+	merged := mergeGeneratedMenu(old, generated)
+	require.Equal(t, "代币管理", merged.Title)
+	require.Equal(t, "", merged.TitleEN)
+}
+
+func TestDisplayTitlesChanged(t *testing.T) {
+	withTitles := func(title, titleEN string) *smodels.MenuModel {
+		menu := smodels.NewMenuModel()
+		menu.Title = title
+		menu.TitleEN = titleEN
+		return menu
+	}
+
+	require.False(t, displayTitlesChanged(withTitles("代币管理", "Tokens"), withTitles("代币管理", "Tokens")))
+	require.True(t, displayTitlesChanged(withTitles("代币管理", ""), withTitles("代币管理", "Tokens")))
+	require.True(t, displayTitlesChanged(withTitles("TokenManage", ""), withTitles("代币管理", "")))
+	require.True(t, displayTitlesChanged(withTitles("代币管理", "Stale"), withTitles("代币管理", "")))
+	// 生成结果没有中文标题时不算变化，避免把已有标题抹成空白
+	require.False(t, displayTitlesChanged(withTitles("用户标题", ""), withTitles("", "")))
+	require.False(t, displayTitlesChanged(nil, withTitles("代币管理", "Tokens")))
+	require.False(t, displayTitlesChanged(withTitles("代币管理", "Tokens"), nil))
+}
+
 func TestUpdateMenuDoPropagatesSyncError(t *testing.T) {
 	op := NewUpdateMenu(&MenuManage{})
 	require.NotPanics(t, func() {
