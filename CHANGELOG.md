@@ -6,6 +6,7 @@
 
 ### Added
 
+- 必过门禁 `required/web-dist-sync`（`scripts/check-web-dist-sync.sh`）：校验已提交的内嵌前端产物 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致。此前只有 `scripts/test-build-web-admin.sh` 用合成 fixture 验证构建脚本行为，没有任何门禁看真实产物，`web/admin` 指针前进而 dist 未重建时服务会静默内嵌旧前端。校验只读、不联网、不需要 node/yarn，约 1 秒；配套契约测试 `scripts/test-check-web-dist-sync.sh` 与本地入口 `./scripts/test.sh web-dist-sync`。
 - 管理后台中英文切换：请求头 `X-Locale`（`zh-CN` / `en-US`，缺省与无法识别一律回退 `zh-CN`）、解析包 `pkg/server/locale`、加性接口 `types.ILocaleTitle`，以及 `DirectoryModel` / `MenuModel` 的 `TitleEN` 列（框架自动补列，无需迁移脚本）。`getmenu` 按当前语言填写 `title`，`View.Do` 的页面标题、标准命令和 `ID`、`CreatedAt` 等框架公共字段也有了中英默认标题。未实现 `ILocaleTitle` 的服务行为不变。详见 `docs/ai/core-skill/manage.md` 与 `docs/ai/core-skill/openapi-and-frontend.md`。
 - 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、Store、Dashboard、**StatsEngine**、`CompileClickHouse`；**服务级报表** `ReportDef`（与 Dashboard 分离，多菜单位于服务下）。示例 07：多报表 API + Admin `/report/:service/:code`（图表/表/钻取/跳转 Manage）。
 - ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。

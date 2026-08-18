@@ -56,7 +56,7 @@ grep -q 'CI_GATE_START gate=required/quick commit=' "$tmp_dir/failure.out" || fa
 grep -Eq ' os=[^[:space:]]+' "$tmp_dir/failure.out" || fail "开始元数据缺 OS"
 grep -q ' command="' "$tmp_dir/failure.out" || fail "开始元数据缺命令"
 
-required_commands="$(sed -n '/required\/quick)/,/;;/p; /required\/contracts)/,/;;/p; /required\/server-manage)/,/;;/p; /required\/simple-shop)/,/;;/p; /required\/race)/,/;;/p' "$CI_SCRIPT")"
+required_commands="$(sed -n '/required\/quick)/,/;;/p; /required\/contracts)/,/;;/p; /required\/web-dist-sync)/,/;;/p; /required\/server-manage)/,/;;/p; /required\/simple-shop)/,/;;/p; /required\/race)/,/;;/p' "$CI_SCRIPT")"
 if grep -Eq 'rtk|git (tag|push)|update-public-api|integration-|CORE_TEST_' <<<"$required_commands"; then
   fail "required gate 包含禁止命令或外部依赖"
 fi
