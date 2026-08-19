@@ -27,6 +27,8 @@ var commonFieldTitles = map[string][2]string{
 	"UpdatedUserName": {"更新人", "Updated By"},
 	"TraceID":         {"追踪号", "Trace ID"},
 	"Revision":        {"修订号", "Revision"},
+	"TitleEN":         {"英文标题", "Title EN"},
+	"ParentID":        {"上级编号", "Parent ID"},
 }
 
 // standardCommandTitle 返回标准命令在当前语言下的标题，非标准命令返回空串。

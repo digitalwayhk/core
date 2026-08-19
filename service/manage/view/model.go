@@ -25,6 +25,8 @@ type ViewModel struct {
 	ChildModels   []*ViewChildModel `json:"childmodels"`
 	ShowComvtp    bool              `json:"showComvtp"` //是否显示左边工具栏
 	AutoSearch    bool              `json:"autoSearch"` //左边工具栏是否自动搜索
+	//描述,用于说明该模块的功能Ï
+	Desc string             `json:"desc"`
 }
 
 func (own *ViewModel) ViewField(name string) *FieldModel {
