@@ -205,7 +205,15 @@ CoreTransport 只有一个 gRPC method，不能只按 `/CoreTransport/Call` 聚�
 
 只有真实注册的订阅才能形成异步边。一个 Subject 被多个逻辑服务订阅时，生成多条来源相同、目标不同的虚线边。动态 Subject 必须先归一为有界 family；EventID、TraceID、消息 ID 和业务聚合 ID 都不得成为标签。
 
-消费 rate、ack/nack 和 lag 由目标服务的 consumer 指标提供。发布存在但没有订阅时只显示服务内部 warning，不凭猜测创建目标节点。
+消费 rate、ack/nack 和 lag 由目标服务的 consumer 指标提供。异步关系的空闲与故障语义如下：
+
+- 已注册订阅、但当前窗口没有匹配的 `core_event_publish_total` rate 序列：保留 `source` 为空的虚线边，数值为 `null`、状态为 `not_collected`；这表示从未采集到或无法在当前窗口判定发布方，不产生 `async_publish_missing` 持续告警。低频事件、失败路径和启动即注册的订阅属于这种正常情况。
+- 已有发布 counter 序列、当前窗口 rate 为 `0`：保留已知发布方，边状态为 `no_traffic`，请求率为已采集到的 `0`，不产生 missing 告警。
+- 发布指标查询失败：边的可用数据保持诚实状态，并用 `event_publish_query_partial` 与全局 `unavailable`/`partial` 表达查询故障；不得伪装成发布缺失。
+- 有发布样本但没有任何注册订阅：产生 `async_subscription_missing` warning，但不猜测目标服务或创建目标节点。warning 的 `message` 必须包含 `subject_family` 以及已知的 `event_type`，`scope` 使用 family 语义。
+- `TopologyResponse.Warnings` 在同一轮响应内按 `(code, scope, message)` 去重；同一个 subject family 最多一条异步订阅缺失 warning。
+
+当前仅查询所选窗口，不能可靠区分“从未发布”与“历史发布后停止”，因此不输出 `async_publish_missing`。将来若增加独立的长保留存在性查询，只有确认该 family 曾有发布序列、当前窗口序列又消失时，才可恢复该 code。
 
 ### 7.5 服务内部组件
 

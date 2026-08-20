@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,6 +164,7 @@ func (a *Aggregator) Topology(ctx context.Context, window string) (*TopologyResp
 		resp.Warnings = append(resp.Warnings, RuntimeWarning{
 			Code: "cluster_unavailable", Message: "cluster provider is unavailable", Scope: "global",
 		})
+		resp.Warnings = dedupeRuntimeWarnings(resp.Warnings)
 		return resp, nil
 	}
 
@@ -244,6 +247,7 @@ func (a *Aggregator) Topology(ctx context.Context, window string) (*TopologyResp
 	if len(resp.Services) == 0 {
 		resp.Status = MergeStates(resp.Status, StatePartial)
 	}
+	resp.Warnings = dedupeRuntimeWarnings(resp.Warnings)
 	a.cacheSet(cacheKey, resp)
 	return resp, nil
 }
@@ -428,9 +432,6 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 
 	// 优先从 Prometheus 读取跨进程订阅事实；本进程索引作补充。
 	subs := a.loadSubscriptions(ctx, now, &anySample, &anyFail, &warnings)
-	if len(subs) == 0 {
-		return edges, warnings, anySample, anyFail
-	}
 
 	publishRates := map[string]float64{} // family|type|source -> rate
 	if q, err := EventPublishRateQuery(window); err == nil {
@@ -449,11 +450,16 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 		}
 	}
 
-	seenPublishFamily := map[string]bool{}
+	seenPublishFamily := map[string]map[string]bool{}
 	for k := range publishRates {
 		parts := split3(k)
 		if parts[0] != "" {
-			seenPublishFamily[parts[0]] = true
+			if seenPublishFamily[parts[0]] == nil {
+				seenPublishFamily[parts[0]] = map[string]bool{}
+			}
+			if parts[1] != "" && parts[1] != "unspecified" {
+				seenPublishFamily[parts[0]][parts[1]] = true
+			}
 		}
 	}
 
@@ -484,15 +490,19 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 		}
 	}
 	for ek, rate := range edgeAcc {
+		state := StateOK
+		if rate == 0 {
+			state = StateNoTraffic
+		}
 		edges = append(edges, ServiceEdge{
 			Source:        ek.src,
 			Target:        ek.tgt,
 			Kind:          "async",
 			SubjectFamily: ek.family,
-			RequestRate:   ValueMetric(rate, StateOK),
-			ErrorRate:     NullMetric(baseState),
-			P95Ms:         NullMetric(baseState),
-			State:         StateOK,
+			RequestRate:   ValueMetric(rate, state),
+			ErrorRate:     NullMetric(state),
+			P95Ms:         NullMetric(state),
+			State:         state,
 		})
 	}
 	for ek := range edgeMissing {
@@ -517,23 +527,27 @@ func (a *Aggregator) buildAsyncEdges(ctx context.Context, window string, now tim
 			P95Ms:         NullMetric(StateNotCollected),
 			State:         StateNotCollected,
 		})
-		warnings = append(warnings, RuntimeWarning{
-			Code:    "async_publish_missing",
-			Message: "subscription exists but no publish samples for subject family",
-			Scope:   ek.tgt,
-		})
 	}
 
-	for family := range seenPublishFamily {
+	for family, eventTypes := range seenPublishFamily {
 		if !subFamilies[family] {
+			message := "publish samples exist without registered subscribers for subject family " + family
+			if len(eventTypes) > 0 {
+				types := make([]string, 0, len(eventTypes))
+				for eventType := range eventTypes {
+					types = append(types, eventType)
+				}
+				sort.Strings(types)
+				message += "; event_type=" + strings.Join(types, ",")
+			}
 			warnings = append(warnings, RuntimeWarning{
 				Code:    "async_subscription_missing",
-				Message: "publish samples exist without registered subscribers",
-				Scope:   family,
+				Message: message,
+				Scope:   "family=" + family,
 			})
 		}
 	}
-	return edges, warnings, anySample, anyFail
+	return edges, dedupeRuntimeWarnings(warnings), anySample, anyFail
 }
 
 func (a *Aggregator) loadSubscriptions(ctx context.Context, now time.Time, anySample *bool, anyFail *bool, warnings *[]RuntimeWarning) []SubscriptionEdge {
@@ -778,8 +792,26 @@ func (a *Aggregator) ServiceDetail(ctx context.Context, window, service string) 
 		}
 	}
 
+	detail.Warnings = dedupeRuntimeWarnings(detail.Warnings)
 	a.cacheSet(cacheKey, detail)
 	return detail, nil
+}
+
+func dedupeRuntimeWarnings(warnings []RuntimeWarning) []RuntimeWarning {
+	if len(warnings) < 2 {
+		return warnings
+	}
+	seen := make(map[string]struct{}, len(warnings))
+	out := make([]RuntimeWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		key := warning.Code + "\x00" + warning.Scope + "\x00" + warning.Message
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, warning)
+	}
+	return out
 }
 
 type routeAcc struct {
