@@ -7,6 +7,7 @@
 | `required/quick` | 已启用 | 是 | PR、push | 5 分钟 | `./scripts/test.sh quick` | 无 | core | 快速包与 server vet 稳定通过 |
 | `required/contracts` | 已启用 | 是 | PR、push | 8 分钟 | `./scripts/test.sh release-contract` | 无 | release tooling | API、安全、配置与发布候选契约全绿 |
 | `required/ai-skill` | 已启用 | 是 | PR、push | 2 分钟 | `./scripts/check-ai-skill.sh` | 无 | docs/ai | 权威 skill 目录与各代理指针文件保持闭合 |
+| `required/web-dist-sync` | 已启用 | 是 | PR、push | 1 分钟 | `./scripts/check-web-dist-sync.sh` | 无 | web/admin | 已提交的 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致；只读校验，不联网、不需要 node/yarn、不触发前端构建，本机约 1 秒 |
 | `required/server-manage` | 已启用 | 是 | PR、push | 10 分钟 | `go test ./pkg/server/... ./service/manage/... -count=1 -timeout=10m` | 无 | server/manage | 默认测试不连接外部服务 |
 | `required/simple-shop` | 已启用 | 是 | PR、push | 5 分钟 | `go test ./examples/integration/01-simple-shop -count=1 -timeout=10m` | 无 | examples/server | 守 WebSocket 认证边界等端到端回归；本机测试约 28 秒、含构建约 80 秒，不连接外部服务 |
 | `required/race` | 已启用 | 是 | PR、push | 12 分钟 | `./scripts/test.sh concurrency-race` | 无 | server/manage | 单轮 race 分片无已知不稳定项 |
@@ -37,6 +38,7 @@
 - CI 与本地统一调用 `./scripts/ci.sh <gate>`，YAML 不复制测试包清单。
 - `required/contracts` 先跑 `scripts/test-ci-contract.sh` 再跑发布候选检查；新增或删除 gate 必须同步 `scripts/ci.sh` 与本表，否则该门禁直接失败。
 - `required/*` 不使用 Docker、外部服务、`rtk`、基线更新、tag、push 或隐式 `CORE_TEST_*` 环境变量。
+- `required/web-dist-sync` 校验的是**真实已提交产物**：`scripts/test-build-web-admin.sh`（由 `./scripts/test.sh web-contract` 调用）只用合成 fixture 验证 `build-web-admin.sh` 的脚本行为，并明确断言真实 dist 不被改动，因此看不到仓库里 dist 与子模块指针的脱节。子模块指针必须取 `git ls-tree HEAD web/admin`，不能取子模块工作区 HEAD——后者会被本地 checkout 改动而放过已提交的漂移。升级前端时，`web/admin` 指针与重建后的 `pkg/server/run/dist` 必须在同一个提交里同时更新。
 - `required/contracts` 中的文档契约锁定 `WithInternalCallers`、`x-internal-callers`、mTLS SAN、`SupplierOrder` 和 `requestID`；实现改变时必须同步当前指南和 skill，不能只更新历史计划。
 - 调用方通过 `CI_ARTIFACT_DIR` 指定持久化日志目录；未指定时脚本使用并清理临时目录。
 - 每次执行输出 gate、commit、Go 版本、耗时和退出码，不输出环境变量或凭据。

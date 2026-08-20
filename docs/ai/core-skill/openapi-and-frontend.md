@@ -133,6 +133,17 @@ interface TableData {
 }
 ```
 
+### 语言协商（`X-Locale`）
+
+管理端当前语言通过请求头 `X-Locale` 传给后端，合法值 `zh-CN`、`en-US`，缺省与无法识别一律回退 `zh-CN`。
+
+- 拦截器在 `src/requestErrorConfig.ts` 的 `requestInterceptors` 里与 Casdoor token 同处注入 `getLocale()`，所有走 Umi `request` 的调用都会带上，包括 `getmenu`、`view`、`search` 和各命令。
+- **不要用查询参数传语言**（污染缓存与书签），后端也**不读 Cookie / `umi_locale`**（`localStorage` 不随请求发送），更不会用浏览器 `Accept-Language` 覆盖 `X-Locale`。
+- `getmenu` 返回的 `title` 已经是当前语言，前端继续用 `childItem.title ?? childItem.name` 渲染，**不要在前端用语言包翻译业务 `ViewModel`**。`titleen` 仅供调试，展示权威始终是 `title`。
+- `SelectLang` 只暴露 `zh-CN` 与 `en-US`；后端第一期只有中英文案，其它语言会切出未翻译的界面。切换后沿用 Umi 默认整页刷新，刷新后重新请求 `getmenu` 与当前页 `view`。
+
+后端如何声明中英标题见 [manage.md](manage.md) 的「管理后台中英标题」。
+
 ### URL 规则与三个核心请求
 
 **URL 规则：**

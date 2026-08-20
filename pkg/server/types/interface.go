@@ -80,6 +80,13 @@ type ITitle interface {
 	GetTitle() string //获取标题
 }
 
+// ILocaleTitle 按展示语言返回标题，是 ITitle 的加性扩展。
+// locale 由框架规范化为 zh-CN 或 en-US；返回值只用于展示，
+// 不得影响 Name、Url、权限和路由。某语言无文案时返回空串，由调用方回退。
+type ILocaleTitle interface {
+	GetLocaleTitle(locale string) string
+}
+
 type IDescription interface {
 	GetDescription() string //获取描述
 }

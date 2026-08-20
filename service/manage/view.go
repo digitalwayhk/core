@@ -8,6 +8,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
+	"github.com/digitalwayhk/core/pkg/server/locale"
 	types "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -82,11 +83,17 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 		}
 	}
 	model := list.NewItem()
-	mv, vm := own.getmv(req)
-	vm.Fields = modelToFiled(model, mv)
+	current := locale.FromRequest(req)
+	mv, vm := own.getmv(req, current)
+	vm.Fields = modelToFiled(model, mv, current)
 	if mv != nil {
-		vm.ChildModels = modelToChildModel(model, mv)
+		vm.ChildModels = modelToChildModel(model, mv, current)
 		mv.ViewModel(vm)
+	}
+	if vm != nil {
+		if title := localeViewTitle(own.instance, current); title != "" {
+			vm.Title = title
+		}
 	}
 	own.Model = vm
 	if view, ok := own.instance.(IManageService); ok {
@@ -95,7 +102,7 @@ func (own *View[T]) Do(req types.IRequest) (interface{}, error) {
 	}
 	return own.Model, nil
 }
-func (own *View[T]) getmv(req types.IRequest) (IManageView, *view.ViewModel) {
+func (own *View[T]) getmv(req types.IRequest, current string) (IManageView, *view.ViewModel) {
 	vm := &view.ViewModel{}
 	vm.ShowComvtp = true
 	vm.AutoSearch = true
@@ -110,7 +117,7 @@ func (own *View[T]) getmv(req types.IRequest) (IManageView, *view.ViewModel) {
 				for index, router := range ms.Routers() {
 					info := router.RouterInfo()
 					vm.ServiceName = info.GetServiceName()
-					cmd := routerToCommand(info)
+					cmd := RouterToLocaleCommand(info, current)
 					if cmd != nil {
 						cmd.Index = index
 						if mv != nil {
@@ -139,33 +146,6 @@ func (own *View[T]) RouterInfo() *types.RouterInfo {
 func (own *View[T]) GetInstance() interface{} {
 	return own.instance
 }
-func routerToCommand(info *types.RouterInfo) *view.CommandModel {
-	structName := info.GetStructName()
-	count := strings.Index(structName, "[")
-	name := structName
-	if count > 0 {
-		name = structName[0:count]
-	}
-	if name == "View" || name == "Search" {
-		return nil
-	}
-	cmd := &view.CommandModel{
-		Command: strings.ToLower(name),
-		Name:    name,
-		Title:   name,
-	}
-	if cmd.Command != "add" {
-		cmd.IsSelectRow = true
-	}
-	if cmd.Command != "add" && cmd.Command != "edit" {
-		cmd.IsAlert = true
-	}
-	// if cmd.Name == "Release" {
-	// 	cmd.IsSplit = true
-	// 	cmd.SplitName = "submit"
-	// }
-	return cmd
-}
 
 // getfieldname returns the field name, json name, and post type from a struct field.
 func getfieldname(field *reflect.StructField) (string, string, string) {
@@ -186,7 +166,7 @@ func getfieldname(field *reflect.StructField) (string, string, string) {
 	}
 	return name1, name, posttype
 }
-func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
+func modelToFiled(model interface{}, mv IManageView, current string) []*view.FieldModel {
 	fields := make([]*view.FieldModel, 0)
 	foreignItems := make(map[string]*view.ForeignModel)
 
@@ -199,7 +179,7 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 			typeName = field.Type.Elem().Name()
 		}
 		if kind == utils.Base || ((kind == utils.Struct || kind == utils.Ptr) && (typeName == "Time" || typeName == "Decimal")) {
-			vfm := getField(field, typeName)
+			vfm := getField(field, typeName, current)
 			fields = append(fields, vfm)
 		}
 		if (kind == utils.Struct || kind == utils.Ptr) && (typeName != "Time" && typeName != "Decimal") {
@@ -255,10 +235,13 @@ func modelToFiled(model interface{}, mv IManageView) []*view.FieldModel {
 	})
 	return fields
 }
-func getField(field reflect.StructField, typeName string) *view.FieldModel {
+func getField(field reflect.StructField, typeName, current string) *view.FieldModel {
 	vfm := &view.FieldModel{}
 	vfm.Field, vfm.PropField, vfm.PostType = getfieldname(&field)
 	vfm.Title = field.Name
+	if title := commonFieldTitle(field.Name, current); title != "" {
+		vfm.Title = title
+	}
 	vfm.IsSearch = true
 	vfm.IsEdit = true
 	vfm.Visible = true
@@ -382,11 +365,11 @@ func GetForeignModel(field *view.FieldModel, relevanceModel interface{}, manyFie
 	fm.FModel.Fields = append(fm.FModel.Fields, &view.FieldModel{Field: "name", Title: "名称", Type: "string", IsSearch: true, Visible: true, Sorter: true})
 	return fm
 }
-func modelToChildModel(model interface{}, mv IManageView) []*view.ViewChildModel {
+func modelToChildModel(model interface{}, mv IManageView, current string) []*view.ViewChildModel {
 	childItems := make([]*view.ViewChildModel, 0)
 	utils.DeepForItem(model, func(field, parent reflect.StructField, kind utils.TypeKind) {
 		if kind == utils.Array {
-			child := getChildModel(field, model, mv)
+			child := getChildModel(field, model, mv, current)
 			mv.ViewChildModel(child)
 			childItems = append(childItems, child)
 		}
@@ -396,7 +379,7 @@ func modelToChildModel(model interface{}, mv IManageView) []*view.ViewChildModel
 	})
 	return childItems
 }
-func getChildModel(field reflect.StructField, model interface{}, mv IManageView) *view.ViewChildModel {
+func getChildModel(field reflect.StructField, model interface{}, mv IManageView, current string) *view.ViewChildModel {
 	foreignkey := gormfield(FOREIGNKEY, field)
 
 	vt := field.Type.Elem()
@@ -410,7 +393,7 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 		ForeignKey: foreignkey,
 		References: gormfield(REFERENCES, field),
 	}
-	vm.ViewModel = *getviewModel(obj, mv, field.Name)
+	vm.ViewModel = *getviewModel(obj, mv, field.Name, current)
 	for _, f := range vm.ViewModel.Fields {
 		if f.IsFieldOrTitle(foreignkey) {
 			f.Visible = false
@@ -434,11 +417,11 @@ func getChildModel(field reflect.StructField, model interface{}, mv IManageView)
 	mv.ViewChildModel(vm)
 	return vm
 }
-func getviewModel(instance interface{}, mv IManageView, name string) *view.ViewModel {
+func getviewModel(instance interface{}, mv IManageView, name, current string) *view.ViewModel {
 	vm := &view.ViewModel{}
 	vm.Name = utils.GetTypeName(instance)
 	vm.Title = name
 	vm.Commands = make([]*view.CommandModel, 0)
-	vm.Fields = modelToFiled(instance, mv)
+	vm.Fields = modelToFiled(instance, mv, current)
 	return vm
 }

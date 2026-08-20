@@ -6,6 +6,8 @@
 
 ### Added
 
+- 必过门禁 `required/web-dist-sync`（`scripts/check-web-dist-sync.sh`）：校验已提交的内嵌前端产物 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致。此前只有 `scripts/test-build-web-admin.sh` 用合成 fixture 验证构建脚本行为，没有任何门禁看真实产物，`web/admin` 指针前进而 dist 未重建时服务会静默内嵌旧前端。校验只读、不联网、不需要 node/yarn，约 1 秒；配套契约测试 `scripts/test-check-web-dist-sync.sh` 与本地入口 `./scripts/test.sh web-dist-sync`。
+- 管理后台中英文切换：请求头 `X-Locale`（`zh-CN` / `en-US`，缺省与无法识别一律回退 `zh-CN`）、解析包 `pkg/server/locale`、加性接口 `types.ILocaleTitle`，以及 `DirectoryModel` / `MenuModel` 的 `TitleEN` 列（框架自动补列，无需迁移脚本）。`getmenu` 按当前语言填写 `title`，`View.Do` 的页面标题、标准命令和 `ID`、`CreatedAt` 等框架公共字段也有了中英默认标题。未实现 `ILocaleTitle` 的服务行为不变。详见 `docs/ai/core-skill/manage.md` 与 `docs/ai/core-skill/openapi-and-frontend.md`。
 - 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、Store、Dashboard、**StatsEngine**、`CompileClickHouse`；**服务级报表** `ReportDef`（与 Dashboard 分离，多菜单位于服务下）。示例 07：多报表 API + Admin `/report/:service/:code`（图表/表/钻取/跳转 Manage）。
 - ServerManage AI 提供商运行时配置：`POST /api/servermanage/aiprovider`、`saveaiprovider`、`testaiprovider`，持久化 `etc/aiprovider.json`。
 - PageAgent 同源 LLM 代理：`POST /api/servermanage/aillm/chat/completions`（OpenAI 兼容透传）；`view=runtime` 仅下发代理 baseURL，上游 API Key 不进入浏览器。
@@ -24,6 +26,8 @@
 
 ### Changed
 
+- **菜单同步刷新展示标题**：`syncOneMenu` 过去在权限集合未变时直接返回，存量菜单的标题永远停留在首次落库的值。现在权限比较与展示标题比较分开判断，权限未变但代码里的中英标题变了也会写库；`Sort`、`Icon`、`Description` 仍是用户字段，不被生成结果覆盖。目录同步遵循同一规则。
+- **标准命令默认标题按语言生成**：`RouterToCommand` 签名不变，但默认语言下 `add`、`edit`、`remove`、`submit`、`release` 的 `Title` 从 `Add`、`Edit` 等英文类型名变为中文；`Command` 与 `Name` 仍是稳定键，消费方可继续用 `ViewCommandModel` 覆盖。需要显式指定语言时使用新增的 `RouterToLocaleCommand`。
 - **UpdateMenu 报表菜单**：不再把 `reports.List` / `reports.View` 扫成 List/View 两行；改为按 `ReportDef` **一个报表一行**（Name=code、Title=菜单名、Url=`/report/{service}/{code}`），并清理历史 API 伪菜单。
 
 - skill 澄清 Manage/`ModelList`、public/private/`IDataAction` 与 04/07 高吞吐写三层数据访问；动态分库与「写死只能 SQLite」脱钩。
@@ -73,6 +77,7 @@
 - Casdoor Webhook 使用独立 Secret、请求上限、域绑定和幂等持久化；REST/WebSocket 每次认证均校验撤销权威，内部 JWT 失败日志不再转储 Authorization Header。
 - 跨主机 gRPC 默认要求 mTLS；`mesh` 仅适用于已有双向身份校验的服务网格，生产禁止 `insecure`。
 - 修复 `/ws` 的认证绕过：WebSocket `call` 事件直接用客户端给定的 channel 查询 public/private/manage 三张路由表并执行 `ExecDo`，跳过整条 HTTP 中间件链（JWT、限流、访问日志、指标）。未认证会话可借此读取 Manage 列表数据，并以空 UID 执行 Private 路由。该事件已删除，`/ws` 上唯一执行路由代码的事件是 `sub`，它对 `Auth=true` 与 Private 路由在解析请求前强制校验会话身份。回归测试：`examples/integration/01-simple-shop/websocket_auth_boundary_test.go`。
+- `/ws` 的 `sub` 事件改为按路由所属认证域验签，与 REST 侧 `resolveRouteAuthPolicy` 同构：Manage 路由用 `ManageAuth`、ServerManage 路由用 `ServerManageAuth`，其余仍用 `Auth`。此前 `authorizeAuthenticatedSubscription` 把密钥与 AuthType 都写死为用户域，而 `routeRequiresWebSocketAuth` 只判断 `Auth || PrivateType`、Manage 路由又显式 `WithAuth(true)`，因此普通用户 Token 能通过 Manage 与 ServerManage 路由的验签；跨域订阅当时未真正建立，靠的是验签之后几道与认证无关的护栏（Manage 路由未实现 `IWebSocketUserIdentity`、`RouteWebSocketHub` 的服务归属校验），隔离不由认证层保证。回归测试：`pkg/server/trans/websocket/melody/auth_boundary_test.go` 的 `TestAuthenticatedSubscriptionSelectsAuthDomainPerRoute`（含两域密钥被配成同一个时仍须按 AuthType 拒绝），以及 `examples/integration/01-simple-shop/websocket_auth_boundary_test.go` 的 `TestWebSocketSubscribeEnforcesAuthDomain`。
 - 升级 `github.com/getkin/kin-openapi` 至 v0.144.0、`google.golang.org/grpc` 至 v1.82.1，处理三条依赖公告。本仓库只使用 kin-openapi 的 `openapi3` 与 `openapi3gen`，未使用 `openapi3filter` 和 `ValidationHandler`，因此 GHSA-r277-6w6q-xmqw（认证 fail-open，CVSS 9.1）与 GHSA-jpcw-4wr7-c3vq（请求校验空指针）在当前代码中不可达；GHSA-hrxh-6v49-42gf 中真正相关的是 HTTP/2 Rapid Reset 缓解绕过导致的拒绝服务，其 xDS RBAC 部分不适用（未使用 xDS）。
 
 [Unreleased]: https://github.com/digitalwayhk/core/compare/v0.0.247...HEAD

@@ -160,6 +160,19 @@ go test -race ./examples/integration/01-simple-shop -count=1
 ./scripts/test.sh integration-persistence
 ```
 
+### 内嵌前端产物与子模块指针
+
+管理后台前端产物 `pkg/server/run/dist` 直接提交进仓库，由 `scripts/build-web-admin.sh` 生成，构建时把当时的 `web/admin` HEAD 写进 `dist/build-info.json` 的 `frontend_commit`。升级前端时，**子模块指针与重建后的 dist 必须在同一个提交里同时更新**；只推进 `web/admin` 而不重建 dist，服务内嵌的仍是旧前端，运行时不会报任何错。
+
+必过门禁 `required/web-dist-sync` 守这条不变量，本地单独运行：
+
+```bash
+./scripts/check-web-dist-sync.sh   # 只读校验，约 1 秒，不需要 node/yarn
+./scripts/test.sh web-dist-sync    # 契约测试 + 校验
+```
+
+它比对 `git ls-tree HEAD web/admin` 的**已提交**指针与 `build-info.json` 的 `frontend_commit`。不要改成读子模块工作区 HEAD——本地 checkout 会让它跟着漂移，从而放过已提交的不一致。
+
 发布前不得自动创建 tag。开发消费方可临时引用分支或精确 commit：
 
 ```bash

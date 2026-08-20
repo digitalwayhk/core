@@ -6,6 +6,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
+	"github.com/digitalwayhk/core/pkg/server/locale"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -49,7 +50,30 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 		}
 		dirs = append(dirs, localMenu)
 	}
+	applyMenuLocale(dirs, locale.FromRequest(req))
 	return dirs, nil
+}
+
+// applyMenuLocale 把当前语言的文案写进 Title，让前端继续只读 title 渲染。
+// TitleEN 仍随 JSON 返回，只作调试参考，展示权威仍是 title。
+func applyMenuLocale(dirs []*smodels.DirectoryModel, current string) {
+	if current != locale.EnUS {
+		return
+	}
+	for _, dir := range dirs {
+		if dir == nil {
+			continue
+		}
+		if dir.TitleEN != "" {
+			dir.Title = dir.TitleEN
+		}
+		for _, item := range dir.MenuItems {
+			if item == nil || item.TitleEN == "" {
+				continue
+			}
+			item.Title = item.TitleEN
+		}
+	}
 }
 
 func (own *GetMenu) RouterInfo() *types.RouterInfo {
@@ -64,6 +88,7 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	dir.ID = 9987243
 	dir.Name = "server"
 	dir.Title = "内部系统管理"
+	dir.TitleEN = "System"
 	dir.Description = "系统管理相关的菜单"
 	dir.Sort = 0
 	dir.MenuItems = make([]*smodels.MenuModel, 0)
@@ -72,6 +97,7 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu1.DirectoryModelID = dir.ID
 	menu1.Name = "directorymanage"
 	menu1.Title = "目录管理"
+	menu1.TitleEN = "Directories"
 	menu1.Description = "管理系统中的目录"
 	menu1.Sort = 0
 	menu1.Url = "/api/manage/server/directorymanage"
@@ -82,6 +108,7 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu2.DirectoryModelID = dir.ID
 	menu2.Name = "menumanage"
 	menu2.Title = "菜单管理"
+	menu2.TitleEN = "Menus"
 	menu2.Description = "管理系统中的菜单"
 	menu2.Sort = 1
 	menu2.Url = "/api/manage/server/menumanage"
@@ -92,6 +119,7 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu3.DirectoryModelID = dir.ID
 	menu3.Name = "configsettings"
 	menu3.Title = "配置设置"
+	menu3.TitleEN = "Settings"
 	menu3.Description = "查看和编辑各服务的系统配置"
 	menu3.Sort = 2
 	// 配置页是前端专用页面，不是普通 Manage CRUD 页面。
@@ -103,6 +131,7 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	menu4.DirectoryModelID = dir.ID
 	menu4.Name = "aiprovider"
 	menu4.Title = "AI 提供商"
+	menu4.TitleEN = "AI Provider"
 	menu4.Description = "配置管理端 PageAgent 使用的 LLM 提供商（方案 A 运行时下发）"
 	menu4.Sort = 3
 	// 前端专用页面，对应 web/admin/src/pages/config/ai-provider

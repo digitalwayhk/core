@@ -93,6 +93,10 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - Runtime Aggregator 只部署在 ServerManage 可达边界：业务副本暴露 scrape 指标，**禁止** Aggregator 在 API 请求中直连各实例 `/metrics` 或 Provider。
 - 指标诚实状态：`ok` / `partial` / `stale` / `unavailable` / `no_traffic` / `not_collected`。缺失时数值为 `null` + `state`，不得把未采集写成 0。
 - 同步边：跨服务 gRPC/内部调用；异步边：Outbox 发布与订阅索引汇合及低基数 gauge。全局图画逻辑服务，组件进入服务内部视图。
+- 异步订阅在当前窗口没有匹配发布序列时属于空闲/未采集路径：保留 `source` 为空、数值为 `null`、状态为 `not_collected` 的虚线边，不产生 `async_publish_missing`。启动即注册的低频事件和失败路径不得因此持续告警。
+- 发布 counter 序列存在但窗口 rate 为 `0` 时，异步边保留已知发布方并标记 `no_traffic`；发布查询失败使用 `event_publish_query_partial` 与 `unavailable`/`partial`，不得伪装成 missing。
+- 只有“有发布样本、无注册订阅”产生 `async_subscription_missing`；不猜测目标节点。warning 的 `message` 包含 `subject_family` 和已知 `event_type`，`scope` 使用 family 语义，响应按 `(code, scope, message)` 去重。
+- 当前窗口查询无法区分“从未发布”和“历史发布后停止”，因此 Core 不输出 `async_publish_missing`。若未来增加长保留存在性证据，只能在确认曾有发布而当前窗口消失时使用该 code。
 - 标签低基数：禁止 userId、orderId、TraceID、原始 URL、SQL 等作为指标标签。
 - 兼容级别见 `docs/codex/API_COMPATIBILITY_SURFACE.md`（Experimental → 趋向 Stable）与 `docs/codex/DEPRECATION_REGISTER.md`。
 - Web Admin 页面为 `MonitorSystem`，前端经 ServerManage 调 Runtime API，浏览器不直连 Prometheus。
@@ -123,4 +127,3 @@ go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 请求/跨服务失败携带 `trace_id`、service、route/target、operation 和 error。错误由拥有重试、降级、响应或终止决策的边界记录一次。
 
 禁止记录凭据、token、cookie、TOTP、完整 payload/body/response、DSN、SQL、参数和对象 dump。
-

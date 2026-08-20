@@ -99,6 +99,10 @@ case "${1:-quick}" in
   ci-contract)
     "$ROOT/scripts/test-ci-contract.sh"
     ;;
+  web-dist-sync)
+    "$ROOT/scripts/test-check-web-dist-sync.sh"
+    "$ROOT/scripts/check-web-dist-sync.sh"
+    ;;
   workflow-contract)
     "$ROOT/scripts/test-workflow-contract.sh"
     ;;
@@ -495,7 +499,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|integration-casdoor-rbac|web-contract|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|web-dist-sync|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|integration-casdoor-rbac|web-contract|all}" >&2
     exit 2
     ;;
 esac

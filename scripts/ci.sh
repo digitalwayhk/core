@@ -6,7 +6,7 @@ GATE="${1:-}"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/ci.sh {required/quick|required/contracts|required/ai-skill|required/server-manage|required/simple-shop|required/race|observational/persistence|observational/casdoor-rbac|observational/shop-microservices|scheduled/stress|scheduled/integration|consumer/futures}
+usage: scripts/ci.sh {required/quick|required/contracts|required/ai-skill|required/web-dist-sync|required/server-manage|required/simple-shop|required/race|observational/persistence|observational/casdoor-rbac|observational/shop-microservices|scheduled/stress|scheduled/integration|consumer/futures}
 EOF
 }
 
@@ -19,6 +19,9 @@ case "$GATE" in
     ;;
   required/ai-skill)
     command=("$ROOT/scripts/check-ai-skill.sh")
+    ;;
+  required/web-dist-sync)
+    command=("$ROOT/scripts/check-web-dist-sync.sh")
     ;;
   required/server-manage)
     command=(go test ./pkg/server/... ./service/manage/... -count=1 -timeout=10m)

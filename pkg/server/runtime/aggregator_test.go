@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -13,6 +14,16 @@ import (
 
 type fakeCluster struct {
 	nodes map[string][]*cluster.NodeInfo
+}
+
+type duplicateFailCluster struct{}
+
+func (duplicateFailCluster) List(context.Context, string, ...cluster.NodeStatus) ([]*cluster.NodeInfo, error) {
+	return nil, errors.New("cluster list failed")
+}
+
+func (duplicateFailCluster) ListServices(context.Context) ([]string, error) {
+	return []string{"positions", "positions"}, nil
 }
 
 func (f fakeCluster) List(_ context.Context, serviceName string, _ ...cluster.NodeStatus) ([]*cluster.NodeInfo, error) {
@@ -193,6 +204,137 @@ func TestAggregatorAsyncEdgesAggregateEventTypes(t *testing.T) {
 	require.Equal(t, 6.0, rate)
 }
 
+// TestAggregatorAsyncIdleSubscriptionIsNotCollectedWithoutWarning 验证从未发布的空闲订阅只保留诚实状态，不产生故障告警。
+func TestAggregatorAsyncIdleSubscriptionIsNotCollectedWithoutWarning(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"positions": {{ServiceName: "positions", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	t.Cleanup(idx.Register("positions", "funds.settlement.rejected", "SettlementRejected", true))
+
+	agg := runtime.NewAggregator(fc, labeledProm{samples: map[string]runtime.Vector{}}, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "5m")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Edges, 1)
+	require.Equal(t, "async", resp.Edges[0].Kind)
+	require.Empty(t, resp.Edges[0].Source)
+	require.Equal(t, "positions", resp.Edges[0].Target)
+	require.Equal(t, "funds.settlement.rejected", resp.Edges[0].SubjectFamily)
+	require.Equal(t, runtime.StateNotCollected, resp.Edges[0].State)
+	require.Nil(t, resp.Edges[0].RequestRate.Value)
+	for _, warning := range resp.Warnings {
+		require.NotEqual(t, "async_publish_missing", warning.Code)
+	}
+}
+
+// TestAggregatorAsyncExistingSeriesWithZeroRateIsNoTraffic 验证发布序列存在但窗口速率为零时标记无流量，不误报发布缺失。
+func TestAggregatorAsyncExistingSeriesWithZeroRateIsNoTraffic(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"funds":     {{ServiceName: "funds", Status: cluster.NodeStatusRunning}},
+		"positions": {{ServiceName: "positions", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	t.Cleanup(idx.Register("positions", "positions.position.updated", "PositionUpdated", true))
+	pubQ, err := runtime.EventPublishRateQuery("5m")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		pubQ: {{
+			Value: 0,
+			Metric: map[string]string{
+				"source_service": "funds",
+				"subject_family": "positions.position.updated",
+				"event_type":     "positionupdated",
+				"result_class":   "success",
+			},
+		}},
+	}}
+
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "5m")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Edges, 1)
+	require.Equal(t, "funds", resp.Edges[0].Source)
+	require.Equal(t, runtime.StateNoTraffic, resp.Edges[0].State)
+	require.NotNil(t, resp.Edges[0].RequestRate.Value)
+	require.Zero(t, *resp.Edges[0].RequestRate.Value)
+	for _, warning := range resp.Warnings {
+		require.NotEqual(t, "async_publish_missing", warning.Code)
+	}
+}
+
+// TestAggregatorAsyncPublishWithoutSubscriptionWarnsWithoutInventingEdge 验证真实发布缺少订阅时保留规格告警，但不猜测目标节点。
+func TestAggregatorAsyncPublishWithoutSubscriptionWarnsWithoutInventingEdge(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"pricing": {{ServiceName: "pricing", Status: cluster.NodeStatusRunning}},
+	}}
+	pubQ, err := runtime.EventPublishRateQuery("5m")
+	require.NoError(t, err)
+	fp := labeledProm{samples: map[string]runtime.Vector{
+		pubQ: {{
+			Value: 2,
+			Metric: map[string]string{
+				"source_service": "pricing",
+				"subject_family": "pricing.price.snapshot",
+				"event_type":     "pricesnapshot",
+				"result_class":   "success",
+			},
+		}},
+	}}
+
+	agg := runtime.NewAggregator(fc, fp, runtime.Config{Mode: "prometheus"})
+	resp, err := agg.Topology(context.Background(), "5m")
+
+	require.NoError(t, err)
+	require.Empty(t, resp.Edges)
+	require.Len(t, resp.Warnings, 1)
+	require.Equal(t, "async_subscription_missing", resp.Warnings[0].Code)
+	require.Contains(t, resp.Warnings[0].Message, "pricing.price.snapshot")
+	require.Contains(t, resp.Warnings[0].Message, "pricesnapshot")
+	require.Contains(t, resp.Warnings[0].Scope, "pricing.price.snapshot")
+}
+
+// TestAggregatorAsyncIdleFamiliesRemainDistinctWithoutWarningFlood 验证同一订阅方的多个空闲 family 各自成边且不重复刷缺发布告警。
+func TestAggregatorAsyncIdleFamiliesRemainDistinctWithoutWarningFlood(t *testing.T) {
+	fc := fakeCluster{nodes: map[string][]*cluster.NodeInfo{
+		"positions": {{ServiceName: "positions", Status: cluster.NodeStatusRunning}},
+	}}
+	idx := runtime.NewMemorySubscriptionIndex()
+	t.Cleanup(idx.Register("positions", "funds.settlement.rejected", "SettlementRejected", true))
+	t.Cleanup(idx.Register("positions", "positions.liquidation.tick", "LiquidationTick", true))
+
+	agg := runtime.NewAggregator(fc, labeledProm{samples: map[string]runtime.Vector{}}, runtime.Config{Mode: "prometheus"})
+	agg.SetSubscriptions(idx)
+	resp, err := agg.Topology(context.Background(), "5m")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Edges, 2)
+	families := map[string]bool{}
+	for _, edge := range resp.Edges {
+		families[edge.SubjectFamily] = true
+		require.Equal(t, runtime.StateNotCollected, edge.State)
+	}
+	require.True(t, families["funds.settlement.rejected"])
+	require.True(t, families["positions.liquidation.tick"])
+	for _, warning := range resp.Warnings {
+		require.NotEqual(t, "async_publish_missing", warning.Code)
+	}
+}
+
+// TestAggregatorTopologyDeduplicatesWarnings 验证同一轮拓扑响应按 code、scope、message 去重告警。
+func TestAggregatorTopologyDeduplicatesWarnings(t *testing.T) {
+	agg := runtime.NewAggregator(duplicateFailCluster{}, nil, runtime.Config{Mode: "off"})
+	resp, err := agg.Topology(context.Background(), "5m")
+
+	require.NoError(t, err)
+	require.Len(t, resp.Warnings, 1)
+	require.Equal(t, "cluster_partial", resp.Warnings[0].Code)
+	require.Equal(t, "positions", resp.Warnings[0].Scope)
+}
+
 func TestSubscriptionCancelIsIdempotent(t *testing.T) {
 	idx := runtime.NewMemorySubscriptionIndex()
 	cancel := idx.Register("shop-user", "order.changed", "OrderCreated", true)
@@ -237,6 +379,12 @@ func TestAggregatorPrometheusDownKeepsTopology(t *testing.T) {
 	require.NotEmpty(t, resp.Services)
 	require.Nil(t, resp.Services[0].RequestRate.Value)
 	require.Equal(t, runtime.StateUnavailable, resp.Services[0].RequestRate.State)
+	warningCodes := map[string]bool{}
+	for _, warning := range resp.Warnings {
+		warningCodes[warning.Code] = true
+	}
+	require.True(t, warningCodes["event_publish_query_partial"])
+	require.False(t, warningCodes["async_publish_missing"])
 }
 
 func TestAggregatorKnownService(t *testing.T) {

@@ -69,6 +69,10 @@ func (own *MenuManage) updateMenuModelAll(req types.IRequest) error {
 	if err := syncMenusAtomic(action, own.GetDefaultItemsWithRequest(req)); err != nil {
 		return err
 	}
+	// 存量目录的标题同样以代码为权威源，需要随服务实例的中英文案一起刷新
+	if err := syncDirectoryTitles(action, generatedDirectoryTitles()); err != nil {
+		return err
+	}
 	// 历史 UpdateMenu 曾把 reports.List/View 扫成菜单行，同步后删除这些 API 伪菜单
 	return removeStaleReportAPIMenus(action)
 }
@@ -108,7 +112,7 @@ func (own *MenuManage) GetDefaultItemsWithRequest(req types.IRequest) []*smodels
 				item = smodels.NewMenuModel()
 				item.Name = instanceName
 				name := strings.ToLower(item.Name)
-				item.Title=item.Name
+				item.Title, item.TitleEN = localeTitles(manageOwner(info), item.Name)
 				item.Url = buildMenuUrl(path, name)
 				item.Permissions = make([]*smodels.PermissionsModel, 0)
 				dirrows, err := dirList.SearchName(sc.Service.Name)
@@ -281,11 +285,8 @@ func clonePermissions(src []*smodels.PermissionsModel) []*smodels.PermissionsMod
 func (own *MenuManage) newDirectoryModel(req types.IRequest, sc *router.ServiceContext) *smodels.DirectoryModel {
 	diritem := smodels.NewDirectoryModel()
 	diritem.Name = sc.Service.Name
-	diritem.Title=diritem.Name
 	diritem.ID = req.NewID()
-	if ititle, ok := sc.Service.Instance.(types.ITitle); ok {
-		diritem.Title = ititle.GetTitle()
-	}
+	diritem.Title, diritem.TitleEN = localeTitles(sc.Service.Instance, diritem.Name)
 	return diritem
 }
 

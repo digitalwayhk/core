@@ -89,7 +89,8 @@ func syncOneMenu(action persistencetypes.IDataAction, generated *smodels.MenuMod
 	if err != nil {
 		return fmt.Errorf("load permissions for menu %s: %w", existing.Name, err)
 	}
-	if !permissionSetsChanged(oldPermissions, generated.Permissions) {
+	permissionsChanged := permissionSetsChanged(oldPermissions, generated.Permissions)
+	if !permissionsChanged && !displayTitlesChanged(existing, generated) {
 		return nil
 	}
 
@@ -97,6 +98,9 @@ func syncOneMenu(action persistencetypes.IDataAction, generated *smodels.MenuMod
 	merged.Permissions = nil
 	if err := action.Update(merged); err != nil {
 		return fmt.Errorf("update menu %s: %w", merged.Name, err)
+	}
+	if !permissionsChanged {
+		return nil
 	}
 	for _, permission := range oldPermissions {
 		if permission == nil || permission.ID == 0 {
@@ -136,12 +140,42 @@ func cloneGeneratedMenu(source *smodels.MenuModel) *smodels.MenuModel {
 	}
 	menu.Name = source.Name
 	menu.Title = source.Title
+	menu.TitleEN = source.TitleEN
 	menu.Description = source.Description
 	menu.Sort = source.Sort
 	menu.Icon = source.Icon
 	menu.Url = source.Url
 	menu.DirectoryModelID = source.DirectoryModelID
 	return menu
+}
+
+// syncDirectoryTitles 用生成结果刷新存量目录的中英标题。
+// 只写展示标题，不新建目录，也不触碰 Name、Url、Sort、Icon。
+func syncDirectoryTitles(action persistencetypes.IDataAction, generated []*smodels.DirectoryModel) error {
+	if action == nil {
+		return errors.New("directory persistence adapter unavailable")
+	}
+	directoryList := entity.NewModelList[smodels.DirectoryModel](action)
+	for _, item := range generated {
+		if item == nil || item.Name == "" {
+			continue
+		}
+		existing, err := directoryList.SearchOne(func(where *persistencetypes.SearchItem) {
+			where.AddWhereN("Name", item.Name)
+		})
+		if err != nil {
+			return fmt.Errorf("search directory %s: %w", item.Name, err)
+		}
+		if existing == nil || !directoryTitlesChanged(existing, item) {
+			continue
+		}
+		merged := mergeGeneratedDirectory(existing, item)
+		merged.MenuItems = nil
+		if err := action.Update(merged); err != nil {
+			return fmt.Errorf("update directory %s: %w", merged.Name, err)
+		}
+	}
+	return nil
 }
 
 // removeStaleReportAPIMenus 删除把报表 API 误当成导航的菜单（Name=List/View 等）。

@@ -185,3 +185,68 @@ func TestAuthenticatedSubscriptionOnlyExposesTypedHookMessage(t *testing.T) {
 	require.Equal(t, "账户已冻结", webSocketPublicMessage(err))
 	require.NotContains(t, webSocketPublicMessage(err), "internal")
 }
+
+// TestAuthenticatedSubscriptionSelectsAuthDomainPerRoute 固定 sub 路径的验签按路由所属
+// 认证域分流。此前这里把密钥与 AuthType 都写死成用户域，普通用户 Token 因此能通过
+// Manage 与 ServerManage 路由的验签，跨域隔离只剩订阅链路后面几道与认证无关的护栏
+// （Manage 路由没实现 IWebSocketUserIdentity、Hub 的服务归属校验）在挡。集成用例只断言
+// 「跨域订阅失败」，护栏在时看不出验签是否分流，所以这里直接盯住认证层本身。
+func TestAuthenticatedSubscriptionSelectsAuthDomainPerRoute(t *testing.T) {
+	newUserSession := func(t *testing.T, manageSecret string) *SessionSubscriptions {
+		t.Helper()
+		pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
+			Claims:              safe.NewClaims("user-1", "用户一"),
+			Identity:            types.AuthIdentity{UID: "user-1", Username: "用户一"},
+			AuthType:            types.AuthTypeUser,
+			IssuedAt:            time.Now().UTC(),
+			AccessSecret:        "websocket-access-secret",
+			AccessExpireSeconds: 3600,
+		})
+		require.NoError(t, err)
+		serverConfig := config.NewServiceDefaultConfig("shop", 0)
+		serverConfig.Auth.AccessSecret = "websocket-access-secret"
+		serverConfig.ManageAuth.AccessSecret = manageSecret
+		serverConfig.ServerManageAuth.AccessSecret = "servermanage-access-secret"
+		subscriptions := &SessionSubscriptions{manage: &MelodyManager{
+			serviceContext: &router.ServiceContext{Config: serverConfig},
+		}}
+		require.NoError(t, subscriptions.Logon(&SessionRequest{Token: pair.AccessToken}))
+		return subscriptions
+	}
+	authRoute := func(pathType types.ApiType) *types.RouterInfo {
+		return &types.RouterInfo{Path: "/ws/x", Method: "GET", PathType: pathType, Auth: true}
+	}
+
+	t.Run("UserTokenPassesPrivateRoute", func(t *testing.T) {
+		verified, err := newUserSession(t, "manage-access-secret").
+			authorizeAuthenticatedSubscription(authRoute(types.PrivateType), &webSocketAuthTestRequest{service: "shop"})
+
+		require.NoError(t, err, "用户域 Token 必须仍能进 Private 路由")
+		require.Equal(t, "user-1", verified.UID)
+	})
+
+	for _, tc := range []struct {
+		name     string
+		pathType types.ApiType
+	}{
+		{"ManageRoute", types.ManageType},
+		{"ServerManageRoute", types.ServerManagerType},
+	} {
+		t.Run("UserTokenRejectedOn"+tc.name, func(t *testing.T) {
+			_, err := newUserSession(t, "manage-access-secret").
+				authorizeAuthenticatedSubscription(authRoute(tc.pathType), &webSocketAuthTestRequest{service: "shop"})
+
+			require.Error(t, err)
+			require.Equal(t, "authentication failed", types.ResolvePublicError(err).Message)
+		})
+	}
+
+	// 即使把两个域的密钥配成同一个，AuthType 仍要把域分开：能否通过验签不能只由密钥决定。
+	t.Run("SharedSecretStillRejectsForeignAuthType", func(t *testing.T) {
+		_, err := newUserSession(t, "websocket-access-secret").
+			authorizeAuthenticatedSubscription(authRoute(types.ManageType), &webSocketAuthTestRequest{service: "shop"})
+
+		require.Error(t, err)
+		require.Equal(t, "authentication failed", types.ResolvePublicError(err).Message)
+	})
+}
