@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,6 +51,47 @@ func TestServerConfigDefaultsTrustedProxiesToEmpty(t *testing.T) {
 
 	require.NotNil(t, cfg.TrustedProxies)
 	require.Empty(t, cfg.TrustedProxies)
+}
+
+// TestServerConfigAppliesNeutralHMACHeaders 验证 Core 默认使用与消费方品牌无关的 HMAC Header。
+func TestServerConfigAppliesNeutralHMACHeaders(t *testing.T) {
+	cfg := NewServiceDefaultConfig("hmac-defaults", 18080)
+
+	require.Equal(t, "X-Access-Key", cfg.HMACAuth.AccessKeyHeader)
+	require.Equal(t, "X-Timestamp", cfg.HMACAuth.TimestampHeader)
+	require.Equal(t, "X-Nonce", cfg.HMACAuth.NonceHeader)
+	require.Equal(t, "X-Signature", cfg.HMACAuth.SignatureHeader)
+	require.Equal(t, "X-Recv-Window", cfg.HMACAuth.RecvWindowHeader)
+	require.Positive(t, cfg.HMACAuth.MaxInFlight)
+}
+
+// TestLegacyServerConfigWithoutHMACSectionAppliesDefaults 验证旧配置缺少 HMACAuth 节时仍可无损加载。
+func TestLegacyServerConfigWithoutHMACSectionAppliesDefaults(t *testing.T) {
+	var cfg ServerConfig
+	require.NoError(t, json.Unmarshal([]byte(`{"Name":"legacy","Host":"127.0.0.1","Port":18080}`), &cfg))
+
+	cfg.ApplyDefaults()
+
+	require.NoError(t, cfg.Validate())
+	require.Equal(t, "X-Access-Key", cfg.HMACAuth.AccessKeyHeader)
+	require.Equal(t, "X-Signature", cfg.HMACAuth.SignatureHeader)
+	require.Equal(t, 64, cfg.HMACAuth.MaxInFlight)
+}
+
+// TestServerConfigRejectsConflictingHMACHeaders 验证凭证 Header 重名时配置 fail closed。
+func TestServerConfigRejectsConflictingHMACHeaders(t *testing.T) {
+	cfg := NewServiceDefaultConfig("hmac-conflict", 18081)
+	cfg.HMACAuth.SignatureHeader = cfg.HMACAuth.AccessKeyHeader
+
+	require.ErrorContains(t, cfg.Validate(), "HMACAuth")
+}
+
+// TestServerConfigRejectsNegativeHMACConcurrency 验证非法并发上限不得进入运行时。
+func TestServerConfigRejectsNegativeHMACConcurrency(t *testing.T) {
+	cfg := NewServiceDefaultConfig("hmac-negative-concurrency", 18082)
+	cfg.HMACAuth.MaxInFlight = -1
+
+	require.ErrorContains(t, cfg.Validate(), "MaxInFlight")
 }
 
 func TestServerConfigValidatesTrustedProxies(t *testing.T) {

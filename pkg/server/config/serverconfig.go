@@ -30,15 +30,16 @@ type ServerConfig struct {
 	IsWhiteList           bool
 	WhiteList             []string
 	TrustedProxies        []string
+	HMACAuth              HMACAuthConfig `json:",optional"`
 	IsLoaclVisit          bool
 	RemoteAccessManageAPI bool
-	MelodyConfigPath      string               `json:",optional"`
-	Cluster               ClusterConfig        `json:",optional"`
-	Transport             TransportConfig      `json:",optional"`
-	MQ                    MQConfig             `json:",optional"`
-	RouteCache             RouteCacheConfig             `json:",optional"`
-	AuthRevocation         AuthRevocationConfig         `json:",optional"`
-	RuntimeObservability   RuntimeObservabilityConfig   `json:",optional"`
+	MelodyConfigPath      string                     `json:",optional"`
+	Cluster               ClusterConfig              `json:",optional"`
+	Transport             TransportConfig            `json:",optional"`
+	MQ                    MQConfig                   `json:",optional"`
+	RouteCache            RouteCacheConfig           `json:",optional"`
+	AuthRevocation        AuthRevocationConfig       `json:",optional"`
+	RuntimeObservability  RuntimeObservabilityConfig `json:",optional"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -57,6 +58,7 @@ func (con *ServerConfig) ApplyDefaults() {
 	con.RouteCache.ApplyDefaults()
 	con.AuthRevocation.ApplyDefaults(con.Name)
 	con.RuntimeObservability.ApplyDefaults()
+	con.HMACAuth.ApplyDefaults()
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
@@ -90,6 +92,11 @@ func (con *ServerConfig) Validate() error {
 		return err
 	}
 	if err := con.RuntimeObservability.Validate(); err != nil {
+		return err
+	}
+	hmacAuth := con.HMACAuth
+	hmacAuth.ApplyDefaults()
+	if err := hmacAuth.Validate(); err != nil {
 		return err
 	}
 	if err := con.validateCasdoorSecrets(); err != nil {
@@ -176,6 +183,80 @@ type AuthSecret struct {
 	RefreshSecret string
 	RefreshExpire int64
 	CasDoor       CasDoorConfig
+}
+
+// HMACAuthConfig 配置 Auth 用户域 REST 凭证头和未认证 Hook 的进程内并发上限。
+// 是否启用由服务是否实现 IHMACAuthProvider 决定；Manage 与 ServerManage 不读取本配置。
+type HMACAuthConfig struct {
+	AccessKeyHeader  string `json:",default=X-Access-Key"`
+	TimestampHeader  string `json:",default=X-Timestamp"`
+	NonceHeader      string `json:",default=X-Nonce"`
+	SignatureHeader  string `json:",default=X-Signature"`
+	RecvWindowHeader string `json:",default=X-Recv-Window"`
+	MaxInFlight      int    `json:",default=64"`
+}
+
+const defaultHMACMaxInFlight = 64
+
+// ApplyDefaults 补充中性 HMAC Header 名和安全的进程内并发上限。
+func (c *HMACAuthConfig) ApplyDefaults() {
+	if c.AccessKeyHeader == "" {
+		c.AccessKeyHeader = "X-Access-Key"
+	}
+	if c.TimestampHeader == "" {
+		c.TimestampHeader = "X-Timestamp"
+	}
+	if c.NonceHeader == "" {
+		c.NonceHeader = "X-Nonce"
+	}
+	if c.SignatureHeader == "" {
+		c.SignatureHeader = "X-Signature"
+	}
+	if c.RecvWindowHeader == "" {
+		c.RecvWindowHeader = "X-Recv-Window"
+	}
+	if c.MaxInFlight == 0 {
+		c.MaxInFlight = defaultHMACMaxInFlight
+	}
+}
+
+// Validate 拒绝非法、重复 Header 名和无效并发上限。
+func (c HMACAuthConfig) Validate() error {
+	headers := []string{c.AccessKeyHeader, c.TimestampHeader, c.NonceHeader, c.SignatureHeader, c.RecvWindowHeader}
+	seen := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		if !validHTTPHeaderName(header) {
+			return fmt.Errorf("HMACAuth header name is invalid: %q", header)
+		}
+		key := strings.ToLower(header)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("HMACAuth header names must be distinct")
+		}
+		seen[key] = struct{}{}
+	}
+	if c.MaxInFlight <= 0 {
+		return fmt.Errorf("HMACAuth MaxInFlight must be positive")
+	}
+	return nil
+}
+
+func validHTTPHeaderName(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 const (

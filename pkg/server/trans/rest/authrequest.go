@@ -1,14 +1,17 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -110,7 +113,13 @@ func bearerAccessToken(header string) (string, bool) {
 
 // internalJWTAuthorize 验证框架签发的 Access Token，并把已验证 Claims 注入请求上下文。
 // 不使用 go-zero 默认 Authorize 的失败日志，因为它会转储包含 Authorization 的完整请求。
-func internalJWTAuthorize(secret string, authType types.AuthType, next http.Handler) http.Handler {
+func internalJWTAuthorize(
+	sc *router.ServiceContext,
+	info *types.RouterInfo,
+	secret string,
+	authType types.AuthType,
+	next http.Handler,
+) http.Handler {
 	if next == nil {
 		next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writePublicErrorContract(w, types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract())
@@ -118,26 +127,178 @@ func internalJWTAuthorize(secret string, authType types.AuthType, next http.Hand
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearerAccessToken(r.Header.Get("Authorization"))
-		if !ok {
+		if ok {
+			verified, err := safe.ValidateAccessToken(token, secret, authType, time.Now().UTC())
+			if err != nil {
+				writeInternalJWTUnauthorized(w, authType)
+				return
+			}
+			serveVerifiedAccess(w, r, verified, next)
+			return
+		}
+		if authType != types.AuthTypeUser || sc == nil || info == nil {
 			writeInternalJWTUnauthorized(w, authType)
 			return
 		}
-		verified, err := safe.ValidateAccessToken(token, secret, authType, time.Now().UTC())
-		if err != nil {
+		credentials, present := extractHMACHeaders(r, sc.Config)
+		if !present {
 			writeInternalJWTUnauthorized(w, authType)
 			return
 		}
-		ctx := r.Context()
-		for key, value := range verified.Claims {
-			ctx = context.WithValue(ctx, key, value)
+		provider, active := sc.GetHMACAuthRuntime()
+		if !active || provider == nil {
+			writeInternalJWTUnauthorized(w, authType)
+			return
 		}
-		ctx = context.WithValue(ctx, verifiedAccessContextKey{}, verifiedAccessContext{
-			identity: verified.Identity,
-			claims:   types.CloneAuthClaims(verified.Claims),
+		result, err := sc.InvokePreparedHMACAuth(r.Context(), func(hookCtx context.Context) (types.HMACAuthArgs, error) {
+			body, err := readHMACBody(hookCtx, r, hmacBodyLimit(sc))
+			if err != nil {
+				if !errors.Is(err, errHMACBodyTooLarge) {
+					err = types.NewPublicError(types.ErrorKindInternal, 0, "", err)
+				}
+				return types.HMACAuthArgs{}, err
+			}
+			bodyHash := sha256.Sum256(body)
+			credentials.Method = info.GetMethod()
+			credentials.Path = info.GetPath()
+			credentials.PathType = info.GetPathType()
+			credentials.Query = r.URL.RawQuery
+			credentials.BodyHashHex = hex.EncodeToString(bodyHash[:])
+			credentials.ClientIP = utils.ClientPublicIP(r, sc.Config.TrustedProxies...)
+			credentials.TraceID = ensureAuthRequestTraceID(r)
+			return credentials, nil
 		})
-		ctx = safe.WithVerifiedSecretClaims(ctx, verified.SecretClaims)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		if err != nil {
+			if errors.Is(err, errHMACBodyTooLarge) {
+				writePublicErrorContract(w, types.NewPublicError(types.ErrorKindPayloadTooLarge, 0, "", nil).PublicErrorContract())
+				return
+			}
+			writeHMACAccessDenied(w, sc, info, authType, credentials.AccessKey, err)
+			return
+		}
+		maxLifetime := time.Duration(sc.Config.Auth.AccessExpire) * time.Second
+		if maxLifetime <= 0 {
+			maxLifetime = time.Duration(config.DefaultAccessExpireSeconds) * time.Second
+		}
+		verified, err := safe.BuildHMACAccessIdentity(result, credentials.AccessKey, authType, time.Now().UTC(), maxLifetime)
+		if err != nil {
+			writeHMACAccessDenied(w, sc, info, authType, credentials.AccessKey, err)
+			return
+		}
+		serveVerifiedAccess(w, r, verified, next)
 	})
+}
+
+func serveVerifiedAccess(w http.ResponseWriter, r *http.Request, verified *safe.AccessTokenIdentity, next http.Handler) {
+	ctx := r.Context()
+	for key, value := range verified.Claims {
+		ctx = context.WithValue(ctx, key, value)
+	}
+	ctx = context.WithValue(ctx, verifiedAccessContextKey{}, verifiedAccessContext{
+		identity: verified.Identity,
+		claims:   types.CloneAuthClaims(verified.Claims),
+	})
+	if len(verified.SecretClaims) > 0 {
+		ctx = safe.WithVerifiedSecretClaims(ctx, verified.SecretClaims)
+	}
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func extractHMACHeaders(r *http.Request, cfg *config.ServerConfig) (types.HMACAuthArgs, bool) {
+	if r == nil || cfg == nil {
+		return types.HMACAuthArgs{}, false
+	}
+	headers := cfg.HMACAuth
+	args := types.HMACAuthArgs{
+		AccessKey:  strings.TrimSpace(r.Header.Get(headers.AccessKeyHeader)),
+		Timestamp:  strings.TrimSpace(r.Header.Get(headers.TimestampHeader)),
+		Nonce:      strings.TrimSpace(r.Header.Get(headers.NonceHeader)),
+		Signature:  strings.TrimSpace(r.Header.Get(headers.SignatureHeader)),
+		RecvWindow: strings.TrimSpace(r.Header.Get(headers.RecvWindowHeader)),
+	}
+	return args, args.AccessKey != "" && args.Timestamp != "" && args.Nonce != "" && args.Signature != ""
+}
+
+var errHMACBodyTooLarge = errors.New("HMAC request body too large")
+
+func hmacBodyLimit(sc *router.ServiceContext) int64 {
+	const defaultLimit int64 = 1 << 20
+	if sc == nil || sc.Config == nil || sc.Config.MaxBytes <= 0 {
+		return defaultLimit
+	}
+	return sc.Config.MaxBytes
+}
+
+func readHMACBody(ctx context.Context, r *http.Request, limit int64) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return []byte{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	bodyStream := r.Body
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = bodyStream.Close()
+	})
+	defer stopClose()
+	body, err := io.ReadAll(io.LimitReader(bodyStream, limit+1))
+	if closeErr := bodyStream.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, errHMACBodyTooLarge
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
+}
+
+func writeHMACAccessDenied(
+	w http.ResponseWriter,
+	sc *router.ServiceContext,
+	info *types.RouterInfo,
+	authType types.AuthType,
+	accessKey string,
+	err error,
+) {
+	contract := hmacPublicErrorContract(err)
+	serviceName := ""
+	path := ""
+	if sc != nil && sc.Service != nil {
+		serviceName = sc.Service.Name
+	}
+	if info != nil {
+		path = info.GetPath()
+	}
+	identityHash := authRequestIdentityHash(serviceName, authType, types.AuthIdentity{
+		Provider: "hmac", ProviderSubject: accessKey,
+	})
+	logx.Infow("hmac_access_denied",
+		logx.Field("service", serviceName), logx.Field("route", path),
+		logx.Field("auth_type", authType), logx.Field("identity_hash", identityHash),
+		logx.Field("code", contract.Code),
+	)
+	writePublicErrorContract(w, contract)
+}
+
+func hmacPublicErrorContract(err error) types.PublicErrorContract {
+	type contractProvider interface {
+		PublicErrorContract() types.PublicErrorContract
+	}
+	var provider contractProvider
+	if errors.As(err, &provider) {
+		switch provider.PublicErrorContract().Kind {
+		case types.ErrorKindUnavailable:
+			return types.NewPublicError(types.ErrorKindUnavailable, 0, "", nil).PublicErrorContract()
+		case types.ErrorKindRateLimited:
+			return types.NewPublicError(types.ErrorKindRateLimited, 0, "", nil).PublicErrorContract()
+		case types.ErrorKindInternal:
+			return types.NewPublicError(types.ErrorKindInternal, 0, "", nil).PublicErrorContract()
+		}
+	}
+	return types.NewPublicError(types.ErrorKindUnauthenticated, types.PublicCodeUnauthenticated, "authentication failed", nil).PublicErrorContract()
 }
 
 func writeInternalJWTUnauthorized(w http.ResponseWriter, authType types.AuthType) {

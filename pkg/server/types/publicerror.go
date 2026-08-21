@@ -15,6 +15,7 @@ const (
 	ErrorKindConflict        ErrorKind = "conflict"
 	ErrorKindBusiness        ErrorKind = "business"
 	ErrorKindRateLimited     ErrorKind = "rate_limited"
+	ErrorKindPayloadTooLarge ErrorKind = "payload_too_large"
 	ErrorKindUnavailable     ErrorKind = "unavailable"
 	ErrorKindInternal        ErrorKind = "internal"
 )
@@ -29,6 +30,7 @@ const (
 	PublicCodeConflict                  = 40900
 	PublicCodeBusiness                  = 42200
 	PublicCodeRateLimited               = 42900
+	PublicCodePayloadTooLarge           = 41300
 	PublicCodeInternal                  = 50000
 	PublicCodeUnavailable               = 50300
 	PublicCodeAuthDependencyUnavailable = 50301
@@ -111,6 +113,8 @@ func defaultPublicErrorContract(kind ErrorKind) PublicErrorContract {
 		return PublicErrorContract{Kind: kind, Code: PublicCodeBusiness, HTTPStatus: 422, Message: "business rule rejected"}
 	case ErrorKindRateLimited:
 		return PublicErrorContract{Kind: kind, Code: PublicCodeRateLimited, HTTPStatus: 429, Message: "rate limit exceeded"}
+	case ErrorKindPayloadTooLarge:
+		return PublicErrorContract{Kind: kind, Code: PublicCodePayloadTooLarge, HTTPStatus: 413, Message: "request entity too large"}
 	case ErrorKindUnavailable:
 		return PublicErrorContract{Kind: kind, Code: PublicCodeUnavailable, HTTPStatus: 503, Message: "service unavailable"}
 	default:

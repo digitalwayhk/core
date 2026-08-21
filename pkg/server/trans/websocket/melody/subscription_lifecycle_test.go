@@ -75,3 +75,29 @@ func TestHandleSubscribeDoesNotLogSuccessWhenRouteIsMissing(t *testing.T) {
 
 	require.False(t, strings.Contains(output.String(), "客户端订阅成功"), output.String())
 }
+
+// TestMalformedWebSocketMessageLogDoesNotExposeHMACCredentials 验证无法解析的 logon payload 不会把 HMAC 凭证写入日志。
+func TestMalformedWebSocketMessageLogDoesNotExposeHMACCredentials(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() {
+		logx.Reset()
+		if previous != nil {
+			logx.SetWriter(previous)
+		}
+	})
+
+	session := &melody.Session{Request: &http.Request{RemoteAddr: "127.0.0.1:10000"}}
+	manager := &MelodyManager{melody: melody.New()}
+	payload := []byte(`{"event":"noop","channel":"logon","data":{"apiKey":"secret-key","signature":"secret-signature","nonce":"secret-nonce"},}`)
+
+	manager.handleMessage(session, payload)
+
+	logOutput := output.String()
+	require.Contains(t, logOutput, "websocket_json_parse_failed")
+	require.Contains(t, logOutput, "message_bytes")
+	for _, secret := range []string{"secret-key", "secret-signature", "secret-nonce", string(payload)} {
+		require.NotContains(t, logOutput, secret)
+	}
+}

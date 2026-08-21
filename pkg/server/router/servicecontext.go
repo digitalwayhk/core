@@ -39,6 +39,17 @@ var processLocalRegistry = cluster.NewLocalProvider(
 	config.DefaultClusterInstanceReuseCooldown,
 )
 
+type hmacAuthLifecycle struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+func newHMACAuthLifecycle() *hmacAuthLifecycle {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &hmacAuthLifecycle{ctx: ctx, cancel: cancel}
+}
+
 func init() {
 	processLocalRegistry.Start()
 }
@@ -71,13 +82,16 @@ type ServiceContext struct {
 	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
 	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
 	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
+	HMACAuthProvider         types.IHMACAuthProvider         `json:"-"`
 	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
-	CasdoorClients           *casdoorauth.ClientSet          `json:"-"`
-	AuthRevocationManager    *authstate.Manager              `json:"-"`
-	ClusterProvider          cluster.DiscoveryProvider       `json:"-"`
-	localFallbackProvider    cluster.DiscoveryProvider       `json:"-"`
-	ClusterSwitcher          cluster.ProviderSwitcher        `json:"-"`
-	ServiceResolver          *ServiceResolver                `json:"-"`
+	hmacAuthSlots            chan struct{}
+	hmacAuthLifecycle        *hmacAuthLifecycle
+	CasdoorClients           *casdoorauth.ClientSet    `json:"-"`
+	AuthRevocationManager    *authstate.Manager        `json:"-"`
+	ClusterProvider          cluster.DiscoveryProvider `json:"-"`
+	localFallbackProvider    cluster.DiscoveryProvider `json:"-"`
+	ClusterSwitcher          cluster.ProviderSwitcher  `json:"-"`
+	ServiceResolver          *ServiceResolver          `json:"-"`
 	ServiceInstanceID        string
 	// RuntimeAggregator 由 ServerManage 查询端持有；业务进程可为 nil。
 	RuntimeAggregator   *runtime.Aggregator `json:"-"`
@@ -344,6 +358,110 @@ func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IA
 		return nil, nil, false
 	}
 	return own.AuthRevocationManager, own.AuthRequestHookProvider, true
+}
+
+// GetHMACAuthRuntime 返回 HMAC Provider 的生命周期快照。
+// active 为 false 表示服务已终止；Provider 为 nil 表示服务没有实现该可选能力。
+func (own *ServiceContext) GetHMACAuthRuntime() (types.IHMACAuthProvider, bool) {
+	if own == nil {
+		return nil, false
+	}
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.terminated {
+		return nil, false
+	}
+	return own.HMACAuthProvider, true
+}
+
+// InvokeHMACAuth 在有界并发、超时和 panic 隔离下调用服务 HMAC Provider。
+func (own *ServiceContext) InvokeHMACAuth(ctx context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+	return own.InvokePreparedHMACAuth(ctx, func(context.Context) (types.HMACAuthArgs, error) {
+		return args, nil
+	})
+}
+
+// InvokePreparedHMACAuth 在同一并发名额内完成未认证输入预处理和 Provider 调用。
+// prepare 必须响应 ctx 取消，且不得记录凭证或原始请求体。
+func (own *ServiceContext) InvokePreparedHMACAuth(
+	ctx context.Context,
+	prepare func(context.Context) (types.HMACAuthArgs, error),
+) (*types.HMACAuthResult, error) {
+	if own == nil {
+		return nil, types.NewPublicError(types.ErrorKindUnauthenticated, 0, "", errors.New("HMAC authentication context unavailable"))
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if prepare == nil {
+		return nil, types.NewPublicError(types.ErrorKindInternal, 0, "", errors.New("HMAC authentication preparation unavailable"))
+	}
+	own.lifecycleMu.Lock()
+	if own.terminated || own.HMACAuthProvider == nil {
+		own.lifecycleMu.Unlock()
+		return nil, types.NewPublicError(types.ErrorKindUnauthenticated, 0, "", errors.New("HMAC authentication unavailable"))
+	}
+	provider := own.HMACAuthProvider
+	if own.hmacAuthLifecycle == nil {
+		own.hmacAuthLifecycle = newHMACAuthLifecycle()
+	}
+	lifecycle := own.hmacAuthLifecycle
+	slots := own.hmacAuthSlots
+	if slots == nil {
+		maxInFlight := 64
+		if own.Config != nil && own.Config.HMACAuth.MaxInFlight > 0 {
+			maxInFlight = own.Config.HMACAuth.MaxInFlight
+		}
+		slots = make(chan struct{}, maxInFlight)
+		own.hmacAuthSlots = slots
+	}
+	timeout := 3 * time.Second
+	if own.Config != nil && own.Config.Timeout > 0 {
+		timeout = time.Duration(own.Config.Timeout) * time.Millisecond
+	}
+	select {
+	case slots <- struct{}{}:
+	default:
+		own.lifecycleMu.Unlock()
+		return nil, types.NewPublicError(types.ErrorKindRateLimited, 0, "", errors.New("HMAC authentication is busy"))
+	}
+	lifecycle.wg.Add(1)
+	own.lifecycleMu.Unlock()
+
+	hookCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	stopLifecycleCancel := context.AfterFunc(lifecycle.ctx, cancel)
+	defer stopLifecycleCancel()
+	type hookResult struct {
+		result *types.HMACAuthResult
+		err    error
+	}
+	resultCh := make(chan hookResult, 1)
+	go func() {
+		defer func() { <-slots }()
+		defer lifecycle.wg.Done()
+		defer func() {
+			if recover() != nil {
+				resultCh <- hookResult{err: types.NewPublicError(types.ErrorKindInternal, 0, "", errors.New("HMAC authentication hook panic"))}
+			}
+		}()
+		args, err := prepare(hookCtx)
+		if err != nil {
+			resultCh <- hookResult{err: err}
+			return
+		}
+		result, err := provider.AuthenticateHMAC(hookCtx, args)
+		resultCh <- hookResult{result: result, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		if hookCtx.Err() != nil {
+			return nil, types.NewPublicError(types.ErrorKindInternal, 0, "", errors.New("HMAC authentication hook timeout"))
+		}
+		return result.result, result.err
+	case <-hookCtx.Done():
+		return nil, types.NewPublicError(types.ErrorKindInternal, 0, "", errors.New("HMAC authentication hook timeout"))
+	}
 }
 
 // EnableEventBridge wires an in-process event.Stream to the MQManager so that
@@ -736,6 +854,15 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	if provider, ok := service.(types.IAuthRequestHookProvider); ok {
 		sc.AuthRequestHookProvider = provider
 	}
+	if provider, ok := service.(types.IHMACAuthProvider); ok {
+		sc.HMACAuthProvider = provider
+		sc.hmacAuthLifecycle = newHMACAuthLifecycle()
+		maxInFlight := 64
+		if con != nil && con.HMACAuth.MaxInFlight > 0 {
+			maxInFlight = con.HMACAuth.MaxInFlight
+		}
+		sc.hmacAuthSlots = make(chan struct{}, maxInFlight)
+	}
 	if provider, ok := service.(types.ICasdoorEventHookProvider); ok {
 		sc.CasdoorEventHookProvider = provider
 	}
@@ -1039,6 +1166,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 	routeCacheManager := own.RouteCacheManager
 	publicRateLimiter := own.PublicRateLimiter
 	authRevocationManager := own.AuthRevocationManager
+	hmacAuthLifecycle := own.hmacAuthLifecycle
 	serviceResolver := own.ServiceResolver
 	ownsClusterProvider := own.ownsClusterProvider
 	grpcServer := own.grpcServer
@@ -1055,6 +1183,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.AuthRevocationManager = nil
 		own.CasdoorClients = nil
 		own.AuthRequestHookProvider = nil
+		own.HMACAuthProvider = nil
+		own.hmacAuthLifecycle = nil
 		own.CasdoorEventHookProvider = nil
 		own.AuthHookProvider = nil
 		own.EventStream = nil
@@ -1062,6 +1192,25 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.ownsClusterProvider = false
 	}
 	own.lifecycleMu.Unlock()
+	if !state && hmacAuthLifecycle != nil {
+		hmacAuthLifecycle.cancel()
+		hmacDone := make(chan struct{})
+		go func() {
+			hmacAuthLifecycle.wg.Wait()
+			close(hmacDone)
+		}()
+		wait := own.lifecycleDuration()
+		select {
+		case <-hmacDone:
+		case <-time.After(wait):
+			err := fmt.Errorf("HMAC authentication hooks did not stop within %s", wait)
+			own.recordShutdownError(err)
+			logx.Errorw("hmac_auth_shutdown_timeout",
+				logx.Field("service", own.Service.Name),
+				logx.Field("timeout", wait),
+			)
+		}
+	}
 	if !state && authRevocationManager != nil {
 		authRevocationManager.BeginClose()
 	}

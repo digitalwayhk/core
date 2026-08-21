@@ -51,10 +51,23 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 - local 模式使用 Badger，适合单实例。shared 模式使用 Redis 权威且必须启用 MQ `event-stream`；Redis/EventBridge 故障时认证面 fail closed，Public REST 保持可用。
 - WebSocket 登录与每次认证订阅都重新验证 Access Token 和撤销权威；更高世代、blocked 事件或共享权威不可用会关闭旧 Casdoor 连接。
 
+## 可选 HMAC 请求认证
+
+服务可选实现 `types.IHMACAuthProvider`，用于在没有 Bearer 的 **Auth 用户域**验证请求签名。未实现时 Private REST 与用户 WebSocket 继续只认框架 Access Token，Manage 与 ServerManage 无论是否携带 HMAC Header 都不进入该 Hook。
+
+- Core 只从 `ServerConfig.HMACAuth` 配置的中性 REST Header 提取 AccessKey、Timestamp、Nonce、Signature 和可选 RecvWindow；REST 不从 query 提取、移除或规范化凭证，客户端不得用 query 提交 HMAC 凭证，WebSocket 只从 logon JSON 提取。`HMACAuthArgs.Query` 原样保留业务 `RawQuery`，签名串排序仍由消费方负责。
+- Core 在确认 Provider 存在并预留 `MaxInFlight` 名额后，才有界、有超时地读取并恢复请求体，按原始字节计算 SHA-256；HMAC 分支即使挂到 `NewExternalRouterHandler` 也受 `ServerConfig.MaxBytes` 硬限制。Core 不持有 HMAC Secret、不实现算法、不存 nonce，也不读取业务权限。
+- Provider 成功返回 `HMACAuthResult`：UID、AuthType、非 Casdoor Provider 和稳定 `ProviderSubject` 必须完整；`ProviderSubject` 应是凭证记录 ID，禁止放原始 AccessKey。业务 Claims 可先调用 `safe.ValidateHMACAuthClaims` 预检查，不得使用 `uid`、`uname`、`auth_type`、`token_use`、`iat`、`exp`、`auth_provider`、`provider_subject`、`auth_generation`、`auth_authority_service`、`args`、`secret_args` 保留键。
+- Core 在 `safe.BuildHMACAccessIdentity` 统一构造可信身份，随后复用 JWT 相同的 verified context、请求授权链和 `OnAuthRequest`；非 Casdoor 的 HMAC 身份不进入 Casdoor 世代校验。Bearer 始终优先，只要存在非空 Bearer，就不降级尝试 HMAC。
+- 当服务实现 `IHMACAuthProvider` 时，`/api/openapi` 为 Private 操作生成 Bearer OR HMAC 安全要求，并通过 `x-core-hmac-auth` 公开实际 Header、Core 会交给 Provider 的可用字段和 Bearer 优先规则；签名算法、字段选择与规范化均由 Provider 定义。仅 `ServerOption.IsWebSocket=true` 时，顶层 `x-core-websocket-hmac-logon` 才公开 `event=sub`、`channel=logon` 的 `data_schema`。未实现 Provider 时不生成这些契约。
+- HMAC 凭证拒绝统一返回 `authentication failed`，不得向未认证调用方透出 Provider 的业务消息。日志只记录 `hmac_access_denied` 与凭证摘要，不记录 AccessKey、Signature、Nonce、RawQuery 或 body。
+- HMAC Hook 使用 ServiceContext 级 `MaxInFlight` 名额、服务 Timeout、panic 隔离并 fail closed；REST 从读 body 到 Provider 返回全程占用同一名额。Provider 必须响应请求、WebSocket 会话和 ServiceContext 关闭的 `ctx` 取消；服务停止时 Core 先禁止新调用、取消存量 Hook，再在生命周期超时内等待。忽略取消的调用会继续占用 Hook 槽位直到真正返回，防止超时 goroutine 无界堆积；关闭等待超时会记入 `ShutdownError`。
+- WebSocket HMAC 只在 logon 调用一次，订阅不重放签名或 nonce；每次认证订阅仍校验目标域必须为 Auth 用户域并继续执行 `OnAuthRequest`。会话到期时间不晚于 `Auth.AccessExpire`，Provider 返回更早的 `Identity.ExpiresAt` 时取更早值；到期先标记失效并关闭连接，再清理订阅。断连必须取消进行中的 HMAC Hook、停止到期计时器并释放缓存身份；重新登录一律清理旧的认证订阅，避免同 UID 降权后仍保留旧授权。
+- HMAC logon 成功后立即清除 SessionRequest 中的 Signature、Nonce、Timestamp、RecvWindow，并只保留掩码后的 ApiKey、可信身份、Claims 和到期时间。
+
 验证命令：
 
 ```bash
 ./scripts/test.sh security
 CORE_TEST_REDIS_ADDR=127.0.0.1:6379 ./scripts/test.sh integration-casdoor-auth
 ```
-

@@ -163,6 +163,8 @@ func TestRouteHandlerAllowsVerifiedInternalJWTIdentity(t *testing.T) {
 	setRequestPath(request, path)
 	recorder := httptest.NewRecorder()
 	handler := internalJWTAuthorize(
+		sc,
+		nil,
 		sc.Config.Auth.AccessSecret,
 		types.AuthTypeUser,
 		RouteHandler(sc.Router),
@@ -184,6 +186,8 @@ func TestRouteHandlerRejectsVerifiedUserIdentityOnManageRoute(t *testing.T) {
 	setRequestPath(request, path)
 	recorder := httptest.NewRecorder()
 	handler := internalJWTAuthorize(
+		sc,
+		nil,
 		sc.Config.Auth.AccessSecret,
 		types.AuthTypeUser,
 		RouteHandler(sc.Router),

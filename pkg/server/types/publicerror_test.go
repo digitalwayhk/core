@@ -51,6 +51,16 @@ func TestResolvePublicErrorDoesNotClassifyByMessage(t *testing.T) {
 	}
 }
 
+// TestPayloadTooLargePublicErrorContract 验证请求体超限使用独立的 413 状态和稳定公开错误码。
+func TestPayloadTooLargePublicErrorContract(t *testing.T) {
+	contract := NewPublicError(ErrorKindPayloadTooLarge, 0, "", nil).PublicErrorContract()
+
+	require.Equal(t, ErrorKindPayloadTooLarge, contract.Kind)
+	require.Equal(t, PublicCodePayloadTooLarge, contract.Code)
+	require.Equal(t, 413, contract.HTTPStatus)
+	require.Equal(t, "request entity too large", contract.Message)
+}
+
 func TestLegacyTypeErrorStageCodesRemainStable(t *testing.T) {
 	tests := []struct {
 		operation string

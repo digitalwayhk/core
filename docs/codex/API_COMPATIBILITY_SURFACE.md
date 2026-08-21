@@ -54,7 +54,7 @@
 | OpenAPI HTTP 入口 | Stable security | `/api/openapi` 匿名且过滤内部专用 Public；`/api/internal/openapi` 使用 ServerManageAuth，可用 `service` 筛选并禁止缓存 | run/public/rest 定向测试 |
 | 默认成功/失败 JSON | Stable baseline | `traceid/errorCode/errorMessage/success/duration/data/host/showType` | `pkg/server/router.Response`；15.2 改造前不得改字段名或含义 |
 | 自定义 `INewResponse` | Stable | 响应实例与 JSON 由服务拥有，框架只依赖 `IResponse` | `pkg/server/router.Request.NewResponse` |
-| 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
+| 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；`payload_too_large` 固定为 HTTP 413 / `41300`；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
 | 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和 600/700/800 保留；parse/validation→400，do→422，panic/未知→500 | `pkg/server/types/typeerror.go`、兼容测试 |
 | 未分类普通错误 | Stable security | 固定返回 HTTP 500、`50000` 和 `internal server error`，不得按错误文字猜状态 | `pkg/server/trans/rest/error.go`、安全测试 |
 | Casdoor 配置与回调 | Stable | `/api/casdoor?type=auth|manage&service=<name>` 返回目标服务对应域配置；回调路径为 `/api/casdoor/callback` 并保留可选 `service`；旧 `/api/callback` 已删除 | `pkg/server/api/public/casdoor.go`、`casdoorcallback.go`、真实集成测试 |
@@ -86,7 +86,7 @@
 | ServiceContext 运行资源关闭 | Stable | owner 有界关闭、重复关闭幂等、关闭后不承诺复用 | 任务 12/14 生命周期与 race 测试 |
 | Provider 注册扩展点 | Stable（已登记部分） | 注册、注销、并发与关闭语义保持 | cluster/transport/mq factory 测试 |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
-| 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试 | `pkg/server/types/auth.go`、认证 Hook 测试 |
+| 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
 
 ## Casdoor 迁移与运行约束
 
@@ -94,6 +94,9 @@
 - 单节点默认使用 Badger 撤销权威。`AuthRevocation.Mode=shared` 时 Redis 是共享事实源，并且服务必须配置 MQ `event-stream` 供 EventBridge 可靠传播控制事件；Redis 或控制通道故障时 Private、Manage、Callback、Refresh 和新 WebSocket fail closed，Public REST 不受影响。
 - Webhook Secret 不得复用 Client/Token Secret，只能通过 HTTPS 传输；日志不得记录 Authorization Header、Token、Secret、Claims 或原始 Payload。
 - Hook 只有 `types.PublicError` 的安全消息可以返回调用方；普通错误、panic 和超时统一脱敏为 `internal server error`。
+- `AuthenticateHMAC` 位于身份建立前，不沿用 `OnAuthRequest` 的消息透出规则：凭证拒绝统一为 401，依赖不可用、限流与内部错误只返回固定脱敏契约。
+- `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
+- 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
 
 ## 快照规则
 

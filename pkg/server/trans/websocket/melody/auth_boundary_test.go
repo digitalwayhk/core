@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/olahol/melody"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,6 +52,12 @@ type webSocketAuthHookRecorder struct {
 	calls int
 	args  types.AuthRequestArgs
 	err   error
+}
+
+type webSocketHMACProviderFunc func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error)
+
+func (f webSocketHMACProviderFunc) AuthenticateHMAC(ctx context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+	return f(ctx, args)
 }
 
 type blockingWebSocketAuthHook struct {
@@ -249,4 +257,312 @@ func TestAuthenticatedSubscriptionSelectsAuthDomainPerRoute(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, "authentication failed", types.ResolvePublicError(err).Message)
 	})
+}
+
+// TestHMACLogonCachesFiniteIdentityAndPrivateSubscriptionRunsHook 验证 HMAC logon 只验签一次，Private 订阅仍执行 OnAuthRequest。
+func TestHMACLogonCachesFiniteIdentityAndPrivateSubscriptionRunsHook(t *testing.T) {
+	hook := &webSocketAuthHookRecorder{}
+	providerCalls := 0
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	cfg.Auth.AccessExpire = 3600
+	sc := &router.ServiceContext{
+		Config: cfg, Service: &types.Service{Name: "shop"}, AuthRequestHookProvider: hook,
+		HMACAuthProvider: webSocketHMACProviderFunc(func(_ context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			providerCalls++
+			require.Equal(t, "WS", args.Method)
+			require.Equal(t, "/ws", args.Path)
+			require.Equal(t, types.PrivateType, args.PathType)
+			require.Equal(t, "key-public", args.AccessKey)
+			require.Equal(t, "nonce-1", args.Nonce)
+			return &types.HMACAuthResult{Identity: types.AuthIdentity{
+				UID: "42", Username: "alice", AuthType: types.AuthTypeUser,
+				Provider: "apikey", ProviderSubject: "credential-7",
+			}, Claims: map[string]string{"platform_uid": "42"}}, nil
+		}),
+	}
+	subscriptions := &SessionSubscriptions{manage: &MelodyManager{serviceContext: sc}}
+	req := &SessionRequest{ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1", RecvWindow: "5000"}
+
+	require.NoError(t, subscriptions.Logon(req))
+	require.True(t, subscriptions.hmacAuth)
+	require.NotNil(t, subscriptions.identity)
+	require.True(t, subscriptions.identity.ExpiresAt.After(time.Now()))
+	require.Empty(t, subscriptions.req.Signature)
+	require.Empty(t, subscriptions.req.Nonce)
+	require.Zero(t, subscriptions.req.Timestamp)
+	require.Empty(t, subscriptions.req.RecvWindow)
+	require.NotEqual(t, "key-public", subscriptions.req.ApiKey)
+
+	verified, err := subscriptions.authorizeAuthenticatedSubscription(
+		&types.RouterInfo{Path: "/private/orders", Method: "GET", PathType: types.PrivateType, Auth: true},
+		&webSocketAuthTestRequest{service: "shop"},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "42", verified.UID)
+	require.Equal(t, "42", hook.args.Claims["platform_uid"])
+	require.Equal(t, 1, hook.calls)
+	require.Equal(t, 1, providerCalls, "订阅不得重复消费 HMAC nonce")
+}
+
+// TestHMACSubscriptionRejectsManageAndExpiredIdentity 验证 HMAC 会话不得跨入 Manage 域且过期后 fail closed。
+func TestHMACSubscriptionRejectsManageAndExpiredIdentity(t *testing.T) {
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	sc := &router.ServiceContext{
+		Config: cfg, Service: &types.Service{Name: "shop"},
+		HMACAuthProvider: webSocketHMACProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			return &types.HMACAuthResult{Identity: types.AuthIdentity{
+				UID: "42", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-7",
+			}}, nil
+		}),
+	}
+	newSession := func(t *testing.T) *SessionSubscriptions {
+		t.Helper()
+		subscriptions := &SessionSubscriptions{manage: &MelodyManager{serviceContext: sc}}
+		require.NoError(t, subscriptions.Logon(&SessionRequest{
+			ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1",
+		}))
+		return subscriptions
+	}
+
+	manageSession := newSession(t)
+	_, err := manageSession.authorizeAuthenticatedSubscription(
+		&types.RouterInfo{Path: "/manage/orders", Method: "GET", PathType: types.ManageType, Auth: true},
+		&webSocketAuthTestRequest{service: "shop"},
+	)
+	require.Equal(t, "authentication failed", types.ResolvePublicError(err).Message)
+
+	expiredSession := newSession(t)
+	expiredSession.identity.ExpiresAt = time.Now().Add(-time.Second)
+	_, err = expiredSession.authorizeAuthenticatedSubscription(
+		&types.RouterInfo{Path: "/private/orders", Method: "GET", PathType: types.PrivateType, Auth: true},
+		&webSocketAuthTestRequest{service: "shop"},
+	)
+	require.Equal(t, "authentication failed", types.ResolvePublicError(err).Message)
+	require.Nil(t, expiredSession.identity)
+	require.False(t, expiredSession.hmacAuth)
+}
+
+// TestHMACLogonFailureIsGenericAndBearerTakesPriority 验证 logon 失败脱敏且 Token 始终优先。
+func TestHMACLogonFailureIsGenericAndBearerTakesPriority(t *testing.T) {
+	providerCalls := 0
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	sc := &router.ServiceContext{
+		Config: cfg,
+		HMACAuthProvider: webSocketHMACProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			providerCalls++
+			return nil, types.NewPublicError(types.ErrorKindForbidden, 40321, "key exists", errors.New("signature detail"))
+		}),
+	}
+	subscriptions := &SessionSubscriptions{manage: &MelodyManager{serviceContext: sc}}
+
+	err := subscriptions.Logon(&SessionRequest{
+		ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1",
+	})
+	require.Equal(t, "authentication failed", webSocketPublicMessage(err))
+	require.Nil(t, subscriptions.req)
+	require.Equal(t, 1, providerCalls)
+
+	jwt := websocketAccessToken(t, cfg.Auth.AccessSecret, "user-1")
+	require.NoError(t, subscriptions.Logon(&SessionRequest{
+		Token: jwt, ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-2",
+	}))
+	require.False(t, subscriptions.hmacAuth)
+	require.Equal(t, 1, providerCalls)
+}
+
+// TestSessionRequestRequiresNonceForHMAC 验证无 Token 的 logon 必须提供 nonce 防重放材料。
+func TestSessionRequestRequiresNonceForHMAC(t *testing.T) {
+	err := (&SessionRequest{ApiKey: "key-public", Signature: "signature", Timestamp: 1_900_000_000_000}).Validate()
+	require.Error(t, err)
+}
+
+// TestHMACSessionExpiresWithoutAnotherSubscription 验证无后续消息时 HMAC 会话也会主动过期。
+func TestHMACSessionExpiresWithoutAnotherSubscription(t *testing.T) {
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	sc := &router.ServiceContext{
+		Config: cfg,
+		HMACAuthProvider: webSocketHMACProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			return &types.HMACAuthResult{Identity: types.AuthIdentity{
+				UID: "42", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-7",
+				ExpiresAt: time.Now().Add(30 * time.Millisecond),
+			}}, nil
+		}),
+	}
+	subscriptions := &SessionSubscriptions{manage: &MelodyManager{serviceContext: sc}}
+	require.NoError(t, subscriptions.Logon(&SessionRequest{
+		ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1",
+	}))
+
+	require.Eventually(t, func() bool {
+		subscriptions.mu.RLock()
+		defer subscriptions.mu.RUnlock()
+		return subscriptions.identity == nil && !subscriptions.hmacAuth
+	}, time.Second, 10*time.Millisecond)
+}
+
+// TestHMACSessionDisconnectCancelsAuthentication 验证连接清理会立即取消进行中的 HMAC Hook。
+func TestHMACSessionDisconnectCancelsAuthentication(t *testing.T) {
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	cfg.Timeout = 5000
+	entered := make(chan struct{})
+	canceled := make(chan struct{})
+	sc := &router.ServiceContext{
+		Config: cfg,
+		HMACAuthProvider: webSocketHMACProviderFunc(func(ctx context.Context, _ types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			close(entered)
+			<-ctx.Done()
+			close(canceled)
+			return nil, ctx.Err()
+		}),
+	}
+	subscriptions := NewSessionSubscriptions(&MelodyManager{serviceContext: sc}, nil, nil)
+	logonDone := make(chan struct{})
+	go func() {
+		defer close(logonDone)
+		_ = subscriptions.Logon(&SessionRequest{
+			ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1",
+		})
+	}()
+	<-entered
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		subscriptions.UnsubscribeAll()
+	}()
+
+	select {
+	case <-canceled:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("断连应立即取消进行中的 HMAC 认证")
+	}
+	select {
+	case <-cleanupDone:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("断连清理不应等待 HMAC 超时")
+	}
+	<-logonDone
+}
+
+// TestCleanupSessionCancelsHMACAuthenticationAndRemovesSession 验证真实 manager 断连入口取消认证并删除会话。
+func TestCleanupSessionCancelsHMACAuthenticationAndRemovesSession(t *testing.T) {
+	cfg := config.NewServiceDefaultConfig("shop", 0)
+	cfg.Timeout = 5000
+	entered := make(chan struct{})
+	canceled := make(chan struct{})
+	sc := &router.ServiceContext{
+		Config: cfg,
+		HMACAuthProvider: webSocketHMACProviderFunc(func(ctx context.Context, _ types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+			close(entered)
+			<-ctx.Done()
+			close(canceled)
+			return nil, ctx.Err()
+		}),
+	}
+	session := &melody.Session{Request: &http.Request{RemoteAddr: "127.0.0.1:10000", Header: make(http.Header)}}
+	manager := &MelodyManager{serviceContext: sc, subscriptions: make(map[*melody.Session]*SessionSubscriptions)}
+	subscriptions := NewSessionSubscriptions(manager, &MelodyClient{session: session, manager: manager}, nil)
+	manager.subscriptions[session] = subscriptions
+	go func() {
+		_ = subscriptions.Logon(&SessionRequest{
+			ApiKey: "key-public", Signature: "signature-secret", Timestamp: 1_900_000_000_000, Nonce: "nonce-1",
+		})
+	}()
+	<-entered
+
+	manager.cleanupSession(session)
+
+	select {
+	case <-canceled:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("真实断连清理入口应立即取消 HMAC 认证")
+	}
+	manager.subscriptionsMu.RLock()
+	_, exists := manager.subscriptions[session]
+	manager.subscriptionsMu.RUnlock()
+	require.False(t, exists)
+}
+
+// TestHMACSessionDisconnectStopsExpiryTimerAndClearsIdentity 验证断连释放 timer、凭证快照和可信身份。
+func TestHMACSessionDisconnectStopsExpiryTimerAndClearsIdentity(t *testing.T) {
+	subscriptions := NewSessionSubscriptions(nil, nil, nil)
+	identity := &safe.AccessTokenIdentity{
+		UID: "42", ExpiresAt: time.Now().Add(time.Hour),
+		Identity: types.AuthIdentity{UID: "42", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-7"},
+	}
+	subscriptions.identity = identity
+	subscriptions.hmacAuth = true
+	subscriptions.scheduleHMACExpiryLocked(identity)
+	require.NotNil(t, subscriptions.hmacExpiryTimer)
+
+	subscriptions.UnsubscribeAll()
+
+	require.Nil(t, subscriptions.hmacExpiryTimer)
+	require.Nil(t, subscriptions.identity)
+	require.Nil(t, subscriptions.req)
+	require.False(t, subscriptions.hmacAuth)
+}
+
+// TestHMACSessionMarksExpiredBeforeWaitingForSessionLock 验证过期标记不被慢 OnAuthRequest 占用的会话锁阻塞。
+func TestHMACSessionMarksExpiredBeforeWaitingForSessionLock(t *testing.T) {
+	subscriptions := NewSessionSubscriptions(nil, nil, nil)
+	identity := &safe.AccessTokenIdentity{
+		UID: "42", ExpiresAt: time.Now().Add(30 * time.Millisecond),
+		Identity: types.AuthIdentity{UID: "42", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-7"},
+	}
+	subscriptions.identity = identity
+	subscriptions.hmacAuth = true
+	subscriptions.scheduleHMACExpiryLocked(identity)
+	subscriptions.mu.Lock()
+
+	require.Eventually(t, subscriptions.hmacExpired.Load, time.Second, 10*time.Millisecond)
+	require.False(t, subscriptions.sessionAuthenticated())
+	subscriptions.mu.Unlock()
+}
+
+// TestStaleHMACExpiryCannotInvalidateReplacementIdentity 验证旧 timer 不得失效重新登录后的新身份。
+func TestStaleHMACExpiryCannotInvalidateReplacementIdentity(t *testing.T) {
+	subscriptions := NewSessionSubscriptions(nil, nil, nil)
+	oldIdentity := &safe.AccessTokenIdentity{
+		UID: "old", ExpiresAt: time.Now().Add(-time.Second),
+		Identity: types.AuthIdentity{UID: "old", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-old"},
+	}
+	oldGeneration := subscriptions.hmacExpiryGen.Add(1)
+	subscriptions.stopHMACExpiryTimerLocked()
+	newIdentity := &safe.AccessTokenIdentity{
+		UID: "new", ExpiresAt: time.Now().Add(time.Hour),
+		Identity: types.AuthIdentity{UID: "new", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-new"},
+	}
+	subscriptions.identity = newIdentity
+	subscriptions.hmacAuth = true
+	subscriptions.hmacExpired.Store(false)
+
+	subscriptions.expireHMACSession(oldGeneration, oldIdentity)
+
+	require.False(t, subscriptions.hmacExpired.Load())
+	require.Same(t, newIdentity, subscriptions.identity)
+	require.True(t, subscriptions.hmacAuth)
+}
+
+// TestMelodyClientCloseMarksDeliveryClosedSynchronously 验证过期关闭会在底层关闭帧排队前立即禁止投递。
+func TestMelodyClientCloseMarksDeliveryClosedSynchronously(t *testing.T) {
+	client := &MelodyClient{}
+
+	require.NoError(t, client.Close())
+
+	client.stateMu.RLock()
+	closed := client.closed
+	client.stateMu.RUnlock()
+	require.True(t, closed)
+	require.True(t, client.IsClosed())
+}
+
+func websocketAccessToken(t *testing.T, secret, uid string) string {
+	t.Helper()
+	pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
+		Claims: safe.NewClaims(uid, "user"), Identity: types.AuthIdentity{UID: uid}, AuthType: types.AuthTypeUser,
+		IssuedAt: time.Now().UTC(), AccessSecret: secret, AccessExpireSeconds: 3600,
+	})
+	require.NoError(t, err)
+	return pair.AccessToken
 }

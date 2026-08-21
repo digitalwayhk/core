@@ -6,9 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +37,7 @@ func TestInternalJWTAuthorizeDoesNotLogToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/private", nil)
 	request.Header.Set("Authorization", "Bearer "+rawToken)
 	response := httptest.NewRecorder()
-	internalJWTAuthorize("access-secret", types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	internalJWTAuthorize(nil, nil, "access-secret", types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("无效 Token 不得进入下游")
 	})).ServeHTTP(response, request)
 
@@ -52,7 +55,7 @@ func TestInternalJWTAuthorizePassesTrustedVerifiedIdentity(t *testing.T) {
 	request := authenticatedRequest(t, sc.Config.Auth.AccessSecret, identity)
 	recorder := httptest.NewRecorder()
 	called := false
-	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+	handler := internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		http.HandlerFunc(func(_ http.ResponseWriter, verifiedRequest *http.Request) {
 			called = true
 			verifiedRequest.Header.Del("Authorization")
@@ -98,7 +101,7 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 		calls = append(calls, "router")
 		callsMu.Unlock()
 	})
-	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+	handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, info, types.AuthTypeUser, next),
 	)
 	request := authenticatedRequest(t, sc.Config.Auth.AccessSecret, types.AuthIdentity{
@@ -137,6 +140,8 @@ func TestAuthRequestAuthorityUsesAuthorityRevocationAndTargetHook(t *testing.T) 
 	info := authRequestRouterInfo(types.ServerManagerType)
 	nextCalled := false
 	handler := internalJWTAuthorize(
+		authority,
+		info,
 		authority.Config.ManageAuth.AccessSecret,
 		types.AuthTypeManage,
 		authRequestHandlerWithAuthority(
@@ -171,7 +176,7 @@ func TestSecretClaimsOnlyUseVerifiedServerSideChannel(t *testing.T) {
 	})
 	sc := authRequestServiceContext(hook)
 	info := authRequestRouterInfo(types.PrivateType)
-	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+	handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 			require.Nil(t, request.Context().Value("api_key"))
 			require.Equal(t, "private-api-key", safe.VerifiedSecretClaimsFromContext(request.Context())["api_key"])
@@ -194,7 +199,7 @@ func TestCasdoorAuthorityUnavailableRejectsProtectedRequest(t *testing.T) {
 	}))
 	info := authRequestRouterInfo(types.PrivateType)
 	called := false
-	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+	handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
@@ -217,7 +222,7 @@ func TestAuthRequestRejectsTokenFromWrongAuthDomain(t *testing.T) {
 	sc.Config.ManageAuth.AccessSecret = sc.Config.Auth.AccessSecret
 	info := authRequestRouterInfo(types.ManageType)
 	called := false
-	handler := internalJWTAuthorize(sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
 		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			called = true
 		})),
@@ -275,7 +280,7 @@ func TestAuthRequestHookFailureContract(t *testing.T) {
 			sc := authRequestServiceContext(tt.hook)
 			sc.Config.Timeout = 10
 			info := authRequestRouterInfo(types.PrivateType)
-			handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+			handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 				authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 					t.Fatal("Hook失败时不得执行Router")
 				})),
@@ -314,7 +319,8 @@ func TestAuthRequestDeniedLogContainsRedactedIdentityDigest(t *testing.T) {
 		UID: "sensitive-user-id", Username: "敏感用户名", AuthType: types.AuthTypeUser,
 		Provider: types.AuthProviderCasdoor, ProviderSubject: "sensitive-subject",
 	}
-	handler := internalJWTAuthorize(sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+	info := authRequestRouterInfo(types.PrivateType)
+	handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
 		authRequestHandler(sc, authRequestRouterInfo(types.PrivateType), types.AuthTypeUser,
 			http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("拒绝请求不得进入Router") })),
 	)
@@ -334,9 +340,294 @@ func TestAuthRequestDeniedLogContainsRedactedIdentityDigest(t *testing.T) {
 	require.NotContains(t, logOutput, identity.ProviderSubject)
 }
 
+// TestInternalJWTAuthorizeAuthenticatesHMACBeforeAuthRequestHook 验证 Auth REST 按 HMAC、OnAuthRequest、Router 顺序执行。
+func TestInternalJWTAuthorizeAuthenticatesHMACBeforeAuthRequestHook(t *testing.T) {
+	calls := make([]string, 0, 3)
+	sc := authRequestServiceContext(authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
+		calls = append(calls, "auth-request")
+		require.Equal(t, "42", args.Claims["platform_uid"])
+		return nil
+	}))
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(_ context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		calls = append(calls, "hmac")
+		require.Equal(t, http.MethodPost, args.Method)
+		require.Equal(t, "/private/orders", args.Path)
+		require.Equal(t, "symbol=BTCUSDT", args.Query)
+		require.Equal(t, "payload", args.AccessKey)
+		require.Equal(t, sha256Hex([]byte("request-body")), args.BodyHashHex)
+		return &types.HMACAuthResult{Identity: types.AuthIdentity{
+			UID: "42", Username: "alice", AuthType: types.AuthTypeUser,
+			Provider: "apikey", ProviderSubject: "credential-7",
+		}, Claims: map[string]string{"platform_uid": "42"}}, nil
+	})
+	info := authRequestRouterInfo(types.PrivateType)
+	info.Method = http.MethodPost
+	handler := internalJWTAuthorize(sc, info, sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		authRequestHandler(sc, info, types.AuthTypeUser, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			calls = append(calls, "router")
+			body := make([]byte, len("request-body"))
+			_, err := request.Body.Read(body)
+			require.NoError(t, err)
+			require.Equal(t, "request-body", string(body))
+		})),
+	)
+	request := hmacRequest(http.MethodPost, "/private/orders?symbol=BTCUSDT", "request-body")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"hmac", "auth-request", "router"}, calls)
+}
+
+// TestInternalJWTAuthorizeBearerTakesPriorityOverHMAC 验证同时存在两类凭证时只执行 Bearer 路径。
+func TestInternalJWTAuthorizeBearerTakesPriorityOverHMAC(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	called := false
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		called = true
+		return nil, nil
+	})
+	request := hmacRequest(http.MethodGet, "/private/orders", "")
+	request.Header.Set("Authorization", "Bearer invalid-token")
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("无效 Bearer 不得进入下游") }),
+	).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.False(t, called)
+}
+
+// TestInternalJWTAuthorizeRejectsHMACOutsideAuthDomain 验证 Manage 与 ServerManage 认证域不得使用 HMAC Hook。
+func TestInternalJWTAuthorizeRejectsHMACOutsideAuthDomain(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	called := false
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		called = true
+		return nil, nil
+	})
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.ManageType), sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("Manage 不得使用 HMAC") }),
+	).ServeHTTP(recorder, hmacRequest(http.MethodGet, "/manage", ""))
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.False(t, called)
+}
+
+// TestInternalJWTAuthorizeBoundsHMACBodyBeforeHook 验证超限 body 以统一 JSON 413 拒绝且不调用 Provider。
+func TestInternalJWTAuthorizeBoundsHMACBodyBeforeHook(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.Config.MaxBytes = 4
+	called := false
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		called = true
+		return nil, nil
+	})
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("超限请求不得进入下游") }),
+	).ServeHTTP(recorder, hmacRequest(http.MethodPost, "/private/orders", "12345"))
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+	require.JSONEq(t, `{"success":false,"code":41300,"message":"request entity too large"}`, recorder.Body.String())
+	require.False(t, called)
+}
+
+// TestInternalJWTAuthorizeHMACFailureIsGenericAndRedacted 验证验签失败的响应与日志不泄露凭证或 body。
+func TestInternalJWTAuthorizeHMACFailureIsGenericAndRedacted(t *testing.T) {
+	var output bytes.Buffer
+	previous := logx.Reset()
+	logx.SetWriter(logx.NewWriter(&output))
+	t.Cleanup(func() { logx.SetWriter(previous); logx.Reset() })
+	sc := authRequestServiceContext(nil)
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		return nil, types.NewPublicError(types.ErrorKindForbidden, 40321, "key exists but signature failed", errors.New("secret detail"))
+	})
+	request := hmacRequest(http.MethodPost, "/private/orders", "sensitive-body")
+	request.Header.Set(sc.Config.HMACAuth.SignatureHeader, "sensitive-signature")
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("失败认证不得进入下游") }),
+	).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "authentication failed")
+	for _, secret := range []string{"payload", "sensitive-signature", "sensitive-body", "key exists", "secret detail"} {
+		require.NotContains(t, output.String(), secret)
+		require.NotContains(t, recorder.Body.String(), secret)
+	}
+}
+
+// TestInternalJWTAuthorizeWithoutHMACProviderKeepsJWTOnlyResponse 验证未实现 Provider 的旧服务仍保持 JWT-only 401 契约。
+func TestInternalJWTAuthorizeWithoutHMACProviderKeepsJWTOnlyResponse(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.Config.MaxBytes = 4
+	request := hmacRequest(http.MethodPost, "/private/orders", "12345")
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("未实现 HMAC Provider 不得进入下游") }),
+	).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "authentication failed")
+}
+
+type observedReader struct {
+	reader io.Reader
+	reads  atomic.Int32
+}
+
+type blockingRequestBody struct {
+	started   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func (b *blockingRequestBody) Read([]byte) (int, error) {
+	b.startOnce.Do(func() { close(b.started) })
+	<-b.closed
+	return 0, errors.New("request body closed")
+}
+
+func (b *blockingRequestBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+func (r *observedReader) Read(buffer []byte) (int, error) {
+	r.reads.Add(1)
+	return r.reader.Read(buffer)
+}
+
+// TestInternalJWTAuthorizeRejectsBusyHMACBeforeReadingBody 验证并发名额饱和时在读取未认证 body 前拒绝。
+func TestInternalJWTAuthorizeRejectsBusyHMACBeforeReadingBody(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.Config.HMACAuth.MaxInFlight = 1
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		close(entered)
+		<-release
+		return &types.HMACAuthResult{Identity: types.AuthIdentity{
+			UID: "42", AuthType: types.AuthTypeUser, Provider: "apikey", ProviderSubject: "credential-1",
+		}}, nil
+	})
+	handler := internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+	)
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		handler.ServeHTTP(httptest.NewRecorder(), hmacRequest(http.MethodPost, "/private/orders", "first"))
+	}()
+	<-entered
+
+	body := &observedReader{reader: strings.NewReader("second")}
+	request := httptest.NewRequest(http.MethodPost, "/private/orders", body)
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("X-Access-Key", "payload-2")
+	request.Header.Set("X-Timestamp", "1900000000000")
+	request.Header.Set("X-Nonce", "nonce-2")
+	request.Header.Set("X-Signature", "signature-2")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Zero(t, body.reads.Load())
+	close(release)
+	<-firstDone
+}
+
+// TestInternalJWTAuthorizeKeepsSlotUntilTimedOutProviderReturns 验证超时不会提前释放仍在执行的 Provider 名额。
+func TestInternalJWTAuthorizeKeepsSlotUntilTimedOutProviderReturns(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.Config.HMACAuth.MaxInFlight = 1
+	sc.Config.Timeout = 20
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		close(entered)
+		<-release
+		return nil, errors.New("provider stopped")
+	})
+	handler := internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+	)
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		handler.ServeHTTP(httptest.NewRecorder(), hmacRequest(http.MethodPost, "/private/orders", "first"))
+	}()
+	<-entered
+	<-firstDone
+
+	body := &observedReader{reader: strings.NewReader("second")}
+	request := httptest.NewRequest(http.MethodPost, "/private/orders", body)
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("X-Access-Key", "payload-2")
+	request.Header.Set("X-Timestamp", "1900000000000")
+	request.Header.Set("X-Nonce", "nonce-2")
+	request.Header.Set("X-Signature", "signature-2")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Zero(t, body.reads.Load())
+	close(release)
+}
+
+// TestInternalJWTAuthorizeBoundsHMACBodyReadTime 验证停发的未认证 body 会被 ctx 取消并 fail closed。
+func TestInternalJWTAuthorizeBoundsHMACBodyReadTime(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.Config.Timeout = 20
+	var providerCalled atomic.Bool
+	sc.HMACAuthProvider = hmacAuthProviderFunc(func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
+		providerCalled.Store(true)
+		return nil, nil
+	})
+	body := &blockingRequestBody{started: make(chan struct{}), closed: make(chan struct{})}
+	request := httptest.NewRequest(http.MethodPost, "/private/orders", nil)
+	request.Body = body
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("X-Access-Key", "payload")
+	request.Header.Set("X-Timestamp", "1900000000000")
+	request.Header.Set("X-Nonce", "nonce-1")
+	request.Header.Set("X-Signature", "signature-1")
+	recorder := httptest.NewRecorder()
+
+	internalJWTAuthorize(sc, authRequestRouterInfo(types.PrivateType), sc.Config.Auth.AccessSecret, types.AuthTypeUser,
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("未读完请求体不得进入下游") }),
+	).ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.False(t, providerCalled.Load())
+	select {
+	case <-body.closed:
+	case <-time.After(time.Second):
+		t.Fatal("HMAC 请求体超时后必须关闭 body")
+	}
+}
+
 type authRequestHookFunc func(context.Context, types.AuthRequestArgs) error
 
 func (f authRequestHookFunc) OnAuthRequest(ctx context.Context, args types.AuthRequestArgs) error {
+	return f(ctx, args)
+}
+
+type hmacAuthProviderFunc func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error)
+
+func (f hmacAuthProviderFunc) AuthenticateHMAC(ctx context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
 	return f(ctx, args)
 }
 
@@ -351,6 +642,21 @@ func authRequestServiceContext(hook types.IAuthRequestHookProvider) *router.Serv
 		Service:                 &types.Service{Name: "auth-request-test"},
 		AuthRequestHookProvider: hook,
 	}
+}
+
+func hmacRequest(method, target, body string) *http.Request {
+	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("X-Access-Key", "payload")
+	request.Header.Set("X-Timestamp", "1900000000000")
+	request.Header.Set("X-Nonce", "nonce-1")
+	request.Header.Set("X-Signature", "signature-1")
+	return request
+}
+
+func sha256Hex(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
 }
 
 func authRequestRouterInfo(pathType types.ApiType) *types.RouterInfo {
