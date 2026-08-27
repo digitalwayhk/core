@@ -100,6 +100,13 @@
 | `ServerConfig.IsWhiteList` | supported | access-control middleware | 白名单开关消费 |
 | `ServerConfig.WhiteList` | supported | access-control middleware | 白名单匹配消费 |
 | `ServerConfig.TrustedProxies` | supported | REST request handling | Validate 校验 IP/CIDR，请求来源解析消费 |
+| `ServerConfig.HMACAuth` | supported | Auth REST/WebSocket middleware + OpenAPI generator | 仅 Auth 用户域读取；服务未实现 IHMACAuthProvider 时不启用 |
+| `ServerConfig.HMACAuth.AccessKeyHeader` | supported | Auth REST middleware + OpenAPI generator | 从配置的中性 Header 提取 AccessKey；不读取 query 备用值 |
+| `ServerConfig.HMACAuth.TimestampHeader` | supported | Auth REST middleware + OpenAPI generator | 从配置 Header 提取原始时间戳字符串 |
+| `ServerConfig.HMACAuth.NonceHeader` | supported | Auth REST middleware + OpenAPI generator | 从配置 Header 提取 nonce，实际消费由服务 Provider 负责 |
+| `ServerConfig.HMACAuth.SignatureHeader` | supported | Auth REST middleware + OpenAPI generator | 从配置 Header 提取签名且禁止日志记录 |
+| `ServerConfig.HMACAuth.RecvWindowHeader` | supported | Auth REST middleware + OpenAPI generator | 从配置 Header 提取可选接收窗口 |
+| `ServerConfig.HMACAuth.MaxInFlight` | supported | ServiceContext HMAC runtime | 限制 HMAC REST 请求体预处理与 REST/WebSocket Hook 在途调用，饱和时在读取 body 前 fail closed；构造期配置，修改后需重启 |
 | `ServerConfig.IsLoaclVisit` | supported | access-control middleware | 本地访问控制分支消费 |
 | `ServerConfig.RemoteAccessManageAPI` | supported | manage access control | 远程管理 API 访问控制消费 |
 | `ServerConfig.MelodyConfigPath` | supported | Melody global config | 非空时 ReloadExternalConfigs 加载 |

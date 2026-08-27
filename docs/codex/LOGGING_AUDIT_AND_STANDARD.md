@@ -23,6 +23,8 @@ RouterInfo 运行组件遵循以下补充约束：
 - WebSocket 只记录 service、route、hash、连接/失败计数和关闭结果，不记录 payload、请求对象或客户端凭据。
 - Redis 地址可作为受控目标字段，密码、缓存键中的业务敏感维度和缓存值禁止记录。
 - ServiceContext 关闭日志按组件记录稳定事件名；正常、幂等关闭不使用 error 级别。
+- HMAC 认证失败只记录稳定事件 `hmac_access_denied`，字段限定为 `service`、`route`、`auth_type`、`identity_hash`、`code`。`identity_hash` 由稳定凭证 ID 或 AccessKey 的不可逆摘要生成；禁止记录 AccessKey、Signature、Nonce、Authorization、RawQuery、请求体及 Provider 原始错误。
+- WebSocket JSON 解析失败使用稳定事件 `websocket_json_parse_failed`，字段限定为 `error`、`message_bytes`、`remote_addr`；禁止记录未解析 payload 或 preview，因为其中可能包含 Token、AccessKey、Signature 和 Nonce。
 
 ## 临时例外
 

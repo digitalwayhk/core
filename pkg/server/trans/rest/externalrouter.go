@@ -57,7 +57,7 @@ func newExternalRouterHandler(
 		} else {
 			handler = authRequestHandler(sc, info, authType, handler)
 		}
-		handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
+		handler = internalJWTAuthorize(sc, info, auth.AccessSecret, authType, handler)
 	}
 	rateLimited := externalRateLimitHandler(sc, info, handler)
 	methodChecked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

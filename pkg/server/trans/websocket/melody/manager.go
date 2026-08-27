@@ -2,6 +2,7 @@ package melody
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,19 @@ type Message struct {
 	Data    interface{} `json:"data"`
 }
 
+type websocketAdmissionKey struct{}
+
+type websocketAdmission struct {
+	once sync.Once
+	done func()
+}
+
+func (a *websocketAdmission) release() {
+	if a != nil {
+		a.once.Do(a.done)
+	}
+}
+
 // MelodyManager 替换原有的Hub
 type MelodyManager struct {
 	melody         *melody.Melody
@@ -45,6 +59,9 @@ type MelodyManager struct {
 	monitorDone chan struct{}
 	closed      bool
 	closeMu     sync.Mutex
+	closeDone   chan struct{}
+	closeErr    error
+	admissions  sync.WaitGroup
 
 	// 客户端订阅管理
 	subscriptions   map[*melody.Session]*SessionSubscriptions
@@ -76,6 +93,7 @@ func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.M
 	m.Config.PongWait = config.PongWait
 	m.Config.PingPeriod = config.PingPeriod
 	m.Config.WriteWait = config.WriteWait
+	m.Upgrader.HandshakeTimeout = config.WriteWait
 
 	// m.Config.WriteBufferSize = 1024
 
@@ -85,6 +103,7 @@ func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.M
 		subscriptions:   make(map[*melody.Session]*SessionSubscriptions),
 		closeChan:       make(chan struct{}), // 🔧 添加关闭通道
 		monitorDone:     make(chan struct{}),
+		closeDone:       make(chan struct{}),
 		connectionLimit: NewConnectionRateLimiter(),
 		connCounter:     &ConnectionCounter{},
 		maxConnections:  config.MaxConnections, // 默认最大连接数
@@ -130,25 +149,84 @@ func (mm *MelodyManager) GetConnectionLimiter() *ConnectionRateLimiter {
 
 // 🔧 修复：优雅关闭
 func (mm *MelodyManager) Close() error {
+	return mm.CloseContext(context.Background())
+}
+
+// CloseContext 先阻止新握手，再等待已接纳握手注册完成，避免 Melody 关闭后出现漏网连接。
+func (mm *MelodyManager) CloseContext(ctx context.Context) error {
 	mm.closeMu.Lock()
-	defer mm.closeMu.Unlock()
-
 	if mm.closed {
-		return nil
+		done := mm.closeDone
+		mm.closeMu.Unlock()
+		return mm.waitClosed(ctx, done)
 	}
-
 	mm.closed = true
 	close(mm.closeChan) // 关闭统计监控goroutine
+	done := mm.closeDone
+	mm.closeMu.Unlock()
+
+	// 调用方可按 ctx 有界返回，但底层 Hub 必须等所有已接纳握手注册后再关闭，
+	// 否则 Melody 会把迟到 Session 留在已关闭的内部 map 中。
+	go mm.finishClose()
+	return mm.waitClosed(ctx, done)
+}
+
+func (mm *MelodyManager) finishClose() {
+	mm.admissions.Wait()
 	mm.connectionLimit.Close()
 	<-mm.monitorDone
+	err := mm.melody.Close()
 
-	return mm.melody.Close()
+	mm.closeMu.Lock()
+	mm.closeErr = err
+	close(mm.closeDone)
+	mm.closeMu.Unlock()
+}
+
+func (mm *MelodyManager) waitClosed(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		mm.closeMu.Lock()
+		err := mm.closeErr
+		mm.closeMu.Unlock()
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (mm *MelodyManager) isClosed() bool {
+	mm.closeMu.Lock()
+	defer mm.closeMu.Unlock()
+	return mm.closed
+}
+
+func (mm *MelodyManager) beginAdmission() (*websocketAdmission, bool) {
+	mm.closeMu.Lock()
+	defer mm.closeMu.Unlock()
+	if mm.closed {
+		return nil, false
+	}
+	mm.admissions.Add(1)
+	return &websocketAdmission{done: mm.admissions.Done}, true
 }
 
 func (mm *MelodyManager) setupHandlers() {
 	// 连接建立事件
 	mm.melody.HandleConnect(func(s *melody.Session) {
-		mm.onConnect(s)
+		admission, _ := s.Request.Context().Value(websocketAdmissionKey{}).(*websocketAdmission)
+		defer admission.release()
+		if mm.isClosed() {
+			_ = s.Close()
+			return
+		}
+		if !mm.onConnect(s) {
+			return
+		}
+		s.Set("core_connected", true)
+		if mm.isClosed() {
+			_ = s.Close()
+		}
 	})
 
 	// 连接断开事件
@@ -224,13 +302,13 @@ func (mm *MelodyManager) handleBufferFullError(s *melody.Session) {
 		}
 	}()
 }
-func (mm *MelodyManager) onConnect(s *melody.Session) {
+func (mm *MelodyManager) onConnect(s *melody.Session) bool {
 	currentCount := mm.connCounter.Increment()
 	if currentCount > mm.maxConnections {
 		logx.Errorf("超过最大连接数限制 %d，拒绝连接: %s", mm.maxConnections, s.Request.RemoteAddr)
 		mm.connCounter.Decrement()
-		s.Close()
-		return
+		_ = s.Close()
+		return false
 	}
 
 	// 🔧 在锁外创建所有对象
@@ -255,9 +333,13 @@ func (mm *MelodyManager) onConnect(s *melody.Session) {
 
 	logx.Infof("WebSocket客户端连接: %s, 当前活跃连接: %d",
 		s.Request.RemoteAddr, activeCount)
+	return true
 }
 
 func (mm *MelodyManager) onDisconnect(s *melody.Session) {
+	if connected, ok := s.Get("core_connected"); !ok || connected != true {
+		return
+	}
 	currentCount := mm.connCounter.Decrement()
 	mm.cleanupSession(s)
 
@@ -279,10 +361,6 @@ func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 		}
 	}()
 	dataLen := len(data)
-	preview := string(data)
-	if dataLen > int(mm.melody.Config.MaxMessageSize) {
-		preview = preview[:int(mm.melody.Config.MaxMessageSize)] + "...(truncated)"
-	}
 	mm.stats.mu.Lock()
 	mm.stats.totalMessages++
 	mm.stats.mu.Unlock()
@@ -290,8 +368,12 @@ func (mm *MelodyManager) handleMessage(s *melody.Session, data []byte) {
 	msg := &Message{}
 
 	if err := json.Unmarshal(data, msg); err != nil {
-		// 解析失败时记录更多信息
-		logx.Errorf("JSON 解析失败: %v, len=%d, preview=%s, RemoteAddr=%s", err, dataLen, preview, s.Request.RemoteAddr)
+		// 未解析的消息可能含 Token、HMAC 签名与 nonce，日志只记长度和解析错误。
+		logx.Errorw("websocket_json_parse_failed",
+			logx.Field("error", err),
+			logx.Field("message_bytes", dataLen),
+			logx.Field("remote_addr", s.Request.RemoteAddr),
+		)
 		// 1) 先去掉尾部空白
 		tryBuf := bytes.TrimSpace(data)
 
@@ -421,6 +503,7 @@ func (mm *MelodyManager) cleanupSession(s *melody.Session) {
 
 	// 🔧 在锁外执行耗时的清理操作
 	if ss != nil {
+		ss.Cancel()
 		// 这里可能是耗时操作，在锁外执行
 		go func() {
 			defer func() {
@@ -499,7 +582,14 @@ func (mm *MelodyManager) sendError(s *melody.Session, channel, errMsg string) {
 
 // WebSocket路由处理器
 func (mm *MelodyManager) ServeWS(w http.ResponseWriter, r *http.Request) {
-	mm.melody.HandleRequest(w, r)
+	admission, ok := mm.beginAdmission()
+	if !ok {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), websocketAdmissionKey{}, admission))
+	defer admission.release()
+	_ = mm.melody.HandleRequest(w, r)
 }
 
 // 获取统计信息

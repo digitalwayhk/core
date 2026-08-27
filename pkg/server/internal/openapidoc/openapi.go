@@ -2,11 +2,13 @@
 package openapidoc
 
 import (
+	"fmt"
 	"net/http"
 	"reflect"
 	"runtime/debug"
 	"strings"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/internal/openapiutil"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -50,8 +52,10 @@ func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*rou
 	components := openapi3.NewComponents()
 	doc.Components = &components
 	doc.Components.Schemas = make(openapi3.Schemas, 0)
+	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
 	doc.Paths = openapi3.NewPaths()
 	privateTokenIssuers := make([]string, 0)
+	webSocketHMACLogons := make([]map[string]interface{}, 0)
 
 	for _, r := range srs {
 		if r == nil || r.Service == nil || r.Service.Service == nil {
@@ -88,13 +92,36 @@ func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*rou
 		}
 		eachPublicRouters(r.GetTypeRouters(types.PublicType), doc, server, audience)
 		privateRouters := r.GetTypeRouters(types.PrivateType)
+		var hmacSecurity *hmacOpenAPISecurity
+		if provider, active := r.Service.GetHMACAuthRuntime(); active && provider != nil && con != nil {
+			hmacSecurity = registerHMACSecuritySchemes(doc, r.Service.Service.Name, con.HMACAuth)
+			if option := r.Service.GetServerOption(); option != nil && option.IsWebSocket {
+				webSocketHMACLogons = append(webSocketHMACLogons, map[string]interface{}{
+					"service": r.Service.Service.Name,
+					"server":  server.URL,
+					"path":    "/ws",
+					"event":   "sub",
+					"channel": "logon",
+					"data_schema": map[string]interface{}{
+						"type":     "object",
+						"required": []string{"apiKey", "timestamp", "nonce", "signature"},
+						"properties": map[string]interface{}{
+							"apiKey":     map[string]interface{}{"type": "string"},
+							"timestamp":  map[string]interface{}{"type": "integer", "format": "int64"},
+							"nonce":      map[string]interface{}{"type": "string"},
+							"signature":  map[string]interface{}{"type": "string"},
+							"recvWindow": map[string]interface{}{"type": "string"},
+						},
+					},
+				})
+			}
+		}
 		if len(privateRouters) > 0 {
 			privateTokenIssuers = append(privateTokenIssuers,
 				r.Service.Service.Name+" "+server.URL+"api/servermanage/testtoken?userid=12345")
 		}
-		eachrouters(privateRouters, doc, server)
+		eachrouters(privateRouters, doc, server, hmacSecurity)
 	}
-	doc.Components.SecuritySchemes = make(openapi3.SecuritySchemes, 0)
 	bearerDescription := "Bearer token authentication"
 	if len(privateTokenIssuers) > 0 {
 		bearerDescription = "Get TestToken from target service: " + strings.Join(privateTokenIssuers, "; ")
@@ -107,7 +134,42 @@ func generate(req *http.Request, audience Audience, sameOrigin bool, srs ...*rou
 			Description:  bearerDescription,
 		},
 	}
+	if len(webSocketHMACLogons) > 0 {
+		doc.Extensions = map[string]interface{}{"x-core-websocket-hmac-logon": webSocketHMACLogons}
+	}
 	return doc
+}
+
+type hmacOpenAPISecurity struct {
+	schemes []string
+	headers map[string]string
+}
+
+func registerHMACSecuritySchemes(doc *openapi3.T, serviceName string, cfg config.HMACAuthConfig) *hmacOpenAPISecurity {
+	prefix := fmt.Sprintf("HMAC_%x", utils.HashCode64(serviceName))
+	headers := map[string]string{
+		"access_key": cfg.AccessKeyHeader, "timestamp": cfg.TimestampHeader,
+		"nonce": cfg.NonceHeader, "signature": cfg.SignatureHeader,
+		"recv_window": cfg.RecvWindowHeader,
+	}
+	schemes := make([]string, 0, 4)
+	for _, item := range []struct {
+		suffix string
+		header string
+	}{
+		{suffix: "AccessKey", header: cfg.AccessKeyHeader},
+		{suffix: "Timestamp", header: cfg.TimestampHeader},
+		{suffix: "Nonce", header: cfg.NonceHeader},
+		{suffix: "Signature", header: cfg.SignatureHeader},
+	} {
+		name := prefix + "_" + item.suffix
+		doc.Components.SecuritySchemes[name] = &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{
+			Type: "apiKey", In: "header", Name: item.header,
+			Description: "HMAC request authentication for service " + serviceName,
+		}}
+		schemes = append(schemes, name)
+	}
+	return &hmacOpenAPISecurity{schemes: schemes, headers: headers}
 }
 func eachPublicRouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.Server, audience Audience) {
 	for _, r := range routers {
@@ -125,10 +187,30 @@ func eachPublicRouters(routers []*types.RouterInfo, doc *openapi3.T, server *ope
 		doc.AddOperation(path, method, oper)
 	}
 }
-func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.Server) {
+func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.Server, hmacSecurity *hmacOpenAPISecurity) {
 	for _, r := range routers {
 		path, method, oper := getOperation(r, doc)
 		oper.Servers = &openapi3.Servers{server}
+		if hmacSecurity != nil {
+			requirement := openapi3.NewSecurityRequirement()
+			for _, scheme := range hmacSecurity.schemes {
+				requirement.Authenticate(scheme)
+			}
+			oper.Security.With(requirement)
+			if oper.Extensions == nil {
+				oper.Extensions = make(map[string]interface{})
+			}
+			oper.Extensions["x-core-hmac-auth"] = map[string]interface{}{
+				"headers": hmacSecurity.headers,
+				"available_inputs": []string{
+					"access_key", "timestamp", "nonce", "signature", "recv_window", "method", "path",
+					"raw_query", "body_sha256", "client_ip", "trace_id", "path_type",
+				},
+				"algorithm":        "provider_defined",
+				"canonicalization": "provider_defined",
+				"bearer_priority":  true,
+			}
+		}
 		doc.AddOperation(path, method, oper)
 	}
 }

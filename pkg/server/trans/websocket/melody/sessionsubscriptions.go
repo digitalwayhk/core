@@ -2,43 +2,59 @@ package melody
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
+	"github.com/digitalwayhk/core/pkg/utils"
+	"github.com/gofrs/uuid"
 )
 
 type SessionSubscriptions struct {
-	subscriptions map[string]map[uint64]types.IRouter // channel -> hash -> router
-	metadata      map[string]interface{}              // 客户端元数据
-	createdAt     time.Time
-	lastActivity  time.Time
-	mu            sync.RWMutex
-	manage        *MelodyManager
-	client        *MelodyClient
-	sr            *router.ServiceRouter
-	req           *SessionRequest
-	identity      *safe.AccessTokenIdentity
-	hookSlots     chan struct{}
+	subscriptions   map[string]map[uint64]types.IRouter // channel -> hash -> router
+	metadata        map[string]interface{}              // 客户端元数据
+	createdAt       time.Time
+	lastActivity    time.Time
+	mu              sync.RWMutex
+	manage          *MelodyManager
+	client          *MelodyClient
+	sr              *router.ServiceRouter
+	req             *SessionRequest
+	identity        *safe.AccessTokenIdentity
+	hmacAuth        bool
+	hmacExpiryTimer *time.Timer
+	hmacExpired     atomic.Bool
+	hmacExpiryGen   atomic.Uint64
+	hmacExpiryMu    sync.Mutex
+	sessionContext  context.Context
+	cancelSession   context.CancelFunc
+	hookSlots       chan struct{}
 }
 
 func NewSessionSubscriptions(manage *MelodyManager, client *MelodyClient, sr *router.ServiceRouter) *SessionSubscriptions {
+	sessionContext, cancelSession := context.WithCancel(context.Background())
 	return &SessionSubscriptions{
-		subscriptions: make(map[string]map[uint64]types.IRouter),
-		client:        client,
-		manage:        manage,
-		sr:            sr,
-		metadata:      make(map[string]interface{}),
-		createdAt:     time.Now(),
-		lastActivity:  time.Now(),
-		hookSlots:     make(chan struct{}, 1),
+		subscriptions:  make(map[string]map[uint64]types.IRouter),
+		client:         client,
+		manage:         manage,
+		sr:             sr,
+		metadata:       make(map[string]interface{}),
+		createdAt:      time.Now(),
+		lastActivity:   time.Now(),
+		sessionContext: sessionContext,
+		cancelSession:  cancelSession,
+		hookSlots:      make(chan struct{}, 1),
 	}
 }
 func (s *SessionSubscriptions) GetClient() types.IWebSocket {
@@ -107,7 +123,7 @@ func (s *SessionSubscriptions) isLogonChannel(msg *Message) bool {
 		return true
 	}
 	if strings.EqualFold(channel, "status") {
-		if s.req == nil || s.identity == nil || s.req.Validate() != nil {
+		if !s.sessionAuthenticated() {
 			s.manage.sendError(s.client.session, channel, "Invalid token, API-key, IP, or permissions for action")
 			return true
 		}
@@ -186,8 +202,14 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 }
 
 func (s *SessionSubscriptions) UnsubscribeAll() {
+	s.Cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stopHMACExpiryTimerLocked()
+	s.req = nil
+	s.identity = nil
+	s.hmacAuth = false
+	s.hmacExpired.Store(false)
 	for channel, subs := range s.subscriptions {
 		info := s.sr.GetRouter(channel)
 		if info == nil {
@@ -202,6 +224,13 @@ func (s *SessionSubscriptions) UnsubscribeAll() {
 		}
 	}
 	s.lastActivity = time.Now() // 更新最后活动时间
+}
+
+// Cancel 立即取消与连接同寿命的认证任务，不等待会话锁。
+func (s *SessionSubscriptions) Cancel() {
+	if s != nil && s.cancelSession != nil {
+		s.cancelSession()
+	}
 }
 func (s *SessionSubscriptions) UnsubscribeUser() {
 	s.mu.Lock()
@@ -237,6 +266,12 @@ func (s *SessionSubscriptions) logonLocked(req *SessionRequest) error {
 	if err := req.Validate(); err != nil {
 		return webSocketAuthenticationError(err)
 	}
+	if s == nil || s.manage == nil || s.manage.serviceContext == nil || s.manage.serviceContext.Config == nil {
+		return webSocketAuthenticationError(errors.New("authentication context unavailable"))
+	}
+	if req.Token == "" {
+		return s.hmacLogonLocked(req)
+	}
 	identity, err := safe.ValidateAccessToken(
 		req.Token,
 		s.manage.serviceContext.Config.Auth.AccessSecret,
@@ -261,26 +296,144 @@ func (s *SessionSubscriptions) logonLocked(req *SessionRequest) error {
 			return webSocketAuthenticationError(err)
 		}
 	}
-	if s.identity != nil && !sameWebSocketIdentity(s.identity, identity) {
+	if s.identity != nil {
 		s.unsubscribeUserLocked()
 	}
+	s.stopHMACExpiryTimerLocked()
 	req.userID = identity.UID
 	req.userName = identity.Username
 	s.req = req
 	s.identity = identity
+	s.hmacAuth = false
+	s.hmacExpired.Store(false)
 
 	return nil
 }
 
-func sameWebSocketIdentity(left, right *safe.AccessTokenIdentity) bool {
-	if left == nil || right == nil {
-		return left == right
+func (s *SessionSubscriptions) hmacLogonLocked(req *SessionRequest) error {
+	sc := s.manage.serviceContext
+	hash := sha256.Sum256(nil)
+	args := types.HMACAuthArgs{
+		AccessKey: req.ApiKey, Timestamp: strconv.FormatInt(req.Timestamp, 10), Nonce: req.Nonce,
+		Signature: req.Signature, RecvWindow: req.RecvWindow,
+		Method: "WS", Path: "/ws", PathType: types.PrivateType,
+		BodyHashHex: hex.EncodeToString(hash[:]),
 	}
-	return left.Identity.UID == right.Identity.UID &&
-		left.Identity.AuthType == right.Identity.AuthType &&
-		left.Identity.Provider == right.Identity.Provider &&
-		left.Identity.ProviderSubject == right.Identity.ProviderSubject &&
-		left.Identity.Generation == right.Identity.Generation
+	if request := s.webSocketHTTPRequest(); request != nil {
+		args.ClientIP = utils.ClientPublicIP(request, sc.Config.TrustedProxies...)
+		args.TraceID = strings.TrimSpace(request.Header.Get("X-Trace-Id"))
+		if args.TraceID == "" {
+			if generated, err := uuid.NewV4(); err == nil {
+				args.TraceID = generated.String()
+				request.Header.Set("X-Trace-Id", args.TraceID)
+			}
+		}
+	}
+	ctx := s.sessionContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := sc.InvokeHMACAuth(ctx, args)
+	if err != nil {
+		return webSocketHMACAuthenticationError(err)
+	}
+	maxLifetime := time.Duration(sc.Config.Auth.AccessExpire) * time.Second
+	if maxLifetime <= 0 {
+		maxLifetime = time.Duration(config.DefaultAccessExpireSeconds) * time.Second
+	}
+	identity, err := safe.BuildHMACAccessIdentity(result, req.ApiKey, types.AuthTypeUser, time.Now().UTC(), maxLifetime)
+	if err != nil {
+		return webSocketAuthenticationError(err)
+	}
+	if s.identity != nil {
+		s.unsubscribeUserLocked()
+	}
+	s.stopHMACExpiryTimerLocked()
+	req.userID = identity.UID
+	req.userName = identity.Username
+	sanitizeHMACSessionRequest(req)
+	s.req = req
+	s.identity = identity
+	s.hmacAuth = true
+	s.hmacExpired.Store(false)
+	s.scheduleHMACExpiryLocked(identity)
+	return nil
+}
+
+func (s *SessionSubscriptions) scheduleHMACExpiryLocked(identity *safe.AccessTokenIdentity) {
+	s.stopHMACExpiryTimerLocked()
+	if identity == nil || identity.ExpiresAt.IsZero() {
+		return
+	}
+	delay := time.Until(identity.ExpiresAt)
+	if delay < 0 {
+		delay = 0
+	}
+	s.hmacExpired.Store(false)
+	s.hmacExpiryMu.Lock()
+	generation := s.hmacExpiryGen.Add(1)
+	s.hmacExpiryTimer = time.AfterFunc(delay, func() { s.expireHMACSession(generation, identity) })
+	s.hmacExpiryMu.Unlock()
+}
+
+func (s *SessionSubscriptions) expireHMACSession(generation uint64, identity *safe.AccessTokenIdentity) {
+	s.hmacExpiryMu.Lock()
+	ownedGeneration := generation + 1
+	if !s.hmacExpiryGen.CompareAndSwap(generation, ownedGeneration) {
+		s.hmacExpiryMu.Unlock()
+		return
+	}
+	s.hmacExpired.Store(true)
+	if client := s.client; client != nil {
+		_ = client.Close()
+	}
+	s.hmacExpiryTimer = nil
+	s.hmacExpiryMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hmacExpiryGen.Load() != ownedGeneration || !s.hmacAuth || s.identity != identity || time.Now().UTC().Before(identity.ExpiresAt) {
+		return
+	}
+	s.logoutLocked()
+}
+
+func (s *SessionSubscriptions) stopHMACExpiryTimerLocked() {
+	s.hmacExpiryMu.Lock()
+	defer s.hmacExpiryMu.Unlock()
+	s.hmacExpiryGen.Add(1)
+	if s.hmacExpiryTimer != nil {
+		s.hmacExpiryTimer.Stop()
+		s.hmacExpiryTimer = nil
+	}
+}
+
+func (s *SessionSubscriptions) webSocketHTTPRequest() *http.Request {
+	if s == nil || s.client == nil || s.client.session == nil {
+		return nil
+	}
+	return s.client.session.Request
+}
+
+func sanitizeHMACSessionRequest(req *SessionRequest) {
+	if req == nil {
+		return
+	}
+	sum := sha256.Sum256([]byte(req.ApiKey))
+	req.ApiKey = hex.EncodeToString(sum[:8])
+	req.Signature = ""
+	req.Timestamp = 0
+	req.Nonce = ""
+	req.RecvWindow = ""
+}
+
+func (s *SessionSubscriptions) sessionAuthenticated() bool {
+	if s == nil || s.req == nil || s.identity == nil {
+		return false
+	}
+	if s.hmacAuth {
+		return !s.hmacExpired.Load() && s.identity.ExpiresAt.After(time.Now().UTC())
+	}
+	return s.req.Validate() == nil
 }
 
 func routeRequiresWebSocketAuth(info *types.RouterInfo) bool {
@@ -311,8 +464,11 @@ func (s *SessionSubscriptions) Logout() *SessionResponse {
 }
 
 func (s *SessionSubscriptions) logoutLocked() *SessionResponse {
+	s.stopHMACExpiryTimerLocked()
 	s.req = nil
 	s.identity = nil
+	s.hmacAuth = false
+	s.hmacExpired.Store(false)
 	s.unsubscribeUserLocked()
 	return &SessionResponse{
 		ApiKey:           "",
@@ -348,20 +504,29 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 		return nil, webSocketAuthenticationError(errors.New("authentication context unavailable"))
 	}
 	secret, authType := webSocketRouteAuthPolicy(s.manage.serviceContext.Config, info)
-	verified, err := safe.ValidateAccessToken(
-		s.req.Token,
-		secret.AccessSecret,
-		authType,
-		time.Now().UTC(),
-	)
-	if err != nil {
-		return nil, webSocketAuthenticationError(err)
-	}
 	manager, hook, active := s.manage.serviceContext.GetAuthRequestRuntime()
 	if !active {
 		return nil, webSocketAuthenticationError(errors.New("service authentication is closing"))
 	}
-	if verified.Identity.Provider == types.AuthProviderCasdoor {
+	var verified *safe.AccessTokenIdentity
+	if s.hmacAuth {
+		provider, hmacActive := s.manage.serviceContext.GetHMACAuthRuntime()
+		if !hmacActive || provider == nil || s.identity == nil || s.hmacExpired.Load() || authType != types.AuthTypeUser || s.identity.AuthType != authType {
+			return nil, webSocketAuthenticationError(errors.New("HMAC session auth domain is invalid"))
+		}
+		if !s.identity.ExpiresAt.After(time.Now().UTC()) {
+			s.logoutLocked()
+			return nil, webSocketAuthenticationError(errors.New("HMAC session expired"))
+		}
+		verified = s.identity
+	} else {
+		var err error
+		verified, err = safe.ValidateAccessToken(s.req.Token, secret.AccessSecret, authType, time.Now().UTC())
+		if err != nil {
+			return nil, webSocketAuthenticationError(err)
+		}
+	}
+	if !s.hmacAuth && verified.Identity.Provider == types.AuthProviderCasdoor {
 		if manager == nil {
 			return nil, webSocketAuthenticationError(errors.New("revocation authority unavailable"))
 		}
@@ -369,7 +534,7 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 			return nil, webSocketAuthenticationError(err)
 		}
 	}
-	if setter, ok := req.(types.IRequestSecretClaimsSetter); ok {
+	if setter, ok := req.(types.IRequestSecretClaimsSetter); ok && !s.hmacAuth {
 		setter.SetSecretClaims(verified.SecretClaims)
 	}
 	if hook != nil {
@@ -453,6 +618,24 @@ func toWebSocketAuthIdentity(serviceName string, verified *safe.AccessTokenIdent
 
 func webSocketAuthenticationError(cause error) error {
 	return types.NewPublicError(types.ErrorKindUnauthenticated, types.PublicCodeUnauthenticated, "authentication failed", cause)
+}
+
+func webSocketHMACAuthenticationError(err error) error {
+	type contractProvider interface {
+		PublicErrorContract() types.PublicErrorContract
+	}
+	var provider contractProvider
+	if errors.As(err, &provider) {
+		switch provider.PublicErrorContract().Kind {
+		case types.ErrorKindUnavailable:
+			return types.NewPublicError(types.ErrorKindUnavailable, 0, "", err)
+		case types.ErrorKindRateLimited:
+			return types.NewPublicError(types.ErrorKindRateLimited, 0, "", err)
+		case types.ErrorKindInternal:
+			return types.NewPublicError(types.ErrorKindInternal, 0, "", err)
+		}
+	}
+	return webSocketAuthenticationError(err)
 }
 
 func webSocketPublicMessage(err error) string {

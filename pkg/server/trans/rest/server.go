@@ -219,7 +219,7 @@ func handers(own *Server, api *types.RouterInfo) error {
 	if api.GetAuth() {
 		auth, authType := resolveRouteAuthPolicy(own.context.Router, path)
 		handler = authRequestHandler(own.context, api, authType, handler)
-		handler = internalJWTAuthorize(auth.AccessSecret, authType, handler)
+		handler = internalJWTAuthorize(own.context, api, auth.AccessSecret, authType, handler)
 	}
 	handler = securityHeaders(externalRateLimitHandler(own.context, api, handler))
 	serviceName := own.context.Config.Name
@@ -423,8 +423,23 @@ func (own *Server) GetIPandPort() (string, int) {
 	return own.context.Config.Host, own.context.Config.Port
 }
 
+type melodyManagedResource struct {
+	manager *melody.MelodyManager
+}
+
+func (r *melodyManagedResource) Close(ctx context.Context) error {
+	if r == nil || r.manager == nil {
+		return nil
+	}
+	return r.manager.CloseContext(ctx)
+}
+
 func (own *Server) websocket() {
 	melodyManager := melody.NewMelodyManager(own.context)
+	if err := own.context.UseResource("websocket-melody", &melodyManagedResource{manager: melodyManager}); err != nil {
+		_ = melodyManager.Close()
+		panic(fmt.Sprintf("websocket: register managed resource failed: %v", err))
+	}
 	own.context.Hub = melodyManager
 
 	// 🔧 修复：为WebSocket路由单独设置超时

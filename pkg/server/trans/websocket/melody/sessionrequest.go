@@ -6,12 +6,14 @@ import (
 )
 
 type SessionRequest struct {
-	ApiKey    string `json:"apiKey"`
-	Signature string `json:"signature"`
-	Timestamp int64  `json:"timestamp"`
-	Token     string `json:"token"`
-	userID    string
-	userName  string
+	ApiKey     string `json:"apiKey"`
+	Signature  string `json:"signature"`
+	Timestamp  int64  `json:"timestamp"`
+	Nonce      string `json:"nonce,omitempty"`
+	RecvWindow string `json:"recvWindow,omitempty"`
+	Token      string `json:"token"`
+	userID     string
+	userName   string
 }
 
 func (own *SessionRequest) Response() *SessionResponse {
@@ -30,7 +32,7 @@ func (own *SessionRequest) Validate() error {
 	if own == nil {
 		return errors.New("invalid session request")
 	}
-	if own.Token == "" && (own.ApiKey == "" || own.Signature == "" || own.Timestamp == 0) {
+	if own.Token == "" && (own.ApiKey == "" || own.Signature == "" || own.Timestamp == 0 || own.Nonce == "") {
 		return errors.New("invalid session request")
 	}
 	return nil

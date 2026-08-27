@@ -26,7 +26,16 @@ GET http://localhost:{port}/api/internal/openapi?service={serviceName}
 | **`/api/internal/openapi`** | 完整内部视图；包含 Public、Private 和内部专用路由，保留 `x-internal-callers`，支持按 `service` 查询参数过滤 |
 | **服务分组（Tags）** | 每个服务名作为一个 Tag，多服务时分组清晰 |
 | **Server URL** | 每个服务的实际访问地址（含端口） |
-| **Private 安全要求** | Private 路由自动标注 Bearer 安全要求 |
+| **Private 安全要求** | Private 路由自动标注 Bearer 安全要求；服务实现 `IHMACAuthProvider` 时追加 HMAC 备选，语义为 Bearer OR HMAC |
+
+### 可选 HMAC 机器可读契约
+
+服务实现 `IHMACAuthProvider` 时，Private operation 保留 Bearer 安全要求，并增加一组同时要求 AccessKey、Timestamp、Nonce、Signature Header 的 HMAC 安全要求。OpenAPI 多个 `security` 对象是 OR，同一对象内多个 scheme 是 AND。
+
+- `x-core-hmac-auth.headers` 反映当前 `ServerConfig.HMACAuth` 实际 Header 名。
+- `x-core-hmac-auth.available_inputs` 只表示 Core 能交给 Provider 的可用字段；签名算法、字段选择与规范化顺序均由 Provider 定义，不得把该列表当作固定签名串。
+- 仅当 `ServerOption.IsWebSocket=true` 时，`x-core-websocket-hmac-logon` 才描述 `/ws` 上 `event=sub` 、`channel=logon` 的 `data_schema`，其中 `apiKey`、`timestamp`、`nonce`、`signature` 必填，`recvWindow` 可选。REST-only 服务不宣告该扩展。
+- Bearer 与 HMAC 同时出现时 Bearer 优先；Manage / ServerManage 不启用 HMAC。
 
 > ⚠️ **Manage 路由不包含在 OpenAPI 文档中**，仅 Public + Private 路由会被导出。
 
@@ -343,4 +352,3 @@ interface CommandAttribute {
   splitname?: string;       // 分组父按钮名称
 }
 ```
-

@@ -22,14 +22,27 @@ func (*authLifecycleHooks) OnAuthRequest(context.Context, AuthRequestArgs) error
 
 func (*authLifecycleHooks) OnCasdoorEvent(context.Context, CasdoorEvent) error { return nil }
 
+func (*authLifecycleHooks) AuthenticateHMAC(context.Context, HMACAuthArgs) (*HMACAuthResult, error) {
+	return &HMACAuthResult{Identity: AuthIdentity{UID: "user-1", AuthType: AuthTypeUser, Provider: "apikey", ProviderSubject: "key-1"}}, nil
+}
+
 func TestAuthLifecycleHookContractsCanBeImplementedTogether(t *testing.T) {
 	var service interface{} = &authLifecycleHooks{}
 	_, issueOK := service.(IAuthHookProvider)
 	_, requestOK := service.(IAuthRequestHookProvider)
 	_, eventOK := service.(ICasdoorEventHookProvider)
+	_, hmacOK := service.(IHMACAuthProvider)
 	require.True(t, issueOK)
 	require.True(t, requestOK)
 	require.True(t, eventOK)
+	require.True(t, hmacOK)
+}
+
+// TestHMACAuthProviderRemainsOptional 验证只实现原有三个 Hook 的服务不会被迫实现 HMAC。
+func TestHMACAuthProviderRemainsOptional(t *testing.T) {
+	var service interface{} = &struct{}{}
+	_, ok := service.(IHMACAuthProvider)
+	require.False(t, ok)
 }
 
 func TestSecretClaimsUseOptionalCompatibleContract(t *testing.T) {

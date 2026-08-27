@@ -225,6 +225,15 @@ func (m *MySQL) GetSyncPoolKey(data interface{}) string {
 // ==================== 核心方法（与 SQLite 保持一致）====================
 
 func (m *MySQL) ensureValidConnection() error {
+	// 活动事务已经绑定专用连接。此时再对基础 *sql.DB 执行 Ping 会额外
+	// 借用连接池槽位；当并发事务数等于 MaxOpenConns 时，所有事务都会
+	// 等待不存在的下一条连接，且无法继续到 Commit/Rollback。
+	// 事务连接是否有效由后续 SQL、Commit 或 Rollback 直接报告，不能在
+	// 事务外重连后继续执行同一个事务。
+	if m.isTansaction && m.tx != nil {
+		return nil
+	}
+
 	// m.db 为 nil 表示本实例尚未关联连接（懒加载），直接从连接池获取，不走重建流程
 	if m.db == nil {
 		db, err := m.GetDB()
@@ -431,7 +440,7 @@ func (m *MySQL) init(data interface{}) error {
 
 	if m.isTansaction {
 		if m.tx == nil {
-			// 兜底懒加载（Transaction() 已 eager Begin，正常不走这里）
+			// Transaction() 只登记事务状态；首次数据访问时再绑定连接。
 			m.tx = m.db.Begin()
 			if m.tx.Error != nil {
 				err := m.tx.Error

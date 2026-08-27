@@ -108,6 +108,36 @@ type IAuthRequestHookProvider interface {
 	OnAuthRequest(ctx context.Context, args AuthRequestArgs) error
 }
 
+// IHMACAuthProvider 由服务可选实现，用于验证无 Bearer 的 Auth 域请求签名。
+// Core 只抽取凭证并接收可信身份，不持有 HMAC Secret、不消费 nonce，也不签发 Token。
+type IHMACAuthProvider interface {
+	AuthenticateHMAC(ctx context.Context, args HMACAuthArgs) (*HMACAuthResult, error)
+}
+
+// HMACAuthArgs 是 Core 从 REST Header 或 WebSocket logon 提取的只读凭证快照。
+// Signature、AccessKey 与原始请求体不得写入日志。
+type HMACAuthArgs struct {
+	AccessKey   string
+	Timestamp   string
+	Nonce       string
+	Signature   string
+	RecvWindow  string
+	Method      string
+	Path        string
+	Query       string
+	BodyHashHex string
+	ClientIP    string
+	TraceID     string
+	PathType    ApiType
+}
+
+// HMACAuthResult 是服务完成验签后返回的身份。
+// ProviderSubject 必须是稳定的凭证 ID，不得使用原始 AccessKey。
+type HMACAuthResult struct {
+	Identity AuthIdentity
+	Claims   map[string]string
+}
+
 // ICasdoorEventHookProvider 由服务可选实现，用于异步处理已完成框架撤销的标准事件。
 type ICasdoorEventHookProvider interface {
 	OnCasdoorEvent(ctx context.Context, event CasdoorEvent) error
