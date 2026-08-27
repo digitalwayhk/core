@@ -203,7 +203,7 @@ func eachrouters(routers []*types.RouterInfo, doc *openapi3.T, server *openapi3.
 			oper.Extensions["x-core-hmac-auth"] = map[string]interface{}{
 				"headers": hmacSecurity.headers,
 				"available_inputs": []string{
-					"access_key", "timestamp", "nonce", "recv_window", "method", "path",
+					"access_key", "timestamp", "nonce", "signature", "recv_window", "method", "path",
 					"raw_query", "body_sha256", "client_ip", "trace_id", "path_type",
 				},
 				"algorithm":        "provider_defined",

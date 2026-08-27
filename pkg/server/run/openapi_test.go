@@ -113,7 +113,7 @@ func TestOpenAPIDescribesOptionalHMACAuthentication(t *testing.T) {
 	require.Equal(t, "provider_defined", extension["algorithm"])
 	require.Equal(t, "provider_defined", extension["canonicalization"])
 	require.ElementsMatch(t, []string{
-		"access_key", "timestamp", "nonce", "recv_window", "method", "path",
+		"access_key", "timestamp", "nonce", "signature", "recv_window", "method", "path",
 		"raw_query", "body_sha256", "client_ip", "trace_id", "path_type",
 	}, extension["available_inputs"])
 
