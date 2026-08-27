@@ -24,6 +24,16 @@ type mysqlConcurrencyRecord struct {
 	Value     string     `gorm:"column:test_value;type:varchar(255)"`
 }
 
+type mysqlPoolCapacityRecord struct {
+	ID    uint   `gorm:"primaryKey"`
+	Batch string `gorm:"size:64;not null;index"`
+	Step  int    `gorm:"not null"`
+}
+
+func (mysqlPoolCapacityRecord) TableName() string {
+	return "core_mysql_pool_capacity_records"
+}
+
 func newMySQLConcurrencyRecord(dbName, key, value string) *mysqlConcurrencyRecord {
 	return &mysqlConcurrencyRecord{
 		DBName: dbName,
@@ -232,4 +242,170 @@ func TestMySQL_TransactionRejectsDifferentDBName(t *testing.T) {
 	require.Contains(t, err.Error(), "transaction is bound to db")
 
 	require.NoError(t, adapter.Rollback())
+}
+
+func TestMySQL_TransactionAtPoolCapacityDoesNotSelfDeadlock(t *testing.T) {
+	cfg := mysqlIntegrationConfig(t)
+
+	base := NewMySQL(cfg)
+	base.Name = cfg.Database
+	require.NoError(t, base.HasTable(&mysqlPoolCapacityRecord{}))
+
+	db, err := base.GetDB()
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	originalMaxOpen := sqlDB.Stats().MaxOpenConnections
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+
+	batch := fmt.Sprintf("pool-capacity-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		sqlDB.SetMaxOpenConns(originalMaxOpen)
+		_ = db.Where("batch = ?", batch).Delete(&mysqlPoolCapacityRecord{}).Error
+	})
+
+	ready := make(chan struct{}, cfg.MaxOpenConns)
+	startSecondOperation := make(chan struct{})
+	results := make(chan error, cfg.MaxOpenConns)
+
+	for worker := 0; worker < cfg.MaxOpenConns; worker++ {
+		worker := worker
+		go func() {
+			adapter := NewMySQL(cfg)
+			adapter.Name = cfg.Database
+			if err := adapter.Transaction(); err != nil {
+				results <- err
+				return
+			}
+			committed := false
+			defer func() {
+				if !committed {
+					_ = adapter.Rollback()
+				}
+			}()
+
+			if err := adapter.Insert(&mysqlPoolCapacityRecord{Batch: batch, Step: worker * 2}); err != nil {
+				results <- err
+				return
+			}
+			ready <- struct{}{}
+			<-startSecondOperation
+
+			if err := adapter.Insert(&mysqlPoolCapacityRecord{Batch: batch, Step: worker*2 + 1}); err != nil {
+				results <- err
+				return
+			}
+			if err := adapter.Commit(); err != nil {
+				results <- err
+				return
+			}
+			committed = true
+			results <- nil
+		}()
+	}
+
+	for worker := 0; worker < cfg.MaxOpenConns; worker++ {
+		select {
+		case <-ready:
+		case <-time.After(5 * time.Second):
+			t.Fatal("事务未能在 5 秒内各自占用一条连接")
+		}
+	}
+
+	waitCountBefore := sqlDB.Stats().WaitCount
+	close(startSecondOperation)
+
+	completed := 0
+	var resultErrors []error
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for completed < cfg.MaxOpenConns {
+		select {
+		case resultErr := <-results:
+			if resultErr != nil {
+				resultErrors = append(resultErrors, resultErr)
+			}
+			completed++
+		case <-timer.C:
+			blockedStats := sqlDB.Stats()
+			// 提高上限后主动发起一次 Ping，促使 database/sql 打开第 5 条连接；
+			// 该连接归还后会依次唤醒旧实现中等待基础池 Ping 的事务，避免挂死测试进程。
+			sqlDB.SetMaxOpenConns(cfg.MaxOpenConns + 1)
+			if rescueErr := sqlDB.Ping(); rescueErr != nil {
+				t.Fatalf("释放连接池自锁失败: %v", rescueErr)
+			}
+			for completed < cfg.MaxOpenConns {
+				select {
+				case <-results:
+					completed++
+				case <-time.After(5 * time.Second):
+					t.Fatal("提高测试连接池上限后事务仍未退出")
+				}
+			}
+			t.Fatalf(
+				"%d 个事务占满 %d 条连接后发生自锁: in_use=%d wait_count_delta=%d",
+				cfg.MaxOpenConns,
+				cfg.MaxOpenConns,
+				blockedStats.InUse,
+				blockedStats.WaitCount-waitCountBefore,
+			)
+		}
+	}
+	for _, resultErr := range resultErrors {
+		require.NoError(t, resultErr)
+	}
+
+	require.Eventually(t, func() bool {
+		return sqlDB.Stats().InUse == 0
+	}, time.Second, 10*time.Millisecond, "事务结束后连接应全部归还连接池")
+
+	var count int64
+	require.NoError(t, db.Model(&mysqlPoolCapacityRecord{}).Where("batch = ?", batch).Count(&count).Error)
+	require.EqualValues(t, cfg.MaxOpenConns*2, count)
+}
+
+func TestMySQL_TransactionSQLFailureRollsBackAndResetsState(t *testing.T) {
+	cfg := mysqlIntegrationConfig(t)
+
+	base := NewMySQL(cfg)
+	base.Name = cfg.Database
+	require.NoError(t, base.HasTable(&mysqlPoolCapacityRecord{}))
+	db, err := base.GetDB()
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	originalMaxOpen := sqlDB.Stats().MaxOpenConnections
+	// 本测试只验证事务错误传播与状态复位；保留一条池连接用于隔离该断言与容量自锁回归。
+	sqlDB.SetMaxOpenConns(2)
+
+	firstID := uint(time.Now().UnixNano()%1_000_000_000 + 1_000_000_000)
+	secondID := firstID + 1
+	t.Cleanup(func() {
+		sqlDB.SetMaxOpenConns(originalMaxOpen)
+		_ = db.Where("id IN ?", []uint{firstID, secondID}).Delete(&mysqlPoolCapacityRecord{}).Error
+	})
+
+	adapter := NewMySQL(cfg)
+	adapter.Name = cfg.Database
+	require.NoError(t, adapter.Transaction())
+	require.NoError(t, adapter.Insert(&mysqlPoolCapacityRecord{ID: firstID, Batch: "rollback", Step: 1}))
+
+	duplicateErr := adapter.Insert(&mysqlPoolCapacityRecord{ID: firstID, Batch: "duplicate", Step: 2})
+	require.Error(t, duplicateErr)
+	require.NoError(t, adapter.Rollback())
+	require.False(t, adapter.isTansaction)
+	require.Nil(t, adapter.tx)
+	require.Empty(t, adapter.txDBName)
+
+	require.NoError(t, adapter.Transaction())
+	require.NoError(t, adapter.Insert(&mysqlPoolCapacityRecord{ID: secondID, Batch: "after-rollback", Step: 3}))
+	require.NoError(t, adapter.Commit())
+
+	var firstCount int64
+	require.NoError(t, db.Model(&mysqlPoolCapacityRecord{}).Where("id = ?", firstID).Count(&firstCount).Error)
+	require.Zero(t, firstCount, "失败事务中的写入不得部分提交")
+
+	var secondCount int64
+	require.NoError(t, db.Model(&mysqlPoolCapacityRecord{}).Where("id = ?", secondID).Count(&secondCount).Error)
+	require.EqualValues(t, 1, secondCount, "回滚后同一适配器应能开始并提交新事务")
 }
