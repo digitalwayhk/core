@@ -6,6 +6,7 @@
 
 ### Added
 
+- 可选 `IHMACAuthProvider`：只有显式实现该接口的服务才为 Auth 用户域增加 HMAC 凭证备选；Bearer 保持默认且始终优先，Manage/ServerManage 不进入 HMAC 分支。REST 与 WebSocket 复用现有可信身份和 `OnAuthRequest` 授权链，Core 不保存 Secret/nonce，也不实现业务签名算法。
 - 必过门禁 `required/web-dist-sync`（`scripts/check-web-dist-sync.sh`）：校验已提交的内嵌前端产物 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致。此前只有 `scripts/test-build-web-admin.sh` 用合成 fixture 验证构建脚本行为，没有任何门禁看真实产物，`web/admin` 指针前进而 dist 未重建时服务会静默内嵌旧前端。校验只读、不联网、不需要 node/yarn，约 1 秒；配套契约测试 `scripts/test-check-web-dist-sync.sh` 与本地入口 `./scripts/test.sh web-dist-sync`。
 - 管理后台中英文切换：请求头 `X-Locale`（`zh-CN` / `en-US`，缺省与无法识别一律回退 `zh-CN`）、解析包 `pkg/server/locale`、加性接口 `types.ILocaleTitle`，以及 `DirectoryModel` / `MenuModel` 的 `TitleEN` 列（框架自动补列，无需迁移脚本）。`getmenu` 按当前语言填写 `title`，`View.Do` 的页面标题、标准命令和 `ID`、`CreatedAt` 等框架公共字段也有了中英默认标题。未实现 `ILocaleTitle` 的服务行为不变。详见 `docs/ai/core-skill/manage.md` 与 `docs/ai/core-skill/openapi-and-frontend.md`。
 - 声明式业务统计 `pkg/persistence/entity/stats`：`StatSpec`、Store、Dashboard、**StatsEngine**、`CompileClickHouse`；**服务级报表** `ReportDef`（与 Dashboard 分离，多菜单位于服务下）。示例 07：多报表 API + Admin `/report/:service/:code`（图表/表/钻取/跳转 Manage）。
@@ -62,6 +63,8 @@
 
 ### Fixed
 
+- MySQL 活动事务已经绑定连接后不再对基础 `*sql.DB` 额外执行 `Ping`，避免并发事务数等于 `MaxOpenConns` 时所有事务等待下一条连接而无法 Commit/Rollback；事务连接错误继续由 SQL、Commit 或 Rollback 原样返回。
+- HMAC OpenAPI 扩展的 `available_inputs` 补回 `signature`，与运行时实际抽取的凭证字段保持一致。
 - OpenAPI 零服务生成、配置静默接受、生命周期和并发关闭问题。
 - write-behind 同 key 重复写入或待同步 Set 后软删除的 pending 计数漂移，以及损坏同步项被静默跳过的问题。
 - write-behind 二次绑定静默成功、手动同步忽略批次上限、部分远端成功确认丢失，以及订单查询被过期本地 pending 覆盖的问题。
