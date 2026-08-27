@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core

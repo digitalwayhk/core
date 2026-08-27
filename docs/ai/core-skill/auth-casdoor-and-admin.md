@@ -55,6 +55,84 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 
 服务可选实现 `types.IHMACAuthProvider`，用于在没有 Bearer 的 **Auth 用户域**验证请求签名。未实现时 Private REST 与用户 WebSocket 继续只认框架 Access Token，Manage 与 ServerManage 无论是否携带 HMAC Header 都不进入该 Hook。
 
+### 默认行为与按服务启用
+
+**服务开启 `Auth` 后的默认凭证方式仍是 Core 原有 Access Token（TestToken/JWT/Casdoor 换取后的 Bearer），HMAC 不会因为 `Auth` 开启而自动启用。**
+
+Core 故意不提供全局 `HMACAuth.Enable`。HMAC 的启用开关是“具体服务实例是否显式实现 `IHMACAuthProvider`”：
+
+| 服务状态 | Private Auth 凭证行为 |
+| --- | --- |
+| 只配置 `Auth`，未实现 `IHMACAuthProvider` | 只认原有 Bearer Access Token |
+| 配置了 `HMACAuth` Header/`MaxInFlight`，但未实现 Provider | 仍只认 Bearer；`HMACAuth` 配置本身不是启用开关 |
+| 该服务显式实现 `IHMACAuthProvider` | 该服务的 Auth Private REST/用户 WebSocket 才增加 HMAC 备选 |
+| 请求已带非空 Bearer | 只验证 Bearer；即使 Bearer 无效也不降级尝试 HMAC |
+| Manage / ServerManage | 始终使用原有域凭证，从不调用 HMAC Provider |
+
+因此多服务工程必须在“确实需要 API Key/HMAC”的服务类型上实现该接口；其他服务不实现，保持原凭证行为。同一进程中各 `ServiceContext` 独立发现 Provider，不会因某一个服务启用 HMAC 而全局开启。
+
+### 消费方最小接入
+
+Provider 由已注册的业务服务实现；Core 在创建 `ServiceContext` 时通过可选接口自动发现，不需要手工向 Router 或 middleware 注册 Hook。
+
+```go
+func (s *UserService) AuthenticateHMAC(
+	ctx context.Context,
+	args types.HMACAuthArgs,
+) (*types.HMACAuthResult, error) {
+	// 业务服务负责：查找凭证、验签、时间窗、nonce 原子占用、撤销和权限。
+	credential, user, err := s.verifyAPIKey(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	result := &types.HMACAuthResult{
+		Identity: types.AuthIdentity{
+			UID:             user.ID,
+			Username:        user.Name,
+			AuthType:        types.AuthTypeUser,
+			Provider:        "apikey",
+			ProviderSubject: credential.ID, // 稳定凭证 ID，不是原始 AccessKey
+		},
+		Claims: map[string]string{"platform_uid": user.ID},
+	}
+	if err := safe.ValidateHMACAuthClaims(result.Claims); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+```
+
+Header 可保留 Core 中性默认值，也可在创建 `ServiceContext` **之前**按产品协议覆盖：
+
+```yaml
+HMACAuth:
+  AccessKeyHeader: X-Access-Key
+  TimestampHeader: X-Timestamp
+  NonceHeader: X-Nonce
+  SignatureHeader: X-Signature
+  RecvWindowHeader: X-Recv-Window
+  MaxInFlight: 64
+```
+
+`MaxInFlight` 限制单个 `ServiceContext` 内 REST 请求体预处理和 REST/WebSocket Provider 的总在途数，是构造期配置，运行中修改不会重建信号量。产品自定义 Header 和签名串只写在消费方契约，不要写成 Core 默认。
+
+### `HMACAuthArgs` 输入映射
+
+| 字段 | Private REST | WebSocket HMAC logon |
+| --- | --- | --- |
+| `AccessKey` | 配置 Header 值去首尾空白 | logon `data.apiKey` |
+| `Timestamp` | 配置 Header 原始字符串去首尾空白 | `data.timestamp` 的 `int64` 十进制字符串 |
+| `Nonce` / `Signature` / `RecvWindow` | 对应配置 Header 值去首尾空白 | 对应 logon JSON 字段；`recvWindow` 可选 |
+| `Method` | 冻结后 `RouterInfo.Method` | 固定 `WS` |
+| `Path` | 冻结后 `RouterInfo.Path` | 固定 `/ws` |
+| `Query` | `r.URL.RawQuery` 原样传递，Core 不排序、不删字段 | 空字符串 |
+| `BodyHashHex` | 原始请求体字节的 SHA-256 小写 hex；空 body 哈希空字节 | SHA-256 空字节的小写 hex |
+| `ClientIP` | `TrustedProxies` 规则下的请求来源 IP | WebSocket upgrade 请求的同样解析结果 |
+| `TraceID` | 复用或生成当前 HTTP 请求 TraceID | 复用 upgrade 请求 `X-Trace-Id`；缺失时生成 UUID |
+| `PathType` | 冻结后 `RouterInfo.PathType`，该分支必须为 Auth 用户域 | 固定 `types.PrivateType` |
+
+同一 Provider 同时支持 REST 和 WebSocket 时，应在产品协议中根据 `Method`/`PathType` 明确两种 canonical payload；不得假设 WebSocket 有 REST body/query，也不得把上表所有字段当成 Core 强制的签名顺序。
+
 - Core 只从 `ServerConfig.HMACAuth` 配置的中性 REST Header 提取 AccessKey、Timestamp、Nonce、Signature 和可选 RecvWindow；REST 不从 query 提取、移除或规范化凭证，客户端不得用 query 提交 HMAC 凭证，WebSocket 只从 logon JSON 提取。`HMACAuthArgs.Query` 原样保留业务 `RawQuery`，签名串排序仍由消费方负责。
 - Core 在确认 Provider 存在并预留 `MaxInFlight` 名额后，才有界、有超时地读取并恢复请求体，按原始字节计算 SHA-256；HMAC 分支即使挂到 `NewExternalRouterHandler` 也受 `ServerConfig.MaxBytes` 硬限制。Core 不持有 HMAC Secret、不实现算法、不存 nonce，也不读取业务权限。
 - Provider 成功返回 `HMACAuthResult`：UID、AuthType、非 Casdoor Provider 和稳定 `ProviderSubject` 必须完整；`ProviderSubject` 应是凭证记录 ID，禁止放原始 AccessKey。业务 Claims 可先调用 `safe.ValidateHMACAuthClaims` 预检查，不得使用 `uid`、`uname`、`auth_type`、`token_use`、`iat`、`exp`、`auth_provider`、`provider_subject`、`auth_generation`、`auth_authority_service`、`args`、`secret_args` 保留键。
@@ -71,3 +149,5 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 ./scripts/test.sh security
 CORE_TEST_REDIS_ADDR=127.0.0.1:6379 ./scripts/test.sh integration-casdoor-auth
 ```
+
+消费方至少还要测试：Bearer 优先且不调 Provider、无 Provider 仍为 401、坏签名/重放/Provider 超时 fail closed、Manage 不调 Provider、日志无 AccessKey/Signature/body，以及 WebSocket HMAC logon 后的 Private 订阅不再重放 nonce。

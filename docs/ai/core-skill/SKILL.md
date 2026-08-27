@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
@@ -28,7 +28,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
 | 多服务调用、EventBridge、WebSocket、Cluster/MQ、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
-| Casdoor 双域、Web Admin bootstrap、HTMLServer 边界 | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
+| Casdoor/JWT 双域、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
 | OpenAPI 与前端调用约定 | [openapi-and-frontend.md](openapi-and-frontend.md) |
 | 集成测试模板、UAT 角色拆分、发布门禁 | [testing-and-release.md](testing-and-release.md) |
@@ -120,6 +120,7 @@ entity.Model
 33. **Manage 动态分库**走 `IDBName` + 空 `Database` MySQL + 标准 `LoadList`，不用 `OnSearchBefore`+`stop=true` 自研列表。缺分库键时的 fail-closed 必须同时约束 `GetRemoteDBName` 与 `GetLocalDBName`（实现会在前者为空时回退后者）。硬条件与易踩坑见 [manage.md](manage.md)。
 34. **业务统计、经营分析与服务报表不是零接线自动 CRUD**：必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层刷新服务自己的 `stats.Store`，API 只读快照。`ReportDef` 只描述展示，不会自动创建事实数据、Runner 或 API。详见 [stats-and-reports.md](stats-and-reports.md)。
 35. 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
+36. 服务开启 `Auth` 后默认仍使用原有 Bearer Access Token；`HMACAuth` 配置不是开关。只有确实需要 API Key/HMAC 的具体服务显式实现 `IHMACAuthProvider` 时，该 `ServiceContext` 才增加 HMAC 备选。Core 只负责抽取凭证、限流/超时和注入可信身份，业务服务负责验签、nonce/重放、凭证撤销与权限。仅 Auth 用户域在无 Bearer 时进入，Bearer 永远优先，Manage/ServerManage 不得复用该分支。
 
 ## 工作流
 
@@ -140,4 +141,5 @@ entity.Model
 - Manage 在 `OnSearchBefore` 手写列表并 `stop=true`，破坏标准筛选、排序、分页与 `SearchAfter`。
 - 动态分库时 MySQL `config.Database` 非空、缺分库键时回退到默认业务库、或指望一次 Search 跨多个分库。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
+- 在 Core 里实现业务 HMAC 算法/保存 Secret/nonce，让 HMAC 降级进入 Manage/ServerManage，或在 WebSocket 每次订阅重放一次性签名。
 - Runtime 聚合把未采集指标写成 0；浏览器直连 Prometheus 或其他副本 `/metrics`。

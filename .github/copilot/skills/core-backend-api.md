@@ -16,7 +16,7 @@
 | 缓存、本地可靠写、write-behind、水平扩展 | `write-path-and-performance.md` |
 | 多服务调用、EventBridge、WebSocket、Runtime 观测、日志 | `multiservice-and-observability.md` |
 | 业务统计、经营分析、服务报表 | `stats-and-reports.md` |
-| Casdoor 双域、Web Admin bootstrap | `auth-casdoor-and-admin.md` |
+| Casdoor/JWT 双域、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | `auth-casdoor-and-admin.md` |
 | 命名规范与开发设计流程 | `naming-and-workflow.md` |
 | OpenAPI 与前端调用约定 | `openapi-and-frontend.md` |
 | 集成测试、UAT 与发布门禁 | `testing-and-release.md` |
