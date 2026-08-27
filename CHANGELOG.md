@@ -65,6 +65,7 @@
 
 ### Fixed
 
+- `SearchItem.SkipCount` 在带 `IScopes` 模型上先应用 Scope 再解析排序字段，避免 CamelCase 字段在 MySQL 中未映射成 snake_case 列名。
 - MySQL 活动事务已经绑定连接后不再对基础 `*sql.DB` 额外执行 `Ping`，避免并发事务数等于 `MaxOpenConns` 时所有事务等待下一条连接而无法 Commit/Rollback；事务连接错误继续由 SQL、Commit 或 Rollback 原样返回。
 - HMAC OpenAPI 扩展的 `available_inputs` 补回 `signature`，与运行时实际抽取的凭证字段保持一致。
 - OpenAPI 零服务生成、配置静默接受、生命周期和并发关闭问题。

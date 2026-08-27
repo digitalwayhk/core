@@ -47,8 +47,9 @@ func TestUpdateDataUsesIDWhenHashChanges(t *testing.T) {
 }
 
 type scopedLoadRecord struct {
-	ID   uint `gorm:"primaryKey"`
-	Name string
+	ID        uint `gorm:"primaryKey"`
+	AccountID string
+	Name      string
 }
 
 func (*scopedLoadRecord) ScopesHandler() func(*gorm.DB) *gorm.DB {
@@ -64,11 +65,12 @@ func TestLoadSkipCountExecutesOneSelect(t *testing.T) {
 	)})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&scopedLoadRecord{}))
-	require.NoError(t, db.Create(&scopedLoadRecord{Name: "first"}).Error)
+	require.NoError(t, db.Create(&scopedLoadRecord{AccountID: "account-a", Name: "first"}).Error)
 	statements.Reset()
 
 	query := &types.SearchItem{Page: 1, Size: 1, Total: 99, Model: &scopedLoadRecord{}, SkipCount: true}
 	query.AddWhereN("Name", "first")
+	query.AddSortN("AccountID", false)
 	var rows []*scopedLoadRecord
 	require.NoError(t, load(db, query, &rows))
 	require.Len(t, rows, 1)

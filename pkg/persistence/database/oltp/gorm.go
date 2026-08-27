@@ -256,12 +256,9 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 	}
 	if ist, ok := item.Model.(types.IScopes); ok {
 		if item.SkipCount {
-			return db.Scopes(func(d *gorm.DB) *gorm.DB {
-				sh := ist.ScopesHandler()
-				sdb := sh(d)
-				query, args := item.Where(sdb)
-				return sdb.Where(query, args...)
-			}).Model(item.Model).Scopes(paginate(item.Page, item.Size)).Order(item.Order()).Find(result).Error
+			sdb := ist.ScopesHandler()(db)
+			query, args := item.Where(sdb)
+			return sdb.Model(item.Model).Where(query, args...).Scopes(paginate(item.Page, item.Size)).Order(item.Order()).Find(result).Error
 		}
 		tx := db.Scopes(func(d *gorm.DB) *gorm.DB {
 			sh := ist.ScopesHandler()
