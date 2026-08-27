@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -173,4 +175,126 @@ func TestRedisReliableTakeoverPreservesOrderAcrossMultiplePending(t *testing.T) 
 	for i := 0; i < total; i++ {
 		require.Equal(t, fmt.Sprintf("%02d", i+1), got[i], "full=%v", got)
 	}
+}
+
+func TestRedisReliableKeyedConcurrencyRunsDifferentKeysInParallel(t *testing.T) {
+	provider := newReliableRedisProvider(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	var (
+		mu    sync.Mutex
+		order []string
+	)
+	cancelSub, err := provider.SubscribeReliable(ctx, "fills", mq.ReliableSubscribeOptions{
+		Group: "positions", Consumer: "owner-a", MinIdle: 100 * time.Millisecond,
+		ClaimInterval: 50 * time.Millisecond, KeyConcurrency: 2,
+	}, func(message *mq.Message) error {
+		body := string(message.Data)
+		started <- body
+		<-release
+		mu.Lock()
+		order = append(order, body)
+		mu.Unlock()
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancelSub()
+
+	for _, item := range []struct{ body, key string }{{"a1", "a"}, {"a2", "a"}, {"b1", "b"}} {
+		require.NoError(t, provider.Publish(ctx, "fills", []byte(item.body), &mq.PublishOptions{
+			OrderingKey: item.key, IdempotencyKey: item.body,
+		}))
+	}
+	first := map[string]bool{}
+	for len(first) < 2 {
+		select {
+		case body := <-started:
+			first[body] = true
+		case <-ctx.Done():
+			t.Fatalf("different Redis keys did not overlap: %v", first)
+		}
+	}
+	require.True(t, first["a1"])
+	require.True(t, first["b1"])
+	require.False(t, first["a2"])
+	snapshot := provider.RuntimeMetricSnapshot(context.Background())
+	require.Equal(t, "ok", snapshot.State)
+	require.Equal(t, float64(2), snapshot.Gauges["key_concurrency"])
+	require.Equal(t, float64(2), snapshot.Gauges["handler_inflight"])
+	close(release)
+	select {
+	case body := <-started:
+		require.Equal(t, "a2", body)
+	case <-ctx.Done():
+		t.Fatal("same-key successor did not resume")
+	}
+	require.Eventually(t, func() bool {
+		return provider.RuntimeMetricSnapshot(context.Background()).Gauges["handler_peak"] >= 2
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestRedisReliableKeyedPoisonKeyDoesNotBlockOtherKeys(t *testing.T) {
+	provider := newReliableRedisProvider(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	allowA := atomic.Bool{}
+	var aAttempts atomic.Int32
+	bDone := make(chan struct{}, 1)
+	aDone := make(chan string, 2)
+	cancelSub, err := provider.SubscribeReliable(ctx, "fills", mq.ReliableSubscribeOptions{
+		Group: "positions", Consumer: "owner-a", MinIdle: 100 * time.Millisecond,
+		ClaimInterval: 50 * time.Millisecond, KeyConcurrency: 2,
+	}, func(message *mq.Message) error {
+		body := string(message.Data)
+		if body == "a1" && !allowA.Load() {
+			aAttempts.Add(1)
+			return errors.New("poison")
+		}
+		if body == "b1" {
+			bDone <- struct{}{}
+		} else {
+			aDone <- body
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancelSub()
+
+	for _, item := range []struct{ body, key string }{{"a1", "a"}, {"a2", "a"}, {"b1", "b"}} {
+		require.NoError(t, provider.Publish(ctx, "fills", []byte(item.body), &mq.PublishOptions{
+			OrderingKey: item.key, IdempotencyKey: item.body,
+		}))
+	}
+	select {
+	case <-bDone:
+	case <-ctx.Done():
+		t.Fatal("poison key blocked healthy key")
+	}
+	require.GreaterOrEqual(t, aAttempts.Load(), int32(1))
+	select {
+	case body := <-aDone:
+		t.Fatalf("same-key successor overtook poison message: %s", body)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	allowA.Store(true)
+	select {
+	case body := <-aDone:
+		require.Equal(t, "a1", body)
+	case <-ctx.Done():
+		t.Fatal("poison message did not recover")
+	}
+	select {
+	case body := <-aDone:
+		require.Equal(t, "a2", body)
+	case <-ctx.Done():
+		t.Fatal("same-key successor did not resume after recovery")
+	}
+}
+
+func TestRedisReliableKeyedConformance(t *testing.T) {
+	provider := newReliableRedisProvider(t)
+	require.NoError(t, mq.VerifyKeyedReliableConcurrency(provider))
 }

@@ -37,7 +37,8 @@
 | 自定义 Provider | 通过 `RegisterProviderFactory` 注册后由 factory 创建；未注册名称是硬配置错误；测试注册必须用 `t.Cleanup` 调用 `UnregisterProviderFactory` 隔离全局状态 | MQManager/已注册 factory | supported |
 | `PublishOptions.OrderingKey` | 加性元数据；零值保持既有发布行为；`MQBridge` 将 `Envelope.ShardKey` 透传为 OrderingKey、`IdempotencyKey` 透传为 IdempotencyKey | MQProvider.Publish、Redis XAdd `ordering_key` 字段 | supported |
 | ordered-reliable 可选能力 | 显式 `ServiceContext`/`ServiceEventBridge.RequireOrderedReliableByShardKey` 或构造选项 + Ensure；未声明时零行为变化 | `OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、空 ShardKey fail-closed、Outbox 同 key barrier | supported（可选） |
-| Redis Streams ordered-reliable | 单 active owner lease；读新消息前先 reclaim 旧 pending（MinIdle=0）；handler 丢 owner 不 ACK；SubscribeReliable 强制 Count=1 | `RedisStreamProvider`；真 Redis 测试需 `CORE_TEST_REDIS_ADDR`；发版前各 provider 应跑 `VerifyOrderedReliableFailureBarrier` | supported |
+| Redis Streams ordered-reliable | 默认单 active owner + 全 subject 串行；`KeyConcurrency>1` 时 owner 内按 OrderingKey 分 lane，PEL cursor 有界分页、poison key 只阻断同 key；handler 丢 owner不 ACK | `RedisStreamProvider`；真 Redis测试需 `CORE_TEST_REDIS_ADDR`；发版前同时跑 failure barrier 与 keyed concurrency conformance | supported（显式 opt-in） |
+| Outbox/可靠订阅 key concurrency | `UseOutbox`、`OutboxOptions`/`Subscription` 零值均为 1；只有调用方显式 `>1` 才改变跨 key完成顺序；同 subject 配置必须一致 | `UseOutboxWithOptions`、`KeyedReliableExternalSubscriber`、`KeyedReliableMQProvider`；不支持时 fail closed | supported（加性、默认关闭） |
 | NATS JetStream ordered-reliable / `ReliableMQProvider` | 内建 NATS 仅普通 Publish/Subscribe；声明 ordered-reliable requirement 时 fail closed | 无完整 reliable/ordered owner | rejected（待实现） |
 | kafka、rabbitmq、rocketmq 内建 provider | 未注册同名自定义 factory 时 BuildManager 返回 not implemented | 无内建 owner | rejected |
 | transport/websocket/delayed-task Usage、request/reply、retry、dead-letter、dynamic switch | 启用时 Validate 明确失败；Enable=false 和预填默认参数只是 inactive/旧配置兼容 | 无 | rejected |

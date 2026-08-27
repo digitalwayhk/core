@@ -50,3 +50,39 @@ func TestMQBridgeReliableSubscriptionPropagatesControlHandlerError(t *testing.T)
 	require.NoError(t, err)
 	require.ErrorIs(t, provider.handler(&mq.Message{ID: "1-0", Subject: "orders.changed", Data: data}), want)
 }
+
+type keyedReliableBridgeProvider struct {
+	reliableBridgeProvider
+	options mq.ReliableSubscribeOptions
+}
+
+func (*keyedReliableBridgeProvider) SupportsKeyedReliableConcurrency() bool { return true }
+
+func (p *keyedReliableBridgeProvider) SubscribeReliable(
+	_ context.Context,
+	_ string,
+	options mq.ReliableSubscribeOptions,
+	handler func(*mq.Message) error,
+) (func(), error) {
+	p.options = options
+	p.handler = handler
+	return func() {}, nil
+}
+
+func TestMQBridgeReliableSubscriptionPropagatesKeyConcurrency(t *testing.T) {
+	provider := &keyedReliableBridgeProvider{}
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	bridge := event.NewMQBridge(event.NewStream(), manager)
+
+	cancel, err := bridge.SubscribeReliableWithOptions(
+		context.Background(),
+		"fills",
+		"positions",
+		event.ReliableExternalSubscribeOptions{KeyConcurrency: 6},
+	)
+	require.NoError(t, err)
+	defer cancel()
+	require.Equal(t, 6, provider.options.KeyConcurrency)
+}

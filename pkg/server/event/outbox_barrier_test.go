@@ -73,6 +73,23 @@ type barrierExternal struct {
 	published []string
 }
 
+type failOnceExternal struct {
+	mu        sync.Mutex
+	failed    bool
+	published []string
+}
+
+func (e *failOnceExternal) Publish(_ context.Context, _ string, env *event.Envelope) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if env.ID == "a1" && !e.failed {
+		e.failed = true
+		return errors.New("temporary publish failure")
+	}
+	e.published = append(e.published, env.ID)
+	return nil
+}
+
 func (e *barrierExternal) Publish(_ context.Context, _ string, env *event.Envelope) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -183,4 +200,37 @@ func TestOutboxBarrierSurvivesPublisherRestart(t *testing.T) {
 	store.mu.Unlock()
 	require.Contains(t, remaining, "a2")
 	require.Contains(t, remaining, "a3")
+}
+
+func TestOutboxBlockedKeyIsRetriedOnNextNotify(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	external := &failOnceExternal{}
+	bridge.SetExternalPublisher(external)
+	store := &barrierStore{pending: []event.OutboxMessage{
+		{EventID: "a1", EventType: "fill", Subject: "fills", ShardKey: "a", Payload: []byte("a1")},
+		{EventID: "a2", EventType: "fill", Subject: "fills", ShardKey: "a", Payload: []byte("a2")},
+		{EventID: "b1", EventType: "fill", Subject: "fills", ShardKey: "b", Payload: []byte("b1")},
+	}}
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{
+		SourceService: "trades", Store: store, Interval: time.Hour, BatchSize: 10,
+		KeyConcurrency: 2, External: true,
+	}))
+
+	bridge.NotifyOutbox()
+	require.Eventually(t, func() bool {
+		external.mu.Lock()
+		defer external.mu.Unlock()
+		return len(external.published) == 1 && external.published[0] == "b1"
+	}, time.Second, 10*time.Millisecond)
+
+	bridge.NotifyOutbox()
+	require.Eventually(t, func() bool {
+		external.mu.Lock()
+		defer external.mu.Unlock()
+		return len(external.published) == 3
+	}, time.Second, 10*time.Millisecond)
+	external.mu.Lock()
+	require.Equal(t, []string{"b1", "a1", "a2"}, external.published)
+	external.mu.Unlock()
 }

@@ -941,6 +941,15 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			panic(fmt.Sprintf("mq: provider init failed (mode=%s): %v", con.MQ.Mode, mqErr))
 		} else {
 			sc.MQManager = mgr
+			if mgr != nil {
+				if err := sc.RegisterRuntimeMetricProviders(mgr); err != nil {
+					logx.Infow("runtime_metric_provider_register_failed",
+						logx.Field("service", sc.Service.Name),
+						logx.Field("component", "mq"),
+						logx.Field("error", err),
+					)
+				}
+			}
 			// Wire MQ-backed event stream when usage includes "event-stream".
 			if mgr != nil && containsUsage(con.MQ.Usage, "event-stream") {
 				sc.EnableEventBridge()
@@ -1066,15 +1075,30 @@ func (own *ServiceContext) NewID() uint {
 	return uint(own.snow.NextId())
 }
 
+// OutboxRuntimeOptions 是服务显式启用的 Outbox 运行时选项。
+// KeyConcurrency 零值和 1 保持历史串行行为。
+type OutboxRuntimeOptions struct {
+	KeyConcurrency int
+}
+
 // UseOutbox 启用当前服务的可靠 Outbox 发布器。事件来源服务名固定为当前 ServiceContext。
 func (own *ServiceContext) UseOutbox(store event.OutboxStore) error {
+	return own.UseOutboxWithOptions(store, OutboxRuntimeOptions{})
+}
+
+// UseOutboxWithOptions 显式启用加性 Outbox 运行时能力。
+func (own *ServiceContext) UseOutboxWithOptions(
+	store event.OutboxStore,
+	options OutboxRuntimeOptions,
+) error {
 	if own == nil || own.ServiceEventBridge == nil || own.Service == nil {
 		return event.ErrServiceEventBridgeClosed
 	}
 	if err := own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
-		SourceService: own.Service.Name,
-		Store:         store,
-		External:      own.ServiceEventBridge.HasExternalPublisher(),
+		SourceService:  own.Service.Name,
+		Store:          store,
+		KeyConcurrency: options.KeyConcurrency,
+		External:       own.ServiceEventBridge.HasExternalPublisher(),
 	}); err != nil {
 		return err
 	}

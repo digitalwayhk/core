@@ -13,6 +13,7 @@
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
 - HTTP 仅可作为显式发送前 fallback；gRPC 开始发送后不得跨协议重试。内部异步事件使用 EventBridge，WebSocket 只面向最终用户。
 - Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 只实现 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。
+- `UseOutbox` 和 `Subscription` 的零值永远保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
 - 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
 - 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。发布方只负责发布事实，不知道也不等待消费者处理完成。
@@ -111,7 +112,8 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
-- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge 透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。
+- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。
+- Runtime 低基数指标公开 Outbox 的配置并发/实际峰值/active lanes/blocked keys/batch，以及 MQ可靠订阅的配置并发/handler in-flight/active/blocked/pending keys；缺少 provider指标时状态为 `not_collected`，禁止伪造零值。
 - JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已有 publish ACK、消息 ID 去重和显式 ACK，但重试、死信、pull consumer 与生产 stream 参数尚未实现。
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 

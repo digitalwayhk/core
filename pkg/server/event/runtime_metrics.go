@@ -65,8 +65,15 @@ func (p *outboxPublisher) RuntimeMetricSnapshot(context.Context) observability.R
 		Component: "outbox",
 		State:     state,
 		Gauges: map[string]float64{
-			"depth":        float64(p.depth.Load()),
-			"publish_fail": float64(p.failures.Load()),
+			"depth":           float64(p.depth.Load()),
+			"publish_fail":    float64(p.failures.Load()),
+			"key_concurrency": float64(p.keyConcurrency),
+			"worker_inflight": float64(p.workerInflight.Load()),
+			"worker_peak":     float64(p.workerPeak.Load()),
+			"active_lanes":    float64(p.activeLanes.Load()),
+			"blocked_keys":    float64(p.blockedKeys.Load()),
+			"batch_size":      float64(p.lastBatch.Load()),
+			"batch_limit":     float64(p.batch),
 		},
 	}
 }

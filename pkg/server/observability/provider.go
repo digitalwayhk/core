@@ -18,15 +18,26 @@ type RuntimeMetricProvider interface {
 
 // allowedGaugeNames 组件 gauge 名白名单（低基数）。
 var allowedGaugeNames = map[string]struct{}{
-	"depth":          {},
-	"disk_bytes":     {},
-	"sync_fail":      {},
-	"oldest_age_sec": {},
-	"publish_fail":   {},
-	"lag":            {},
-	"connections":    {},
-	"queue_depth":    {},
-	"hit_ratio":      {},
+	"depth":            {},
+	"disk_bytes":       {},
+	"sync_fail":        {},
+	"oldest_age_sec":   {},
+	"publish_fail":     {},
+	"lag":              {},
+	"connections":      {},
+	"queue_depth":      {},
+	"hit_ratio":        {},
+	"key_concurrency":  {},
+	"worker_inflight":  {},
+	"worker_peak":      {},
+	"active_lanes":     {},
+	"blocked_keys":     {},
+	"batch_size":       {},
+	"batch_limit":      {},
+	"handler_inflight": {},
+	"handler_peak":     {},
+	"active_keys":      {},
+	"pending_keys":     {},
 }
 
 func filterGauges(in map[string]float64) map[string]float64 {

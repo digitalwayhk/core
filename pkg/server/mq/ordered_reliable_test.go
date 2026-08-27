@@ -220,6 +220,11 @@ func TestConformanceRejectsLyingOrderedProvider(t *testing.T) {
 	require.Error(t, mq.VerifyOrderedReliableFailureBarrier(lying))
 }
 
+func TestKeyedReliableConformanceAcceptsParallelProvider(t *testing.T) {
+	provider := mq.NewFakeOrderedReliableProvider()
+	require.NoError(t, mq.VerifyKeyedReliableConcurrency(provider))
+}
+
 type basicProvider struct{}
 
 func (*basicProvider) Name() string                  { return "basic" }

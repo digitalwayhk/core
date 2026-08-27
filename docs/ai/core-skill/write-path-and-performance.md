@@ -28,6 +28,7 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 
 - `AutoMachineID=true`：MachineID 由 ClusterProvider lease 分配，不得为可扩容副本硬编码固定 MachineID。
 - 每副本本地 pending / Outbox / Inbox / 投影目录隔离；最终订单权威库是**共享**远程库（Docker/多进程下为 MySQL 等），不是每进程 SQLite remote。
+- “有序可靠”不等于全局串行。高吞吐 Outbox 只有在 Store 能按 ordering key公平组成有界 batch、同 key按持久顺序恢复、消费者以 Inbox/业务 sequence收敛重复时，才可显式开启 key concurrency。单纯把 `LIMIT 1` 改大仍会被 hot key占满，不构成容量修复。失败案例与认证证据见 `docs/codex/cases/KEYED_RELIABLE_GLOBAL_SERIALIZATION_FAILURE.md`。
 - 下单热路径：public/private → business → `OrderWriteRuntime` → 本地可靠写 → `UseWriteBehind` 同步远程权威库；Manage 继续用 `ModelList` 做后台视图/配置（服务级 `GetList` 绑定同一权威库 DataAction 亦可），但不得替代业务写路径。
 - `OrderRule` 等可配置规则走 Manage + 可靠事件同步到副本本地缓存；下单校验读本地规则快照，不在热路径同步打远程权威库。
 - 多实例诊断字段记录 `TraceID`、`ServiceName`、`ServiceInstanceID`；`ServiceInstanceIP` 仅诊断。
@@ -44,4 +45,3 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - `SetSyncDB`、`EnableWriteBehind(ModelList)` 是仍可编译的 Deprecated 兼容路径，不得作为新热路径设计中心。
 - 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
 - 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
-

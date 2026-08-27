@@ -58,4 +58,26 @@ func TestOutboxRuntimeMetricsExistWithoutBacklog(t *testing.T) {
 	require.Equal(t, "ok", snapshot.State)
 	require.Equal(t, float64(0), snapshot.Gauges["depth"])
 	require.Equal(t, float64(0), snapshot.Gauges["publish_fail"])
+	require.Equal(t, float64(1), snapshot.Gauges["key_concurrency"])
+}
+
+func TestOutboxRuntimeMetricsReportConfiguredKeyConcurrency(t *testing.T) {
+	bridge := event.NewServiceEventBridge(nil, event.ServiceEventBridgeOptions{})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, bridge.Close(ctx))
+	})
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{
+		SourceService: "trades", Store: runtimeMetricsOutboxStore{}, Interval: time.Hour,
+		KeyConcurrency: 7,
+	}))
+
+	snapshot := bridge.OutboxRuntimeMetricProvider().RuntimeMetricSnapshot(context.Background())
+	require.Equal(t, float64(7), snapshot.Gauges["key_concurrency"])
+	require.Contains(t, snapshot.Gauges, "worker_inflight")
+	require.Contains(t, snapshot.Gauges, "worker_peak")
+	require.Contains(t, snapshot.Gauges, "active_lanes")
+	require.Contains(t, snapshot.Gauges, "blocked_keys")
+	require.Contains(t, snapshot.Gauges, "batch_size")
 }

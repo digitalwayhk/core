@@ -8,6 +8,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/server/observability"
 )
 
 // MQManager 管理当前 MQ Provider、动态注册表和可选的无停机迁移状态。
@@ -24,6 +26,26 @@ type MQManager struct {
 // NewManager returns an initialised MQManager with no active provider.
 func NewManager() *MQManager {
 	return &MQManager{registry: make(map[string]MQProvider)}
+}
+
+func (*MQManager) ComponentName() string { return "mq" }
+
+func (m *MQManager) RuntimeMetricSnapshot(ctx context.Context) observability.RuntimeComponentSnapshot {
+	if m == nil {
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	m.mu.RLock()
+	provider := m.current
+	closed := m.closed
+	m.mu.RUnlock()
+	if closed || provider == nil {
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	metrics, ok := provider.(observability.RuntimeMetricProvider)
+	if !ok {
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "not_collected"}
+	}
+	return metrics.RuntimeMetricSnapshot(ctx)
 }
 
 // Register adds a provider to the registry. It does not make it active.
@@ -177,6 +199,12 @@ func (m *MQManager) SubscribeReliable(
 	provider, ok := m.current.(ReliableMQProvider)
 	if !ok {
 		return nil, ErrReliableSubscribeUnsupported
+	}
+	if options.KeyConcurrency > 1 {
+		keyed, supported := m.current.(KeyedReliableMQProvider)
+		if !supported || !keyed.SupportsKeyedReliableConcurrency() {
+			return nil, ErrKeyedReliableSubscribeUnsupported
+		}
 	}
 	return provider.SubscribeReliable(ctx, subject, options, handler)
 }

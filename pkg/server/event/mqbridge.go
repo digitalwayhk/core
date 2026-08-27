@@ -89,7 +89,18 @@ func (b *MQBridge) Subscribe(ctx context.Context, subject string) (cancel func()
 // SubscribeReliable 使用逻辑服务名作为 consumer group，只有全部控制 Handler
 // 成功后 Provider 才确认消息。
 func (b *MQBridge) SubscribeReliable(ctx context.Context, subject, subscriberID string) (func(), error) {
-	return b.manager.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{Group: subscriberID}, func(msg *mq.Message) error {
+	return b.SubscribeReliableWithOptions(ctx, subject, subscriberID, ReliableExternalSubscribeOptions{})
+}
+
+// SubscribeReliableWithOptions 把显式分键并发度传给 MQ provider；零值保持历史串行。
+func (b *MQBridge) SubscribeReliableWithOptions(
+	ctx context.Context,
+	subject, subscriberID string,
+	options ReliableExternalSubscribeOptions,
+) (func(), error) {
+	return b.manager.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
+		Group: subscriberID, KeyConcurrency: options.KeyConcurrency,
+	}, func(msg *mq.Message) error {
 		env := &Envelope{}
 		if err := json.Unmarshal(msg.Data, env); err != nil {
 			return err

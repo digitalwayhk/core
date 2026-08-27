@@ -56,3 +56,16 @@ func TestServiceContextRegistersEventRuntimeProviders(t *testing.T) {
 	require.True(t, components["eventbridge"])
 	require.True(t, components["outbox"])
 }
+
+func TestServiceContextUseOutboxWithOptionsIsExplicitAndAdditive(t *testing.T) {
+	serviceName := fmt.Sprintf("runtime-options-%d", time.Now().UnixNano())
+	cfg := config.NewServiceDefaultConfig(serviceName, 0)
+	cfg.Cluster.Mode = "off"
+	cfg.MQ.Mode = "off"
+	sc := NewServiceContextWithConfig(&metricsTestService{name: serviceName}, cfg)
+	require.NotNil(t, sc)
+	require.NoError(t, sc.UseOutboxWithOptions(
+		runtimeMetricOutboxStore{},
+		OutboxRuntimeOptions{KeyConcurrency: 4},
+	))
+}
