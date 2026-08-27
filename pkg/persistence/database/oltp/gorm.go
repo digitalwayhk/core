@@ -213,28 +213,30 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		name = "`" + name + "`"
 	}
 	sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
-	runsql := "select count(*) from (" + sqlwhere + ") a"
-	tx := db.Raw(runsql).Count(&item.Total)
-	if tx.Error != nil {
-		logx.Errorw("database_query_failed",
-			logx.Field("operation", "raw_count"),
-			logx.Field("error", tx.Error),
-		)
-		return tx.Error
+	if !item.SkipCount {
+		runsql := "select count(*) from (" + sqlwhere + ") a"
+		tx := db.Raw(runsql).Count(&item.Total)
+		if tx.Error != nil {
+			logx.Errorw("database_query_failed",
+				logx.Field("operation", "raw_count"),
+				logx.Field("error", tx.Error),
+			)
+			return tx.Error
+		}
 	}
-	if item.Total > 0 {
+	if item.SkipCount || item.Total > 0 {
 		swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
 			tx = tx.Model(item.Model)
 			tx = tx.Where(query, args...)
 			//tx = tx.Order(item.Order())
-			if item.Total > int64(item.Size) {
+			if item.SkipCount || item.Total > int64(item.Size) {
 				tx = tx.Scopes(paginate(item.Page, item.Size))
 			}
 			tx = tx.Find(result)
 			return tx
 		})
 		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
-		tx = db.Raw(sqlwhere).Find(result)
+		tx := db.Raw(sqlwhere).Find(result)
 		if tx.Error != nil {
 			logx.Errorw("database_query_failed",
 				logx.Field("operation", "raw_find"),
@@ -246,10 +248,21 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 	return nil
 }
 func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
+	if item.SkipCount {
+		item.Total = 0
+	}
 	if dbsql, ok := item.Model.(types.IDBSQL); ok {
 		return sqlload(dbsql, db, item, result)
 	}
 	if ist, ok := item.Model.(types.IScopes); ok {
+		if item.SkipCount {
+			return db.Scopes(func(d *gorm.DB) *gorm.DB {
+				sh := ist.ScopesHandler()
+				sdb := sh(d)
+				query, args := item.Where(sdb)
+				return sdb.Where(query, args...)
+			}).Model(item.Model).Scopes(paginate(item.Page, item.Size)).Order(item.Order()).Find(result).Error
+		}
 		tx := db.Scopes(func(d *gorm.DB) *gorm.DB {
 			sh := ist.ScopesHandler()
 			sdb := sh(d)
@@ -283,6 +296,19 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 		return nil
 	}
 	query, args := item.Where(db)
+	if item.SkipCount {
+		db = db.Model(item.Model).Scopes(paginate(item.Page, item.Size))
+		if len(item.WhereList) > 0 {
+			db = db.Where(query, args...)
+		}
+		if item.Order() != "" {
+			db = db.Order(item.Order())
+		}
+		if item.IsPreload {
+			db = db.Preload(clause.Associations)
+		}
+		return db.Scan(result).Error
+	}
 	tx := db.Model(item.Model).Where(query, args...).Count(&item.Total)
 	if tx.Error != nil {
 		return tx.Error

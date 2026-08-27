@@ -36,9 +36,11 @@ func init() {
 }
 
 type SearchItem struct {
-	Page          int
-	Size          int
-	Total         int64
+	Page  int
+	Size  int
+	Total int64
+	// SkipCount 供无需完整总数的业务热路径跳过 COUNT 往返；Total 保持为零。
+	SkipCount     bool
 	WhereList     []*WhereItem
 	SortList      []*SortItem
 	Model         interface{}

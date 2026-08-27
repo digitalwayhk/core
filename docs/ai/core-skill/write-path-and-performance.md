@@ -18,6 +18,11 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 3. 远程权威库类型由 models 的 DataAction/`WriteBehindTarget` 决定：开发可用 SQLite；多进程/Docker 应用共享 MySQL 等网络库。04 可用 `ModelListWriteBehindTarget` 作示例目标适配；07 订单权威库应用真正共享 remote。
 4. `EnableWriteBehind(ModelList)` / `SetSyncDB` 仍存在但已标记 Deprecated，仅为 ModelList/IDataAction 兼容层；示例 04/07 的 `StartOrderWriteStore`/`StopOrderWriteStore` 已在 v0.0.250 删除，代码中不存在可调用版本，替代品是 `OrderWriteRuntime` + `ServiceContext.UseResource`。
 
+事务内按唯一键点查或只需要有界结果、不需要分页总数时，显式设置
+`SearchItem.SkipCount=true`。此模式只执行查询本身，`Total` 保持零；零值仍执行
+`COUNT(*)` 后查询，供 Manage 分页和确实需要总数的业务读取使用。不得在调用方仍依赖
+完整 `Total` 时开启，也不得用它绕过结果上限。
+
 基准必须与对照示例同机、同口径、多轮运行，同时报告 QPS/TPS、p50/p95/p99、错误率、pending 收敛和磁盘上限。
 
 详细运行时契约见 `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`，容量契约见 `docs/codex/PERFORMANCE_SLO_BASELINE.md`。

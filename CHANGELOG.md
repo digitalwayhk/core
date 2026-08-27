@@ -6,6 +6,7 @@
 
 ### Added
 
+- `types.SearchItem.SkipCount`：业务热路径可显式放弃完整结果总数，使 `IDataAction.Load` 直接执行有界查询，避免点查固定产生 `COUNT(*)` + `SELECT` 两次数据库往返；零值继续保留原分页总数语义。
 - 可选分键可靠并发：`UseOutboxWithOptions`、`Subscription.KeyConcurrency` 与 `KeyedReliableMQProvider` 默认均保持并发度 1；显式启用后同 OrderingKey串行、不同 key有界并行，Redis仍保持单 active owner并分页处理 PEL。provider不支持或同 subject配置冲突时 fail closed；新增真 Redis conformance、Runtime低基数指标和 Bitzoom全局串行失败案例。
 - 可选 `IHMACAuthProvider`：只有显式实现该接口的服务才为 Auth 用户域增加 HMAC 凭证备选；Bearer 保持默认且始终优先，Manage/ServerManage 不进入 HMAC 分支。REST 与 WebSocket 复用现有可信身份和 `OnAuthRequest` 授权链，Core 不保存 Secret/nonce，也不实现业务签名算法。
 - 必过门禁 `required/web-dist-sync`（`scripts/check-web-dist-sync.sh`）：校验已提交的内嵌前端产物 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致。此前只有 `scripts/test-build-web-admin.sh` 用合成 fixture 验证构建脚本行为，没有任何门禁看真实产物，`web/admin` 指针前进而 dist 未重建时服务会静默内嵌旧前端。校验只读、不联网、不需要 node/yarn，约 1 秒；配套契约测试 `scripts/test-check-web-dist-sync.sh` 与本地入口 `./scripts/test.sh web-dist-sync`。

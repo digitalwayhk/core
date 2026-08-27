@@ -29,6 +29,7 @@
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
 | `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
+| `types.SearchItem.SkipCount` | Stable（加性） | persistence | 无需完整总数的有界业务查询跳过 COUNT 往返；零值保持原 Load/Total 语义 | `pkg/persistence/database/oltp` 单查询回归测试 |
 | `service/manage.ManageService`、标准 CRUD、hook、`Operation` | Stable | service/manage | 管理后台 CRUD 与自定义操作 | `service/manage/crud_test.go`、`examples/01-simple-shop` |
 | `service/manage/view` 的 ViewModel、FieldModel 与查询视图类型 | Stable | service/manage | Manage 元数据与管理前端契约 | Manage view/CRUD 测试与 apidiff 基线 |
 | Cluster、Transport、MQ 的已登记 factory/provider 入口 | Stable（按能力矩阵） | server runtime | 可插拔基础设施组装 | 任务 14 config-contract 与六包 race |
