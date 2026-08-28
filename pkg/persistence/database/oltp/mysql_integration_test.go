@@ -8,11 +8,74 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
 type mysqlIntegrationRecord struct {
 	ID    uint   `gorm:"primaryKey"`
 	Value string `gorm:"size:128;not null"`
+}
+
+// TestMySQLIntegration_ClosedPoolRecovery 锁定运行期连接池关闭后的语义：
+// 只读刷新连接并重试一次；写入不盲目重放，但后续幂等重试可使用新连接成功。
+func TestMySQLIntegration_ClosedPoolRecovery(t *testing.T) {
+	cfg := mysqlIntegrationConfig(t)
+	adapter := NewMySQL(cfg)
+	adapter.Name = cfg.Database
+	if err := adapter.HasTable(&mysqlIntegrationRecord{}); err != nil {
+		t.Fatalf("准备测试表失败: %v", err)
+	}
+	db, err := adapter.GetDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := &mysqlIntegrationRecord{Value: "closed-pool-read"}
+	if err := db.Create(seed).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		fresh, freshErr := adapter.GetDB()
+		if freshErr == nil {
+			_ = fresh.Exec("DROP TABLE IF EXISTS " + mysqlIntegrationRecord{}.TableName()).Error
+		}
+	})
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	query := &types.SearchItem{Page: 1, Size: 1, SkipCount: true, Model: &mysqlIntegrationRecord{}}
+	query.AddWhereN("ID", seed.ID)
+	var rows []*mysqlIntegrationRecord
+	if err := adapter.Load(query, &rows); err != nil {
+		t.Fatalf("只读未在连接关闭后恢复: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != seed.Value {
+		t.Fatalf("恢复后读取结果=%+v", rows)
+	}
+
+	current, err := adapter.GetDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentSQL, err := current.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := currentSQL.Close(); err != nil {
+		t.Fatal(err)
+	}
+	write := &mysqlIntegrationRecord{Value: "closed-pool-write"}
+	if err := adapter.Insert(write); !isConnectionError(err) {
+		t.Fatalf("关闭连接后的写入错误=%v，必须原样返回连接错误", err)
+	}
+	if err := adapter.Insert(write); err != nil {
+		t.Fatalf("上层幂等重试未使用刷新连接成功: %v", err)
+	}
 }
 
 func (mysqlIntegrationRecord) TableName() string { return "core_integration_mysql_records" }

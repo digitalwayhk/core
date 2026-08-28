@@ -1,6 +1,8 @@
 package oltp
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"os"
@@ -249,25 +251,17 @@ func (m *MySQL) ensureValidConnection() error {
 		return nil
 	}
 
-	// 测试已有连接是否仍然可用
-	sqlDB, err := m.db.DB()
-	if err != nil {
-		logx.Errorf("获取底层数据库连接失败: %v", err)
-		return m.recreateConnection()
-	}
-
-	if err := sqlDB.Ping(); err != nil {
-		logx.Infof(" 检测到连接异常，尝试重新连接: %v", err)
-		return m.recreateConnection()
-	}
-
+	// 已绑定的 *gorm.DB 是并发安全连接池句柄。每次业务 SQL 前 Ping 会额外借用
+	// 一个连接池槽位，并在池饱和时把一条 SQL 放大成两次串行排队。连接是否有效
+	// 由真实操作报告；非事务只读可在连接错误后刷新重试，写入与事务不得盲目重放。
 	return nil
 }
 
 // 重建连接的方法（增强版）
 func (m *MySQL) recreateConnection() error {
-	// 清理当前连接
-	m.cleanupCurrentConnection()
+	// 先从本实例和共享管理器清除失效句柄；GetDB 不再通过预先 Ping
+	// 判断健康状态，因此重建入口必须显式驱逐旧引用。
+	m.invalidateConnection()
 
 	//  添加重试机制
 	maxRetries := 3
@@ -312,9 +306,36 @@ func (m *MySQL) cleanupCurrentConnection() {
 	m.txDBName = ""
 }
 
+// invalidateConnection 只在非事务操作确认连接错误后驱逐失效连接池引用。
+// 活动事务已经绑定专用连接，不能在事务中切换到另一连接继续执行。
+func (m *MySQL) invalidateConnection() {
+	if m.isTansaction {
+		return
+	}
+	connManager.SetConnection(m.getConnectionKey(), nil)
+	m.db = nil
+}
+
+// retryReadAfterConnectionError 为无副作用只读操作提供一次恢复重试。
+// 非连接错误和活动事务原样返回；刷新失败同时保留原始错误链。
+func retryReadAfterConnectionError(initial error, inTransaction bool, refresh func() error, retry func() error) error {
+	if initial == nil || inTransaction || !isConnectionError(initial) {
+		return initial
+	}
+	if err := refresh(); err != nil {
+		return errors.Join(initial, fmt.Errorf("刷新数据库连接失败: %w", err))
+	}
+	return retry()
+}
+
 // 延迟表检查方法
 func (m *MySQL) ensureTable(data interface{}) error {
-	return m.HasTable(data)
+	err := m.HasTable(data)
+	return retryReadAfterConnectionError(err, m.isTansaction, m.recreateConnection, func() error {
+		// HasTable 在表缺失时会执行幂等建表/补列；连接错误发生在首次尝试时，
+		// 刷新后仍由同一框架迁移契约收敛并发建表结果。
+		return m.HasTable(data)
+	})
 }
 
 func (m *MySQL) GetDBName(data interface{}) error {
@@ -396,17 +417,8 @@ func (m *MySQL) GetDB() (*gorm.DB, error) {
 	// 尝试从连接池获取
 	if db, ok := connManager.GetConnection(connKey); ok {
 		if db != nil {
-			// 检查连接健康状态
-			if sqlDB, err := db.DB(); err == nil {
-				if err := sqlDB.Ping(); err == nil {
-					m.db = db
-					return db, nil
-				} else {
-					// 连接不健康，仅从缓存中清除引用，不调用 Close()
-					// 调用 Close() 会影响所有持有同一 *gorm.DB 的实例
-					connManager.SetConnection(connKey, nil)
-				}
-			}
+			m.db = db
+			return db, nil
 		}
 	}
 
@@ -927,7 +939,8 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 		return err
 	}
 	if item.IsStatistical {
-		return sum(m.db, item, result)
+		runSum := func() error { return sum(m.db, item, result) }
+		return retryReadAfterConnectionError(runSum(), m.isTansaction, m.recreateConnection, runSum)
 	}
 
 	runLoad := func() error {
@@ -949,7 +962,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 		}
 		return runLoad()
 	}
-	return loadErr
+	return retryReadAfterConnectionError(loadErr, m.isTansaction, m.recreateConnection, runLoad)
 }
 
 func (m *MySQL) Raw(sql string, data interface{}) error {
@@ -958,7 +971,8 @@ func (m *MySQL) Raw(sql string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	return m.db.Raw(sql).Scan(data).Error
+	runRaw := func() error { return m.db.Raw(sql).Scan(data).Error }
+	return retryReadAfterConnectionError(runRaw(), m.isTansaction, m.recreateConnection, runRaw)
 }
 
 func (m *MySQL) Exec(sql string, data interface{}) error {
@@ -966,7 +980,12 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	return m.db.Exec(sql, data).Error
+	err = m.db.Exec(sql, data).Error
+	if !m.isTansaction && isConnectionError(err) {
+		// Exec 可承载任意写入，连接错误时提交结果未知，不得自动重放。
+		m.invalidateConnection()
+	}
+	return err
 }
 
 // Clone 返回一个独立事务状态的新实例，供并发 goroutine 使用。
@@ -1058,8 +1077,8 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 
 	//  数据库不存在错误（Error 1049: Unknown database）。
 	// 场景：DB 被运行时删除（如 APP_ENV=test 清库操作）。
-	// Ping() 仍然成功（连接的是 MySQL server，不是某个具体库），所以
-	// ensureValidConnection() 无法感知，需在此处主动重建库 + 重连。
+	// 常规读写不做预先 Ping，且 server 级 Ping 也无法证明具体库存在，
+	// 因此在真实 SQL 返回 1049 时主动重建库 + 重连。
 	if !m.isTansaction && (strings.Contains(errStr, "Unknown database") || strings.Contains(errStr, "Error 1049")) {
 		logx.Infof(" 检测到数据库不存在，尝试重建数据库并重连: %v", err)
 
@@ -1083,21 +1102,12 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		return fn(m.db, data)
 	}
 
-	//  连接级错误（bad connection / commands out of sync）：刷新连接池空闲连接
-	// （SetMaxIdleConns(0) 立即关闭全部空闲连接，清除协议失步的坏连接），然后重试一次。
-	// 仅在非事务场景下重试；事务场景由调用方的 Rollback+逐条降级处理。
+	// 连接级错误下写入的提交结果可能未知。非事务写只驱逐失效句柄并返回原错误，
+	// 由上层业务幂等边界决定是否重试；活动事务保持原连接并由 Rollback 收敛。
 	if !m.isTansaction && isConnectionError(err) {
-		logx.Infof(" 检测到连接错误，刷新连接池后重试: %v", err)
-		if sqlDB, e := m.db.DB(); e == nil {
-			sqlDB.SetMaxIdleConns(0)                     // 驱逐全部空闲坏连接
-			sqlDB.SetMaxIdleConns(m.config.MaxIdleConns) // 恢复连接池大小
-		}
-		retryErr := fn(m.db, data)
-		if retryErr != nil {
-			logx.Errorf("连接错误重试仍失败: %v", retryErr)
-			return retryErr
-		}
-		return nil
+		logx.Infof(" 检测到写入连接错误，驱逐失效连接但不自动重放: %v", err)
+		m.invalidateConnection()
+		return err
 	}
 
 	return err
@@ -1165,9 +1175,13 @@ func isConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := err.Error()
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) || errors.Is(err, gorm.ErrInvalidDB) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "bad connection") ||
 		strings.Contains(s, "invalid connection") ||
+		strings.Contains(s, "database is closed") ||
 		strings.Contains(s, "commands out of sync") ||
 		strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "connection reset by peer")
@@ -1371,7 +1385,15 @@ func (m *MySQL) Exists(data interface{}) (bool, error) {
 	}
 
 	//  调用通用方法
-	return existsData(db, data)
+	exists, readErr := existsData(db, data)
+	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
+		return exists, readErr
+	}
+	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+		exists, readErr = existsData(m.db, data)
+		return readErr
+	})
+	return exists, readErr
 }
 
 // ExistsByCondition 根据自定义条件判断数据行是否存在
@@ -1394,7 +1416,15 @@ func (m *MySQL) ExistsByCondition(model interface{}, condition string, args ...i
 	}
 
 	//  调用通用方法
-	return existsByCondition(db, model, condition, args...)
+	exists, readErr := existsByCondition(db, model, condition, args...)
+	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
+		return exists, readErr
+	}
+	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+		exists, readErr = existsByCondition(m.db, model, condition, args...)
+		return readErr
+	})
+	return exists, readErr
 }
 
 // ExistsByHashcode 根据 hashcode 判断数据行是否存在（快速方法）
@@ -1417,7 +1447,15 @@ func (m *MySQL) ExistsByHashcode(model interface{}, hashcode string) (bool, erro
 	}
 
 	//  调用通用方法
-	return existsByHashcode(db, model, hashcode)
+	exists, readErr := existsByHashcode(db, model, hashcode)
+	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
+		return exists, readErr
+	}
+	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+		exists, readErr = existsByHashcode(m.db, model, hashcode)
+		return readErr
+	})
+	return exists, readErr
 }
 
 // ExistsByID 根据 ID 判断数据行是否存在（快速方法）
@@ -1440,5 +1478,13 @@ func (m *MySQL) ExistsByID(model interface{}, id int64) (bool, error) {
 	}
 
 	//  调用通用方法
-	return existsByID(db, model, id)
+	exists, readErr := existsByID(db, model, id)
+	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
+		return exists, readErr
+	}
+	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+		exists, readErr = existsByID(m.db, model, id)
+		return readErr
+	})
+	return exists, readErr
 }

@@ -24,6 +24,7 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 完整 `Total` 时开启，也不得用它绕过结果上限。
 
 基准必须与对照示例同机、同口径、多轮运行，同时报告 QPS/TPS、p50/p95/p99、错误率、pending 收敛和磁盘上限。
+数据库热路径的连接健康由真实 SQL 错误驱动，不得每操作先 `Ping`；详细的只读单次恢复、写入不重放和事务不换连接契约见 [models.md](models.md#mysql)，容量失败案例见 `docs/codex/cases/MYSQL_PER_OPERATION_PING_POOL_AMPLIFICATION.md`。
 
 详细运行时契约见 `docs/codex/ROUTERINFO_RUNTIME_GUIDE.md`，容量契约见 `docs/codex/PERFORMANCE_SLO_BASELINE.md`。
 
