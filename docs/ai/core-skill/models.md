@@ -126,6 +126,10 @@ func (own *Product) UpdateValid(_ interface{}) error {
 
 MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额外 `Ping`。连接有效性由真实 SQL 结果判定：
 
+- 同一个 `host:port/database` 的首次建池和故障恢复按连接键合并，只发布一套池；并发调用不得各自创建池后互相替换。
+- Clone 报告连接错误时只能驱逐自己仍引用的那套底层池；若其他 goroutine 已发布新池，旧 Clone 不得删除新池。
+- 长期服务池不按 ConnectionManager 的查询时间主动关闭；物理空闲连接由 `database/sql` 的 `MaxIdleConns`、`ConnMaxIdleTime` 和 `ConnMaxLifetime` 管理。
+
 - 非事务只读遇到连接级错误时，驱逐失效句柄、重建连接并且最多重试一次。
 - 写入的提交结果可能不确定；框架只驱逐失效句柄并返回原错误，不自动重放。上层只能在稳定业务幂等键下决定是否重试。
 - 活动事务已绑定专用连接，连接错误时不切换连接、不重放，由事务回滚与业务边界收敛。

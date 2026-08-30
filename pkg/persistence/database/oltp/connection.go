@@ -34,6 +34,13 @@ type TableCacheKey struct {
 type ConnectionManager struct {
 	mutex       sync.RWMutex
 	connections map[string]*ConnectionInfo
+	creations   map[string]*connectionCreation
+}
+
+type connectionCreation struct {
+	done chan struct{}
+	db   *gorm.DB
+	err  error
 }
 type ConnectionInfo struct {
 	DB        *gorm.DB
@@ -66,6 +73,55 @@ func (cm *ConnectionManager) GetConnection(key string) (*gorm.DB, bool) {
 	}
 	return nil, false
 }
+
+// GetOrCreate 按连接键串行化首次建池；不同调用方只接收同一个已发布连接池，
+// 避免并发 cache miss 创建多套池并在延迟关闭时破坏仍持有旧池的 Clone。
+func (cm *ConnectionManager) GetOrCreate(key string, create func() (*gorm.DB, error)) (*gorm.DB, error) {
+	if create == nil {
+		return nil, fmt.Errorf("connection factory is required")
+	}
+	cm.mutex.Lock()
+	if info, exists := cm.connections[key]; exists && info.DB != nil {
+		info.LastUsed = time.Now()
+		db := info.DB
+		cm.mutex.Unlock()
+		return db, nil
+	}
+	if cm.creations == nil {
+		cm.creations = make(map[string]*connectionCreation)
+	}
+	if flight, exists := cm.creations[key]; exists {
+		cm.mutex.Unlock()
+		<-flight.done
+		return flight.db, flight.err
+	}
+	flight := &connectionCreation{done: make(chan struct{})}
+	cm.creations[key] = flight
+	cm.mutex.Unlock()
+
+	created, createErr := create()
+	var unused *gorm.DB
+	cm.mutex.Lock()
+	if createErr == nil {
+		if info, exists := cm.connections[key]; exists && info.DB != nil {
+			flight.db = info.DB
+			if !sameConnectionPool(info.DB, created) {
+				unused = created
+			}
+		} else {
+			cm.connections[key] = &ConnectionInfo{DB: created, CreatedAt: time.Now(), LastUsed: time.Now()}
+			flight.db = created
+		}
+	} else {
+		flight.err = createErr
+	}
+	delete(cm.creations, key)
+	close(flight.done)
+	cm.mutex.Unlock()
+	closeConnectionPool(unused)
+	return flight.db, flight.err
+}
+
 func (cm *ConnectionManager) Remove(key string) {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
@@ -76,6 +132,19 @@ func (cm *ConnectionManager) Remove(key string) {
 		delete(cm.connections, key)
 	}
 
+}
+
+// RemoveIfSame 只驱逐报告连接错误的那一套底层池。旧 Clone 不得删除已经由
+// 其他 goroutine 发布的新池，否则会形成周期性重建和连接风暴。
+func (cm *ConnectionManager) RemoveIfSame(key string, failed *gorm.DB) {
+	cm.mutex.Lock()
+	var removed *gorm.DB
+	if info, exists := cm.connections[key]; exists && sameConnectionPool(info.DB, failed) {
+		removed = info.DB
+		delete(cm.connections, key)
+	}
+	cm.mutex.Unlock()
+	closeConnectionPool(removed)
 }
 func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 	cm.mutex.Lock()
@@ -99,12 +168,10 @@ func (cm *ConnectionManager) SetConnection(key string, db *gorm.DB) {
 	}
 
 	// 延迟关闭旧连接，给正在使用旧连接的操作宽限期
-	if oldDB != nil && oldDB != db {
+	if oldDB != nil && !sameConnectionPool(oldDB, db) {
 		go func(toClose *gorm.DB) {
 			time.Sleep(30 * time.Second)
-			if sqlDB, err := toClose.DB(); err == nil {
-				sqlDB.Close()
-			}
+			closeConnectionPool(toClose)
 		}(oldDB)
 	}
 }
@@ -121,28 +188,34 @@ func (cm *ConnectionManager) CloseAll() {
 	}
 }
 
-// 新增：清理过期连接
+// CleanupExpired 只清理无效缓存项。database/sql 已通过 MaxIdleConns、
+// ConnMaxIdleTime 与 ConnMaxLifetime 管理物理连接；按管理器 LastUsed 关闭
+// 长期服务池会破坏仍持有该池的 Clone，并在恢复时触发连接风暴。
 func (cm *ConnectionManager) CleanupExpired() {
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
-
-	now := time.Now()
 	for key, info := range cm.connections {
-		// 超过 30 分钟未使用（原 10 分钟太短，活跃连接会被关闭）
-		if now.Sub(info.LastUsed) < 30*time.Minute {
-			continue
+		if info == nil || info.DB == nil {
+			delete(cm.connections, key)
 		}
-		// Ping 确诺连接真正空闲且已无事务；若 Ping 失败则也删除（坏连接）
-		if sqlDB, err := info.DB.DB(); err == nil {
-			pingErr := sqlDB.Ping()
-			sqlDB.Close()
-			if pingErr != nil {
-				logx.Infof("清理坏连接: %s, err=%v", key, pingErr)
-			} else {
-				logx.Infof("清理过期空闲连接: %s (未使用 %.1f 分钟)", key, now.Sub(info.LastUsed).Minutes())
-			}
-		}
-		delete(cm.connections, key)
+	}
+}
+
+func sameConnectionPool(left, right *gorm.DB) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	leftSQL, leftErr := left.DB()
+	rightSQL, rightErr := right.DB()
+	return leftErr == nil && rightErr == nil && leftSQL == rightSQL
+}
+
+func closeConnectionPool(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
 	}
 }
 
@@ -236,7 +309,7 @@ func startGlobalCleanup() {
 	}()
 }
 
-//  新增：带上下文的连接健康检查
+// 新增：带上下文的连接健康检查
 func checkConnectionHealthWithContext(ctx context.Context) {
 	done := make(chan struct{}, 1)
 	go func() {
@@ -254,7 +327,7 @@ func checkConnectionHealthWithContext(ctx context.Context) {
 
 var lastMemStats runtime.MemStats
 
-//  新增：清理过期表缓存
+// 新增：清理过期表缓存
 func cleanExpiredTableCache() {
 	count := 0
 	tableCache.Range(func(key, value interface{}) bool {
@@ -276,7 +349,7 @@ func cleanExpiredTableCache() {
 	}
 }
 
-//  修复：带超时的连接健康检查
+// 修复：带超时的连接健康检查
 func checkConnectionHealth() {
 	//  使用带超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -322,10 +395,7 @@ func checkConnectionHealth() {
 				case err := <-done:
 					if err != nil {
 						logx.Errorf("数据库连接不健康，移除: %s, 错误: %v", k, err)
-						if sqlDB, dbErr := info.DB.DB(); dbErr == nil {
-							sqlDB.Close()
-						}
-						connManager.SetConnection(k, nil)
+						connManager.RemoveIfSame(k, info.DB)
 					}
 				case <-ctx.Done():
 					logx.Alert(fmt.Sprintf("数据库连接健康检查超时: %s", k))

@@ -174,7 +174,7 @@ type MySQL struct {
 }
 
 func NewConnectionManager() *ConnectionManager {
-	return &ConnectionManager{}
+	return &ConnectionManager{connections: make(map[string]*ConnectionInfo)}
 }
 
 // NewMySQL 创建 MySQL 实例
@@ -312,7 +312,7 @@ func (m *MySQL) invalidateConnection() {
 	if m.isTansaction {
 		return
 	}
-	connManager.SetConnection(m.getConnectionKey(), nil)
+	connManager.RemoveIfSame(m.getConnectionKey(), m.db)
 	m.db = nil
 }
 
@@ -413,24 +413,11 @@ func (m *MySQL) GetModelDB(model interface{}) (interface{}, error) {
 func (m *MySQL) GetDB() (*gorm.DB, error) {
 	// 确保数据库名已设置（但允许为空，用于管理操作）
 	connKey := m.getConnectionKey()
-
-	// 尝试从连接池获取
-	if db, ok := connManager.GetConnection(connKey); ok {
-		if db != nil {
-			m.db = db
-			return db, nil
-		}
-	}
-
-	// 创建新连接
-	db, err := m.newDB()
+	db, err := connManager.GetOrCreate(connKey, m.newDB)
 	if err != nil {
 		return nil, err
 	}
-
-	// 缓存连接
 	m.db = db
-	connManager.SetConnection(connKey, db)
 	return db, nil
 }
 

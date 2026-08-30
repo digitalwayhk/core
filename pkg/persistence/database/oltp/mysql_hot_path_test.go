@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -196,6 +197,80 @@ func TestInvalidateConnectionClearsLocalAndSharedReferences(t *testing.T) {
 	}
 	if _, ok := connManager.GetConnection(key); ok {
 		t.Fatal("shared stale database reference was not cleared")
+	}
+}
+
+func TestInvalidateStaleCloneDoesNotEvictNewerSharedPool(t *testing.T) {
+	staleDB, _ := newPingCountingGorm(t)
+	currentDB, _ := newPingCountingGorm(t)
+	adapter := NewMySQL(&Config{Host: fmt.Sprintf("stale-clone-%d", time.Now().UnixNano()), Port: 3306, Database: "hot_path"})
+	adapter.Name = "hot_path"
+	adapter.db = staleDB.Session(&gorm.Session{NewDB: true})
+	key := adapter.getConnectionKey()
+	connManager.SetConnection(key, currentDB)
+	t.Cleanup(func() { connManager.Remove(key) })
+
+	adapter.invalidateConnection()
+	if adapter.db != nil {
+		t.Fatal("stale clone local database reference was not cleared")
+	}
+	got, ok := connManager.GetConnection(key)
+	if !ok || got != currentDB {
+		t.Fatal("stale clone evicted the newer shared connection pool")
+	}
+}
+
+func TestConnectionManagerGetOrCreatePublishesOnePoolUnderConcurrency(t *testing.T) {
+	manager := NewConnectionManager()
+	db, _ := newPingCountingGorm(t)
+	var creates atomic.Int32
+	const callers = 32
+	results := make(chan *gorm.DB, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := manager.GetOrCreate("shared", func() (*gorm.DB, error) {
+				creates.Add(1)
+				return db, nil
+			})
+			results <- got
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for got := range results {
+		if got != db {
+			t.Fatalf("GetOrCreate returned %p, want shared %p", got, db)
+		}
+	}
+	if got := creates.Load(); got != 1 {
+		t.Fatalf("connection factory called %d times, want 1", got)
+	}
+}
+
+func TestCleanupExpiredLeavesHealthyServicePoolOpen(t *testing.T) {
+	manager := NewConnectionManager()
+	db, connector := newPingCountingGorm(t)
+	manager.connections["service"] = &ConnectionInfo{
+		DB: db, CreatedAt: time.Now().Add(-time.Hour), LastUsed: time.Now().Add(-time.Hour),
+	}
+
+	manager.CleanupExpired()
+	if got, ok := manager.GetConnection("service"); !ok || got != db {
+		t.Fatal("CleanupExpired removed a healthy long-lived service pool")
+	}
+	if got := connector.pings.Load(); got != 0 {
+		t.Fatalf("CleanupExpired pinged a healthy service pool %d times, want 0", got)
 	}
 }
 
