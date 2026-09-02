@@ -8,6 +8,7 @@
 - `GetHash` 与业务唯一性、保存时间精度不一致。
 - ManageService 传入内嵌实例而非真实 owner。
 - 为切换 Manage 数据库而在 `OnSearchBefore` 手写查询并返回 `stop=true`，导致标准筛选、排序、分页和关联查询失效。
+- 在 `api/manage` 直接调用 `entity.NewModelList`、传入 `IDataAction`，或公开 `ManageDataAction` 给 Manage。正确边界是最低公共 Manage 层只调用无参数 `models.NewManageModelList[T]()`。
 - public/private 直接返回持久化模型，或复用 Manage 列表 DTO。
 - WebSocket 把外部用户订阅与内部 EventBridge 混为一谈。
 - private WebSocket 未实现可信身份注入和用户级通知过滤。

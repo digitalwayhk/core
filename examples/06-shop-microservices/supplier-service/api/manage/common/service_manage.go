@@ -41,6 +41,11 @@ func NewServiceManage[T persistencetypes.IModel](owner interface{}) *ServiceMana
 	return &ServiceManage[T]{HookedManageService: managepkg.NewHookedManageService[T](owner), owner: owner}
 }
 
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*ServiceManage[T]) GetList() interface{} {
+	return models.NewManageModelList[T]()
+}
+
 // DoBefore 实现本类型在当前服务边界中的行为。
 func (own *ServiceManage[T]) DoBefore(sender interface{}, req servertypes.IRequest) (data interface{}, err error, stop bool) {
 	defer func() {

@@ -14,9 +14,10 @@ import (
 func TestOrderManageUsesRemoteModelList(t *testing.T) {
 	manager := NewOrderManage()
 	list, ok := manager.GetList().(*entity.ModelList[models.Order])
+	reference := models.NewManageModelList[models.Order]()
 
 	require.True(t, ok)
-	require.Same(t, models.RemoteDataAction(), list.GetAction())
+	require.Same(t, reference.GetAction(), list.GetAction())
 }
 
 func TestOrderManageDoesNotInterceptStandardSearch(t *testing.T) {

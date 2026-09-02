@@ -25,22 +25,31 @@ func NewProductManage() *ProductManage {
 Manage **应当**使用 `ModelList`，以获得默认筛选、排序、分页等标准能力（适合管理人员配置系统，不追求业务级吞吐）。
 
 - **未重写 `GetList()`** 时：`ManageService[T].GetList()` 返回 `entity.NewModelList[T](nil)`，最终落到进程运行目录下 `db/` 中的**本地 SQLite**（按模型库名，路径形如 `<工作目录>/db/<库名>/<库名>.ldb`）。
-- **生产或共享权威库**：在 models 提供 `ManageDataAction()` / `RemoteDataAction()`，并在本服务最基础的 `common.ServiceManage[T]` **统一重写** `GetList()`，使本服务全部 Manage 连同一数据源。
+- **任何服务数据源**：在 models 提供唯一的无参数 `NewManageModelList[T]()`，并在本服务最基础的 `common.ServiceManage[T]` **统一重写** `GetList()`。`api/manage` 不得感知 `IDataAction`，也不得决定使用本地库、远程权威库或动态分库适配器。
 - 不要在具体 Manage 的 `OnSearchBefore` 手写列表并 `stop=true`，否则会绕过 `SearchItem`/`LoadList`，破坏前端筛选、排序、分页、关联与 `SearchAfter`。
 
 ```go
-// models 包只暴露 IDataAction，不让 api/manage 直接依赖具体驱动。
-func ManageDataAction() persistencetypes.IDataAction {
-	return RemoteDataAction() // 开发可为 SQLite；生产常为共享 MySQL
+// models 内部选择连接；不向 api/manage 暴露。
+func manageDataAction() persistencetypes.IDataAction {
+	return store.GetRemote() // 也可以集中切换为本地库或动态分库适配器
 }
 
-// common.ServiceManage 为本服务全部 Manage 统一选择数据库。
+// NewManageModelList 为当前服务的 Manage API 创建模型列表。
+//
+// 本方法是 Manage 访问 ModelList 的唯一 models 层入口。调用方只声明要管理的
+// 模型类型，不得感知或传入 IDataAction，也不得决定数据库位置。连接类型、
+// 数据库位置和路由策略全部由当前服务的 models 持久化组合根集中选择。
+func NewManageModelList[T persistencetypes.IModel]() *entity.ModelList[T] {
+	return entity.NewModelList[T](manageDataAction())
+}
+
+// common.ServiceManage 只依赖 models 语义入口。
 func (*ServiceManage[T]) GetList() interface{} {
-	return entity.NewModelList[T](models.ManageDataAction())
+	return models.NewManageModelList[T]()
 }
 ```
 
-具体 `OrderManage`、`ProductManage` 等继续使用框架标准 `Search`，只在确有业务语义时实现 Hook。仅当**单个**模型需要特殊库时，才可在该 Manage 重写 `GetList()`，且仍必须返回绑定目标 `IDataAction` 的 `ModelList`。
+具体 `OrderManage`、`ProductManage` 等继续使用框架标准 `Search`，只在确有业务语义时实现 Hook。普通水平分库仍使用同一个 `NewManageModelList[T]()`，由模型 `IDBName`/`SearchWhere` 决定目标库。仅当**单个**模型确实连接不同权威库且无法由模型路由表达时，才在 models 增加语义明确的专用 ModelList 工厂，并由该模型的 Manage 重写 `GetList()`；专用工厂仍不得接受 DataAction 参数。
 
 ## 只读管理
 
@@ -124,17 +133,21 @@ func (m *ServiceBaseModel) GetLocalDBName() string {
 ### 推荐目标形态（分库服务）
 
 ```go
-// models：可路由 MySQL —— Database 必须为空
-func ManageRoutableMySQL() persistencetypes.IDataAction {
+// models：连接选择保持私有；Database 必须为空以启用模型动态路由。
+func manageDataAction() persistencetypes.IDataAction {
 	return oltp.NewMySQL(&oltp.Config{
 		Host: host, Port: port, User: user, Password: pass,
 		Database: "", // 关键：非空则永远固定库
 	})
 }
 
+func NewManageModelList[T persistencetypes.IModel]() *entity.ModelList[T] {
+	return entity.NewModelList[T](manageDataAction())
+}
+
 // ServiceManage.GetList
 func (*ServiceManage[T]) GetList() interface{} {
-	return entity.NewModelList[T](models.ManageRoutableMySQL())
+	return models.NewManageModelList[T]()
 }
 
 // OnSearchBefore：只校验 / 补齐 Where，不 stop
@@ -316,4 +329,3 @@ func (own *OrderManage) GetLocaleTitle(locale string) string {
 自定义命令不在表内，`Title` 保持类型名。需要在 Manage 之外按指定语言生成命令时用 `manage.RouterToLocaleCommand(info, current)`；`manage.RouterToCommand(info)` 等价于默认语言。
 
 ---
-

@@ -19,6 +19,11 @@ func NewProductManage() *ProductManage {
 	return own
 }
 
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*ProductManage) GetList() interface{} {
+	return models.NewManageModelList[models.Product]()
+}
+
 // Routers 只暴露本示例需要的商品 CRUD，不启用状态提交与发布。
 func (own *ProductManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove}

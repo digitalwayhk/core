@@ -1,6 +1,7 @@
 package common
 
 import (
+	"github.com/digitalwayhk/core/examples/05-shop-casdoor-rbac/models"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -43,6 +44,11 @@ type ShopManage[T persistencetypes.IModel] struct {
 // NewShopManage 创建绑定最终 owner 的服务级 Manage。
 func NewShopManage[T persistencetypes.IModel](owner interface{}) *ShopManage[T] {
 	return &ShopManage[T]{ManageService: managepkg.NewManageService[T](owner), owner: owner}
+}
+
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*ShopManage[T]) GetList() interface{} {
+	return models.NewManageModelList[T]()
 }
 
 // DoBefore 是服务级前置总入口，会把所有派生 Manage 的命令分派到对应 On...Before。

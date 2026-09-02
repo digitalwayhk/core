@@ -26,6 +26,11 @@ func NewPaymentTypeManage() *PaymentTypeManage {
 	return own
 }
 
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*PaymentTypeManage) GetList() interface{} {
+	return models.NewManageModelList[models.PaymentType]()
+}
+
 // Routers 暴露 CRUD 和启用、禁用命令。
 func (own *PaymentTypeManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Add, own.Edit, own.Remove, own.Enable, own.Disable}

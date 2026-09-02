@@ -19,6 +19,11 @@ func NewOrderManage() *OrderManage {
 	return own
 }
 
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*OrderManage) GetList() interface{} {
+	return models.NewManageModelList[models.Order]()
+}
+
 // Routers 仅暴露 View 与 Search，避免管理端绕过订单所有权和通知逻辑。
 func (own *OrderManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search}

@@ -143,7 +143,14 @@ func (own *ManageService[T]) SearchAfter(sender interface{}, result *view.TableD
 			items = idg.GetDefaultItems()
 		}
 		if len(items) > 0 {
-			if list := own.GetList().(*entity.ModelList[T]); list != nil {
+			var list *entity.ModelList[T]
+			if search, ok := sender.(*Search[T]); ok {
+				list = search.list
+			}
+			if list == nil {
+				list, _ = own.GetList().(*entity.ModelList[T])
+			}
+			if list != nil {
 				if err := list.Add(items...); err != nil {
 					return nil, err
 				}

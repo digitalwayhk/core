@@ -88,7 +88,7 @@ entity.Model
 1. public/private URL 为 `/api/{service}/{router}`；Manage 为 `/api/manage/{service}/{manage}/{operation}`；ServerManage 为 `/api/servermanage/{router}`。`public`/`private` 不进入 URL。
 2. 服务名放无依赖 `contract`；RouterInfo 注册后 Path、ServiceName、Method、Auth 等元数据冻结，只通过 Getter 读取。
 3. private 身份只读 `req.GetUser()`/claims，缓存键和 WebSocket 订阅不信任客户端 UserID。
-4. **数据访问分两套，不可混用职责**：Manage 走 `ModelList` 获得框架筛选/排序/分页；public/private 走 models 业务方法（内部用集中获取的 `IDataAction`），复杂编排放 business；高吞吐写再升级为专用 store + 本地可靠写 + `UseWriteBehind`。共用 model 结构体，不共用访问方式。详见 [manage.md](manage.md) 与 [write-path-and-performance.md](write-path-and-performance.md)。
+4. **数据访问分两套，不可混用职责**：Manage 只通过 models 的无参数 `NewManageModelList[T]()` 取得 `ModelList`，不得感知或传入 `IDataAction`；public/private 走 models 业务方法（内部用集中获取的 `IDataAction`），复杂编排放 business；高吞吐写再升级为专用 store + 本地可靠写 + `UseWriteBehind`。共用 model 结构体，不共用访问方式。详见 [manage.md](manage.md) 与 [write-path-and-performance.md](write-path-and-performance.md)。
 5. Model 必须先按生命周期归入基础资料或业务事实两条平行支路，不能按"谁是继承上层"判断。模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料通常只能禁用，不能删除。
 6. **建库、建表和字段迁移由框架自动完成，业务代码不得自建。** 禁止 `CREATE TABLE`/`init.sql`、migration 目录、版本化迁移框架或业务代码直接调用 GORM `AutoMigrate`。破坏性变更（删列、改类型、加约束）不自动执行，需走发布流程。机制与边界见 [models.md](models.md)。
 7. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
@@ -116,7 +116,7 @@ entity.Model
 29. 多服务运维观测使用 ServerManage Runtime API，窗口仅 `15s|5m|1h`。ClusterProvider 是实例与地址权威，Prometheus 是历史指标权威；指标缺失必须返回 `null` 并带 `state`，禁止把未采集伪装成零。不得恢复已废弃的 `RouterStats`/`/api/servermanage/statistics`。
 30. 高吞吐写路径必须使用实例级 `OrderWriteRuntime`（或等价注入访问面）+ `ServiceContext.UseResource` 管理生命周期；禁止包级全局 store registry。示例 04/07 的 `StartOrderWriteStore`/`StopOrderWriteStore` 已删除，不存在可调用版本；`SetSyncDB`、`EnableWriteBehind(ModelList)` 仍存在但仅为兼容层。
 31. 有序可靠投递等加性 MQ 契约以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。
-32. **库类型与连接获取集中在 models**：在服务公共模型/持久化组合根声明 `LocalDataAction`/`RemoteDataAction`/`ManageDataAction` 等入口；切换 SQLite→MySQL 只改这些实现，不改遍业务 API。
+32. **Manage 的存储选择集中在 models**：每个服务的公共模型/持久化组合根只向 Manage 暴露无参数泛型 `NewManageModelList[T]()`；其内部用私有 `manageDataAction()` 或 store 选择本地库、远程权威库或动态分库适配器。普通分库继续由模型的 `IDBName`/`SearchWhere` 路由；只有单个模型确实连接不同权威库时才增加语义明确的专用 ModelList 工厂。切换 SQLite→MySQL 不得修改 `api/manage`。
 33. **Manage 动态分库**走 `IDBName` + 空 `Database` MySQL + 标准 `LoadList`，不用 `OnSearchBefore`+`stop=true` 自研列表。缺分库键时的 fail-closed 必须同时约束 `GetRemoteDBName` 与 `GetLocalDBName`（实现会在前者为空时回退后者）。硬条件与易踩坑见 [manage.md](manage.md)。
 34. **业务统计、经营分析与服务报表不是零接线自动 CRUD**：必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层刷新服务自己的 `stats.Store`，API 只读快照。`ReportDef` 只描述展示，不会自动创建事实数据、Runner 或 API。详见 [stats-and-reports.md](stats-and-reports.md)。
 35. 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
@@ -125,7 +125,7 @@ entity.Model
 ## 工作流
 
 1. 选择最近示例，再读对应主题分片与现行指南，然后核对当前代码。
-2. 先写失败测试；不绕过 ServiceContext、Manage 的 ModelList、models 层 DataAction/业务 store 与认证生命周期。
+2. 先写失败测试；不绕过 ServiceContext、Manage 的 `models.NewManageModelList`、models 内部 DataAction/业务 store 与认证生命周期。
 3. 集成测试启动真实进程，使用自动生成配置、临时数据目录、真实 HTTP/WebSocket；普通业务用 TestToken，Casdoor 生命周期用 Fake Casdoor。
 4. 运行 `gofmt`、定向测试、race、`./scripts/check-logging.sh`；跨模块变更再运行 `release-contract` 和对应 CI gate。
 5. 发现指南与代码不一致时，以代码、测试和公开契约为准，并回写本目录对应分片。
@@ -138,7 +138,7 @@ entity.Model
 - 把"基础 Model"理解成继承树最上层或 `entity.BaseModel`；让业务事实继承基础资料支路；业务事实不保存基础资料 ID。
 - public/private 直接 `NewModelList` 做业务读写，或把 Manage CRUD/Search 当业务接口。
 - 手写 `CREATE TABLE`/`CREATE DATABASE`、`init.sql`、`migrations/` 目录或在业务代码调用 GORM `AutoMigrate`。
-- Manage 在 `OnSearchBefore` 手写列表并 `stop=true`，破坏标准筛选、排序、分页与 `SearchAfter`。
+- Manage 直接构造 `ModelList`、传入 DataAction，或在 `OnSearchBefore` 手写列表并 `stop=true`，破坏 models 边界或标准筛选、排序、分页与 `SearchAfter`。
 - 动态分库时 MySQL `config.Database` 非空、缺分库键时回退到默认业务库、或指望一次 Search 跨多个分库。
 - WebSocket 接受客户端 UserID、跨用户投递，或内部服务用 WebSocket 通信。
 - 在 Core 里实现业务 HMAC 算法/保存 Secret/nonce，让 HMAC 降级进入 Manage/ServerManage，或在 WebSocket 每次订阅重放一次性签名。

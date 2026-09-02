@@ -173,13 +173,13 @@ func EnsureModel(model interface{}) error {
 
 框架支持多种数据库类型（SQLite、MySQL、PostgreSQL 等）。**SQLite 只是零配置的默认/开发选项**：本地开发与单机测试最简单，无需额外配置即可作为本地库，也可临时当作"远程"权威库；**生产与多进程共享权威库应按 MySQL 等网络库选型**，不是"只能 SQLite"。
 
-推荐在服务**公共模型/持久化组合根**（如 `models/common`、`models/data_action.go`、`models/internal/store`）集中定义明确的 `IDataAction` 获取方法，例如 `LocalDataAction()` / `RemoteDataAction()` / `ManageDataAction()`。后续切换库类型时**只改这些方法**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
+推荐在服务**公共模型/持久化组合根**（如 `models/models.go`、`models/data_action.go`、`models/internal/store`）集中选择 `IDataAction`。对 Manage 只公开一个无参数泛型入口 `NewManageModelList[T]()`；实际连接获取方法保持私有，例如 `manageDataAction()`。后续切换库类型时**只改 models 内部实现**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
 
 **Manage API 与 public/private 使用数据库的方式不同，不可混用：**
 
 | 路径 | 访问方式 | 适用 |
 | --- | --- | --- |
-| Manage | `ModelList` + 标准 Search/View/Add… | 管理后台；框架筛选/排序/分页；管理人员配置与查询 |
+| Manage | `models.NewManageModelList[T]()` + 标准 Search/View/Add… | 管理后台；框架筛选/排序/分页；`api/manage` 不接触 DataAction |
 | public/private | models 业务方法（内部 `IDataAction`）+ 可选 business | **所有**业务读写默认模式（见 01）；API 不直接 `NewModelList` |
 | public/private 高吞吐写 | 04/07 专用 store：本地可靠写 + `UseWriteBehind` → 远程权威库 | 下单/支付等需水平扩展或极高 TPS 时再升级，不是简单业务的必选项 |
 
@@ -202,8 +202,8 @@ var (
 	dataAction     persistencetypes.IDataAction
 )
 
-// LocalDataAction / RemoteDataAction：切换 SQLite→MySQL 只改此处实现。
-func LocalDataAction() persistencetypes.IDataAction {
+// manageDataAction 保持在 models 内部；切换 SQLite→MySQL 只改此处实现。
+func manageDataAction() persistencetypes.IDataAction {
 	dataActionOnce.Do(func() {
 		dataAction = entity.GetGlobalSqliteInstance(NewProduct().GetLocalDBName())
 		// 生产示例（固定库）：
@@ -214,7 +214,14 @@ func LocalDataAction() persistencetypes.IDataAction {
 	})
 	return dataAction
 }
+
+// NewManageModelList 是 Manage 访问 ModelList 的唯一 models 层入口。
+func NewManageModelList[T persistencetypes.IModel]() *entity.ModelList[T] {
+	return entity.NewModelList[T](manageDataAction())
+}
 ```
+
+普通动态分库不需要 `NewLocalModelList`、`NewRemoteModelList` 或按市场拆工厂：同一个 `NewManageModelList[T]()` 返回可路由 adapter，模型的 `IDBName` 与 `SearchWhere` 决定本次访问的库。只有某个模型连接的权威存储与服务默认连接真正不同，才增加语义明确的专用 ModelList 工厂；它仍不接受 `IDataAction` 参数。
 
 ## `SearchWhere` 的默认行数上限
 

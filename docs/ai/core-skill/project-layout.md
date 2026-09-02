@@ -11,7 +11,7 @@ examples/01-simple-shop/
 │   ├── product_persistence.go    # 商品查询与名称唯一性操作
 │   ├── order.go                  # 订单模型、价格快照和秒级业务哈希
 │   ├── order_persistence.go      # 下单、本人查询、所有权查询和删除
-│   └── data_action.go            # 模型层共享 IDataAction 持久化边界
+│   └── data_action.go            # 私有 DataAction + NewManageModelList 持久化组合根
 ├── api/
 │   ├── dto/                      # 面向 HTTP、OpenAPI 和 WebSocket 的扁平 DTO
 │   ├── manage/                   # 商品完整 CRUD、订单只读管理
@@ -94,7 +94,7 @@ examples/integration/07-shop-order-scale-multi-process/
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。
 
-示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务公共模型基座、数据库名和 TraceID，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影等业务事实，`models/internal/store` 放 DataAction、Outbox/Inbox 等基础设施持久化模型和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面，不放具体模型或持久化实现。基础资料模型与业务事实模型是继承服务公共基座的两条平行支路；这个公共基座不是“基础资料 Model”。写路径从入口 `req.GetTraceId()` 传到 business，再写入业务事实、Outbox、Inbox 和投影；事件 Metadata 同步携带 TraceID，但 EventID 仍负责事件幂等。
+示例 06 的每个服务也按示例 05 的模型目录拆分：`models/common` 放服务公共模型基座、数据库名和 TraceID，`models/basedata` 放供应商、商品、支付类型、用户、地址等基础资料，`models/transaction` 放订单、支付、投影等业务事实，`models/internal/store` 放 DataAction、Outbox/Inbox 等基础设施持久化模型和事务互斥，`models/schema` 统一建表，根 `models` 只保留 `models.go` 兼容门面和 `NewManageModelList[T]()`，不放具体模型或持久化实现。基础资料模型与业务事实模型是继承服务公共基座的两条平行支路；这个公共基座不是“基础资料 Model”。写路径从入口 `req.GetTraceId()` 传到 business，再写入业务事实、Outbox、Inbox 和投影；事件 Metadata 同步携带 TraceID，但 EventID 仍负责事件幂等。
 
 示例 06 的 `api/manage` 目录也必须按示例 05 拆分：`api/manage/common` 放权限、owner 限域和全服务最基础 `ServiceManage[T]`，`api/manage/basedata` 放 `BaseDataManage[T]`、基础资料 Manage 与受控命令，`api/manage/transaction` 放 `TransactionManage[T]`、订单、支付、投影等业务 Manage，`api/manage/audit` 只在存在审计/身份事件时使用；根 `api/manage` 只保留 `manage.go` 兼容门面和路由注册入口。
 
@@ -219,17 +219,13 @@ func (own *ProjectModel) NewModel() {
     }
 }
 
-// ProjectModelList 封装全项目公共连接获取逻辑。
-type ProjectModelList[T persisttypes.IModel] struct {
-    *entity.ModelList[T]
-}
-
-func NewProjectModelList[T persisttypes.IModel](action persisttypes.IDataAction) *ProjectModelList[T] {
-    return &ProjectModelList[T]{
-        ModelList: entity.NewModelList[T](action),
-    }
+// NewManageModelList 是 Manage 访问 ModelList 的唯一 models 层入口。
+func NewManageModelList[T persisttypes.IModel]() *entity.ModelList[T] {
+    return entity.NewModelList[T](manageDataAction())
 }
 ```
+
+`manageDataAction()` 必须留在 models 内部。`api/manage` 的最低公共基座只重写一次 `GetList()` 并调用 `models.NewManageModelList[T]()`，不能接收或选择 `IDataAction`。
 
 #### `internal/pkg/api/base_api.go`
 
@@ -361,4 +357,3 @@ func (own *BaseManageService[T]) DoBefore(sender interface{}, req stypes.IReques
 ```
 
 ---
-

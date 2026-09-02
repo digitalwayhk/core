@@ -2,6 +2,7 @@
 package common
 
 import (
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service/models"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -19,6 +20,11 @@ type ServiceManage[T persistencetypes.IModel] struct {
 // NewServiceManage 创建绑定最终 owner 的服务级 Manage 基座。
 func NewServiceManage[T persistencetypes.IModel](owner interface{}) *ServiceManage[T] {
 	return &ServiceManage[T]{HookedManageService: managepkg.NewHookedManageService[T](owner), owner: owner}
+}
+
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*ServiceManage[T]) GetList() interface{} {
+	return models.NewManageModelList[T]()
 }
 
 // DoAfter 在所有 Manage 命令后统一记录生命周期日志。

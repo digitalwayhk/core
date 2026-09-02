@@ -25,6 +25,11 @@ func NewPaymentRecordManage() *PaymentRecordManage {
 	return own
 }
 
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*PaymentRecordManage) GetList() interface{} {
+	return models.NewManageModelList[models.PaymentRecord]()
+}
+
 // Routers 只暴露查询和三个受控命令。
 func (own *PaymentRecordManage) Routers() []servertypes.IRouter {
 	return []servertypes.IRouter{own.View, own.Search, own.Confirm, own.Fail, own.Refund}

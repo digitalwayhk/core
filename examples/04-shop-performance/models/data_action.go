@@ -22,6 +22,15 @@ func getDataAction() persistencetypes.IDataAction {
 	return dataAction
 }
 
+// NewManageModelList 为当前服务的 Manage API 创建模型列表。
+//
+// 本方法是 Manage 访问 ModelList 的唯一 models 层入口。调用方只声明要管理的
+// 模型类型，不得感知或传入 IDataAction，也不得决定数据库位置。连接类型、
+// 数据库位置和路由策略全部由当前服务的 models 持久化组合根集中选择。
+func NewManageModelList[T persistencetypes.IModel]() *entity.ModelList[T] {
+	return entity.NewModelList[T](getDataAction())
+}
+
 // cloneDataAction 返回共享连接池但隔离可变事务和模型状态的数据操作器。
 func cloneDataAction() persistencetypes.IDataAction {
 	if cloner, ok := getDataAction().(interface {

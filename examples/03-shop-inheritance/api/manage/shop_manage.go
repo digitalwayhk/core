@@ -1,6 +1,7 @@
 package manage
 
 import (
+	"github.com/digitalwayhk/core/examples/03-shop-inheritance/models"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	managepkg "github.com/digitalwayhk/core/service/manage"
@@ -16,6 +17,11 @@ type ShopManage[T persistencetypes.IModel] struct {
 // NewShopManage 创建绑定最终 owner 的服务级 Manage。
 func NewShopManage[T persistencetypes.IModel](owner interface{}) *ShopManage[T] {
 	return &ShopManage[T]{ManageService: managepkg.NewManageService[T](owner)}
+}
+
+// GetList 通过 models 层取得当前服务统一的 Manage 模型列表。
+func (*ShopManage[T]) GetList() interface{} {
+	return models.NewManageModelList[T]()
 }
 
 // ParseAfter 保留服务级输入规范化扩展点。

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	st "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -90,6 +91,41 @@ func (d *legacyDefaults) GetDefaultItems() []*testItem {
 	defer d.mu.Unlock()
 	d.calls++
 	return nil
+}
+
+type defaultsWithResolvedList struct {
+	*manage.ManageService[testItem]
+	list *entity.ModelList[testItem]
+}
+
+func newDefaultsWithResolvedList(action *mockDataAction) *defaultsWithResolvedList {
+	owner := &defaultsWithResolvedList{
+		list: entity.NewModelList[testItem](action),
+	}
+	owner.ManageService = manage.NewManageService[testItem](owner)
+	owner.Search.New(owner)
+	return owner
+}
+
+func (d *defaultsWithResolvedList) GetList() interface{} {
+	return d.list
+}
+
+func (d *defaultsWithResolvedList) GetDefaultItems() []*testItem {
+	return []*testItem{{Model: &entity.Model{}, Name: "default"}}
+}
+
+func TestSearchAfterUsesResolvedSearchModelList(t *testing.T) {
+	action := &mockDataAction{}
+	owner := newDefaultsWithResolvedList(action)
+	owner.Search.SearchItem = &view.SearchItem{Page: 1, Size: 10}
+	result := &view.TableData{}
+
+	actual, err := owner.SearchAfter(owner.Search, result, &crudRequest{})
+	require.NoError(t, err)
+	require.Same(t, result, actual)
+	require.Len(t, action.inserted, 1)
+	assert.Equal(t, int64(1), result.Total)
 }
 
 func TestSearchAfterDefaultItemsLegacyFallback(t *testing.T) {

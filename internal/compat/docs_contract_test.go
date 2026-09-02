@@ -73,6 +73,25 @@ func TestCurrentDocsDescribeTrustedShopBoundaries(t *testing.T) {
 	require.NotContains(t, string(readme), "supplier-service/api/call")
 }
 
+func TestCoreSkillManageModelListBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	files := []string{
+		"docs/ai/core-skill/SKILL.md",
+		"docs/ai/core-skill/manage.md",
+		"docs/ai/core-skill/models.md",
+		"docs/ai/core-skill/project-layout.md",
+		"docs/ai/core-skill/common-mistakes.md",
+	}
+	for _, name := range files {
+		contents, err := os.ReadFile(filepath.Join(root, name))
+		require.NoError(t, err)
+		text := string(contents)
+		require.Contains(t, text, "NewManageModelList", "%s 必须说明 Manage 的唯一 models 层入口", name)
+		require.NotContains(t, text, "entity.NewModelList[T](models.", "%s 不得指导 Manage 传入 DataAction", name)
+		require.NotContains(t, text, "func ManageDataAction", "%s 不得把 IDataAction 暴露给 Manage", name)
+	}
+}
+
 func TestExample06StructureFollowsServiceModelConventions(t *testing.T) {
 	root := repositoryRoot(t)
 	skill, err := os.ReadFile(filepath.Join(root, "docs/ai/core-skill/multiservice-and-observability.md"))
