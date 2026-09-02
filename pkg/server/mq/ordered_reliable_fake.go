@@ -16,6 +16,8 @@ type FakeOrderedReliableProvider struct {
 	seq      int
 }
 
+func (*FakeOrderedReliableProvider) SupportsKeyedReliableConcurrency() bool { return true }
+
 type fakeOrderedMsg struct {
 	id          string
 	subject     string

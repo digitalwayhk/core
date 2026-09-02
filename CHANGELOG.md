@@ -6,6 +6,8 @@
 
 ### Added
 
+- `types.SearchItem.SkipCount`：业务热路径可显式放弃完整结果总数，使 `IDataAction.Load` 直接执行有界查询，避免点查固定产生 `COUNT(*)` + `SELECT` 两次数据库往返；零值继续保留原分页总数语义。
+- 可选分键可靠并发：`UseOutboxWithOptions`、`Subscription.KeyConcurrency` 与 `KeyedReliableMQProvider` 默认均保持并发度 1；显式启用后同 OrderingKey串行、不同 key有界并行，Redis仍保持单 active owner并分页处理 PEL。provider不支持或同 subject配置冲突时 fail closed；新增真 Redis conformance、Runtime低基数指标和 Bitzoom全局串行失败案例。
 - 可选 `IHMACAuthProvider`：只有显式实现该接口的服务才为 Auth 用户域增加 HMAC 凭证备选；Bearer 保持默认且始终优先，Manage/ServerManage 不进入 HMAC 分支。REST 与 WebSocket 复用现有可信身份和 `OnAuthRequest` 授权链，Core 不保存 Secret/nonce，也不实现业务签名算法。
 - 必过门禁 `required/web-dist-sync`（`scripts/check-web-dist-sync.sh`）：校验已提交的内嵌前端产物 `pkg/server/run/dist/build-info.json` 的 `frontend_commit` 与 `git ls-tree HEAD web/admin` 的子模块指针一致。此前只有 `scripts/test-build-web-admin.sh` 用合成 fixture 验证构建脚本行为，没有任何门禁看真实产物，`web/admin` 指针前进而 dist 未重建时服务会静默内嵌旧前端。校验只读、不联网、不需要 node/yarn，约 1 秒；配套契约测试 `scripts/test-check-web-dist-sync.sh` 与本地入口 `./scripts/test.sh web-dist-sync`。
 - 管理后台中英文切换：请求头 `X-Locale`（`zh-CN` / `en-US`，缺省与无法识别一律回退 `zh-CN`）、解析包 `pkg/server/locale`、加性接口 `types.ILocaleTitle`，以及 `DirectoryModel` / `MenuModel` 的 `TitleEN` 列（框架自动补列，无需迁移脚本）。`getmenu` 按当前语言填写 `title`，`View.Do` 的页面标题、标准命令和 `ID`、`CreatedAt` 等框架公共字段也有了中英默认标题。未实现 `ILocaleTitle` 的服务行为不变。详见 `docs/ai/core-skill/manage.md` 与 `docs/ai/core-skill/openapi-and-frontend.md`。
@@ -63,6 +65,7 @@
 
 ### Fixed
 
+- `SearchItem.SkipCount` 在带 `IScopes` 模型上先应用 Scope 再解析排序字段，避免 CamelCase 字段在 MySQL 中未映射成 snake_case 列名。
 - MySQL 活动事务已经绑定连接后不再对基础 `*sql.DB` 额外执行 `Ping`，避免并发事务数等于 `MaxOpenConns` 时所有事务等待下一条连接而无法 Commit/Rollback；事务连接错误继续由 SQL、Commit 或 Rollback 原样返回。
 - HMAC OpenAPI 扩展的 `available_inputs` 补回 `signature`，与运行时实际抽取的凭证字段保持一致。
 - OpenAPI 零服务生成、配置静默接受、生命周期和并发关闭问题。

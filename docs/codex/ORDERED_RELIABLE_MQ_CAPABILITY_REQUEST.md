@@ -201,15 +201,15 @@ Core Outbox publisher 需要定义：
 | NATS JetStream | 固定 shard subject/consumer，或等价有序 consumer |
 | RabbitMQ | consistent-hash routing 或固定 shard queue |
 | RocketMQ | message group/sharding key 与 orderly consumer |
-| Redis Streams | 固定 shard stream 与单 shard active owner |
+| Redis Streams | 单 subject stream + 单 active owner；显式 opt-in 后 owner 内按 OrderingKey 建 lane |
 
 provider adapter 自己负责 rebalance、pending、ACK、owner 接管和关闭语义。
 Core 不应把 Redis consumer group 或任何单一 broker 的偶然行为当作通用契约。
 
 内置 provider 落地时的特别说明：
 
-- Redis：需从“单 stream + 多 consumer 分片”升级为“按 key 的 shard stream /
-  单 active owner”，并在 handler 失败时阻断同 key 后续消息（含同批）；
+- Redis：默认仍为整 subject 串行；显式 key concurrency 后保持单 active owner，
+  owner 内按 key串行/跨 key并行，PEL cursor有界分页，handler失败只阻断同 key；
 - NATS：需先补齐 `ReliableMQProvider`，再叠加 ordered-by-key 语义；
 - 自定义 factory：同样必须通过同一 conformance suite，不能只注册名字。
 
@@ -269,8 +269,10 @@ Bitzoom 当前为 `TradeFill` 实现了项目内 Redis Streams adapter，作为 
 - 真实 Redis 覆盖 100 条顺序、第 17 条失败阻断第 18 条、pending 接管；
 - 真实 MySQL + Redis 覆盖开仓、加仓、减仓、平仓和 ACK 前退出恢复。
 
-该项目实现只用于证明需求和提供验收样本，不应原样复制为 Core 的通用框架。
-Core 现有 `redis-stream` provider 本身**不**等于上述 ordered-reliable 语义。
+该项目实现用于证明需求和提供验收样本，不应把其市场模型复制进 Core。
+Core `redis-stream` provider 已提供显式 opt-in 的 provider-neutral keyed scheduler；
+业务仍必须提供稳定 OrderingKey、Inbox/sequence 幂等和公平 Store，不能只凭 provider
+能力宣称端到端正确或高吞吐。
 
 ## 10. 实现 PR 的完成定义
 
@@ -288,17 +290,18 @@ Core 现有 `redis-stream` provider 本身**不**等于上述 ordered-reliable �
 ### 10.1 实现状态（对照 main，截至 residual 修复）
 
 已合入：API/透传/Require fail-closed、Outbox barrier（含可选 SkipBlocked）、
-Redis 单 owner + 读 `>` 前 reclaim pending（MinIdle=0）+ lost-owner 不 ACK、
-`VerifyOrderedReliableFailureBarrier`、能力矩阵与 API 兼容表面登记。
+默认关闭的 Outbox/Subscription key concurrency、Redis 单 owner 内 keyed scheduler、
+PEL cursor分页/poison-key隔离/lost-owner不 ACK、`VerifyOrderedReliableFailureBarrier`、
+`VerifyKeyedReliableConcurrency`、运行时指标、能力矩阵与 API兼容表面登记。
 
 发版门禁（每个生产 provider 必须通过，含自定义 factory）：
 
 ```bash
 # 行为套件（fake 或真实 provider）
-go test ./pkg/server/mq/ -count=1 -run 'Conformance|OrderedReliable|FakeOrdered'
+go test ./pkg/server/mq/ -count=1 -run 'Conformance|OrderedReliable|FakeOrdered|Keyed'
 
 # 真 Redis integration（需环境变量）
-CORE_TEST_REDIS_ADDR=127.0.0.1:6379 go test ./pkg/server/mq/ -count=1 -run RedisReliable
+CORE_TEST_REDIS_ADDR=127.0.0.1:6379 go test -race ./pkg/server/mq/ -count=1 -run RedisReliable
 ```
 
 handler 与**单次 pending 排空总时长**均应落在 owner lease TTL 内（默认约

@@ -1,12 +1,17 @@
 package oltp
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type changingHashRecord struct {
@@ -39,4 +44,39 @@ func TestUpdateDataUsesIDWhenHashChanges(t *testing.T) {
 	require.NoError(t, db.First(&stored, 1).Error)
 	require.Equal(t, "new", stored.Name)
 	require.Equal(t, "new-hash", stored.Hashcode)
+}
+
+type scopedLoadRecord struct {
+	ID        uint `gorm:"primaryKey"`
+	AccountID string
+	Name      string
+}
+
+func (*scopedLoadRecord) ScopesHandler() func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB { return db }
+}
+
+// TestLoadSkipCountExecutesOneSelect 验证业务热路径显式放弃总数时不再执行 COUNT 往返。
+func TestLoadSkipCountExecutesOneSelect(t *testing.T) {
+	var statements bytes.Buffer
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.New(
+		log.New(&statements, "", 0),
+		logger.Config{SlowThreshold: time.Second, LogLevel: logger.Info},
+	)})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&scopedLoadRecord{}))
+	require.NoError(t, db.Create(&scopedLoadRecord{AccountID: "account-a", Name: "first"}).Error)
+	statements.Reset()
+
+	query := &types.SearchItem{Page: 1, Size: 1, Total: 99, Model: &scopedLoadRecord{}, SkipCount: true}
+	query.AddWhereN("Name", "first")
+	query.AddSortN("AccountID", false)
+	var rows []*scopedLoadRecord
+	require.NoError(t, load(db, query, &rows))
+	require.Len(t, rows, 1)
+	require.Zero(t, query.Total, "skip-count query must not claim a full result total")
+
+	sql := strings.ToUpper(statements.String())
+	require.NotContains(t, sql, "COUNT(")
+	require.Equal(t, 1, strings.Count(sql, "SELECT"), statements.String())
 }

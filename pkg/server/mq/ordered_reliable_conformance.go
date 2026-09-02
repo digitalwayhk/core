@@ -90,3 +90,56 @@ func VerifyOrderedReliableFailureBarrier(provider OrderedReliableMQProvider) err
 	}
 	return nil
 }
+
+// VerifyKeyedReliableConcurrency 证明显式 opt-in 后至少两个不同 OrderingKey
+// 能同时进入 handler。它不替代失败屏障 conformance，发布门禁应同时运行两者。
+func VerifyKeyedReliableConcurrency(provider KeyedReliableMQProvider) error {
+	if provider == nil || !provider.SupportsKeyedReliableConcurrency() {
+		return ErrKeyedReliableSubscribeUnsupported
+	}
+	base, ok := provider.(MQProvider)
+	if !ok {
+		return fmt.Errorf("mq keyed conformance: provider must implement MQProvider")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	defer close(release)
+	subCancel, err := provider.SubscribeReliable(ctx, "conformance.keyed", ReliableSubscribeOptions{
+		Group: "conformance-keyed", MinIdle: 100 * time.Millisecond,
+		ClaimInterval: 50 * time.Millisecond, KeyConcurrency: 2,
+	}, func(msg *Message) error {
+		started <- string(msg.Data)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		return err
+	}
+	defer subCancel()
+	for _, item := range []struct{ body, key string }{{"a1", "a"}, {"b1", "b"}} {
+		if err := base.Publish(ctx, "conformance.keyed", []byte(item.body), &PublishOptions{
+			OrderingKey: item.key, IdempotencyKey: item.body,
+		}); err != nil {
+			return err
+		}
+	}
+	got := map[string]bool{}
+	for len(got) < 2 {
+		select {
+		case body := <-started:
+			got[body] = true
+		case <-ctx.Done():
+			return fmt.Errorf("mq keyed conformance: different keys did not overlap, got %v", got)
+		}
+	}
+	if !got["a1"] || !got["b1"] {
+		return fmt.Errorf("mq keyed conformance: unexpected messages %v", got)
+	}
+	return nil
+}

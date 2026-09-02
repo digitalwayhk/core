@@ -14,6 +14,8 @@ var ErrNotConnected = errors.New("mq: provider not connected")
 
 var ErrReliableSubscribeUnsupported = errors.New("mq: reliable subscribe unsupported")
 
+var ErrKeyedReliableSubscribeUnsupported = errors.New("mq: keyed reliable subscribe unsupported")
+
 // ErrOrderedReliableUnsupported 表示当前 provider 未声明或不满足 ordered-reliable 契约。
 var ErrOrderedReliableUnsupported = errors.New("mq: ordered reliable unsupported")
 
@@ -85,6 +87,9 @@ type ReliableSubscribeOptions struct {
 	MinIdle       time.Duration
 	ClaimInterval time.Duration
 	Count         int64
+	// KeyConcurrency 是同一 active owner 内可并行处理的 OrderingKey 数。
+	// 零值和 1 保持整 subject 串行。
+	KeyConcurrency int
 }
 
 // ReliableMQProvider 是 MQProvider 的可选可靠消费能力。
@@ -96,6 +101,13 @@ type ReliableMQProvider interface {
 		options ReliableSubscribeOptions,
 		handler func(msg *Message) error,
 	) (cancel func(), err error)
+}
+
+// KeyedReliableMQProvider 显式声明 provider 能正确实现同 key 串行、不同 key 并行。
+// 仅接受 ReliableSubscribeOptions 字段但忽略它，不构成该能力。
+type KeyedReliableMQProvider interface {
+	ReliableMQProvider
+	SupportsKeyedReliableConcurrency() bool
 }
 
 // OrderedReliableMQProvider 是可选扩展：在可靠 ACK 之上保证同 OrderingKey 有序与失败阻断。

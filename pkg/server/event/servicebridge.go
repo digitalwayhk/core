@@ -10,11 +10,12 @@ import (
 )
 
 var (
-	ErrExternalProviderUnavailable = errors.New("event external provider unavailable")
-	ErrServiceEventBridgeClosed    = errors.New("service event bridge closed")
-	ErrInvalidPublishRequest       = errors.New("invalid event publish request")
-	ErrControlQueueTimeout         = errors.New("service event bridge control queue timeout")
-	ErrOrderedReliableUnsupported  = errors.New("event ordered reliable unsupported")
+	ErrExternalProviderUnavailable       = errors.New("event external provider unavailable")
+	ErrServiceEventBridgeClosed          = errors.New("service event bridge closed")
+	ErrInvalidPublishRequest             = errors.New("invalid event publish request")
+	ErrControlQueueTimeout               = errors.New("service event bridge control queue timeout")
+	ErrOrderedReliableUnsupported        = errors.New("event ordered reliable unsupported")
+	ErrKeyedReliableSubscribeUnsupported = errors.New("event keyed reliable subscribe unsupported")
 )
 
 // orderedReliableEnsurer 由外部适配器（如 MQBridge）实现，用于启动 fail-closed 检查。
@@ -54,6 +55,23 @@ type ReliableExternalSubscriber interface {
 	SubscribeReliable(ctx context.Context, subject, subscriberID string) (func(), error)
 }
 
+// ReliableExternalSubscribeOptions 是可靠订阅的加性运行时选项。
+// KeyConcurrency 零值和 1 保持整 subject 串行。
+type ReliableExternalSubscribeOptions struct {
+	KeyConcurrency int
+}
+
+// KeyedReliableExternalSubscriber 是不同 ordering key 并行消费的可选能力。
+// 调用方显式要求 KeyConcurrency>1 时，缺少该能力必须 fail-closed。
+type KeyedReliableExternalSubscriber interface {
+	ReliableExternalSubscriber
+	SubscribeReliableWithOptions(
+		ctx context.Context,
+		subject, subscriberID string,
+		options ReliableExternalSubscribeOptions,
+	) (func(), error)
+}
+
 type ServiceEventBridgeOptions struct {
 	ObserverQueueSize                int
 	ControlQueueSize                 int
@@ -84,15 +102,16 @@ type ServiceEventBridge struct {
 	closed atomic.Bool
 	once   sync.Once
 
-	externalMu            sync.RWMutex
-	external              ExternalPublisher
-	subscriber            ExternalSubscriber
-	reliableSubscriber    ReliableExternalSubscriber
-	externalSubMu         sync.Mutex
-	externalSubscriptions map[string]*externalSubscriptionRef
-	outboxMu              sync.Mutex
-	outbox                *outboxPublisher
-	subscriberID          string
+	externalMu              sync.RWMutex
+	external                ExternalPublisher
+	subscriber              ExternalSubscriber
+	reliableSubscriber      ReliableExternalSubscriber
+	keyedReliableSubscriber KeyedReliableExternalSubscriber
+	externalSubMu           sync.Mutex
+	externalSubscriptions   map[string]*externalSubscriptionRef
+	outboxMu                sync.Mutex
+	outbox                  *outboxPublisher
+	subscriberID            string
 	// wantOrderedReliable 来自构造选项或显式 Require，表示意图；真正开启门禁必须 Ensure 成功。
 	wantOrderedReliable bool
 	// requireOrderedReliable 仅在 EnsureOrderedReliable 成功后置位。
@@ -159,6 +178,7 @@ func (b *ServiceEventBridge) SetExternalPublisher(publisher ExternalPublisher) {
 	b.external = publisher
 	b.subscriber, _ = publisher.(ExternalSubscriber)
 	b.reliableSubscriber, _ = publisher.(ReliableExternalSubscriber)
+	b.keyedReliableSubscriber, _ = publisher.(KeyedReliableExternalSubscriber)
 	want := b.wantOrderedReliable
 	b.externalMu.Unlock()
 	// 构造时声明了 requirement：装配后立即 Ensure；失败暂存错误，外发路径 fail closed（禁止静默降级）。
@@ -330,7 +350,9 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	}
 	var externalCancel func()
 	if sub.Subject != "" && b.canSubscribeExternal(sub.Reliable) {
-		externalCancel, err = b.subscribeExternalRef(context.Background(), sub.Reliable, sub.Subject)
+		externalCancel, err = b.subscribeExternalRef(
+			context.Background(), sub.Reliable, sub.Subject, sub.KeyConcurrency,
+		)
 		if err != nil {
 			if localCancel != nil {
 				localCancel()
@@ -367,14 +389,32 @@ func (b *ServiceEventBridge) SubscribeExternal(ctx context.Context, subject stri
 
 // SubscribeExternalControl 建立需要成功处理后才 ACK 的跨服务控制事件订阅。
 func (b *ServiceEventBridge) SubscribeExternalControl(ctx context.Context, subject string) (func(), error) {
+	return b.subscribeExternalControlWithOptions(ctx, subject, ReliableExternalSubscribeOptions{})
+}
+
+func (b *ServiceEventBridge) subscribeExternalControlWithOptions(
+	ctx context.Context,
+	subject string,
+	options ReliableExternalSubscribeOptions,
+) (func(), error) {
 	if b == nil || b.closed.Load() {
 		return nil, ErrServiceEventBridgeClosed
 	}
 	b.externalMu.RLock()
 	subscriber := b.reliableSubscriber
+	keyedSubscriber := b.keyedReliableSubscriber
 	subscriberID := b.subscriberID
 	b.externalMu.RUnlock()
-	if subscriber == nil || subscriberID == "" {
+	if subscriberID == "" {
+		return nil, ErrExternalProviderUnavailable
+	}
+	if options.KeyConcurrency > 1 {
+		if keyedSubscriber == nil {
+			return nil, ErrKeyedReliableSubscribeUnsupported
+		}
+		return keyedSubscriber.SubscribeReliableWithOptions(ctx, subject, subscriberID, options)
+	}
+	if subscriber == nil {
 		return nil, ErrExternalProviderUnavailable
 	}
 	return subscriber.SubscribeReliable(ctx, subject, subscriberID)

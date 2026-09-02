@@ -158,6 +158,21 @@ type fakeExternalEventAdapter struct {
 	published      []*event.Envelope
 }
 
+type keyedExternalEventAdapter struct {
+	fakeExternalEventAdapter
+	keyConcurrency int
+}
+
+func (a *keyedExternalEventAdapter) SubscribeReliableWithOptions(
+	_ context.Context,
+	_, subscriberID string,
+	options event.ReliableExternalSubscribeOptions,
+) (func(), error) {
+	a.reliableID = subscriberID
+	a.keyConcurrency = options.KeyConcurrency
+	return func() {}, nil
+}
+
 func (a *fakeExternalEventAdapter) Publish(_ context.Context, _ string, env *event.Envelope) error {
 	a.publishCalls.Add(1)
 	a.published = append(a.published, env)
@@ -195,6 +210,70 @@ func TestServiceEventBridgeReliableSubscriptionUsesLogicalServiceName(t *testing
 	require.NoError(t, err)
 	cancel()
 	assert.Equal(t, "user-service", adapter.reliableID)
+}
+
+func TestServiceEventBridgeReliableSubscriptionOptsIntoKeyConcurrency(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID: "position-service",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	adapter := &keyedExternalEventAdapter{}
+	bridge.SetExternalPublisher(adapter)
+
+	cancel, err := bridge.SubscribeEvent(event.Subscription{
+		Subject:        "trades.trade.filled",
+		EventType:      "trades.trade.filled",
+		Reliable:       true,
+		KeyConcurrency: 8,
+		Handler:        func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.NoError(t, err)
+	cancel()
+	require.Equal(t, "position-service", adapter.reliableID)
+	require.Equal(t, 8, adapter.keyConcurrency)
+}
+
+func TestServiceEventBridgeRejectsConflictingKeyConcurrencyForSameSubject(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID: "position-service",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	bridge.SetExternalPublisher(&keyedExternalEventAdapter{})
+	handler := func(context.Context, *event.Envelope) error { return nil }
+
+	first, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "fills", EventType: "fill-a", Reliable: true, KeyConcurrency: 4, Handler: handler,
+	})
+	require.NoError(t, err)
+	defer first()
+
+	_, err = bridge.SubscribeEvent(event.Subscription{
+		Subject: "fills", EventType: "fill-b", Reliable: true, KeyConcurrency: 2, Handler: handler,
+	})
+	require.Error(t, err)
+}
+
+func TestServiceEventBridgeRejectsKeyConcurrencyWithoutCapability(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID: "position-service",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	bridge.SetExternalPublisher(&fakeExternalEventAdapter{})
+
+	_, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "fills", Reliable: true, KeyConcurrency: 2,
+		Handler: func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.ErrorIs(t, err, event.ErrKeyedReliableSubscribeUnsupported)
+}
+
+func TestServiceEventBridgeRejectsKeyConcurrencyOnObserverSubscription(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	_, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "quotes", KeyConcurrency: 2,
+		Handler: func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.Error(t, err)
 }
 
 func TestServiceEventBridgeControlWaitsForLocalDeliveryAndPropagatesExternalFailure(t *testing.T) {

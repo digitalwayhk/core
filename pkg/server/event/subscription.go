@@ -9,15 +9,17 @@ import (
 // Subscription 描述业务事件订阅。Subject 决定外部通道，EventType 是可选过滤条件；
 // EventType 为空表示订阅该 Subject 下所有事件类型。
 type Subscription struct {
-	Subject   string
-	EventType string
-	Reliable  bool
-	Handler   func(context.Context, *Envelope) error
+	Subject        string
+	EventType      string
+	Reliable       bool
+	KeyConcurrency int
+	Handler        func(context.Context, *Envelope) error
 }
 
 type externalSubscriptionRef struct {
-	cancel func()
-	count  int
+	cancel         func()
+	count          int
+	keyConcurrency int
 }
 
 func subscriptionKey(reliable bool, subject string) string {
@@ -40,16 +42,26 @@ func combineCancels(cancels ...func()) func() {
 	}
 }
 
-func (b *ServiceEventBridge) subscribeExternalRef(ctx context.Context, reliable bool, subject string) (func(), error) {
+func (b *ServiceEventBridge) subscribeExternalRef(
+	ctx context.Context,
+	reliable bool,
+	subject string,
+	keyConcurrency int,
+) (func(), error) {
 	if subject == "" {
 		return func() {}, nil
 	}
+	keyConcurrency = normalizeKeyConcurrency(keyConcurrency)
 	b.externalSubMu.Lock()
 	if b.externalSubscriptions == nil {
 		b.externalSubscriptions = make(map[string]*externalSubscriptionRef)
 	}
 	key := subscriptionKey(reliable, subject)
 	if ref := b.externalSubscriptions[key]; ref != nil {
+		if ref.keyConcurrency != keyConcurrency {
+			b.externalSubMu.Unlock()
+			return nil, errors.New("event subscription key concurrency conflicts for subject")
+		}
 		ref.count++
 		b.externalSubMu.Unlock()
 		return func() {
@@ -61,7 +73,9 @@ func (b *ServiceEventBridge) subscribeExternalRef(ctx context.Context, reliable 
 	var cancel func()
 	var err error
 	if reliable {
-		cancel, err = b.SubscribeExternalControl(ctx, subject)
+		cancel, err = b.subscribeExternalControlWithOptions(ctx, subject, ReliableExternalSubscribeOptions{
+			KeyConcurrency: keyConcurrency,
+		})
 	} else {
 		cancel, err = b.SubscribeExternal(ctx, subject)
 	}
@@ -71,12 +85,19 @@ func (b *ServiceEventBridge) subscribeExternalRef(ctx context.Context, reliable 
 
 	b.externalSubMu.Lock()
 	if ref := b.externalSubscriptions[key]; ref != nil {
+		if ref.keyConcurrency != keyConcurrency {
+			b.externalSubMu.Unlock()
+			cancel()
+			return nil, errors.New("event subscription key concurrency conflicts for subject")
+		}
 		ref.count++
 		b.externalSubMu.Unlock()
 		cancel()
 		return func() { b.releaseExternalRef(key) }, nil
 	}
-	b.externalSubscriptions[key] = &externalSubscriptionRef{cancel: cancel, count: 1}
+	b.externalSubscriptions[key] = &externalSubscriptionRef{
+		cancel: cancel, count: 1, keyConcurrency: keyConcurrency,
+	}
 	b.externalSubMu.Unlock()
 	return func() { b.releaseExternalRef(key) }, nil
 }
@@ -122,5 +143,18 @@ func validateSubscription(sub Subscription) error {
 	if sub.Handler == nil {
 		return errors.New("event subscription handler is nil")
 	}
+	if sub.KeyConcurrency < 0 {
+		return errors.New("event subscription key concurrency cannot be negative")
+	}
+	if !sub.Reliable && sub.KeyConcurrency > 1 {
+		return errors.New("event subscription key concurrency requires reliable delivery")
+	}
 	return nil
+}
+
+func normalizeKeyConcurrency(value int) int {
+	if value <= 1 {
+		return 1
+	}
+	return value
 }

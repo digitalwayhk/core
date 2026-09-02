@@ -21,12 +21,15 @@
 | `mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable` | Stable（加性） | server/mq | 按 key 有序可靠投递的可选契约；未声明 requirement 时零值兼容 | `pkg/server/mq` unit/conformance；Redis 需 `CORE_TEST_REDIS_ADDR` |
 | `event.MQBridge` 透传 IdempotencyKey/OrderingKey、`EnsureOrderedReliable` | Stable（加性） | server/event | Envelope → provider 元数据；Require 后门禁空 ShardKey | mqbridge 与 ordered-reliable require 测试 |
 | `ServiceEventBridge`/`ServiceContext.RequireOrderedReliableByShardKey`、`OutboxStore` earliest-first 与可选 `OutboxStoreSkipBlocked` | Stable（加性） | server/event、router | 启动 fail-closed、Outbox 同 key barrier、hot-key 可选跳过 | outbox barrier / require 测试 |
+| `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 零值/1 保持全局串行；显式 `>1` 才启用同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |
+| `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
 | `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
+| `types.SearchItem.SkipCount` | Stable（加性） | persistence | 无需完整总数的有界业务查询跳过 COUNT 往返；零值保持原 Load/Total 语义 | `pkg/persistence/database/oltp` 单查询回归测试 |
 | `service/manage.ManageService`、标准 CRUD、hook、`Operation` | Stable | service/manage | 管理后台 CRUD 与自定义操作 | `service/manage/crud_test.go`、`examples/01-simple-shop` |
 | `service/manage/view` 的 ViewModel、FieldModel 与查询视图类型 | Stable | service/manage | Manage 元数据与管理前端契约 | Manage view/CRUD 测试与 apidiff 基线 |
 | Cluster、Transport、MQ 的已登记 factory/provider 入口 | Stable（按能力矩阵） | server runtime | 可插拔基础设施组装 | 任务 14 config-contract 与六包 race |

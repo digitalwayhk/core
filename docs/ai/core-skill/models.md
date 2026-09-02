@@ -124,6 +124,18 @@ func (own *Product) UpdateValid(_ interface{}) error {
 
 所以切换到 MySQL 不需要 DBA 预建库，也不需要迁移脚本；连上去就会自己建。
 
+MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额外 `Ping`。连接有效性由真实 SQL 结果判定：
+
+- 同一个 `host:port/database` 的首次建池和故障恢复按连接键合并，只发布一套池；并发调用不得各自创建池后互相替换。
+- Clone 报告连接错误时只能驱逐自己仍引用的那套底层池；若其他 goroutine 已发布新池，旧 Clone 不得删除新池。
+- 长期服务池不按 ConnectionManager 的查询时间主动关闭；物理空闲连接由 `database/sql` 的 `MaxIdleConns`、`ConnMaxIdleTime` 和 `ConnMaxLifetime` 管理。
+
+- 非事务只读遇到连接级错误时，驱逐失效句柄、重建连接并且最多重试一次。
+- 写入的提交结果可能不确定；框架只驱逐失效句柄并返回原错误，不自动重放。上层只能在稳定业务幂等键下决定是否重试。
+- 活动事务已绑定专用连接，连接错误时不切换连接、不重放，由事务回滚与业务边界收敛。
+
+不得在业务层为每次数据操作再包一次 `Ping`；这会在连接池饱和时把一条 SQL 放大成两次串行借连接。实际失败与认证口径见 `docs/codex/cases/MYSQL_PER_OPERATION_PING_POOL_AMPLIFICATION.md`。
+
 ### 触发时机
 
 建表发生在**首次数据访问**时，不是构造 `ModelList` 时。`entity.NewModelList[T](nil)` 只是创建列表对象；真正建表在首次落到 `DefaultAdapter.getLocalDB` 绑定该库时调用 `HasTable`，以及各驱动 CRUD 入口的 `ensureTable`。框架启动期间 `config.IsServerInitializing()` 为真时会跳过建表，等正式请求再执行。

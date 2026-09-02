@@ -14,6 +14,10 @@ type reliableMockProvider struct {
 	handler func(*mq.Message) error
 }
 
+type keyedReliableMockProvider struct{ reliableMockProvider }
+
+func (*keyedReliableMockProvider) SupportsKeyedReliableConcurrency() bool { return true }
+
 func (p *reliableMockProvider) SubscribeReliable(
 	_ context.Context,
 	_ string,
@@ -43,6 +47,33 @@ func TestMQManagerSubscribeReliableDelegatesOptions(t *testing.T) {
 	options := mq.ReliableSubscribeOptions{Group: "user-service", Consumer: "user-1"}
 
 	cancel, err := manager.SubscribeReliable(context.Background(), "orders", options, func(*mq.Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+	require.Equal(t, options, provider.options)
+}
+
+func TestMQManagerSubscribeReliableRejectsUnsupportedKeyConcurrency(t *testing.T) {
+	manager := mq.NewManager()
+	provider := &reliableMockProvider{mockProvider: mockProvider{name: "reliable", healthy: true}}
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent("reliable"))
+
+	_, err := manager.SubscribeReliable(context.Background(), "fills", mq.ReliableSubscribeOptions{
+		Group: "positions", KeyConcurrency: 2,
+	}, func(*mq.Message) error { return nil })
+	require.ErrorIs(t, err, mq.ErrKeyedReliableSubscribeUnsupported)
+}
+
+func TestMQManagerSubscribeReliableDelegatesSupportedKeyConcurrency(t *testing.T) {
+	manager := mq.NewManager()
+	provider := &keyedReliableMockProvider{reliableMockProvider: reliableMockProvider{
+		mockProvider: mockProvider{name: "keyed-reliable", healthy: true},
+	}}
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent("keyed-reliable"))
+	options := mq.ReliableSubscribeOptions{Group: "positions", KeyConcurrency: 4}
+
+	cancel, err := manager.SubscribeReliable(context.Background(), "fills", options, func(*mq.Message) error { return nil })
 	require.NoError(t, err)
 	defer cancel()
 	require.Equal(t, options, provider.options)
