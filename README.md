@@ -5,7 +5,7 @@
 **面向 AI Agent 协作开发的 Go 业务服务框架**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/digitalwayhk/core.svg)](https://pkg.go.dev/github.com/digitalwayhk/core)
-[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white)](./go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8?logo=go&logoColor=white)](./go.mod)
 [![Examples](https://img.shields.io/badge/examples-7%20个完整应用-brightgreen)](./examples)
 [![Skill](https://img.shields.io/badge/AI%20skill-单一权威源-8A2BE2)](./docs/ai/core-skill/SKILL.md)
 

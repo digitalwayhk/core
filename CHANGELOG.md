@@ -77,6 +77,7 @@
 
 ### Security
 
+- 升级最低 Go 工具链与示例构建镜像至 1.26.6，纳入 `crypto/tls`、`encoding/asn1`、`html/template`、`net/http`、`net/url` 等标准库安全修复；使用旧工具链构建的二进制不包含这些修复，需要重新构建发布。
 - 升级 `google.golang.org/grpc` 至 v1.83.1，修复 CVE-2026-84304 / GHSA-vp52-pcj8-j9qc：远程客户端可通过大量极小 HTTP/2 DATA frame 放大接收缓冲区内存开销，导致 gRPC Server 堆内存耗尽和拒绝服务。同步采用该版本要求的 OpenTelemetry v1.44.0 与 Google Genproto 版本。
 - 默认 REST 错误响应不再暴露内部 cause；代理、本地访问、JWT/Casdoor 和 CORS 使用 fail-closed 策略。
 - 匿名 OpenAPI 不再暴露内部专用路由和 `x-internal-callers`；内部文档使用独立 ServerManage 认证域并禁止缓存。
