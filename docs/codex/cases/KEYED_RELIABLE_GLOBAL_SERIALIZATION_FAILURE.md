@@ -35,4 +35,3 @@ OrderingKey 已存在，但执行器没有把它作为并发隔离单元。只�
 - provider-neutral：同 key 100条顺序、不同 key实际重叠、poison-key隔离、cancel/race。
 - 真 Redis：pending接管、owner fencing、ACK后置、不同 key并行、失败恢复。
 - consumer：同一环境/数据集比较每条异步边，保存 count/p50/p95/p99/max和 missing watermark。
-
