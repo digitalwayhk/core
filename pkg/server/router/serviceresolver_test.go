@@ -142,6 +142,68 @@ func TestServiceResolverResolveWithKeyRejectsEmptyKey(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Keyed 解析必须基于完整集群成员，不能因调用发生在目标服务进程内就永远选本机。
+func TestServiceResolverResolveWithKeyIncludesLocalInstanceInClusterHash(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	serviceName := fmt.Sprintf("positions-keyed-owner-%d", time.Now().UnixNano())
+	nodes := []*cluster.NodeInfo{
+		{ID: "position-a", ServiceName: serviceName, DataCenterID: 1, MachineID: 1, Address: "position-a", Port: 8080},
+		{ID: "position-b", ServiceName: serviceName, DataCenterID: 1, MachineID: 2, Address: "position-b", Port: 8080},
+	}
+	for _, node := range nodes {
+		require.NoError(t, provider.Register(ctx, node))
+	}
+	local := &ServiceContext{ServiceInstanceID: "position-a", Config: &config.ServerConfig{}}
+	resolver := NewServiceResolver(provider, func(name string) *ServiceContext {
+		if name == serviceName {
+			return local
+		}
+		return nil
+	})
+	defer resolver.Close()
+	key := "market:77"
+	want, err := cluster.NewConsistentHashBalancer().Pick(ctx, nodes, cluster.BalanceHint{HashKey: key})
+	require.NoError(t, err)
+
+	resolved, err := resolver.ResolveWithKey(ctx, serviceName, key)
+	require.NoError(t, err)
+	assert.Equal(t, want.ID, resolved.NodeID)
+}
+
+func TestServiceContextOwnsServiceKeyUsesResolverOwner(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	serviceName := fmt.Sprintf("trades-keyed-owner-%d", time.Now().UnixNano())
+	nodes := []*cluster.NodeInfo{
+		{ID: "trade-a", ServiceName: serviceName, DataCenterID: 1, MachineID: 1, Address: "trade-a", Port: 8080},
+		{ID: "trade-b", ServiceName: serviceName, DataCenterID: 1, MachineID: 2, Address: "trade-b", Port: 8080},
+	}
+	for _, node := range nodes {
+		require.NoError(t, provider.Register(ctx, node))
+	}
+	owner, err := cluster.NewConsistentHashBalancer().Pick(ctx, nodes, cluster.BalanceHint{HashKey: "market:77"})
+	require.NoError(t, err)
+	sc := &ServiceContext{
+		Service:           &types.Service{Name: serviceName},
+		ServiceInstanceID: owner.ID,
+		ServiceResolver:   NewServiceResolver(provider, func(string) *ServiceContext { return nil }),
+	}
+	defer sc.ServiceResolver.Close()
+
+	owned, err := sc.OwnsServiceKey(ctx, serviceName, "market:77")
+	require.NoError(t, err)
+	assert.True(t, owned)
+	sc.ServiceInstanceID = "not-the-owner"
+	owned, err = sc.OwnsServiceKey(ctx, serviceName, "market:77")
+	require.NoError(t, err)
+	assert.False(t, owned)
+}
+
 func TestServiceResolverFailsClosedWithoutHealthyNode(t *testing.T) {
 	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
 	provider.Start()

@@ -90,18 +90,20 @@ func (r *ServiceResolver) resolve(ctx context.Context, serviceName, hashKey stri
 	if serviceName == "" {
 		return nil, fmt.Errorf("%w: service name is empty", ErrTargetServiceUnavailable)
 	}
-	if local := r.local(serviceName); local != nil && local.Config != nil {
-		address := local.RuntimeAddress()
-		grpcPort := local.Config.Transport.GRPC.Port
-		return &ResolvedService{
-			Local: local,
-			Info: &types.TargetInfo{
-				TargetAddress: address, TargetService: serviceName,
-				TargetPort:     local.Config.Port,
-				TargetGRPCPort: grpcPort,
-			},
-			Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort),
-		}, nil
+	if hashKey == "" {
+		if local := r.local(serviceName); local != nil && local.Config != nil {
+			address := local.RuntimeAddress()
+			grpcPort := local.Config.Transport.GRPC.Port
+			return &ResolvedService{
+				Local: local,
+				Info: &types.TargetInfo{
+					TargetAddress: address, TargetService: serviceName,
+					TargetPort:     local.Config.Port,
+					TargetGRPCPort: grpcPort,
+				},
+				Endpoints: serviceTransportEndpoints(address, local.Config.Port, grpcPort),
+			}, nil
+		}
 	}
 
 	entry, err := r.ensureEntry(ctx, serviceName)
