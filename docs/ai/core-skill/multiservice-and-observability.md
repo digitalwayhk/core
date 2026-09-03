@@ -8,7 +8,7 @@
 - 调用方直接构造目标服务已注册的 Public API，不建保存地址的 client，也不复制 `api/call` 路由。如果 Go 目录名与 `IService.ServiceName()` 不同，目标 API 必须在 Freeze 前同时声明 `router.WithServiceName(contract.XxxServiceName)` 和稳定 `WithPath`。
 - 内部专用 Public 用 `router.WithInternalCallers(...)` 声明允许服务；冻结后通过 `GetInternalCallers()` 读取。匿名 `/api/openapi` 过滤这些路由且不输出白名单；兼容快照和使用 `ServerManageAuth` 的 `/api/internal/openapi` 才记录 `x-internal-callers`。
 - `req.CallService` 先查同进程 ServiceContext，再查 ClusterProvider 健康快照。新链路不读 `AttachServices`；无节点时 fail closed。
-- 默认 `req.CallService` 继续在健康副本间轮询。业务数据按市场、租户等稳定 key 分片时，调用方必须检查加性接口 `types.IRequestKeyedServiceCaller`，并调用 `CallServiceWithKey(router, hashKey)`；ServiceContext 后台任务使用同名方法，并以 `OwnsServiceKey(ctx, serviceName, hashKey)` 判断本实例是否可竞争业务 lease。空 key 会 fail closed，同 key 通过 rendezvous consistent hash 固定到同一健康实例，候选发现顺序不同也不改变 owner；keyed owner 判断不会因同进程本地路由而绕过完整成员快照。同步调用、市场事件和任务 owner 必须使用完全相同的规范化 key；成员变化时只允许迁移到新增/存活 owner，业务仍负责恢复、generation fencing 和幂等。
+- 默认 `req.CallService` 继续在健康副本间轮询。业务数据按市场、租户等稳定 key 分片时，调用方必须检查加性接口 `types.IRequestKeyedServiceCaller`，并调用 `CallServiceWithKey(router, hashKey)`；ServiceContext 后台任务使用同名方法，并以 `OwnsServiceKey(ctx, serviceName, hashKey)` 判断本实例是否可竞争业务 lease。空 key 会 fail closed，同 key 通过 rendezvous consistent hash 按稳定服务端点固定到同一健康实例，候选发现顺序不同、容器重启也不改变 owner；keyed owner 判断不会因同进程本地路由而绕过完整成员快照。同步调用、市场事件和任务 owner 必须使用完全相同的规范化 key；成员变化时只允许迁移到新增/存活 owner，业务仍负责恢复、generation fencing 和幂等。
 - 同进程调用方身份来自源 ServiceContext。同步跨进程调用默认使用 gRPC；服务端只在已验证客户端证书 SAN 等于载荷 `SourceService` 时注入可信身份。HTTP、Header、请求字段、无证书和 SAN 不匹配都不能建立内部身份，并在 Parse 前拒绝。
 - 客户端按 endpoint 复用 go-zero `zrpc.Client`；Core Resolver 仍是唯一节点发现权威，不启用 zrpc 自带发现。
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
@@ -16,6 +16,7 @@
 - Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 只实现 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。
 - `UseOutbox` 和 `Subscription` 的零值永远保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
+- 低频、幂等的副本收敛控制事件（例如市场准备/激活）可显式设置 `Reliable:true, Broadcast:true`，每个稳定服务端点使用独立 consumer group 各消费一次。该选项不得用于价格、成交、结算等高频数据面；数据面仍使用逻辑服务共享组或按 key 分区。
 - 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
 - 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。发布方只负责发布事实，不知道也不等待消费者处理完成。
 - User 下单必须提供业务 `requestID`；事实服务用 `{UserID}:{requestID}` 唯一约束和请求指纹收敛并发重试。

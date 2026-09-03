@@ -87,9 +87,10 @@ func (b *ConsistentHashBalancer) Pick(_ context.Context, candidates []*NodeInfo,
 			continue
 		}
 		h := fnv.New64a()
-		fmt.Fprint(h, hint.HashKey, "\x00", candidate.ID)
+		identity := consistentHashNodeIdentity(candidate)
+		fmt.Fprint(h, hint.HashKey, "\x00", identity)
 		score := h.Sum64()
-		if selected == nil || score > selectedScore || score == selectedScore && candidate.ID < selected.ID {
+		if selected == nil || score > selectedScore || score == selectedScore && identity < consistentHashNodeIdentity(selected) {
 			selected = candidate
 			selectedScore = score
 		}
@@ -98,6 +99,18 @@ func (b *ConsistentHashBalancer) Pick(_ context.Context, candidates []*NodeInfo,
 		return nil, ErrEmptyCandidates
 	}
 	return selected, nil
+}
+
+// consistentHashNodeIdentity 使用副本的稳定网络端点，不使用每次启动都变化的 NodeInfo.ID。
+// 旧测试/进程内节点没有端点时回退 ID，保持兼容。
+func consistentHashNodeIdentity(node *NodeInfo) string {
+	if node == nil {
+		return ""
+	}
+	if node.Address == "" && node.Port == 0 && node.GRPCPort == 0 {
+		return node.ID
+	}
+	return fmt.Sprintf("%s\x00%s\x00%d\x00%d", node.ServiceName, node.Address, node.Port, node.GRPCPort)
 }
 
 // ---- weighted ----

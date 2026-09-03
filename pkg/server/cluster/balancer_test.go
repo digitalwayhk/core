@@ -99,6 +99,29 @@ func TestConsistentHash_CandidateOrderDoesNotChangeOwner(t *testing.T) {
 	assert.Equal(t, first.ID, second.ID)
 }
 
+// ServiceInstanceID 每次进程启动都会变化；一致性哈希必须按稳定端点识别副本，
+// 否则仅一个副本重启也会导致市场 owner 全量抖动。
+func TestConsistentHash_ServiceRestartKeepsEndpointOwner(t *testing.T) {
+	b := cluster.NewConsistentHashBalancer()
+	before := []*cluster.NodeInfo{
+		{ID: "positions-a-old", ServiceName: "positions", Address: "10.0.0.1", Port: 8080, GRPCPort: 9080},
+		{ID: "positions-b-old", ServiceName: "positions", Address: "10.0.0.2", Port: 8080, GRPCPort: 9080},
+	}
+	after := []*cluster.NodeInfo{
+		{ID: "positions-a-new", ServiceName: "positions", Address: "10.0.0.1", Port: 8080, GRPCPort: 9080},
+		{ID: "positions-b-new", ServiceName: "positions", Address: "10.0.0.2", Port: 8080, GRPCPort: 9080},
+	}
+
+	for i := 0; i < 200; i++ {
+		hint := cluster.BalanceHint{HashKey: fmt.Sprintf("market:%d", i)}
+		oldOwner, err := b.Pick(testCtx(), before, hint)
+		require.NoError(t, err)
+		newOwner, err := b.Pick(testCtx(), after, hint)
+		require.NoError(t, err)
+		assert.Equal(t, oldOwner.Address, newOwner.Address)
+	}
+}
+
 // 增加节点时，未迁移的 key 必须继续由原节点处理，避免取模导致近乎全量重映射。
 func TestConsistentHash_AddNodeOnlyMovesKeysToNewNode(t *testing.T) {
 	b := cluster.NewConsistentHashBalancer()
