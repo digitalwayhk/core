@@ -1,6 +1,7 @@
 package cluster_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
@@ -82,6 +83,38 @@ func TestConsistentHash_DifferentKeysMayReturnDifferentNodes(t *testing.T) {
 	}
 	// With 20 different keys across 4 nodes we expect multiple nodes to be chosen.
 	assert.Greater(t, len(seen), 1)
+}
+
+// 相同业务 key 在发现顺序不同的调用方上仍必须命中同一节点。
+func TestConsistentHash_CandidateOrderDoesNotChangeOwner(t *testing.T) {
+	b := cluster.NewConsistentHashBalancer()
+	forward := makeNodes("node-a", "node-b", "node-c")
+	reversed := makeNodes("node-c", "node-b", "node-a")
+	hint := cluster.BalanceHint{HashKey: "market:BTCUSDT"}
+
+	first, err := b.Pick(testCtx(), forward, hint)
+	require.NoError(t, err)
+	second, err := b.Pick(testCtx(), reversed, hint)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+}
+
+// 增加节点时，未迁移的 key 必须继续由原节点处理，避免取模导致近乎全量重映射。
+func TestConsistentHash_AddNodeOnlyMovesKeysToNewNode(t *testing.T) {
+	b := cluster.NewConsistentHashBalancer()
+	before := makeNodes("node-a", "node-b")
+	after := makeNodes("node-a", "node-b", "node-c")
+
+	for i := 0; i < 200; i++ {
+		hint := cluster.BalanceHint{HashKey: fmt.Sprintf("market-%d", i)}
+		oldNode, err := b.Pick(testCtx(), before, hint)
+		require.NoError(t, err)
+		newNode, err := b.Pick(testCtx(), after, hint)
+		require.NoError(t, err)
+		if newNode.ID != "node-c" {
+			assert.Equal(t, oldNode.ID, newNode.ID)
+		}
+	}
 }
 
 // ---- Weighted ----

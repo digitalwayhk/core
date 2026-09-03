@@ -37,6 +37,7 @@ type ServiceResolver struct {
 	provider  cluster.DiscoveryProvider
 	local     func(string) *ServiceContext
 	balancer  cluster.LoadBalancer
+	keyed     cluster.LoadBalancer
 	entries   map[string]*resolverEntry
 	protocols map[string]struct{}
 	closed    bool
@@ -50,6 +51,7 @@ func NewServiceResolver(provider cluster.DiscoveryProvider, local func(string) *
 		provider: provider,
 		local:    local,
 		balancer: cluster.NewRoundRobinBalancer(),
+		keyed:    cluster.NewConsistentHashBalancer(),
 		entries:  make(map[string]*resolverEntry),
 	}
 	resolver.SetProtocols(protocols...)
@@ -71,6 +73,19 @@ func (r *ServiceResolver) SetProtocols(protocols ...string) {
 }
 
 func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*ResolvedService, error) {
+	return r.resolve(ctx, serviceName, "")
+}
+
+// ResolveWithKey 使用稳定业务 key 选择目标实例；空 key 会失败，不能退回轮询。
+func (r *ServiceResolver) ResolveWithKey(ctx context.Context, serviceName, hashKey string) (*ResolvedService, error) {
+	hashKey = strings.TrimSpace(hashKey)
+	if hashKey == "" {
+		return nil, fmt.Errorf("%w: service hash key is empty", ErrTargetServiceUnavailable)
+	}
+	return r.resolve(ctx, serviceName, hashKey)
+}
+
+func (r *ServiceResolver) resolve(ctx context.Context, serviceName, hashKey string) (*ResolvedService, error) {
 	serviceName = strings.ToLower(strings.TrimSpace(serviceName))
 	if serviceName == "" {
 		return nil, fmt.Errorf("%w: service name is empty", ErrTargetServiceUnavailable)
@@ -106,7 +121,13 @@ func (r *ServiceResolver) Resolve(ctx context.Context, serviceName string) (*Res
 	if len(healthy) == 0 {
 		return nil, fmt.Errorf("%w: service=%s", ErrTargetServiceUnavailable, serviceName)
 	}
-	node, err := r.balancer.Pick(ctx, healthy, cluster.BalanceHint{})
+	balancer := r.balancer
+	hint := cluster.BalanceHint{}
+	if hashKey != "" {
+		balancer = r.keyed
+		hint.HashKey = hashKey
+	}
+	node, err := balancer.Pick(ctx, healthy, hint)
 	if err != nil {
 		return nil, fmt.Errorf("%w: service=%s: %v", ErrTargetServiceUnavailable, serviceName, err)
 	}

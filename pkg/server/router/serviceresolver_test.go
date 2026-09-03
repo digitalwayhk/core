@@ -21,6 +21,7 @@ import (
 type resolverTestTransport struct {
 	targetAddress  string
 	targetEndpoint string
+	targets        []string
 }
 
 func (*resolverTestTransport) Name() string                                          { return "resolver-test" }
@@ -31,6 +32,7 @@ func (*resolverTestTransport) Health(context.Context, string) error             
 func (t *resolverTestTransport) Send(_ context.Context, payload *types.PayLoad, target string) ([]byte, error) {
 	t.targetAddress = payload.TargetAddress
 	t.targetEndpoint = target
+	t.targets = append(t.targets, payload.TargetAddress)
 	return json.Marshal(&Response{Success: true, Data: "remote"})
 }
 
@@ -41,6 +43,8 @@ func (s *resolverTestSelector) Select(_ context.Context, _ *types.PayLoad, endpo
 }
 
 type resolverTestAPI struct{ info *types.RouterInfo }
+
+var _ types.IRequestKeyedServiceCaller = (*Request)(nil)
 
 func (*resolverTestAPI) Parse(types.IRequest) error             { return nil }
 func (*resolverTestAPI) Validation(types.IRequest) error        { return nil }
@@ -102,6 +106,40 @@ func TestServiceResolverRoundRobinsRunningNodes(t *testing.T) {
 
 	assert.NotEqual(t, first.NodeID, second.NodeID)
 	assert.ElementsMatch(t, []string{"order-1", "order-2"}, []string{first.Info.TargetAddress, second.Info.TargetAddress})
+}
+
+// 同一市场 key 的同步调用必须稳定落到同一服务实例。
+func TestServiceResolverResolveWithKeyPinsCallsToOneNode(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	for i := 1; i <= 2; i++ {
+		require.NoError(t, provider.Register(ctx, &cluster.NodeInfo{
+			ID: fmt.Sprintf("positions-%d", i), ServiceName: "positions",
+			DataCenterID: 1, MachineID: int64(i),
+			Address: fmt.Sprintf("position-%d", i), Port: 8080,
+		}))
+	}
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+
+	first, err := resolver.ResolveWithKey(ctx, "positions", "market:BTCUSDT")
+	require.NoError(t, err)
+	for range 20 {
+		resolved, err := resolver.ResolveWithKey(ctx, "positions", "market:BTCUSDT")
+		require.NoError(t, err)
+		assert.Equal(t, first.NodeID, resolved.NodeID)
+	}
+}
+
+// 显式 keyed 调用缺少 key 时必须失败，不能静默退回轮询。
+func TestServiceResolverResolveWithKeyRejectsEmptyKey(t *testing.T) {
+	resolver := NewServiceResolver(nil, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+
+	_, err := resolver.ResolveWithKey(context.Background(), "positions", " ")
+	require.Error(t, err)
 }
 
 func TestServiceResolverFailsClosedWithoutHealthyNode(t *testing.T) {
@@ -300,6 +338,72 @@ func TestServiceContextRemoteCallUsesDiscovery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "remote", response.GetData())
 	assert.Equal(t, "discovered-orders", transport.targetAddress)
+}
+
+// ServiceContext keyed 调用必须把同一市场的连续请求发送到同一实例。
+func TestServiceContextCallServiceWithKeyPinsRemoteTarget(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	serviceName := fmt.Sprintf("positions-keyed-%d", time.Now().UnixNano())
+	for i := 1; i <= 2; i++ {
+		require.NoError(t, provider.Register(ctx, &cluster.NodeInfo{
+			ID: fmt.Sprintf("%s-%d", serviceName, i), ServiceName: serviceName,
+			DataCenterID: 1, MachineID: int64(i),
+			Address: fmt.Sprintf("position-%d", i), Port: 8080,
+		}))
+	}
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+	transport := &resolverTestTransport{}
+	source := &ServiceContext{
+		Service:           &types.Service{Name: "trades"},
+		ServiceResolver:   resolver,
+		TransportSelector: &resolverTestSelector{transport: transport},
+		Config:            &config.ServerConfig{},
+	}
+
+	for range 20 {
+		_, err := source.CallServiceWithKey(&types.PayLoad{
+			TraceID: "trace-keyed", TargetService: serviceName,
+			TargetPath: "/api/positions/prepareriskplan", Instance: map[string]any{},
+		}, "market:BTCUSDT")
+		require.NoError(t, err)
+	}
+	require.Len(t, transport.targets, 20)
+	for _, target := range transport.targets[1:] {
+		assert.Equal(t, transport.targets[0], target)
+	}
+}
+
+// Keyed 调用不得污染调用方持有的 payload，避免后续普通调用意外沿用旧 key。
+func TestServiceContextCallServiceWithKeyDoesNotMutatePayload(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	ctx := context.Background()
+	serviceName := fmt.Sprintf("positions-keyed-payload-%d", time.Now().UnixNano())
+	require.NoError(t, provider.Register(ctx, &cluster.NodeInfo{
+		ID: serviceName + "-1", ServiceName: serviceName,
+		DataCenterID: 1, MachineID: 1, Address: "position-1", Port: 8080,
+	}))
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+	source := &ServiceContext{
+		Service:           &types.Service{Name: "users"},
+		ServiceResolver:   resolver,
+		TransportSelector: &resolverTestSelector{transport: &resolverTestTransport{}},
+		Config:            &config.ServerConfig{},
+	}
+	payload := &types.PayLoad{
+		TraceID: "trace-keyed-copy", TargetService: serviceName,
+		TargetPath: "/api/positions/prepareriskplan", Instance: map[string]any{},
+	}
+
+	_, err := source.CallServiceWithKey(payload, " market:BTCUSDT ")
+	require.NoError(t, err)
+	assert.Empty(t, payload.ServiceHashKey)
 }
 
 type localDispatchRoute struct {

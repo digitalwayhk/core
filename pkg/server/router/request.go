@@ -293,6 +293,15 @@ func (own *Request) GetTargetServerInfo(serviceName string) *types.TargetInfo {
 func (own *Request) CallService(router types.IRouter, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	return own.CallTargetService(router, nil, callback...)
 }
+
+// CallServiceWithKey 使用稳定业务 key 选择目标服务实例。
+func (own *Request) CallServiceWithKey(router types.IRouter, hashKey string, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	payload, err := own.callPayload(router)
+	if err != nil {
+		return nil, err
+	}
+	return own.service.CallServiceWithKey(payload, hashKey, callback...)
+}
 func (own *Request) CallTargetService(router types.IRouter, info *types.TargetInfo, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	payload, err := own.callPayload(router)
 	if err != nil {

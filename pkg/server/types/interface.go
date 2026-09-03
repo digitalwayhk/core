@@ -24,6 +24,12 @@ type IRequest interface {
 	GetServerInfo() *TargetInfo                         //获取当前服务信息
 	GetTargetServerInfo(serviceName string) *TargetInfo //获取目标服务信息
 }
+
+// IRequestKeyedServiceCaller 为需要按稳定业务 key 固定目标实例的跨服务调用提供加性契约。
+// 普通 IRequest 实现无需实现；依赖分片正确性的业务必须显式检查该能力并 fail closed。
+type IRequestKeyedServiceCaller interface {
+	CallServiceWithKey(router IRouter, hashKey string, callback ...func(res IResponse)) (IResponse, error)
+}
 type IRequestHttp interface {
 	GetHttpRequest() *http.Request //获取原生http请求
 }

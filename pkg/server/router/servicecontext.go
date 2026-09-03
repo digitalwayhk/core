@@ -1926,6 +1926,24 @@ func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse
 	return own.CallService(pl)
 }
 func (own *ServiceContext) CallService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	return own.callService(payload, callback...)
+}
+
+// CallServiceWithKey 使用稳定业务 key 选择目标服务实例；空 key 会失败。
+func (own *ServiceContext) CallServiceWithKey(payload *types.PayLoad, hashKey string, callback ...func(res types.IResponse)) (types.IResponse, error) {
+	hashKey = strings.TrimSpace(hashKey)
+	if hashKey == "" {
+		return nil, fmt.Errorf("%w: service hash key is empty", ErrTargetServiceUnavailable)
+	}
+	if payload == nil {
+		return nil, fmt.Errorf("%w: payload is required", ErrTargetServiceUnavailable)
+	}
+	keyedPayload := *payload
+	keyedPayload.ServiceHashKey = hashKey
+	return own.callService(&keyedPayload, callback...)
+}
+
+func (own *ServiceContext) callService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	res := &Response{}
 	ctx := context.Background()
 	if payload != nil && own != nil && own.Service != nil {
@@ -2014,7 +2032,13 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	}
 	var endpoints transport.TransportEndpoints
 	if own.ServiceResolver != nil {
-		resolved, err := own.ServiceResolver.Resolve(ctx, payload.TargetService)
+		var resolved *ResolvedService
+		var err error
+		if payload.ServiceHashKey != "" {
+			resolved, err = own.ServiceResolver.ResolveWithKey(ctx, payload.TargetService, payload.ServiceHashKey)
+		} else {
+			resolved, err = own.ServiceResolver.Resolve(ctx, payload.TargetService)
+		}
 		if err != nil {
 			return nil, "grpc", err
 		}
