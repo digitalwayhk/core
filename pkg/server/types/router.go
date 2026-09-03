@@ -33,6 +33,12 @@ type IRouterResponse interface {
 	GetResponse() interface{}
 }
 
+// IRouterResponseSizeLimit 为跨服务 HTTP 调用声明单次响应体上限。
+// 未实现或返回非正数时保持传输层既有行为。
+type IRouterResponseSizeLimit interface {
+	MaxResponseBytes() int64
+}
+
 // IRouterInfo 路由信息用于管理IRouter,IRouterInfo是IRouter的元数据
 type IRouterInfo interface {
 	New() IRouter                                   //创建IRouter空实例

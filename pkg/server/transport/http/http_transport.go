@@ -30,7 +30,7 @@ func (h *HTTPTransport) Supports(_ context.Context, _ *coretypes.PayLoad, _ stri
 	return true
 }
 
-func (h *HTTPTransport) Send(_ context.Context, payload *coretypes.PayLoad, target string) ([]byte, error) {
+func (h *HTTPTransport) Send(ctx context.Context, payload *coretypes.PayLoad, target string) ([]byte, error) {
 	if !strings.Contains(target, "://") {
 		target = "http://" + target
 	}
@@ -41,14 +41,22 @@ func (h *HTTPTransport) Send(_ context.Context, payload *coretypes.PayLoad, targ
 	if err != nil {
 		return nil, err
 	}
-	return postJSON(h.client, target, data, payload.Token, payload.TraceID)
+	var maxResponseBytes int64
+	if limited, ok := payload.Instance.(coretypes.IRouterResponseSizeLimit); ok {
+		maxResponseBytes = limited.MaxResponseBytes()
+	}
+	return postJSON(ctx, h.client, target, data, payload.Token, payload.TraceID, maxResponseBytes)
 }
 
-func (h *HTTPTransport) Health(_ context.Context, target string) error {
+func (h *HTTPTransport) Health(ctx context.Context, target string) error {
 	if !strings.Contains(target, "://") {
 		target = "http://" + target
 	}
-	resp, err := h.client.Get(target)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -56,8 +64,8 @@ func (h *HTTPTransport) Health(_ context.Context, target string) error {
 	return nil
 }
 
-func postJSON(client *http.Client, url string, data []byte, token, traceID string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+func postJSON(ctx context.Context, client *http.Client, url string, data []byte, token, traceID string, maxResponseBytes int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +82,26 @@ func postJSON(client *http.Client, url string, data []byte, token, traceID strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		var body []byte
+		if maxResponseBytes > 0 {
+			body, _ = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+			if int64(len(body)) > maxResponseBytes {
+				return nil, fmt.Errorf("http: response exceeds %d bytes", maxResponseBytes)
+			}
+		} else {
+			body, _ = io.ReadAll(resp.Body)
+		}
 		return nil, fmt.Errorf("http: status %d: %s", resp.StatusCode, body)
 	}
-	return io.ReadAll(resp.Body)
+	if maxResponseBytes <= 0 {
+		return io.ReadAll(resp.Body)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxResponseBytes {
+		return nil, fmt.Errorf("http: response exceeds %d bytes", maxResponseBytes)
+	}
+	return body, nil
 }

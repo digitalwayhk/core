@@ -8,6 +8,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -49,6 +50,35 @@ func TestEtcdProviderList_UsesConfiguredServicePrefix(t *testing.T) {
 	assert.Empty(t, nodes)
 	assert.Equal(t, "/tenant-a/discovery/orders/", gotKey)
 	assert.True(t, gotPrefixOption)
+}
+
+func TestEtcdProviderListAllUsesProviderRootPrefix(t *testing.T) {
+	var gotKey string
+	provider := &EtcdProvider{
+		prefix: "/tenant-a/discovery",
+		get: func(_ context.Context, key string, _ ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+			gotKey = key
+			return &clientv3.GetResponse{}, nil
+		},
+	}
+
+	_, err := provider.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, "/tenant-a/discovery/", gotKey)
+}
+
+func TestEtcdProviderListRejectsMalformedNode(t *testing.T) {
+	provider := &EtcdProvider{
+		prefix: "/tenant-a/discovery",
+		get: func(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+			return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{{
+				Key: []byte("/tenant-a/discovery/users/broken"), Value: []byte(`{"id":`),
+			}}}, nil
+		},
+	}
+
+	_, err := provider.List(context.Background(), "")
+	require.ErrorContains(t, err, "users/broken")
 }
 
 func TestEtcdProviderWatch_UsesConfiguredServicePrefixAndCancels(t *testing.T) {

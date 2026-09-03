@@ -185,6 +185,22 @@ func (own *PositionManage) OnSearchBefore(op *manage.Search[Position], req types
 
 业务高吞吐写仍可按市场分库，但是 **models/business/专用 store** 路径（或 04/07 write-behind 目标绑定分库），**不是** Manage `ModelList` 动态路由。两者可共用「按 MarketCode 拼库名」规则，但 API 访问方式仍分离。
 
+## 多服务独立进程的菜单同步
+
+`UpdateMenu` 由 `server` SystemManage 接收，但 `server` 可以使用本地 Provider，不能作为
+集群发现权威源。框架会选取同进程的业务 `ServiceContext` 并调用
+`List(ctx, "", running)` 收集服务全集：同进程服务直接读取自己的 RouterInfo，独立进程
+则按发现到的每个运行副本调用固定的 `/api/servermanage/queryrouters` 菜单快照，取得
+Manage 路由、服务与控制器中英标题以及 `ReportDef` 菜单。管理入口进程的
+`router.GetContexts()` 只用于识别本地业务服务，不能代表集群服务全集。
+
+任一已发现的远程副本无法调用、返回了跨服务路由，或同服务运行副本快照不一致时，
+整次 `UpdateMenu` 必须失败，
+不得用部分发现结果继续同步或对外报告成功。业务
+服务必须注册到同一个 ClusterProvider，并发布可由内部传输访问的地址；前端不需要再逐服务
+调用 `queryrouters/{service}` 做二次聚合。`QueryRouters` 未请求菜单快照时仍返回原有
+`[]*RouterInfo`，现有运维调用保持兼容。
+
 ## 可复用 Button（跨服务通用操作）
 
 

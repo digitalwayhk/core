@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity/stats"
-	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	manageservice "github.com/digitalwayhk/core/service/manage"
@@ -28,9 +27,7 @@ func (r *menuRequest) NewID() uint { return r.id }
 
 func TestMenuManageRequestIsolation(t *testing.T) {
 	menu := NewMenuManage()
-	serviceContext := &router.ServiceContext{
-		Service: &types.Service{Name: "request-isolation"},
-	}
+	snapshot := &smodels.MenuServiceSnapshot{Name: "request-isolation"}
 	requests := []*menuRequest{
 		{id: 501},
 		{id: 502},
@@ -42,7 +39,7 @@ func TestMenuManageRequestIsolation(t *testing.T) {
 		wg.Add(1)
 		go func(req types.IRequest) {
 			defer wg.Done()
-			ids <- menu.newDirectoryModel(req, serviceContext).ID
+			ids <- menu.newDirectoryModel(req, snapshot).ID
 		}(req)
 	}
 	wg.Wait()

@@ -64,7 +64,8 @@ type ClusterRegistry interface {
 	// Get returns the node with the given ID, or ErrNodeNotFound.
 	Get(ctx context.Context, nodeID string) (*NodeInfo, error)
 
-	// List returns all nodes for the given service, optionally filtered by status.
+	// List returns nodes for the given service, optionally filtered by status.
+	// An empty serviceName returns nodes across all services.
 	List(ctx context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error)
 
 	// Watch calls onChange whenever the node list for serviceName changes.

@@ -19,7 +19,8 @@ import (
 )
 
 type resolverTestTransport struct {
-	targetAddress string
+	targetAddress  string
+	targetEndpoint string
 }
 
 func (*resolverTestTransport) Name() string                                          { return "resolver-test" }
@@ -27,8 +28,9 @@ func (*resolverTestTransport) Start(context.Context) error                      
 func (*resolverTestTransport) Stop(context.Context) error                            { return nil }
 func (*resolverTestTransport) Supports(context.Context, *types.PayLoad, string) bool { return true }
 func (*resolverTestTransport) Health(context.Context, string) error                  { return nil }
-func (t *resolverTestTransport) Send(_ context.Context, payload *types.PayLoad, _ string) ([]byte, error) {
+func (t *resolverTestTransport) Send(_ context.Context, payload *types.PayLoad, target string) ([]byte, error) {
 	t.targetAddress = payload.TargetAddress
+	t.targetEndpoint = target
 	return json.Marshal(&Response{Success: true, Data: "remote"})
 }
 
@@ -36,6 +38,24 @@ type resolverTestSelector struct{ transport *resolverTestTransport }
 
 func (s *resolverTestSelector) Select(_ context.Context, _ *types.PayLoad, endpoints transport.TransportEndpoints) (transport.Selection, error) {
 	return transport.Selection{Transport: s.transport, Endpoint: endpoints.HTTP}, nil
+}
+
+type resolverTestAPI struct{ info *types.RouterInfo }
+
+func (*resolverTestAPI) Parse(types.IRequest) error             { return nil }
+func (*resolverTestAPI) Validation(types.IRequest) error        { return nil }
+func (*resolverTestAPI) Do(types.IRequest) (interface{}, error) { return nil, nil }
+func (a *resolverTestAPI) RouterInfo() *types.RouterInfo        { return a.info }
+
+func newResolverTestAPI(service string) *resolverTestAPI {
+	api := &resolverTestAPI{}
+	api.info = &types.RouterInfo{
+		Path: "/api/servermanage/queryrouters", ServiceName: service,
+		PathType: types.ServerManagerType, Method: http.MethodPost,
+		StructName: "QueryRouters", InstanceName: "QueryRouters",
+	}
+	api.info.SetInstance(api)
+	return api
 }
 
 func TestServiceResolverPrefersLocalContext(t *testing.T) {
@@ -93,6 +113,32 @@ func TestServiceResolverFailsClosedWithoutHealthyNode(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), "orders")
 	require.ErrorIs(t, err, ErrTargetServiceUnavailable)
+}
+
+func TestServiceContextCallTargetNodeBypassesResolver(t *testing.T) {
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	defer provider.Close()
+	require.NoError(t, provider.Register(context.Background(), &cluster.NodeInfo{
+		ID: "orders-resolver", ServiceName: "orders", Address: "resolver.internal", Port: 8080,
+		Status: cluster.NodeStatusRunning,
+	}))
+	resolver := NewServiceResolver(provider, func(string) *ServiceContext { return nil })
+	defer resolver.Close()
+	transport := &resolverTestTransport{}
+	sc := &ServiceContext{
+		Service:           &types.Service{Name: "exchange"},
+		Config:            config.NewServiceDefaultConfig("exchange", 8080),
+		ServiceResolver:   resolver,
+		TransportSelector: &resolverTestSelector{transport: transport},
+	}
+
+	_, err := sc.CallTargetNode(context.Background(), "trace", newResolverTestAPI("orders"), &types.TargetInfo{
+		TargetService: "orders", TargetAddress: "exact.internal", TargetPort: 18080, TargetGRPCPort: 19090,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "exact.internal", transport.targetAddress)
+	assert.Equal(t, "http://exact.internal:18080", transport.targetEndpoint)
 }
 
 func TestRequestGetTargetServerInfoUsesServiceResolver(t *testing.T) {

@@ -95,6 +95,28 @@ func TestConsulProviderMetadataRoundTripIncludesTransportPorts(t *testing.T) {
 	}
 }
 
+func TestConsulProviderListAllEnumeratesCoreServices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/catalog/services":
+			_, _ = fmt.Fprint(w, `{"orders":["core-cluster","orders"],"external":["external"]}`)
+		case "/v1/health/service/orders":
+			_, _ = fmt.Fprint(w, consulHealthEntryJSON)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	provider, err := NewConsulProvider(server.URL)
+	require.NoError(t, err)
+
+	nodes, err := provider.List(context.Background(), "", NodeStatusRunning)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Equal(t, "orders", nodes[0].ServiceName)
+}
+
 func assertConsulTransportMetadata(t *testing.T, node *NodeInfo) {
 	t.Helper()
 	assert.Equal(t, 19090, node.GRPCPort)

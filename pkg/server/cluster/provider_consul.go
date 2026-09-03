@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -178,6 +179,9 @@ func (c *ConsulProvider) serviceNameForNode(nodeID string) string {
 
 // List returns nodes for the given service, optionally filtered by status.
 func (c *ConsulProvider) List(ctx context.Context, serviceName string, statuses ...NodeStatus) ([]*NodeInfo, error) {
+	if serviceName == "" {
+		return c.listAll(ctx, statuses...)
+	}
 	entries, _, err := c.client.Health().Service(serviceName, "", false,
 		(&consulapi.QueryOptions{}).WithContext(ctx))
 	if err != nil {
@@ -196,6 +200,32 @@ func (c *ConsulProvider) List(ctx context.Context, serviceName string, statuses 
 			}
 		}
 		result = append(result, node)
+	}
+	return result, nil
+}
+
+func (c *ConsulProvider) listAll(ctx context.Context, statuses ...NodeStatus) ([]*NodeInfo, error) {
+	services, _, err := c.client.Catalog().Services((&consulapi.QueryOptions{}).WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("consul: list services: %w", err)
+	}
+	names := make([]string, 0, len(services))
+	for name, tags := range services {
+		for _, tag := range tags {
+			if tag == consulServicePrefix {
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	result := make([]*NodeInfo, 0)
+	for _, name := range names {
+		nodes, err := c.List(ctx, name, statuses...)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, nodes...)
 	}
 	return result, nil
 }

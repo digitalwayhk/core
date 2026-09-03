@@ -1871,6 +1871,43 @@ func (own *ServiceContext) CallTargetService(traceid string, router types.IRoute
 	}
 	return own.CallService(payload, callback...)
 }
+
+// CallTargetNode 绕过 ServiceResolver，将请求发送到已由 ClusterProvider 确定的单个节点。
+//
+// 该入口用于必须逐副本校验的框架流程；普通跨服务调用仍应使用
+// CallTargetService，由 ServiceResolver 选择健康副本。
+func (own *ServiceContext) CallTargetNode(ctx context.Context, traceid string, api types.IRouter, info *types.TargetInfo) (types.IResponse, error) {
+	if own == nil || own.Service == nil || api == nil || info == nil ||
+		info.TargetService == "" || info.TargetAddress == "" || (info.TargetPort == 0 && info.TargetGRPCPort == 0) {
+		return nil, errors.New("目标节点地址或端口错误")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload := GetPayLoad(traceid, own.Service.Name, "", "", "", api)
+	payload.TargetService = info.TargetService
+	payload.TargetAddress = info.TargetAddress
+	payload.TargetPort = info.TargetPort
+	if info.TargetPath != "" {
+		payload.TargetPath = info.TargetPath
+	}
+	if info.TargetToken != "" {
+		payload.Token = info.TargetToken
+	}
+	endpoints := serviceTransportEndpoints(info.TargetAddress, info.TargetPort, info.TargetGRPCPort)
+	ctx = types.ContextWithTrustedInternalCaller(ctx, own.Service.Name)
+	start := time.Now()
+	values, protocol, err := own.sendPayload(ctx, payload, endpoints)
+	own.recordServiceCall(payload, protocol, err, time.Since(start))
+	if err != nil {
+		return nil, err
+	}
+	response := &Response{}
+	if err := json.Unmarshal(values, response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
 func (own *ServiceContext) CallServiceUseApi(api types.IRouter) (types.IResponse, error) {
 	info := api.RouterInfo()
 	pl := &types.PayLoad{

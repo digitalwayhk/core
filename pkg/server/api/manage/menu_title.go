@@ -3,7 +3,6 @@ package manage
 
 import (
 	"github.com/digitalwayhk/core/pkg/server/locale"
-	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -31,17 +30,20 @@ func localeTitles(instance interface{}, fallback string) (title string, titleEN 
 	return title, locale.Title(instance, locale.EnUS)
 }
 
-// generatedDirectoryTitles 按当前注册的服务生成目录标题快照，用于刷新存量目录。
-func generatedDirectoryTitles() []*smodels.DirectoryModel {
-	contexts := router.GetContexts()
-	items := make([]*smodels.DirectoryModel, 0, len(contexts))
-	for _, sc := range contexts {
-		if sc == nil || sc.Service == nil || sc.Service.Name == "server" {
+// generatedDirectoryTitlesFromSnapshots 从本地或远程服务快照生成目录标题刷新集合。
+func generatedDirectoryTitlesFromSnapshots(snapshots []*smodels.MenuServiceSnapshot) []*smodels.DirectoryModel {
+	items := make([]*smodels.DirectoryModel, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot == nil || snapshot.Name == "" || snapshot.Name == "server" {
 			continue
 		}
 		item := smodels.NewDirectoryModel()
-		item.Name = sc.Service.Name
-		item.Title, item.TitleEN = localeTitles(sc.Service.Instance, sc.Service.Name)
+		item.Name = snapshot.Name
+		item.Title = snapshot.Title
+		if item.Title == "" {
+			item.Title = item.Name
+		}
+		item.TitleEN = snapshot.TitleEN
 		items = append(items, item)
 	}
 	return items

@@ -181,7 +181,7 @@ func (e *EtcdProvider) List(ctx context.Context, serviceName string, statuses ..
 	for _, kv := range resp.Kvs {
 		var node NodeInfo
 		if err := json.Unmarshal(kv.Value, &node); err != nil {
-			continue
+			return nil, fmt.Errorf("etcd: decode node %s: %w", string(kv.Key), err)
 		}
 		if len(statusSet) > 0 {
 			if _, ok := statusSet[node.Status]; !ok {
@@ -246,6 +246,9 @@ func (e *EtcdProvider) nodeKey(serviceName, nodeID string) string {
 }
 
 func (e *EtcdProvider) servicePrefix(serviceName string) string {
+	if serviceName == "" {
+		return fmt.Sprintf("%s/", e.prefix)
+	}
 	return fmt.Sprintf("%s/%s/", e.prefix, serviceName)
 }
 
