@@ -1955,10 +1955,10 @@ func (own *ServiceContext) OwnsServiceKey(ctx context.Context, serviceName, hash
 	if err != nil {
 		return false, err
 	}
-	if resolved == nil || strings.TrimSpace(resolved.NodeID) == "" {
-		return false, fmt.Errorf("%w: keyed owner node is unavailable", ErrTargetServiceUnavailable)
+	if resolved == nil || strings.TrimSpace(resolved.ServiceInstanceID) == "" {
+		return false, fmt.Errorf("%w: keyed owner instance is unavailable", ErrTargetServiceUnavailable)
 	}
-	return resolved.NodeID == own.ServiceInstanceID, nil
+	return resolved.ServiceInstanceID == own.ServiceInstanceID, nil
 }
 
 func (own *ServiceContext) callService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {

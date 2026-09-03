@@ -19,10 +19,11 @@ var ErrTargetServiceUnavailable = errors.New("target service unavailable")
 
 // ResolvedService 是一次服务解析得到的不可变目标快照。
 type ResolvedService struct {
-	Info      *types.TargetInfo
-	Endpoints transport.TransportEndpoints
-	Local     *ServiceContext
-	NodeID    string
+	Info              *types.TargetInfo
+	Endpoints         transport.TransportEndpoints
+	Local             *ServiceContext
+	NodeID            string
+	ServiceInstanceID string
 }
 
 type resolverEntry struct {
@@ -95,7 +96,8 @@ func (r *ServiceResolver) resolve(ctx context.Context, serviceName, hashKey stri
 			address := local.RuntimeAddress()
 			grpcPort := local.Config.Transport.GRPC.Port
 			return &ResolvedService{
-				Local: local,
+				Local:             local,
+				ServiceInstanceID: local.ServiceInstanceID,
 				Info: &types.TargetInfo{
 					TargetAddress: address, TargetService: serviceName,
 					TargetPort:     local.Config.Port,
@@ -134,7 +136,8 @@ func (r *ServiceResolver) resolve(ctx context.Context, serviceName, hashKey stri
 		return nil, fmt.Errorf("%w: service=%s: %v", ErrTargetServiceUnavailable, serviceName, err)
 	}
 	return &ResolvedService{
-		NodeID: node.ID,
+		NodeID:            node.ID,
+		ServiceInstanceID: node.ServiceInstanceID,
 		Info: &types.TargetInfo{
 			TargetAddress: node.Address, TargetService: serviceName,
 			TargetPort:     node.Port,
