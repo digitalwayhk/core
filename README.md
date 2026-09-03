@@ -8,6 +8,7 @@
 [![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8?logo=go&logoColor=white)](./go.mod)
 [![Examples](https://img.shields.io/badge/examples-7%20个完整应用-brightgreen)](./examples)
 [![Skill](https://img.shields.io/badge/AI%20skill-单一权威源-8A2BE2)](./docs/ai/core-skill/SKILL.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 </div>
 
@@ -29,7 +30,7 @@ go get github.com/digitalwayhk/core@latest
 
 **进阶**　[高性能写路径](#高性能写路径)　·　[多服务与水平扩展](#多服务与水平扩展)　·　[统计与报表](#统计与报表)
 
-**运维**　[安全与配置](#安全与配置)　·　[兼容与废弃](#兼容与废弃)　·　[测试与门禁](#测试与门禁)　·　[文档地图](#文档地图)
+**运维**　[安全与配置](#安全与配置)　·　[兼容与废弃](#兼容与废弃)　·　[测试与门禁](#测试与门禁)　·　[文档地图](#文档地图)　·　[许可证](#许可证)
 
 ---
 
@@ -362,6 +363,12 @@ CI 门禁由 `scripts/ci.sh` 按名称执行：
 | 废弃 API 与迁移 | [DEPRECATION_REGISTER.md](./docs/codex/DEPRECATION_REGISTER.md) |
 | 日志规范 | [LOGGING_AUDIT_AND_STANDARD.md](./docs/codex/LOGGING_AUDIT_AND_STANDARD.md) |
 | 版本变更 | [CHANGELOG.md](./CHANGELOG.md) |
+
+---
+
+## 许可证
+
+Digitalway Core 使用 [Apache License 2.0](./LICENSE) 开源。
 
 ---
 
