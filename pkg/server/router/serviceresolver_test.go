@@ -179,9 +179,11 @@ func TestServiceContextOwnsServiceKeyUsesResolverOwner(t *testing.T) {
 	defer provider.Close()
 	ctx := context.Background()
 	serviceName := fmt.Sprintf("trades-keyed-owner-%d", time.Now().UnixNano())
+	instanceA := "trades-instance-a"
+	instanceB := "trades-instance-b"
 	nodes := []*cluster.NodeInfo{
-		{ID: "trade-a", ServiceName: serviceName, DataCenterID: 1, MachineID: 1, Address: "trade-a", Port: 8080},
-		{ID: "trade-b", ServiceName: serviceName, DataCenterID: 1, MachineID: 2, Address: "trade-b", Port: 8080},
+		{ID: serviceName + "-1-1-" + instanceA, ServiceName: serviceName, ServiceInstanceID: instanceA, DataCenterID: 1, MachineID: 1, Address: "trade-a", Port: 8080},
+		{ID: serviceName + "-1-2-" + instanceB, ServiceName: serviceName, ServiceInstanceID: instanceB, DataCenterID: 1, MachineID: 2, Address: "trade-b", Port: 8080},
 	}
 	for _, node := range nodes {
 		require.NoError(t, provider.Register(ctx, node))
@@ -190,7 +192,7 @@ func TestServiceContextOwnsServiceKeyUsesResolverOwner(t *testing.T) {
 	require.NoError(t, err)
 	sc := &ServiceContext{
 		Service:           &types.Service{Name: serviceName},
-		ServiceInstanceID: owner.ID,
+		ServiceInstanceID: owner.ServiceInstanceID,
 		ServiceResolver:   NewServiceResolver(provider, func(string) *ServiceContext { return nil }),
 	}
 	defer sc.ServiceResolver.Close()
