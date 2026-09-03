@@ -1943,6 +1943,22 @@ func (own *ServiceContext) CallServiceWithKey(payload *types.PayLoad, hashKey st
 	return own.callService(&keyedPayload, callback...)
 }
 
+// OwnsServiceKey 报告当前实例是否为目标服务稳定 key 的 consistent-hash owner。
+// 服务内 market/task owner gate 与跨服务 CallServiceWithKey 必须使用同一 key。
+func (own *ServiceContext) OwnsServiceKey(ctx context.Context, serviceName, hashKey string) (bool, error) {
+	if own == nil || own.ServiceResolver == nil || strings.TrimSpace(own.ServiceInstanceID) == "" {
+		return false, fmt.Errorf("%w: service ownership resolver is unavailable", ErrTargetServiceUnavailable)
+	}
+	resolved, err := own.ServiceResolver.ResolveWithKey(ctx, serviceName, hashKey)
+	if err != nil {
+		return false, err
+	}
+	if resolved == nil || strings.TrimSpace(resolved.NodeID) == "" {
+		return false, fmt.Errorf("%w: keyed owner node is unavailable", ErrTargetServiceUnavailable)
+	}
+	return resolved.NodeID == own.ServiceInstanceID, nil
+}
+
 func (own *ServiceContext) callService(payload *types.PayLoad, callback ...func(res types.IResponse)) (types.IResponse, error) {
 	res := &Response{}
 	ctx := context.Background()

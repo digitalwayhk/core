@@ -25,7 +25,7 @@
 | `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |
-| `types.IRequestKeyedServiceCaller`、`Request.CallServiceWithKey`、`ServiceContext.CallServiceWithKey`、`ServiceResolver.ResolveWithKey` | Stable（加性） | server/router、cluster | 按市场/租户稳定 key 将同步调用固定到同一健康实例；普通 `CallService` 继续轮询 | rendezvous hash 顺序独立/最小迁移、Resolver 与 ServiceContext 定向/race 测试 |
+| `types.IRequestKeyedServiceCaller`、`Request.CallServiceWithKey`、`ServiceContext.CallServiceWithKey`、`ServiceContext.OwnsServiceKey`、`ServiceResolver.ResolveWithKey` | Stable（加性） | server/router、cluster | 按市场/租户稳定 key 将同步调用固定到同一健康实例，并让服务 owner gate 复用同一成员快照；普通 `CallService` 继续轮询 | rendezvous hash 顺序独立/最小迁移、local bypass 防回归、Resolver 与 ServiceContext 定向/race 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
