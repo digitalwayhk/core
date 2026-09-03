@@ -70,8 +70,8 @@ func (b *RoundRobinBalancer) Pick(_ context.Context, candidates []*NodeInfo, _ B
 
 // ---- consistent-hash ----
 
-// ConsistentHashBalancer routes calls with the same HashKey to the same node
-// (modulo changes to the candidate list).
+// ConsistentHashBalancer 使用 rendezvous hash 将相同 HashKey 稳定路由到同一节点。
+// 候选顺序不会改变 owner；新增节点时只有迁移到新节点的 key 会改变 owner。
 type ConsistentHashBalancer struct{}
 
 func NewConsistentHashBalancer() *ConsistentHashBalancer { return &ConsistentHashBalancer{} }
@@ -80,10 +80,24 @@ func (b *ConsistentHashBalancer) Pick(_ context.Context, candidates []*NodeInfo,
 	if len(candidates) == 0 {
 		return nil, ErrEmptyCandidates
 	}
-	h := fnv.New32a()
-	fmt.Fprint(h, hint.HashKey)
-	idx := h.Sum32() % uint32(len(candidates))
-	return candidates[idx], nil
+	var selected *NodeInfo
+	var selectedScore uint64
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		h := fnv.New64a()
+		fmt.Fprint(h, hint.HashKey, "\x00", candidate.ID)
+		score := h.Sum64()
+		if selected == nil || score > selectedScore || score == selectedScore && candidate.ID < selected.ID {
+			selected = candidate
+			selectedScore = score
+		}
+	}
+	if selected == nil {
+		return nil, ErrEmptyCandidates
+	}
+	return selected, nil
 }
 
 // ---- weighted ----

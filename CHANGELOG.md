@@ -6,6 +6,7 @@
 
 ### Added
 
+- keyed 同步服务调用：新增加性接口 `types.IRequestKeyedServiceCaller`，以及 `Request`、`ServiceContext` 的 `CallServiceWithKey` 和 `ServiceResolver.ResolveWithKey`。显式提供市场/租户 key 时使用顺序无关、成员变化最小迁移的 rendezvous consistent hash 固定目标实例；空 key fail closed，原 `CallService` 继续轮询。
 - `types.SearchItem.SkipCount`：业务热路径可显式放弃完整结果总数，使 `IDataAction.Load` 直接执行有界查询，避免点查固定产生 `COUNT(*)` + `SELECT` 两次数据库往返；零值继续保留原分页总数语义。
 - 可选分键可靠并发：`UseOutboxWithOptions`、`Subscription.KeyConcurrency` 与 `KeyedReliableMQProvider` 默认均保持并发度 1；显式启用后同 OrderingKey串行、不同 key有界并行，Redis仍保持单 active owner并分页处理 PEL。provider不支持或同 subject配置冲突时 fail closed；新增真 Redis conformance、Runtime低基数指标和 Bitzoom全局串行失败案例。
 - 可选 `IHMACAuthProvider`：只有显式实现该接口的服务才为 Auth 用户域增加 HMAC 凭证备选；Bearer 保持默认且始终优先，Manage/ServerManage 不进入 HMAC 分支。REST 与 WebSocket 复用现有可信身份和 `OnAuthRequest` 授权链，Core 不保存 Secret/nonce，也不实现业务签名算法。
