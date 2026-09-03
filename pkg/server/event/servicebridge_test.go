@@ -212,6 +212,39 @@ func TestServiceEventBridgeReliableSubscriptionUsesLogicalServiceName(t *testing
 	assert.Equal(t, "user-service", adapter.reliableID)
 }
 
+func TestServiceEventBridgeReliableBroadcastUsesStableInstanceSubscriberID(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID:         "position-service",
+		InstanceSubscriberID: "position-service@10.0.0.1:8080:9080",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	adapter := &fakeExternalEventAdapter{}
+	bridge.SetExternalPublisher(adapter)
+
+	cancel, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "market.activate.requested", EventType: "market.activate.requested",
+		Reliable: true, Broadcast: true,
+		Handler: func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.NoError(t, err)
+	cancel()
+	assert.Equal(t, "position-service@10.0.0.1:8080:9080", adapter.reliableID)
+}
+
+func TestServiceEventBridgeReliableBroadcastRequiresStableInstanceSubscriberID(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+		SubscriberID: "position-service",
+	})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	bridge.SetExternalPublisher(&fakeExternalEventAdapter{})
+
+	_, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "market.activate.requested", Reliable: true, Broadcast: true,
+		Handler: func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.Error(t, err)
+}
+
 func TestServiceEventBridgeReliableSubscriptionOptsIntoKeyConcurrency(t *testing.T) {
 	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
 		SubscriberID: "position-service",
@@ -271,6 +304,15 @@ func TestServiceEventBridgeRejectsKeyConcurrencyOnObserverSubscription(t *testin
 	bridge := newTestServiceEventBridge(t, 2)
 	_, err := bridge.SubscribeEvent(event.Subscription{
 		Subject: "quotes", KeyConcurrency: 2,
+		Handler: func(context.Context, *event.Envelope) error { return nil },
+	})
+	require.Error(t, err)
+}
+
+func TestServiceEventBridgeRejectsBroadcastOnObserverSubscription(t *testing.T) {
+	bridge := newTestServiceEventBridge(t, 2)
+	_, err := bridge.SubscribeEvent(event.Subscription{
+		Subject: "market.activate.requested", Broadcast: true,
 		Handler: func(context.Context, *event.Envelope) error { return nil },
 	})
 	require.Error(t, err)

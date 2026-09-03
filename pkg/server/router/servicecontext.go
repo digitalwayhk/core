@@ -481,7 +481,8 @@ func (own *ServiceContext) EnableEventBridge() {
 			subscriberID = own.Service.Name
 		}
 		own.ServiceEventBridge = event.NewServiceEventBridge(own.EventStream, event.ServiceEventBridgeOptions{
-			SubscriberID: subscriberID,
+			SubscriberID:         subscriberID,
+			InstanceSubscriberID: own.eventInstanceSubscriberID(),
 		})
 	}
 	own.EventBridge = event.NewMQBridge(own.EventStream, own.MQManager)
@@ -870,7 +871,8 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	sc.localFallbackProvider = processLocalRegistry
 	sc.EventStream = event.NewStream()
 	sc.ServiceEventBridge = event.NewServiceEventBridge(sc.EventStream, event.ServiceEventBridgeOptions{
-		SubscriberID: sc.Service.Name,
+		SubscriberID:         sc.Service.Name,
+		InstanceSubscriberID: sc.eventInstanceSubscriberID(),
 	})
 	if err := sc.RegisterRuntimeMetricProviders(sc.ServiceEventBridge); err != nil {
 		logx.Infow("runtime_metric_provider_register_failed",
@@ -2217,6 +2219,14 @@ func newServiceInstanceID(serviceName string) string {
 		return fmt.Sprintf("%s-%d", serviceName, time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s-%s", serviceName, id.String())
+}
+
+// eventInstanceSubscriberID 按公布端点生成稳定的副本消费组，不使用重启即变的 ServiceInstanceID。
+func (own *ServiceContext) eventInstanceSubscriberID() string {
+	if own == nil || own.Service == nil || own.Config == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s@%s:%d:%d", own.Service.Name, own.RuntimeAddress(), own.Config.Port, own.Config.Transport.GRPC.Port)
 }
 
 // claimMachineID registers this service before Snowflake initialisation.

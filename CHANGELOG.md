@@ -7,6 +7,7 @@
 ### Added
 
 - keyed 同步服务调用：新增加性接口 `types.IRequestKeyedServiceCaller`，以及 `Request`、`ServiceContext` 的 `CallServiceWithKey`、`ServiceContext.OwnsServiceKey` 和 `ServiceResolver.ResolveWithKey`。显式提供市场/租户 key 时使用顺序无关、成员变化最小迁移的 rendezvous consistent hash 固定目标实例；服务自身可用同一成员快照判断 owner，空 key fail closed，原 `CallService` 继续轮询。
+- 可靠副本广播订阅：`Subscription.Broadcast=true` 使低频、幂等的控制面事件由每个服务副本各消费一次；消费组使用稳定网络端点而非重启即变的进程 UUID。非可靠广播或缺少稳定副本标识时 fail closed；价格、成交等数据面不应启用。
 - `types.SearchItem.SkipCount`：业务热路径可显式放弃完整结果总数，使 `IDataAction.Load` 直接执行有界查询，避免点查固定产生 `COUNT(*)` + `SELECT` 两次数据库往返；零值继续保留原分页总数语义。
 - 可选分键可靠并发：`UseOutboxWithOptions`、`Subscription.KeyConcurrency` 与 `KeyedReliableMQProvider` 默认均保持并发度 1；显式启用后同 OrderingKey串行、不同 key有界并行，Redis仍保持单 active owner并分页处理 PEL。provider不支持或同 subject配置冲突时 fail closed；新增真 Redis conformance、Runtime低基数指标和 Bitzoom全局串行失败案例。
 - 可选 `IHMACAuthProvider`：只有显式实现该接口的服务才为 Auth 用户域增加 HMAC 凭证备选；Bearer 保持默认且始终优先，Manage/ServerManage 不进入 HMAC 分支。REST 与 WebSocket 复用现有可信身份和 `OnAuthRequest` 授权链，Core 不保存 Secret/nonce，也不实现业务签名算法。
@@ -65,6 +66,8 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
+
+- keyed rendezvous hash 改为按稳定服务端点评分，不再按每次启动都随机的 `NodeInfo.ID`；单副本重启不会导致市场/租户 key 全量重映射。
 
 - `UpdateMenu` 不再只扫描管理入口进程的 `router.GetContexts()`：它现在借用同进程业务服务的 `ClusterProvider` 获取运行中的服务全集，本进程直接生成菜单快照，独立容器则按每个运行副本调用固定 `QueryRouters` 路由，校验 Manage 路由、本地化标题与报表定义后统一同步。任一远程副本失败、返回跨服务数据或同服务副本快照不一致时整体失败闭合；`QueryRouters` 默认响应保持不变。
 - `SearchItem.SkipCount` 在带 `IScopes` 模型上先应用 Scope 再解析排序字段，避免 CamelCase 字段在 MySQL 中未映射成 snake_case 列名。

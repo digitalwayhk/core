@@ -73,11 +73,14 @@ type KeyedReliableExternalSubscriber interface {
 }
 
 type ServiceEventBridgeOptions struct {
-	ObserverQueueSize                int
-	ControlQueueSize                 int
-	ControlShards                    int
-	ControlEnqueueTimeout            time.Duration
-	SubscriberID                     string
+	ObserverQueueSize     int
+	ControlQueueSize      int
+	ControlShards         int
+	ControlEnqueueTimeout time.Duration
+	SubscriberID          string
+	// InstanceSubscriberID 是按部署副本端点生成的稳定 consumer group。
+	// 仅 Subscription.Broadcast 使用，容器重启后必须保持不变。
+	InstanceSubscriberID             string
 	RequireOrderedReliableByShardKey bool
 }
 
@@ -112,6 +115,7 @@ type ServiceEventBridge struct {
 	outboxMu                sync.Mutex
 	outbox                  *outboxPublisher
 	subscriberID            string
+	instanceSubscriberID    string
 	// wantOrderedReliable 来自构造选项或显式 Require，表示意图；真正开启门禁必须 Ensure 成功。
 	wantOrderedReliable bool
 	// requireOrderedReliable 仅在 EnsureOrderedReliable 成功后置位。
@@ -144,14 +148,15 @@ func NewServiceEventBridge(stream *Stream, options ServiceEventBridgeOptions) *S
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &ServiceEventBridge{
-		stream:              stream,
-		observerQueue:       make(chan PublishRequest, options.ObserverQueueSize),
-		controlQueues:       make([]chan controlEvent, options.ControlShards),
-		controlTimeout:      options.ControlEnqueueTimeout,
-		subscriberID:        options.SubscriberID,
-		wantOrderedReliable: options.RequireOrderedReliableByShardKey,
-		ctx:                 ctx,
-		cancel:              cancel,
+		stream:               stream,
+		observerQueue:        make(chan PublishRequest, options.ObserverQueueSize),
+		controlQueues:        make([]chan controlEvent, options.ControlShards),
+		controlTimeout:       options.ControlEnqueueTimeout,
+		subscriberID:         options.SubscriberID,
+		instanceSubscriberID: options.InstanceSubscriberID,
+		wantOrderedReliable:  options.RequireOrderedReliableByShardKey,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 	b.wg.Add(1)
 	go b.runObserver()
@@ -351,7 +356,7 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	var externalCancel func()
 	if sub.Subject != "" && b.canSubscribeExternal(sub.Reliable) {
 		externalCancel, err = b.subscribeExternalRef(
-			context.Background(), sub.Reliable, sub.Subject, sub.KeyConcurrency,
+			context.Background(), sub.Reliable, sub.Broadcast, sub.Subject, sub.KeyConcurrency,
 		)
 		if err != nil {
 			if localCancel != nil {
@@ -389,13 +394,14 @@ func (b *ServiceEventBridge) SubscribeExternal(ctx context.Context, subject stri
 
 // SubscribeExternalControl 建立需要成功处理后才 ACK 的跨服务控制事件订阅。
 func (b *ServiceEventBridge) SubscribeExternalControl(ctx context.Context, subject string) (func(), error) {
-	return b.subscribeExternalControlWithOptions(ctx, subject, ReliableExternalSubscribeOptions{})
+	return b.subscribeExternalControlWithOptions(ctx, subject, ReliableExternalSubscribeOptions{}, "")
 }
 
 func (b *ServiceEventBridge) subscribeExternalControlWithOptions(
 	ctx context.Context,
 	subject string,
 	options ReliableExternalSubscribeOptions,
+	subscriberIDOverride string,
 ) (func(), error) {
 	if b == nil || b.closed.Load() {
 		return nil, ErrServiceEventBridgeClosed
@@ -405,6 +411,9 @@ func (b *ServiceEventBridge) subscribeExternalControlWithOptions(
 	keyedSubscriber := b.keyedReliableSubscriber
 	subscriberID := b.subscriberID
 	b.externalMu.RUnlock()
+	if subscriberIDOverride != "" {
+		subscriberID = subscriberIDOverride
+	}
 	if subscriberID == "" {
 		return nil, ErrExternalProviderUnavailable
 	}
