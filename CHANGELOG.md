@@ -68,6 +68,7 @@
 
 ### Fixed
 
+- 可信内部调用请求包装现在会保留底层 `IRequestKeyedServiceCaller` 能力；Gateway 调用中间服务后，中间服务仍可按同一市场/租户 key 固定下游实例。底层请求不支持该加性能力时继续失败闭合。
 - keyed rendezvous hash 改为按稳定服务端点评分，不再按每次启动都随机的 `NodeInfo.ID`；单副本重启不会导致市场/租户 key 全量重映射。
 
 - `UpdateMenu` 不再只扫描管理入口进程的 `router.GetContexts()`：它现在借用同进程业务服务的 `ClusterProvider` 获取运行中的服务全集，本进程直接生成菜单快照，独立容器则按每个运行副本调用固定 `QueryRouters` 路由，校验 Manage 路由、本地化标题与报表定义后统一同步。任一远程副本失败、返回跨服务数据或同服务副本快照不一致时整体失败闭合；`QueryRouters` 默认响应保持不变。

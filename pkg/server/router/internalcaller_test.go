@@ -44,6 +44,48 @@ type localInternalCallerService struct {
 	route types.IRouter
 }
 
+type keyedInternalCallerRequest struct {
+	types.IRequest
+	key string
+}
+
+func (r *keyedInternalCallerRequest) CallServiceWithKey(
+	_ types.IRouter,
+	hashKey string,
+	_ ...func(types.IResponse),
+) (types.IResponse, error) {
+	r.key = hashKey
+	return nil, nil
+}
+
+func TestTrustedInternalRequestPreservesKeyedServiceCaller(t *testing.T) {
+	request := &keyedInternalCallerRequest{}
+	wrapped := requestWithTrustedInternalCaller(request, "gateway")
+
+	caller, ok := wrapped.(types.IRequestKeyedServiceCaller)
+	require.True(t, ok, "trusted internal request must preserve keyed service routing")
+	if !ok {
+		return
+	}
+
+	_, err := caller.CallServiceWithKey(nil, "market:77")
+	require.NoError(t, err)
+	require.Equal(t, "market:77", request.key)
+}
+
+func TestTrustedInternalRequestFailsClosedWithoutKeyedServiceCaller(t *testing.T) {
+	wrapped := requestWithTrustedInternalCaller(struct{ types.IRequest }{}, "gateway")
+
+	caller, ok := wrapped.(types.IRequestKeyedServiceCaller)
+	require.True(t, ok, "trusted internal request must expose the additive capability")
+	if !ok {
+		return
+	}
+
+	_, err := caller.CallServiceWithKey(nil, "market:77")
+	require.Error(t, err)
+}
+
 func (s *localInternalCallerService) ServiceName() string      { return s.name }
 func (s *localInternalCallerService) Routers() []types.IRouter { return []types.IRouter{s.route} }
 
