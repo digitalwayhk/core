@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/stretchr/testify/require"
@@ -67,6 +68,33 @@ func (p *keyedReliableBridgeProvider) SubscribeReliable(
 	p.options = options
 	p.handler = handler
 	return func() {}, nil
+}
+
+func TestMQBridgeRejectsKeyConcurrencyOnKafkaAndRabbitMQ(t *testing.T) {
+	providers := []mq.MQProvider{
+		mq.NewKafkaProvider(config.KafkaMQConfig{Brokers: []string{"127.0.0.1:9092"}}),
+		mq.NewRabbitMQProvider(config.RabbitMQConfig{
+			URL: "amqp://guest:guest@127.0.0.1:5672/", Exchange: "events", Prefetch: 1,
+		}),
+	}
+	for _, provider := range providers {
+		t.Run(provider.Name(), func(t *testing.T) {
+			manager := mq.NewManager()
+			manager.Register(provider)
+			require.NoError(t, manager.SetCurrent(provider.Name()))
+			bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{
+				SubscriberID: "order-service",
+			})
+			t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+			bridge.SetExternalPublisher(event.NewMQBridge(event.NewStream(), manager))
+
+			_, err := bridge.SubscribeEvent(event.Subscription{
+				Subject: "fills", Reliable: true, KeyConcurrency: 2,
+				Handler: func(context.Context, *event.Envelope) error { return nil },
+			})
+			require.ErrorIs(t, err, mq.ErrKeyedReliableSubscribeUnsupported)
+		})
+	}
 }
 
 func TestMQBridgeReliableSubscriptionPropagatesKeyConcurrency(t *testing.T) {

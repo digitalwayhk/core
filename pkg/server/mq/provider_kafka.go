@@ -32,8 +32,30 @@ type kafkaMessageReader interface {
 
 type kafkaSubscription struct {
 	cancel context.CancelFunc
-	reader kafkaMessageReader
 	done   chan struct{}
+
+	readerMu sync.Mutex
+	reader   kafkaMessageReader
+}
+
+func (s *kafkaSubscription) setReader(reader kafkaMessageReader) {
+	s.readerMu.Lock()
+	old := s.reader
+	s.reader = reader
+	s.readerMu.Unlock()
+	if old != nil && old != reader {
+		_ = old.Close()
+	}
+}
+
+func (s *kafkaSubscription) closeReader() {
+	s.readerMu.Lock()
+	reader := s.reader
+	s.reader = nil
+	s.readerMu.Unlock()
+	if reader != nil {
+		_ = reader.Close()
+	}
 }
 
 // KafkaProvider 使用 kafka-go 实现普通发布订阅与 at-least-once 可靠消费。
@@ -65,6 +87,9 @@ func NewKafkaProvider(cfg config.KafkaMQConfig) *KafkaProvider {
 	}
 	if cfg.ConnectTimeout <= 0 {
 		cfg.ConnectTimeout = 10 * time.Second
+	}
+	if cfg.StartOffset == "" {
+		cfg.StartOffset = "latest"
 	}
 	return &KafkaProvider{
 		cfg:           cfg,
@@ -129,13 +154,14 @@ func (p *KafkaProvider) Connect(ctx context.Context) error {
 		SASL:        mechanism,
 	}
 	writer := &kafka.Writer{
-		Addr:         kafka.TCP(nonEmptyKafkaBrokers(p.cfg.Brokers)...),
-		Balancer:     &kafka.Murmur2Balancer{},
-		RequiredAcks: kafka.RequireAll,
-		Async:        false,
-		Transport:    transport,
-		ReadTimeout:  p.cfg.ConnectTimeout,
-		WriteTimeout: p.cfg.ConnectTimeout,
+		Addr:                   kafka.TCP(nonEmptyKafkaBrokers(p.cfg.Brokers)...),
+		Balancer:               &kafka.Murmur2Balancer{},
+		RequiredAcks:           kafka.RequireAll,
+		Async:                  false,
+		AllowAutoTopicCreation: true,
+		Transport:              transport,
+		ReadTimeout:            p.cfg.ConnectTimeout,
+		WriteTimeout:           p.cfg.ConnectTimeout,
 	}
 
 	p.stateMu.Lock()
@@ -213,6 +239,9 @@ func (p *KafkaProvider) SubscribeReliable(
 	if options.Group == "" || handler == nil {
 		return nil, fmt.Errorf("kafka: reliable group and handler are required")
 	}
+	if options.KeyConcurrency > 1 {
+		return nil, ErrKeyedReliableSubscribeUnsupported
+	}
 	return p.subscribe(ctx, subject, options, func(message *Message) (err error) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -238,29 +267,20 @@ func (p *KafkaProvider) subscribe(
 		p.stateMu.Unlock()
 		return nil, ErrNotConnected
 	}
-	dialer := cloneKafkaDialer(p.dialer, p.cfg.ClientID, options.Consumer)
-	reader := p.readerFactory(kafka.ReaderConfig{
-		Brokers:        nonEmptyKafkaBrokers(p.cfg.Brokers),
-		GroupID:        options.Group,
-		Topic:          mqResourceName(p.cfg.Prefix, subject, 249),
-		Dialer:         dialer,
-		CommitInterval: 0,
-		StartOffset:    kafka.FirstOffset,
-	})
 	consumerCtx, cancel := context.WithCancel(ctx)
 	p.nextSubID++
 	id := p.nextSubID
-	subscription := &kafkaSubscription{cancel: cancel, reader: reader, done: make(chan struct{})}
+	subscription := &kafkaSubscription{cancel: cancel, done: make(chan struct{})}
 	p.subscriptions[id] = subscription
 	p.wg.Add(1)
 	p.stateMu.Unlock()
 
-	go p.runKafkaSubscription(consumerCtx, id, subject, reader, subscription, handler)
+	go p.runKafkaSubscription(consumerCtx, id, subject, options, subscription, handler)
 	var cancelOnce sync.Once
 	return func() {
 		cancelOnce.Do(func() {
 			cancel()
-			_ = reader.Close()
+			subscription.closeReader()
 			<-subscription.done
 		})
 	}, nil
@@ -270,23 +290,84 @@ func (p *KafkaProvider) runKafkaSubscription(
 	ctx context.Context,
 	id uint64,
 	subject string,
-	reader kafkaMessageReader,
+	options ReliableSubscribeOptions,
 	subscription *kafkaSubscription,
 	handler func(*Message) error,
 ) {
 	defer p.wg.Done()
 	defer close(subscription.done)
 	defer func() {
-		_ = reader.Close()
+		subscription.closeReader()
 		p.stateMu.Lock()
 		delete(p.subscriptions, id)
 		p.stateMu.Unlock()
 	}()
 
+	topic := mqResourceName(p.cfg.Prefix, subject, 249)
+	groupID := mqResourceName("", options.Group, 255)
+	startOffset := kafkaStartOffset(p.cfg.StartOffset)
+	backoff := 100 * time.Millisecond
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		p.stateMu.RLock()
+		if p.closed || !p.connected || p.readerFactory == nil {
+			p.stateMu.RUnlock()
+			return
+		}
+		factory := p.readerFactory
+		dialer := cloneKafkaDialer(p.dialer, p.cfg.ClientID, options.Consumer)
+		brokers := nonEmptyKafkaBrokers(p.cfg.Brokers)
+		p.stateMu.RUnlock()
+
+		reader := factory(kafka.ReaderConfig{
+			Brokers:        brokers,
+			GroupID:        groupID,
+			Topic:          topic,
+			Dialer:         dialer,
+			CommitInterval: 0,
+			StartOffset:    startOffset,
+		})
+		if reader == nil {
+			if !waitMQRetry(ctx, backoff) {
+				return
+			}
+			backoff = nextMQBackoff(backoff)
+			continue
+		}
+		subscription.setReader(reader)
+		backoff = 100 * time.Millisecond
+
+		err := p.consumeKafkaSession(ctx, subject, reader, handler)
+		subscription.closeReader()
+		if ctx.Err() != nil || err == nil {
+			return
+		}
+		logx.Debugw("mq_kafka_subscription_reconnect",
+			logx.Field("subject", subject),
+			logx.Field("error", err),
+		)
+		if !waitMQRetry(ctx, backoff) {
+			return
+		}
+		backoff = nextMQBackoff(backoff)
+	}
+}
+
+func (p *KafkaProvider) consumeKafkaSession(
+	ctx context.Context,
+	subject string,
+	reader kafkaMessageReader,
+	handler func(*Message) error,
+) error {
 	for {
 		brokerMessage, err := reader.FetchMessage(ctx)
 		if err != nil {
-			return
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
 		}
 		message := &Message{
 			ID:      fmt.Sprintf("%s:%d:%d", brokerMessage.Topic, brokerMessage.Partition, brokerMessage.Offset),
@@ -295,15 +376,16 @@ func (p *KafkaProvider) runKafkaSubscription(
 		}
 		for {
 			if err := handler(message); err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(100 * time.Millisecond):
-					continue
+				if !waitMQRetry(ctx, 100*time.Millisecond) {
+					return nil
 				}
+				continue
 			}
 			if err := reader.CommitMessages(ctx, brokerMessage); err != nil {
-				return
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
 			}
 			break
 		}
@@ -353,7 +435,7 @@ func (p *KafkaProvider) Close() error {
 
 		for _, subscription := range subscriptions {
 			subscription.cancel()
-			_ = subscription.reader.Close()
+			subscription.closeReader()
 		}
 		p.wg.Wait()
 		if writer != nil {
@@ -422,6 +504,15 @@ func kafkaSASLMechanism(cfg config.KafkaSASLConfig) (sasl.Mechanism, error) {
 		return scram.Mechanism(scram.SHA512, cfg.Username, cfg.Password)
 	default:
 		return nil, fmt.Errorf("unsupported mechanism")
+	}
+}
+
+func kafkaStartOffset(value string) int64 {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "earliest":
+		return kafka.FirstOffset
+	default:
+		return kafka.LastOffset
 	}
 }
 

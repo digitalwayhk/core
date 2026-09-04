@@ -256,6 +256,9 @@ func (p *RabbitMQProvider) SubscribeReliable(
 	if options.Group == "" || handler == nil {
 		return nil, fmt.Errorf("rabbitmq: reliable group and handler are required")
 	}
+	if options.KeyConcurrency > 1 {
+		return nil, ErrKeyedReliableSubscribeUnsupported
+	}
 	return p.subscribe(ctx, subject, options, func(message *Message) (err error) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -323,10 +326,10 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 			return
 		}
 		if err := p.ensureRabbitConnection(ctx); err != nil {
-			if !waitRabbitRetry(ctx, backoff) {
+			if !waitMQRetry(ctx, backoff) {
 				return
 			}
-			backoff = nextRabbitBackoff(backoff)
+			backoff = nextMQBackoff(backoff)
 			continue
 		}
 		p.stateMu.RLock()
@@ -341,10 +344,10 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 		session, err := connection.NewConsumer(ctx, exchange, queueName, routingKey, consumerTag, prefetch)
 		if err != nil {
 			p.invalidateRabbitConnection(connection)
-			if !waitRabbitRetry(ctx, backoff) {
+			if !waitMQRetry(ctx, backoff) {
 				return
 			}
-			backoff = nextRabbitBackoff(backoff)
+			backoff = nextMQBackoff(backoff)
 			continue
 		}
 		subscription.setSession(session)
@@ -360,7 +363,7 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 					ended = true
 					continue
 				}
-				if err := p.processRabbitDelivery(subject, delivery, handler); err != nil {
+				if err := p.processRabbitDelivery(ctx, subject, delivery, handler); err != nil {
 					ended = true
 				}
 			}
@@ -374,6 +377,7 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 }
 
 func (p *RabbitMQProvider) processRabbitDelivery(
+	ctx context.Context,
 	subject string,
 	delivery amqp.Delivery,
 	handler func(*Message) error,
@@ -391,7 +395,9 @@ func (p *RabbitMQProvider) processRabbitDelivery(
 		if nackErr := delivery.Nack(false, true); nackErr != nil {
 			return fmt.Errorf("rabbitmq: nack delivery: %w", nackErr)
 		}
-		time.Sleep(50 * time.Millisecond)
+		if !waitMQRetry(ctx, 50*time.Millisecond) {
+			return ctx.Err()
+		}
 		return nil
 	}
 	if err := delivery.Ack(false); err != nil {
@@ -491,7 +497,7 @@ func validateRabbitMQProviderConfig(cfg config.RabbitMQConfig) error {
 	return nil
 }
 
-func waitRabbitRetry(ctx context.Context, delay time.Duration) bool {
+func waitMQRetry(ctx context.Context, delay time.Duration) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -500,7 +506,7 @@ func waitRabbitRetry(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-func nextRabbitBackoff(current time.Duration) time.Duration {
+func nextMQBackoff(current time.Duration) time.Duration {
 	next := current * 2
 	if next > 2*time.Second {
 		return 2 * time.Second

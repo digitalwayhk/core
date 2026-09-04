@@ -70,12 +70,14 @@ type NATSJetStreamMQConfig struct {
 
 // KafkaMQConfig Kafka 连接配置。
 type KafkaMQConfig struct {
-	Brokers        []string        `json:",optional"`
-	Prefix         string          `json:",optional"`
-	ClientID       string          `json:",optional"`
-	ConnectTimeout time.Duration   `json:",optional"`
-	TLS            MQTLSConfig     `json:",optional"`
-	SASL           KafkaSASLConfig `json:",optional"`
+	Brokers        []string      `json:",optional"`
+	Prefix         string        `json:",optional"`
+	ClientID       string        `json:",optional"`
+	ConnectTimeout time.Duration `json:",optional"`
+	// StartOffset 仅在消费组尚无提交位移时生效。latest（默认）从当前末尾开始，earliest 从 topic 开头回放。
+	StartOffset string          `json:",optional"`
+	TLS         MQTLSConfig     `json:",optional"`
+	SASL        KafkaSASLConfig `json:",optional"`
 }
 
 // KafkaSASLConfig Kafka SASL 认证配置。
@@ -164,6 +166,9 @@ func (m *MQConfig) ApplyDefaults() {
 	}
 	if m.Kafka.ConnectTimeout == 0 {
 		m.Kafka.ConnectTimeout = 10 * time.Second
+	}
+	if m.Kafka.StartOffset == "" {
+		m.Kafka.StartOffset = "latest"
 	}
 	if m.RabbitMQ.Exchange == "" {
 		m.RabbitMQ.Exchange = "digitalway.core.events"
@@ -258,6 +263,11 @@ func validateKafkaMQConfig(cfg KafkaMQConfig) error {
 		}
 	default:
 		return errors.New("mq.kafka.sasl.mechanism is invalid; use plain, scram-sha-256, or scram-sha-512")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.StartOffset)) {
+	case "", "latest", "earliest":
+	default:
+		return errors.New("mq.kafka.startOffset is invalid; use latest or earliest")
 	}
 	return validateMQTLSConfig("mq.kafka.tls", cfg.TLS)
 }

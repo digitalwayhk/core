@@ -181,8 +181,10 @@ func TestRabbitMQProviderDoesNotDeclareOrderedReliable(t *testing.T) {
 	})
 	_, reliable := provider.(ReliableMQProvider)
 	_, ordered := provider.(OrderedReliableMQProvider)
+	_, keyed := provider.(KeyedReliableMQProvider)
 	assert.True(t, reliable)
 	assert.False(t, ordered)
+	assert.False(t, keyed)
 }
 
 // TestRabbitMQProviderPublishWaitsForConfirmationAndMapsMetadata 验证持久消息与 confirm ACK。
@@ -227,7 +229,7 @@ func TestRabbitMQProviderDeliveryACKsOnlyAfterHandlerSuccess(t *testing.T) {
 	delivery := amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: 7, Body: []byte("payload")}
 	provider := NewRabbitMQProvider(config.RabbitMQConfig{})
 
-	err := provider.processRabbitDelivery("orders", delivery, func(message *Message) error {
+	err := provider.processRabbitDelivery(context.Background(), "orders", delivery, func(message *Message) error {
 		assert.Equal(t, "orders", message.Subject)
 		assert.Nil(t, message.Ack, "RabbitMQ manual ACK 由 Provider 在 Handler 返回后统一执行")
 		return nil
@@ -245,7 +247,7 @@ func TestRabbitMQProviderDeliveryNACKsAndRequeuesHandlerFailure(t *testing.T) {
 	delivery := amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: 8, Body: []byte("payload")}
 	provider := NewRabbitMQProvider(config.RabbitMQConfig{})
 
-	err := provider.processRabbitDelivery("orders", delivery, func(*Message) error {
+	err := provider.processRabbitDelivery(context.Background(), "orders", delivery, func(*Message) error {
 		return errors.New("retry")
 	})
 	require.NoError(t, err)
@@ -343,4 +345,63 @@ func TestRabbitMQProviderReliablePanicNACKsAndContinues(t *testing.T) {
 	defer firstAck.mu.Unlock()
 	assert.Equal(t, 1, firstAck.nacks)
 	assert.True(t, firstAck.requeue)
+}
+
+// TestRabbitMQProviderSubscribeReliableRejectsKeyConcurrency 验证显式分键并发不得静默串行。
+func TestRabbitMQProviderSubscribeReliableRejectsKeyConcurrency(t *testing.T) {
+	provider := NewRabbitMQProvider(config.RabbitMQConfig{Exchange: "events", Prefetch: 1})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.stateMu.Unlock()
+
+	_, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service", KeyConcurrency: 2,
+	}, func(*Message) error { return nil })
+	require.ErrorIs(t, err, ErrKeyedReliableSubscribeUnsupported)
+}
+
+// TestRabbitMQProviderHandlerFailureRespectsCancel 验证 Handler 失败后的短暂等待可被取消打断。
+func TestRabbitMQProviderHandlerFailureRespectsCancel(t *testing.T) {
+	acknowledger := &fakeRabbitAcknowledger{}
+	delivery := amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: 8, Body: []byte("payload")}
+	provider := NewRabbitMQProvider(config.RabbitMQConfig{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := provider.processRabbitDelivery(ctx, "orders", delivery, func(*Message) error {
+		return errors.New("retry")
+	})
+	assert.Less(t, time.Since(start), 40*time.Millisecond)
+	require.ErrorIs(t, err, context.Canceled)
+	acknowledger.mu.Lock()
+	defer acknowledger.mu.Unlock()
+	assert.Equal(t, 1, acknowledger.nacks)
+	assert.True(t, acknowledger.requeue)
+}
+
+// TestRabbitMQProviderConcurrentCloseAndPublish 验证关闭与发布并发时不 panic。
+func TestRabbitMQProviderConcurrentCloseAndPublish(t *testing.T) {
+	publisher := &fakeRabbitPublisher{confirm: fakeRabbitConfirmation{acknowledged: true}}
+	provider := NewRabbitMQProvider(config.RabbitMQConfig{Exchange: "core.events", Prefetch: 1})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.publisher = publisher
+	provider.stateMu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = provider.Publish(context.Background(), "orders", []byte("payload"), nil)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = provider.Close()
+		}()
+	}
+	wg.Wait()
+	assert.ErrorIs(t, provider.Publish(context.Background(), "orders", nil, nil), ErrNotConnected)
+	assert.True(t, publisher.IsClosed())
 }

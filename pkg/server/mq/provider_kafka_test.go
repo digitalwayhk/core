@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,25 +36,49 @@ func (f *fakeKafkaWriter) Close() error {
 }
 
 type fakeKafkaReader struct {
-	message   kafka.Message
-	fetched   bool
+	mu        sync.Mutex
+	messages  []kafka.Message
+	index     int
+	fetchErr  error
+	commitErr error
 	committed chan kafka.Message
 	closed    chan struct{}
 	closeOnce sync.Once
 }
 
 func (f *fakeKafkaReader) FetchMessage(ctx context.Context) (kafka.Message, error) {
-	if !f.fetched {
-		f.fetched = true
-		return f.message, nil
+	f.mu.Lock()
+	if f.fetchErr != nil {
+		err := f.fetchErr
+		f.mu.Unlock()
+		return kafka.Message{}, err
 	}
-	<-ctx.Done()
-	return kafka.Message{}, ctx.Err()
+	if f.index < len(f.messages) {
+		message := f.messages[f.index]
+		f.index++
+		f.mu.Unlock()
+		return message, nil
+	}
+	closed := f.closed
+	f.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return kafka.Message{}, ctx.Err()
+	case <-closed:
+		return kafka.Message{}, errors.New("reader closed")
+	}
 }
 
 func (f *fakeKafkaReader) CommitMessages(_ context.Context, messages ...kafka.Message) error {
-	if len(messages) > 0 {
-		f.committed <- messages[0]
+	f.mu.Lock()
+	err := f.commitErr
+	committed := f.committed
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if len(messages) > 0 && committed != nil {
+		committed <- messages[0]
 	}
 	return nil
 }
@@ -68,8 +93,10 @@ func TestKafkaProviderDoesNotDeclareOrderedReliable(t *testing.T) {
 	var provider MQProvider = NewKafkaProvider(config.KafkaMQConfig{Brokers: []string{"127.0.0.1:9092"}})
 	_, reliable := provider.(ReliableMQProvider)
 	_, ordered := provider.(OrderedReliableMQProvider)
+	_, keyed := provider.(KeyedReliableMQProvider)
 	assert.True(t, reliable)
 	assert.False(t, ordered)
+	assert.False(t, keyed)
 }
 
 // TestKafkaProviderPublishMapsTopicKeyAndIdempotencyHeader 验证同步发布的 Broker 元数据映射。
@@ -99,7 +126,7 @@ func TestKafkaProviderPublishMapsTopicKeyAndIdempotencyHeader(t *testing.T) {
 // TestKafkaProviderReliableRetriesBeforeCommit 验证 Handler 失败不 commit，并在成功后才确认同一消息。
 func TestKafkaProviderReliableRetriesBeforeCommit(t *testing.T) {
 	reader := &fakeKafkaReader{
-		message:   kafka.Message{Topic: "core.orders", Partition: 2, Offset: 42, Value: []byte("payload")},
+		messages:  []kafka.Message{{Topic: "core.orders", Partition: 2, Offset: 42, Value: []byte("payload")}},
 		committed: make(chan kafka.Message, 1),
 		closed:    make(chan struct{}),
 	}
@@ -172,5 +199,173 @@ func TestKafkaProviderCloseIsIdempotentAndRejectsNewCalls(t *testing.T) {
 	require.NoError(t, provider.Close())
 	assert.ErrorIs(t, provider.Publish(context.Background(), "orders", nil, nil), ErrNotConnected)
 	assert.ErrorIs(t, provider.Health(context.Background()), ErrNotConnected)
+	assert.True(t, writer.closed)
+}
+
+func connectedKafkaProvider(t *testing.T, factory func(kafka.ReaderConfig) kafkaMessageReader) *KafkaProvider {
+	t.Helper()
+	provider := NewKafkaProvider(config.KafkaMQConfig{Prefix: "core", ClientID: "core-client"})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.readerFactory = factory
+	provider.stateMu.Unlock()
+	return provider
+}
+
+// TestKafkaProviderSubscribeReliableRejectsKeyConcurrency 验证显式分键并发不得静默串行。
+func TestKafkaProviderSubscribeReliableRejectsKeyConcurrency(t *testing.T) {
+	provider := connectedKafkaProvider(t, func(kafka.ReaderConfig) kafkaMessageReader {
+		t.Fatal("KeyConcurrency>1 不得创建 Kafka reader")
+		return nil
+	})
+	_, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service", KeyConcurrency: 2,
+	}, func(*Message) error { return nil })
+	require.ErrorIs(t, err, ErrKeyedReliableSubscribeUnsupported)
+}
+
+// TestKafkaProviderNormalizesGroupIDAndStartsFromLatest 验证新消费组从当前末尾读，且 GroupID 走资源名规范化。
+func TestKafkaProviderNormalizesGroupIDAndStartsFromLatest(t *testing.T) {
+	got := make(chan kafka.ReaderConfig, 1)
+	provider := connectedKafkaProvider(t, func(readerConfig kafka.ReaderConfig) kafkaMessageReader {
+		got <- readerConfig
+		return &fakeKafkaReader{closed: make(chan struct{})}
+	})
+
+	cancel, err := provider.SubscribeReliable(context.Background(), "order:changed", ReliableSubscribeOptions{
+		Group: "order:service", Consumer: "order-1",
+	}, func(*Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+
+	select {
+	case readerConfig := <-got:
+		assert.Equal(t, "core.order_changed", readerConfig.Topic)
+		assert.Equal(t, "order_service", readerConfig.GroupID)
+		assert.Equal(t, kafka.LastOffset, readerConfig.StartOffset)
+		assert.Zero(t, readerConfig.CommitInterval)
+	case <-time.After(time.Second):
+		t.Fatal("未捕获 Kafka reader 配置")
+	}
+}
+
+// TestKafkaProviderEarliestStartOffsetIsConfigurable 验证显式 earliest 才从 topic 开头回放。
+func TestKafkaProviderEarliestStartOffsetIsConfigurable(t *testing.T) {
+	got := make(chan kafka.ReaderConfig, 1)
+	provider := NewKafkaProvider(config.KafkaMQConfig{Prefix: "core", StartOffset: "earliest"})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.readerFactory = func(readerConfig kafka.ReaderConfig) kafkaMessageReader {
+		got <- readerConfig
+		return &fakeKafkaReader{closed: make(chan struct{})}
+	}
+	provider.stateMu.Unlock()
+
+	cancel, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service",
+	}, func(*Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+
+	select {
+	case readerConfig := <-got:
+		assert.Equal(t, kafka.FirstOffset, readerConfig.StartOffset)
+	case <-time.After(time.Second):
+		t.Fatal("未捕获 Kafka earliest StartOffset")
+	}
+}
+
+// TestKafkaProviderReliableRebuildsReaderAfterFetchFailure 验证 Fetch 失败后 supervisor 重建 reader，而不是让可靠订阅静默消失。
+func TestKafkaProviderReliableRebuildsReaderAfterFetchFailure(t *testing.T) {
+	first := &fakeKafkaReader{fetchErr: errors.New("broker unavailable"), closed: make(chan struct{})}
+	second := &fakeKafkaReader{
+		messages:  []kafka.Message{{Topic: "core.orders", Partition: 0, Offset: 7, Value: []byte("payload")}},
+		committed: make(chan kafka.Message, 1),
+		closed:    make(chan struct{}),
+	}
+	readers := []kafkaMessageReader{first, second}
+	var calls atomic.Int32
+	provider := connectedKafkaProvider(t, func(kafka.ReaderConfig) kafkaMessageReader {
+		index := int(calls.Add(1) - 1)
+		require.Less(t, index, len(readers))
+		return readers[index]
+	})
+
+	cancel, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service",
+	}, func(*Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+
+	select {
+	case committed := <-second.committed:
+		assert.Equal(t, int64(7), committed.Offset)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Fetch 失败后未重建 Kafka reader")
+	}
+}
+
+// TestKafkaProviderReliableRebuildsReaderAfterCommitFailure 验证 commit 失败后重建 reader，未确认消息可被再次投递。
+func TestKafkaProviderReliableRebuildsReaderAfterCommitFailure(t *testing.T) {
+	first := &fakeKafkaReader{
+		messages:  []kafka.Message{{Topic: "core.orders", Partition: 1, Offset: 3, Value: []byte("payload")}},
+		commitErr: errors.New("coordinator unavailable"),
+		closed:    make(chan struct{}),
+	}
+	second := &fakeKafkaReader{
+		messages:  []kafka.Message{{Topic: "core.orders", Partition: 1, Offset: 3, Value: []byte("payload")}},
+		committed: make(chan kafka.Message, 1),
+		closed:    make(chan struct{}),
+	}
+	readers := []kafkaMessageReader{first, second}
+	var calls atomic.Int32
+	provider := connectedKafkaProvider(t, func(kafka.ReaderConfig) kafkaMessageReader {
+		index := int(calls.Add(1) - 1)
+		require.Less(t, index, len(readers))
+		return readers[index]
+	})
+
+	var attempts int
+	cancel, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service",
+	}, func(*Message) error {
+		attempts++
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancel()
+
+	select {
+	case committed := <-second.committed:
+		assert.Equal(t, int64(3), committed.Offset)
+	case <-time.After(2 * time.Second):
+		t.Fatal("commit 失败后未重建 Kafka reader")
+	}
+	assert.GreaterOrEqual(t, attempts, 2)
+}
+
+// TestKafkaProviderConcurrentCloseAndPublish 验证关闭与发布并发时不 panic，关闭后拒绝新发布。
+func TestKafkaProviderConcurrentCloseAndPublish(t *testing.T) {
+	writer := &fakeKafkaWriter{}
+	provider := NewKafkaProvider(config.KafkaMQConfig{Prefix: "core"})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.writer = writer
+	provider.stateMu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = provider.Publish(context.Background(), "orders", []byte("payload"), nil)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = provider.Close()
+		}()
+	}
+	wg.Wait()
+	assert.ErrorIs(t, provider.Publish(context.Background(), "orders", nil, nil), ErrNotConnected)
 	assert.True(t, writer.closed)
 }

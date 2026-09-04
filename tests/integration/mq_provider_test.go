@@ -123,9 +123,10 @@ func TestMQKafka(t *testing.T) {
 		t.Skip("CORE_TEST_KAFKA not set")
 	}
 	p := mq.NewKafkaProvider(config.KafkaMQConfig{
-		Brokers:  kafkaTestBrokers(),
-		Prefix:   "core-integration",
-		ClientID: "core-integration",
+		Brokers:     kafkaTestBrokers(),
+		Prefix:      "core-integration",
+		ClientID:    "core-integration",
+		StartOffset: "earliest",
 	})
 	runMQContract(t, p)
 }
@@ -150,9 +151,10 @@ func TestMQKafkaReliable(t *testing.T) {
 		t.Skip("CORE_TEST_KAFKA not set")
 	}
 	runReliableMQContract(t, mq.NewKafkaProvider(config.KafkaMQConfig{
-		Brokers:  kafkaTestBrokers(),
-		Prefix:   "core-reliable",
-		ClientID: "core-reliable",
+		Brokers:     kafkaTestBrokers(),
+		Prefix:      "core-reliable",
+		ClientID:    "core-reliable",
+		StartOffset: "earliest",
 	}))
 }
 
@@ -341,7 +343,7 @@ func TestMQEventBridgeKafka(t *testing.T) {
 		t.Skip("CORE_TEST_KAFKA not set")
 	}
 	runEventBridgeMQRoundtrip(t, mq.NewKafkaProvider(config.KafkaMQConfig{
-		Brokers: kafkaTestBrokers(), Prefix: "core-event-bridge", ClientID: "core-event-bridge",
+		Brokers: kafkaTestBrokers(), Prefix: "core-event-bridge", ClientID: "core-event-bridge", StartOffset: "earliest",
 	}))
 }
 

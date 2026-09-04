@@ -33,7 +33,7 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 本地集群 | LocalProvider | 配置能力矩阵 | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
 | etcd/Consul 集群 | Etcd/Consul Provider | 外部依赖集成文档 | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
 | MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams、NATS JetStream、Kafka 或 RabbitMQ；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker`；Kafka/RabbitMQ 用 `./scripts/test-external-mq.sh` | Conditional |
-| Kafka/RabbitMQ 可靠消费 | `NewKafkaProvider`、`NewRabbitMQProvider`、`ReliableMQProvider` | 无业务示例，使用外部 MQ 契约测试 | Kafka Brokers 或 RabbitMQ URL；业务 EventID/Inbox 幂等 | `go test -race ./pkg/server/mq`；`./scripts/test-external-mq.sh` | Conditional；不支持 ordered-reliable |
+| Kafka/RabbitMQ 可靠消费 | `NewKafkaProvider`、`NewRabbitMQProvider`、`ReliableMQProvider` | 无业务示例，使用外部 MQ 契约测试 | Kafka Brokers 或 RabbitMQ URL；业务 EventID/Inbox 幂等；`KeyConcurrency>1` fail closed | `go test -race ./pkg/server/mq`；`./scripts/test-external-mq.sh` | Conditional；不支持 ordered-reliable / keyed-reliable |
 | RocketMQ | 自定义 `ProviderFactory` | 无内建示例 | 应用自行注册成熟客户端适配器 | 配置校验与应用自有集成测试 | Unsupported（内建） |
 | QUIC transport | 无推荐 API | 历史兼容包 | 配置层明确拒绝 | `go test ./pkg/server/config -run QUIC` | Unsupported |
 

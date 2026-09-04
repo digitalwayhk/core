@@ -35,6 +35,7 @@ func TestMQConfigApplyDefaults_KafkaAndRabbitMQ(t *testing.T) {
 	assert.Equal(t, "digitalway-core", m.Kafka.Prefix)
 	assert.Equal(t, "digitalway-core", m.Kafka.ClientID)
 	assert.Equal(t, 10*time.Second, m.Kafka.ConnectTimeout)
+	assert.Equal(t, "latest", m.Kafka.StartOffset)
 	assert.Equal(t, "digitalway.core.events", m.RabbitMQ.Exchange)
 	assert.Equal(t, "digitalway-core", m.RabbitMQ.QueuePrefix)
 	assert.Equal(t, 1, m.RabbitMQ.Prefetch)
@@ -123,6 +124,9 @@ func TestMQConfigValidate_Kafka(t *testing.T) {
 		{name: "tls missing key", configure: func(m *MQConfig) {
 			m.Kafka.TLS = MQTLSConfig{Enable: true, CertFile: "client.crt"}
 		}, want: "certFile"},
+		{name: "invalid start offset", configure: func(m *MQConfig) {
+			m.Kafka.StartOffset = "from-beginning"
+		}, want: "startOffset"},
 	}
 
 	for _, tt := range tests {
