@@ -2044,9 +2044,14 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
 		return nil, "unknown", fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
-	if local := GetContext(payload.TargetService); local != nil {
-		data, err := own.dispatchLocal(ctx, payload, local)
-		return data, "local", err
+	// 普通调用保留历史同进程快路径。Keyed 调用必须先按完整集群成员解析；
+	// 否则偶然消费事件的副本会永远调用自己，与使用同一 consistent-hash key
+	// 的远程调用方产生不同的 owner。
+	if payload.ServiceHashKey == "" {
+		if local := GetContext(payload.TargetService); local != nil {
+			data, err := own.dispatchLocal(ctx, payload, local)
+			return data, "local", err
+		}
 	}
 	var endpoints transport.TransportEndpoints
 	if own.ServiceResolver != nil {
@@ -2059,6 +2064,14 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		}
 		if err != nil {
 			return nil, "grpc", err
+		}
+		if payload.ServiceHashKey != "" {
+			if local := GetContext(payload.TargetService); local != nil &&
+				resolved != nil && resolved.ServiceInstanceID != "" &&
+				resolved.ServiceInstanceID == local.ServiceInstanceID {
+				data, err := own.dispatchLocal(ctx, payload, local)
+				return data, "local", err
+			}
 		}
 		payload.TargetAddress = resolved.Info.TargetAddress
 		payload.TargetPort = resolved.Info.TargetPort
