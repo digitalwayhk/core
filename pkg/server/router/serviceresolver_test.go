@@ -528,3 +528,117 @@ func TestServiceContextLocalCallExecutesRegisteredTargetRouter(t *testing.T) {
 	assert.Equal(t, "target", response.GetData())
 	assert.Zero(t, callerRoute.calls)
 }
+
+// Keyed 调用即使与目标服务同进程，也必须先按完整成员快照选 owner。
+// 否则由任意副本消费的市场事件会绕过 consistent hash 留在本机。
+func TestServiceContextCallServiceWithKeyDoesNotBypassRemoteOwnerForLocalTarget(t *testing.T) {
+	serviceName := fmt.Sprintf("keyed-local-bypass-%d", time.Now().UnixNano())
+	path := "/api/" + serviceName + "/apply"
+	targetRoute := &localDispatchRoute{}
+	targetRoute.info = &types.RouterInfo{
+		Path: path, ServiceName: serviceName, PathType: types.PublicType, Method: http.MethodPost,
+	}
+	targetRoute.info.SetInstance(targetRoute)
+	cfg := config.NewServiceDefaultConfig(serviceName, 0)
+	cfg.Cluster.Mode = "off"
+	cfg.MQ.Mode = "off"
+	localContext := NewServiceContextWithConfig(&localDispatchService{name: serviceName, route: targetRoute}, cfg)
+	t.Cleanup(func() { localContext.SetRunState(false) })
+
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	t.Cleanup(func() { _ = provider.Close() })
+	nodes := []*cluster.NodeInfo{
+		{ID: serviceName + "-local", ServiceName: serviceName, ServiceInstanceID: "local", DataCenterID: 1, MachineID: 1, Address: "position-local", Port: 8080},
+		{ID: serviceName + "-remote", ServiceName: serviceName, ServiceInstanceID: "remote", DataCenterID: 1, MachineID: 2, Address: "position-remote", Port: 8080},
+	}
+	for _, node := range nodes {
+		require.NoError(t, provider.Register(context.Background(), node))
+	}
+	key := ""
+	for candidate := 1; candidate < 1000; candidate++ {
+		value := fmt.Sprintf("market:%d", candidate)
+		owner, err := cluster.NewConsistentHashBalancer().Pick(
+			context.Background(), nodes, cluster.BalanceHint{HashKey: value},
+		)
+		require.NoError(t, err)
+		if owner.Address == "position-remote" {
+			key = value
+			break
+		}
+	}
+	require.NotEmpty(t, key)
+
+	transport := &resolverTestTransport{}
+	source := &ServiceContext{
+		Service:           &types.Service{Name: serviceName},
+		ServiceResolver:   NewServiceResolver(provider, func(string) *ServiceContext { return localContext }),
+		TransportSelector: &resolverTestSelector{transport: transport},
+		Config:            &config.ServerConfig{},
+	}
+	t.Cleanup(source.ServiceResolver.Close)
+	response, err := source.CallServiceWithKey(&types.PayLoad{
+		TraceID: "trace-keyed-local", TargetService: serviceName,
+		TargetPath: path, Instance: map[string]any{},
+	}, key)
+	require.NoError(t, err)
+	assert.Equal(t, "remote", response.GetData())
+	assert.Equal(t, "position-remote", transport.targetAddress)
+}
+
+// Keyed resolver 选中当前进程的真实 ServiceInstanceID 后，可保留本地快路径。
+func TestServiceContextCallServiceWithKeyUsesLocalFastPathOnlyForResolvedOwner(t *testing.T) {
+	serviceName := fmt.Sprintf("keyed-local-owner-%d", time.Now().UnixNano())
+	path := "/api/" + serviceName + "/apply"
+	targetRoute := &localDispatchRoute{}
+	targetRoute.info = &types.RouterInfo{
+		Path: path, ServiceName: serviceName, PathType: types.PublicType, Method: http.MethodPost,
+	}
+	targetRoute.info.SetInstance(targetRoute)
+	cfg := config.NewServiceDefaultConfig(serviceName, 0)
+	cfg.Cluster.Mode = "off"
+	cfg.MQ.Mode = "off"
+	localContext := NewServiceContextWithConfig(&localDispatchService{name: serviceName, route: targetRoute}, cfg)
+	t.Cleanup(func() { localContext.SetRunState(false) })
+	require.NotEmpty(t, localContext.ServiceInstanceID)
+
+	provider := cluster.NewLocalProvider(time.Minute, time.Minute, time.Minute)
+	provider.Start()
+	t.Cleanup(func() { _ = provider.Close() })
+	nodes := []*cluster.NodeInfo{
+		{ID: serviceName + "-local", ServiceName: serviceName, ServiceInstanceID: localContext.ServiceInstanceID, DataCenterID: 1, MachineID: 1, Address: "position-local", Port: 8080},
+		{ID: serviceName + "-remote", ServiceName: serviceName, ServiceInstanceID: "remote", DataCenterID: 1, MachineID: 2, Address: "position-remote", Port: 8080},
+	}
+	for _, node := range nodes {
+		require.NoError(t, provider.Register(context.Background(), node))
+	}
+	key := ""
+	for candidate := 1; candidate < 1000; candidate++ {
+		value := fmt.Sprintf("market:%d", candidate)
+		owner, err := cluster.NewConsistentHashBalancer().Pick(
+			context.Background(), nodes, cluster.BalanceHint{HashKey: value},
+		)
+		require.NoError(t, err)
+		if owner.ServiceInstanceID == localContext.ServiceInstanceID {
+			key = value
+			break
+		}
+	}
+	require.NotEmpty(t, key)
+
+	transport := &resolverTestTransport{}
+	source := &ServiceContext{
+		Service:           &types.Service{Name: serviceName},
+		ServiceResolver:   NewServiceResolver(provider, func(string) *ServiceContext { return localContext }),
+		TransportSelector: &resolverTestSelector{transport: transport},
+		Config:            &config.ServerConfig{},
+	}
+	t.Cleanup(source.ServiceResolver.Close)
+	response, err := source.CallServiceWithKey(&types.PayLoad{
+		TraceID: "trace-keyed-local-owner", TargetService: serviceName,
+		TargetPath: path, Instance: map[string]any{},
+	}, key)
+	require.NoError(t, err)
+	assert.Equal(t, "target", response.GetData())
+	assert.Empty(t, transport.targets)
+}
