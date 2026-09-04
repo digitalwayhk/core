@@ -35,6 +35,18 @@ func (f *fakeKafkaWriter) Close() error {
 	return nil
 }
 
+type fakeKafkaTopicAdmin struct {
+	mu     sync.Mutex
+	topics []string
+}
+
+func (f *fakeKafkaTopicAdmin) EnsureTopics(_ context.Context, topics ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.topics = append(f.topics, topics...)
+	return nil
+}
+
 type fakeKafkaReader struct {
 	mu        sync.Mutex
 	messages  []kafka.Message
@@ -121,6 +133,23 @@ func TestKafkaProviderPublishMapsTopicKeyAndIdempotencyHeader(t *testing.T) {
 	require.Len(t, message.Headers, 1)
 	assert.Equal(t, "core-idempotency-key", message.Headers[0].Key)
 	assert.Equal(t, []byte("event-7"), message.Headers[0].Value)
+}
+
+// TestKafkaProviderPublishCreatesMissingTopic 验证动态 subject 在首次发布前声明 topic。
+func TestKafkaProviderPublishCreatesMissingTopic(t *testing.T) {
+	writer := &fakeKafkaWriter{}
+	admin := &fakeKafkaTopicAdmin{}
+	provider := NewKafkaProvider(config.KafkaMQConfig{Prefix: "core"})
+	provider.stateMu.Lock()
+	provider.connected = true
+	provider.writer = writer
+	provider.topicAdmin = admin
+	provider.stateMu.Unlock()
+
+	require.NoError(t, provider.Publish(context.Background(), "order:changed", []byte("payload"), nil))
+	admin.mu.Lock()
+	defer admin.mu.Unlock()
+	require.Equal(t, []string{"core.order_changed"}, admin.topics)
 }
 
 // TestKafkaProviderReliableRetriesBeforeCommit 验证 Handler 失败不 commit，并在成功后才确认同一消息。
@@ -210,6 +239,22 @@ func connectedKafkaProvider(t *testing.T, factory func(kafka.ReaderConfig) kafka
 	provider.readerFactory = factory
 	provider.stateMu.Unlock()
 	return provider
+}
+
+// TestKafkaProviderSubscribeReturnsAfterReaderReady 验证 Subscribe 返回时 reader 已创建，避免发布落到尚未存在的消费组。
+func TestKafkaProviderSubscribeReturnsAfterReaderReady(t *testing.T) {
+	var created atomic.Bool
+	provider := connectedKafkaProvider(t, func(kafka.ReaderConfig) kafkaMessageReader {
+		created.Store(true)
+		return &fakeKafkaReader{closed: make(chan struct{})}
+	})
+
+	cancel, err := provider.SubscribeReliable(context.Background(), "orders", ReliableSubscribeOptions{
+		Group: "order-service",
+	}, func(*Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+	assert.True(t, created.Load())
 }
 
 // TestKafkaProviderSubscribeReliableRejectsKeyConcurrency 验证显式分键并发不得静默串行。

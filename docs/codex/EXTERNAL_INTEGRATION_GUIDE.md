@@ -34,4 +34,4 @@ docker compose -f docker-compose.integration.yml down -v --remove-orphans
 
 该脚本使用唯一 Compose project，启动固定版本 Kafka/RabbitMQ，设置 `CORE_TEST_KAFKA=1` 与 `CORE_TEST_RABBITMQ=1`，运行普通发布订阅、可靠失败重投、消费组隔离和 EventBridge Envelope round-trip；退出时只对该 project 执行 `down -v --remove-orphans`。失败时设置 `CI_ARTIFACT_DIR` 可保留 `ps` 和 Broker 日志。
 
-两种内建 Provider 都是 at-least-once，不是 exactly-once；可靠 Handler 成功后才确认，业务必须继续用 EventID/Inbox 幂等。两者都不满足 `RequireOrderedReliableByShardKey`，显式 `KeyConcurrency>1` 必须 fail closed。Kafka 新消费组默认从当前末尾消费；Connect 不保证 topic 已存在，首次 Publish 在 Broker 允许 auto-create 时建 topic，否则由运维预建。默认 PR quick 不启动 Broker；真实门禁是手工/定时外部验证，未运行时必须报告 `NOT RUN`。
+两种内建 Provider 都是 at-least-once，不是 exactly-once；可靠 Handler 成功后才确认，业务必须继续用 EventID/Inbox 幂等。两者都不满足 `RequireOrderedReliableByShardKey`，显式 `KeyConcurrency>1` 必须 fail closed。Kafka 新消费组默认从当前末尾消费；首次 Publish/Subscribe 会声明 topic。默认 PR quick 不启动 Broker；真实门禁是手工/定时外部验证，未运行时必须报告 `NOT RUN`。

@@ -292,12 +292,19 @@ func (p *RabbitMQProvider) subscribe(
 	p.wg.Add(1)
 	p.stateMu.Unlock()
 
-	go p.runRabbitSubscription(consumerCtx, id, subject, options, subscription, handler)
+	ready := make(chan error, 1)
+	go p.runRabbitSubscription(consumerCtx, id, subject, options, subscription, handler, ready)
+	abort := func() {
+		cancel()
+		subscription.closeSession()
+	}
+	if err := waitSubscriptionReady(consumerCtx, ready, subscription.done, abort); err != nil {
+		return nil, err
+	}
 	var cancelOnce sync.Once
 	return func() {
 		cancelOnce.Do(func() {
-			cancel()
-			subscription.closeSession()
+			abort()
 			<-subscription.done
 		})
 	}, nil
@@ -310,6 +317,7 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 	options ReliableSubscribeOptions,
 	subscription *rabbitSubscription,
 	handler func(*Message) error,
+	ready chan<- error,
 ) {
 	defer p.wg.Done()
 	defer close(subscription.done)
@@ -323,10 +331,12 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 	backoff := 100 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
+			signalSubscriptionReady(ready, ctx.Err())
 			return
 		}
 		if err := p.ensureRabbitConnection(ctx); err != nil {
 			if !waitMQRetry(ctx, backoff) {
+				signalSubscriptionReady(ready, err)
 				return
 			}
 			backoff = nextMQBackoff(backoff)
@@ -345,12 +355,14 @@ func (p *RabbitMQProvider) runRabbitSubscription(
 		if err != nil {
 			p.invalidateRabbitConnection(connection)
 			if !waitMQRetry(ctx, backoff) {
+				signalSubscriptionReady(ready, err)
 				return
 			}
 			backoff = nextMQBackoff(backoff)
 			continue
 		}
 		subscription.setSession(session)
+		signalSubscriptionReady(ready, nil)
 		backoff = 100 * time.Millisecond
 
 		ended := false

@@ -149,14 +149,14 @@ func TestRabbitMQProviderDefaultQueueUsesPrefixOnce(t *testing.T) {
 
 	cancel, err := provider.Subscribe(context.Background(), "order:changed", func(*Message) {})
 	require.NoError(t, err)
-	select {
-	case <-consumerUp:
-	case <-time.After(time.Second):
-		t.Fatal("RabbitMQ consumer 未启动")
-	}
 	connection.mu.Lock()
 	assert.Equal(t, "core.default.order_changed", connection.queueName)
 	connection.mu.Unlock()
+	select {
+	case <-consumerUp:
+	default:
+		t.Fatal("Subscribe 返回时 RabbitMQ consumer 尚未就绪")
+	}
 	cancel()
 	assert.False(t, connection.IsClosed(), "取消单个订阅不得关闭共享 RabbitMQ connection")
 }

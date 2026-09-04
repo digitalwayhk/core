@@ -68,6 +68,7 @@ type KafkaProvider struct {
 	dialer        *kafka.Dialer
 	transport     *kafka.Transport
 	writer        kafkaMessageWriter
+	topicAdmin    kafkaTopicAdmin
 	readerFactory func(kafka.ReaderConfig) kafkaMessageReader
 	subscriptions map[uint64]*kafkaSubscription
 	nextSubID     uint64
@@ -174,6 +175,14 @@ func (p *KafkaProvider) Connect(ctx context.Context) error {
 	p.dialer = dialer
 	p.transport = transport
 	p.writer = writer
+	p.topicAdmin = &kafkaGoTopicAdmin{
+		created: make(map[string]struct{}),
+		client: &kafka.Client{
+			Addr:      kafka.TCP(nonEmptyKafkaBrokers(p.cfg.Brokers)...),
+			Timeout:   p.cfg.ConnectTimeout,
+			Transport: transport,
+		},
+	}
 	p.connected = true
 	p.stateMu.Unlock()
 	return nil
@@ -190,8 +199,12 @@ func (p *KafkaProvider) Publish(ctx context.Context, subject string, data []byte
 	prefix := p.cfg.Prefix
 	p.stateMu.RUnlock()
 
+	topic := mqResourceName(prefix, subject, 249)
+	if err := p.ensureTopics(ctx, topic); err != nil {
+		return fmt.Errorf("kafka: ensure topic: %w", err)
+	}
 	message := kafka.Message{
-		Topic: mqResourceName(prefix, subject, 249),
+		Topic: topic,
 		Value: data,
 	}
 	if opts != nil {
@@ -275,12 +288,19 @@ func (p *KafkaProvider) subscribe(
 	p.wg.Add(1)
 	p.stateMu.Unlock()
 
-	go p.runKafkaSubscription(consumerCtx, id, subject, options, subscription, handler)
+	ready := make(chan error, 1)
+	go p.runKafkaSubscription(consumerCtx, id, subject, options, subscription, handler, ready)
+	abort := func() {
+		cancel()
+		subscription.closeReader()
+	}
+	if err := waitSubscriptionReady(consumerCtx, ready, subscription.done, abort); err != nil {
+		return nil, err
+	}
 	var cancelOnce sync.Once
 	return func() {
 		cancelOnce.Do(func() {
-			cancel()
-			subscription.closeReader()
+			abort()
 			<-subscription.done
 		})
 	}, nil
@@ -293,6 +313,7 @@ func (p *KafkaProvider) runKafkaSubscription(
 	options ReliableSubscribeOptions,
 	subscription *kafkaSubscription,
 	handler func(*Message) error,
+	ready chan<- error,
 ) {
 	defer p.wg.Done()
 	defer close(subscription.done)
@@ -309,11 +330,13 @@ func (p *KafkaProvider) runKafkaSubscription(
 	backoff := 100 * time.Millisecond
 	for {
 		if ctx.Err() != nil {
+			signalSubscriptionReady(ready, ctx.Err())
 			return
 		}
 		p.stateMu.RLock()
 		if p.closed || !p.connected || p.readerFactory == nil {
 			p.stateMu.RUnlock()
+			signalSubscriptionReady(ready, ErrNotConnected)
 			return
 		}
 		factory := p.readerFactory
@@ -321,6 +344,14 @@ func (p *KafkaProvider) runKafkaSubscription(
 		brokers := nonEmptyKafkaBrokers(p.cfg.Brokers)
 		p.stateMu.RUnlock()
 
+		if err := p.ensureTopics(ctx, topic); err != nil {
+			if !waitMQRetry(ctx, backoff) {
+				signalSubscriptionReady(ready, err)
+				return
+			}
+			backoff = nextMQBackoff(backoff)
+			continue
+		}
 		reader := factory(kafka.ReaderConfig{
 			Brokers:        brokers,
 			GroupID:        groupID,
@@ -331,12 +362,14 @@ func (p *KafkaProvider) runKafkaSubscription(
 		})
 		if reader == nil {
 			if !waitMQRetry(ctx, backoff) {
+				signalSubscriptionReady(ready, ErrNotConnected)
 				return
 			}
 			backoff = nextMQBackoff(backoff)
 			continue
 		}
 		subscription.setReader(reader)
+		signalSubscriptionReady(ready, nil)
 		backoff = 100 * time.Millisecond
 
 		err := p.consumeKafkaSession(ctx, subject, reader, handler)
@@ -504,6 +537,101 @@ func kafkaSASLMechanism(cfg config.KafkaSASLConfig) (sasl.Mechanism, error) {
 		return scram.Mechanism(scram.SHA512, cfg.Username, cfg.Password)
 	default:
 		return nil, fmt.Errorf("unsupported mechanism")
+	}
+}
+
+func (p *KafkaProvider) ensureTopics(ctx context.Context, topics ...string) error {
+	p.stateMu.RLock()
+	admin := p.topicAdmin
+	p.stateMu.RUnlock()
+	if admin == nil {
+		return nil
+	}
+	return admin.EnsureTopics(ctx, topics...)
+}
+
+type kafkaTopicAdmin interface {
+	EnsureTopics(ctx context.Context, topics ...string) error
+}
+
+type kafkaGoTopicAdmin struct {
+	mu      sync.Mutex
+	created map[string]struct{}
+	client  *kafka.Client
+}
+
+func (a *kafkaGoTopicAdmin) EnsureTopics(ctx context.Context, topics ...string) error {
+	if a == nil || a.client == nil {
+		return nil
+	}
+	a.mu.Lock()
+	if a.created == nil {
+		a.created = make(map[string]struct{})
+	}
+	missing := make([]kafka.TopicConfig, 0, len(topics))
+	for _, topic := range topics {
+		if topic == "" {
+			continue
+		}
+		if _, exists := a.created[topic]; exists {
+			continue
+		}
+		missing = append(missing, kafka.TopicConfig{
+			Topic:             topic,
+			NumPartitions:     1,
+			ReplicationFactor: 1,
+		})
+	}
+	a.mu.Unlock()
+	if len(missing) == 0 {
+		return nil
+	}
+	resp, err := a.client.CreateTopics(ctx, &kafka.CreateTopicsRequest{
+		Addr:   a.client.Addr,
+		Topics: missing,
+	})
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, cfg := range missing {
+		if topicErr := resp.Errors[cfg.Topic]; topicErr != nil && !errors.Is(topicErr, kafka.TopicAlreadyExists) {
+			return fmt.Errorf("create topic %s: %w", cfg.Topic, topicErr)
+		}
+		a.created[cfg.Topic] = struct{}{}
+	}
+	return nil
+}
+
+func signalSubscriptionReady(ready chan<- error, err error) {
+	if ready == nil {
+		return
+	}
+	select {
+	case ready <- err:
+	default:
+	}
+}
+
+func waitSubscriptionReady(ctx context.Context, ready <-chan error, done <-chan struct{}, abort func()) error {
+	select {
+	case err := <-ready:
+		if err != nil {
+			abort()
+			<-done
+			return err
+		}
+		return nil
+	case <-done:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return ErrNotConnected
+	case <-ctx.Done():
+		abort()
+		<-done
+		return ctx.Err()
 	}
 }
 
