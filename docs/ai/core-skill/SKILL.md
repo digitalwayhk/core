@@ -30,7 +30,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
 | Casdoor/JWT 双域、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
-| OpenAPI 与前端调用约定 | [openapi-and-frontend.md](openapi-and-frontend.md) |
+| OpenAPI、Manage View schema、三种 Search、命令执行 | [openapi-and-frontend.md](openapi-and-frontend.md) |
 | 集成测试模板、UAT 角色拆分、发布门禁 | [testing-and-release.md](testing-and-release.md) |
 | 高频错误快速自检 | [common-mistakes.md](common-mistakes.md) |
 

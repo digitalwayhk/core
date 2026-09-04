@@ -26,6 +26,10 @@ HTTP 400 / `record id is required`；Edit、Remove 目标不存在返回 NotFoun
 `record not found`。这些通用文案不得携带 ID、hash、SQL 或具体业务模型名称。消费方若需要
 更具体的业务提示，应在自己的显式校验中返回 PublicError，不能依赖数据库原文。
 
+`POST .../search` 是同一条路由、三种模式：主模型列表、外键关联表、主表某行的子表。分流看请求体是否带 `field`+`foreign` 或 `parent`+`childmodel`，不要另写 URL。
+
+`POST .../view` 只返回 schema（字段、命令、子模型），没有业务体。命令 `POST .../{command}` 的 body 是**模型字段本身**（不要包 `{model:...}`），`{command}` 必须等于 schema 里 `commands[].command`。View / Search / 命令的调用约定见 [openapi-and-frontend.md](openapi-and-frontend.md)。
+
 ## 指定 Manage 数据源（服务级 `GetList`）
 
 Manage **应当**使用 `ModelList`，以获得默认筛选、排序、分页等标准能力（适合管理人员配置系统，不追求业务级吞吐）。

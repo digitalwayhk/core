@@ -86,7 +86,7 @@ execute((method, item) => execute({
 }))
 ```
 
-所以 `WayPlus/request.ts` 最终请求：
+所以 `@/services/manage` 最终请求：
 
 ```text
 POST /api/manage/{service}/{controller}/view
@@ -131,47 +131,29 @@ const path = childItem.url.replace('/api/manage/', '/main/');
 /main/demo/tokenmanage
 ```
 
-## WayPlus 组件结构
+## 协议层与 WayPlus
 
-`web/admin/src/components/WayPlus` 是配套管理组件目录。
+和 Core 后台交换的不是整个 `WayPlus` 目录，而是三层：
 
-### request.ts
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| 协议 | `web/admin/src/manage-protocol/` | `ViewModel` 类型、规范 URL、字段转换、可注入 HTTP 客户端。无 Umi / Ant Design。 |
+| Admin 绑定 | `web/admin/src/services/manage.ts`、`servermanage.ts` | 注入 Umi `request`；`view/search/execute/getmenu`；配置页的 queryconfig/modifyconfig。认证与 `X-Locale` 仍走拦截器。 |
+| UI 壳 | `web/admin/src/components/WayPlus` | `WayPage` / `WayTable` / `WayForm` / `WayToolbar` / `WayTextBox`，按 schema 渲染。 |
 
-封装后端请求：
+JSON 字段名以 `service/manage/view/model.go` 为准。冻结拼写 `porpfield` 不要改；日期布尔是 `isdate`。
 
-- `init(params)` -> `/api/{c}/view`
-- `search(params)` -> `/api/{c}/search`
-- `execute(params)` -> `/api/{c}/{m}`
-- `getMenu()` -> `/api/servermanage/getmenu`
-- `getRouters()` -> 动态路由查询
-- `getService()` -> 服务查询
+`WayPlus/request.ts` 只是兼容再导出，新代码请引用 `@/manage-protocol` 或 `@/services/manage`。
 
-内部用 `reqKeys` 防止同一接口重复请求。
+### way.ts
 
-### way.d.ts
-
-定义前后端共享的数据结构类型：
-
-- `ModelAttribute`
-- `WayFieldAttribute`
-- `CommandAttribute`
-- `ChildModelAttribute`
-- `SearchItem`
-- `TableData`
-- `ResultData`
-
-这些类型与后端 `service/manage/view/model.go` 中的 `ViewModel`、`FieldModel`、`CommandModel`、`ViewChildModel`、`SearchItem`、`TableData` 对应。
+UI 类型在协议类型上叠加运行时字段（`hander`、`eventrow`、`showCustomizeSetting` 等）。`ModelAttribute` 对应后端 `ViewModel`。
 
 ### waymodel.ts
 
-提供模型转换和数据流封装：
+把后端 `ViewModel` 补成页面默认值，并规范化字段类型别名。字段值转换（日期/数字）在协议层 `convert.ts`。
 
-- 初始化命令和字段默认值。
-- 把后端字段类型转换为前端控件类型。
-- 转换枚举、外键、日期、数字等字段。
-- 提供 `WayModel` 的 init/search/execute effects。
-
-当前 `main.tsx` 直接给 `WayPage` 传入请求函数，没有强依赖 `WayModel` 的 dva model 方式。
+当前 `main.tsx` 直接给 `WayPage` 传入请求函数。
 
 ### WayPage
 
@@ -290,7 +272,7 @@ PageContainer
 - 后端字段 `json` 名称要和前端字段访问保持一致。
 - 外键、枚举、日期格式优先在后端 `FieldModel` 中描述。
 - 菜单由后端 `servermanage/getmenu` 提供，前端只负责 URL 转换和渲染。
-- 修改动态管理页时优先看 `views/main.tsx`、`WayPage`、`request.ts`。
+- 修改动态管理页时优先看 `views/main.tsx`、`WayPage`、`src/manage-protocol/`、`src/services/manage.ts`。
 
 ## 开发视图发布链路
 
