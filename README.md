@@ -285,8 +285,22 @@ Claude、Cursor、Copilot 的 skills 目录同构安装，各自指针都指向�
 
 - **内部调用**　只供其他服务调用的 Public API 声明 `router.WithInternalCallers("shop-user", ...)`。调用方身份只能来自同进程 ServiceContext 或已验证的 mTLS 证书 SAN，不接受 HTTP Header 或请求体自报。调用方直接构造目标服务已注册的 API 并用 `req.CallService`，不另建地址型 client。
 - **传输与发现**　内部同步调用默认走 gRPC，服务发现用 ServiceResolver（Redis / etcd / Consul），异步事件统一走 EventBridge。
+- **消息队列**　EventBridge 可选择内建 Redis Streams、NATS JetStream、Kafka 或 RabbitMQ。Kafka/RabbitMQ 支持 Handler 成功后确认的 at-least-once 可靠消费，但不声明 ordered-reliable；业务仍需 EventID/Inbox 幂等。同名自定义 `ProviderFactory` 可覆盖内建实现。
 - **扩容方式**　数据库按业务域拆分，不按技术实例拆分。同一逻辑服务的多个副本共享一个远程权威库，每个副本持有独立的本地 pending store 用于可靠接收、崩溃恢复和批量同步；`AutoMachineID=true` 在扩容时自动分配唯一实例编号。
 - **运行观测**　运行拓扑与请求聚合通过 `POST /api/servermanage/runtimetopology` 和 `runtimeservice` 查询，历史指标源是 go-zero / Prometheus。
+
+Kafka/RabbitMQ 最小配置示例（实际凭据必须来自安全配置源）：
+
+```go
+config.MQConfig{
+	Mode: "on", Provider: "kafka", Usage: []string{"event-stream"},
+	Kafka: config.KafkaMQConfig{Brokers: []string{"kafka:9092"}},
+}
+config.MQConfig{
+	Mode: "on", Provider: "rabbitmq", Usage: []string{"event-stream"},
+	RabbitMQ: config.RabbitMQConfig{URL: "amqps://rabbit.example.com/vhost"},
+}
+```
 
 ---
 

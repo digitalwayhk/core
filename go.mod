@@ -31,6 +31,8 @@ require (
 	github.com/olahol/melody v1.3.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.35.1
+	github.com/rabbitmq/amqp091-go v1.13.0
+	github.com/segmentio/kafka-go v0.4.51
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
 	go.etcd.io/etcd/client/v3 v3.6.12

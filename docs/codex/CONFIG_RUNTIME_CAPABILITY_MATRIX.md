@@ -33,14 +33,16 @@
 
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
-| Mode、event-stream Usage、Redis Stream、NATS JetStream | factory 创建 provider，ServiceContext 创建 EventStream/EventBridge | ServiceContext 终止型关闭 MQManager；Health/Publish/Subscribe 的 provider 调用受 Manager 读写门禁保护，Close 等待已进入调用并阻止新调用后再按稳定 registry key/name 顺序关闭去重实例；不支持关闭后复用 | supported |
+| Mode、event-stream Usage、Redis Stream、NATS JetStream、Kafka、RabbitMQ | factory 创建 provider，ServiceContext 创建 EventStream/EventBridge | ServiceContext 终止型关闭 MQManager；Health/Publish/Subscribe 的 provider 调用受 Manager 读写门禁保护，Close 等待已进入调用并阻止新调用后再按稳定 registry key/name 顺序关闭去重实例；不支持关闭后复用 | supported |
 | 自定义 Provider | 通过 `RegisterProviderFactory` 注册后由 factory 创建；未注册名称是硬配置错误；测试注册必须用 `t.Cleanup` 调用 `UnregisterProviderFactory` 隔离全局状态 | MQManager/已注册 factory | supported |
 | `PublishOptions.OrderingKey` | 加性元数据；零值保持既有发布行为；`MQBridge` 将 `Envelope.ShardKey` 透传为 OrderingKey、`IdempotencyKey` 透传为 IdempotencyKey | MQProvider.Publish、Redis XAdd `ordering_key` 字段 | supported |
 | ordered-reliable 可选能力 | 显式 `ServiceContext`/`ServiceEventBridge.RequireOrderedReliableByShardKey` 或构造选项 + Ensure；未声明时零行为变化 | `OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、空 ShardKey fail-closed、Outbox 同 key barrier | supported（可选） |
 | Redis Streams ordered-reliable | 默认单 active owner + 全 subject 串行；`KeyConcurrency>1` 时 owner 内按 OrderingKey 分 lane，PEL cursor 有界分页、poison key 只阻断同 key；handler 丢 owner不 ACK | `RedisStreamProvider`；真 Redis测试需 `CORE_TEST_REDIS_ADDR`；发版前同时跑 failure barrier 与 keyed concurrency conformance | supported（显式 opt-in） |
 | Outbox/可靠订阅 key concurrency | `UseOutbox`、`OutboxOptions`/`Subscription` 零值均为 1；只有调用方显式 `>1` 才改变跨 key完成顺序；同 subject 配置必须一致 | `UseOutboxWithOptions`、`KeyedReliableExternalSubscriber`、`KeyedReliableMQProvider`；不支持时 fail closed | supported（加性、默认关闭） |
 | NATS JetStream ordered-reliable / `ReliableMQProvider` | 内建 NATS 仅普通 Publish/Subscribe；声明 ordered-reliable requirement 时 fail closed | 无完整 reliable/ordered owner | rejected（待实现） |
-| kafka、rabbitmq、rocketmq 内建 provider | 未注册同名自定义 factory 时 BuildManager 返回 not implemented | 无内建 owner | rejected |
+| Kafka、RabbitMQ 内建 provider | Kafka 同步写等待全部 ISR ACK；RabbitMQ persistent publish 等待 publisher confirm；两者可靠消费只在 Handler 成功后确认 | `KafkaProvider`、`RabbitMQProvider`；外部 Broker 与显式集成门禁 | supported（Conditional） |
+| Kafka、RabbitMQ ordered-reliable | 两者均未声明 `OrderedReliableMQProvider`；requirement 继续返回 `ErrOrderedReliableUnsupported` | 无严格同键有序 owner | rejected |
+| RocketMQ 内建 provider | 未注册同名自定义 factory 时 BuildManager 返回 not implemented | 无内建 owner | rejected |
 | transport/websocket/delayed-task Usage、request/reply、retry、dead-letter、dynamic switch | 启用时 Validate 明确失败；Enable=false 和预填默认参数只是 inactive/旧配置兼容 | 无 | rejected |
 | `Mode=off` 下的旧 MQ 字段 | 不创建 manager/provider/event bridge，保留旧配置解析兼容 | inactive，无生命周期对象 | rejected |
 
@@ -231,12 +233,33 @@
 | `ServerConfig.MQ.NATSJetStream.URL` | supported | NATS JetStream provider | NATS 连接构造消费 |
 | `ServerConfig.MQ.NATSJetStream.StreamPrefix` | supported | NATS JetStream provider | stream/subject 命名消费 |
 | `ServerConfig.MQ.NATSJetStream.DurablePrefix` | supported | NATS JetStream provider | durable consumer 命名消费 |
-| `ServerConfig.MQ.Kafka` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
-| `ServerConfig.MQ.Kafka.Brokers` | rejected | MQ factory | 内建 Kafka provider 未实现，启用时拒绝 |
-| `ServerConfig.MQ.Kafka.Prefix` | rejected | MQ factory | 内建 Kafka provider 未实现，启用时拒绝 |
-| `ServerConfig.MQ.RabbitMQ` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
-| `ServerConfig.MQ.RabbitMQ.URL` | rejected | MQ factory | 内建 RabbitMQ provider 未实现，启用时拒绝 |
-| `ServerConfig.MQ.RabbitMQ.Exchange` | rejected | MQ factory | 内建 RabbitMQ provider 未实现，启用时拒绝 |
+| `ServerConfig.MQ.Kafka` | supported | Kafka provider | factory 直连外部 Kafka；同名自定义 factory 优先 |
+| `ServerConfig.MQ.Kafka.Brokers` | supported | Kafka provider | 至少一个非空地址，metadata 请求验证可达性 |
+| `ServerConfig.MQ.Kafka.Prefix` | supported | Kafka provider | 默认 digitalway-core，映射动态 topic |
+| `ServerConfig.MQ.Kafka.ClientID` | supported | Kafka provider | 默认 digitalway-core，consumer 标识加实例 Consumer |
+| `ServerConfig.MQ.Kafka.ConnectTimeout` | supported | Kafka provider | 默认 10s，约束 dial、metadata 与 writer I/O |
+| `ServerConfig.MQ.Kafka.TLS` | supported | Kafka provider | 可选严格 TLS，不提供跳过服务端证书验证 |
+| `ServerConfig.MQ.Kafka.TLS.Enable` | supported | Kafka provider | true 时装配系统 CA、可选 CA 与 client certificate |
+| `ServerConfig.MQ.Kafka.TLS.CAFile` | supported | Kafka provider | 文件不可读或无有效证书时启动 fail closed |
+| `ServerConfig.MQ.Kafka.TLS.CertFile` | supported | Kafka provider | 必须与 KeyFile 成对且可解析 |
+| `ServerConfig.MQ.Kafka.TLS.KeyFile` | supported | Kafka provider | 必须与 CertFile 成对且可解析 |
+| `ServerConfig.MQ.Kafka.TLS.ServerName` | supported | Kafka provider | 显式 TLS 服务端名称 |
+| `ServerConfig.MQ.Kafka.SASL` | supported | Kafka provider | 支持 plain、scram-sha-256、scram-sha-512 |
+| `ServerConfig.MQ.Kafka.SASL.Mechanism` | supported | Kafka provider | 非空时只接受已登记机制 |
+| `ServerConfig.MQ.Kafka.SASL.Username` | supported | Kafka provider | mechanism 非空时必填 |
+| `ServerConfig.MQ.Kafka.SASL.Password` | supported | Kafka provider | mechanism 非空时必填且不得写入错误或日志 |
+| `ServerConfig.MQ.RabbitMQ` | supported | RabbitMQ provider | factory 直连外部 RabbitMQ；同名自定义 factory 优先 |
+| `ServerConfig.MQ.RabbitMQ.URL` | supported | RabbitMQ provider | 必填，scheme 仅 amqp 或 amqps；错误日志移除 userinfo |
+| `ServerConfig.MQ.RabbitMQ.Exchange` | supported | RabbitMQ provider | durable topic exchange，默认 digitalway.core.events |
+| `ServerConfig.MQ.RabbitMQ.QueuePrefix` | supported | RabbitMQ provider | 默认 digitalway-core，映射 durable group queue |
+| `ServerConfig.MQ.RabbitMQ.Prefetch` | supported | RabbitMQ provider | 必须大于零，默认 1 |
+| `ServerConfig.MQ.RabbitMQ.ConnectTimeout` | supported | RabbitMQ provider | 默认 10s，约束 TCP/TLS/AMQP handshake |
+| `ServerConfig.MQ.RabbitMQ.TLS` | supported | RabbitMQ provider | 可选严格 TLS，不提供跳过服务端证书验证 |
+| `ServerConfig.MQ.RabbitMQ.TLS.Enable` | supported | RabbitMQ provider | true 时装配系统 CA、可选 CA 与 client certificate |
+| `ServerConfig.MQ.RabbitMQ.TLS.CAFile` | supported | RabbitMQ provider | 文件不可读或无有效证书时启动 fail closed |
+| `ServerConfig.MQ.RabbitMQ.TLS.CertFile` | supported | RabbitMQ provider | 必须与 KeyFile 成对且可解析 |
+| `ServerConfig.MQ.RabbitMQ.TLS.KeyFile` | supported | RabbitMQ provider | 必须与 CertFile 成对且可解析 |
+| `ServerConfig.MQ.RabbitMQ.TLS.ServerName` | supported | RabbitMQ provider | 显式 TLS 服务端名称 |
 | `ServerConfig.MQ.RocketMQ` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
 | `ServerConfig.MQ.RocketMQ.NameServers` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |
 | `ServerConfig.MQ.RocketMQ.Group` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |

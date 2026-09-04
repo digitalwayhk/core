@@ -27,6 +27,20 @@ func TestMQConfigApplyDefaults_EmptyStruct(t *testing.T) {
 	assert.Equal(t, 30*time.Second, m.Switch.DualWriteDuration)
 }
 
+// TestMQConfigApplyDefaults_KafkaAndRabbitMQ 验证两个内建 MQ Provider 的安全默认值。
+func TestMQConfigApplyDefaults_KafkaAndRabbitMQ(t *testing.T) {
+	var m MQConfig
+	m.ApplyDefaults()
+
+	assert.Equal(t, "digitalway-core", m.Kafka.Prefix)
+	assert.Equal(t, "digitalway-core", m.Kafka.ClientID)
+	assert.Equal(t, 10*time.Second, m.Kafka.ConnectTimeout)
+	assert.Equal(t, "digitalway.core.events", m.RabbitMQ.Exchange)
+	assert.Equal(t, "digitalway-core", m.RabbitMQ.QueuePrefix)
+	assert.Equal(t, 1, m.RabbitMQ.Prefetch)
+	assert.Equal(t, 10*time.Second, m.RabbitMQ.ConnectTimeout)
+}
+
 // TestMQConfigApplyDefaults_PreserveExistingValues 验证已设置的值不被覆盖。
 func TestMQConfigApplyDefaults_PreserveExistingValues(t *testing.T) {
 	m := MQConfig{Mode: "on", Provider: "nats-jetstream"}
@@ -80,13 +94,102 @@ func TestMQConfigValidate_NATSRequiresURL(t *testing.T) {
 	assert.NoError(t, m.Validate())
 }
 
-func TestMQConfigValidate_UnimplementedProviders(t *testing.T) {
-	for _, provider := range []string{"kafka", "rabbitmq", "rocketmq"} {
-		t.Run(provider, func(t *testing.T) {
-			err := (&MQConfig{Mode: "auto", Provider: provider, Usage: []string{"event-stream"}}).Validate()
-			assert.NoError(t, err, "provider 是否可构建应由已注册 factory 或 BuildManager 决定")
+// TestMQConfigValidate_Kafka 验证 Kafka 必填项、SASL 和 TLS 配置 fail closed。
+func TestMQConfigValidate_Kafka(t *testing.T) {
+	valid := MQConfig{
+		Mode:     "on",
+		Provider: "kafka",
+		Usage:    []string{"event-stream"},
+		Kafka: KafkaMQConfig{
+			Brokers: []string{"127.0.0.1:9092"},
+		},
+	}
+	valid.ApplyDefaults()
+	require.NoError(t, valid.Validate())
+
+	tests := []struct {
+		name      string
+		configure func(*MQConfig)
+		want      string
+	}{
+		{name: "empty broker", configure: func(m *MQConfig) { m.Kafka.Brokers = []string{"", "  "} }, want: "brokers"},
+		{name: "unknown sasl", configure: func(m *MQConfig) { m.Kafka.SASL.Mechanism = "oauth" }, want: "mechanism"},
+		{name: "sasl missing username", configure: func(m *MQConfig) {
+			m.Kafka.SASL = KafkaSASLConfig{Mechanism: "plain", Password: "secret"}
+		}, want: "username"},
+		{name: "sasl missing password", configure: func(m *MQConfig) {
+			m.Kafka.SASL = KafkaSASLConfig{Mechanism: "scram-sha-256", Username: "alice"}
+		}, want: "password"},
+		{name: "tls missing key", configure: func(m *MQConfig) {
+			m.Kafka.TLS = MQTLSConfig{Enable: true, CertFile: "client.crt"}
+		}, want: "certFile"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid
+			tt.configure(&cfg)
+			err := cfg.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
+}
+
+// TestMQConfigValidate_RabbitMQ 验证 RabbitMQ URL、exchange、prefetch 和 TLS 配置。
+func TestMQConfigValidate_RabbitMQ(t *testing.T) {
+	valid := MQConfig{
+		Mode:     "on",
+		Provider: "rabbitmq",
+		Usage:    []string{"event-stream"},
+		RabbitMQ: RabbitMQConfig{
+			URL:      "amqp://guest:guest@127.0.0.1:5672/",
+			Exchange: "events",
+			Prefetch: 1,
+		},
+	}
+	valid.ApplyDefaults()
+	require.NoError(t, valid.Validate())
+
+	tests := []struct {
+		name      string
+		configure func(*MQConfig)
+		want      string
+	}{
+		{name: "empty url", configure: func(m *MQConfig) { m.RabbitMQ.URL = "" }, want: "url"},
+		{name: "bad scheme", configure: func(m *MQConfig) { m.RabbitMQ.URL = "https://example.com" }, want: "scheme"},
+		{name: "empty exchange", configure: func(m *MQConfig) { m.RabbitMQ.Exchange = "" }, want: "exchange"},
+		{name: "zero prefetch", configure: func(m *MQConfig) { m.RabbitMQ.Prefetch = 0 }, want: "prefetch"},
+		{name: "tls missing cert", configure: func(m *MQConfig) {
+			m.RabbitMQ.TLS = MQTLSConfig{Enable: true, KeyFile: "client.key"}
+		}, want: "certFile"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid
+			tt.configure(&cfg)
+			err := cfg.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+// TestMQConfigValidate_KafkaAndRabbitMQAutoStillRequireConnectionConfig 验证 auto 仅允许连接失败降级，不允许缺配置。
+func TestMQConfigValidate_KafkaAndRabbitMQAutoStillRequireConnectionConfig(t *testing.T) {
+	for _, provider := range []string{"kafka", "rabbitmq"} {
+		t.Run(provider, func(t *testing.T) {
+			cfg := MQConfig{Mode: "auto", Provider: provider, Usage: []string{"event-stream"}}
+			cfg.ApplyDefaults()
+			require.Error(t, cfg.Validate())
+		})
+	}
+}
+
+func TestMQConfigValidate_RocketMQConstructionRemainsFactoryResponsibility(t *testing.T) {
+	err := (&MQConfig{Mode: "auto", Provider: "rocketmq", Usage: []string{"event-stream"}}).Validate()
+	assert.NoError(t, err, "RocketMQ 是否可构建仍由已注册 factory 或 BuildManager 决定")
 }
 
 func TestMQConfigValidate_UnsupportedUsage(t *testing.T) {

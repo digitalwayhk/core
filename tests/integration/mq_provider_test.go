@@ -12,9 +12,17 @@
 //
 //	Optional: CORE_TEST_NATS_URL (default "nats://127.0.0.1:4222")
 //
+// CORE_TEST_KAFKA=1         – run Kafka contract tests.
+//
+//	Optional: CORE_TEST_KAFKA_BROKERS (default "127.0.0.1:9092")
+//
+// CORE_TEST_RABBITMQ=1      – run RabbitMQ contract tests.
+//
+//	Optional: CORE_TEST_RABBITMQ_URL (default "amqp://core:core_test_password@127.0.0.1:5672/")
+//
 // To run all MQ integration tests:
 //
-// CORE_TEST_REDIS_STREAM=1 CORE_TEST_NATS=1 go test -tags=integration ./tests/integration/ -run TestMQ
+// CORE_TEST_REDIS_STREAM=1 CORE_TEST_NATS=1 CORE_TEST_KAFKA=1 CORE_TEST_RABBITMQ=1 go test -tags=integration ./tests/integration/ -run TestMQ
 package integration_test
 
 import (
@@ -26,6 +34,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,6 +115,128 @@ func TestMQNATSJetStream(t *testing.T) {
 	}
 	p := mq.NewNATSJetStreamProvider(url, "core-integration", "core-int")
 	runMQContract(t, p)
+}
+
+// TestMQKafka 通过真实 Kafka 验证普通发布订阅与 Broker 健康。
+func TestMQKafka(t *testing.T) {
+	if os.Getenv("CORE_TEST_KAFKA") == "" {
+		t.Skip("CORE_TEST_KAFKA not set")
+	}
+	p := mq.NewKafkaProvider(config.KafkaMQConfig{
+		Brokers:  kafkaTestBrokers(),
+		Prefix:   "core-integration",
+		ClientID: "core-integration",
+	})
+	runMQContract(t, p)
+}
+
+// TestMQRabbitMQ 通过真实 RabbitMQ 验证 publisher confirm 与普通订阅。
+func TestMQRabbitMQ(t *testing.T) {
+	if os.Getenv("CORE_TEST_RABBITMQ") == "" {
+		t.Skip("CORE_TEST_RABBITMQ not set")
+	}
+	p := mq.NewRabbitMQProvider(config.RabbitMQConfig{
+		URL:         rabbitMQTestURL(),
+		Exchange:    "core.integration.events",
+		QueuePrefix: "core-integration",
+		Prefetch:    1,
+	})
+	runMQContract(t, p)
+}
+
+// TestMQKafkaReliable 通过真实 Kafka 验证失败不确认、同消息重试和消费组隔离。
+func TestMQKafkaReliable(t *testing.T) {
+	if os.Getenv("CORE_TEST_KAFKA") == "" {
+		t.Skip("CORE_TEST_KAFKA not set")
+	}
+	runReliableMQContract(t, mq.NewKafkaProvider(config.KafkaMQConfig{
+		Brokers:  kafkaTestBrokers(),
+		Prefix:   "core-reliable",
+		ClientID: "core-reliable",
+	}))
+}
+
+// TestMQRabbitMQReliable 通过真实 RabbitMQ 验证 NACK 重投、成功 ACK 和消费组隔离。
+func TestMQRabbitMQReliable(t *testing.T) {
+	if os.Getenv("CORE_TEST_RABBITMQ") == "" {
+		t.Skip("CORE_TEST_RABBITMQ not set")
+	}
+	runReliableMQContract(t, mq.NewRabbitMQProvider(config.RabbitMQConfig{
+		URL:         rabbitMQTestURL(),
+		Exchange:    "core.reliable.events",
+		QueuePrefix: "core-reliable",
+		Prefetch:    1,
+	}))
+}
+
+func runReliableMQContract(t *testing.T, provider mq.MQProvider) {
+	t.Helper()
+	ctx, cancelContext := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelContext()
+	require.NoError(t, provider.Connect(ctx))
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	t.Cleanup(func() { _ = manager.Close() })
+	assert.ErrorIs(t, manager.RequireOrderedReliable(), mq.ErrOrderedReliableUnsupported)
+
+	subject := fmt.Sprintf("core.reliable.%d", time.Now().UnixNano())
+	payload := []byte("reliable-payload")
+	groupADone := make(chan struct{}, 1)
+	groupBDone := make(chan struct{}, 1)
+	var mu sync.Mutex
+	attemptsA := 0
+	messageIDs := make([]string, 0, 2)
+	cancelA, err := manager.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
+		Group: "group-a", Consumer: "consumer-a",
+	}, func(message *mq.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		attemptsA++
+		messageIDs = append(messageIDs, message.ID)
+		if attemptsA == 1 {
+			return fmt.Errorf("expected first-attempt failure")
+		}
+		select {
+		case groupADone <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancelA()
+	cancelB, err := manager.SubscribeReliable(ctx, subject, mq.ReliableSubscribeOptions{
+		Group: "group-b", Consumer: "consumer-b",
+	}, func(message *mq.Message) error {
+		assert.Equal(t, payload, message.Data)
+		select {
+		case groupBDone <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancelB()
+
+	require.NoError(t, manager.Publish(ctx, subject, payload, &mq.PublishOptions{
+		OrderingKey: "order-42", IdempotencyKey: "event-42",
+	}))
+	for name, done := range map[string]<-chan struct{}{"group-a": groupADone, "group-b": groupBDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Fatalf("等待 %s 可靠消费超时: %v", name, ctx.Err())
+		}
+	}
+	mu.Lock()
+	require.Equal(t, 2, attemptsA)
+	require.Len(t, messageIDs, 2)
+	assert.Equal(t, messageIDs[0], messageIDs[1], "Handler 失败后必须重投同一消息")
+	mu.Unlock()
+	time.Sleep(300 * time.Millisecond)
+	mu.Lock()
+	assert.Equal(t, 2, attemptsA, "成功确认后不应再次重投")
+	mu.Unlock()
 }
 
 // envelopeFixture is a CloudEvents-compatible envelope for MQ round-trip tests.
@@ -201,4 +333,84 @@ func TestMQEventStreamNATS(t *testing.T) {
 	}
 	p := mq.NewNATSJetStreamProvider(url, "core-event-int", "core-event-int")
 	runEventEnvelopeMQRoundtrip(t, p)
+}
+
+// TestMQEventBridgeKafka 验证真实 Kafka 上的 MQBridge Envelope round-trip。
+func TestMQEventBridgeKafka(t *testing.T) {
+	if os.Getenv("CORE_TEST_KAFKA") == "" {
+		t.Skip("CORE_TEST_KAFKA not set")
+	}
+	runEventBridgeMQRoundtrip(t, mq.NewKafkaProvider(config.KafkaMQConfig{
+		Brokers: kafkaTestBrokers(), Prefix: "core-event-bridge", ClientID: "core-event-bridge",
+	}))
+}
+
+// TestMQEventBridgeRabbitMQ 验证真实 RabbitMQ 上的 MQBridge Envelope round-trip。
+func TestMQEventBridgeRabbitMQ(t *testing.T) {
+	if os.Getenv("CORE_TEST_RABBITMQ") == "" {
+		t.Skip("CORE_TEST_RABBITMQ not set")
+	}
+	runEventBridgeMQRoundtrip(t, mq.NewRabbitMQProvider(config.RabbitMQConfig{
+		URL: rabbitMQTestURL(), Exchange: "core.event.bridge", QueuePrefix: "core-event-bridge", Prefetch: 1,
+	}))
+}
+
+func runEventBridgeMQRoundtrip(t *testing.T, provider mq.MQProvider) {
+	t.Helper()
+	ctx, cancelContext := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelContext()
+	require.NoError(t, provider.Connect(ctx))
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	t.Cleanup(func() { _ = manager.Close() })
+
+	stream := event.NewStream()
+	bridge := event.NewMQBridge(stream, manager)
+	subject := fmt.Sprintf("core.event.bridge.%d", time.Now().UnixNano())
+	eventType := "order.changed"
+	received := make(chan *event.Envelope, 1)
+	cancelLocal, err := stream.SubscribeControl(eventType, func(envelope *event.Envelope) error {
+		received <- envelope
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancelLocal()
+	cancelExternal, err := bridge.SubscribeReliable(ctx, subject, "integration-service")
+	require.NoError(t, err)
+	defer cancelExternal()
+
+	envelope := event.NewEnvelope("order-service", eventType, []byte(`{"orderID":"42"}`))
+	envelope.Subject = subject
+	envelope.TraceID = "trace-42"
+	envelope.IdempotencyKey = "event-42"
+	envelope.ShardKey = "order-42"
+	require.NoError(t, bridge.Publish(ctx, subject, envelope))
+	select {
+	case actual := <-received:
+		assert.Equal(t, envelope.ID, actual.ID)
+		assert.Equal(t, envelope.Type, actual.Type)
+		assert.Equal(t, envelope.Subject, actual.Subject)
+		assert.Equal(t, envelope.TraceID, actual.TraceID)
+		assert.Equal(t, envelope.IdempotencyKey, actual.IdempotencyKey)
+		assert.Equal(t, envelope.ShardKey, actual.ShardKey)
+	case <-ctx.Done():
+		t.Fatalf("等待 EventBridge round-trip 超时: %v", ctx.Err())
+	}
+}
+
+func kafkaTestBrokers() []string {
+	brokers := os.Getenv("CORE_TEST_KAFKA_BROKERS")
+	if brokers == "" {
+		brokers = "127.0.0.1:9092"
+	}
+	return []string{brokers}
+}
+
+func rabbitMQTestURL() string {
+	rawURL := os.Getenv("CORE_TEST_RABBITMQ_URL")
+	if rawURL == "" {
+		return "amqp://core:core_test_password@127.0.0.1:5672/"
+	}
+	return rawURL
 }

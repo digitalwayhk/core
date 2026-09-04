@@ -16,12 +16,13 @@
 | `observational/shop-microservices` | 观察（固定串行） | 否 | 手工、发布候选 | 20 分钟 | `./scripts/test.sh integration-shop-microservices` | Redis | examples/server | `-p 1` 串行运行示例 06 unit、同进程与三进程集成；验证 Manage owner、requestID、SupplierOrder、mTLS 身份及 Order 不暴露端口 |
 | `scheduled/stress` | 定时 | 否 | nightly、手工 | 30 分钟 | `./scripts/test.sh concurrency-stress` | 无 | server lifecycle | 20 轮压力长期稳定后评估提升 |
 | `scheduled/integration` | 定时（真实 driver 契约已通过） | 否 | nightly、手工 | 20 分钟 | `./scripts/test.sh integration-persistence` | Docker Compose | persistence | MySQL/MongoDB/ClickHouse 与清理已通过；连续 scheduled 稳定后评估提升 |
+| `manual/mq-providers` | 手工、待接入 scheduled | 否 | 手工、发布候选 | 15 分钟 | `./scripts/test-external-mq.sh` | Docker Compose、Kafka、RabbitMQ | server/mq | Kafka/RabbitMQ 普通与可靠消费、group 隔离、EventBridge 连续稳定后接入 scheduled；未运行不得记 passed |
 | `consumer/futures` | 手工、发布候选 | 发布时阻断 | workflow_dispatch | 15 分钟 | `./scripts/test-consumer-futures.sh` | futures 精确 Git commit | release/consumer | token/本地对象库可用时必须通过；不可用明确 blocked，不能记 passed |
 
 ## 外部能力状态
 
 - etcd、Consul、Redis Streams、NATS JetStream 已有真实 Compose 集成命令，但不进入 PR required。
-- Kafka 仅有基础设施 profile，Core 无内建 Provider，不登记虚假绿色 gate。
+- Kafka 与 RabbitMQ 有内建 Conditional Provider 和显式真实 Broker 脚本；当前不进入 PR required，未运行或 Docker 超时必须记录为 `NOT RUN`，不得以单元测试替代。
 
 ## Action 供应链锁定
 

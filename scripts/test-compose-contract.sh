@@ -5,10 +5,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose="$ROOT/docker-compose.integration.yml"
 env_example="$ROOT/.env.integration.example"
 
-for service in etcd consul redis nats kafka mysql mongodb clickhouse; do
+for service in etcd consul redis nats kafka rabbitmq mysql mongodb clickhouse; do
   grep -Eq "^  ${service}:" "$compose" || { echo "Compose 缺少服务: $service" >&2; exit 1; }
 done
 grep -A2 '^  kafka:' "$compose" | grep -Fq 'profiles: ["kafka"]'
+grep -A2 '^  rabbitmq:' "$compose" | grep -Fq 'profiles: ["rabbitmq"]'
 grep -A3 '^  nats:' "$compose" | grep -Fq 'command: ["-js", "-sd", "/data", "-m", "8222"]' || {
   echo "NATS 必须启用 8222 监控端口供 healthcheck 使用" >&2
   exit 1
@@ -24,9 +25,10 @@ if grep -Eq '"0\.0\.0\.0:[0-9]+:' "$compose"; then
   echo "Compose 端口必须绑定回环地址" >&2
   exit 1
 fi
-for variable in CORE_TEST_ETCD CORE_TEST_CONSUL CORE_TEST_REDIS_STREAM CORE_TEST_NATS; do
+for variable in CORE_TEST_ETCD CORE_TEST_CONSUL CORE_TEST_REDIS_STREAM CORE_TEST_NATS CORE_TEST_KAFKA CORE_TEST_RABBITMQ; do
   grep -Eq "^${variable}=1$" "$env_example" || { echo "环境样例缺少 $variable" >&2; exit 1; }
 done
-grep -Fq 'Core 未内建 Kafka MQProvider' "$env_example"
+grep -Fq 'CORE_TEST_KAFKA_BROKERS=127.0.0.1:9092' "$env_example"
+grep -Fq 'CORE_TEST_RABBITMQ_URL=amqp://core:core_test_password@127.0.0.1:5672/' "$env_example"
 
 echo "Docker Compose 静态契约测试通过"

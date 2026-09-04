@@ -113,11 +113,12 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - 内部同步传输默认 gRPC，HTTP 只作为显式备用；自定义 Socket 已删除，迁移见 `docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
 - gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
-- MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
-- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。
-- Runtime 低基数指标公开 Outbox 的配置并发/实际峰值/active lanes/blocked keys/batch，以及 MQ可靠订阅的配置并发/handler in-flight/active/blocked/pending keys；缺少 provider指标时状态为 `not_collected`，禁止伪造零值。
+- MQ/EventBridge：Redis Streams、NATS JetStream、Kafka、RabbitMQ 为 `Conditional`，需要显式配置对应外部 Broker。
+- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge 透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis 仍只有一个 active owner，只在 owner 内并行不同 key。
+- Runtime 低基数指标公开 Outbox 的配置并发/实际峰值/active lanes/blocked keys/batch，以及 MQ 可靠订阅的配置并发/handler in-flight/active/blocked/pending keys；缺少 provider 指标时状态为 `not_collected`，禁止伪造零值。
 - JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已有 publish ACK、消息 ID 去重和显式 ACK，但重试、死信、pull consumer 与生产 stream 参数尚未实现。
-- Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
+- Kafka 与 RabbitMQ 内建 Provider 实现 `MQProvider` 和 `ReliableMQProvider`：发布等待 Broker 确认，可靠 Handler 成功后才 ACK；失败可重投，语义是 at-least-once，不是 exactly-once。两者不实现 `OrderedReliableMQProvider` 或 `KeyedReliableMQProvider`，声明 ordered-reliable requirement 或显式 `KeyConcurrency>1` 时必须 fail closed，不得静默串行；业务仍以 EventID/Inbox 幂等。
+- RocketMQ 无内建 Provider；应用可注册自定义 `ProviderFactory`。同名自定义 factory 仍优先于内建 Provider，供测试或消费方覆盖。
 
 go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 

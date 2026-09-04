@@ -103,7 +103,25 @@ func buildProvider(ctx context.Context, cfg *config.MQConfig) (MQProvider, error
 			return nil, fmt.Errorf("%w: connect nats-jetstream: %v", ErrProviderUnavailable, err)
 		}
 		return provider, nil
-	case "kafka", "rabbitmq", "rocketmq":
+	case "kafka":
+		provider := NewKafkaProvider(cfg.Kafka)
+		if err := provider.Connect(ctx); err != nil {
+			if errors.Is(err, ErrProviderConfiguration) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: connect kafka: %v", ErrProviderUnavailable, err)
+		}
+		return provider, nil
+	case "rabbitmq":
+		provider := NewRabbitMQProvider(cfg.RabbitMQ)
+		if err := provider.Connect(ctx); err != nil {
+			if errors.Is(err, ErrProviderConfiguration) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: connect rabbitmq: %v", ErrProviderUnavailable, err)
+		}
+		return provider, nil
+	case "rocketmq":
 		return nil, fmt.Errorf("%w: provider %q is not implemented; register a provider factory or choose redis-stream/nats-jetstream", ErrProviderConfiguration, cfg.Provider)
 	default:
 		return nil, fmt.Errorf("%w: provider %q is unknown; register a provider factory", ErrProviderConfiguration, cfg.Provider)
