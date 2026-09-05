@@ -19,6 +19,7 @@
 | `pkg/server/config.ServerConfig` 及项目自有子配置 | Stable（按能力矩阵） | server/config | 服务配置、默认化和启动校验 | 任务 14 配置矩阵与 `config-contract` |
 | `pkg/server/event` 的 EventBus、EventStream 与 Bridge 入口 | Stable（按能力矩阵） | server/event | 进程内事件与受支持 MQ 事件流 | event 单元测试与任务 14 生命周期测试 |
 | `mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable` | Stable（加性） | server/mq | 按 key 有序可靠投递的可选契约；未声明 requirement 时零值兼容 | `pkg/server/mq` unit/conformance；Redis 需 `CORE_TEST_REDIS_ADDR` |
+| `mq.NewKafkaProvider`、`mq.NewRabbitMQProvider`、两者的 `ReliableMQProvider` 实现 | Stable（加性，Conditional） | server/mq | 内建 Kafka/RabbitMQ 发布订阅与 Handler 成功后确认；不声明 ordered-reliable 或 keyed-reliable，`KeyConcurrency>1` fail closed | provider/factory/race 测试；`scripts/test-external-mq.sh` 真实 Broker 门禁 |
 | `event.MQBridge` 透传 IdempotencyKey/OrderingKey、`EnsureOrderedReliable` | Stable（加性） | server/event | Envelope → provider 元数据；Require 后门禁空 ShardKey | mqbridge 与 ordered-reliable require 测试 |
 | `ServiceEventBridge`/`ServiceContext.RequireOrderedReliableByShardKey`、`OutboxStore` earliest-first 与可选 `OutboxStoreSkipBlocked` | Stable（加性） | server/event、router | 启动 fail-closed、Outbox 同 key barrier、hot-key 可选跳过 | outbox barrier / require 测试 |
 | `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 零值/1 保持全局串行；显式 `>1` 才启用同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |

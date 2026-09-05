@@ -102,14 +102,68 @@ func TestBuildManager_UnknownProviderIsHardConfigurationError(t *testing.T) {
 	}
 }
 
-func TestBuildManager_UnimplementedBuiltinIsHardConfigurationError(t *testing.T) {
+func TestBuildManager_RocketMQRemainsUnimplemented(t *testing.T) {
 	for _, mode := range []string{"auto", "on"} {
 		t.Run(mode, func(t *testing.T) {
-			mgr, err := mq.BuildManager(context.Background(), &config.MQConfig{Mode: mode, Provider: "rabbitmq"})
+			mgr, err := mq.BuildManager(context.Background(), &config.MQConfig{Mode: mode, Provider: "rocketmq"})
 			require.Error(t, err)
 			assert.ErrorIs(t, err, mq.ErrProviderConfiguration)
 			assert.Contains(t, err.Error(), "not implemented")
 			assert.Nil(t, mgr)
+		})
+	}
+}
+
+func TestBuildManager_KafkaUnavailableUsesTypedAvailabilityError(t *testing.T) {
+	cfg := &config.MQConfig{
+		Mode:     "on",
+		Provider: "kafka",
+		Usage:    []string{"event-stream"},
+		Kafka: config.KafkaMQConfig{
+			Brokers:        []string{"127.0.0.1:0"},
+			ConnectTimeout: 50 * time.Millisecond,
+		},
+	}
+	mgr, err := mq.BuildManager(context.Background(), cfg)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, mq.ErrProviderUnavailable)
+	assert.NotErrorIs(t, err, mq.ErrProviderConfiguration)
+	assert.Nil(t, mgr)
+}
+
+func TestBuildManager_RabbitMQUnavailableUsesTypedAvailabilityError(t *testing.T) {
+	cfg := &config.MQConfig{
+		Mode:     "on",
+		Provider: "rabbitmq",
+		Usage:    []string{"event-stream"},
+		RabbitMQ: config.RabbitMQConfig{
+			URL:            "amqp://guest:guest@127.0.0.1:0/",
+			Exchange:       "events",
+			Prefetch:       1,
+			ConnectTimeout: 50 * time.Millisecond,
+		},
+	}
+	mgr, err := mq.BuildManager(context.Background(), cfg)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, mq.ErrProviderUnavailable)
+	assert.NotErrorIs(t, err, mq.ErrProviderConfiguration)
+	assert.NotContains(t, err.Error(), "guest:guest")
+	assert.Nil(t, mgr)
+}
+
+func TestBuildManager_RegisteredBuiltinOverrideTakesPrecedence(t *testing.T) {
+	for _, providerName := range []string{"kafka", "rabbitmq"} {
+		t.Run(providerName, func(t *testing.T) {
+			mq.RegisterProviderFactory(providerName, func(context.Context, *config.MQConfig) (mq.MQProvider, error) {
+				return &factoryTestProvider{name: providerName}, nil
+			})
+			t.Cleanup(func() { mq.UnregisterProviderFactory(providerName) })
+
+			mgr, err := mq.BuildManager(context.Background(), &config.MQConfig{Mode: "on", Provider: providerName})
+			require.NoError(t, err)
+			require.NotNil(t, mgr)
+			assert.Equal(t, providerName, mgr.Current().Name())
+			require.NoError(t, mgr.Close())
 		})
 	}
 }

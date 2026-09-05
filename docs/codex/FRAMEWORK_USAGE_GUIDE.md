@@ -32,8 +32,9 @@ Digitalway Core 是 go-zero 和成熟依赖之上的轻量应用组装层。业�
 | 订单水平扩展 | `AutoMachineID=true`、`sc.UseOutbox`、本地 pending + 远程权威库 | `examples/07-shop-order-scale` | ClusterProvider 可用；每副本 pending 隔离；order 不暴露宿主业务端口 | `go test ./examples/integration/07-shop-order-scale ./examples/integration/07-shop-order-scale-multi-process` | Conditional |
 | 本地集群 | LocalProvider | 配置能力矩阵 | `Cluster.Mode=on/auto`、provider=local | `go test ./pkg/server/cluster` | Stable |
 | etcd/Consul 集群 | Etcd/Consul Provider | 外部依赖集成文档 | Compose 服务与显式 provider | `./scripts/test.sh integration-external-docker` | Conditional |
-| MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams 或 NATS JetStream；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker` | Conditional |
-| Kafka/RabbitMQ/RocketMQ | 自定义 `ProviderFactory` | 无内建示例 | 应用自行注册成熟客户端适配器 | 配置校验与应用自有集成测试 | Unsupported（内建） |
+| MQ/EventBridge | MQManager、EventBridge、ProviderFactory | 配置能力矩阵 | Redis Streams、NATS JetStream、Kafka 或 RabbitMQ；`Usage=[event-stream]` | `./scripts/test.sh integration-external-docker`；Kafka/RabbitMQ 用 `./scripts/test-external-mq.sh` | Conditional |
+| Kafka/RabbitMQ 可靠消费 | `NewKafkaProvider`、`NewRabbitMQProvider`、`ReliableMQProvider` | 无业务示例，使用外部 MQ 契约测试 | Kafka Brokers 或 RabbitMQ URL；业务 EventID/Inbox 幂等；`KeyConcurrency>1` fail closed | `go test -race ./pkg/server/mq`；`./scripts/test-external-mq.sh` | Conditional；不支持 ordered-reliable / keyed-reliable |
+| RocketMQ | 自定义 `ProviderFactory` | 无内建示例 | 应用自行注册成熟客户端适配器 | 配置校验与应用自有集成测试 | Unsupported（内建） |
 | QUIC transport | 无推荐 API | 历史兼容包 | 配置层明确拒绝 | `go test ./pkg/server/config -run QUIC` | Unsupported |
 
 字段级细节见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
@@ -146,7 +147,7 @@ cp .env.integration.example .env.integration
 ./scripts/test.sh integration-external-docker
 ```
 
-Compose 默认提供 etcd、Consul、Redis、NATS；Kafka 和持久化数据库使用 profile。Kafka 容器只提供消费方扩展环境，不表示框架存在内建 Kafka Provider。
+Compose 默认提供 etcd、Consul、Redis、NATS；Kafka、RabbitMQ 和持久化数据库使用 profile。Kafka/RabbitMQ 内建 Provider 是 Conditional 能力，必须显式配置外部 Broker，并用 `./scripts/test-external-mq.sh` 验收。
 
 ## 日志与错误
 

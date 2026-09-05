@@ -550,7 +550,7 @@ func isDurationKey(k string) bool {
 		"HeartbeatInterval", "HeartbeatTimeout", "SuspectTimeout",
 		"InstanceReuseCooldown", "TTL",
 		"RetryDelay", "InitialDelay", "MaxDelay",
-		"DualWriteDuration",
+		"DualWriteDuration", "ConnectTimeout",
 		"QueryTimeout", "CacheTTL":
 		return true
 	}

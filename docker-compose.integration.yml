@@ -71,6 +71,9 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "1"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
     ports:
       - "127.0.0.1:9092:9092"
     healthcheck:
@@ -78,6 +81,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
+
+  rabbitmq:
+    profiles: ["rabbitmq"]
+    image: rabbitmq:4.2.9-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: core
+      RABBITMQ_DEFAULT_PASS: core_test_password
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   mysql:
     image: mysql:9.0.0

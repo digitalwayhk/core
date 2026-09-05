@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -68,14 +70,40 @@ type NATSJetStreamMQConfig struct {
 
 // KafkaMQConfig Kafka 连接配置。
 type KafkaMQConfig struct {
-	Brokers []string `json:",optional"`
-	Prefix  string   `json:",optional"`
+	Brokers        []string      `json:",optional"`
+	Prefix         string        `json:",optional"`
+	ClientID       string        `json:",optional"`
+	ConnectTimeout time.Duration `json:",optional"`
+	// StartOffset 仅在消费组尚无提交位移时生效。latest（默认）从当前末尾开始，earliest 从 topic 开头回放。
+	StartOffset string          `json:",optional"`
+	TLS         MQTLSConfig     `json:",optional"`
+	SASL        KafkaSASLConfig `json:",optional"`
+}
+
+// KafkaSASLConfig Kafka SASL 认证配置。
+type KafkaSASLConfig struct {
+	Mechanism string `json:",optional"` // plain | scram-sha-256 | scram-sha-512
+	Username  string `json:",optional"`
+	Password  string `json:",optional"`
 }
 
 // RabbitMQConfig RabbitMQ 连接配置。
 type RabbitMQConfig struct {
-	URL      string `json:",optional"`
-	Exchange string `json:",optional"`
+	URL            string        `json:",optional"`
+	Exchange       string        `json:",optional"`
+	QueuePrefix    string        `json:",optional"`
+	Prefetch       int           `json:",optional"`
+	ConnectTimeout time.Duration `json:",optional"`
+	TLS            MQTLSConfig   `json:",optional"`
+}
+
+// MQTLSConfig MQ Provider 共用的 TLS 配置。
+type MQTLSConfig struct {
+	Enable     bool   `json:",optional"`
+	CAFile     string `json:",optional"`
+	CertFile   string `json:",optional"`
+	KeyFile    string `json:",optional"`
+	ServerName string `json:",optional"`
 }
 
 // RocketMQConfig RocketMQ 连接配置。
@@ -130,6 +158,30 @@ func (m *MQConfig) ApplyDefaults() {
 	if m.NATSJetStream.DurablePrefix == "" {
 		m.NATSJetStream.DurablePrefix = "core"
 	}
+	if m.Kafka.Prefix == "" {
+		m.Kafka.Prefix = "digitalway-core"
+	}
+	if m.Kafka.ClientID == "" {
+		m.Kafka.ClientID = "digitalway-core"
+	}
+	if m.Kafka.ConnectTimeout == 0 {
+		m.Kafka.ConnectTimeout = 10 * time.Second
+	}
+	if m.Kafka.StartOffset == "" {
+		m.Kafka.StartOffset = "latest"
+	}
+	if m.RabbitMQ.Exchange == "" {
+		m.RabbitMQ.Exchange = "digitalway.core.events"
+	}
+	if m.RabbitMQ.QueuePrefix == "" {
+		m.RabbitMQ.QueuePrefix = "digitalway-core"
+	}
+	if m.RabbitMQ.Prefetch == 0 {
+		m.RabbitMQ.Prefetch = 1
+	}
+	if m.RabbitMQ.ConnectTimeout == 0 {
+		m.RabbitMQ.ConnectTimeout = 10 * time.Second
+	}
 }
 
 // Validate 校验 MQConfig 中的字段合法性。
@@ -150,12 +202,18 @@ func (m *MQConfig) Validate() error {
 			return fmt.Errorf("mq.usage contains unsupported value %q; only event-stream is implemented", usage)
 		}
 	}
-	if m.Mode == "on" {
-		switch m.Provider {
-		case "nats-jetstream":
-			if m.NATSJetStream.URL == "" {
-				return errors.New("mq.natsJetStream.url is required when provider=nats-jetstream and mode=on")
-			}
+	switch m.Provider {
+	case "nats-jetstream":
+		if m.Mode == "on" && m.NATSJetStream.URL == "" {
+			return errors.New("mq.natsJetStream.url is required when provider=nats-jetstream and mode=on")
+		}
+	case "kafka":
+		if err := validateKafkaMQConfig(m.Kafka); err != nil {
+			return err
+		}
+	case "rabbitmq":
+		if err := validateRabbitMQConfig(m.RabbitMQ); err != nil {
+			return err
 		}
 	}
 	if m.RequestReply.Enable {
@@ -175,6 +233,68 @@ func (m *MQConfig) Validate() error {
 	case "", "drain", "dual-write", "maintenance":
 	default:
 		return fmt.Errorf("mq.switch.strategy=%q is invalid; use drain, dual-write, or maintenance", m.Switch.Strategy)
+	}
+	return nil
+}
+
+func validateKafkaMQConfig(cfg KafkaMQConfig) error {
+	hasBroker := false
+	for _, broker := range cfg.Brokers {
+		if strings.TrimSpace(broker) != "" {
+			hasBroker = true
+			break
+		}
+	}
+	if !hasBroker {
+		return errors.New("mq.kafka.brokers requires at least one non-empty broker")
+	}
+	mechanism := strings.ToLower(strings.TrimSpace(cfg.SASL.Mechanism))
+	switch mechanism {
+	case "":
+		if cfg.SASL.Username != "" || cfg.SASL.Password != "" {
+			return errors.New("mq.kafka.sasl.mechanism is required when credentials are configured")
+		}
+	case "plain", "scram-sha-256", "scram-sha-512":
+		if cfg.SASL.Username == "" {
+			return errors.New("mq.kafka.sasl.username is required when mechanism is configured")
+		}
+		if cfg.SASL.Password == "" {
+			return errors.New("mq.kafka.sasl.password is required when mechanism is configured")
+		}
+	default:
+		return errors.New("mq.kafka.sasl.mechanism is invalid; use plain, scram-sha-256, or scram-sha-512")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.StartOffset)) {
+	case "", "latest", "earliest":
+	default:
+		return errors.New("mq.kafka.startOffset is invalid; use latest or earliest")
+	}
+	return validateMQTLSConfig("mq.kafka.tls", cfg.TLS)
+}
+
+func validateRabbitMQConfig(cfg RabbitMQConfig) error {
+	if strings.TrimSpace(cfg.URL) == "" {
+		return errors.New("mq.rabbitMQ.url is required when provider=rabbitmq")
+	}
+	parsed, err := url.Parse(cfg.URL)
+	if err != nil || parsed.Scheme == "" {
+		return errors.New("mq.rabbitMQ.url is invalid")
+	}
+	if parsed.Scheme != "amqp" && parsed.Scheme != "amqps" {
+		return errors.New("mq.rabbitMQ.url scheme must be amqp or amqps")
+	}
+	if strings.TrimSpace(cfg.Exchange) == "" {
+		return errors.New("mq.rabbitMQ.exchange is required when provider=rabbitmq")
+	}
+	if cfg.Prefetch <= 0 {
+		return errors.New("mq.rabbitMQ.prefetch must be greater than zero")
+	}
+	return validateMQTLSConfig("mq.rabbitMQ.tls", cfg.TLS)
+}
+
+func validateMQTLSConfig(path string, cfg MQTLSConfig) error {
+	if (cfg.CertFile == "") != (cfg.KeyFile == "") {
+		return fmt.Errorf("%s.certFile and %s.keyFile must be configured together", path, path)
 	}
 	return nil
 }
