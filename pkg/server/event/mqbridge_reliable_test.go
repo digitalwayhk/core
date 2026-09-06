@@ -5,11 +5,39 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/stretchr/testify/require"
 )
+
+type lifecycleReliableBridgeProvider struct {
+	reliableBridgeProvider
+}
+
+func (*lifecycleReliableBridgeProvider) LifecycleCapabilities() mq.LifecycleCapabilities {
+	return mq.LifecycleCapabilities{DurablePublishAck: true, RequiredGroups: true}
+}
+func (*lifecycleReliableBridgeProvider) EnsureLifecycle(context.Context, mq.LifecyclePolicy) error {
+	return nil
+}
+func (*lifecycleReliableBridgeProvider) InspectLifecycle(_ context.Context, policy mq.LifecyclePolicy) (mq.LifecycleSnapshot, error) {
+	return mq.LifecycleSnapshot{
+		Subject: policy.Subject, PolicyFingerprint: policy.Fingerprint(),
+		ObservedAt: time.Now(), State: mq.LifecycleStateOK,
+	}, nil
+}
+func (*lifecycleReliableBridgeProvider) ReclaimLifecycle(context.Context, mq.LifecyclePolicy, mq.LifecycleSnapshot) (mq.ReclaimResult, error) {
+	return mq.ReclaimResult{}, nil
+}
+
+func lifecycleBridgePolicy(group string) mq.LifecyclePolicy {
+	return mq.LifecyclePolicy{
+		Subject: "orders.changed", Mode: mq.LifecycleModeObserve,
+		RequiredGroups: []mq.ConsumerGroupRequirement{{Name: group, Start: mq.StartFromAllRetained}},
+	}
+}
 
 type reliableBridgeProvider struct {
 	handler func(*mq.Message) error
@@ -49,6 +77,37 @@ func TestMQBridgeReliableSubscriptionPropagatesControlHandlerError(t *testing.T)
 	data, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	require.ErrorIs(t, provider.handler(&mq.Message{ID: "1-0", Subject: "orders.changed", Data: data}), want)
+}
+
+// TestMQBridgeReliableSubscriptionRejectsGroupOutsideLifecycleManifest 验证本地订阅不能绕过已冻结的必需组 manifest。
+func TestMQBridgeReliableSubscriptionRejectsGroupOutsideLifecycleManifest(t *testing.T) {
+	provider := &lifecycleReliableBridgeProvider{}
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	require.NoError(t, manager.RequireMessageLifecycle(context.Background(), lifecycleBridgePolicy("positions")))
+	bridge := event.NewMQBridge(event.NewStream(), manager)
+
+	_, err := bridge.SubscribeReliable(context.Background(), "orders.changed", "users")
+
+	require.ErrorIs(t, err, mq.ErrLifecycleRequiredGroupMismatch)
+}
+
+// TestMQBridgeReliableSubscriptionAcceptsDeclaredGroup 验证实际逻辑组与 manifest 一致时可正常订阅。
+func TestMQBridgeReliableSubscriptionAcceptsDeclaredGroup(t *testing.T) {
+	provider := &lifecycleReliableBridgeProvider{}
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	require.NoError(t, manager.RequireMessageLifecycle(context.Background(), lifecycleBridgePolicy("positions")))
+	bridge := event.NewMQBridge(event.NewStream(), manager)
+
+	cancel, err := bridge.SubscribeReliable(context.Background(), "orders.changed", "positions")
+
+	require.NoError(t, err)
+	cancel()
 }
 
 type keyedReliableBridgeProvider struct {

@@ -1125,6 +1125,15 @@ func (own *ServiceContext) RequireOrderedReliableByShardKey() error {
 	return own.ServiceEventBridge.RequireOrderedReliableByShardKey()
 }
 
+// RequireMessageLifecycle 声明并冻结一个 MQ Subject 的必需消费组、保留与安全回收策略。
+// 底层 Provider 无法满足策略时 fail closed。
+func (own *ServiceContext) RequireMessageLifecycle(ctx context.Context, policy mq.LifecyclePolicy) error {
+	if own == nil || own.MQManager == nil {
+		return mq.ErrNotConnected
+	}
+	return own.MQManager.RequireMessageLifecycle(ctx, policy)
+}
+
 // NotifyOutbox 唤醒当前服务 Outbox 发布器尽快扫描本地 Outbox 表。
 func (own *ServiceContext) NotifyOutbox() {
 	if own == nil || own.ServiceEventBridge == nil {

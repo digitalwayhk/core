@@ -221,6 +221,9 @@ func (m *MQManager) SubscribeReliable(
 	if m.closed || m.current == nil {
 		return nil, ErrNotConnected
 	}
+	if err := m.lifecycle.validateRequiredGroup(subject, options.Group); err != nil {
+		return nil, err
+	}
 	provider, ok := m.current.(ReliableMQProvider)
 	if !ok {
 		return nil, ErrReliableSubscribeUnsupported
@@ -232,6 +235,15 @@ func (m *MQManager) SubscribeReliable(
 		}
 	}
 	return provider.SubscribeReliable(ctx, subject, options, handler)
+}
+
+// ValidateRequiredGroup 校验已声明生命周期的 Subject 只建立 manifest 中的可靠消费组。
+// 未声明生命周期的 Subject 保持旧版兼容行为。
+func (m *MQManager) ValidateRequiredGroup(subject, group string) error {
+	if m == nil {
+		return ErrNotConnected
+	}
+	return m.lifecycle.validateRequiredGroup(subject, group)
 }
 
 // OrderedReliableInfo 返回当前 provider 的 ordered-reliable 声明；未实现则 ok=false。

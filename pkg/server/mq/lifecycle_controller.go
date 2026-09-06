@@ -200,6 +200,24 @@ func (c *lifecycleController) allowPublish(subject string) error {
 	return nil
 }
 
+func (c *lifecycleController) validateRequiredGroup(subject, group string) error {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	entry := c.entries[subject]
+	c.mu.RUnlock()
+	if entry == nil {
+		return nil
+	}
+	for _, required := range entry.policy.RequiredGroups {
+		if required.Name == group {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: subject %q group %q", ErrLifecycleRequiredGroupMismatch, subject, group)
+}
+
 func (c *lifecycleController) stop() {
 	if c == nil {
 		return
