@@ -36,6 +36,11 @@ func TestLifecyclePolicyValidateRejectsUnsafeOrAmbiguousPolicy(t *testing.T) {
 			RequiredGroups: []ConsumerGroupRequirement{{Name: "positions", Start: StartFromAllRetained}},
 			Retry:          RetryPolicy{MaxDeliveries: 3},
 		}},
+		{name: "source is dlq", policy: LifecyclePolicy{
+			Subject: "fills", Mode: LifecycleModeEnforce,
+			RequiredGroups: []ConsumerGroupRequirement{{Name: "positions", Start: StartFromAllRetained}},
+			Retry:          RetryPolicy{MaxDeliveries: 3, DeadLetterSubject: "fills"},
+		}},
 		{name: "soft above hard", policy: LifecyclePolicy{
 			Subject: "fills", Mode: LifecycleModeEnforce,
 			RequiredGroups: []ConsumerGroupRequirement{{Name: "positions", Start: StartFromAllRetained}},

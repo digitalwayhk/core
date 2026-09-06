@@ -90,6 +90,9 @@ type ReliableSubscribeOptions struct {
 	// KeyConcurrency 是同一 active owner 内可并行处理的 OrderingKey 数。
 	// 零值和 1 保持整 subject 串行。
 	KeyConcurrency int
+	// lifecycle 仅由 MQManager 从已冻结的 Subject manifest 注入。
+	// 应用必须通过 RequireMessageLifecycle 声明策略，不能绕过 Manager 设置。
+	lifecycle *LifecyclePolicy
 }
 
 // ReliableMQProvider 是 MQProvider 的可选可靠消费能力。

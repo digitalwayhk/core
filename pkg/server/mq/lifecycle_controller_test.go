@@ -11,16 +11,17 @@ import (
 )
 
 type lifecycleTestProvider struct {
-	mu             sync.Mutex
-	capabilities   LifecycleCapabilities
-	ensureCalls    int
-	inspectCalls   int
-	reclaimCalls   int
-	lastPolicy     LifecyclePolicy
-	snapshot       LifecycleSnapshot
-	inspectStarted chan struct{}
-	blockInspect   bool
-	events         []string
+	mu                  sync.Mutex
+	capabilities        LifecycleCapabilities
+	ensureCalls         int
+	inspectCalls        int
+	reclaimCalls        int
+	lastPolicy          LifecyclePolicy
+	lastReliableOptions ReliableSubscribeOptions
+	snapshot            LifecycleSnapshot
+	inspectStarted      chan struct{}
+	blockInspect        bool
+	events              []string
 }
 
 func (*lifecycleTestProvider) Name() string                  { return "lifecycle-test" }
@@ -87,6 +88,17 @@ func (p *lifecycleTestProvider) ReclaimLifecycle(_ context.Context, policy Lifec
 	p.lastPolicy = policy
 	return ReclaimResult{}, nil
 }
+func (p *lifecycleTestProvider) SubscribeReliable(
+	_ context.Context,
+	_ string,
+	options ReliableSubscribeOptions,
+	_ func(*Message) error,
+) (func(), error) {
+	p.mu.Lock()
+	p.lastReliableOptions = options
+	p.mu.Unlock()
+	return func() {}, nil
+}
 
 func allLifecycleCapabilities() LifecycleCapabilities {
 	return LifecycleCapabilities{
@@ -149,6 +161,28 @@ func TestLifecycleEnforcePassesBoundedPolicyToProvider(t *testing.T) {
 	require.NoError(t, manager.lifecycle.runOnce(context.Background(), policy.Subject))
 	require.Equal(t, 1, provider.reclaimCalls)
 	require.Equal(t, policy.Reclaim, provider.lastPolicy.Reclaim)
+}
+
+func TestSubscribeReliableInjectsFrozenLifecyclePolicy(t *testing.T) {
+	provider := &lifecycleTestProvider{capabilities: allLifecycleCapabilities()}
+	manager := managerWithLifecycleTestProvider(t, provider)
+	policy := validLifecyclePolicy("positions")
+	policy.Retry = RetryPolicy{
+		MaxDeliveries: 3, DeadLetterSubject: "fills.dlq", Backoff: []time.Duration{time.Second},
+	}
+	require.NoError(t, manager.RequireMessageLifecycle(context.Background(), policy))
+
+	cancel, err := manager.SubscribeReliable(context.Background(), policy.Subject, ReliableSubscribeOptions{
+		Group: policy.RequiredGroups[0].Name,
+	}, func(*Message) error { return nil })
+	require.NoError(t, err)
+	defer cancel()
+
+	provider.mu.Lock()
+	options := provider.lastReliableOptions
+	provider.mu.Unlock()
+	require.NotNil(t, options.lifecycle)
+	require.Equal(t, policy.Normalize(), *options.lifecycle)
 }
 
 // TestPublishRejectsAtFreshHardCapacityAndWhenCapacityUnknown 验证硬限不依赖过期或假零快照。

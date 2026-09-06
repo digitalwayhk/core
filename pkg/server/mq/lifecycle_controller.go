@@ -225,6 +225,20 @@ func (c *lifecycleController) validateRequiredGroup(subject, group string) error
 	return fmt.Errorf("%w: subject %q group %q", ErrLifecycleRequiredGroupMismatch, subject, group)
 }
 
+func (c *lifecycleController) policyForSubject(subject string) *LifecyclePolicy {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	entry := c.entries[subject]
+	c.mu.RUnlock()
+	if entry == nil {
+		return nil
+	}
+	policy := entry.policy.Normalize()
+	return &policy
+}
+
 func (c *lifecycleController) stop() {
 	if c == nil {
 		return

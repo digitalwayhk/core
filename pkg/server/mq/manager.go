@@ -224,6 +224,7 @@ func (m *MQManager) SubscribeReliable(
 	if err := m.lifecycle.validateRequiredGroup(subject, options.Group); err != nil {
 		return nil, err
 	}
+	options.lifecycle = m.lifecycle.policyForSubject(subject)
 	provider, ok := m.current.(ReliableMQProvider)
 	if !ok {
 		return nil, ErrReliableSubscribeUnsupported

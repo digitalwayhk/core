@@ -97,6 +97,8 @@ func (*RedisStreamProvider) LifecycleCapabilities() LifecycleCapabilities {
 	return LifecycleCapabilities{
 		PublishAck:       PublishAckBrokerAccepted,
 		RequiredGroups:   true,
+		Retry:            true,
+		DeadLetter:       true,
 		SafeReclaim:      true,
 		RetainedMessages: true,
 		RetainedBytes:    true,

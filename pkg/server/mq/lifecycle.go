@@ -186,6 +186,9 @@ func (p LifecyclePolicy) Validate() error {
 	if err := validateRetryPolicy(p.Retry); err != nil {
 		return err
 	}
+	if strings.TrimSpace(p.Retry.DeadLetterSubject) == p.Subject {
+		return fmt.Errorf("%w: dead letter subject must differ from source subject", ErrLifecyclePolicyInvalid)
+	}
 	if err := validateCapacityPolicy(p.Capacity); err != nil {
 		return err
 	}
