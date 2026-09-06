@@ -69,6 +69,7 @@
 
 ### Fixed
 
+- 管理菜单首次查询空表时改为复用 `UpdateMenu` 的原子菜单/权限同步链路，再返回已同步结果；不再由通用默认数据保存逐条写入关联权限，避免 SQLite 首次初始化出现 `permissions_model` 不存在或菜单 ID 冲突。
 - 可信内部调用请求包装现在会保留底层 `IRequestKeyedServiceCaller` 能力；Gateway 调用中间服务后，中间服务仍可按同一市场/租户 key 固定下游实例。底层请求不支持该加性能力时继续失败闭合。
 - keyed rendezvous hash 改为按稳定服务端点评分，不再按每次启动都随机的 `NodeInfo.ID`；单副本重启不会导致市场/租户 key 全量重映射。
 

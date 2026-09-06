@@ -52,6 +52,37 @@ func (own *MenuManage) ViewFieldModel(model interface{}, field *view.FieldModel)
 		}
 	}
 }
+
+// SearchAfter 在菜单空表时走 UpdateMenu 的原子持久化链路，避免通用默认数据保存直接写入关联权限。
+func (own *MenuManage) SearchAfter(sender interface{}, result *view.TableData, req types.IRequest) (interface{}, error) {
+	if !shouldBootstrapMenuSearch(sender, result) {
+		return result, nil
+	}
+	if err := own.updateMenuModelAll(req); err != nil {
+		return nil, err
+	}
+	list, ok := own.GetList().(*entity.ModelList[smodels.MenuModel])
+	if !ok || list == nil {
+		return nil, errors.New("MenuManage list unavailable")
+	}
+	search := sender.(*manage.Search[smodels.MenuModel])
+	rows, total, err := list.SearchAll(1, search.SearchItem.Size)
+	if err != nil {
+		return nil, err
+	}
+	result.Rows = rows
+	result.Total = total
+	return result, nil
+}
+
+func shouldBootstrapMenuSearch(sender interface{}, result *view.TableData) bool {
+	if result == nil || result.Total != 0 {
+		return false
+	}
+	search, ok := sender.(*manage.Search[smodels.MenuModel])
+	return ok && search.SearchItem != nil && search.SearchItem.Page <= 1 && len(search.SearchItem.WhereList) == 0
+}
+
 func (own *MenuManage) updateMenuModelAll(req types.IRequest) error {
 	if own == nil || own.DmpBase == nil {
 		return errors.New("MenuManage list unavailable")
