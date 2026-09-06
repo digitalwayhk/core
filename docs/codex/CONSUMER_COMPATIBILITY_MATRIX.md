@@ -1,9 +1,10 @@
 # Core 消费方兼容性矩阵
 
-证据采集于 2026-07-13。commit 用于复现**已提交树**中的锁定，不代表自动跟随。脏工作树中的未提交 `go.mod` 不得写入「Core 锁定」列，只能作为旁注。
+初始证据采集于 2026-07-13，v1 候选刷新于 2026-09-06。commit 用于复现**已提交树**中的锁定，不代表自动跟随。脏工作树中的未提交 `go.mod` 不得写入「Core 锁定」列，只能作为旁注。
 
 | 消费方 | 本地 commit | 工具链 | Core 锁定 | 状态 | Smoke |
 | --- | --- | --- | --- | --- | --- |
+| bitzoom | `4b2b18a8298d47ec1edd3f8dabd1d7c086a2d49c` | Go 1.26.6 | 候选 `v0.0.248-0.20260906080609-e7cf45a7e9db` | 当前重构消费方；已迁移 gRPC/full-e4 | 临时 archive 中 bootstrap + contract 行为测试、全仓 Go 编译通过；未修改消费方工作区 |
 | futures | `203ff8eda53a9691d9409d3ee32aa5868fa1d61f` | Go 1.26.1 | `v0.0.247` | 直接消费 | gateway/worker 行为测试 + services 根包仅编译，均通过临时 `go.work` 指向候选 Core |
 | omni-flow-ai/grok | `6865e7c497b76ffd883d56998f2db4669f9c02be` | backend Go 1.24.1 | not-applicable | backend `go.mod` 不依赖 core | 在 core 发布门禁中不运行；由该项目自身构建验证 |
 | ops-ai | `78499df57832577ac0358b7137f0ee39cf9db135` | Node/TypeScript | not-applicable | 当前仓库无 Go module/core 依赖 | 在 core 发布门禁中不运行；执行其自身 agent/build 流程 |
@@ -46,7 +47,23 @@ go test ./internal/pkg/services -run '^$' -count=1 -timeout=10m
 
 配置扫描发现 `docker/local/etc` 下 13 份 JSON 仍含顶层 `SocketPort`。通过 Core `ReadConfig` 加载临时 `gateway.json` 副本时，`migrateConfig` 会先移除已废弃的 Socket 字段；随后 `conf.MustLoad` 因既有 `Telemetry.Batcher=jaeger` 不属于 go-zero 当前允许值而 fail closed。该失败不是本次 Socket 删除引入，但会阻止消费方原样升级。futures 需先选择当前受支持的 telemetry exporter 并更新这些配置，再复跑迁移后的完整配置 smoke。
 
-因此正式发布状态仍为 `blocked-by-consumer-verification`，不得 tag 或发布；Core 开发期 `--candidate`、源码 smoke 与本次 gRPC 实现验收可以通过。阻断解除必须记录 futures 配置迁移提交和复跑结果。
+旧 futures 工作树仍含 `SocketPort` 与 `Telemetry.Batcher=jaeger`，因此必须继续锁定 `v0.0.247`，不得升级到 Core v1。它是旧系统对照，不作为已完成 gRPC 迁移的 Bitzoom v1 候选证据。
+
+## Bitzoom v1 候选刷新
+
+2026-09-06 在干净的 Bitzoom `main` 精确提交 `4b2b18a8298d47ec1edd3f8dabd1d7c086a2d49c` 上验证。当前提交已不含旧 futures 的 `SocketPort` 或 `Telemetry.Batcher=jaeger` 配置，`bootstrap/config_test.go` 明确断言内部传输为 gRPC；full-e4 gRPC 发布链可追溯到 `110779fa`。
+
+为遵守 Bitzoom 不使用本地 `go.work`/`replace` 的规则，从已提交树创建临时 archive，仅在临时副本执行：
+
+```bash
+go get github.com/digitalwayhk/core@e7cf45a7e9dbc138ac737a88957a9a88e5201698
+go test ./bootstrap ./contract/... -count=1 -timeout=10m
+go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
+```
+
+解析出的候选版本为 `v0.0.248-0.20260906080609-e7cf45a7e9db`；bootstrap、全部 contract 行为测试和全仓 Go 编译均退出 0。archive 不含 `.git` 与三个前端/Casdoor 子模块，因此依赖这些仓库元数据的 architecture 行为测试不作为本次证据；需要真实 MySQL/Redis 的 fullsystem、orderedtradefill 与用户市场 UAT 也明确为 `NOT RUN`，不以编译替代。
+
+本次证据证明 Bitzoom 已跨过 Socket→gRPC 的源码、配置与全仓编译迁移边界，解除 Core v1 tag 的消费方配置阻断。旧 futures 仍停留在 `v0.0.247`；若未来迁移，必须独立修改配置并重跑其完整 smoke。
 
 ## 可信内部调用方的消费方迁移
 
