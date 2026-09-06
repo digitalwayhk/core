@@ -20,8 +20,10 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -105,6 +107,199 @@ func TestMQNATSJetStream(t *testing.T) {
 	}
 	p := mq.NewNATSJetStreamProvider(url, "core-integration", "core-int")
 	runMQContract(t, p)
+}
+
+// TestMQLifecycleRedis 对真实 Redis 执行统一的多组/pending/离线组/安全回收契约。
+func TestMQLifecycleRedis(t *testing.T) {
+	if os.Getenv("CORE_TEST_REDIS_STREAM") == "" {
+		t.Skip("CORE_TEST_REDIS_STREAM not set")
+	}
+	addr := envOrDefault("CORE_TEST_REDIS_ADDR", "127.0.0.1:6379")
+	prefix := fmt.Sprintf("core:integration:lifecycle:%d", time.Now().UnixNano())
+	provider := mq.NewRedisStreamProvider(addr, prefix, 0)
+	runMQLifecycleContract(t, provider, "fills")
+}
+
+// TestMQLifecycleNATS 对真实 NATS JetStream 执行与 Redis 相同的生命周期契约。
+func TestMQLifecycleNATS(t *testing.T) {
+	if os.Getenv("CORE_TEST_NATS") == "" {
+		t.Skip("CORE_TEST_NATS not set")
+	}
+	url := envOrDefault("CORE_TEST_NATS_URL", "nats://127.0.0.1:4222")
+	prefix := fmt.Sprintf("coreint%d", time.Now().UnixNano())
+	provider := mq.NewNATSJetStreamProvider(url, prefix, prefix)
+	runMQLifecycleContract(t, provider, "fills")
+}
+
+func runMQLifecycleContract(t *testing.T, provider mq.LifecycleConformanceProvider, subject string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	require.NoError(t, provider.Connect(ctx))
+	t.Cleanup(func() { _ = provider.Close() })
+	require.NoError(t, mq.VerifyMessageLifecycleConformance(ctx, provider, subject))
+}
+
+func envOrDefault(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+const (
+	restartSubject = "lifecycle.restart"
+	restartGroup   = "restart-required"
+)
+
+// TestMQRedisLifecycleBrokerRestartPrepare 在 Broker 重启前留下尚未 ACK 的 Redis 消息。
+func TestMQRedisLifecycleBrokerRestartPrepare(t *testing.T) {
+	token := requireRestartToken(t)
+	provider := mq.NewRedisStreamProvider(
+		envOrDefault("CORE_TEST_REDIS_ADDR", "127.0.0.1:6379"),
+		"core:integration:restart:"+token, 0,
+	)
+	runBrokerRestartPrepare(t, provider, restartPolicy(mq.PublishAckBrokerAccepted), token)
+}
+
+// TestMQRedisLifecycleBrokerRestartRecover 验证 Redis 重启后未完成消息仍可继续消费并回收。
+func TestMQRedisLifecycleBrokerRestartRecover(t *testing.T) {
+	token := requireRestartToken(t)
+	provider := mq.NewRedisStreamProvider(
+		envOrDefault("CORE_TEST_REDIS_ADDR", "127.0.0.1:6379"),
+		"core:integration:restart:"+token, 0,
+	)
+	runBrokerRestartRecover(t, provider, restartPolicy(mq.PublishAckBrokerAccepted), token)
+}
+
+// TestMQNATSLifecycleBrokerRestartPrepare 在 Broker 重启前留下尚未 ACK 的 JetStream 消息。
+func TestMQNATSLifecycleBrokerRestartPrepare(t *testing.T) {
+	token := requireRestartToken(t)
+	prefix := "coreintrestart" + token
+	provider := mq.NewNATSJetStreamProvider(
+		envOrDefault("CORE_TEST_NATS_URL", "nats://127.0.0.1:4222"), prefix, prefix,
+	)
+	runBrokerRestartPrepare(t, provider, restartPolicy(mq.PublishAckBrokerPersisted), token)
+}
+
+// TestMQNATSLifecycleBrokerRestartRecover 验证 NATS 重启后未完成消息仍可继续消费并回收。
+func TestMQNATSLifecycleBrokerRestartRecover(t *testing.T) {
+	token := requireRestartToken(t)
+	prefix := "coreintrestart" + token
+	provider := mq.NewNATSJetStreamProvider(
+		envOrDefault("CORE_TEST_NATS_URL", "nats://127.0.0.1:4222"), prefix, prefix,
+	)
+	runBrokerRestartRecover(t, provider, restartPolicy(mq.PublishAckBrokerPersisted), token)
+}
+
+func requireRestartToken(t *testing.T) string {
+	t.Helper()
+	token := strings.TrimSpace(os.Getenv("CORE_TEST_MQ_RESTART_TOKEN"))
+	if token == "" {
+		t.Skip("NOT RUN: Broker restart phase is orchestrated by test-external-integration.sh")
+	}
+	return token
+}
+
+func restartPolicy(publishAck mq.PublishAckLevel) mq.LifecyclePolicy {
+	return mq.LifecyclePolicy{
+		Subject: restartSubject, Mode: mq.LifecycleModeEnforce, RequiredPublishAck: publishAck,
+		RequiredGroups: []mq.ConsumerGroupRequirement{{Name: restartGroup, Start: mq.StartFromAllRetained}},
+		Retry: mq.RetryPolicy{
+			MaxDeliveries: 5, DeadLetterSubject: restartSubject + ".dlq",
+			Backoff: []time.Duration{2 * time.Second}, MaxAckPending: 10,
+		},
+		Reclaim: mq.ReclaimBudget{Interval: time.Hour, BatchSize: 10, TimeBudget: time.Second},
+	}
+}
+
+func connectedLifecycleManager(
+	t *testing.T,
+	provider mq.LifecycleConformanceProvider,
+	policy mq.LifecyclePolicy,
+) (*mq.MQManager, context.Context) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	require.NoError(t, provider.Connect(ctx))
+	manager := mq.NewManager()
+	manager.Register(provider)
+	require.NoError(t, manager.SetCurrent(provider.Name()))
+	require.NoError(t, manager.RequireMessageLifecycle(ctx, policy))
+	t.Cleanup(func() {
+		_ = manager.Close()
+		cancel()
+	})
+	return manager, ctx
+}
+
+func runBrokerRestartPrepare(
+	t *testing.T,
+	provider mq.LifecycleConformanceProvider,
+	policy mq.LifecyclePolicy,
+	token string,
+) {
+	t.Helper()
+	manager, ctx := connectedLifecycleManager(t, provider, policy)
+	attempted := make(chan struct{}, 1)
+	cancel, err := manager.SubscribeReliable(ctx, policy.Subject, mq.ReliableSubscribeOptions{
+		Group: restartGroup, Consumer: "before-restart", MinIdle: 50 * time.Millisecond,
+		ClaimInterval: 20 * time.Millisecond,
+	}, func(*mq.Message) error {
+		select {
+		case attempted <- struct{}{}:
+		default:
+		}
+		return errors.New("intentional restart checkpoint")
+	})
+	require.NoError(t, err)
+	defer cancel()
+	require.NoError(t, manager.Publish(ctx, policy.Subject, []byte("restart-"+token), nil))
+	select {
+	case <-attempted:
+	case <-ctx.Done():
+		t.Fatal("message was not delivered before broker restart")
+	}
+	require.Eventually(t, func() bool {
+		snapshot, inspectErr := provider.InspectLifecycle(ctx, policy)
+		return inspectErr == nil && snapshot.PendingMessages != nil && *snapshot.PendingMessages > 0
+	}, 5*time.Second, 20*time.Millisecond, "message must be pending before broker restart")
+}
+
+func runBrokerRestartRecover(
+	t *testing.T,
+	provider mq.LifecycleConformanceProvider,
+	policy mq.LifecyclePolicy,
+	token string,
+) {
+	t.Helper()
+	manager, ctx := connectedLifecycleManager(t, provider, policy)
+	recovered := make(chan []byte, 1)
+	cancel, err := manager.SubscribeReliable(ctx, policy.Subject, mq.ReliableSubscribeOptions{
+		Group: restartGroup, Consumer: "after-restart", MinIdle: 50 * time.Millisecond,
+		ClaimInterval: 20 * time.Millisecond,
+	}, func(message *mq.Message) error {
+		recovered <- append([]byte(nil), message.Data...)
+		return nil
+	})
+	require.NoError(t, err)
+	defer cancel()
+	select {
+	case payload := <-recovered:
+		require.Equal(t, []byte("restart-"+token), payload)
+	case <-ctx.Done():
+		t.Fatal("pending message was not recovered after broker restart")
+	}
+
+	var snapshot mq.LifecycleSnapshot
+	require.Eventually(t, func() bool {
+		var inspectErr error
+		snapshot, inspectErr = provider.InspectLifecycle(ctx, policy)
+		return inspectErr == nil && snapshot.PendingMessages != nil && *snapshot.PendingMessages == 0 &&
+			snapshot.SafeFrontier != "" && snapshot.SafeFrontier != "0" && snapshot.SafeFrontier != "0-0"
+	}, 5*time.Second, 20*time.Millisecond)
+	result, err := provider.ReclaimLifecycle(ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Reclaimed)
 }
 
 // envelopeFixture is a CloudEvents-compatible envelope for MQ round-trip tests.

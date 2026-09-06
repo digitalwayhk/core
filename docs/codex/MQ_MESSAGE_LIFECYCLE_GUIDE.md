@@ -197,6 +197,9 @@ CORE_TEST_REDIS_ADDR=127.0.0.1:6379 \
 CORE_TEST_NATS_URL=nats://127.0.0.1:4222 \
 go test -race ./pkg/server/mq -count=1
 
+# 启动隔离 Broker，执行共享契约，并分别在 pending 状态重启 Redis 与 NATS 后验证恢复和回收
+./scripts/test.sh integration-external-docker
+
 ./scripts/ci.sh required/ai-skill
 ./scripts/test.sh config-contract
 ./scripts/test.sh api-compat

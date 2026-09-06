@@ -46,6 +46,22 @@ capture_diagnostics() {
     >"$CI_ARTIFACT_DIR/compose.log" 2>&1 || true
 }
 
+run_mq_restart_phase() {
+  local test_name="$1"
+  CORE_TEST_REDIS_STREAM=1 \
+  CORE_TEST_REDIS_ADDR="${CORE_TEST_REDIS_ADDR:-127.0.0.1:6379}" \
+  CORE_TEST_NATS=1 \
+  CORE_TEST_NATS_URL="${CORE_TEST_NATS_URL:-nats://127.0.0.1:4222}" \
+  CORE_TEST_MQ_RESTART_TOKEN="$mq_restart_token" \
+    go test -tags=integration ./tests/integration -run "^${test_name}$" -count=1
+}
+
+restart_broker() {
+  local service="$1"
+  run_bounded 120 docker compose --project-name "$project_name" -f "$compose_file" restart -t 20 "$service"
+  run_bounded 120 docker compose --project-name "$project_name" -f "$compose_file" up -d --wait --wait-timeout 90 "$service"
+}
+
 finish() {
   local status=$?
   local cleanup_status=0
@@ -79,3 +95,12 @@ trap 'exit 143' TERM
 started=1
 run_bounded "$up_timeout" docker compose --project-name "$project_name" -f "$compose_file" up -d --wait --wait-timeout 120 etcd consul redis nats
 "$ROOT/scripts/test.sh" integration-external
+
+# Broker 重启必须由测试编排层显式执行；框架运行时代码不得获得 Docker 控制权。
+mq_restart_token="$(date +%s)-$$"
+run_mq_restart_phase TestMQRedisLifecycleBrokerRestartPrepare
+restart_broker redis
+run_mq_restart_phase TestMQRedisLifecycleBrokerRestartRecover
+run_mq_restart_phase TestMQNATSLifecycleBrokerRestartPrepare
+restart_broker nats
+run_mq_restart_phase TestMQNATSLifecycleBrokerRestartRecover
