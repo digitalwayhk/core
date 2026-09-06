@@ -36,17 +36,23 @@ func (n *NATSJetStreamProvider) SubscribeReliable(
 		return nil, err
 	}
 	streamName := natsResourceName(n.streamPrefix, subject)
-	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
-		Name: streamName, Subjects: []string{n.subjectKey(subject)},
-	})
+	stream, err := js.Stream(ctx, streamName)
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		stream, err = js.CreateStream(ctx, jetstream.StreamConfig{
+			Name: streamName, Subjects: []string{n.subjectKey(subject)},
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("nats-jetstream: create reliable stream %s: %w", streamName, err)
 	}
 	if policy != nil && policy.Retry.MaxDeliveries > 0 {
-		_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
-			Name:     natsResourceName(n.streamPrefix, policy.Retry.DeadLetterSubject),
-			Subjects: []string{n.subjectKey(policy.Retry.DeadLetterSubject)},
-		})
+		dlqName := natsResourceName(n.streamPrefix, policy.Retry.DeadLetterSubject)
+		_, err = js.Stream(ctx, dlqName)
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			_, err = js.CreateStream(ctx, jetstream.StreamConfig{
+				Name: dlqName, Subjects: []string{n.subjectKey(policy.Retry.DeadLetterSubject)},
+			})
+		}
 		if err != nil {
 			return nil, fmt.Errorf("nats-jetstream: create dead letter stream: %w", err)
 		}

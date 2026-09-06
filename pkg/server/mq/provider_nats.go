@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -106,10 +107,12 @@ func (n *NATSJetStreamProvider) Subscribe(ctx context.Context, subject string, h
 	streamName := natsResourceName(n.streamPrefix, subject)
 	durableName := natsResourceName(n.durablePrefix, subject)
 
-	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
-		Name:     streamName,
-		Subjects: []string{n.subjectKey(subject)},
-	})
+	stream, err := js.Stream(ctx, streamName)
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		stream, err = js.CreateStream(ctx, jetstream.StreamConfig{
+			Name: streamName, Subjects: []string{n.subjectKey(subject)},
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("nats-jetstream: create stream %s: %w", streamName, err)
 	}
