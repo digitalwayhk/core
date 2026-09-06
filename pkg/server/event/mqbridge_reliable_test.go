@@ -17,7 +17,7 @@ type lifecycleReliableBridgeProvider struct {
 }
 
 func (*lifecycleReliableBridgeProvider) LifecycleCapabilities() mq.LifecycleCapabilities {
-	return mq.LifecycleCapabilities{DurablePublishAck: true, RequiredGroups: true}
+	return mq.LifecycleCapabilities{PublishAck: mq.PublishAckBrokerPersisted, RequiredGroups: true}
 }
 func (*lifecycleReliableBridgeProvider) EnsureLifecycle(context.Context, mq.LifecyclePolicy) error {
 	return nil

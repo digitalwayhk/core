@@ -58,10 +58,23 @@ func TestLifecyclePolicyNormalizeAppliesConservativeDefaults(t *testing.T) {
 	}.Normalize()
 
 	require.Equal(t, LifecycleModeObserve, policy.Mode)
+	require.Equal(t, PublishAckBrokerAccepted, policy.RequiredPublishAck)
 	require.Equal(t, 30*time.Second, policy.Reclaim.Interval)
 	require.Equal(t, 1000, policy.Reclaim.BatchSize)
 	require.Equal(t, 500*time.Millisecond, policy.Reclaim.TimeBudget)
 	require.NoError(t, policy.Validate())
+}
+
+// TestLifecycleCapabilityRejectsWeakerPublishConfirmation 验证 Broker 接受不能伪装成已持久化确认。
+func TestLifecycleCapabilityRejectsWeakerPublishConfirmation(t *testing.T) {
+	policy := validLifecyclePolicy("positions")
+	policy.RequiredPublishAck = PublishAckBrokerPersisted
+	capability := LifecycleCapabilities{
+		PublishAck: PublishAckBrokerAccepted, RequiredGroups: true, SafeReclaim: true,
+		RetainedMessages: true,
+	}
+
+	require.ErrorIs(t, validateLifecycleCapabilities(capability, policy), ErrLifecycleUnsupported)
 }
 
 // TestLifecyclePolicyFingerprintIgnoresGroupDeclarationOrder 验证等价 manifest 不因 slice 顺序产生冲突。
@@ -83,6 +96,16 @@ func TestLifecyclePolicyFingerprintChangesForSafetyRelevantFields(t *testing.T) 
 
 	require.NotEqual(t, base.Fingerprint(), changedRetention.Fingerprint())
 	require.NotEqual(t, base.Fingerprint(), changedStart.Fingerprint())
+}
+
+// TestLifecyclePolicyFingerprintAllowsObserveToEnforceMigration 验证执行模式切换不会伪装成 Broker 安全策略冲突。
+func TestLifecyclePolicyFingerprintAllowsObserveToEnforceMigration(t *testing.T) {
+	observe := validLifecyclePolicy("positions")
+	observe.Mode = LifecycleModeObserve
+	enforce := observe
+	enforce.Mode = LifecycleModeEnforce
+
+	require.Equal(t, observe.Fingerprint(), enforce.Fingerprint())
 }
 
 func validLifecyclePolicy(groups ...string) LifecyclePolicy {

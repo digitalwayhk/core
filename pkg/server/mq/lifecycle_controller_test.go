@@ -90,7 +90,7 @@ func (p *lifecycleTestProvider) ReclaimLifecycle(_ context.Context, policy Lifec
 
 func allLifecycleCapabilities() LifecycleCapabilities {
 	return LifecycleCapabilities{
-		DurablePublishAck: true, RequiredGroups: true, Retry: true, DeadLetter: true,
+		PublishAck: PublishAckBrokerPersisted, RequiredGroups: true, Retry: true, DeadLetter: true,
 		SafeReclaim: true, RetainedMessages: true, RetainedBytes: true,
 		Pending: true, Lag: true, OldestAge: true,
 	}

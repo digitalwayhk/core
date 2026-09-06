@@ -25,7 +25,7 @@ func (*serviceContextLifecycleProvider) Subscribe(context.Context, string, func(
 func (*serviceContextLifecycleProvider) Health(context.Context) error { return nil }
 func (*serviceContextLifecycleProvider) LifecycleCapabilities() mq.LifecycleCapabilities {
 	return mq.LifecycleCapabilities{
-		DurablePublishAck: true, RequiredGroups: true, SafeReclaim: true,
+		PublishAck: mq.PublishAckBrokerPersisted, RequiredGroups: true, SafeReclaim: true,
 		RetainedMessages: true, RetainedBytes: true,
 	}
 }

@@ -80,7 +80,7 @@ func (c *lifecycleController) require(
 }
 
 func validateLifecycleCapabilities(capability LifecycleCapabilities, policy LifecyclePolicy) error {
-	if !capability.DurablePublishAck || !capability.RequiredGroups {
+	if !publishAckSatisfies(capability.PublishAck, policy.RequiredPublishAck) || !capability.RequiredGroups {
 		return ErrLifecycleUnsupported
 	}
 	if policy.Mode == LifecycleModeEnforce && !capability.SafeReclaim {
@@ -96,6 +96,13 @@ func validateLifecycleCapabilities(capability LifecycleCapabilities, policy Life
 		return ErrLifecycleUnsupported
 	}
 	return nil
+}
+
+func publishAckSatisfies(actual, required PublishAckLevel) bool {
+	if required == PublishAckBrokerAccepted {
+		return actual == PublishAckBrokerAccepted || actual == PublishAckBrokerPersisted
+	}
+	return actual == PublishAckBrokerPersisted
 }
 
 func validateLifecycleSnapshot(policy LifecyclePolicy, snapshot LifecycleSnapshot) error {
