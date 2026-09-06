@@ -10,6 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 AUTHORITATIVE="docs/ai/core-skill"
+MQ_LIFECYCLE_GUIDE="docs/codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md"
 # 单文件上限。超过约 60 KB 会触发部分 agent 工具链的管道截断。
 MAX_SHARD_BYTES=61440
 # 指针文件上限。超过说明正文被复制回来了。
@@ -51,6 +52,28 @@ for path in "$AUTHORITATIVE"/*.md; do
     fail "分片 $name 未被 $AUTHORITATIVE/SKILL.md 索引，agent 无法发现它"
   fi
 done
+
+# 2.1 MQ 生命周期是跨 Provider 的安全契约，必须同时保留长期指南与 skill 入口。
+if [[ ! -f "$MQ_LIFECYCLE_GUIDE" ]]; then
+  fail "缺少 MQ 生命周期长期指南: $MQ_LIFECYCLE_GUIDE"
+else
+  for required in \
+    "消息生命周期状态机" \
+    "Provider 能力矩阵" \
+    "安全回收前沿" \
+    "新增 Provider" \
+    "Bitzoom 接入示例"; do
+    if ! grep -q "$required" "$MQ_LIFECYCLE_GUIDE"; then
+      fail "$MQ_LIFECYCLE_GUIDE 缺少必需章节或关键词: $required"
+    fi
+  done
+fi
+if ! grep -q "MQ_MESSAGE_LIFECYCLE_GUIDE.md" "$AUTHORITATIVE/multiservice-and-observability.md"; then
+  fail "multiservice-and-observability.md 未链接 MQ 生命周期长期指南"
+fi
+if ! grep -q "RequireMessageLifecycle" "$AUTHORITATIVE/multiservice-and-observability.md"; then
+  fail "multiservice-and-observability.md 未声明 RequireMessageLifecycle 入口"
+fi
 
 # 3. 每个权威源文件都不能超过管道截断阈值。
 for path in "$AUTHORITATIVE"/*.md; do

@@ -39,10 +39,14 @@
 | ordered-reliable 可选能力 | 显式 `ServiceContext`/`ServiceEventBridge.RequireOrderedReliableByShardKey` 或构造选项 + Ensure；未声明时零行为变化 | `OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、空 ShardKey fail-closed、Outbox 同 key barrier | supported（可选） |
 | Redis Streams ordered-reliable | 默认单 active owner + 全 subject 串行；`KeyConcurrency>1` 时 owner 内按 OrderingKey 分 lane，PEL cursor 有界分页、poison key 只阻断同 key；handler 丢 owner不 ACK | `RedisStreamProvider`；真 Redis测试需 `CORE_TEST_REDIS_ADDR`；发版前同时跑 failure barrier 与 keyed concurrency conformance | supported（显式 opt-in） |
 | Outbox/可靠订阅 key concurrency | `UseOutbox`、`OutboxOptions`/`Subscription` 零值均为 1；只有调用方显式 `>1` 才改变跨 key完成顺序；同 subject 配置必须一致 | `UseOutboxWithOptions`、`KeyedReliableExternalSubscriber`、`KeyedReliableMQProvider`；不支持时 fail closed | supported（加性、默认关闭） |
-| NATS JetStream ordered-reliable / `ReliableMQProvider` | 内建 NATS 仅普通 Publish/Subscribe；声明 ordered-reliable requirement 时 fail closed | 无完整 reliable/ordered owner | rejected（待实现） |
+| NATS JetStream `ReliableMQProvider` | 逻辑组映射 durable；Handler 成功 DoubleAck，失败 `NakWithDelay`，达到上限时 DLQ publish ACK 后 Term；`MaxAckPending` 使用 Broker 背压 | `NATSJetStreamProvider` + 真 NATS retry/DLQ/restart 测试 | supported |
+| NATS JetStream ordered-reliable | 目前不声明 `OrderedReliableMQProvider`/`KeyedReliableMQProvider`；需要按 OrderingKey 并行或失败屏障时 fail closed | `MQManager.SubscribeReliable` capability gate | rejected（待实现） |
+| 应用级 MQ lifecycle manifest | 不新增配置字段；应用通过 `RequireMessageLifecycle` 声明真实必需组、发布确认、保留、重试/DLQ、容量与回收预算。Redis/NATS 按 capability 实现；未声明时不回收 | `MQManager` lifecycle controller、Redis/NATS lifecycle Provider、共享 conformance | supported（加性、默认关闭） |
 | kafka、rabbitmq、rocketmq 内建 provider | 未注册同名自定义 factory 时 BuildManager 返回 not implemented | 无内建 owner | rejected |
-| transport/websocket/delayed-task Usage、request/reply、retry、dead-letter、dynamic switch | 启用时 Validate 明确失败；Enable=false 和预填默认参数只是 inactive/旧配置兼容 | 无 | rejected |
+| transport/websocket/delayed-task Usage、request/reply、旧配置容器 retry/dead-letter、dynamic switch | 启用时 Validate 明确失败；Enable=false 和预填默认参数只是 inactive/旧配置兼容。应用级 lifecycle retry/DLQ 使用 Go manifest，不使用这些字段 | 无 | rejected |
 | `Mode=off` 下的旧 MQ 字段 | 不创建 manager/provider/event bridge，保留旧配置解析兼容 | inactive，无生命周期对象 | rejected |
+
+`ServerConfig.MQ.Retry` 与 `ServerConfig.MQ.DeadLetter` 保持 rejected 是有意的兼容边界：它们没有 Subject、必需逻辑消费组、历史起点和保留要求，不能安全表达业务生命周期。不要因为 `LifecyclePolicy` 已实现就启用这两个旧配置容器；正确入口是应用 contract manifest + `ServiceContext.RequireMessageLifecycle`。完整能力差异见 [MQ 消息生命周期与 Provider 扩展标准](MQ_MESSAGE_LIFECYCLE_GUIDE.md)。
 
 ## Persistence 边界
 

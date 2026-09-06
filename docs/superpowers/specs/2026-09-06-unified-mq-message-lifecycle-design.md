@@ -2,7 +2,7 @@
 
 ## 背景
 
-Core 当前内置 Redis Streams 和 NATS JetStream 两个 MQ Provider。Redis 发布使用无界 `XADD`，可靠消费在 Handler 成功后 `XACK`，但没有安全保留与物理回收。NATS 已等待 JetStream publish ACK，但尚未接入 Core 统一可靠订阅、重试、死信和回收契约。
+设计开始时 Core 内置 Redis Streams 和 NATS JetStream 两个 MQ Provider。Redis 发布使用无界 `XADD`，可靠消费在 Handler 成功后 `XACK`，但没有安全保留与物理回收；NATS 已等待 JetStream publish ACK，但尚未接入统一可靠订阅、重试、死信和回收契约。本文后续章节定义并记录本次补齐后的目标契约。
 
 现场内存压力说明无界保留必须受控，但在没有逐 Stream 占用证据时，不把全部 Redis 内存归因于已 ACK 历史。本设计的目标是建立可验证的统一语义，而不是用删除未完成消息换取资源稳定。
 
@@ -37,7 +37,7 @@ Publish requested
   -> Physically reclaimed
 ```
 
-- `Publish` 返回 `nil` 只表示当前 Provider 已获得 Broker 持久化确认，不表示任何消费者已处理。
+- `Publish` 返回 `nil` 表示达到该 Provider 声明的确认级别，不表示任何消费者已处理。Redis 当前只声明 `broker-accepted`；NATS JetStream 同步 publish ACK 声明 `broker-persisted`。应用要求更强级别时 capability 校验 fail closed。
 - Handler 返回 `nil` 后 Provider 才能 ACK。Handler 返回 error、panic、超时或进程中断都不能产生成功 ACK。
 - ACK 是一个消费组的状态。多组扇出中，只有所有必需组都建立连续 ACK 前沿，且消息不在任何必需组的 pending 中，该消息才算“消费完成”。
 - 达到最大投递次数后，Provider 必须先确认 DLQ 持久化，再终止原消息重投。DLQ 使用原消息的稳定身份与消费组构成幂等键；契约是 at-least-once，可能重复但不得丢失。
@@ -115,7 +115,7 @@ Redis 使用现有 Stream 和 consumer group 原生语义：
 - `XGROUP CREATE ... 0` 实现 `StartFromAllRetained`；`$` 实现 `StartFromNew`，并把实际末尾 ID 写入 Core 元数据。
 - 每个组根据 `XINFO GROUPS`、`XPENDING` 和已持久化前沿建立连续完成边界。有 pending 时使用最早 pending ID 之前的边界；无 pending 时使用连续 ACK 前沿。
 - 全局安全前沿是全部必需组前沿的最小值。再与按 Redis Stream ID 时间计算的 `MinAge` 边界取更保守值。
-- 物理回收使用 `XTRIM MINID ~ <safe-boundary> LIMIT <batch>` 的有界近似修剪，不使用无条件 `MAXLEN`。近似修剪可以保守多留，但不得越过安全边界；边界消息继续保留，避免 inclusive/exclusive 误删。
+- 物理回收在 Lua 中用有界 `XRANGE` 选择安全前沿前的消息，再执行 `XDEL`；不使用无条件 `MAXLEN` 或可能跨越安全边界的近似修剪。前沿统一表示第一条不可删除消息，避免 inclusive/exclusive 误删或最后一条历史永久滞留。
 - 重试计数和 DLQ 状态保存在 Subject+Group 低基数元数据中。到达上限时使用 Lua 原子执行 DLQ `XADD`、原消息 `XACK` 和重试元数据收敛。
 - 不删除离线 consumer group，不自动执行 `XGROUP DESTROY`、`DELCONSUMER` 或游标重置。
 - 回收脚本必须校验 owner token、policy fingerprint 和 generation。
@@ -136,7 +136,7 @@ NATS 使用 JetStream 原生 stream、durable consumer 和管理 API：
 
 | 能力 | Redis Streams | NATS JetStream | 无内置实现的 Provider |
 | --- | --- | --- | --- |
-| Broker 持久化发布确认 | `XADD` 成功 | JetStream publish ACK | 必须自行声明并验证 |
+| 发布确认 | `XADD` 成功仅为 broker-accepted | JetStream publish ACK 为 broker-persisted | 必须自行声明并验证级别 |
 | 多必需消费组 | consumer groups | durable consumers | 默认不支持 |
 | Handler 成功后 ACK | 已支持 | 本次接入统一契约 | 默认不支持 |
 | 失败重投 | pending reclaim | NAK/BackOff | 默认不支持 |
@@ -144,7 +144,7 @@ NATS 使用 JetStream 原生 stream、durable consumer 和管理 API：
 | DLQ | Redis Lua 原子转移 | publish ACK 后 Term | 默认不支持 |
 | 离线组保护 | 保留 group | 保留 durable | 默认不支持 |
 | 历史重放 | 保留范围内 | 保留范围内 | 按 capability |
-| 多组安全回收 | 全组前沿 + `XTRIM MINID` | 全 durable ACK floor + JetStream 管理 API | 默认不支持 |
+| 多组安全回收 | 全组排他前沿 + Lua 有界 `XRANGE`/`XDEL` | 全 durable ACK floor + JetStream 管理 API | 默认不支持 |
 | 有界回收 | 支持 | 支持 | 按 capability |
 | ordered-reliable | 现有契约继续支持 | 未声明则继续 fail closed | 按独立 capability |
 

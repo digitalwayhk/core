@@ -23,6 +23,8 @@
 | `ServiceEventBridge`/`ServiceContext.RequireOrderedReliableByShardKey`、`OutboxStore` earliest-first 与可选 `OutboxStoreSkipBlocked` | Stable（加性） | server/event、router | 启动 fail-closed、Outbox 同 key barrier、hot-key 可选跳过 | outbox barrier / require 测试 |
 | `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 零值/1 保持全局串行；显式 `>1` 才启用同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |
 | `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
+| `mq.LifecyclePolicy`、`LifecycleMQProvider`、`MQManager.RequireMessageLifecycle`、`ServiceContext.RequireMessageLifecycle` | Stable（加性） | server/mq、router | 应用声明必需组、发布确认、保留、重试/DLQ、容量和有界回收；Provider 能力不足或状态不确定时 fail closed | 共享 lifecycle conformance + Redis/NATS 真 Broker 测试 |
+| `mq.VerifyMessageLifecycleConformance` | Stable（测试辅助） | server/mq | 自定义 Provider 在隔离 Subject 上验证失败 pending、离线组、多组完成与物理回收 | Redis/NATS 共用同一 conformance runner |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |
 | `types.IRequestKeyedServiceCaller`、`Request.CallServiceWithKey`、`ServiceContext.CallServiceWithKey`、`ServiceContext.OwnsServiceKey`、`ServiceResolver.ResolveWithKey` | Stable（加性） | server/router、cluster | 按市场/租户稳定 key 将同步调用固定到同一健康实例，并让服务 owner gate 复用同一成员快照；普通 `CallService` 继续轮询 | rendezvous hash 顺序独立/最小迁移、local bypass 防回归、Resolver 与 ServiceContext 定向/race 测试 |
@@ -90,6 +92,7 @@
 | Manage hook 顺序与 stop 语义 | Stable | Before/After、stop/result/error 顺序保持 | `service/manage/crud_test.go` |
 | ServiceContext 运行资源关闭 | Stable | owner 有界关闭、重复关闭幂等、关闭后不承诺复用 | 任务 12/14 生命周期与 race 测试 |
 | Provider 注册扩展点 | Stable（已登记部分） | 注册、注销、并发与关闭语义保持 | cluster/transport/mq factory 测试 |
+| MQ lifecycle manifest | Stable（加性） | 未声明时不启动回收；声明后策略在进程内冻结，observe/enforce 切换通过重启；旧配置升级不静默删除消息 | `pkg/server/mq` lifecycle/controller/真 Broker 测试与 `MQ_MESSAGE_LIFECYCLE_GUIDE.md` |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
 | 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
 

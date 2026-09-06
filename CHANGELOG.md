@@ -6,6 +6,7 @@
 
 ### Added
 
+- 统一 MQ 消息生命周期：应用通过 `RequireMessageLifecycle` 声明必需逻辑消费组、发布确认、保留、重试/DLQ、容量与有界回收；Redis Streams 使用 fenced Lua 安全前沿和原子 DLQ，NATS JetStream 使用 durable AckFloor、KV 前沿、`NakWithDelay`、DLQ publish ACK 后 Term 与有界 purge。未声明时保持不回收和无限重试，能力不足或状态不确定时 fail closed；新增跨 Provider conformance、真 Broker/race 测试、低基数 Runtime 指标和长期 Provider 扩展标准。
 - keyed 同步服务调用：新增加性接口 `types.IRequestKeyedServiceCaller`，以及 `Request`、`ServiceContext` 的 `CallServiceWithKey`、`ServiceContext.OwnsServiceKey` 和 `ServiceResolver.ResolveWithKey`。显式提供市场/租户 key 时使用顺序无关、成员变化最小迁移的 rendezvous consistent hash 固定目标实例；服务自身可用同一成员快照判断 owner，空 key fail closed，原 `CallService` 继续轮询。
 - 可靠副本广播订阅：`Subscription.Broadcast=true` 使低频、幂等的控制面事件由每个服务副本各消费一次；消费组使用稳定网络端点而非重启即变的进程 UUID。非可靠广播或缺少稳定副本标识时 fail closed；价格、成交等数据面不应启用。
 - 仓库根目录增加 Apache License 2.0 标准许可证文本，README 同步标明项目的开源许可方式。

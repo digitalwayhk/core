@@ -359,6 +359,7 @@ CI 门禁由 `scripts/ci.sh` 按名称执行：
 | 完整开发规范（唯一权威源） | [docs/ai/core-skill/SKILL.md](./docs/ai/core-skill/SKILL.md) |
 | 场景矩阵、成熟度、必需配置 | [FRAMEWORK_USAGE_GUIDE.md](./docs/codex/FRAMEWORK_USAGE_GUIDE.md) |
 | 配置字段到运行时能力的对应 | [CONFIG_RUNTIME_CAPABILITY_MATRIX.md](./docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md) |
+| MQ 消息生命周期、安全回收与 Provider 扩展 | [MQ_MESSAGE_LIFECYCLE_GUIDE.md](./docs/codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md) |
 | 消费方安装 skill | [CONSUMER_AI_SKILL_SETUP.md](./docs/codex/CONSUMER_AI_SKILL_SETUP.md) |
 | 废弃 API 与迁移 | [DEPRECATION_REGISTER.md](./docs/codex/DEPRECATION_REGISTER.md) |
 | 日志规范 | [LOGGING_AUDIT_AND_STANDARD.md](./docs/codex/LOGGING_AUDIT_AND_STANDARD.md) |

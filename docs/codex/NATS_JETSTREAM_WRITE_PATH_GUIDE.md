@@ -1,36 +1,28 @@
 # NATS JetStream 可靠写路径接入指南
 
-> 本文是架构与接入指南，不表示当前框架已经完成数据库可靠写入、重试或死信队列实现。
+本文说明业务数据如何通过 Core 的 NATS JetStream Provider 可靠进入下游数据库。消息生命周期、安全回收和新增 Provider 的统一标准见 [MQ 消息生命周期与 Provider 扩展标准](MQ_MESSAGE_LIFECYCLE_GUIDE.md)。
 
 ## 结论
 
-`PrefixedBadgerDB` 适合保存可按 key 合并的最新状态；NATS JetStream 适合承载不可合并的业务事件和跨进程可靠投递。推荐把远端数据库写入放在 JetStream durable consumer 中，API 或离线节点只负责生成稳定事件并等待发布确认，不直接把 Badger 同步器扩展成通用消息代理。
+JetStream 适合不可合并的业务事件和跨进程可靠投递；`PrefixedBadgerDB`/`ReliableWriteStore` 适合可按 key 合并的最新状态。资金流水、成交、审计事实等不可合并事件应使用事务 Outbox 或稳定事件 ID，经 JetStream durable consumer 写入远端权威库。
 
-所有方案都是 at-least-once。Broker 去重不能代替消费者幂等，远端数据库必须用 `event_id` 唯一约束、幂等记录表或等价事务约束防止重复写入。
+全链路仍是 at-least-once。JetStream `Nats-Msg-Id` 与 DLQ 去重不能代替业务幂等；消费者必须以 `event_id` 唯一约束、幂等表或等价事务约束收敛重复投递。
 
-## 当前框架能力边界
+## 当前 Core 能力
 
-当前 `pkg/server/mq` 已提供：
+`pkg/server/mq` 当前提供：
 
-- `MQManager.Publish` 与 `MQManager.Subscribe` 的统一入口。
-- NATS 发布等待 JetStream publish ACK；`PublishOptions.IdempotencyKey` 映射为 `Nats-Msg-Id`。
-- 按 subject 创建 stream 和 durable consumer，消费使用显式 ACK。
-- `Message.Ack` 只在业务处理成功后调用。
-- `ServiceContext` 可按 `MQConfig` 构造和关闭 `MQManager`。
+- 同步 JetStream publish ACK；`PublishOptions.IdempotencyKey` 映射 `Nats-Msg-Id`，`OrderingKey` 进入稳定 Header。
+- `ReliableMQProvider` durable consumer；Handler 成功后 `DoubleAck`，error/panic/timeout 不成功 ACK。
+- 按 `LifecyclePolicy.Retry.Backoff` 执行 `NakWithDelay`；`MaxAckPending` 使用 Broker 原生背压。
+- 达到 `MaxDeliveries` 后，以稳定 DLQ 消息 ID同步发布并等待 ACK，之后才 `Term` 原消息；DLQ 发布失败时原消息继续重投。
+- `RequireMessageLifecycle` 预建全部必需 durable，持久化 enrollment/completed frontier，保护离线组和 pending，并在满足最小保留期后有界 purge。
+- 检测自动 `MaxAge`、`DiscardOld` 限额、非 `LimitsPolicy`、不兼容 durable、组缺失和前沿回退并 fail closed。
+- retained、bytes、backlog、pending、oldest age、redelivery、DLQ、回收和发布拒绝低基数指标。
 
-当前实现还不能直接宣称是完整的生产级数据库写通道：
-
-- `Message` 仅暴露 `Ack`，没有 `Nak`、`Term`、`InProgress`。
-- 配置尚未暴露 `AckWait`、`MaxDeliver`、退避、`MaxAckPending` 和死信策略。
-- stream 尚未暴露存储类型、副本数、保留策略、最大消息年龄/字节数。
-- `MQConfig.Retry` 和 `DeadLetter` 当前被校验为未实现，不能配置后假定已生效。
-- 当前 `Subscribe` 是 push consume 回调，不是可控制批量和背压的 durable pull consumer。
-
-因此，应先把下述缺口作为独立 MQ Provider 增强任务完成并通过真实 NATS 集成测试，再把数据库写路径标记为生产就绪。本任务不修改这些接口。
+当前 NATS Provider 没有声明 `OrderedReliableMQProvider` 或 `KeyedReliableMQProvider`。需要同 OrderingKey 严格失败屏障或跨 key 并行时，Manager 会 fail closed；不能因可靠 ACK 已实现就推导有序能力。
 
 ## 事件信封
-
-事件一经发布就不可修改，建议使用稳定 JSON 信封：
 
 ```json
 {
@@ -44,63 +36,52 @@
 }
 ```
 
-- `event_id`：全局唯一，并同时传给 `PublishOptions.IdempotencyKey`。
-- `aggregate_id`：消费者按业务实体控制顺序和并发。
-- `event_type` 与 `schema_version`：用于兼容演进；消费者拒绝未知版本并进入死信流程。
-- `payload`：只包含完成远端写入所需数据；日志不得输出完整 payload。
+- `event_id` 全局唯一，同一次业务重试复用，并传给 `PublishOptions.IdempotencyKey`。
+- `aggregate_id` 用于业务幂等与未来明确声明的分区顺序，不把实体 ID 塞进 Subject。
+- `event_type` 与 `schema_version` 用于兼容演进；未知版本返回错误并进入重试/DLQ。
+- payload 只含处理所需数据，不写日志或指标标签。
 
-建议 subject 使用稳定、低基数命名，例如 `persistence.order.snapshot.v1`。不要把用户 ID、订单 ID 放进 subject。
+Subject 使用稳定低基数命名，例如 `persistence.order.snapshot.v1`。
 
-## 模式一：在线服务默认路径
+## 在线服务与事务 Outbox
 
-适用于 API 服务与 NATS、远端数据库均可达的常规部署。
-
-```text
-API -> 校验并生成 event_id -> JetStream Publish -> 等待 publish ACK -> 返回已受理
-                                                |
-durable consumer -> 数据库幂等事务 -> 成功后 Ack
-```
-
-1. API 在请求边界生成稳定 `event_id`，同一次业务重试复用该 ID。
-2. 调用 `MQManager.Publish(ctx, subject, body, &mq.PublishOptions{IdempotencyKey: eventID})`。
-3. 只有 publish 返回 nil 才表示 JetStream 已确认接收；这不表示数据库已经写入。
-4. 消费者在一个数据库事务中检查/插入 `event_id` 幂等记录并执行业务写入。
-5. 事务提交成功后调用 `msg.Ack()`；失败时不 ACK，由未来的重试策略控制重投。
-
-若调用方必须同步读取刚写入的数据，应使用状态查询、完成事件或有界等待，不要把“发布已确认”包装成“数据库已提交”。
-
-## 模式二：离线节点路径
-
-适用于边缘节点可能长期离线、但本地必须先接受可恢复写入的场景。
+普通在线链路：
 
 ```text
-本地请求 -> PrefixedBadgerDB 保存待发信封 -> 网络恢复发布 JetStream
-                                            -> publish ACK 后标记本地已同步
+API -> 校验并生成 event_id -> JetStream Publish -> publish ACK -> 返回已受理
+durable consumer -> 数据库幂等事务 -> Handler nil -> DoubleAck
 ```
 
-- 本地 Badger 只保存“待发布事件”，不直接同步远端业务数据库。
-- 不可合并事件必须以唯一 `event_id` 作为 Badger key；若复用业务实体 key，后写会覆盖前写。
-- `EnableWriteBehind` 现有目标是 `ModelList` 远端写回，并不会自动发布 NATS。接入 JetStream 需要单独设计 publisher/outbox adapter，不能靠替换 `SetSyncDB` 偷换语义。
-- 只有收到 JetStream publish ACK 后才能删除或确认本地待发记录。
-- 本地关闭仍有待发记录时必须返回可观察错误，并保留 Badger 目录。
+publish ACK 表示 Broker 已持久化接收，不表示数据库已提交。需要同步读取本次写入时使用状态查询、完成事件或有界等待，不能把“已发布”包装成“已落业务库”。
 
-该模式适合断网缓冲，但多进程争抢、事件顺序、重放速率和本地磁盘上限都必须另设契约测试。
-
-## 模式三：事务 Outbox
-
-适用于业务数据库本身就是事实源，且“业务提交成功但事件未发布”不可接受的核心交易路径。
+核心交易路径优先使用事务 Outbox：
 
 ```text
 业务事务 -> 更新业务表 + 插入 outbox
-relay/CDC -> JetStream Publish -> publish ACK -> 标记 outbox 已发布
-consumer -> 下游幂等处理 -> Ack
+relay/CDC -> JetStream publish ACK -> 标记 outbox 已发布
+consumer -> 下游幂等事务 -> DoubleAck
 ```
 
-这是资金、审计和关键状态变更的首选方式。业务表与 outbox 必须在同一数据库事务提交；relay 可重试，JetStream 与消费者均按 `event_id` 幂等。Badger 不参与主数据库事务一致性。
+业务表与 Outbox 必须在同一数据库事务中提交。relay 可以重试，事件 ID 在 Broker 和消费者两端保持稳定。
+
+离线边缘节点可先在本地可靠存储待发事件，网络恢复后发布；只有收到 publish ACK 才能确认或删除本地记录。不可合并事件必须以唯一事件 ID 为 key，不能用业务实体 key 让后写覆盖前写。
+
+## 生命周期声明
+
+生命周期是应用 contract，不是基础设施配置猜测：
+
+```go
+policy := contract.OrderSnapshotLifecyclePolicy()
+if err := sc.RequireMessageLifecycle(ctx, policy); err != nil {
+	return err
+}
+```
+
+manifest 必须列出当前实际可靠订阅的逻辑组，并明确 `StartFromAllRetained` 或 `StartFromNew`。先以 `LifecycleModeObserve` 上线，核对 durable、pending、lag、oldest age 和容量；确认后通过重启切换 `LifecycleModeEnforce`。
+
+不调用 `RequireMessageLifecycle` 时保持旧行为：不自动安全回收，可靠 Handler 失败无限重试。`ServerConfig.MQ.Retry`/`DeadLetter` 仍是 rejected 的旧容器，不能表达 Subject 和必需组，不应启用。
 
 ## 基础配置
-
-当前可用配置只覆盖 Provider 选择和命名前缀：
 
 ```json
 {
@@ -117,26 +98,35 @@ consumer -> 下游幂等处理 -> Ack
 }
 ```
 
-`Mode=on` 适合必须依赖 NATS 的写链路，连接失败应阻止服务启动。`Mode=auto` 允许依赖不可用时降级，因此不能用于承诺可靠接收的写 API。
+必须依赖可靠接收的写 API 使用 `Mode=on`，连接或 lifecycle capability 不满足时阻止启动。`Mode=auto` 允许外部依赖不可用时降级，不适合承诺可靠接收的接口。
 
-不要启用 `Retry.Enable`、`DeadLetter.Enable`、request/reply 或动态切换；当前配置校验会明确拒绝这些未实现能力。
+Broker 生产部署还要单独确定 file storage、副本数、磁盘、账号配额、TLS/凭据、备份恢复和监控。Core lifecycle 管理的 Stream 禁止外部设置会删除未完成消息的 `MaxAge`/`DiscardOld`/per-subject TTL。声明硬容量时 NATS 使用 `DiscardNew` 拒绝新发布，不删除旧消息。
 
-## 生产化前必须补齐
+NATS 管理 API 无法把“读取全部 durable 状态”和“purge”组合成一条事务。生产账号必须用 ACL 禁止其他应用并发删除或重建 lifecycle stream/durable；组变更按长期指南进入维护窗口。
 
-1. 扩展消息确认契约：`Ack/Nak/Term/InProgress`，并定义 handler panic 与超时行为。
-2. 扩展 consumer 配置：`AckWait`、`MaxDeliver`、backoff、`MaxAckPending`、durable/filter subject。
-3. 扩展 stream 配置：file storage、生产副本数、retention、`MaxAge`、`MaxBytes`。
-4. 实现明确的 DLQ/parking-lot 流程；超过重试上限的事件保留原始 `event_id` 和失败分类。
-5. 增加 pull consumer 或等价有界批处理，限制数据库并发和单批事务大小。
-6. 增加真实 NATS 集成测试：发布确认、重复 ID、重投、进程重启、消费者故障、DLQ、关闭积压。
-7. 增加指标：publish 延迟/失败、consumer backlog、oldest message age、redelivery、DLQ 数、数据库处理延迟。
+## Handler、重试与 DLQ
 
-## 推荐实施顺序
+- 数据库事务提交前不得返回 `nil`。返回 error、panic 或超时会重投。
+- Handler 自身必须设置数据库/HTTP context 超时并保持线程安全；Go 不能强制终止忽略取消的 goroutine。
+- `MaxAckPending` 应匹配数据库连接池和允许的并发事务，不能靠大值掩盖下游不足。
+- Backoff 数组用完后重复最后一个值。达到上限后 DLQ 先同步 publish ACK，再 `Term`。
+- DLQ 保留原 payload、源 Subject、逻辑组、源 stream sequence、OrderingKey 和固定失败分类；日志不输出这些高基数身份或 payload。
+- DLQ 是待补偿事实，必须单独声明容量、保留、告警和人工/自动恢复流程。
 
-1. 先选择在线 JetStream、离线节点或 transactional outbox，不把三种语义塞进同一个开关。
-2. 为事件信封、subject、schema 兼容和消费者幂等写契约测试。
-3. 独立增强 NATS Provider 的确认、重试、DLQ、stream/consumer 配置和 pull 消费能力。
-4. 使用 `docker-compose.integration.yml` 的 NATS 服务做显式集成测试，默认单元测试继续 skip 外部依赖。
-5. 先影子发布并校验消费者幂等，再逐步切换写流量；保留 backlog 和 oldest-age 告警。
+## 容量与观测
 
-在上述门禁完成前，当前 NATS Provider 可用于基础 EventBridge/事件流，但不应作为资金或审计数据“绝不丢失”的唯一承诺。
+估算至少包含平均消息大小、峰值发布速率、正常保留时间、最坏必需组离线窗口、复制倍数、Stream 索引、durable 状态、KV 元数据和 DLQ。消费者离线时应告警、扩容、背压或让发布明确失败，不能删除未完成消息。
+
+重点指标：`retained_messages`、`retained_bytes`、`backlog_messages`、`pending_messages`、`oldest_age_sec`、`redelivered_total`、`dead_letter_total`、`dead_letter_fail_total`、`reclaimed_total`、`reclaim_fail_total`、`publish_rejected_total`。未采集值省略并标记 `not_collected`，不填假零。
+
+## 真 Broker 验收
+
+```bash
+docker compose --project-name core-mq-lifecycle \
+  -f docker-compose.integration.yml up -d --wait nats
+
+CORE_TEST_NATS_URL=nats://127.0.0.1:4222 \
+go test -race ./pkg/server/mq -run '^TestNATS|MessageLifecycleConformance' -count=1
+```
+
+发布前还要验证真实生产拓扑下的进程重启、Broker 重启、慢/离线消费者、漏 ACK、重复投递、DLQ 故障、并发发布/ACK/回收、容量拒绝和受控组变更。未运行的场景明确写 `NOT RUN`，不能用 mock 代替。

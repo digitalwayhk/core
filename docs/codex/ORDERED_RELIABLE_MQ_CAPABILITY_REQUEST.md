@@ -35,7 +35,7 @@ provider，可以用各自机制满足同一行为契约。
 - Outbox 的 `IdempotencyKey`、`ShardKey`、`LoadPending` 和
   `MarkPublished`；
 - Redis Streams 基础 provider，并实现了 `ReliableMQProvider`；
-- NATS JetStream 基础 provider（仅普通 Publish/Subscribe）。
+- NATS JetStream provider 已支持普通与可靠 durable Publish/Subscribe，但尚未声明 ordered/keyed reliable。
 
 当前缺口（已对照源码）：
 
@@ -49,7 +49,7 @@ provider，可以用各自机制满足同一行为契约。
   “同 key 最早失败记录阻断后续记录”的通用契约；
 - 服务启动时无法声明并验证“必须支持 ordered-reliable by key”；
 - 现有 provider 没有共用的 ordered-reliable conformance suite；
-- 内置 NATS JetStream provider **未实现** `ReliableMQProvider`；
+- 内置 NATS JetStream provider 已实现 `ReliableMQProvider`，但**未实现** `OrderedReliableMQProvider` / `KeyedReliableMQProvider`；
 - 内置 Redis Streams 的 `SubscribeReliable`：
   - 默认按批 `Count` 拉取，handler 失败后仍会继续处理同批后续消息；
   - 同 consumer group 多实例会分片消费，不保证全局按 key 顺序；

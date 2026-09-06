@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、MQ 消息生命周期、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
@@ -26,7 +26,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 模型分类与继承、持久化边界、**建库建表与字段迁移** | [models.md](models.md) |
 | Manage CRUD、Hook 继承、`GetList` 数据源、动态分库 | [manage.md](manage.md) |
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
-| 多服务调用、EventBridge、WebSocket、Cluster/MQ、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
+| 多服务调用、EventBridge、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
 | Casdoor/JWT 双域、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
@@ -34,7 +34,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 集成测试模板、UAT 角色拆分、发布门禁 | [testing-and-release.md](testing-and-release.md) |
 | 高频错误快速自检 | [common-mistakes.md](common-mistakes.md) |
 
-`docs/codex/` 下的现行指南仍是运维与兼容契约来源：场景选择看 `FRAMEWORK_USAGE_GUIDE.md`，配置能力看 `CONFIG_RUNTIME_CAPABILITY_MATRIX.md`，运行时看 `ROUTERINFO_RUNTIME_GUIDE.md`，日志看 `LOGGING_AUDIT_AND_STANDARD.md`，外部依赖看 `EXTERNAL_INTEGRATION_GUIDE.md`，JetStream 看 `NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，性能看 `PERFORMANCE_SLO_BASELINE.md`，兼容与废弃看 `API_COMPATIBILITY_SURFACE.md`、`DEPRECATION_REGISTER.md`、`CONSUMER_COMPATIBILITY_MATRIX.md`，CI 与发布看 `CI_QUALITY_GATE_MATRIX.md`、`docs/RELEASE_POLICY.md`。
+`docs/codex/` 下的现行指南仍是运维与兼容契约来源：场景选择看 `FRAMEWORK_USAGE_GUIDE.md`，配置能力看 `CONFIG_RUNTIME_CAPABILITY_MATRIX.md`，运行时看 `ROUTERINFO_RUNTIME_GUIDE.md`，日志看 `LOGGING_AUDIT_AND_STANDARD.md`，外部依赖看 `EXTERNAL_INTEGRATION_GUIDE.md`，MQ 生命周期与 Provider 扩展看 `MQ_MESSAGE_LIFECYCLE_GUIDE.md`，JetStream 写路径看 `NATS_JETSTREAM_WRITE_PATH_GUIDE.md`，性能看 `PERFORMANCE_SLO_BASELINE.md`，兼容与废弃看 `API_COMPATIBILITY_SURFACE.md`、`DEPRECATION_REGISTER.md`、`CONSUMER_COMPATIBILITY_MATRIX.md`，CI 与发布看 `CI_QUALITY_GATE_MATRIX.md`、`docs/RELEASE_POLICY.md`。
 
 `PROJECT_REVIEW_ACTION_PLAN.md`、`plans/`、`*_PROMPT.md`、`*_REVIEW.md` 是历史审计证据，不是新实现的默认规范。
 

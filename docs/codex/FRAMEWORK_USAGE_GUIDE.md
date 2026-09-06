@@ -135,7 +135,7 @@ _ = admin // 仅交给独立运维入口，不注入业务服务。
 
 目录固定为 `<BasePath>/<service>/dc-<DataCenterID>/machine-<MachineID>`。`ServiceContext` 必须持有 store 资源，业务通过同一服务实例的 typed runtime 访问，禁止恢复包级 registry。`AutoMachineID` 重新分配后会解析到新目录，不会自动接管旧 MachineID 的 pending；编排层必须为每个副本提供稳定、独立的持久卷并制定旧目录 drain/接管流程。
 
-JetStream 数据库写路径的模式选择、当前能力边界和生产化前置条件见 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`。当前 Provider 只应视为基础事件流能力，不能把尚未实现的重试、死信和 pull consumer 当作已生效。
+JetStream 数据库写路径的模式选择、当前能力边界和生产化前置条件见 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`。当前 Provider 已支持可靠 durable、重试、DLQ、`MaxAckPending` 与生命周期安全前沿，但仍未声明 ordered/keyed reliable；业务幂等、事务 Outbox、容量取值和生产 Broker 拓扑也不能由框架替代。
 
 ## 外部依赖
 

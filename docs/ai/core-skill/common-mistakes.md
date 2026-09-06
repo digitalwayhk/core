@@ -23,6 +23,10 @@
 - 把 `models/schema`（`EnsureStorage`）当成业务 DDL 层，为没有跨模型事务的新服务无条件生成该包。
 - 在每个具体 model/API 里散落库连接，未在基础 model/store 集中 DataAction；或把「库类型」与「ModelList vs IDataAction」混为一谈。
 - 集成测试重新实现公共 Suite，只测 handler，或依赖开发机已有配置和数据库。
+- 把某个消费组 ACK 当成全局完成，在 Handler 中直接 `XDEL`/`XTRIM`/TTL，或用 `MAXLEN` 删除离线组、pending、重试中的消息。正确做法是 contract manifest + `RequireMessageLifecycle`，由 Provider 按全部必需组安全前沿回收。
+- 把 Redis `XADD` 成功描述为已落盘，或在 Provider 不满足 publish ACK、DLQ、指标、保留/回放 requirement 时静默降级。能力不足必须 fail closed。
+- 生命周期一上来就用 `enforce`，或热改必需组、重建 durable、重置游标。首次迁移先 `observe`；组变更进入维护窗口并核对 enrollment/completed frontier。
+- 未采集 MQ retained bytes、pending、lag、oldest age 时输出 0，或把 message ID、用户/订单 ID、动态 Subject、payload 放入指标标签或日志。
 - 仅因配置字段存在就声明能力稳定。
 - 单元测试隐式依赖 Docker/本机数据库。
 - 已需要高吞吐写时仍去找已删除的全局 `StartOrderWriteStore`、或使用兼容层 `SetSyncDB` 与 Manage 式列表轮询，未采用「本地可靠写 → `UseWriteBehind` → 远程权威库」。
