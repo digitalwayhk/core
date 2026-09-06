@@ -21,11 +21,15 @@ type MQManager struct {
 	closed    bool
 	closeOnce sync.Once
 	closeErr  error
+	lifecycle *lifecycleController
 }
 
 // NewManager returns an initialised MQManager with no active provider.
 func NewManager() *MQManager {
-	return &MQManager{registry: make(map[string]MQProvider)}
+	return &MQManager{
+		registry:  make(map[string]MQProvider),
+		lifecycle: newLifecycleController(),
+	}
 }
 
 func (*MQManager) ComponentName() string { return "mq" }
@@ -99,6 +103,7 @@ func (m *MQManager) Close() error {
 		m.current = nil
 		m.registry = make(map[string]MQProvider)
 		m.mu.Unlock()
+		m.lifecycle.stop()
 
 		type providerPointer struct {
 			typ     reflect.Type
@@ -150,6 +155,9 @@ func (m *MQManager) Health(ctx context.Context) error {
 
 // Publish 将消息交给当前 Provider；迁移双写阶段会透明地改由 Switcher 发布。
 func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, opts *PublishOptions) error {
+	if err := m.lifecycle.allowPublish(subject); err != nil {
+		return err
+	}
 	m.mu.RLock()
 	if m.closed || m.current == nil {
 		m.mu.RUnlock()
@@ -172,6 +180,23 @@ func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, op
 		return ErrNotConnected
 	}
 	return m.current.Publish(ctx, subject, data, opts)
+}
+
+// RequireMessageLifecycle 冻结 Subject 生命周期策略并启动有界观测/回收 worker。
+func (m *MQManager) RequireMessageLifecycle(ctx context.Context, policy LifecyclePolicy) error {
+	if m == nil {
+		return ErrNotConnected
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.current == nil {
+		return ErrNotConnected
+	}
+	provider, ok := m.current.(LifecycleMQProvider)
+	if !ok {
+		return ErrLifecycleUnsupported
+	}
+	return m.lifecycle.require(ctx, provider, policy)
 }
 
 // Subscribe delegates to the active provider.
