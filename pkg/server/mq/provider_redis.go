@@ -17,14 +17,15 @@ import (
 // RedisStreamProvider implements MQProvider using Redis Streams.
 // It is the default development-friendly provider requiring only Redis.
 type RedisStreamProvider struct {
-	addr            string
-	db              int
-	prefix          string
-	client          *redis.Client
-	mu              sync.Mutex
-	subs            map[string]context.CancelFunc
-	reliableMetrics map[string]*redisReliableSubscriptionMetrics
-	wg              sync.WaitGroup
+	addr             string
+	db               int
+	prefix           string
+	client           *redis.Client
+	mu               sync.Mutex
+	subs             map[string]context.CancelFunc
+	reliableMetrics  map[string]*redisReliableSubscriptionMetrics
+	lifecycleMetrics lifecycleProviderMetrics
+	wg               sync.WaitGroup
 }
 
 type redisReliableSubscriptionMetrics struct {
@@ -617,7 +618,9 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		gauges["blocked_keys"] += float64(item.blockedKeys.Load())
 		gauges["pending_keys"] += float64(item.pendingKeys.Load())
 	}
-	return observability.RuntimeComponentSnapshot{Component: "mq", State: "ok", Gauges: gauges}
+	return observability.RuntimeComponentSnapshot{
+		Component: "mq", State: "ok", Gauges: gauges, Counters: r.lifecycleMetrics.snapshot(),
+	}
 }
 
 func (r *RedisStreamProvider) reliableKeyedWorks(

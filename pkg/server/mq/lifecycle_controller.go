@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,13 +16,16 @@ type lifecycleEntry struct {
 
 // lifecycleController 持有已冻结的 Subject 策略、快照和有界回收 worker。
 type lifecycleController struct {
-	mu      sync.RWMutex
-	entries map[string]*lifecycleEntry
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	now     func() time.Time
-	close   sync.Once
+	mu              sync.RWMutex
+	entries         map[string]*lifecycleEntry
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	now             func() time.Time
+	close           sync.Once
+	reclaimed       atomic.Int64
+	reclaimFailed   atomic.Int64
+	publishRejected atomic.Int64
 }
 
 func newLifecycleController() *lifecycleController {
@@ -147,6 +151,9 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) error
 	defer cancel()
 	snapshot, err := provider.InspectLifecycle(runCtx, policy)
 	if err != nil {
+		if policy.Mode == LifecycleModeEnforce {
+			c.reclaimFailed.Add(1)
+		}
 		return err
 	}
 	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
@@ -164,8 +171,25 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) error
 	if policy.Mode != LifecycleModeEnforce {
 		return nil
 	}
-	_, err = provider.ReclaimLifecycle(runCtx, policy, snapshot)
+	result, err := provider.ReclaimLifecycle(runCtx, policy, snapshot)
+	if err != nil {
+		c.reclaimFailed.Add(1)
+		return err
+	}
+	c.reclaimed.Add(result.Reclaimed)
 	return err
+}
+
+func (c *lifecycleController) recordPublishRejected(subject string) {
+	if c == nil {
+		return
+	}
+	c.mu.RLock()
+	_, declared := c.entries[subject]
+	c.mu.RUnlock()
+	if declared {
+		c.publishRejected.Add(1)
+	}
 }
 
 func (c *lifecycleController) allowPublish(subject string) error {

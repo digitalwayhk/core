@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -16,13 +17,14 @@ import (
 // NATSJetStreamProvider implements MQProvider using NATS JetStream.
 // It is the recommended production provider.
 type NATSJetStreamProvider struct {
-	url           string
-	streamPrefix  string
-	durablePrefix string
-	mu            sync.Mutex
-	conn          *nats.Conn
-	js            jetstream.JetStream
-	subs          []jetstream.ConsumeContext
+	url              string
+	streamPrefix     string
+	durablePrefix    string
+	mu               sync.Mutex
+	conn             *nats.Conn
+	js               jetstream.JetStream
+	subs             []jetstream.ConsumeContext
+	lifecycleMetrics lifecycleProviderMetrics
 }
 
 // NewNATSJetStreamProvider creates a provider connecting to the given NATS URL.
@@ -41,6 +43,23 @@ func NewNATSJetStreamProvider(url, streamPrefix, durablePrefix string) *NATSJetS
 }
 
 func (n *NATSJetStreamProvider) Name() string { return "nats-jetstream" }
+
+func (*NATSJetStreamProvider) ComponentName() string { return "mq" }
+
+func (n *NATSJetStreamProvider) RuntimeMetricSnapshot(context.Context) observability.RuntimeComponentSnapshot {
+	if n == nil {
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	n.mu.Lock()
+	connected := n.conn != nil && n.conn.IsConnected()
+	n.mu.Unlock()
+	if !connected {
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	return observability.RuntimeComponentSnapshot{
+		Component: "mq", State: "ok", Counters: n.lifecycleMetrics.snapshot(),
+	}
+}
 
 // Connect establishes a NATS connection and creates a JetStream context.
 func (n *NATSJetStreamProvider) Connect(_ context.Context) error {

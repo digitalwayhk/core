@@ -149,6 +149,9 @@ func (r *RedisStreamProvider) processReliableMessage(
 	if err != nil {
 		return fmt.Errorf("redis-stream: record delivery attempt: %w", err)
 	}
+	if attempt > 1 {
+		r.lifecycleMetrics.redelivered.Add(1)
+	}
 	if attempt <= int64(policy.Retry.MaxDeliveries) {
 		err = callReliableHandler(ctx, policy.Retry.HandlerTimeout, handler, message)
 		if err == nil {
@@ -176,8 +179,10 @@ func (r *RedisStreamProvider) processReliableMessage(
 		r.streamKey(policy.Retry.DeadLetterSubject),
 	}, options.Group, messageID, dedupeID, data, subject, orderingKey, idempotencyKey).Err()
 	if err != nil {
+		r.lifecycleMetrics.deadLetterFailed.Add(1)
 		return fmt.Errorf("redis-stream: dead letter transfer: %w", err)
 	}
+	r.lifecycleMetrics.deadLetters.Add(1)
 	return nil
 }
 

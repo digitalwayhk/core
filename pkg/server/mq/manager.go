@@ -45,11 +45,15 @@ func (m *MQManager) RuntimeMetricSnapshot(ctx context.Context) observability.Run
 	if closed || provider == nil {
 		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
 	}
-	metrics, ok := provider.(observability.RuntimeMetricProvider)
-	if !ok {
-		return observability.RuntimeComponentSnapshot{Component: "mq", State: "not_collected"}
+	providerSnapshot := observability.RuntimeComponentSnapshot{Component: "mq", State: "not_collected"}
+	if metrics, ok := provider.(observability.RuntimeMetricProvider); ok {
+		providerSnapshot = metrics.RuntimeMetricSnapshot(ctx)
 	}
-	return metrics.RuntimeMetricSnapshot(ctx)
+	lifecycleSnapshot, ok := m.lifecycle.runtimeMetricSnapshot(ctx)
+	if !ok {
+		return providerSnapshot
+	}
+	return mergeRuntimeMetricSnapshots(providerSnapshot, lifecycleSnapshot)
 }
 
 // Register adds a provider to the registry. It does not make it active.
@@ -156,6 +160,7 @@ func (m *MQManager) Health(ctx context.Context) error {
 // Publish 将消息交给当前 Provider；迁移双写阶段会透明地改由 Switcher 发布。
 func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, opts *PublishOptions) error {
 	if err := m.lifecycle.allowPublish(subject); err != nil {
+		m.lifecycle.recordPublishRejected(subject)
 		return err
 	}
 	m.mu.RLock()
@@ -165,13 +170,21 @@ func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, op
 	}
 	switcher := m.switcher
 	if switcher == nil {
-		defer m.mu.RUnlock()
-		return m.current.Publish(ctx, subject, data, opts)
+		err := m.current.Publish(ctx, subject, data, opts)
+		m.mu.RUnlock()
+		if err != nil {
+			m.lifecycle.recordPublishRejected(subject)
+		}
+		return err
 	}
 	m.mu.RUnlock()
 
 	if switcher.Stage() == SwitchStageDoubleWrite {
-		return switcher.DoubleWritePublish(ctx, subject, data, opts)
+		err := switcher.DoubleWritePublish(ctx, subject, data, opts)
+		if err != nil {
+			m.lifecycle.recordPublishRejected(subject)
+		}
+		return err
 	}
 
 	m.mu.RLock()
@@ -179,7 +192,11 @@ func (m *MQManager) Publish(ctx context.Context, subject string, data []byte, op
 	if m.closed || m.current == nil {
 		return ErrNotConnected
 	}
-	return m.current.Publish(ctx, subject, data, opts)
+	err := m.current.Publish(ctx, subject, data, opts)
+	if err != nil {
+		m.lifecycle.recordPublishRejected(subject)
+	}
+	return err
 }
 
 // RequireMessageLifecycle 冻结 Subject 生命周期策略并启动有界观测/回收 worker。

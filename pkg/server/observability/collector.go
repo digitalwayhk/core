@@ -10,9 +10,10 @@ import (
 
 // ComponentCollector 将 RuntimeMetricProvider 快照导出为 Prometheus gauge。
 type ComponentCollector struct {
-	providers map[string][]RuntimeMetricProvider
-	desc      *prometheus.Desc
-	mu        sync.Mutex
+	providers   map[string][]RuntimeMetricProvider
+	desc        *prometheus.Desc
+	counterDesc *prometheus.Desc
+	mu          sync.Mutex
 }
 
 // NewComponentCollector 创建组件采集器。service 使用逻辑服务名。
@@ -28,12 +29,19 @@ func NewComponentCollector(service string, providers []RuntimeMetricProvider) *C
 			[]string{"service", "component", "name", "state"},
 			nil,
 		),
+		counterDesc: prometheus.NewDesc(
+			"core_component_counter",
+			"core component runtime counter",
+			[]string{"service", "component", "name", "state"},
+			nil,
+		),
 	}
 }
 
 // Describe 实现 prometheus.Collector。
 func (c *ComponentCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.desc
+	ch <- c.counterDesc
 }
 
 // Collect 实现 prometheus.Collector。
@@ -64,6 +72,9 @@ func (c *ComponentCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 			for name, value := range filterGauges(snap.Gauges) {
 				ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, value, service, component, name, state)
+			}
+			for name, value := range filterCounters(snap.Counters) {
+				ch <- prometheus.MustNewConstMetric(c.counterDesc, prometheus.CounterValue, value, service, component, name, state)
 			}
 		}
 	}

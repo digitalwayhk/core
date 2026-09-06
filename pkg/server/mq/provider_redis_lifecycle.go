@@ -58,6 +58,13 @@ local function less(a, b)
   return as < bs
 end
 
+local function successor(id)
+  local dash = string.find(id, "-")
+  local millis = string.sub(id, 1, dash - 1)
+  local sequence = tonumber(string.sub(id, dash + 1)) + 1
+  return millis .. "-" .. tostring(sequence)
+end
+
 local groups = redis.call("XINFO", "GROUPS", KEYS[1])
 for argi = 6, #ARGV do
   local required = ARGV[argi]
@@ -77,7 +84,7 @@ for argi = 6, #ARGV do
     end
   end
   if not found then return redis.error_reply("LIFECYCLE_REQUIRED_GROUP_MISSING") end
-  if less(delivered, ARGV[4]) then return redis.error_reply("LIFECYCLE_GROUP_CURSOR_REGRESSED") end
+  if less(successor(delivered), ARGV[4]) then return redis.error_reply("LIFECYCLE_GROUP_CURSOR_REGRESSED") end
   local pending = redis.call("XPENDING", KEYS[1], required)
   if pending[1] > 0 and less(pending[2], ARGV[4]) then
     return redis.error_reply("LIFECYCLE_PENDING_BEFORE_FRONTIER")
@@ -184,7 +191,11 @@ func (r *RedisStreamProvider) EnsureLifecycle(ctx context.Context, policy Lifecy
 		if err := r.client.HSetNX(ctx, metaKey, redisLifecycleEnrollmentField(required.Name), enrollment).Err(); err != nil {
 			return err
 		}
-		if err := r.client.HSetNX(ctx, metaKey, redisLifecycleCompletedField(required.Name), enrollment).Err(); err != nil {
+		completed := enrollment
+		if enrollment != "0-0" {
+			completed = streamIDSuccessor(enrollment)
+		}
+		if err := r.client.HSetNX(ctx, metaKey, redisLifecycleCompletedField(required.Name), completed).Err(); err != nil {
 			return err
 		}
 	}
@@ -241,9 +252,15 @@ func (r *RedisStreamProvider) InspectLifecycle(ctx context.Context, policy Lifec
 		}
 		if pending.Count > 0 && pending.Lower != "" {
 			frontier = pending.Lower
+		} else if frontier != "0-0" {
+			frontier = streamIDSuccessor(frontier)
 		}
-		if streamIDCompare(frontier, enrollment) < 0 {
-			frontier = enrollment
+		enrollmentBoundary := enrollment
+		if enrollment != "0-0" {
+			enrollmentBoundary = streamIDSuccessor(enrollment)
+		}
+		if streamIDCompare(frontier, enrollmentBoundary) < 0 {
+			frontier = enrollmentBoundary
 		}
 		completedField := redisLifecycleCompletedField(required.Name)
 		previous, previousErr := r.client.HGet(ctx, metaKey, completedField).Result()
@@ -442,4 +459,12 @@ func streamIDCompare(left, right string) int {
 		return 1
 	}
 	return 0
+}
+
+func streamIDSuccessor(id string) string {
+	millis, sequence, err := parseStreamID(id)
+	if err != nil {
+		return id
+	}
+	return fmt.Sprintf("%d-%d", millis, sequence+1)
 }

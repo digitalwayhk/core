@@ -126,6 +126,9 @@ func (n *NATSJetStreamProvider) handleReliableMessage(
 		_ = message.NakWithDelay(50 * time.Millisecond)
 		return
 	}
+	if metadata.NumDelivered > 1 {
+		n.lifecycleMetrics.redelivered.Add(1)
+	}
 	maxDeliveries := 0
 	timeout := time.Duration(0)
 	if policy != nil {
@@ -154,10 +157,12 @@ func (n *NATSJetStreamProvider) handleReliableMessage(
 	}
 
 	if err := n.publishNATSDeadLetter(ctx, js, subject, group, policy, metadata, message); err != nil {
+		n.lifecycleMetrics.deadLetterFailed.Add(1)
 		logx.Errorw("mq_nats_dead_letter_failed", logx.Field("subject", subject), logx.Field("error", err))
 		_ = message.NakWithDelay(natsRetryDelay(policy, metadata.NumDelivered))
 		return
 	}
+	n.lifecycleMetrics.deadLetters.Add(1)
 	if err := message.Term(); err != nil {
 		logx.Errorw("mq_nats_term_failed", logx.Field("subject", subject), logx.Field("error", err))
 	}
