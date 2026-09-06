@@ -68,9 +68,10 @@ func (n *NATSJetStreamProvider) Close() error {
 	}
 	n.subs = nil
 	if n.conn != nil {
-		n.conn.Drain()
+		_ = n.conn.Drain()
 		n.conn = nil
 	}
+	n.js = nil
 	return nil
 }
 
@@ -86,7 +87,11 @@ func (n *NATSJetStreamProvider) Publish(ctx context.Context, subject string, dat
 	if opts != nil && opts.IdempotencyKey != "" {
 		pubOpts = append(pubOpts, jetstream.WithMsgID(opts.IdempotencyKey))
 	}
-	_, err := js.Publish(ctx, n.subjectKey(subject), data, pubOpts...)
+	message := &nats.Msg{Subject: n.subjectKey(subject), Data: data, Header: nats.Header{}}
+	if opts != nil && opts.OrderingKey != "" {
+		message.Header.Set("Core-Ordering-Key", opts.OrderingKey)
+	}
+	_, err := js.PublishMsg(ctx, message, pubOpts...)
 	return err
 }
 
