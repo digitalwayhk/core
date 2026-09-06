@@ -655,7 +655,7 @@ func (r *RedisStreamProvider) reliableKeyedWorks(
 func (r *RedisStreamProvider) logReliableKeyedFailure(subject string, failure reliableKeyedFailure) {
 	logx.Errorw("mq_redis_reliable_keyed_handler_failed",
 		logx.Field("subject", subject),
-		logx.Field("error", failure.err),
+		logx.Field("failure_class", "handler_or_delivery_failed"),
 	)
 }
 
@@ -738,7 +738,7 @@ func (r *RedisStreamProvider) handleReliableMessages(
 		if err := r.processReliableMessage(ctx, key, subject, options, item, handler); err != nil {
 			logx.Errorw("mq_redis_reliable_handler_failed",
 				logx.Field("subject", subject),
-				logx.Field("error", err),
+				logx.Field("failure_class", "handler_or_delivery_failed"),
 			)
 			return redisReliableRetryDelay(err)
 		}
