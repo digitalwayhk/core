@@ -71,12 +71,14 @@ type ServiceContext struct {
 	StateChan                chan bool   `json:"-"`
 	serverOption             *types.ServerOption
 	serverOptionMu           sync.RWMutex
-	TransportSelector        transport.TransportSelector     `json:"-"`
-	TransportStats           *transport.Stats                `json:"-"`
-	MQManager                *mq.MQManager                   `json:"-"`
-	EventStream              *event.Stream                   `json:"-"`
-	EventBridge              *event.MQBridge                 `json:"-"`
-	ServiceEventBridge       *event.ServiceEventBridge       `json:"-"`
+	TransportSelector        transport.TransportSelector `json:"-"`
+	TransportStats           *transport.Stats            `json:"-"`
+	MQManager                *mq.MQManager               `json:"-"`
+	EventStream              *event.Stream               `json:"-"`
+	EventBridge              *event.MQBridge             `json:"-"`
+	ServiceEventBridge       *event.ServiceEventBridge   `json:"-"`
+	cacheNotificationBridge  *internalNotificationBridge
+	authNotificationBridge   *internalNotificationBridge
 	RouteWebSocketHub        *types.RouteWebSocketHub        `json:"-"`
 	RouteCacheManager        *routecache.Manager             `json:"-"`
 	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
@@ -881,7 +883,6 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Field("error", err),
 		)
 	}
-	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
 	if err := observability.RegisterProcessLabels(sc.Service.Name, sc.ServiceInstanceID); err != nil {
 		// 同进程多服务（测试 / all-in-one）时保留首次注册；非冲突错误才记日志。
@@ -969,10 +970,20 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		if con.AuthRevocation.Mode == config.AuthRevocationModeShared && sc.EventBridge == nil {
 			panic("auth lifecycle: shared mode requires MQ event-stream")
 		}
+		var authEvents authstate.EventBridge = sc.ServiceEventBridge
+		if con.AuthRevocation.Mode == config.AuthRevocationModeShared {
+			bridge, err := sc.buildInternalNotificationBridge("identity")
+			if err != nil {
+				panic(fmt.Sprintf("auth lifecycle: internal notification init failed: %v", err))
+			}
+			sc.authNotificationBridge = bridge
+			sc.registerInternalNotificationMetrics(bridge)
+			authEvents = bridge
+		}
 		manager, err := authstate.NewManager(
 			sc.Service.Name,
 			con.AuthRevocation,
-			authstate.WithEventBridge(sc.ServiceEventBridge),
+			authstate.WithEventBridge(authEvents),
 			authstate.WithCasdoorEventHook(sc.CasdoorEventHookProvider),
 		)
 		if err != nil {
@@ -980,13 +991,29 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 		}
 		sc.AuthRevocationManager = manager
 	}
+	sc.RouteWebSocketHub = types.NewRouteWebSocketHub(sc.Service.Name, sc.ServiceEventBridge)
 
 	// shared 缓存必须等 MQ/EventBridge 外部适配器装配完成后再初始化，确保
 	// Redis 事实缓存与跨节点失效订阅同时就绪，不允许只启动本地层。
+	var cacheEvents routecache.InvalidationBridge = sc.ServiceEventBridge
+	if con.RouteCache.Mode == "shared" {
+		bridge, err := sc.buildInternalNotificationBridge("cache")
+		if err != nil {
+			if con.RouteCache.Redis.OnUnavailable != "bypass" {
+				panic(fmt.Sprintf("route cache: internal notification init failed: %v", err))
+			}
+			cacheEvents = nil
+			logx.Infow("route_cache_bypassed", logx.Field("service", sc.Service.Name), logx.Field("reason", "internal_notification_unavailable"))
+		} else {
+			sc.cacheNotificationBridge = bridge
+			sc.registerInternalNotificationMetrics(bridge)
+			cacheEvents = bridge
+		}
+	}
 	cacheManager, cacheErr := routecache.NewManager(
 		sc.Service.Name,
 		con.RouteCache,
-		routecache.WithInvalidationBridge(sc.ServiceEventBridge),
+		routecache.WithInvalidationBridge(cacheEvents),
 	)
 	if cacheErr != nil {
 		panic(fmt.Sprintf("route cache: init failed: %v", cacheErr))
@@ -1002,6 +1029,14 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 func cleanupInitializedServiceContext(sc *ServiceContext) {
 	if sc == nil {
 		return
+	}
+	if sc.cacheNotificationBridge != nil {
+		_ = sc.cacheNotificationBridge.Close()
+		sc.cacheNotificationBridge = nil
+	}
+	if sc.authNotificationBridge != nil {
+		_ = sc.authNotificationBridge.Close()
+		sc.authNotificationBridge = nil
 	}
 	if sc.AuthRevocationManager != nil {
 		sc.AuthRevocationManager.BeginClose()
@@ -1197,6 +1232,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 	broker := own.CrossNodeBroker
 	mqManager := own.MQManager
 	serviceEventBridge := own.ServiceEventBridge
+	cacheNotificationBridge := own.cacheNotificationBridge
+	authNotificationBridge := own.authNotificationBridge
 	routeWebSocketHub := own.RouteWebSocketHub
 	routeCacheManager := own.RouteCacheManager
 	publicRateLimiter := own.PublicRateLimiter
@@ -1212,6 +1249,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.MQManager = nil
 		own.EventBridge = nil
 		own.ServiceEventBridge = nil
+		own.cacheNotificationBridge = nil
+		own.authNotificationBridge = nil
 		own.RouteWebSocketHub = nil
 		own.RouteCacheManager = nil
 		own.PublicRateLimiter = nil
@@ -1227,6 +1266,18 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.ownsClusterProvider = false
 	}
 	own.lifecycleMu.Unlock()
+	if !state {
+		if cacheNotificationBridge != nil {
+			if err := cacheNotificationBridge.Close(); err != nil {
+				own.recordShutdownError(err)
+			}
+		}
+		if authNotificationBridge != nil {
+			if err := authNotificationBridge.Close(); err != nil {
+				own.recordShutdownError(err)
+			}
+		}
+	}
 	if !state && hmacAuthLifecycle != nil {
 		hmacAuthLifecycle.cancel()
 		hmacDone := make(chan struct{})

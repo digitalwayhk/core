@@ -79,6 +79,17 @@ if ! grep -q "NoRequiredGroups" "$AUTHORITATIVE/multiservice-and-observability.m
   fail "multiservice-and-observability.md 未声明显式无必需消费组的契约"
 fi
 
+# 内部瞬时通知必须保留独立长期标准，不能被误读为业务 MQ 可以随 ACK 删除。
+internal_guide="docs/codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md"
+if [[ ! -s "$internal_guide" ]]; then
+  fail "缺少内部通知长期标准: $internal_guide"
+fi
+for entry in "$MQ_LIFECYCLE_GUIDE" "$AUTHORITATIVE/multiservice-and-observability.md"; do
+  if ! grep -q "CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md" "$entry"; then
+    fail "$entry 未链接内部通知长期标准"
+  fi
+done
+
 # 3. 每个权威源文件都不能超过管道截断阈值。
 for path in "$AUTHORITATIVE"/*.md; do
   size="$(filesize "$path")"

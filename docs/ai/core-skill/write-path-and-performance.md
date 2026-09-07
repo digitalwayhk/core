@@ -8,6 +8,7 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - L1/L2/L3 命中统一返回 `json.RawMessage`。L1 `MaxBytes=0` 按进程/容器有效内存 2% 解析为 16–256 MiB 共享预算；`MaxEntries=0` 自动解析；超过 `MaxValueBytes` 的响应正常返回但不进入任何缓存层。
 - 商品、供应商、支付类型、订单状态变更后，通过 ServiceContext 专属 EventBridge 执行主动失效；TTL 只是兜底。
 - 同键冷加载使用 RouteCache/`syncx.SingleFlight`，不在 API 自建锁和队列。
+- shared 缓存内部通知由组合根使用原生广播；每 1 秒读取路由 generation 并推进本地记录版本，覆盖 key 级漏通知，单轮预算 3 秒、5 秒无成功对账即旁路。版本写在记录内，不扩展物理 key、不每秒全扫 Badger；L1/L2 原 TTL/容量仍负责回收。通知不健康时禁止旧 L1/L2 命中，显式 `RouteCache.Redis.OnUnavailable=bypass` 仍可完全旁路。详见 [内部通知标准](../../codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)，不得把可重建缓存的失效方式复制到业务 pending。
 
 `PrefixedBadgerDB` / `ReliableWriteStore` 的 write-behind 与 RouterInfo L2 是两种不同能力：L2 可重建；write-behind pending 在远端权威库确认前是业务事实。高 TPS 路径必须等**本地可靠写成功**后才向调用方确认，再异步同步远程；远端 ACK 后才删除 pending。
 

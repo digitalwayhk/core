@@ -35,6 +35,8 @@
 
 ### Changed
 
+- shared 路由缓存失效、Casdoor 身份通知改由框架专用 Redis Pub/Sub / Core NATS 广播并权威补偿，停止创建无界内部消息历史。缓存失效保护与无订阅 Casdoor WebSocket 周期撤销检查闭环，补充通知健康/失败/缓存补偿指标；业务 MQ 的 ACK、必需组、retention-only、重试和 DLQ 不变。**升级须同逻辑服务维护窗口切换，不保证旧/新内部协议混跑，旧内部 Stream 不自动删除，存量内存不会因此全部释放**；见 `docs/codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md`。
+
 - **菜单同步刷新展示标题**：`syncOneMenu` 过去在权限集合未变时直接返回，存量菜单的标题永远停留在首次落库的值。现在权限比较与展示标题比较分开判断，权限未变但代码里的中英标题变了也会写库；`Sort`、`Icon`、`Description` 仍是用户字段，不被生成结果覆盖。目录同步遵循同一规则。
 - **标准命令默认标题按语言生成**：`RouterToCommand` 签名不变，但默认语言下 `add`、`edit`、`remove`、`submit`、`release` 的 `Title` 从 `Add`、`Edit` 等英文类型名变为中文；`Command` 与 `Name` 仍是稳定键，消费方可继续用 `ViewCommandModel` 覆盖。需要显式指定语言时使用新增的 `RouterToLocaleCommand`。
 - **UpdateMenu 报表菜单**：不再把 `reports.List` / `reports.View` 扫成 List/View 两行；改为按 `ReportDef` **一个报表一行**（Name=code、Title=菜单名、Url=`/report/{service}/{code}`），并清理历史 API 伪菜单。
@@ -70,6 +72,8 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
+
+- Redis ClusterProvider 的服务发现唤醒 Stream 统一使用近似 `MAXLEN ~ 10000`，Register、Heartbeat、Deregister 均受同一私有阈值约束。节点 TTL 键及索引仍是状态权威，Watch 周期对账补偿被裁剪通知；不改变业务 MQ/EventBridge Stream，也不要求应用执行 XTRIM。旧超大通知流随后续写入按 Redis 原生裁剪预算逐步收敛，所有发现写入方升级后才能持续保证有界；不新增公共 API 或配置。
 
 - 管理菜单首次查询空表时改为复用 `UpdateMenu` 的原子菜单/权限同步链路，再返回已同步结果；不再由通用默认数据保存逐条写入关联权限，避免 SQLite 首次初始化出现 `permissions_model` 不存在或菜单 ID 冲突。
 - LocalProvider 的 MachineID 分配跳过仍在冷却期内的离线槽位，与注册校验保持一致，避免服务快速重启反复选中不可注册的槽位；保留原有冷却时长、耗尽返回值和注册并发裁决。

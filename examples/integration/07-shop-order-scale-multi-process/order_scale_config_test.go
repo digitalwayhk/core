@@ -26,6 +26,8 @@ func TestOrderReplicaUsesAutoMachineID(t *testing.T) {
 
 // TestDiscoveryProviderComesFromConfig 验证 07 只通过配置选择发现 Provider，业务服务不写死发现实现。
 func TestDiscoveryProviderComesFromConfig(t *testing.T) {
+	// 全仓真实集成会配置隔离 Redis；默认值断言必须拥有自己的环境边界。
+	t.Setenv("SHOP_REDIS_ADDR", "")
 	local := bootstrap.LocalServiceConfig(contract.OrderServiceName, 18183, 4, 3)
 	distributed := bootstrap.DistributedOrderConfig(18183, 4)
 	require.Equal(t, "local", local.Cluster.Provider)
@@ -34,6 +36,10 @@ func TestDiscoveryProviderComesFromConfig(t *testing.T) {
 	require.Equal(t, "mesh", distributed.Transport.GRPC.Security.Mode)
 	require.Equal(t, "127.0.0.1:6379", distributed.Cluster.Providers.Redis.Addr)
 	require.Equal(t, "127.0.0.1:6379", distributed.MQ.RedisStream.Addr)
+	t.Setenv("SHOP_REDIS_ADDR", "127.0.0.1:16379")
+	overridden := bootstrap.DistributedOrderConfig(18183, 4)
+	require.Equal(t, "127.0.0.1:16379", overridden.Cluster.Providers.Redis.Addr)
+	require.Equal(t, "127.0.0.1:16379", overridden.MQ.RedisStream.Addr)
 }
 
 // TestOrderReplicaPortsComeFromEnvironment 验证 order 副本端口可由编排环境覆盖。

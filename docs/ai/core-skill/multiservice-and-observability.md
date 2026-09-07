@@ -108,6 +108,10 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 
 ## Cluster、Transport、MQ 与事件
 
+- 框架自己的 Redis 发现唤醒流使用统一 `MAXLEN ~ 10000`；不是业务事实，节点 TTL 状态和 `ttl/2` 对账保持权威。Local/etcd/Consul 不另建同类消息流，不能强行套用 Stream 删除。
+- **框架内部例外**：shared 路由缓存失效与 Casdoor 身份变更由 ServiceContext 专用桥使用 Redis Pub/Sub / Core NATS 每副本广播，并用权威对账补偿；不创建持久组，不向业务开放通用瞬时 API。业务 EventBridge、ACK、必需组和 `NoRequiredGroups` 不变。新 Provider 必须独立验证内部广播能力，不能靠注册工厂假装支持。
+- 内部协议升级须同逻辑服务维护窗口切换；不自动删除旧内部 Stream，不保证新旧协议混跑。权限、容量、故障预算和精确旧资源核对见 [Core 内部通知生命周期标准](../../codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)。业务项目不得自行日常 XTRIM。
+
 - Local cluster：`Stable`。
 - etcd/Consul：`Conditional`，需要显式配置和外部依赖。
 - 内部同步传输默认 gRPC，HTTP 只作为显式备用；自定义 Socket 已删除，迁移见 `docs/codex/GRPC_TRANSPORT_MIGRATION.md`。

@@ -16,6 +16,10 @@ import (
 
 const redisDiscoveryConnectTimeout = 2 * time.Second
 
+// redisDiscoveryEventMaxLen 是发现唤醒流的近似保留条数，不是业务消息保留策略。
+// 节点键为状态权威，Watch 周期对账补偿被裁剪的通知；近似裁剪允许少量宏节点余量。
+const redisDiscoveryEventMaxLen = 10000
+
 var redisRegisterNodeScript = redis.NewScript(`
 local owner = redis.call('GET', KEYS[1])
 if owner and owner ~= ARGV[1] then
@@ -25,7 +29,7 @@ redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
 redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
 redis.call('SET', KEYS[3], ARGV[4], 'PX', ARGV[3])
 redis.call('SADD', KEYS[4], ARGV[1])
-redis.call('XADD', KEYS[5], '*', 'service', ARGV[4], 'action', 'upsert', 'node_id', ARGV[1])
+redis.call('XADD', KEYS[5], 'MAXLEN', '~', ARGV[5], '*', 'service', ARGV[4], 'action', 'upsert', 'node_id', ARGV[1])
 return 1
 `)
 
@@ -36,7 +40,7 @@ end
 redis.call('DEL', KEYS[2])
 redis.call('DEL', KEYS[3])
 redis.call('SREM', KEYS[4], ARGV[1])
-redis.call('XADD', KEYS[5], '*', 'service', ARGV[2], 'action', 'delete', 'node_id', ARGV[1])
+redis.call('XADD', KEYS[5], 'MAXLEN', '~', ARGV[3], '*', 'service', ARGV[2], 'action', 'delete', 'node_id', ARGV[1])
 return 1
 `)
 
@@ -103,7 +107,7 @@ func (p *RedisProvider) Register(ctx context.Context, node *NodeInfo) error {
 	}
 	result, err := redisRegisterNodeScript.Run(ctx, p.client,
 		[]string{p.slotKey(copyNode), p.nodeKey(copyNode.ServiceName, copyNode.ID), p.indexKey(copyNode.ID), p.serviceKey(copyNode.ServiceName), p.eventsKey()},
-		copyNode.ID, data, p.ttl.Milliseconds(), copyNode.ServiceName,
+		copyNode.ID, data, p.ttl.Milliseconds(), copyNode.ServiceName, redisDiscoveryEventMaxLen,
 	).Int()
 	if err != nil {
 		return fmt.Errorf("redis discovery register %s: %w", copyNode.ID, err)
@@ -122,7 +126,7 @@ func (p *RedisProvider) Deregister(ctx context.Context, nodeID string) error {
 	}
 	_, err = redisDeregisterNodeScript.Run(ctx, p.client,
 		[]string{p.slotKey(node), p.nodeKey(node.ServiceName, node.ID), p.indexKey(node.ID), p.serviceKey(node.ServiceName), p.eventsKey()},
-		node.ID, node.ServiceName,
+		node.ID, node.ServiceName, redisDiscoveryEventMaxLen,
 	).Result()
 	if err != nil {
 		return fmt.Errorf("redis discovery deregister %s: %w", nodeID, err)
