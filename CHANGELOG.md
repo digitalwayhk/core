@@ -71,6 +71,8 @@
 
 ### Fixed
 
+- Redis ClusterProvider 的服务发现唤醒 Stream 统一使用近似 `MAXLEN ~ 10000`，Register、Heartbeat、Deregister 均受同一私有阈值约束。节点 TTL 键及索引仍是状态权威，Watch 周期对账补偿被裁剪通知；不改变业务 MQ/EventBridge Stream，也不要求应用执行 XTRIM。旧超大通知流随后续写入按 Redis 原生裁剪预算逐步收敛，所有发现写入方升级后才能持续保证有界；不新增公共 API 或配置。
+
 - 管理菜单首次查询空表时改为复用 `UpdateMenu` 的原子菜单/权限同步链路，再返回已同步结果；不再由通用默认数据保存逐条写入关联权限，避免 SQLite 首次初始化出现 `permissions_model` 不存在或菜单 ID 冲突。
 - LocalProvider 的 MachineID 分配跳过仍在冷却期内的离线槽位，与注册校验保持一致，避免服务快速重启反复选中不可注册的槽位；保留原有冷却时长、耗尽返回值和注册并发裁决。
 
