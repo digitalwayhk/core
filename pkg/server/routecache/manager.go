@@ -63,11 +63,18 @@ type Manager struct {
 	state     atomic.Uint32
 	ttlJitter func(time.Duration) time.Duration
 
-	invalidationReady atomic.Bool
-	recoveryMu        sync.Mutex
-	subscriptionMu    sync.Mutex
-	localCancel       func()
-	externalCancel    func()
+	invalidationReady      atomic.Bool
+	recoveryMu             sync.Mutex
+	subscriptionMu         sync.Mutex
+	localCancel            func()
+	externalCancel         func()
+	notificationGuard      notificationStateReader
+	notificationEpoch      atomic.Uint64
+	notificationConnection atomic.Uint64
+	notificationSynced     atomic.Int64
+	notificationContext    context.Context
+	notificationCancel     context.CancelFunc
+	notificationDone       chan struct{}
 
 	routesMu sync.RWMutex
 	routes   map[string]routePolicy
@@ -104,6 +111,7 @@ func NewManager(service string, cfg config.RouteCacheConfig, options ...Option) 
 		ttlJitter: jitterTTL,
 	}
 	manager.state.Store(uint32(StateEnabled))
+	manager.notificationContext, manager.notificationCancel = context.WithCancel(context.Background())
 
 	if cfg.Mode == "shared" {
 		if resolved.redisClient != nil {
@@ -120,15 +128,17 @@ func NewManager(service string, cfg config.RouteCacheConfig, options ...Option) 
 		if !manager.redis.Ping(ctx) {
 			return manager.sharedUnavailable(errors.New("route cache Redis ping failed"))
 		}
-		if err := manager.subscribeInvalidation(ctx); err != nil {
+		if err := manager.subscribeInvalidation(manager.notificationContext); err != nil {
 			return manager.sharedUnavailable(err)
 		}
 	}
 
 	if err := manager.initLocalTiers(); err != nil {
+		manager.notificationCancel()
 		manager.cancelInvalidationSubscriptions()
 		return nil, err
 	}
+	manager.startNotificationRecovery()
 	return manager, nil
 }
 
@@ -141,6 +151,7 @@ func resolutionSource(auto bool) string {
 
 func (m *Manager) sharedUnavailable(cause error) (*Manager, error) {
 	if m.config.Redis.OnUnavailable != "bypass" {
+		m.notificationCancel()
 		m.cancelInvalidationSubscriptions()
 		return nil, cause
 	}
@@ -204,15 +215,18 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 	if m == nil || m.closed.Load() {
 		return nil, false, ErrManagerClosed
 	}
-	if m.State() != StateEnabled {
+	if !m.notificationAvailable() || m.State() != StateEnabled {
 		return nil, false, nil
 	}
 	key, enabled, err := m.cacheKey(route, source)
 	if err != nil || !enabled {
 		return nil, false, err
 	}
+	epoch := m.notificationEpoch.Load()
 	if value, ok := m.l1.Get(key); ok {
-		return value, true, nil
+		if value, valid := m.notificationValue(value, epoch); valid && m.notificationStillCurrent(epoch) {
+			return value, true, nil
+		}
 	}
 	if m.l2 != nil {
 		data, ok, getErr := m.l2.Get(key)
@@ -220,8 +234,10 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 			return nil, false, getErr
 		}
 		if ok {
-			m.l1.Set(key, json.RawMessage(data), m.routeTTL(route))
-			return data, true, nil
+			if value, valid := m.notificationValue(data, epoch); valid && m.notificationStillCurrent(epoch) {
+				m.l1.Set(key, json.RawMessage(data), m.routeTTL(route))
+				return value, true, nil
+			}
 		}
 	}
 	if m.redis == nil {
@@ -236,12 +252,15 @@ func (m *Manager) Get(route string, source interface{}) (interface{}, bool, erro
 		return nil, false, nil
 	}
 	ttl := m.routeTTL(route)
-	if m.l2 != nil {
-		if err := m.l2.Set(key, data, ttl); err != nil {
-			return nil, false, err
-		}
+	if !m.notificationStillCurrent(epoch) {
+		return nil, false, nil
 	}
-	m.l1.Set(key, json.RawMessage(data), ttl)
+	if err := m.storeNotificationLocal(key, data, ttl, epoch); err != nil {
+		return nil, false, err
+	}
+	if !m.notificationStillCurrent(epoch) {
+		return nil, false, nil
+	}
 	return data, true, nil
 }
 
@@ -249,13 +268,14 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 	if m == nil || m.closed.Load() {
 		return ErrManagerClosed
 	}
-	if m.State() != StateEnabled {
+	if !m.notificationAvailable() || m.State() != StateEnabled {
 		return nil
 	}
 	key, enabled, err := m.cacheKey(route, source)
 	if err != nil || !enabled {
 		return err
 	}
+	epoch := m.notificationEpoch.Load()
 	if ttl <= 0 {
 		ttl = m.routeTTL(route)
 	}
@@ -279,13 +299,10 @@ func (m *Manager) Set(route string, source, value interface{}, ttl time.Duration
 			return err
 		}
 	}
-	if m.l2 != nil {
-		if err := m.l2.Set(key, data, ttl); err != nil {
-			return err
-		}
+	if !m.notificationStillCurrent(epoch) {
+		return nil
 	}
-	m.l1.Set(key, json.RawMessage(data), ttl)
-	return nil
+	return m.storeNotificationLocal(key, data, ttl, epoch)
 }
 
 func jitterTTL(ttl time.Duration) time.Duration {
@@ -485,6 +502,9 @@ func (m *Manager) Recover(ctx context.Context) (bool, error) {
 	if m == nil || m.closed.Load() {
 		return false, ErrManagerClosed
 	}
+	if m.notificationGuard != nil {
+		return m.reconcileNotification(ctx)
+	}
 	if m.config.Mode != "shared" || m.State() != StateDegraded {
 		return m.State() == StateEnabled, nil
 	}
@@ -528,6 +548,12 @@ func (m *Manager) Close() {
 		return
 	}
 	m.state.Store(uint32(StateClosed))
+	if m.notificationCancel != nil {
+		m.notificationCancel()
+	}
+	if m.notificationDone != nil {
+		<-m.notificationDone
+	}
 	m.cancelInvalidationSubscriptions()
 	m.clearLocal()
 	if m.l1 != nil {
@@ -622,7 +648,11 @@ func (m *Manager) degrade() {
 	if m.config.Mode != "shared" || m.closed.Load() {
 		return
 	}
-	m.clearLocal()
+	if m.notificationGuard != nil {
+		m.notificationEpoch.Add(1)
+	} else {
+		m.clearLocal()
+	}
 	m.state.Store(uint32(StateDegraded))
 }
 

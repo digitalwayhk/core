@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/digitalwayhk/core/internal/controlnotify"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
@@ -22,24 +23,30 @@ import (
 )
 
 type SessionSubscriptions struct {
-	subscriptions   map[string]map[uint64]types.IRouter // channel -> hash -> router
-	metadata        map[string]interface{}              // 客户端元数据
-	createdAt       time.Time
-	lastActivity    time.Time
-	mu              sync.RWMutex
-	manage          *MelodyManager
-	client          *MelodyClient
-	sr              *router.ServiceRouter
-	req             *SessionRequest
-	identity        *safe.AccessTokenIdentity
-	hmacAuth        bool
-	hmacExpiryTimer *time.Timer
-	hmacExpired     atomic.Bool
-	hmacExpiryGen   atomic.Uint64
-	hmacExpiryMu    sync.Mutex
-	sessionContext  context.Context
-	cancelSession   context.CancelFunc
-	hookSlots       chan struct{}
+	subscriptions        map[string]map[uint64]types.IRouter // channel -> hash -> router
+	metadata             map[string]interface{}              // 客户端元数据
+	createdAt            time.Time
+	lastActivity         time.Time
+	mu                   sync.RWMutex
+	manage               *MelodyManager
+	client               *MelodyClient
+	sr                   *router.ServiceRouter
+	req                  *SessionRequest
+	identity             *safe.AccessTokenIdentity
+	hmacAuth             bool
+	hmacExpiryTimer      *time.Timer
+	hmacExpired          atomic.Bool
+	hmacExpiryGen        atomic.Uint64
+	hmacExpiryMu         sync.Mutex
+	sessionContext       context.Context
+	cancelSession        context.CancelFunc
+	hookSlots            chan struct{}
+	notificationMu       sync.Mutex
+	notificationGen      atomic.Uint64
+	notificationExpired  atomic.Bool
+	notificationCancel   context.CancelFunc
+	notificationState    *controlnotify.AuthSessionState
+	notificationWatchdog *time.Timer
 }
 
 func NewSessionSubscriptions(manage *MelodyManager, client *MelodyClient, sr *router.ServiceRouter) *SessionSubscriptions {
@@ -206,6 +213,7 @@ func (s *SessionSubscriptions) UnsubscribeAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopHMACExpiryTimerLocked()
+	s.stopNotificationSessionLocked()
 	s.req = nil
 	s.identity = nil
 	s.hmacAuth = false
@@ -288,11 +296,18 @@ func (s *SessionSubscriptions) logonLocked(req *SessionRequest) error {
 	if !active {
 		return webSocketAuthenticationError(errors.New("service authentication is closing"))
 	}
+	notificationState := &controlnotify.AuthSessionState{}
 	if identity.Identity.Provider == types.AuthProviderCasdoor {
 		if manager == nil {
 			return webSocketAuthenticationError(errors.New("revocation authority unavailable"))
 		}
-		if err := manager.Authorize(context.Background(), identity.Identity); err != nil {
+		lifetime := s.sessionContext
+		if lifetime == nil {
+			lifetime = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(lifetime, 3*time.Second)
+		defer cancel()
+		if err := manager.Authorize(controlnotify.WithAuthSession(ctx, notificationState), identity.Identity); err != nil {
 			return webSocketAuthenticationError(err)
 		}
 	}
@@ -306,6 +321,7 @@ func (s *SessionSubscriptions) logonLocked(req *SessionRequest) error {
 	s.identity = identity
 	s.hmacAuth = false
 	s.hmacExpired.Store(false)
+	s.startNotificationSessionLocked(manager, identity, notificationState)
 
 	return nil
 }
@@ -355,6 +371,7 @@ func (s *SessionSubscriptions) hmacLogonLocked(req *SessionRequest) error {
 	s.req = req
 	s.identity = identity
 	s.hmacAuth = true
+	s.stopNotificationSessionLocked()
 	s.hmacExpired.Store(false)
 	s.scheduleHMACExpiryLocked(identity)
 	return nil
@@ -427,6 +444,9 @@ func sanitizeHMACSessionRequest(req *SessionRequest) {
 }
 
 func (s *SessionSubscriptions) sessionAuthenticated() bool {
+	if s != nil && s.notificationExpired.Load() {
+		return false
+	}
 	if s == nil || s.req == nil || s.identity == nil {
 		return false
 	}
@@ -465,6 +485,7 @@ func (s *SessionSubscriptions) Logout() *SessionResponse {
 
 func (s *SessionSubscriptions) logoutLocked() *SessionResponse {
 	s.stopHMACExpiryTimerLocked()
+	s.stopNotificationSessionLocked()
 	s.req = nil
 	s.identity = nil
 	s.hmacAuth = false
@@ -530,7 +551,11 @@ func (s *SessionSubscriptions) authorizeAuthenticatedSubscription(info *types.Ro
 		if manager == nil {
 			return nil, webSocketAuthenticationError(errors.New("revocation authority unavailable"))
 		}
-		if err := manager.Authorize(requestContext(req), verified.Identity); err != nil {
+		ctx := requestContext(req)
+		if s.notificationState != nil {
+			ctx = controlnotify.WithAuthSession(ctx, s.notificationState)
+		}
+		if err := manager.Authorize(ctx, verified.Identity); err != nil {
 			return nil, webSocketAuthenticationError(err)
 		}
 	}

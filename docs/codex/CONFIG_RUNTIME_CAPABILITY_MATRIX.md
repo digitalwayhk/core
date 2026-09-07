@@ -4,6 +4,8 @@
 
 ## Server 与认证
 
+框架 shared 缓存/身份通知复用现有内置 Redis/NATS MQ 配置，由私有原生广播桥消费，不增加公共字段；无法建立或校验隔离时认证拒绝启动，缓存仅在既有显式 `RouteCache.Redis.OnUnavailable=bypass` 下旁路。自定义 MQ 工厂不等于支持内部通知。维护窗口和观测边界见 [内部通知标准](CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)。MQ 业务能力和原有生命周期矩阵不变。
+
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
 | `ServerConfig.RestConf` | go-zero 默认值和校验 | go-zero rest server | upstream |

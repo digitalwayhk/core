@@ -48,7 +48,8 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 - `/api/refresh` 不访问 OAuth，但必须验证 Refresh 用途、AuthType、Provider、Subject、Generation 和当前在线用户状态；Auth Token 不能访问 Manage，Manage Token 不能访问 Private。
 - `/api/casdoor/webhook?type=auth|manage` 使用对应域独立 Bearer Secret。Webhook 是控制面，不记录 Header/Payload，成功仅表示撤销事实已持久化且控制事件被 EventBridge 接受。
 - 服务可选实现 `IAuthHookProvider`（签名前）、`IAuthRequestHookProvider`（验签及撤销校验后、Router 前）和 `ICasdoorEventHookProvider`（撤销事实提交后的异步业务通知）。只有类型化 `PublicError` 可向前端公开安全业务消息，普通错误统一 500 脱敏。
-- local 模式使用 Badger，适合单实例。shared 模式使用 Redis 权威且必须启用 MQ `event-stream`；Redis/EventBridge 故障时认证面 fail closed，Public REST 保持可用。
+- local 模式使用 Badger，适合单实例。shared 模式使用 Redis 权威且必须启用内置 MQ `event-stream`，身份通知由专用原生广播桥装配。HTTP 始终查询权威，不因通知单独断线改用快照或拒绝权威仍健康的请求；权威故障 fail closed，Public REST 保持可用。
+- shared Casdoor WebSocket 从登录开始（包含无订阅会话）每 1 秒查权威，单次 3 秒预算、每 Manager 至多 64 个检查在途，5 秒 watchdog 防停滞。通知断线/恢复代次变化、漏撤销或无法确认时关闭旧会话；不恢复旧身份，不影响其他认证域。完整条件、容量与维护窗口迁移见 [内部通知标准](../../codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)。不得将原生通知接受等同于每个副本已完成撤销。
 - WebSocket 登录与每次认证订阅都重新验证 Access Token 和撤销权威；更高世代、blocked 事件或共享权威不可用会关闭旧 Casdoor 连接。
 
 ## 可选 HMAC 请求认证

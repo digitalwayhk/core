@@ -35,6 +35,8 @@
 
 ### Changed
 
+- shared 路由缓存失效、Casdoor 身份通知改由框架专用 Redis Pub/Sub / Core NATS 广播并权威补偿，停止创建无界内部消息历史。缓存失效保护与无订阅 Casdoor WebSocket 周期撤销检查闭环，补充通知健康/失败/缓存补偿指标；业务 MQ 的 ACK、必需组、retention-only、重试和 DLQ 不变。**升级须同逻辑服务维护窗口切换，不保证旧/新内部协议混跑，旧内部 Stream 不自动删除，存量内存不会因此全部释放**；见 `docs/codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md`。
+
 - **菜单同步刷新展示标题**：`syncOneMenu` 过去在权限集合未变时直接返回，存量菜单的标题永远停留在首次落库的值。现在权限比较与展示标题比较分开判断，权限未变但代码里的中英标题变了也会写库；`Sort`、`Icon`、`Description` 仍是用户字段，不被生成结果覆盖。目录同步遵循同一规则。
 - **标准命令默认标题按语言生成**：`RouterToCommand` 签名不变，但默认语言下 `add`、`edit`、`remove`、`submit`、`release` 的 `Title` 从 `Add`、`Edit` 等英文类型名变为中文；`Command` 与 `Name` 仍是稳定键，消费方可继续用 `ViewCommandModel` 覆盖。需要显式指定语言时使用新增的 `RouterToLocaleCommand`。
 - **UpdateMenu 报表菜单**：不再把 `reports.List` / `reports.View` 扫成 List/View 两行；改为按 `ReportDef` **一个报表一行**（Name=code、Title=菜单名、Url=`/report/{service}/{code}`），并清理历史 API 伪菜单。

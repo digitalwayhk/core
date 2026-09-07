@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/digitalwayhk/core/internal/controlnotify"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -49,26 +50,27 @@ func IdentityChangedSubject(service string) string {
 
 // Manager 将权威撤销状态与本地已确认快照组合为请求授权边界。
 type Manager struct {
-	service        string
-	authority      Store
-	snapshot       Store
-	shared         bool
-	events         EventBridge
-	ctx            context.Context
-	cancel         context.CancelFunc
-	closing        atomic.Bool
-	subMu          sync.Mutex
-	localCancel    func()
-	externalCancel func()
-	closeOnce      sync.Once
-	closeErr       error
-	hook           types.ICasdoorEventHookProvider
-	hookWake       chan struct{}
-	hookWG         sync.WaitGroup
-	hookBackoff    []time.Duration
-	hookSlots      chan struct{}
-	hookTimeout    time.Duration
-	authorityDown  atomic.Bool
+	service           string
+	authority         Store
+	snapshot          Store
+	shared            bool
+	events            EventBridge
+	ctx               context.Context
+	cancel            context.CancelFunc
+	closing           atomic.Bool
+	subMu             sync.Mutex
+	localCancel       func()
+	externalCancel    func()
+	closeOnce         sync.Once
+	closeErr          error
+	hook              types.ICasdoorEventHookProvider
+	hookWake          chan struct{}
+	hookWG            sync.WaitGroup
+	hookBackoff       []time.Duration
+	hookSlots         chan struct{}
+	hookTimeout       time.Duration
+	authorityDown     atomic.Bool
+	notificationSlots chan struct{}
 }
 
 func NewManager(service string, cfg config.AuthRevocationConfig, options ...Option) (*Manager, error) {
@@ -120,10 +122,12 @@ func newManagerWithStores(service string, authority, snapshot Store, shared bool
 		ctx: ctx, cancel: cancel, hookWake: make(chan struct{}, 1),
 		hookBackoff: []time.Duration{time.Second, 5 * time.Second, 30 * time.Second, 2 * time.Minute, 10 * time.Minute},
 		hookSlots:   make(chan struct{}, 1), hookTimeout: casdoorEventHookTimeout,
+		notificationSlots: make(chan struct{}, 64),
 	}
 }
 
-// ProcessEvent 原子应用权威状态，并等待可靠控制事件被 EventBridge 接受后再返回。
+// ProcessEvent 原子应用权威状态，并等待控制通知被事件桥接受后再返回。
+// 内置 shared 桥使用瞬时广播；接受不等于各副本已处理，漏通知由权威检查补偿。
 func (m *Manager) ProcessEvent(ctx context.Context, value types.CasdoorEvent, retention time.Duration) (ApplyResult, error) {
 	result, err := m.ApplyEvent(ctx, value, retention)
 	if err != nil {
@@ -192,6 +196,25 @@ func (m *Manager) Authorize(ctx context.Context, identity types.AuthIdentity) er
 	if identity.Provider != types.AuthProviderCasdoor {
 		return nil
 	}
+	session := controlnotify.AuthSession(ctx)
+	var notification interface{ NotificationState() (uint64, bool) }
+	if m.shared && session != nil {
+		var ok bool
+		notification, ok = m.events.(interface{ NotificationState() (uint64, bool) })
+		if !ok {
+			return ErrAuthorityUnavailable
+		}
+		epoch, ready := notification.NotificationState()
+		if !session.Accept(epoch, ready) {
+			return ErrAuthorityUnavailable
+		}
+		select {
+		case m.notificationSlots <- struct{}{}:
+			defer func() { <-m.notificationSlots }()
+		default:
+			return ErrAuthorityUnavailable
+		}
+	}
 	key := identityKey(m.service, identity)
 	if err := key.validate(); err != nil || identity.UID == "" {
 		return ErrIdentityRevoked
@@ -207,6 +230,12 @@ func (m *Manager) Authorize(ctx context.Context, identity types.AuthIdentity) er
 	}
 	if m.shared && m.snapshot != nil {
 		if err := m.snapshot.SaveSnapshot(ctx, state); err != nil {
+			return ErrAuthorityUnavailable
+		}
+	}
+	if notification != nil {
+		epoch, ready := notification.NotificationState()
+		if ctx.Err() != nil || !session.Accept(epoch, ready) {
 			return ErrAuthorityUnavailable
 		}
 	}

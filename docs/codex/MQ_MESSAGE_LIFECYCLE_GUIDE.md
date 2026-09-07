@@ -4,6 +4,8 @@
 
 ## 消息生命周期状态机
 
+**框架内部通知边界：** Redis 发现唤醒、shared 缓存失效和 Casdoor 身份变更有独立可读权威及补偿，遵循 [Core 内部通知生命周期标准](CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)。它们不要求业务项目创建可靠消费组；其瞬时广播不能替代本文的业务消息策略、ACK、pending、多组完成证明或纯保留主题。
+
 ```text
 Publish requested
   -> Broker accepted
