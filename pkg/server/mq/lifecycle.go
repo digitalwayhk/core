@@ -76,7 +76,7 @@ type ConsumerGroupRequirement struct {
 	Start ConsumerStartPosition
 }
 
-// RetentionPolicy 声明消费完成后仍需保留的最小时间。
+// RetentionPolicy 声明消息入 Broker 后的最小保留时间；有必需组时还必须等待全部组完成。
 type RetentionPolicy struct {
 	MinAge time.Duration
 }
@@ -111,10 +111,13 @@ type LifecyclePolicy struct {
 	Mode               LifecycleMode
 	RequiredPublishAck PublishAckLevel
 	RequiredGroups     []ConsumerGroupRequirement
-	Retention          RetentionPolicy
-	Retry              RetryPolicy
-	Capacity           CapacityPolicy
-	Reclaim            ReclaimBudget
+	// NoRequiredGroups 显式声明仅按保留期管理，不承诺可靠消费完成；不能与 RequiredGroups/Retry 同用。
+	// omitempty 保持旧策略的持久化指纹不变，零值不会授权无组回收。
+	NoRequiredGroups bool `json:",omitempty"`
+	Retention        RetentionPolicy
+	Retry            RetryPolicy
+	Capacity         CapacityPolicy
+	Reclaim          ReclaimBudget
 }
 
 // Normalize 补充保守默认值并规范化组顺序。
@@ -161,7 +164,14 @@ func (p LifecyclePolicy) Validate() error {
 	if p.RequiredPublishAck != PublishAckBrokerAccepted && p.RequiredPublishAck != PublishAckBrokerPersisted {
 		return fmt.Errorf("%w: publish ack level %q is invalid", ErrLifecyclePolicyInvalid, p.RequiredPublishAck)
 	}
-	if len(p.RequiredGroups) == 0 {
+	if p.NoRequiredGroups {
+		if len(p.RequiredGroups) != 0 || p.Retention.MinAge <= 0 {
+			return fmt.Errorf("%w: no-required-groups needs empty groups and positive retention", ErrLifecyclePolicyInvalid)
+		}
+		if p.Retry.MaxDeliveries != 0 || len(p.Retry.Backoff) != 0 || p.Retry.DeadLetterSubject != "" || p.Retry.HandlerTimeout != 0 || p.Retry.MaxAckPending != 0 {
+			return fmt.Errorf("%w: no-required-groups cannot declare retry", ErrLifecyclePolicyInvalid)
+		}
+	} else if len(p.RequiredGroups) == 0 {
 		return fmt.Errorf("%w: required groups are empty", ErrLifecyclePolicyInvalid)
 	}
 	seen := make(map[string]struct{}, len(p.RequiredGroups))
@@ -241,8 +251,10 @@ func (p LifecyclePolicy) Fingerprint() string {
 
 // LifecycleCapabilities 明确 Provider 可以为哪些生命周期要求提供行为证据。
 type LifecycleCapabilities struct {
-	PublishAck       PublishAckLevel
-	RequiredGroups   bool
+	PublishAck     PublishAckLevel
+	RequiredGroups bool
+	// NoRequiredGroups 表示支持显式无组保留及回收，不由 SafeReclaim 隐式推断。
+	NoRequiredGroups bool
 	Retry            bool
 	DeadLetter       bool
 	SafeReclaim      bool

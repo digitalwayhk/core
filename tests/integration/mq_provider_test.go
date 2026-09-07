@@ -263,6 +263,7 @@ func runBrokerRestartPrepare(
 		snapshot, inspectErr := provider.InspectLifecycle(ctx, policy)
 		return inspectErr == nil && snapshot.PendingMessages != nil && *snapshot.PendingMessages > 0
 	}, 5*time.Second, 20*time.Millisecond, "message must be pending before broker restart")
+	prepareNoGroupRestart(t, ctx, provider)
 }
 
 func runBrokerRestartRecover(
@@ -300,6 +301,7 @@ func runBrokerRestartRecover(
 	result, err := provider.ReclaimLifecycle(ctx, policy, snapshot)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), result.Reclaimed)
+	recoverNoGroupRestart(t, ctx, provider)
 }
 
 // envelopeFixture is a CloudEvents-compatible envelope for MQ round-trip tests.

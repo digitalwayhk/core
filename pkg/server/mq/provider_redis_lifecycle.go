@@ -17,6 +17,18 @@ const redisLifecycleGeneration = "1"
 
 var redisLifecycleOwnerSequence atomic.Uint64
 
+// 无组主题只创建空 Stream；临时组在同一 Lua 中销毁，不产生伪消息。
+var redisLifecycleEnsureNoGroupsScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then
+  redis.call("XGROUP", "CREATE", KEYS[1], "core-lifecycle-init", "0", "MKSTREAM")
+  redis.call("XGROUP", "DESTROY", KEYS[1], "core-lifecycle-init")
+end
+if #redis.call("XINFO", "GROUPS", KEYS[1]) ~= 0 then
+  return redis.error_reply("LIFECYCLE_UNEXPECTED_GROUP")
+end
+return 1
+`)
+
 var redisLifecycleMaxFrontierScript = redis.NewScript(`
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then
@@ -66,6 +78,9 @@ local function successor(id)
 end
 
 local groups = redis.call("XINFO", "GROUPS", KEYS[1])
+if #ARGV == 5 and #groups ~= 0 then
+  return redis.error_reply("LIFECYCLE_UNEXPECTED_GROUP")
+end
 for argi = 6, #ARGV do
   local required = ARGV[argi]
   local found = false
@@ -104,6 +119,7 @@ func (*RedisStreamProvider) LifecycleCapabilities() LifecycleCapabilities {
 	return LifecycleCapabilities{
 		PublishAck:       PublishAckBrokerAccepted,
 		RequiredGroups:   true,
+		NoRequiredGroups: true,
 		Retry:            true,
 		DeadLetter:       true,
 		SafeReclaim:      true,
@@ -129,6 +145,9 @@ func (r *RedisStreamProvider) EnsureLifecycle(ctx context.Context, policy Lifecy
 	existingGroups, err := r.redisLifecycleGroups(ctx, streamKey)
 	if err != nil {
 		return err
+	}
+	if policy.NoRequiredGroups && len(existingGroups) != 0 {
+		return fmt.Errorf("%w: Redis no-required-groups subject has consumer groups", ErrLifecycleStateUncertain)
 	}
 	for _, required := range policy.RequiredGroups {
 		if _, exists := existingGroups[required.Name]; !exists || required.Start != StartFromNew {
@@ -159,6 +178,11 @@ func (r *RedisStreamProvider) EnsureLifecycle(ctx context.Context, policy Lifecy
 	}
 	if err := r.client.HSetNX(ctx, metaKey, "generation", redisLifecycleGeneration).Err(); err != nil {
 		return err
+	}
+	if policy.NoRequiredGroups {
+		if err := redisLifecycleEnsureNoGroupsScript.Run(ctx, r.client, []string{streamKey}).Err(); err != nil {
+			return fmt.Errorf("%w: Redis no-required-groups initialization: %v", ErrLifecycleStateUncertain, err)
+		}
 	}
 
 	for _, required := range policy.RequiredGroups {
@@ -224,6 +248,9 @@ func (r *RedisStreamProvider) InspectLifecycle(ctx context.Context, policy Lifec
 	groups, err := r.redisLifecycleGroups(ctx, streamKey)
 	if err != nil {
 		return LifecycleSnapshot{}, err
+	}
+	if policy.NoRequiredGroups && len(groups) != 0 {
+		return LifecycleSnapshot{}, fmt.Errorf("%w: Redis no-required-groups subject has consumer groups", ErrLifecycleStateUncertain)
 	}
 
 	retained := stream.Length
@@ -347,6 +374,12 @@ func (r *RedisStreamProvider) ReclaimLifecycle(
 		return ReclaimResult{}, ErrNotConnected
 	}
 	policy = policy.Normalize()
+	if err := policy.Validate(); err != nil {
+		return ReclaimResult{}, err
+	}
+	if policy.Mode != LifecycleModeEnforce {
+		return ReclaimResult{Duration: time.Since(started)}, nil
+	}
 	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
 		return ReclaimResult{}, err
 	}

@@ -84,7 +84,9 @@ func (c *lifecycleController) require(
 }
 
 func validateLifecycleCapabilities(capability LifecycleCapabilities, policy LifecyclePolicy) error {
-	if !publishAckSatisfies(capability.PublishAck, policy.RequiredPublishAck) || !capability.RequiredGroups {
+	if !publishAckSatisfies(capability.PublishAck, policy.RequiredPublishAck) ||
+		(policy.NoRequiredGroups && !capability.NoRequiredGroups) ||
+		(!policy.NoRequiredGroups && !capability.RequiredGroups) {
 		return ErrLifecycleUnsupported
 	}
 	if policy.Mode == LifecycleModeEnforce && !capability.SafeReclaim {
