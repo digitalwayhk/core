@@ -235,12 +235,13 @@ func TestRedisReliableKeyedConcurrencyRunsDifferentKeysInParallel(t *testing.T) 
 	}, time.Second, 10*time.Millisecond)
 }
 
+// TestRedisReliableKeyedPoisonKeyDoesNotBlockOtherKeys 验证失败 key 不阻塞其他 key，且恢复后同 key 不越序。
 func TestRedisReliableKeyedPoisonKeyDoesNotBlockOtherKeys(t *testing.T) {
 	provider := newReliableRedisProvider(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	allowA := atomic.Bool{}
-	var aAttempts atomic.Int32
+	aAttempted := make(chan struct{}, 1)
 	bDone := make(chan struct{}, 1)
 	aDone := make(chan string, 2)
 	cancelSub, err := provider.SubscribeReliable(ctx, "fills", mq.ReliableSubscribeOptions{
@@ -249,7 +250,10 @@ func TestRedisReliableKeyedPoisonKeyDoesNotBlockOtherKeys(t *testing.T) {
 	}, func(message *mq.Message) error {
 		body := string(message.Data)
 		if body == "a1" && !allowA.Load() {
-			aAttempts.Add(1)
+			select {
+			case aAttempted <- struct{}{}:
+			default:
+			}
 			return errors.New("poison")
 		}
 		if body == "b1" {
@@ -272,7 +276,12 @@ func TestRedisReliableKeyedPoisonKeyDoesNotBlockOtherKeys(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("poison key blocked healthy key")
 	}
-	require.GreaterOrEqual(t, aAttempts.Load(), int32(1))
+	// 不同 key 并发执行，B 完成不代表 A 已被调度；分别等待两个事实。
+	select {
+	case <-aAttempted:
+	case <-ctx.Done():
+		t.Fatal("poison key was not attempted")
+	}
 	select {
 	case body := <-aDone:
 		t.Fatalf("same-key successor overtook poison message: %s", body)

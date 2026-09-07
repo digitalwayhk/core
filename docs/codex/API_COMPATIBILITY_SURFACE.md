@@ -24,6 +24,7 @@
 | `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 零值/1 保持全局串行；显式 `>1` 才启用同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |
 | `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
 | `mq.LifecyclePolicy`、`LifecycleMQProvider`、`MQManager.RequireMessageLifecycle`、`ServiceContext.RequireMessageLifecycle` | Stable（加性） | server/mq、router | 应用声明必需组、发布确认、保留、重试/DLQ、容量和有界回收；Provider 能力不足或状态不确定时 fail closed | 共享 lifecycle conformance + Redis/NATS 真 Broker 测试 |
+| `mq.LifecyclePolicy.NoRequiredGroups`、`LifecycleCapabilities.NoRequiredGroups` | Stable（加性） | server/mq | 显式纯保留主题；正数保留期、零重试、禁止组订阅；零值保持旧策略指纹和空组拒绝语义 | 无组单元/共享 conformance、Redis/NATS 真 Broker 验证；边界见 MQ_MESSAGE_LIFECYCLE_GUIDE |
 | `mq.VerifyMessageLifecycleConformance` | Stable（测试辅助） | server/mq | 自定义 Provider 在隔离 Subject 上验证失败 pending、离线组、多组完成与物理回收 | Redis/NATS 共用同一 conformance runner |
 | `pkg/server/router.DefaultRouterInfo`、`NewRouterInfo` | Stable | server/router | 普通服务路由元数据 | `pkg/server/router/servicerouter.go`、`use-digitalway-core` skill |
 | `router.WithInternalCallers`、`RouterInfo.GetInternalCallers`、可信调用方上下文读取契约 | Stable security | server/router | 受限内部 Public 的冻结白名单与执行前授权 | RouterInfo 冻结、同进程、gRPC mTLS 身份和示例 06 测试 |

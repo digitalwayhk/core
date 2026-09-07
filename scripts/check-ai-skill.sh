@@ -61,6 +61,7 @@ else
     "消息生命周期状态机" \
     "Provider 能力矩阵" \
     "安全回收前沿" \
+    "NoRequiredGroups" \
     "新增 Provider" \
     "Bitzoom 接入示例"; do
     if ! grep -q "$required" "$MQ_LIFECYCLE_GUIDE"; then
@@ -73,6 +74,9 @@ if ! grep -q "MQ_MESSAGE_LIFECYCLE_GUIDE.md" "$AUTHORITATIVE/multiservice-and-ob
 fi
 if ! grep -q "RequireMessageLifecycle" "$AUTHORITATIVE/multiservice-and-observability.md"; then
   fail "multiservice-and-observability.md 未声明 RequireMessageLifecycle 入口"
+fi
+if ! grep -q "NoRequiredGroups" "$AUTHORITATIVE/multiservice-and-observability.md"; then
+  fail "multiservice-and-observability.md 未声明显式无必需消费组的契约"
 fi
 
 # 3. 每个权威源文件都不能超过管道截断阈值。

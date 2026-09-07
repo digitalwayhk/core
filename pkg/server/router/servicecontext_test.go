@@ -369,6 +369,12 @@ func TestNewServiceContextWithConfig_EventBridgeAutoInit(t *testing.T) {
 
 	sc := router.NewServiceContextWithConfig(&fakeService{svcName}, con)
 	require.NotNil(t, sc)
+	// 固定服务名必须在每次测试结束后注销；否则 -count 重复运行会复用旧配置和订阅。
+	t.Cleanup(func() {
+		sc.SetRunState(false)
+		require.NoError(t, sc.ShutdownError())
+		require.Nil(t, router.GetContext(svcName))
+	})
 
 	assert.NotNil(t, sc.MQManager, "MQManager should be initialized via fake provider")
 	assert.NotNil(t, sc.EventStream, "EventStream should be auto-wired when usage contains event-stream")

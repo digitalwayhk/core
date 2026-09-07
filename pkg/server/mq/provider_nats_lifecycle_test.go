@@ -18,6 +18,60 @@ func natsLifecyclePolicy(subject string, mode LifecycleMode, batch int, groups .
 	}
 }
 
+// TestNATSLifecycleNoRequiredGroups 验证无 durable 时按保留期有界回收，出现 durable 后停止。
+func TestNATSLifecycleNoRequiredGroups(t *testing.T) {
+	provider, ctx := newNATSReliableProvider(t)
+	policy := natsLifecyclePolicy("history", LifecycleModeEnforce, 2)
+	policy.NoRequiredGroups = true
+	policy.Retention.MinAge = 100 * time.Millisecond
+	require.NoError(t, provider.EnsureLifecycle(ctx, policy))
+	for i := 0; i < 3; i++ {
+		require.NoError(t, provider.Publish(ctx, policy.Subject, []byte("history"), nil))
+	}
+	snapshot, err := provider.InspectLifecycle(ctx, policy)
+	require.NoError(t, err)
+	result, err := provider.ReclaimLifecycle(ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.Zero(t, result.Reclaimed)
+	time.Sleep(120 * time.Millisecond)
+	result, err = provider.ReclaimLifecycle(ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, result.Reclaimed)
+	stream, err := provider.js.Stream(ctx, natsResourceName(provider.streamPrefix, policy.Subject))
+	require.NoError(t, err)
+	_, err = stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{Durable: "unexpected", AckPolicy: jetstream.AckExplicitPolicy})
+	require.NoError(t, err)
+	_, err = provider.ReclaimLifecycle(ctx, policy, snapshot)
+	require.ErrorIs(t, err, ErrLifecycleStateUncertain)
+	_, err = provider.InspectLifecycle(ctx, policy)
+	require.ErrorIs(t, err, ErrLifecycleStateUncertain)
+	require.ErrorIs(t, provider.EnsureLifecycle(ctx, policy), ErrLifecycleStateUncertain)
+	info, err := stream.Info(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, info.State.Msgs)
+}
+
+// TestNATSLifecycleNoRequiredGroupsRejectsBeforeEnrollment 验证拒绝既有消费者不会写入错误指纹。
+func TestNATSLifecycleNoRequiredGroupsRejectsBeforeEnrollment(t *testing.T) {
+	provider, ctx := newNATSReliableProvider(t)
+	subject := "existing-history"
+	_, err := provider.js.CreateStream(ctx, jetstream.StreamConfig{Name: natsResourceName(provider.streamPrefix, subject), Subjects: []string{provider.subjectKey(subject)}})
+	require.NoError(t, err)
+	require.NoError(t, provider.Publish(ctx, subject, []byte("retained"), nil))
+	stream, err := provider.js.Stream(ctx, natsResourceName(provider.streamPrefix, subject))
+	require.NoError(t, err)
+	_, err = stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{Durable: "existing", AckPolicy: jetstream.AckExplicitPolicy})
+	require.NoError(t, err)
+	policy := natsLifecyclePolicy(subject, LifecycleModeObserve, 2)
+	policy.NoRequiredGroups = true
+	policy.Retention.MinAge = time.Hour
+	require.ErrorIs(t, provider.EnsureLifecycle(ctx, policy), ErrLifecycleStateUncertain)
+	store, err := provider.natsLifecycleStore(ctx, provider.js)
+	require.NoError(t, err)
+	_, err = store.Get(ctx, provider.natsLifecycleFingerprintKey(subject))
+	require.ErrorIs(t, err, jetstream.ErrKeyNotFound)
+}
+
 func TestNATSLifecyclePrecreatesOfflineRequiredDurables(t *testing.T) {
 	provider, ctx := newNATSReliableProvider(t)
 	policy := natsLifecyclePolicy("fills", LifecycleModeObserve, 10,

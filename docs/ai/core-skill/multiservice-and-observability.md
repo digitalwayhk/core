@@ -116,6 +116,8 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
 - 对需要可靠保留、重放或安全回收的 Subject，应用必须在组合根通过 `ServiceContext.RequireMessageLifecycle(ctx, policy)` 声明真实必需逻辑消费组、起点、保留、重试、DLQ、容量与回收预算。完整状态机、Provider 能力矩阵、迁移和扩展标准见 [MQ 消息生命周期与 Provider 扩展标准](../../codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md)。
 - 生命周期策略属于应用 contract manifest，不属于 Manage/API，也不由通用 MQ 配置猜测。`RequiredGroups` 只能来自实际 `Reliable` 订阅注册点；离线组仍阻断回收，单组 ACK 不代表全部业务完成。无声明时保持旧行为：不自动回收、无限重试，不静默删除历史。
+- **纯保留主题**必须显式设置 `NoRequiredGroups:true`、空 `RequiredGroups`、正数 `Retention.MinAge`，且 `Retry` 必须为零值；空 slice 本身不是授权。只有应用确认主题无 Broker 消费组时才允许该声明，不能从本进程未注册订阅推断集群无必需组。当前普通 `Subscribe` 也创建组，因此无组主题的普通和可靠订阅均被拒绝；发现既有/意外组后保守停止回收。到期回收不代表业务处理完成，不得用该模式绕过成交等事实事件的可靠消费；后续增加消费者必须先停回收、走 manifest 迁移和重放维护窗口。
+- `LifecycleCapabilities.NoRequiredGroups` 是独立能力，旧自定义 Provider 的零值会拒绝无组声明。Redis 无组检查与删除在同一 Lua 内完成；NATS 在 purge 前复核消费者数量，但不提供 check-and-purge 原子事务，部署必须禁止未协调的 consumer 创建/重建。统一策略和 Broker 管理面隔离是前提，不得把定向 race 通过当作跨 Broker 管理事务证明。
 - Redis publish 只声明 `broker-accepted`；要求落盘确认的应用必须选择提供 `broker-persisted` 的 Provider。Redis 回收只允许 fenced Lua 校验后的有界 `XDEL`；NATS 使用全部 durable `AckFloor`、KV 前沿和有界 purge。禁止应用自行 `MAXLEN`、TTL、单组 ACK 后删除、删离线组或重置游标。
 - 策略先以 `observe` 上线核对 pending/lag/oldest/容量，再通过重启切换 `enforce`。Provider capability 不满足、既有组 enrollment 未知、自动淘汰策略不安全、必需组缺失或前沿回退时必须 fail closed。
 - 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。

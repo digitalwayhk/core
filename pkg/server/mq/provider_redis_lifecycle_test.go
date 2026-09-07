@@ -59,6 +59,51 @@ func group(name string, start mq.ConsumerStartPosition) mq.ConsumerGroupRequirem
 	return mq.ConsumerGroupRequirement{Name: name, Start: start}
 }
 
+// TestRedisLifecycleNoRequiredGroups 验证空主题初始化、保留期、批量回收和并发建组的原子保护。
+func TestRedisLifecycleNoRequiredGroups(t *testing.T) {
+	h := newRedisLifecycleHarness(t)
+	policy := h.policy(mq.LifecycleModeEnforce)
+	policy.NoRequiredGroups = true
+	policy.Retention.MinAge = 100 * time.Millisecond
+	require.NoError(t, h.provider.EnsureLifecycle(h.ctx, policy))
+	snapshot, err := h.provider.InspectLifecycle(h.ctx, policy)
+	require.NoError(t, err)
+	require.Zero(t, *snapshot.RetainedMessages)
+	for i := 0; i < 3; i++ {
+		h.publish("history")
+	}
+	snapshot, err = h.provider.InspectLifecycle(h.ctx, policy)
+	require.NoError(t, err)
+	result, err := h.provider.ReclaimLifecycle(h.ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.Zero(t, result.Reclaimed)
+	time.Sleep(120 * time.Millisecond)
+	snapshot, err = h.provider.InspectLifecycle(h.ctx, policy)
+	require.NoError(t, err)
+	// 快照之后创建 pending 消费组，旧快照也不能授权删除。
+	require.NoError(t, h.client.XGroupCreate(h.ctx, h.stream, "unexpected", "0").Err())
+	h.read("unexpected", 1)
+	_, err = h.provider.ReclaimLifecycle(h.ctx, policy, snapshot)
+	require.ErrorIs(t, err, mq.ErrLifecycleStateUncertain)
+	_, err = h.provider.InspectLifecycle(h.ctx, policy)
+	require.ErrorIs(t, err, mq.ErrLifecycleStateUncertain)
+	require.ErrorIs(t, h.provider.EnsureLifecycle(h.ctx, policy), mq.ErrLifecycleStateUncertain)
+	require.EqualValues(t, 3, h.client.XLen(h.ctx, h.stream).Val())
+	// 仅测试清除注入的组；生产删组必须在维护窗口处理 pending。
+	require.NoError(t, h.client.XGroupDestroy(h.ctx, h.stream, "unexpected").Err())
+	snapshot, err = h.provider.InspectLifecycle(h.ctx, policy)
+	require.NoError(t, err)
+	observe := policy
+	observe.Mode = mq.LifecycleModeObserve
+	result, err = h.provider.ReclaimLifecycle(h.ctx, observe, snapshot)
+	require.NoError(t, err)
+	require.Zero(t, result.Reclaimed)
+	result, err = h.provider.ReclaimLifecycle(h.ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, result.Reclaimed)
+	require.EqualValues(t, 1, h.client.XLen(h.ctx, h.stream).Val())
+}
+
 func (h *redisLifecycleHarness) publish(body string) string {
 	h.t.Helper()
 	require.NoError(h.t, h.provider.Publish(h.ctx, h.subject, []byte(body), nil))

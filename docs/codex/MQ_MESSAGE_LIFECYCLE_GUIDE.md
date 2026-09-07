@@ -68,6 +68,38 @@ Core 承担以下职责：
 
 ## 消费组、重放与变更边界
 
+### 显式无必需消费组（纯保留主题）
+
+`RequiredGroups:nil` 或空 slice 默认仍属于漏配，`observe` 也拒绝。应用必须明确声明：
+
+```go
+policy := mq.LifecyclePolicy{
+	Subject: "retained.history",
+	Mode: mq.LifecycleModeObserve,
+	NoRequiredGroups: true,
+	Retention: mq.RetentionPolicy{MinAge: 24 * time.Hour},
+	Capacity: mq.CapacityPolicy{SoftMessages: 500_000, HardMessages: 1_000_000},
+	Reclaim: mq.ReclaimBudget{
+		Interval: 30 * time.Second, BatchSize: 1_000, TimeBudget: 500 * time.Millisecond,
+	},
+}
+if err := sc.RequireMessageLifecycle(ctx, policy); err != nil {
+	return err
+}
+```
+
+这是“只保留历史、无消费完成承诺”，不是“允许删除其他消费者的 pending”。必需组必须为空，保留期必须大于零，不能配置重试、Handler 超时或 DLQ。`MinAge` 从消息入 Broker 的时间起算，不是从声明策略或最后一次读取起算；已存在历史只在显式切换 enforce 后才可能删除。没有声明仍维持旧行为。
+
+当前两个内置 Provider 的普通 `Subscribe` 也创建 Broker 消费组，因此无组主题通过 `MQManager` 的普通与可靠订阅均返回 `ErrLifecycleRequiredGroupMismatch`；已有组或运行中出现任何组（包括离线、pending、非必需 durable/ephemeral consumer）时返回 `ErrLifecycleStateUncertain`，不自动删除、忽略或 ACK 该组。此版不支持“有可选 Broker 消费组但允许它们被保留期淘汰”的额外语义。没有组且 Broker 状态已确认时，pending/backlog 为真实的零，retained 仍记录实际历史量；状态读取失败不能冒充零。
+
+无组回收使用保留时间边界，而不伪造消费 ACK。Redis 原子创建空 Stream（不插入伪消息），删除 Lua 同时要求组集合仍为空。NATS 用已观测 stream 末尾作为候选上界，逐条检查消息时间、有界 purge，并在删除前复核无 consumer。NATS 没有原子 check-and-purge：必须通过 Broker ACL 禁止其他账号创建/重建 consumer，所有应用实例必须在任何订阅前加载同一 manifest；未经协调的 Broker 管理写不在支持范围，不能声称该竞态已由 Core 消除。
+
+同一 `MQManager` 的策略声明与订阅建组互斥。跨进程、旧版本实例及直接调用 Provider 不得绕过组合根声明；拓扑变更仍须维护窗口，不能靠进程内锁代替集群协调。由无组切换到有组会改变持久化 fingerprint，原地重启直接换策略会被拒绝；必须停回收、核对未过期历史、受控迁移 metadata，或使用新 Subject。已经回收的消息无法通过新建组恢复。Core 不提供自动删元数据或自动缩组入口。
+
+正常纯保留主题资源量约为消息速率 × 消息大小 ×（保留期 + 回收延迟）；每轮回收能力须大于长期发布速率，否则即使没有消费积压，历史仍会增长至硬容量并拒绝发布。故障恢复后继续按原策略回收，不为维持容量提前删除保留期内数据。
+
+### 有必需消费组
+
 每个必需组必须选择起点：
 
 - `StartFromAllRetained`：读取 Broker 当前仍保留的全部历史。
@@ -106,6 +138,7 @@ NATS 使用 durable consumer 的 `AckFloor.Stream`、`NumAckPending`、`NumPendi
 | --- | --- | --- | --- |
 | 发布确认 | `broker-accepted` | `broker-persisted` | fail closed |
 | 多必需消费组 | 原生 consumer group | 原生 durable consumer | fail closed |
+| 显式 `NoRequiredGroups` | 空 Stream + Lua 原子空组检查；按保留期有界删除 | 空 consumer 集合 + 末尾候选/时间检查/purge；要求管理面 ACL | 独立 capability，零值 fail closed |
 | 重试 | Core 持久 attempt + pending reclaim | `NakWithDelay` + delivery metadata | 按 capability |
 | DLQ | Lua 原子 `XADD + XACK + retry cleanup` | DLQ 同步 publish ACK 后 `Term` | 按 capability |
 | 离线组保护 | 支持 | 支持 | 未证明则不回收 |
@@ -153,6 +186,7 @@ Core Runtime/Prometheus 公开以下低基数聚合：
 ## 兼容与迁移
 
 - 旧配置没有生命周期声明时，不启动 lifecycle worker、不预建必需组、不物理回收，可靠订阅保持既有无限重试行为。升级不会静默删除历史消息。
+- v1.0.1 及更早的生命周期契约不支持显式无组。新增 `NoRequiredGroups` 的 false 值不进入 fingerprint JSON，已有非空必需组策略的指纹保持不变；true 值属于新的安全授权，必须所有相关实例升级后才能使用，不支持滚动期间向旧实例投递新 manifest。旧自定义 Provider 未声明同名 capability 时明确拒绝，不因已有 `SafeReclaim` 而自动放行。
 - `ServerConfig.MQ.Retry` 与 `DeadLetter` 旧配置容器仍保持 rejected；生命周期是应用级 Go manifest，不把业务组和保留需求塞进通用基础设施配置。
 - 首次接入先用 `LifecycleModeObserve`，核对现有 Stream、durable/group、pending、lag、容量和告警。Redis 既有 `new-only` 组没有 Core enrollment 元数据时 fail closed；NATS 既有自动 `MaxAge`、`DiscardOld` 限额、非 Limits retention 或不兼容 durable 时 fail closed。
 - Redis 要求 `broker-persisted` 的应用不能选择 Redis Provider；应改用满足能力的 Provider，不能静默降低为 accepted。
@@ -170,6 +204,8 @@ Core Runtime/Prometheus 公开以下低基数聚合：
 6. 实现低基数指标；不支持的值保持 nil/`not_collected`。
 7. 运行共享 `VerifyMessageLifecycleConformance`，再运行该 Broker 的单组、多组、慢/离线消费者、漏 ACK、失败、重复投递、进程与 Broker 重启、并发发布/ACK/回收、保留、DLQ 和组变更真 Broker 测试。未运行必须标 `NOT RUN`，mock 不能替代。
 
+声明 `NoRequiredGroups` capability 的 Provider 必须额外通过共享 runner 的无组分支（空主题、observe 不删、容量拒绝、组策略冲突、保留到期、批量回收），并验证意外消费者、重启及拓扑并发边界。不得只取消空组校验或把 `min(empty)` 默认为“全部业务完成”；若无法保护实际存在的消费者，拒绝该策略或关闭该能力。
+
 若 Broker 原生保留机制会在必需组完成前按 TTL、条数、字节或单组 ACK 删除消息，且无法切换成 fail-new 或受安全前沿控制，则该 Provider 必须把 `SafeReclaim` 声明为 false。
 
 ## Bitzoom 接入示例
@@ -185,6 +221,8 @@ if err := sc.RequireMessageLifecycle(ctx, policy); err != nil {
 ```
 
 接入时先盘点正在运行和计划恢复的逻辑消费组、历史重放窗口、平均/峰值消息大小与速率，再确定保留、重试、容量和告警。Bitzoom 工作区的具体 manifest 由其项目按实际注册点实现，Core 不复制业务列表。
+
+只有应用实际注册与部署清单均确认某个主题用于纯历史保留、没有任何 Broker 消费组时，才可使用上述 `NoRequiredGroups:true` 示例。单个发布服务没有本地订阅、订阅服务离线或尚未启动，都不是把成交主题改成无组策略的理由；不能通过空列表兜底自动切换语义。
 
 ## 验收命令
 

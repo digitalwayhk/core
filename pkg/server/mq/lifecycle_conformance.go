@@ -24,6 +24,11 @@ func VerifyMessageLifecycleConformance(
 	if provider == nil || subject == "" {
 		return errors.New("mq lifecycle conformance: provider and subject are required")
 	}
+	if provider.LifecycleCapabilities().NoRequiredGroups {
+		if err := verifyNoRequiredGroupsLifecycleConformance(ctx, provider, subject+"-no-groups"); err != nil {
+			return err
+		}
+	}
 	policy := LifecyclePolicy{
 		Subject: subject, Mode: LifecycleModeEnforce,
 		RequiredGroups: []ConsumerGroupRequirement{

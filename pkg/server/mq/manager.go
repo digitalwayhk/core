@@ -204,8 +204,9 @@ func (m *MQManager) RequireMessageLifecycle(ctx context.Context, policy Lifecycl
 	if m == nil {
 		return ErrNotConnected
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	// 声明与订阅建组互斥，避免订阅通过校验后才落地一个与新策略冲突的组。
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.closed || m.current == nil {
 		return ErrNotConnected
 	}
@@ -222,6 +223,9 @@ func (m *MQManager) Subscribe(ctx context.Context, subject string, handler func(
 	defer m.mu.RUnlock()
 	if m.closed || m.current == nil {
 		return nil, ErrNotConnected
+	}
+	if policy := m.lifecycle.policyForSubject(subject); policy != nil && policy.NoRequiredGroups {
+		return nil, ErrLifecycleRequiredGroupMismatch
 	}
 	return m.current.Subscribe(ctx, subject, handler)
 }

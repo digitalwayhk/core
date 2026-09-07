@@ -6,6 +6,8 @@
 
 ### Added
 
+- MQ 生命周期增加显式 `NoRequiredGroups` 策略及独立 capability：纯保留主题无需虚假消费组即可在保留期到期后有界回收；空列表仍默认拒绝，禁止重试配置与普通/可靠建组订阅，意外组保守阻断。Redis 原子空组校验、NATS 无组前沿与删除前复核；保留旧策略指纹，统一设计文档和权威 skill 同步更新。
+
 - 统一 MQ 消息生命周期：应用通过 `RequireMessageLifecycle` 声明必需逻辑消费组、发布确认、保留、重试/DLQ、容量与有界回收；Redis Streams 使用 fenced Lua 安全前沿和原子 DLQ，NATS JetStream 使用 durable AckFloor、KV 前沿、`NakWithDelay`、DLQ publish ACK 后 Term 与有界 purge。未声明时保持不回收和无限重试，能力不足或状态不确定时 fail closed；新增跨 Provider conformance、真 Broker/race 测试、低基数 Runtime 指标和长期 Provider 扩展标准。
 - keyed 同步服务调用：新增加性接口 `types.IRequestKeyedServiceCaller`，以及 `Request`、`ServiceContext` 的 `CallServiceWithKey`、`ServiceContext.OwnsServiceKey` 和 `ServiceResolver.ResolveWithKey`。显式提供市场/租户 key 时使用顺序无关、成员变化最小迁移的 rendezvous consistent hash 固定目标实例；服务自身可用同一成员快照判断 owner，空 key fail closed，原 `CallService` 继续轮询。
 - 可靠副本广播订阅：`Subscription.Broadcast=true` 使低频、幂等的控制面事件由每个服务副本各消费一次；消费组使用稳定网络端点而非重启即变的进程 UUID。非可靠广播或缺少稳定副本标识时 fail closed；价格、成交等数据面不应启用。
@@ -70,6 +72,8 @@
 ### Fixed
 
 - 管理菜单首次查询空表时改为复用 `UpdateMenu` 的原子菜单/权限同步链路，再返回已同步结果；不再由通用默认数据保存逐条写入关联权限，避免 SQLite 首次初始化出现 `permissions_model` 不存在或菜单 ID 冲突。
+- LocalProvider 的 MachineID 分配跳过仍在冷却期内的离线槽位，与注册校验保持一致，避免服务快速重启反复选中不可注册的槽位；保留原有冷却时长、耗尽返回值和注册并发裁决。
+
 - 可信内部调用请求包装现在会保留底层 `IRequestKeyedServiceCaller` 能力；Gateway 调用中间服务后，中间服务仍可按同一市场/租户 key 固定下游实例。底层请求不支持该加性能力时继续失败闭合。
 - keyed rendezvous hash 改为按稳定服务端点评分，不再按每次启动都随机的 `NodeInfo.ID`；单副本重启不会导致市场/租户 key 全量重映射。
 

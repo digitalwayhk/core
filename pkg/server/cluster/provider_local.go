@@ -248,8 +248,9 @@ func (p *LocalProvider) advanceStates() {
 	}
 }
 
-// AllocateMachineID finds the lowest available MachineID for the given service
-// and DataCenterID. Returns -1 if all slots are full.
+// AllocateMachineID 返回指定服务和数据中心的最小可用 MachineID，耗尽时返回 -1。
+// 与 Register 一致，运行中及最后心跳尚在冷却期内的离线节点均占用槽位。
+// 此方法只选择候选，不预留槽位；并发竞争仍由 Register 在写锁下裁决。
 func (p *LocalProvider) AllocateMachineID(serviceName string, dataCenterID int64, maxMachineID ...int64) int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -259,9 +260,13 @@ func (p *LocalProvider) AllocateMachineID(serviceName string, dataCenterID int64
 		max = maxMachineID[0]
 	}
 
+	now := time.Now()
 	used := make(map[int64]bool)
 	for _, n := range p.nodes {
-		if n.ServiceName == serviceName && n.DataCenterID == dataCenterID && n.Status == NodeStatusRunning {
+		if n.ServiceName != serviceName || n.DataCenterID != dataCenterID {
+			continue
+		}
+		if n.Status == NodeStatusRunning || (n.Status == NodeStatusOffline && now.Sub(n.LastHeartbeat) < p.cooldown) {
 			used[n.MachineID] = true
 		}
 	}

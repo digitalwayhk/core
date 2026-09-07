@@ -18,7 +18,7 @@ var natsLifecycleOwnerSequence atomic.Uint64
 
 func (*NATSJetStreamProvider) LifecycleCapabilities() LifecycleCapabilities {
 	return LifecycleCapabilities{
-		PublishAck: PublishAckBrokerPersisted, RequiredGroups: true,
+		PublishAck: PublishAckBrokerPersisted, RequiredGroups: true, NoRequiredGroups: true,
 		Retry: true, DeadLetter: true, SafeReclaim: true,
 		RetainedMessages: true, RetainedBytes: true, Pending: true, Lag: true, OldestAge: true,
 	}
@@ -43,15 +43,18 @@ func (n *NATSJetStreamProvider) EnsureLifecycle(ctx context.Context, policy Life
 	if err != nil {
 		return err
 	}
+	streamInfo, err := stream.Info(ctx)
+	if err != nil {
+		return err
+	}
+	if policy.NoRequiredGroups && streamInfo.State.Consumers != 0 {
+		return fmt.Errorf("%w: NATS no-required-groups stream has consumers", ErrLifecycleStateUncertain)
+	}
 	store, err := n.natsLifecycleStore(ctx, js)
 	if err != nil {
 		return err
 	}
 	if err := n.ensureNATSLifecycleFingerprint(ctx, store, policy); err != nil {
-		return err
-	}
-	streamInfo, err := stream.Info(ctx)
-	if err != nil {
 		return err
 	}
 	for _, required := range policy.RequiredGroups {
@@ -130,6 +133,13 @@ func (n *NATSJetStreamProvider) InspectLifecycle(ctx context.Context, policy Lif
 
 	safe := uint64(0)
 	safeSet := false
+	if policy.NoRequiredGroups {
+		if streamInfo.State.Consumers != 0 {
+			return LifecycleSnapshot{}, fmt.Errorf("%w: NATS no-required-groups stream has consumers", ErrLifecycleStateUncertain)
+		}
+		// 无消费完成承诺，候选范围仅限已观测末尾；实际删除仍逐条检查 Broker 时间。
+		safe, safeSet = streamInfo.State.LastSeq, true
+	}
 	pendingTotal := int64(0)
 	backlog := int64(0)
 	groups := make([]ConsumerGroupSnapshot, 0, len(policy.RequiredGroups))
@@ -201,6 +211,9 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 ) (ReclaimResult, error) {
 	started := time.Now()
 	policy = policy.Normalize()
+	if err := policy.Validate(); err != nil {
+		return ReclaimResult{}, err
+	}
 	if policy.Mode != LifecycleModeEnforce {
 		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
@@ -263,6 +276,12 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	}
 	if lastEligible == 0 {
 		return ReclaimResult{Duration: time.Since(started)}, nil
+	}
+	if policy.NoRequiredGroups {
+		// JetStream 无 check-and-purge 事务；必须同时遵守管理面 ACL/维护窗口契约。
+		if _, err := n.InspectLifecycle(ctx, policy); err != nil {
+			return ReclaimResult{}, err
+		}
 	}
 	if err := stream.Purge(ctx, jetstream.WithPurgeSequence(lastEligible+1)); err != nil {
 		return ReclaimResult{}, err
