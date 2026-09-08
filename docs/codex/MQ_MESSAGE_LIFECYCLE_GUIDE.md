@@ -148,6 +148,8 @@ standby 只读取数量/字节和策略证据，用独立容量快照维持发�
 
 Redis 原子删除检查不变；NATS 复用本轮 owner 内的完整快照，公开直接调用 Reclaim 仍须先获取 owner 再重新 Inspect，并在 purge 前复核策略及 lease revision。NATS 外部管理面并发变更的 ACL/维护窗口边界不变。
 
+两个 Provider 的公开 Reclaim 直接调用也强制使用声明预算。NATS 候选消息读取最多占用该阶段剩余时间的一半，为最终校验和 purge 留出时间；扫描子预算结束时只提交已验证的前缀，并报告 `BudgetExhausted`，不读取或删除未验证的后缀。没有成功验证任何候选且发生超时、整轮 deadline 到期、校验失败或 purge 失败仍返回错误，不能用预算耗尽吞掉真实故障。
+
 从 v1.1.1 原地升级无需修改 manifest、fingerprint、generation 或重建 Stream。新旧 worker 锁仍互斥，但旧进程继续进行锁前扫描，全部实例升级后才能验收去重收益。停止 observe 控制器后才能切换 enforce；NATS 重启读取原 enrollment 和已推进 completed frontier，仍拒绝实际前沿回退，不重置已存 metadata。
 
 | 能力 | Redis Streams | NATS JetStream | 未声明 capability 的自定义 Provider |

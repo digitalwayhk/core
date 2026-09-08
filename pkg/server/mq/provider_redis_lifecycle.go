@@ -383,6 +383,9 @@ func (r *RedisStreamProvider) ReclaimLifecycle(
 	if policy.Mode != LifecycleModeEnforce {
 		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
+	// 直接调用也受声明的预算约束；较早的 controller deadline 保持优先。
+	ctx, cancel := context.WithTimeout(ctx, policy.Reclaim.TimeBudget)
+	defer cancel()
 	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
 		return ReclaimResult{}, err
 	}

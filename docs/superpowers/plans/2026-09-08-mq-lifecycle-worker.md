@@ -17,6 +17,7 @@
 - [x] 使用旧版 v1.1.1 二进制生成真实 metadata/pending 数据。发现 NATS 已推进前沿重启冲突，补 `TestNATSLifecycleReensurePreservesAdvancedFrontier` 的 RED→GREEN，不重置存量前沿。
 - [x] 回归中发现 Redis 零保留期的客户端时钟边界问题，以 `TestRedisLifecycleZeroRetentionDoesNotUseClientClock` 复现，改为零保留只依赖消费完成、正保留使用 Broker TIME；定向 race 30 次通过。
 - [x] 更新长期生命周期指南、消费者权威 skill、changelog；保留 `scripts/testdata/mq-worker-migration/main.go` 供双版本验证复用。
+- [x] 合并前审查补充 NATS 大批次短预算和 Redis 公开直接回收的 RED→GREEN：候选读取为 purge 预留时间，Provider 直接调用也强制预算，真实 Broker 定向 race 与全包三轮通过。
 - [x] 最终源码真实 Redis/NATS 全包 race 三轮、全仓测试及发布门禁全部通过。
 - [ ] 核对最新远端 main、兼容 API 和候选版本，提交、合并、发布并验证 Go Module 解析。
 

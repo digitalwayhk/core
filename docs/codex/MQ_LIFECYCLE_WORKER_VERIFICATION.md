@@ -21,6 +21,8 @@
 | Redis Lua 放大 | 所有 standby 也执行 Lua，EVALSHA 为 1848 | GET 过滤 standby，EVALSHA 降至 220 |
 | NATS 原地重启 | 已推进 completed / new-only enrollment 被误判为策略冲突 | 保留已存前沿，仍拒绝回退 |
 | Redis 零保留期 | 模拟客户端时钟落后，已 ACK 消息回收为零 | 零保留不叠加客户端时间，定向 race 30 次通过 |
+| NATS 大批次短预算 | 1000 条已到期消息、100 ms 轮次耗尽在候选读取，返回 deadline | 为 purge 预留剩余时间的一半，有界提交已验证前缀，持续取得进展 |
+| Redis 公开直接回收 | 调用方无 deadline 时，200 ms Broker 暂停超过 policy 预算仍返回成功 | Provider 自身强制声明预算，按 deadline 返回 |
 
 曾有一轮完整 race 的 Redis 全组回收断言失败，记录保留在 `race-three-rounds.log`，没有将其当作通过。随后补了零保留期确定性回归。新增定时器测试还发现测试替身的 `expired` 字段并发写，改用 atomic 后通过；不是通过禁用 race 处理。
 
@@ -52,11 +54,11 @@ CORE_TEST_LIFECYCLE_PAUSE_REDIS=1 \
 go test -race ./pkg/server/mq -count=3 -v
 ```
 
-通过，29.256 秒，日志 `race-release.log`。覆盖共享生命周期、发布/ACK、pending、离线必需组、无组连续回收、DLQ、失败重试、并发 publish/ack/reclaim、前沿回退、13×44 去重和启动抖动。
+最终通过，30.737 秒，日志 `race-purge-budget.log`（前一轮 `race-release.log` 也通过）。覆盖共享生命周期、发布/ACK、pending、离线必需组、无组连续回收、DLQ、失败重试、并发 publish/ack/reclaim、前沿回退、13×44 去重、启动抖动及大批次短预算推进。
 
 真实网络超时测试只对专用 Redis 执行一次 200 ms `CLIENT PAUSE`，断言轮次在 150 ms 调度容差内返回 deadline；测试整个函数还包含等待 Broker 恢复及关闭清理，不能把函数总耗时当轮次预算。不得在应用 Redis 上开启 `CORE_TEST_LIFECYCLE_PAUSE_REDIS`。
 
-- `SHOP_REDIS_ADDR=127.0.0.1:52954 go test -p 2 ./... -count=1`：通过，日志 `full-suite.log`；示例 06 三进程测试 98.123 秒。默认外部环境保护下跳过的用例不因此视作真实外部验收。
+- `SHOP_REDIS_ADDR=127.0.0.1:52954 go test -p 2 ./... -count=1`：最终重跑通过，日志 `full-suite-final.log`；示例 06 三进程测试 99.830 秒。默认外部环境保护下跳过的用例不因此视作真实外部验收。
 - `go vet ./pkg/server/mq ./pkg/server/observability`：通过。
 - `./scripts/test.sh release-contract`：通过，包含 api-compat、public-api、config-contract、security。
 - `./scripts/check-ai-skill.sh`、`./scripts/check-logging.sh`、`git diff --check`：通过。
@@ -80,7 +82,7 @@ fingerprint=110f18cc4888cc319591aa40c0c202afdcaaee45ad349ab68f105927272fe3cc
 preserved=2 pending>=1 recovered_and_reclaimed=true
 ```
 
-日志为 `migration-seed-release.log`、`migration-check-release.log`。另重新用旧版生成隔离数据，实际重启 `core-internal-notify-redis` 和 `core-internal-notify-nats` 两个专用容器，再由候选程序验证；两者均通过，日志 `broker-restart-seed.log`、`broker-restart-check.log`。
+最终源码再次验证通过，日志为 `migration-final-seed.log`、`migration-final-check.log`。另重新用旧版生成隔离数据，实际重启 `core-internal-notify-redis` 和 `core-internal-notify-nats` 两个专用容器，再由候选程序验证；两者均通过，日志 `broker-restart-seed.log`、`broker-restart-check.log`。
 
 迁移测试曾使用 25 秒总等待，在 NATS 默认 `AckWait=30s` 时超时。原生状态证据为 primary pending=1、AckFloor=1，offline pending=0、AckFloor=2。测试总恢复窗口改为 60 秒后复测通过，应用 policy 始终为 `Interval=2s / BatchSize=2000 / TimeBudget=100ms`；没有延长应用回收预算。
 

@@ -211,3 +211,27 @@ func TestRedisLifecycleWorkerNetworkDeadline(t *testing.T) {
 	require.Equal(t, 0, lifecycleFailureReason(err))
 	require.Less(t, time.Since(start), 150*time.Millisecond)
 }
+
+// TestRedisLifecycleDirectReclaimDeadline 验证公开直接回收也遵守 policy 预算，不依赖调用方先设置 deadline。
+func TestRedisLifecycleDirectReclaimDeadline(t *testing.T) {
+	addr := os.Getenv("CORE_TEST_REDIS_ADDR")
+	if addr == "" || os.Getenv("CORE_TEST_LIFECYCLE_PAUSE_REDIS") != "1" {
+		t.Skip("NOT RUN: requires dedicated Redis and CORE_TEST_LIFECYCLE_PAUSE_REDIS=1")
+	}
+	ctx := context.Background()
+	p := NewRedisStreamProvider(addr, fmt.Sprintf("core:worker:direct:%d", time.Now().UnixNano()), 0)
+	require.NoError(t, p.Connect(ctx))
+	defer p.Close()
+	policy := validLifecyclePolicy()
+	policy.NoRequiredGroups = true
+	policy.Retention.MinAge = time.Millisecond
+	policy.Reclaim.TimeBudget = 100 * time.Millisecond
+	require.NoError(t, p.EnsureLifecycle(ctx, policy))
+	snapshot, err := p.InspectLifecycle(ctx, policy)
+	require.NoError(t, err)
+	require.NoError(t, p.client.Do(ctx, "CLIENT", "PAUSE", 200, "ALL").Err())
+	start := time.Now()
+	_, err = p.ReclaimLifecycle(ctx, policy, snapshot)
+	require.Error(t, err)
+	require.Less(t, time.Since(start), 150*time.Millisecond)
+}

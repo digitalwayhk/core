@@ -73,6 +73,8 @@
 
 ### Fixed
 
+- NATS 大批次回收为最终校验与 purge 预留时间，扫描达到子预算时只提交已验证前缀，避免短预算下始终扫描超时而无法推进；Redis/NATS 公开直接 Reclaim 调用同样受声明预算约束。
+
 - Redis 生命周期保留边界改用 Broker 时钟；零保留期不再因客户端时钟落后阻断已经全部 ACK 的消息。正保留期需要 Redis ACL 允许 `TIME`，权限缺失仍 fail closed。
 
 - 修复 Redis/NATS 生命周期 worker 在多实例下重复 Inspect 和复用耗尽 context：完整扫描前竞争跨周期租约、启动/周期抖动、100 ms 等声明预算保持整轮上限，standby 轻量刷新容量且不伪造 pending/lag 新鲜度；失败增加固定原因指标。保持 v1.1.1 策略指纹与 metadata 原地兼容，不清数据或重建 Stream；NATS 重启保留已推进的完成前沿并继续拒绝回退。业务 ACK、必需组、pending、DLQ 和原子回收边界不变。

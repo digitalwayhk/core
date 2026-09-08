@@ -232,6 +232,9 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	if policy.Mode != LifecycleModeEnforce {
 		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
+	// 公开直接调用同样有界；controller 传入更早的总 deadline 时自动取较早者。
+	ctx, cancel := context.WithTimeout(ctx, policy.Reclaim.TimeBudget)
+	defer cancel()
 	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
 		return ReclaimResult{}, err
 	}
@@ -284,15 +287,26 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	cutoff := time.Now().Add(-policy.Retention.MinAge)
 	lastEligible := uint64(0)
 	checked := 0
+	deadline, _ := ctx.Deadline()
+	// 扫描最多使用剩余时间的一半，保留另一半给校验及 purge，不能读到整轮超时才提交。
+	scanCtx, stopScan := context.WithTimeout(ctx, time.Until(deadline)/2)
+	defer stopScan()
+	budgetExhausted := false
 	for sequence := before.State.FirstSeq; sequence <= safe && checked < policy.Reclaim.BatchSize; sequence++ {
-		if ctx.Err() != nil || time.Since(started) >= policy.Reclaim.TimeBudget {
+		if scanCtx.Err() != nil {
+			budgetExhausted = true
 			break
 		}
-		raw, getErr := stream.GetMsg(ctx, sequence)
+		raw, getErr := stream.GetMsg(scanCtx, sequence)
 		if errors.Is(getErr, jetstream.ErrMsgNotFound) {
 			continue
 		}
 		if getErr != nil {
+			if checked > 0 && errors.Is(scanCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				// 只提交已经验证的前缀；本次没读到的候选不包含在 purge 中。
+				budgetExhausted = true
+				break
+			}
 			return ReclaimResult{}, getErr
 		}
 		if raw.Time.After(cutoff) {
@@ -300,6 +314,13 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 		}
 		lastEligible = sequence
 		checked++
+	}
+	stopScan()
+	if err := ctx.Err(); err != nil {
+		return ReclaimResult{}, err
+	}
+	if budgetExhausted && checked == 0 {
+		return ReclaimResult{}, context.DeadlineExceeded
 	}
 	if lastEligible == 0 {
 		return ReclaimResult{Duration: time.Since(started)}, nil
@@ -321,7 +342,7 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	}
 	return ReclaimResult{
 		Reclaimed: int64(checked), Duration: time.Since(started),
-		BudgetExhausted: checked >= policy.Reclaim.BatchSize,
+		BudgetExhausted: budgetExhausted || checked >= policy.Reclaim.BatchSize,
 	}, nil
 }
 

@@ -35,6 +35,28 @@ func TestNATSLifecycleReensurePreservesAdvancedFrontier(t *testing.T) {
 	}
 }
 
+// TestNATSLifecycleWorkerLargeBatchMakesProgress 验证短预算不能耗尽在逐条读取上，必须留时间提交有界 purge。
+func TestNATSLifecycleWorkerLargeBatchMakesProgress(t *testing.T) {
+	p, ctx := newNATSReliableProvider(t)
+	policy := natsLifecyclePolicy("busy-history", LifecycleModeEnforce, 2000)
+	policy.NoRequiredGroups = true
+	policy.Retention.MinAge = time.Millisecond
+	policy.Reclaim.Interval = 2 * time.Second
+	policy.Reclaim.TimeBudget = 100 * time.Millisecond
+	require.NoError(t, p.EnsureLifecycle(ctx, policy))
+	for i := 0; i < 1000; i++ {
+		require.NoError(t, p.Publish(ctx, policy.Subject, []byte("history"), nil))
+	}
+	c := newLifecycleController()
+	defer c.stop()
+	c.entries[policy.Subject] = &lifecycleEntry{policy: policy, provider: p}
+	start := time.Now()
+	require.NoError(t, c.runOnce(ctx, policy.Subject))
+	require.Less(t, time.Since(start), 150*time.Millisecond)
+	require.Greater(t, c.reclaimed.Load(), int64(0))
+	require.Zero(t, c.reclaimFailed.Load())
+}
+
 // TestNATSLifecycleNoRequiredGroups 验证无 durable 时按保留期有界回收，出现 durable 后停止。
 func TestNATSLifecycleNoRequiredGroups(t *testing.T) {
 	provider, ctx := newNATSReliableProvider(t)
