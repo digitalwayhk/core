@@ -132,9 +132,25 @@ safe frontier = min(completion frontier, retention frontier)
 
 Redis 使用 `XINFO GROUPS`、`XPENDING` 和持久化的 enrollment/completed frontier。Lua 在同一 Redis 执行边界重新检查 owner、指纹、generation、全部必需组、游标和 PEL，然后用有界 `XRANGE` + `XDEL` 删除安全前沿前的消息；不使用无条件 `MAXLEN`、TTL、单组 ACK 后删除或自动删组。
 
+Redis 正保留期使用 Broker `TIME` 与 Stream ID 的同源时间计算边界；零保留期只受全部必需组完成前沿约束，不额外叠加客户端时间边界。部署 Redis ACL 时需要允许生命周期管理读取 `TIME`；权限不足仍停止回收，不改用不可信客户端时间兜底。
+
 NATS 使用 durable consumer 的 `AckFloor.Stream`、`NumAckPending`、`NumPending` 和 KV 中的 enrollment/completed frontier。Core 获取有租约的回收 owner 后再次检查，再以 `Purge(sequence)` 删除安全序列前的有界前缀。NATS 管理 API 不提供把“检查全部 durable + purge”合并为单条 Broker 事务的能力，因此生产账号必须用 ACL 禁止应用外部并发删除/重建 lifecycle stream 与 durable；受控组变更必须走上节维护窗口。检测到缺失或回退后 Core 停止后续回收。
 
 ## Provider 能力矩阵
+
+### 多实例 worker、预算与容量采集
+
+内置 Redis/NATS 的后台轮次在完整 Inspect 之前取得 subject 所有权。owner 跨周期续持有界租约，standby 不做全组或 pending 扫描；Redis standby 用 GET 排除竞争，只有 owner 原子续约，不能把检查放大转移成所有实例执行 Lua。租约有效期为 `max(1 秒, 3×Interval + 3×TimeBudget)`，复用既有 owner key / KV 锁编码。进程退出后停止续约，关闭时所有租约释放共享 1 秒预算，未成功释放的由 TTL/到期接管。旧 owner 不得释放新 owner 的锁。
+
+`Reclaim.TimeBudget` 仍是整轮总上限，不是每个阶段各得一份预算。所有权判定和 Inspect 最多使用 70%，剩余时间留给使用独立 context 的回收；检查超时则结束本轮，不把过期 context 交给 Reclaim。所有网络操作必须遵守 context，Redis client 显式启用 context deadline。启动延迟分散在一个 Interval 内；后续延迟为 Interval 的 75%～125%，从上轮完成后计时，不追赶积压 tick，也不允许同 subject 轮次重叠。
+
+standby 只读取数量/字节和策略证据，用独立容量快照维持发布门禁；不会更新完整 pending/lag 快照的采集时间。完整快照超过 2×Interval 后省略旧指标并标记不完整。注册时的 Ensure/初始验证是一次性冻结校验，命令放大验收须与稳定期轮次分开统计。自定义 Provider 仍保持公共接口兼容，但没有实现内置私有协调机制，不宣称其扫描具备跨实例去重。
+
+Redis 原子删除检查不变；NATS 复用本轮 owner 内的完整快照，公开直接调用 Reclaim 仍须先获取 owner 再重新 Inspect，并在 purge 前复核策略及 lease revision。NATS 外部管理面并发变更的 ACL/维护窗口边界不变。
+
+两个 Provider 的公开 Reclaim 直接调用也强制使用声明预算。NATS 候选消息读取最多占用该阶段剩余时间的一半，为最终校验和 purge 留出时间；扫描子预算结束时只提交已验证的前缀，并报告 `BudgetExhausted`，不读取或删除未验证的后缀。没有成功验证任何候选且发生超时、整轮 deadline 到期、校验失败或 purge 失败仍返回错误，不能用预算耗尽吞掉真实故障。
+
+从 v1.1.1 原地升级无需修改 manifest、fingerprint、generation 或重建 Stream。新旧 worker 锁仍互斥，但旧进程继续进行锁前扫描，全部实例升级后才能验收去重收益。停止 observe 控制器后才能切换 enforce；NATS 重启读取原 enrollment 和已推进 completed frontier，仍拒绝实际前沿回退，不重置已存 metadata。
 
 | 能力 | Redis Streams | NATS JetStream | 未声明 capability 的自定义 Provider |
 | --- | --- | --- | --- |
@@ -182,6 +198,8 @@ Core Runtime/Prometheus 公开以下低基数聚合：
 
 - gauge：`retained_messages`、`retained_bytes`、`backlog_messages`、`pending_messages`、`oldest_age_sec`。
 - counter：`reclaimed_total`、`reclaim_fail_total`、`redelivered_total`、`dead_letter_total`、`dead_letter_fail_total`、`publish_rejected_total`。
+
+回收失败总数另按固定指标名提供 `reclaim_fail_deadline_total`、`reclaim_fail_owner_lost_total`、`reclaim_fail_policy_fence_total`、`reclaim_fail_provider_total`，四项之和等于 `reclaim_fail_total`。沿用现有固定指标名标签，不增加动态 subject 或原始错误标签。竞争未获 owner 是正常跳过，不计失败；真正的观测/回收/容量读取错误仍计入，不能通过吞掉 deadline 达成零增量。
 
 指标不存在或 Provider 未采集时省略样本，并用 `not_collected`/`partial`/`unavailable` 表达，不输出假零。指标标签只允许稳定服务、组件和固定指标名；禁止消息 ID、用户 ID、订单 ID、TraceID、动态 Subject 和 payload。日志同样不得输出 payload、凭据或原始消息身份；错误在拥有重试、终止或降级决策的边界记录一次。
 

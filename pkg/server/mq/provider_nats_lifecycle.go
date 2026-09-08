@@ -90,12 +90,27 @@ func (n *NATSJetStreamProvider) EnsureLifecycle(ctx context.Context, policy Life
 		enrollment := uint64(0)
 		if required.Start == StartFromNew {
 			enrollment = consumerInfo.Delivered.Stream
+			if consumerExisted {
+				// 重启读取首次 enrollment，不能用已经推进的 delivered 覆盖起点。
+				enrollment, err = getNATSUint(ctx, store, enrollmentKey)
+				if err != nil {
+					return fmt.Errorf("%w: NATS enrollment missing", ErrLifecycleStateUncertain)
+				}
+			}
 		}
 		if err := createOrCompareNATSUint(ctx, store, enrollmentKey, enrollment); err != nil {
 			return fmt.Errorf("%w: NATS durable %q enrollment conflict", ErrLifecyclePolicyConflict, durable)
 		}
-		if err := createOrCompareNATSUint(ctx, store, n.natsLifecycleCompletedKey(policy.Subject, required.Name), enrollment); err != nil {
-			return fmt.Errorf("%w: NATS durable %q completed frontier conflict", ErrLifecyclePolicyConflict, durable)
+		completedKey := n.natsLifecycleCompletedKey(policy.Subject, required.Name)
+		completed, completedErr := getNATSUint(ctx, store, completedKey)
+		if errors.Is(completedErr, jetstream.ErrKeyNotFound) || errors.Is(completedErr, jetstream.ErrKeyDeleted) {
+			if err := createOrCompareNATSUint(ctx, store, completedKey, enrollment); err != nil {
+				return fmt.Errorf("%w: NATS durable %q completed frontier conflict", ErrLifecyclePolicyConflict, durable)
+			}
+		} else if completedErr != nil {
+			return completedErr
+		} else if completed < enrollment || completed > max(enrollment, consumerInfo.AckFloor.Stream) {
+			return fmt.Errorf("%w: NATS durable %q completed frontier regressed", ErrLifecycleStateUncertain, durable)
 		}
 	}
 	return nil
@@ -217,16 +232,11 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	if policy.Mode != LifecycleModeEnforce {
 		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
+	// 公开直接调用同样有界；controller 传入更早的总 deadline 时自动取较早者。
+	ctx, cancel := context.WithTimeout(ctx, policy.Reclaim.TimeBudget)
+	defer cancel()
 	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
 		return ReclaimResult{}, err
-	}
-	fresh, err := n.InspectLifecycle(ctx, policy)
-	if err != nil {
-		return ReclaimResult{}, err
-	}
-	safe, err := strconv.ParseUint(fresh.SafeFrontier, 10, 64)
-	if err != nil || safe == 0 {
-		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
 	n.mu.Lock()
 	js := n.js
@@ -238,14 +248,34 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	if err != nil {
 		return ReclaimResult{}, err
 	}
-	ownerRevision, acquired, err := acquireNATSReclaimLease(ctx, store, n.natsLifecycleLockKey(policy.Subject), policy.Reclaim.TimeBudget)
-	if err != nil {
+	lease, coordinated := lifecycleLease(ctx, n, policy.Subject)
+	ownerRevision := lease.revision
+	fresh := snapshot
+	if !coordinated {
+		var acquired bool
+		ownerRevision, acquired, err = acquireNATSReclaimLease(ctx, store, n.natsLifecycleLockKey(policy.Subject), policy.Reclaim.TimeBudget)
+		if err != nil {
+			return ReclaimResult{}, err
+		}
+		if !acquired {
+			return ReclaimResult{Duration: time.Since(started)}, nil
+		}
+		defer func() {
+			_, _ = store.Update(ctx, n.natsLifecycleLockKey(policy.Subject), []byte("released|0"), ownerRevision)
+		}()
+		// 公开直接调用仍重新采集，但必须先取得 owner。
+		fresh, err = n.InspectLifecycle(ctx, policy)
+		if err != nil {
+			return ReclaimResult{}, err
+		}
+	}
+	if err := checkNATSWorkerLease(ctx, store, n.natsLifecycleLockKey(policy.Subject), ownerRevision); err != nil {
 		return ReclaimResult{}, err
 	}
-	if !acquired {
+	safe, err := strconv.ParseUint(fresh.SafeFrontier, 10, 64)
+	if err != nil || safe == 0 {
 		return ReclaimResult{Duration: time.Since(started)}, nil
 	}
-	defer releaseNATSReclaimLease(store, n.natsLifecycleLockKey(policy.Subject), ownerRevision)
 	stream, err := js.Stream(ctx, natsResourceName(n.streamPrefix, policy.Subject))
 	if err != nil {
 		return ReclaimResult{}, err
@@ -257,15 +287,26 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 	cutoff := time.Now().Add(-policy.Retention.MinAge)
 	lastEligible := uint64(0)
 	checked := 0
+	deadline, _ := ctx.Deadline()
+	// 扫描最多使用剩余时间的一半，保留另一半给校验及 purge，不能读到整轮超时才提交。
+	scanCtx, stopScan := context.WithTimeout(ctx, time.Until(deadline)/2)
+	defer stopScan()
+	budgetExhausted := false
 	for sequence := before.State.FirstSeq; sequence <= safe && checked < policy.Reclaim.BatchSize; sequence++ {
-		if ctx.Err() != nil || time.Since(started) >= policy.Reclaim.TimeBudget {
+		if scanCtx.Err() != nil {
+			budgetExhausted = true
 			break
 		}
-		raw, getErr := stream.GetMsg(ctx, sequence)
+		raw, getErr := stream.GetMsg(scanCtx, sequence)
 		if errors.Is(getErr, jetstream.ErrMsgNotFound) {
 			continue
 		}
 		if getErr != nil {
+			if checked > 0 && errors.Is(scanCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				// 只提交已经验证的前缀；本次没读到的候选不包含在 purge 中。
+				budgetExhausted = true
+				break
+			}
 			return ReclaimResult{}, getErr
 		}
 		if raw.Time.After(cutoff) {
@@ -273,6 +314,13 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 		}
 		lastEligible = sequence
 		checked++
+	}
+	stopScan()
+	if err := ctx.Err(); err != nil {
+		return ReclaimResult{}, err
+	}
+	if budgetExhausted && checked == 0 {
+		return ReclaimResult{}, context.DeadlineExceeded
 	}
 	if lastEligible == 0 {
 		return ReclaimResult{Duration: time.Since(started)}, nil
@@ -283,12 +331,18 @@ func (n *NATSJetStreamProvider) ReclaimLifecycle(
 			return ReclaimResult{}, err
 		}
 	}
+	if err := n.checkNATSLifecycleFingerprint(ctx, store, policy); err != nil {
+		return ReclaimResult{}, err
+	}
+	if err := checkNATSWorkerLease(ctx, store, n.natsLifecycleLockKey(policy.Subject), ownerRevision); err != nil {
+		return ReclaimResult{}, err
+	}
 	if err := stream.Purge(ctx, jetstream.WithPurgeSequence(lastEligible+1)); err != nil {
 		return ReclaimResult{}, err
 	}
 	return ReclaimResult{
 		Reclaimed: int64(checked), Duration: time.Since(started),
-		BudgetExhausted: checked >= policy.Reclaim.BatchSize,
+		BudgetExhausted: budgetExhausted || checked >= policy.Reclaim.BatchSize,
 	}, nil
 }
 
@@ -417,7 +471,7 @@ func (n *NATSJetStreamProvider) ensureNATSLifecycleFingerprint(ctx context.Conte
 func (n *NATSJetStreamProvider) checkNATSLifecycleFingerprint(ctx context.Context, store jetstream.KeyValue, policy LifecyclePolicy) error {
 	entry, err := store.Get(ctx, n.natsLifecycleFingerprintKey(policy.Subject))
 	if err != nil {
-		return fmt.Errorf("%w: NATS lifecycle metadata missing", ErrLifecycleStateUncertain)
+		return fmt.Errorf("%w: NATS lifecycle metadata missing: %w", ErrLifecycleStateUncertain, err)
 	}
 	expected := natsLifecycleGeneration + ":" + policy.Fingerprint()
 	if string(entry.Value()) != expected {
@@ -536,10 +590,4 @@ func acquireNATSReclaimLease(
 		}
 	}
 	return 0, false, nil
-}
-
-func releaseNATSReclaimLease(store jetstream.KeyValue, key string, revision uint64) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_, _ = store.Update(ctx, key, []byte("released|0"), revision)
 }
