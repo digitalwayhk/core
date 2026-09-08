@@ -57,8 +57,9 @@ func (r *RedisStreamProvider) Name() string { return "redis-stream" }
 // Connect initialises the Redis client. A PING is issued to verify connectivity.
 func (r *RedisStreamProvider) Connect(ctx context.Context) error {
 	r.client = redis.NewClient(&redis.Options{
-		Addr: r.addr,
-		DB:   r.db,
+		Addr:                  r.addr,
+		DB:                    r.db,
+		ContextTimeoutEnabled: true,
 	})
 	if err := r.client.Ping(ctx).Err(); err != nil {
 		return fmt.Errorf("redis-stream: connect to %s: %w", r.addr, err)

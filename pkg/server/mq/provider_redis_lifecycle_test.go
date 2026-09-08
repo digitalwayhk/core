@@ -183,8 +183,23 @@ func TestRedisLifecycleAllGroupsPermitBoundedReclaim(t *testing.T) {
 	require.NoError(t, err)
 	result, err := h.provider.ReclaimLifecycle(h.ctx, policy, snapshot)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), result.Reclaimed)
+	require.Equal(t, int64(2), result.Reclaimed, "safe_frontier=%s", snapshot.SafeFrontier)
 	require.Equal(t, int64(2), h.client.XLen(h.ctx, h.stream).Val())
+}
+
+// TestRedisLifecycleZeroRetentionDoesNotUseClientClock 验证零保留只依赖全部组完成，不受客户端时钟落后影响。
+func TestRedisLifecycleZeroRetentionDoesNotUseClientClock(t *testing.T) {
+	h := newRedisLifecycleHarness(t)
+	policy := h.policy(mq.LifecycleModeEnforce, group("required", mq.StartFromAllRetained))
+	require.NoError(t, h.provider.EnsureLifecycle(h.ctx, policy))
+	id := fmt.Sprintf("%d-0", time.Now().Add(time.Second).UnixMilli())
+	require.NoError(t, h.client.XAdd(h.ctx, &redis.XAddArgs{Stream: h.stream, ID: id, Values: map[string]interface{}{"data": "completed"}}).Err())
+	h.ack("required", h.read("required", 1))
+	snapshot, err := h.provider.InspectLifecycle(h.ctx, policy)
+	require.NoError(t, err)
+	result, err := h.provider.ReclaimLifecycle(h.ctx, policy, snapshot)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Reclaimed)
 }
 
 // TestRedisLifecycleStartFromNewSkipsExistingHistory 验证 new-only 组不会因预建而误消费历史。

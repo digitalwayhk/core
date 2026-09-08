@@ -18,6 +18,23 @@ func natsLifecyclePolicy(subject string, mode LifecycleMode, batch int, groups .
 	}
 }
 
+// TestNATSLifecycleReensurePreservesAdvancedFrontier 验证重启不能把已推进的前沿误判为策略变更。
+func TestNATSLifecycleReensurePreservesAdvancedFrontier(t *testing.T) {
+	for _, start := range []ConsumerStartPosition{StartFromAllRetained, StartFromNew} {
+		t.Run(string(start), func(t *testing.T) {
+			p, ctx := newNATSReliableProvider(t)
+			policy := natsLifecyclePolicy("restart", LifecycleModeEnforce, 2, ConsumerGroupRequirement{Name: "required", Start: start})
+			require.NoError(t, p.EnsureLifecycle(ctx, policy))
+			stop, err := p.SubscribeReliable(ctx, policy.Subject, ReliableSubscribeOptions{Group: "required", lifecycle: &policy}, func(*Message) error { return nil })
+			require.NoError(t, err)
+			defer stop()
+			require.NoError(t, p.Publish(ctx, policy.Subject, []byte("completed"), nil))
+			require.Eventually(t, func() bool { s, e := p.InspectLifecycle(ctx, policy); return e == nil && s.SafeFrontier != "0" }, time.Second, 10*time.Millisecond)
+			require.NoError(t, p.EnsureLifecycle(ctx, policy))
+		})
+	}
+}
+
 // TestNATSLifecycleNoRequiredGroups 验证无 durable 时按保留期有界回收，出现 durable 后停止。
 func TestNATSLifecycleNoRequiredGroups(t *testing.T) {
 	provider, ctx := newNATSReliableProvider(t)

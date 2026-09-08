@@ -62,6 +62,8 @@ func verifyNoRequiredGroupsLifecycleConformance(ctx context.Context, provider Li
 	if err := requireNoGroupReclaimed(ctx, provider, policy, snapshot, 0); err != nil {
 		return err
 	}
+	// 模式迁移遵守停旧 controller 的公开契约，释放其跨周期观察租约。
+	manager.lifecycle.stop()
 	policy.Mode = LifecycleModeEnforce
 	if err := provider.EnsureLifecycle(ctx, policy); err != nil {
 		return err

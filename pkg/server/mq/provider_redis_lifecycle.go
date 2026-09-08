@@ -236,7 +236,7 @@ func (r *RedisStreamProvider) InspectLifecycle(ctx context.Context, policy Lifec
 	metaKey := r.lifecycleMetaKey(policy.Subject)
 	fingerprint, err := r.client.HGet(ctx, metaKey, "fingerprint").Result()
 	if err != nil {
-		return LifecycleSnapshot{}, fmt.Errorf("%w: Redis lifecycle metadata missing", ErrLifecycleStateUncertain)
+		return LifecycleSnapshot{}, fmt.Errorf("%w: Redis lifecycle metadata missing: %w", ErrLifecycleStateUncertain, err)
 	}
 	if fingerprint != policy.Fingerprint() {
 		return LifecycleSnapshot{}, fmt.Errorf("%w: Redis subject %q", ErrLifecyclePolicyConflict, policy.Subject)
@@ -325,13 +325,16 @@ func (r *RedisStreamProvider) InspectLifecycle(ctx context.Context, policy Lifec
 		})
 	}
 
-	cutoff := time.Now().Add(-policy.Retention.MinAge)
-	if policy.Retention.MinAge == 0 {
-		cutoff = cutoff.Add(time.Millisecond)
-	}
-	cutoffID := fmt.Sprintf("%d-0", cutoff.UnixMilli())
-	if safeFrontier == "" || streamIDCompare(cutoffID, safeFrontier) < 0 {
-		safeFrontier = cutoffID
+	if policy.Retention.MinAge > 0 {
+		// 消息 ID 使用 Broker 时钟；保留期也使用同一时钟，避免宿主机偏差。
+		brokerTime, timeErr := r.client.Time(ctx).Result()
+		if timeErr != nil {
+			return LifecycleSnapshot{}, timeErr
+		}
+		cutoffID := fmt.Sprintf("%d-0", brokerTime.Add(-policy.Retention.MinAge).UnixMilli())
+		if safeFrontier == "" || streamIDCompare(cutoffID, safeFrontier) < 0 {
+			safeFrontier = cutoffID
+		}
 	}
 	retainedBytes, memoryErr := r.client.MemoryUsage(ctx, streamKey).Result()
 	var retainedBytesPtr *int64
@@ -389,21 +392,26 @@ func (r *RedisStreamProvider) ReclaimLifecycle(
 	streamKey := r.streamKey(policy.Subject)
 	metaKey := r.lifecycleMetaKey(policy.Subject)
 	ownerKey := r.lifecycleOwnerKey(policy.Subject)
-	owner := fmt.Sprintf("%d-%d", time.Now().UnixNano(), redisLifecycleOwnerSequence.Add(1))
-	leaseTTL := 3 * policy.Reclaim.TimeBudget
-	if leaseTTL < time.Second {
-		leaseTTL = time.Second
+	lease, coordinated := lifecycleLease(ctx, r, policy.Subject)
+	owner := lease.owner
+	if !coordinated {
+		owner = fmt.Sprintf("%d-%d", time.Now().UnixNano(), redisLifecycleOwnerSequence.Add(1))
+		leaseTTL := 3 * policy.Reclaim.TimeBudget
+		if leaseTTL < time.Second {
+			leaseTTL = time.Second
+		}
+		acquired, err := r.client.SetNX(ctx, ownerKey, owner, leaseTTL).Result()
+		if err != nil {
+			return ReclaimResult{}, err
+		}
+		if !acquired {
+			return ReclaimResult{Duration: time.Since(started)}, nil
+		}
+		defer func() {
+			// 不在轮次结束后追加无界网络请求，未释放的短租约会自动过期。
+			_ = redisOwnerReleaseScript.Run(ctx, r.client, []string{ownerKey}, owner).Err()
+		}()
 	}
-	acquired, err := r.client.SetNX(ctx, ownerKey, owner, leaseTTL).Result()
-	if err != nil {
-		return ReclaimResult{}, err
-	}
-	if !acquired {
-		return ReclaimResult{Duration: time.Since(started)}, nil
-	}
-	defer func() {
-		_ = redisOwnerReleaseScript.Run(context.Background(), r.client, []string{ownerKey}, owner).Err()
-	}()
 	args := []interface{}{
 		owner, policy.Fingerprint(), redisLifecycleGeneration,
 		snapshot.SafeFrontier, policy.Reclaim.BatchSize,
@@ -413,7 +421,7 @@ func (r *RedisStreamProvider) ReclaimLifecycle(
 	}
 	count, err := redisLifecycleReclaimScript.Run(ctx, r.client, []string{streamKey, metaKey, ownerKey}, args...).Int64()
 	if err != nil {
-		return ReclaimResult{}, fmt.Errorf("%w: Redis reclaim fence: %v", ErrLifecycleStateUncertain, err)
+		return ReclaimResult{}, fmt.Errorf("%w: Redis reclaim fence: %w", ErrLifecycleStateUncertain, err)
 	}
 	return ReclaimResult{
 		Reclaimed: count, Duration: time.Since(started),

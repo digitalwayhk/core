@@ -55,7 +55,15 @@ func (c *lifecycleController) runtimeMetricSnapshot(context.Context) (observabil
 	c.mu.RLock()
 	entries := make([]LifecycleSnapshot, 0, len(c.entries))
 	for _, entry := range c.entries {
-		entries = append(entries, entry.snapshot)
+		snapshot := entry.snapshot
+		if snapshot.ObservedAt.IsZero() || c.now().Sub(snapshot.ObservedAt) > 2*entry.policy.Reclaim.Interval {
+			snapshot = LifecycleSnapshot{State: LifecycleStateStale}
+		}
+		if entry.capacity != nil && c.now().Sub(entry.capacity.ObservedAt) <= 2*entry.policy.Reclaim.Interval {
+			snapshot.RetainedMessages = entry.capacity.RetainedMessages
+			snapshot.RetainedBytes = entry.capacity.RetainedBytes
+		}
+		entries = append(entries, snapshot)
 	}
 	c.mu.RUnlock()
 	if len(entries) == 0 {
@@ -68,6 +76,9 @@ func (c *lifecycleController) runtimeMetricSnapshot(context.Context) (observabil
 			"reclaim_fail_total":     float64(c.reclaimFailed.Load()),
 			"publish_rejected_total": float64(c.publishRejected.Load()),
 		},
+	}
+	for i, reason := range []string{"deadline", "owner_lost", "policy_fence", "provider"} {
+		result.Counters["reclaim_fail_"+reason+"_total"] = float64(c.reclaimReasons[i].Load())
 	}
 	type metricValue struct {
 		count int
