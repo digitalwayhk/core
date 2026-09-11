@@ -44,6 +44,9 @@ type OutboxStoreSkipBlocked interface {
 // 未实现时框架继续逐条调用 MarkPublished。空切片必须立即成功且不开事务。
 // 实现必须单事务全成或全败；已确认记录视为成功。崩溃发生在 MQ 发布后、
 // 本方法提交前时只形成 at-least-once 重复投递，消费者继续用 EventID 幂等。
+// nil 仅表示全部请求记录已持久确认；缺失/无效记录必须返回错误，不得静默跳过。
+// 确认失败可能重放整批已发布前缀；同 key 串行 Publish 不代表重复消息也单调有序。
+// 此确认只更新 Outbox 发布状态，不代表消费者 ACK，也不授权回收 Broker 消息。
 type OutboxBatchMarker interface {
 	MarkPublishedBatch(ctx context.Context, messages []OutboxMessage) error
 }

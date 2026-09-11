@@ -1,3 +1,4 @@
+// 本文件验证可选批量确认的成功前缀、失败恢复与分键并发契约。
 package event_test
 
 import (
@@ -67,6 +68,7 @@ func (s *batchMarkStore) removePending(eventID string) {
 	s.pending = next
 }
 
+// TestOutboxBatchMarkerConfirmsSuccessfulPrefixOnce 验证发布失败不越过同 key 屏障。
 func TestOutboxBatchMarkerConfirmsSuccessfulPrefixOnce(t *testing.T) {
 	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
 	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
@@ -96,6 +98,7 @@ func TestOutboxBatchMarkerConfirmsSuccessfulPrefixOnce(t *testing.T) {
 	require.Equal(t, []string{"a2", "a3"}, pendingIDs(store.pending))
 }
 
+// TestOutboxBatchMarkerFailureLeavesPrefixUnpublished 验证确认失败保留 pending，重启后用原 EventID 重试。
 func TestOutboxBatchMarkerFailureLeavesPrefixUnpublished(t *testing.T) {
 	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
 	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
@@ -112,15 +115,38 @@ func TestOutboxBatchMarkerFailureLeavesPrefixUnpublished(t *testing.T) {
 		SourceService: "trades", Store: store, Interval: time.Hour, BatchSize: 10, External: true,
 	}))
 	bridge.NotifyOutbox()
-	time.Sleep(150 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return store.batchCalls == 1
+	}, time.Second, time.Millisecond)
+	require.NoError(t, bridge.Close(context.Background()))
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
 	require.Equal(t, 1, store.batchCalls)
 	require.Empty(t, store.marked)
 	require.Equal(t, []string{"a1", "b1"}, pendingIDs(store.pending))
+	store.batchErr = nil
+	store.mu.Unlock()
+
+	restarted := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
+	t.Cleanup(func() { require.NoError(t, restarted.Close(context.Background())) })
+	restarted.SetExternalPublisher(external)
+	require.NoError(t, restarted.UseOutbox(event.OutboxOptions{
+		SourceService: "trades", Store: store, Interval: time.Hour, BatchSize: 10, External: true,
+	}))
+	restarted.NotifyOutbox()
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return store.batchCalls == 2 && len(store.pending) == 0 && store.singleCalls == 0
+	}, time.Second, time.Millisecond)
+	external.mu.Lock()
+	defer external.mu.Unlock()
+	require.Equal(t, []string{"a1", "b1", "a1", "b1"}, external.published)
 }
 
+// TestOutboxBatchMarkerKeyedConcurrencyConfirmsOnce 验证多个有序 lane 共用一次批量确认。
 func TestOutboxBatchMarkerKeyedConcurrencyConfirmsOnce(t *testing.T) {
 	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
 	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })

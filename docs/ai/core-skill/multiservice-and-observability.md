@@ -41,6 +41,10 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
 
+### Outbox 批量确认边界
+
+`OutboxBatchMarker` 的成功必须表示全部请求记录在同一事务内持久确认；重复 ID 去重，已确认记录成功，缺失/零主键返回错误并回滚，不得静默部分成功。它确认的是发布状态，不是消费者 ACK，不改变 MQ 生命周期或授权删除 Broker 消息。确认失败或提交结果未知时可能重放整个已发布前缀；同 key 的首次发布顺序保持不变，但重复消息可能出现在较新消息之后，消费者仍须按 EventID 幂等。批量确认减少事务次数，不等于一条批量 UPDATE，也不保证低流量下减少 fsync。
+
 ## WebSocket 最终用户订阅
 
 WebSocket 只面向最终外部用户。内部服务之间不使用 WebSocket，内部请求使用 TransportSelector，内部事件使用每个 ServiceContext 所属的 EventBridge。

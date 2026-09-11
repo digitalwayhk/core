@@ -55,6 +55,11 @@ func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) e
 		return errors.New("数据操作器不能为空")
 	}
 	unique := uniqueOutboxIDs(ids)
+	for _, id := range ids {
+		if id == 0 {
+			return errors.New("Outbox 主键不能为空")
+		}
+	}
 	if len(unique) == 0 {
 		return nil
 	}
@@ -63,6 +68,18 @@ func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) e
 	query.AddWhereNS("ID", persistencetypes.SymbolIn, unique)
 	if err := action.Load(query, &items); err != nil {
 		return err
+	}
+	// 先校验完整集合，再更新，缺失记录不能冒充幂等成功。
+	found := make(map[uint]bool, len(items))
+	for _, item := range items {
+		if item != nil {
+			found[item.ID] = true
+		}
+	}
+	for _, id := range unique {
+		if !found[id] {
+			return errors.New("Outbox 事件不存在")
+		}
 	}
 	for _, item := range items {
 		if item == nil || item.Published {
