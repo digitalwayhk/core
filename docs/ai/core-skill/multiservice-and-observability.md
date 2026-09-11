@@ -13,7 +13,7 @@
 - 客户端按 endpoint 复用 go-zero `zrpc.Client`；Core Resolver 仍是唯一节点发现权威，不启用 zrpc 自带发现。
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
 - HTTP 仅可作为显式发送前 fallback；gRPC 开始发送后不得跨协议重试。内部异步事件使用 EventBridge，WebSocket 只面向最终用户。
-- Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 只实现 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。
+- Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 必选 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。高吞吐服务应再实现可选 `event.OutboxBatchMarker.MarkPublishedBatch`：框架先按现有规则逐条发布成功前缀，再一次事务确认这些 EventID；未实现时仍逐条 `MarkPublished`。空切片必须立即成功。崩溃发生在 MQ 发布后、批量确认提交前只形成 at-least-once 重复，消费者继续用 EventID/Inbox 幂等。不要为此自写 Outbox 发布循环。
 - `UseOutbox` 和 `Subscription` 的零值永远保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
 - 低频、幂等的副本收敛控制事件（例如市场准备/激活）可显式设置 `Reliable:true, Broadcast:true`，每个稳定服务端点使用独立 consumer group 各消费一次。该选项不得用于价格、成交、结算等高频数据面；数据面仍使用逻辑服务共享组或按 key 分区。
@@ -40,6 +40,10 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 验收必须同时运行 `examples/integration/06-shop-microservices` 和 `examples/integration/06-shop-microservices-three-process`。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
+
+### Outbox 批量确认边界
+
+`OutboxBatchMarker` 的成功必须表示全部请求记录在同一事务内持久确认；重复 ID 去重，已确认记录成功，缺失/零主键返回错误并回滚，不得静默部分成功。它确认的是发布状态，不是消费者 ACK，不改变 MQ 生命周期或授权删除 Broker 消息。确认失败或提交结果未知时可能重放整个已发布前缀；同 key 的首次发布顺序保持不变，但重复消息可能出现在较新消息之后，消费者仍须按 EventID 幂等。批量确认减少事务次数，不等于一条批量 UPDATE，也不保证低流量下减少 fsync。
 
 ## WebSocket 最终用户订阅
 
@@ -125,7 +129,7 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - Redis publish 只声明 `broker-accepted`；要求落盘确认的应用必须选择提供 `broker-persisted` 的 Provider。Redis 回收只允许 fenced Lua 校验后的有界 `XDEL`；NATS 使用全部 durable `AckFloor`、KV 前沿和有界 purge。禁止应用自行 `MAXLEN`、TTL、单组 ACK 后删除、删离线组或重置游标。
 - 策略先以 `observe` 上线核对 pending/lag/oldest/容量，再通过重启切换 `enforce`。Provider capability 不满足、既有组 enrollment 未知、自动淘汰策略不安全、必需组缺失或前沿回退时必须 fail closed。
 - 内置 Redis/NATS 生命周期 worker 在完整 Inspect 前竞争跨周期 subject 租约；standby 只刷新轻量容量，不重复扫描全部组。`TimeBudget` 仍是整轮上限（观测最多 70%，回收使用独立 context），启动和周期有界抖动。不得通过延长业务 policy、清数据、改 observe 或忽略 deadline 掩盖 worker 故障；v1.1.1 的 fingerprint/metadata 原地兼容，混跑旧版期间不保证命令去重收益。诊断同时查看 `reclaim_fail_total` 和固定 `deadline|owner_lost|policy_fence|provider` 原因指标，不能只看某一实例；完整 pending/lag 未采集或过期不得冒充零。详见生命周期指南的多实例 worker 章节。
-- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。
+- 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked`、可选 `OutboxBatchMarker` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。同 key 仍串行 Publish；批量确认只作用于已发布前缀。
 - Runtime 低基数指标公开 Outbox 的配置并发/实际峰值/active lanes/blocked keys/batch，以及 MQ可靠订阅的配置并发/handler in-flight/active/blocked/pending keys；缺少 provider指标时状态为 `not_collected`，禁止伪造零值。
 - JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已支持 lifecycle manifest、有界重试、DLQ、`MaxAckPending` 和安全前沿，但业务数据库幂等、事务 Outbox、容量值和 Broker 生产拓扑仍由应用负责。
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。

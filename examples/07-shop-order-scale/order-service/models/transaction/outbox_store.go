@@ -12,6 +12,11 @@ import (
 // OutboxStore 将 MySQL Outbox 表暴露给 ServiceEventBridge。
 type OutboxStore struct{}
 
+var (
+	_ event.OutboxStore       = OutboxStore{}
+	_ event.OutboxBatchMarker = OutboxStore{}
+)
+
 // LoadPending 读取等待发布的事件批次。
 func (OutboxStore) LoadPending(_ context.Context, limit int) ([]event.OutboxMessage, error) {
 	items, err := PendingOutbox(limit)
@@ -32,5 +37,19 @@ func (OutboxStore) LoadPending(_ context.Context, limit int) ([]event.OutboxMess
 func (OutboxStore) MarkPublished(_ context.Context, message event.OutboxMessage) error {
 	return store.RunRemoteTransaction(func() error { return nil }, func(action persistencetypes.IDataAction) error {
 		return MarkOutboxPublishedByID(action, message.ID)
+	})
+}
+
+// MarkPublishedBatch 一次事务确认一批已发布事件。
+func (OutboxStore) MarkPublishedBatch(_ context.Context, messages []event.OutboxMessage) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	return store.RunRemoteTransaction(func() error { return nil }, func(action persistencetypes.IDataAction) error {
+		return MarkOutboxPublishedByIDs(action, ids)
 	})
 }

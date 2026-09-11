@@ -115,7 +115,7 @@ entity.Model
 28. 只要服务实现 WebSocket 能力，集成测试和 UAT 就必须用真实 WebSocket 覆盖登录、按真实 RouterInfo 路径订阅、事件结构、当前用户投递、其他用户隔离与异常边界。
 29. 多服务运维观测使用 ServerManage Runtime API，窗口仅 `15s|5m|1h`。ClusterProvider 是实例与地址权威，Prometheus 是历史指标权威；指标缺失必须返回 `null` 并带 `state`，禁止把未采集伪装成零。不得恢复已废弃的 `RouterStats`/`/api/servermanage/statistics`。
 30. 高吞吐写路径必须使用实例级 `OrderWriteRuntime`（或等价注入访问面）+ `ServiceContext.UseResource` 管理生命周期；禁止包级全局 store registry。示例 04/07 的 `StartOrderWriteStore`/`StopOrderWriteStore` 已删除，不存在可调用版本；`SetSyncDB`、`EnableWriteBehind(ModelList)` 仍存在但仅为兼容层。
-31. 有序可靠投递等加性 MQ 契约以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。
+31. 有序可靠投递等加性 MQ 契约以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。Outbox 批量确认是加性可选接口 `event.OutboxBatchMarker`，未实现时保持逐条 `MarkPublished`。
 32. **Manage 的存储选择集中在 models**：每个服务的公共模型/持久化组合根只向 Manage 暴露无参数泛型 `NewManageModelList[T]()`；其内部用私有 `manageDataAction()` 或 store 选择本地库、远程权威库或动态分库适配器。普通分库继续由模型的 `IDBName`/`SearchWhere` 路由；只有单个模型确实连接不同权威库时才增加语义明确的专用 ModelList 工厂。切换 SQLite→MySQL 不得修改 `api/manage`。
 33. **Manage 动态分库**走 `IDBName` + 空 `Database` MySQL + 标准 `LoadList`，不用 `OnSearchBefore`+`stop=true` 自研列表。缺分库键时的 fail-closed 必须同时约束 `GetRemoteDBName` 与 `GetLocalDBName`（实现会在前者为空时回退后者）。硬条件与易踩坑见 [manage.md](manage.md)。
 34. **业务统计、经营分析与服务报表不是零接线自动 CRUD**：必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层刷新服务自己的 `stats.Store`，API 只读快照。`ReportDef` 只描述展示，不会自动创建事实数据、Runner 或 API。详见 [stats-and-reports.md](stats-and-reports.md)。

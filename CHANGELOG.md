@@ -11,6 +11,7 @@
 - MQ 生命周期增加显式 `NoRequiredGroups` 策略及独立 capability：纯保留主题无需虚假消费组即可在保留期到期后有界回收；空列表仍默认拒绝，禁止重试配置与普通/可靠建组订阅，意外组保守阻断。Redis 原子空组校验、NATS 无组前沿与删除前复核；保留旧策略指纹，统一设计文档和权威 skill 同步更新。
 
 - 统一 MQ 消息生命周期：应用通过 `RequireMessageLifecycle` 声明必需逻辑消费组、发布确认、保留、重试/DLQ、容量与有界回收；Redis Streams 使用 fenced Lua 安全前沿和原子 DLQ，NATS JetStream 使用 durable AckFloor、KV 前沿、`NakWithDelay`、DLQ publish ACK 后 Term 与有界 purge。未声明时保持不回收和无限重试，能力不足或状态不确定时 fail closed；新增跨 Provider conformance、真 Broker/race 测试、低基数 Runtime 指标和长期 Provider 扩展标准。
+- 可选 Outbox 批量确认：`event.OutboxBatchMarker.MarkPublishedBatch`。框架先按现有同 key 屏障逐条发布成功前缀，再一次事务更新这些 EventID；未实现时保持逐条 `MarkPublished`。崩溃发生在 MQ 发布后、确认前提交只形成 at-least-once 重复。示例 06/07 的 `OutboxStore` 已实现该接口。
 - keyed 同步服务调用：新增加性接口 `types.IRequestKeyedServiceCaller`，以及 `Request`、`ServiceContext` 的 `CallServiceWithKey`、`ServiceContext.OwnsServiceKey` 和 `ServiceResolver.ResolveWithKey`。显式提供市场/租户 key 时使用顺序无关、成员变化最小迁移的 rendezvous consistent hash 固定目标实例；服务自身可用同一成员快照判断 owner，空 key fail closed，原 `CallService` 继续轮询。
 - 可靠副本广播订阅：`Subscription.Broadcast=true` 使低频、幂等的控制面事件由每个服务副本各消费一次；消费组使用稳定网络端点而非重启即变的进程 UUID。非可靠广播或缺少稳定副本标识时 fail closed；价格、成交等数据面不应启用。
 - 仓库根目录增加 Apache License 2.0 标准许可证文本，README 同步标明项目的开源许可方式。
@@ -75,6 +76,8 @@
 
 ### Fixed
 
+- 修复示例 06/07 Outbox 批量确认静默跳过零主键或缺失记录的问题；先验证完整集合，失败整批回滚。增加确认失败后的发布器重启重试与真实 MySQL 原子性验证。
+
 - NATS 大批次回收为最终校验与 purge 预留时间，扫描达到子预算时只提交已验证前缀，避免短预算下始终扫描超时而无法推进；Redis/NATS 公开直接 Reclaim 调用同样受声明预算约束。
 
 - Redis 生命周期保留边界改用 Broker 时钟；零保留期不再因客户端时钟落后阻断已经全部 ACK 的消息。正保留期需要 Redis ACL 允许 `TIME`，权限缺失仍 fail closed。
@@ -113,4 +116,14 @@
 - `/ws` 的 `sub` 事件改为按路由所属认证域验签，与 REST 侧 `resolveRouteAuthPolicy` 同构：Manage 路由用 `ManageAuth`、ServerManage 路由用 `ServerManageAuth`，其余仍用 `Auth`。此前 `authorizeAuthenticatedSubscription` 把密钥与 AuthType 都写死为用户域，而 `routeRequiresWebSocketAuth` 只判断 `Auth || PrivateType`、Manage 路由又显式 `WithAuth(true)`，因此普通用户 Token 能通过 Manage 与 ServerManage 路由的验签；跨域订阅当时未真正建立，靠的是验签之后几道与认证无关的护栏（Manage 路由未实现 `IWebSocketUserIdentity`、`RouteWebSocketHub` 的服务归属校验），隔离不由认证层保证。回归测试：`pkg/server/trans/websocket/melody/auth_boundary_test.go` 的 `TestAuthenticatedSubscriptionSelectsAuthDomainPerRoute`（含两域密钥被配成同一个时仍须按 AuthType 拒绝），以及 `examples/integration/01-simple-shop/websocket_auth_boundary_test.go` 的 `TestWebSocketSubscribeEnforcesAuthDomain`。
 - 升级 `github.com/getkin/kin-openapi` 至 v0.144.0、`google.golang.org/grpc` 至 v1.82.1，处理三条依赖公告。本仓库只使用 kin-openapi 的 `openapi3` 与 `openapi3gen`，未使用 `openapi3filter` 和 `ValidationHandler`，因此 GHSA-r277-6w6q-xmqw（认证 fail-open，CVSS 9.1）与 GHSA-jpcw-4wr7-c3vq（请求校验空指针）在当前代码中不可达；GHSA-hrxh-6v49-42gf 中真正相关的是 HTTP/2 Rapid Reset 缓解绕过导致的拒绝服务，其 xDS RBAC 部分不适用（未使用 xDS）。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v0.0.247...HEAD
+## [v1.2.0] - 2026-09-11
+
+本节仅列相对 v1.1.2 的发布内容；上方历史 Unreleased 记录不重复视为本版新功能。
+
+- 可选 Outbox 批量确认：同 key 逐条发布，成功前缀一次事务确认；旧 store 继续逐条确认。缺失/无效记录 fail closed，确认失败允许 EventID 幂等重试。
+- Write-behind 显式自适应 Group Commit：数量门槛或收集期限触发，成功积压连续排空，失败有界退避；新增配置全零兼容旧行为，无需清空 pending。
+- 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
+- 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
+
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.2.0...HEAD
+[v1.2.0]: https://github.com/digitalwayhk/core/compare/v1.1.2...v1.2.0

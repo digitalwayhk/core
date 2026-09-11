@@ -17,8 +17,10 @@ type recordingBatchAction struct {
 	outboxLoads    int
 	orderInserts   int
 	outboxInserts  int
+	outboxUpdates  int
 	insertedOrders []*Order
 	insertedOutbox []*OutboxRecord
+	updatedOutbox  []*OutboxRecord
 	insertErr      error
 }
 
@@ -55,7 +57,16 @@ func (action *recordingBatchAction) Insert(data interface{}) error {
 	return nil
 }
 
-func (action *recordingBatchAction) Update(interface{}) error                    { return nil }
+func (action *recordingBatchAction) Update(data interface{}) error {
+	switch item := data.(type) {
+	case *OutboxRecord:
+		action.outboxUpdates++
+		action.updatedOutbox = append(action.updatedOutbox, item)
+	default:
+		return errors.New("未知更新类型")
+	}
+	return nil
+}
 func (action *recordingBatchAction) Delete(interface{}) error                    { return nil }
 func (action *recordingBatchAction) Raw(string, interface{}) error               { return nil }
 func (action *recordingBatchAction) Exec(string, interface{}) error              { return nil }
@@ -108,6 +119,25 @@ func TestInsertOutboxesIfMissingWithUsesOneLoadAndOneInsert(t *testing.T) {
 	require.Equal(t, 1, action.outboxLoads)
 	require.Equal(t, 1, action.outboxInserts)
 	require.Equal(t, []*OutboxRecord{missing}, action.insertedOutbox)
+}
+
+// TestMarkOutboxPublishedByIDsUsesOneLoadAndUpdatesInCallerTransaction 验证批量确认只查询一次，并在调用方事务内更新。
+func TestMarkOutboxPublishedByIDsUsesOneLoadAndUpdatesInCallerTransaction(t *testing.T) {
+	first := newBatchTestOutbox("event-1")
+	first.ID = 11
+	second := newBatchTestOutbox("event-2")
+	second.ID = 12
+	already := newBatchTestOutbox("event-3")
+	already.ID = 13
+	already.Published = true
+	action := &recordingBatchAction{existingOutbox: []*OutboxRecord{first, second, already}}
+
+	require.NoError(t, MarkOutboxPublishedByIDs(action, []uint{11, 12, 13, 11}))
+	require.Equal(t, 1, action.outboxLoads)
+	require.Equal(t, 2, action.outboxUpdates)
+	require.True(t, first.Published)
+	require.True(t, second.Published)
+	require.NoError(t, MarkOutboxPublishedByIDs(action, nil))
 }
 
 func newBatchTestOrder(id, userID uint, requestID, fingerprint string) *Order {

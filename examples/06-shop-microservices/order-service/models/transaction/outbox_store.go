@@ -5,11 +5,17 @@ import (
 	"context"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models/internal/store"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/event"
 )
 
 // OutboxStore 将 Order Service 本地 Outbox 表适配给框架事件发布器。
 type OutboxStore struct{}
+
+var (
+	_ event.OutboxStore       = OutboxStore{}
+	_ event.OutboxBatchMarker = OutboxStore{}
+)
 
 // LoadPending 实现本类型在当前服务边界中的行为。
 func (OutboxStore) LoadPending(context.Context, int) ([]event.OutboxMessage, error) {
@@ -44,5 +50,21 @@ func (OutboxStore) MarkPublished(_ context.Context, message event.OutboxMessage)
 			}
 		}
 		return nil
+	})
+}
+
+// MarkPublishedBatch 一次事务确认一批已发布事件。
+func (OutboxStore) MarkPublishedBatch(_ context.Context, messages []event.OutboxMessage) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	return store.RunInTransaction(func() error {
+		return store.EnsureModel(NewOutbox())
+	}, func(action persistencetypes.IDataAction) error {
+		return MarkOutboxPublishedByIDs(action, ids)
 	})
 }

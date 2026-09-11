@@ -40,6 +40,17 @@ type OutboxStoreSkipBlocked interface {
 	LoadPendingSkipping(ctx context.Context, limit int, skipOrderingKeys []string) ([]OutboxMessage, error)
 }
 
+// OutboxBatchMarker 是可选扩展：一次事务确认一批已成功发布到 MQ 的记录。
+// 未实现时框架继续逐条调用 MarkPublished。空切片必须立即成功且不开事务。
+// 实现必须单事务全成或全败；已确认记录视为成功。崩溃发生在 MQ 发布后、
+// 本方法提交前时只形成 at-least-once 重复投递，消费者继续用 EventID 幂等。
+// nil 仅表示全部请求记录已持久确认；缺失/无效记录必须返回错误，不得静默跳过。
+// 确认失败可能重放整批已发布前缀；同 key 串行 Publish 不代表重复消息也单调有序。
+// 此确认只更新 Outbox 发布状态，不代表消费者 ACK，也不授权回收 Broker 消息。
+type OutboxBatchMarker interface {
+	MarkPublishedBatch(ctx context.Context, messages []OutboxMessage) error
+}
+
 type OutboxOptions struct {
 	SourceService string
 	Store         OutboxStore
@@ -163,49 +174,99 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 
 type outboxLaneResult struct {
 	key       string
-	published int
+	published []OutboxMessage
 	failed    bool
 }
 
-// publishBatch 在同 key 内逐条执行，在不同 key 间按显式上限并行。
+// publishBatch 在同 key 内逐条 Publish，在不同 key 间按显式上限并行。
+// 若 store 实现 OutboxBatchMarker，先发布成功前缀再一次确认；否则保持逐条 MarkPublished。
 // blocked 只由调用方 goroutine 更新，worker 不共享修改该 map。
 func (p *outboxPublisher) publishBatch(
 	ctx context.Context,
 	items []OutboxMessage,
 	blocked map[string]struct{},
 ) bool {
+	marker, batchMark := p.store.(OutboxBatchMarker)
 	if p.keyConcurrency <= 1 {
-		progressed := false
-		p.activeLanes.Store(1)
-		defer p.activeLanes.Store(0)
-		for _, item := range items {
-			key := outboxOrderingKey(item)
-			if _, skip := blocked[key]; skip {
-				continue
-			}
-			p.beginOutboxWorker()
-			err := p.publish(ctx, item)
-			if err != nil {
-				p.endOutboxWorker()
-				p.failures.Add(1)
-				logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
-				blocked[key] = struct{}{}
-				continue
-			}
-			if err := p.store.MarkPublished(ctx, item); err != nil {
-				p.endOutboxWorker()
-				p.failures.Add(1)
-				logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
-				blocked[key] = struct{}{}
-				continue
-			}
-			p.endOutboxWorker()
-			p.depth.Add(-1)
-			progressed = true
+		if batchMark {
+			return p.publishSerialThenMarkBatch(ctx, items, blocked, marker)
 		}
-		return progressed
+		return p.publishSerialAndMarkEach(ctx, items, blocked)
 	}
+	if batchMark {
+		return p.publishKeyedThenMarkBatch(ctx, items, blocked, marker)
+	}
+	return p.publishKeyedAndMarkEach(ctx, items, blocked)
+}
 
+func (p *outboxPublisher) publishSerialAndMarkEach(
+	ctx context.Context,
+	items []OutboxMessage,
+	blocked map[string]struct{},
+) bool {
+	progressed := false
+	p.activeLanes.Store(1)
+	defer p.activeLanes.Store(0)
+	for _, item := range items {
+		key := outboxOrderingKey(item)
+		if _, skip := blocked[key]; skip {
+			continue
+		}
+		p.beginOutboxWorker()
+		err := p.publish(ctx, item)
+		if err != nil {
+			p.endOutboxWorker()
+			p.failures.Add(1)
+			logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
+			blocked[key] = struct{}{}
+			continue
+		}
+		if err := p.store.MarkPublished(ctx, item); err != nil {
+			p.endOutboxWorker()
+			p.failures.Add(1)
+			logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
+			blocked[key] = struct{}{}
+			continue
+		}
+		p.endOutboxWorker()
+		p.depth.Add(-1)
+		progressed = true
+	}
+	return progressed
+}
+
+func (p *outboxPublisher) publishSerialThenMarkBatch(
+	ctx context.Context,
+	items []OutboxMessage,
+	blocked map[string]struct{},
+	marker OutboxBatchMarker,
+) bool {
+	published := make([]OutboxMessage, 0, len(items))
+	p.activeLanes.Store(1)
+	defer p.activeLanes.Store(0)
+	for _, item := range items {
+		key := outboxOrderingKey(item)
+		if _, skip := blocked[key]; skip {
+			continue
+		}
+		p.beginOutboxWorker()
+		err := p.publish(ctx, item)
+		p.endOutboxWorker()
+		if err != nil {
+			p.failures.Add(1)
+			logx.Errorw("event_outbox_publish_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
+			blocked[key] = struct{}{}
+			continue
+		}
+		published = append(published, item)
+	}
+	return p.confirmPublishedBatch(ctx, published, blocked, marker)
+}
+
+func (p *outboxPublisher) splitUnblockedLanes(
+	items []OutboxMessage,
+	blocked map[string]struct{},
+) (map[string][]OutboxMessage, []string) {
 	lanes := make(map[string][]OutboxMessage)
 	keys := make([]string, 0)
 	for _, item := range items {
@@ -218,9 +279,58 @@ func (p *outboxPublisher) publishBatch(
 		}
 		lanes[key] = append(lanes[key], item)
 	}
+	return lanes, keys
+}
+
+func (p *outboxPublisher) publishKeyedAndMarkEach(
+	ctx context.Context,
+	items []OutboxMessage,
+	blocked map[string]struct{},
+) bool {
+	lanes, keys := p.splitUnblockedLanes(items, blocked)
 	if len(keys) == 0 {
 		return false
 	}
+	results := p.runKeyedLanes(ctx, keys, lanes, true)
+	progressed := false
+	for _, result := range results {
+		if len(result.published) > 0 {
+			progressed = true
+		}
+		if result.failed {
+			blocked[result.key] = struct{}{}
+		}
+	}
+	return progressed
+}
+
+func (p *outboxPublisher) publishKeyedThenMarkBatch(
+	ctx context.Context,
+	items []OutboxMessage,
+	blocked map[string]struct{},
+	marker OutboxBatchMarker,
+) bool {
+	lanes, keys := p.splitUnblockedLanes(items, blocked)
+	if len(keys) == 0 {
+		return false
+	}
+	results := p.runKeyedLanes(ctx, keys, lanes, false)
+	published := make([]OutboxMessage, 0)
+	for _, result := range results {
+		if result.failed {
+			blocked[result.key] = struct{}{}
+		}
+		published = append(published, result.published...)
+	}
+	return p.confirmPublishedBatch(ctx, published, blocked, marker)
+}
+
+func (p *outboxPublisher) runKeyedLanes(
+	ctx context.Context,
+	keys []string,
+	lanes map[string][]OutboxMessage,
+	markEach bool,
+) []outboxLaneResult {
 	p.activeLanes.Store(int64(len(keys)))
 	defer p.activeLanes.Store(0)
 
@@ -254,31 +364,48 @@ func (p *outboxPublisher) publishBatch(
 					result.failed = true
 					break
 				}
-				if err := p.store.MarkPublished(ctx, item); err != nil {
-					p.failures.Add(1)
-					logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
-					result.failed = true
-					break
+				if markEach {
+					if err := p.store.MarkPublished(ctx, item); err != nil {
+						p.failures.Add(1)
+						logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
+						result.failed = true
+						break
+					}
+					p.depth.Add(-1)
 				}
-				p.depth.Add(-1)
-				result.published++
+				result.published = append(result.published, item)
 			}
 			results <- result
 		}()
 	}
 	wg.Wait()
 	close(results)
-
-	progressed := false
+	out := make([]outboxLaneResult, 0, len(keys))
 	for result := range results {
-		if result.published > 0 {
-			progressed = true
-		}
-		if result.failed {
-			blocked[result.key] = struct{}{}
-		}
+		out = append(out, result)
 	}
-	return progressed
+	return out
+}
+
+func (p *outboxPublisher) confirmPublishedBatch(
+	ctx context.Context,
+	published []OutboxMessage,
+	blocked map[string]struct{},
+	marker OutboxBatchMarker,
+) bool {
+	if len(published) == 0 {
+		return false
+	}
+	if err := marker.MarkPublishedBatch(ctx, published); err != nil {
+		p.failures.Add(1)
+		logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("batch_size", len(published)), logx.Field("error", err))
+		for _, item := range published {
+			blocked[outboxOrderingKey(item)] = struct{}{}
+		}
+		return false
+	}
+	p.depth.Add(-int64(len(published)))
+	return true
 }
 
 func (p *outboxPublisher) beginOutboxWorker() {

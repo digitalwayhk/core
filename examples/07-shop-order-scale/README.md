@@ -203,7 +203,7 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 
 - 禁止新增 `api/call`。
 - 禁止内部权威 Public API 重复入口 facade 缓存。
-- 禁止发布方关心消费者；事件发布只通过 `sc.UseOutbox(models.OutboxStore{})`，订阅只通过 `sc.SubscribeEvent(...)`。
+- 禁止发布方关心消费者；事件发布只通过 `sc.UseOutbox(models.OutboxStore{})`，订阅只通过 `sc.SubscribeEvent(...)`。07 `OutboxStore` 实现可选 `OutboxBatchMarker`，由框架对已发布前缀一次确认，不自写发布循环。
 - 禁止固定水平副本 MachineID；必须使用 `AutoMachineID=true` 并测试自动分配。
 - 禁止把最终业务库按技术副本拆分；只允许按业务域拆库。
 - 禁止用每进程 SQLite 冒充共享远程权威库；07 order 权威库必须是 MySQL 等真实共享网络数据库。
