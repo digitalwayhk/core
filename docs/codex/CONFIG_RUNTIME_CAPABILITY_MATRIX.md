@@ -62,6 +62,7 @@
 | `Badger` | 构造时覆盖 `Path` 为已解析实例目录；`SyncWrites`、冲突检测和损坏策略在绑定 target 时校验 | `SharedBadgerManager`、`PrefixedBadgerDB` | supported |
 | `Badger.AutoSync` | 只控制框架内置 write-behind worker；`false` 仍保留 pending 与手动 `ForceSyncBatch/All` | `PrefixedBadgerDB.startWriteBehindWorker` | supported |
 | `Badger.SyncBatchSize` | 框架 worker 和 `ForceSyncAll` 的单轮批次，同时是手动 `ForceSyncBatch(ctx, limit)` 的硬上限；调用方 limit 更大时自动截断 | `PrefixedBadgerDB.forceSyncBatch`、`ForceSyncAllContext` | supported |
+| `Badger.SyncFlushThreshold/SyncMaxCollectDelay/SyncBacklogDrainDelay` | 全零保留旧调度；显式完整配置启用数量/首条期限触发和成功积压排空，替代而非叠加 `SyncBatchDelay`；错误及零进展按 min/max interval 退避；不影响手动同步 | `BadgerDBConfig.Validate`、`PrefixedBadgerDB.syncAdaptive`；见 `WRITE_BEHIND_SYNC_GUIDE.md` | supported |
 | `Batch.MaxBatch`、`CollectWindow`、`QueueCapacity` | 构造时补默认值并拒绝 queue 小于 max batch | `BatchCommitter` 从接收写到本地事务完成 | supported |
 | `Admission.MaxConcurrent`、`AcquireTimeout` | 每次进入 Group Commit 前读取 | `WriteAdmissionController` | supported |
 | `Admission.SoftPending`、`HardPending`、`MaxBacklogDuration` | 每次写入用 O(1) pending 快照检查持续积压 | `WriteAdmissionController` | supported |

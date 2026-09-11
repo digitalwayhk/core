@@ -40,7 +40,10 @@ type BadgerDBConfig struct {
 	SyncBatchSize              int           `json:"sync_batch_size" yaml:"sync_batch_size"`                             // 单轮同步批次及 ForceSyncBatch 硬上限（默认 1000）
 	SyncMinInterval            time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`                         // 最小同步间隔（默认 1s）
 	SyncMaxInterval            time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`                         // 最大同步间隔（默认 10s）
-	SyncBatchDelay             time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`                           // 触发同步前的积累窗口，让小写入合并成大 batch（默认 10ms）
+	SyncBatchDelay             time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`                           // 旧模式每轮收集等待；共享默认 100ms，生产/快速默认零
+	SyncFlushThreshold         int           `json:"sync_flush_threshold" yaml:"sync_flush_threshold"`                   // 自适应提前提交的不同 pending 条数；新增三字段全零保持旧模式
+	SyncMaxCollectDelay        time.Duration `json:"sync_max_collect_delay" yaml:"sync_max_collect_delay"`               // 自适应空闲后首条 pending 的最长主动收集等待
+	SyncBacklogDrainDelay      time.Duration `json:"sync_backlog_drain_delay" yaml:"sync_backlog_drain_delay"`           // 自适应成功积压批次间隔；零表示立即继续，错误仍退避
 	SyncMaxConcurrency         int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                   // 预留字段：共享模式当前未接线；当前并发度由 adapter 的 GetMaxOpenConns 推导
 	DeferredDeletePollInterval time.Duration `json:"deferred_delete_poll_interval" yaml:"deferred_delete_poll_interval"` // 本地延迟删除轮询间隔（默认 5s）
 
@@ -159,6 +162,11 @@ func (c *BadgerDBConfig) Validate() error {
 
 	if c.SyncBatchSize <= 0 {
 		c.SyncBatchSize = 1000
+	}
+	if c.SyncFlushThreshold != 0 || c.SyncMaxCollectDelay != 0 || c.SyncBacklogDrainDelay != 0 {
+		if c.SyncFlushThreshold <= 0 || c.SyncFlushThreshold > c.SyncBatchSize || c.SyncMaxCollectDelay <= 0 || c.SyncBacklogDrainDelay < 0 {
+			return fmt.Errorf("自适应同步要求 0 < sync_flush_threshold <= sync_batch_size、sync_max_collect_delay > 0、sync_backlog_drain_delay >= 0")
+		}
 	}
 
 	if c.SyncMinInterval <= 0 {

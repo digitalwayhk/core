@@ -220,6 +220,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 
 	// 待同步计数缓存
 	pendingCountCache int
+	pendingFirstAt    time.Time // 空闲后首条 pending 成功入队时间；历史积压为零
 	pendingCountMutex sync.RWMutex
 	lastCountUpdate   time.Time
 
@@ -252,8 +253,6 @@ func NewSharedBadgerDB[T types.IModel](basePath string, config ...BadgerDBConfig
 		return nil, err
 	}
 
-	manager.AddRef(prefix)
-
 	db := &PrefixedBadgerDB[T]{
 		manager:       manager,
 		prefix:        prefix,
@@ -262,6 +261,12 @@ func NewSharedBadgerDB[T types.IModel](basePath string, config ...BadgerDBConfig
 		sadTrigger:    make(chan struct{}, 1),
 		sadQueueItems: make(map[string]syncAfterDeleteCandidate[T]),
 	}
+	if manager.config.SyncFlushThreshold > 0 {
+		if err := db.initAdaptivePending(); err != nil {
+			return nil, fmt.Errorf("初始化自适应同步 pending 失败: %w", err)
+		}
+	}
+	manager.AddRef(prefix)
 	db.startSyncAfterDeleteWorker()
 
 	logx.Infof("共享BadgerDB实例已创建 [prefix=%s]", prefix)
@@ -361,6 +366,10 @@ func (p *PrefixedBadgerDB[T]) startWriteBehindWorker() {
 		go p.syncToOtherDB()
 		logx.Infof("共享DB自动同步已启动 [prefix=%s]", p.prefix)
 	})
+	// 兼容解绑后再次绑定：已有 worker 不会再次启动，但必须重新检查保留的 pending。
+	if p.manager.config.SyncFlushThreshold > 0 {
+		p.triggerSync()
+	}
 }
 
 func (p *PrefixedBadgerDB[T]) recordWriteBehindBindError(err error) error {
@@ -1226,14 +1235,24 @@ func (p *PrefixedBadgerDB[T]) ScanPage(prefix string, limit int, lastKey string)
 // incrementPendingCount 更新待同步计数
 func (p *PrefixedBadgerDB[T]) incrementPendingCount(delta int) {
 	p.pendingCountMutex.Lock()
+	previous := p.pendingCountCache
 	p.pendingCountCache += delta
 	pending := p.pendingCountCache
+	if pending > 0 && previous <= 0 {
+		p.pendingFirstAt = time.Now()
+	}
+	if pending <= 0 {
+		p.pendingFirstAt = time.Time{}
+	}
 	p.pendingCountMutex.Unlock()
 	p.syncMetricsMu.Lock()
 	if pending > p.syncMetrics.MaxPending {
 		p.syncMetrics.MaxPending = pending
 	}
 	p.syncMetricsMu.Unlock()
+	if delta > 0 && p.manager.config.SyncFlushThreshold > 0 {
+		p.triggerSync()
+	}
 }
 
 // triggerSync 通知 syncToOtherDB 立即执行同步（非阻塞，幂等）
@@ -1354,6 +1373,10 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 	}()
 
 	config := p.manager.config
+	if config.SyncFlushThreshold > 0 {
+		p.syncAdaptive()
+		return
+	}
 	interval := config.SyncInterval
 	minInterval := config.SyncMinInterval
 	maxInterval := config.SyncMaxInterval

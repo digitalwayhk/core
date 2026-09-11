@@ -6,6 +6,8 @@
 
 ### Added
 
+- Write-behind 增加显式自适应同步配置：按不同 pending 数量或首条收集期限提交，成功积压连续排空，失败/零进展有界退避。新增三字段全零保持旧行为，继续复用 `SyncBatchSize`、可靠 pending 和远端条件确认；业务无需重写同步循环。详见 `docs/codex/WRITE_BEHIND_SYNC_GUIDE.md`。
+
 - MQ 生命周期增加显式 `NoRequiredGroups` 策略及独立 capability：纯保留主题无需虚假消费组即可在保留期到期后有界回收；空列表仍默认拒绝，禁止重试配置与普通/可靠建组订阅，意外组保守阻断。Redis 原子空组校验、NATS 无组前沿与删除前复核；保留旧策略指纹，统一设计文档和权威 skill 同步更新。
 
 - 统一 MQ 消息生命周期：应用通过 `RequireMessageLifecycle` 声明必需逻辑消费组、发布确认、保留、重试/DLQ、容量与有界回收；Redis Streams 使用 fenced Lua 安全前沿和原子 DLQ，NATS JetStream 使用 durable AckFloor、KV 前沿、`NakWithDelay`、DLQ publish ACK 后 Term 与有界 purge。未声明时保持不回收和无限重试，能力不足或状态不确定时 fail closed；新增跨 Provider conformance、真 Broker/race 测试、低基数 Runtime 指标和长期 Provider 扩展标准。
