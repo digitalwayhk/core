@@ -108,6 +108,49 @@ func MarkOutboxPublishedByID(action persistencetypes.IDataAction, id uint) error
 	return MarkOutboxPublishedWith(action, items[0])
 }
 
+// MarkOutboxPublishedByIDs 在当前事务中按主键批量标记事件已发布。
+// 空切片立即成功；已发布记录视为成功。
+func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) error {
+	if action == nil {
+		return errors.New("数据操作器不能为空")
+	}
+	unique := uniqueOutboxIDs(ids)
+	if len(unique) == 0 {
+		return nil
+	}
+	var items []*OutboxRecord
+	query := store.NewSearch(NewOutbox(), len(unique))
+	query.AddWhereNS("ID", persistencetypes.SymbolIn, unique)
+	if err := action.Load(query, &items); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item == nil || item.Published {
+			continue
+		}
+		if err := MarkOutboxPublishedWith(action, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uniqueOutboxIDs(ids []uint) []uint {
+	seen := make(map[uint]struct{}, len(ids))
+	out := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
 // MarkOutboxPublishedWith 在指定事务中将 Outbox 事件标记为已发布。
 func MarkOutboxPublishedWith(action persistencetypes.IDataAction, item *OutboxRecord) error {
 	now := time.Now().UTC()
