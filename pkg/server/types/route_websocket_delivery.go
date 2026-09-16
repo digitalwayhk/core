@@ -22,7 +22,23 @@ type routeWebSocketDelivery struct {
 }
 
 func (h *RouteWebSocketHub) Notice(info *RouterInfo, message interface{}) {
-	for _, hash := range h.SubscribedHashes(info) {
+	hashes := h.SubscribedHashes(info)
+	seen := make(map[uint64]struct{}, len(hashes))
+	for _, hash := range hashes {
+		seen[hash] = struct{}{}
+	}
+	if forwarder := GetCrossNodeForwarderForService(h.service); forwarder != nil {
+		if index, ok := forwarder.(ICrossNodeSubscriptionIndex); ok {
+			for _, hash := range index.PeerSubscribedHashes(info.GetPath()) {
+				if _, exists := seen[hash]; exists {
+					continue
+				}
+				seen[hash] = struct{}{}
+				hashes = append(hashes, hash)
+			}
+		}
+	}
+	for _, hash := range hashes {
 		h.publishNotice(info, hash, message, true)
 	}
 }

@@ -80,7 +80,7 @@ private WebSocket 路由至少需要以下职责：
 
 不要再包一层 `order`，也不要把 action 写回 HTTP DTO 原对象。通知过滤失败、类型不匹配或用户不匹配时直接不投递。
 
-跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；IPv6 地址通过 `net.JoinHostPort`；非 2xx 转发视为错误。
+跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；通知节点必须合并本地订阅 hash 与 `ICrossNodeSubscriptionIndex` 提供的对等节点订阅 hash，不能因本节点没有同 hash 订阅而丢弃远端用户通知。IPv6 地址通过 `net.JoinHostPort`；非 2xx 转发视为错误。
 
 worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
 

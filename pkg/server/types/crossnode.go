@@ -19,6 +19,12 @@ type ICrossNodeForwarder interface {
 	DrainAndStop(ctx context.Context)
 }
 
+// ICrossNodeSubscriptionIndex 是跨节点转发器的加性能力，返回指定路由当前只存在于
+// 对等节点的订阅 hash。RouteWebSocketHub 用它补齐本节点没有同 hash 订阅时的定向转发。
+type ICrossNodeSubscriptionIndex interface {
+	PeerSubscribedHashes(routePath string) []uint64
+}
+
 var (
 	globalCrossNodeForwarder   ICrossNodeForwarder
 	serviceCrossNodeForwarders = make(map[string]ICrossNodeForwarder)
