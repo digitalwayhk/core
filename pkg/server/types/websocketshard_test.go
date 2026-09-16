@@ -65,9 +65,10 @@ func (s *shardTestRouter) NoticeFiltersRouter(message interface{}, _ IRouter) (b
 }
 
 type shardCapture struct {
-	mu      sync.Mutex
-	subs    []shardSubscription
-	notices []uint64
+	mu         sync.Mutex
+	subs       []shardSubscription
+	notices    []uint64
+	peerHashes map[string][]uint64
 }
 
 type shardSubscription struct {
@@ -79,6 +80,11 @@ func (c *shardCapture) ForwardNotice(_ context.Context, _ string, hash uint64, _
 	c.mu.Lock()
 	c.notices = append(c.notices, hash)
 	c.mu.Unlock()
+}
+func (c *shardCapture) PeerSubscribedHashes(routePath string) []uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]uint64(nil), c.peerHashes[routePath]...)
 }
 func (c *shardCapture) OnSubscriptionChange(_ string, hash uint64, active bool) {
 	c.mu.Lock()
@@ -244,4 +250,22 @@ func TestWebSocketForwardersAreIsolatedByService(t *testing.T) {
 	if got := forwarderA.noticeCount(hashB); got != 0 {
 		t.Fatalf("服务 B 的通知被转发到服务 A：%d", got)
 	}
+}
+
+// TestNoticeWebSocketForwardsRemoteOnlySubscription 验证消费通知的节点即使没有本地同 hash
+// 订阅，也会把通知转发给实际持有外部 WebSocket 的对等节点。
+func TestNoticeWebSocketForwardsRemoteOnlySubscription(t *testing.T) {
+	const (
+		serviceName = "ws-remote-only"
+		routePath   = "/ws/orders"
+		remoteHash  = uint64(303)
+	)
+	forwarder := &shardCapture{peerHashes: map[string][]uint64{routePath: {remoteHash}}}
+	SetCrossNodeForwarderForService(serviceName, forwarder)
+	t.Cleanup(func() { ClearCrossNodeForwarderForService(serviceName, forwarder) })
+
+	info := newShardRouterInfoForService(t, serviceName, routePath)
+	info.NoticeWebSocket("remote-order")
+
+	waitForShard(t, func() bool { return forwarder.noticeCount(remoteHash) == 1 })
 }

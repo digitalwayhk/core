@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -176,6 +177,20 @@ func (b *CrossNodeNoticeBroker) UpdatePeerSubscription(routePath string, hash ui
 			delete(b.subs[routePath][hash], nodeID)
 		}
 	}
+}
+
+// PeerSubscribedHashes 返回指定路由当前由对等节点持有的订阅 hash 快照。
+func (b *CrossNodeNoticeBroker) PeerSubscribedHashes(routePath string) []uint64 {
+	b.subMu.RLock()
+	hashes := make([]uint64, 0, len(b.subs[routePath]))
+	for hash, nodes := range b.subs[routePath] {
+		if len(nodes) > 0 {
+			hashes = append(hashes, hash)
+		}
+	}
+	b.subMu.RUnlock()
+	sort.Slice(hashes, func(i, j int) bool { return hashes[i] < hashes[j] })
+	return hashes
 }
 
 // DrainAndStop broadcasts subscription-removed events for all local subscriptions
