@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -290,7 +291,9 @@ func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb
 		route := "invalid_route"
 		if payload != nil {
 			service = payload.TargetService
-			if resultClass != observability.ResultRejected {
+			if resultClass == observability.ResultRejected {
+				route = rejectedControlPlaneRoute(payload.TargetPath)
+			} else {
 				candidate := payload.TargetPath
 				// 仅接受稳定模板：NormalizeRouteLabel + 可选 allowlist（已注册 RouterInfo）。
 				normalized := observability.NormalizeRouteLabel(candidate)
@@ -320,6 +323,17 @@ func (s *Server) Call(ctx context.Context, req *pb.PayloadRequest) (response *pb
 		return nil, status.Error(codes.Internal, "internal server error")
 	}
 	return &pb.PayloadResponse{Data: data}, nil
+}
+
+func rejectedControlPlaneRoute(path string) string {
+	switch {
+	case path == "/api/manage" || strings.HasPrefix(path, "/api/manage/"):
+		return "/api/manage/*"
+	case path == "/api/servermanage" || strings.HasPrefix(path, "/api/servermanage/"):
+		return "/api/servermanage/*"
+	default:
+		return "invalid_route"
+	}
 }
 
 // Check reports whether the Server has started and is not stopping.

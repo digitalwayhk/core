@@ -93,6 +93,43 @@ func TestGRPCServerInvalidRouteStillRecordsStableLabel(t *testing.T) {
 	require.Equal(t, before+1, after)
 }
 
+// TestGRPCServerRejectedManageCallKeepsControlPlaneMetricClass 验证身份拒绝不会把控制面请求混入业务指标。
+func TestGRPCServerRejectedManageCallKeepsControlPlaneMetricClass(t *testing.T) {
+	observability.EnableMetrics()
+	server := &Server{handler: func(context.Context, *coretypes.PayLoad) ([]byte, error) {
+		t.Fatal("identity mismatch must reject before handler")
+		return nil, nil
+	}}
+	cases := []struct {
+		path  string
+		route string
+	}{
+		{path: "/api/manage/shop-order/order/search", route: "/api/manage/*"},
+		{path: "/api/servermanage/runtimetopology", route: "/api/servermanage/*"},
+	}
+	for _, item := range cases {
+		t.Run(item.route, func(t *testing.T) {
+			labels := map[string]string{
+				"service":      "shop-order",
+				"route":        item.route,
+				"protocol":     "grpc",
+				"result_class": "rejected",
+			}
+			before := gatherCounter(t, "core_service_request_requests_total", labels)
+
+			_, err := server.Call(verifiedCallerContext("shop-admin"), &pb.PayloadRequest{
+				TargetService: "shop-order",
+				TargetPath:    item.path,
+				SourceService: "shop-user",
+			})
+			require.Error(t, err)
+
+			after := gatherCounter(t, "core_service_request_requests_total", labels)
+			require.Equal(t, before+1, after)
+		})
+	}
+}
+
 func gatherCounter(t *testing.T, name string, want map[string]string) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
