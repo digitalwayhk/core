@@ -98,6 +98,7 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - 请求体/查询支持 `window`：仅 `15s`、`5m`、`1h`；`runtimeservice` 另需 `service`。
 - **ClusterProvider** 提供服务实例与地址；**Prometheus** 提供 rate/error/histogram 历史；RouterInfo 提供稳定路由元数据；Pending/Outbox/EventBridge 等通过本进程 Collector 暴露后由 Prom 查询。
 - Runtime Aggregator 只部署在 ServerManage 可达边界：业务副本暴露 scrape 指标，**禁止** Aggregator 在 API 请求中直连各实例 `/metrics` 或 Provider。
+- 运行图的 QPS、错误率、p50/p95/p99、路由排行与同步调用边只表示业务数据面，统一排除 `/api/manage/*` 与 `/api/servermanage/*` 控制面路由。控制面仍保留安全访问日志与原始 Prometheus 时序，但不得污染业务容量和延迟判断。
 - 指标诚实状态：`ok` / `partial` / `stale` / `unavailable` / `no_traffic` / `not_collected`。缺失时数值为 `null` + `state`，不得把未采集写成 0。
 - 同步边：跨服务 gRPC/内部调用；异步边：Outbox 发布与订阅索引汇合及低基数 gauge。全局图画逻辑服务，组件进入服务内部视图。
 - 异步订阅在当前窗口没有匹配发布序列时属于空闲/未采集路径：保留 `source` 为空、数值为 `null`、状态为 `not_collected` 的虚线边，不产生 `async_publish_missing`。启动即注册的低频事件和失败路径不得因此持续告警。

@@ -468,12 +468,12 @@ func TestServiceDetailUsesCoreDurationQuantiles(t *testing.T) {
 	}
 	for _, item := range quantiles {
 		serviceQ := fmt.Sprintf(
-			`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
-			item.q, service, window,
+			`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q,route!~%q}[%s])))`,
+			item.q, service, `^/api/(manage|servermanage)(/.*)?$`, window,
 		)
 		routeQ := fmt.Sprintf(
-			`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
-			item.q, service, window,
+			`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q,route!~%q}[%s])))`,
+			item.q, service, `^/api/(manage|servermanage)(/.*)?$`, window,
 		)
 		samples[serviceQ] = runtime.Vector{{Value: item.value}}
 		samples[routeQ] = runtime.Vector{{
