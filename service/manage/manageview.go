@@ -61,6 +61,7 @@ func RouterToLocaleCommand(info *types.RouterInfo, current string) *view.Command
 		Command: strings.ToLower(name),
 		Name:    name,
 		Title:   name,
+		Visible: true,
 	}
 	if title := standardCommandTitle(cmd.Command, current); title != "" {
 		cmd.Title = title
@@ -71,9 +72,5 @@ func RouterToLocaleCommand(info *types.RouterInfo, current string) *view.Command
 	if cmd.Command != "add" && cmd.Command != "edit" {
 		cmd.IsAlert = true
 	}
-	// if cmd.Name == "Release" {
-	// 	cmd.IsSplit = true
-	// 	cmd.SplitName = "submit"
-	// }
 	return cmd
 }

@@ -17,8 +17,8 @@ https://github.com/bitzoom-futures/futures.admin.git
 3. 菜单 URL 指向 `/main/:s/:c`。
 4. `web/admin/src/pages/views/main.tsx` 读取 `s` 和 `c`。
 5. `main.tsx` 将路由参数映射为后端管理 API。
-6. `WayPage` 调用 `view/search/command` 接口。
-7. `WayPage` 根据后端返回的 `ViewModel` 渲染工具栏、表格、表单、子表和外键选择。
+6. `ManagePage`（`src/manage-ui`）调用 `view/search/command` 接口。
+7. 根据后端返回的 `ViewModel` 渲染工具栏、表格、表单、子表、外键选择、高级搜索、列定制、枚举分段筛选和导入导出。`WayPlus` 仍保留为旧实现，不再作为 `/main/:s/:c` 入口。
 
 ## 路由入口
 

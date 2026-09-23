@@ -109,6 +109,7 @@ func TestRouterToCommandKeepsStableKeysAndUsesDefaultLanguage(t *testing.T) {
 	assert.Equal(t, "add", cmd.Command)
 	assert.Equal(t, "Add", cmd.Name)
 	assert.Equal(t, "新增", cmd.Title)
+	assert.True(t, cmd.Visible)
 }
 
 func TestRouterToLocaleCommandPicksTitleByLanguage(t *testing.T) {

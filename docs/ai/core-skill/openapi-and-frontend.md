@@ -401,6 +401,8 @@ POST /api/manage/{service}/{controller}/{command}
 
 自定义命令：值嵌入 `manage.Operation[T]`（不要指针嵌入），放进 `Routers()`。`command` 仍是结构体名小写。需要表单的，在 `ViewCommandModel` 里设 `editshow=true`；只对当前行执行的，保持默认 `isselectrow=true`。
 
+按钮多时可用命令分割：`issplit=true` 且 `splitname` 等于某条主命令的 `command`（小写，例如 `add`），前端把该按钮藏进宿主按钮的下拉，宿主本身仍可点。找不到宿主时仍作为主按钮显示。示例见 `examples/08-admin-manage-ui` 把导入、导出、复制挂到 `add`。
+
 #### 调用时不要做的事
 
 - 执行 `view.commands` 里没有的 command（未注册就是 404）。

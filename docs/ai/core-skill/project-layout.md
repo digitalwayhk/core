@@ -88,8 +88,16 @@ examples/07-shop-order-scale/
 ├── deploy/                       # Docker、Prometheus scrape 示例
 └── README.md                     # AutoMachineID、共享 MySQL、06/07 对比
 
+examples/08-admin-manage-ui/
+├── models/                       # 分类基础资料、资料条目、明细子行、规格参数、NewManageModelList
+├── api/manage/                   # 分类 CRUD/提交发布，条目外键/子表/导入导出/复制
+├── api/public/                   # 分类公开查询
+├── main/main.go
+└── README.md                     # 管理后台操作与前端能力对照
+
 examples/integration/07-shop-order-scale/
 examples/integration/07-shop-order-scale-multi-process/
+examples/integration/08-admin-manage-ui/
 ```
 
 单元测试与实现同目录；跨子包继承/兼容契约测试留在根包；真实进程、HTTP、WebSocket 和 Casdoor 测试只放 `examples/integration/<service>`；固定样本放 `testdata/`。

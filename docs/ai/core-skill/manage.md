@@ -30,6 +30,117 @@ HTTP 400 / `record id is required`；Edit、Remove 目标不存在返回 NotFoun
 
 `POST .../view` 只返回 schema（字段、命令、子模型），没有业务体。命令 `POST .../{command}` 的 body 是**模型字段本身**（不要包 `{model:...}`），`{command}` 必须等于 schema 里 `commands[].command`。View / Search / 命令的调用约定见 [openapi-and-frontend.md](openapi-and-frontend.md)。
 
+## Manage 继承与 Hook 生命周期
+
+### 推荐继承结构
+
+跨多个 Manage 复用数据源、服务公共能力或领域规则时，使用以下结构：
+
+```text
+manage.ManageService[T]
+└── manage.HookedManageService[T]      # 将粗粒度 Hook 分派为 On... Hook
+    └── common.ServiceManage[T]        # 服务级数据源与公共能力
+        └── BaseDataManage[T]          # 可选：领域公共字段、命令和规则
+            └── ProductManage          # 最终具体 Manage
+```
+
+只有一个简单 Manage 时可以直接嵌入 `ManageService[T]`；需要多层复用时，服务公共层应嵌入 `HookedManageService[T]`。构造链的每一层都必须接收并向下传递**最终具体 Manage** 作为 owner：
+
+```go
+type ServiceManage[T persistencetypes.IModel] struct {
+	*manage.HookedManageService[T]
+}
+
+func NewServiceManage[T persistencetypes.IModel](owner interface{}) *ServiceManage[T] {
+	return &ServiceManage[T]{
+		HookedManageService: manage.NewHookedManageService[T](owner),
+	}
+}
+
+func (*ServiceManage[T]) GetList() interface{} {
+	return models.NewManageModelList[T]()
+}
+
+type BaseDataManage[T persistencetypes.IModel] struct {
+	*ServiceManage[T]
+}
+
+func NewBaseDataManage[T persistencetypes.IModel](owner interface{}) *BaseDataManage[T] {
+	return &BaseDataManage[T]{ServiceManage: NewServiceManage[T](owner)}
+}
+
+type ProductManage struct {
+	*BaseDataManage[models.Product]
+}
+
+func NewProductManage() *ProductManage {
+	own := &ProductManage{}
+	own.BaseDataManage = NewBaseDataManage[models.Product](own)
+	return own
+}
+```
+
+owner 必须是 `own`，不能传中间基座。否则框架只能看到中间层，具体 Manage 的 `OnAddBefore`、`OnSearchAfter`、View 配置等方法不会被调用。
+
+Go 的嵌入只提供方法提升，不会自动执行父层同名方法。覆盖需要保留父层行为的 Hook 时，必须显式调用父层：
+
+```go
+func (own *ProductManage) SearchAfter(
+	sender interface{},
+	result *view.TableData,
+	req servertypes.IRequest,
+) (interface{}, error) {
+	data, err := own.BaseDataManage.SearchAfter(sender, result, req)
+	if err != nil {
+		return nil, err
+	}
+	// 追加 ProductManage 自己的查询结果处理。
+	return data, nil
+}
+```
+
+同样的显式父调用规则适用于 `ParseBefore/After`、`ValidationBefore/After`、`DoBefore/After`、`SearchBefore/After`、`ViewModel`、`ViewFieldModel`、`ViewCommandModel` 和 `ViewChildModel`。不要让具体 Manage 覆盖 `ServiceManage.SearchBefore` 后无意跳过服务级公共处理。
+
+### 标准操作的 Hook 顺序
+
+以下是对外应依赖的概念顺序；Hook 中不要保存请求状态，也不要依赖某个 Hook 只进入一次：
+
+| 操作 | 顺序与可用 Hook |
+| --- | --- |
+| Add / Edit / Remove | `ParseBefore → Bind → ParseAfter → ValidationBefore → 标准校验 → ValidationAfter → DoBefore → 持久化 → DoAfter` |
+| View | `ParseBefore → DoBefore/OnViewBefore → 生成 schema → DoAfter/OnViewAfter` |
+| 主列表 Search | `SearchBefore/OnSearchBefore → 标准 LoadList → ManageService.SearchAfter → OnSearchAfter` |
+| 外键 Search | `ForeignSearchBefore → 查询 → ForeignSearchAfter` |
+| 子表 Search | `ChildSearchBefore → 查询 → ChildSearchAfter` |
+| Submit | 优先调用 `ISubmitHook.OnSubmit`；未实现时回退 `DoBefore`；成功后调用 `DoAfter` |
+| Release | 优先调用 `IReleaseHook.OnRelease`；未实现时回退 `DoBefore`；当前 Release 不调用 `DoAfter` |
+
+`HookedManageService[T]` 把 `DoBefore/DoAfter` 分派为：
+
+- 所有标准 View/Add/Edit/Remove 先进入 `OnDoBefore`，再进入对应的 `OnViewBefore`、`OnAddBefore`、`OnEditBefore`、`OnRemoveBefore`。
+- 后置阶段先进入 `OnDoAfter`；它返回非 nil data 或 error 时停止，返回 nil 才进入对应的类型 Hook。
+- 主列表 Search 单独进入 `OnSearchBefore/OnSearchAfter`，不会先进入 `OnDoBefore/OnDoAfter`。
+- 外键和子表 Search 使用 `ForeignSearchBefore/After`、`ChildSearchBefore/After` 粗粒度 Hook，不由 `HookedManageService` 转换为 `On...` 方法。
+- `stop=true` 表示 Hook 已经处理完成，框架不得再执行默认动作；要同时返回最终 data 或明确 error。不要用 `stop=true` 手写普通列表查询。
+
+类型安全 Hook 的签名以 `service/manage/hooks.go` 为准。可运行参考：多层继承看 `examples/03-shop-inheritance`，服务级公共 Hook 看 `examples/06-shop-microservices/*-service/api/manage/common/service_manage.go`。
+
+### 自定义命令的实例与绑定
+
+自定义命令应以值嵌入 `manage.Operation[T]`，并实现 `New(instance)` 为每次请求创建独立对象。`Operation.Parse` 会调用 owner 的 `ParseBefore/ParseAfter`，并把请求体绑定到 `operation.Model`；不要另建一套平行 Request 再手工复制字段。
+
+自定义写命令的统一权限、审计及其他横切处理方式暂不在本分片定义，待权限方案明确后再补充。当前不要从标准 CRUD 的 Hook 顺序自行推导自定义命令的权限契约。
+
+### 继承与 Hook 常见错误
+
+| 错误 | 后果 | 正确做法 |
+| --- | --- | --- |
+| 构造基座时把中间层作为 owner | 最终 Manage 的 Hook 不触发 | 每一层都传最终 `own` |
+| 覆盖同名方法但不调用父层 | 默认数据或其他父层公共逻辑被截断 | 在明确的前后顺序中显式调用父层 |
+| 具体 Manage 覆盖 `SearchBefore` 并自行返回列表 | 绕过标准筛选、排序、分页和后置 Hook | 只校验或补充 `SearchItem`，让标准 `LoadList` 继续执行 |
+| 在 Manage/命令内创建带 DataAction 的 ModelList | API 层决定数据库，破坏持久化边界 | 通过 owner `GetList()`，最终落到 models 的无参数工厂 |
+| 把请求、用户或 trace 保存在 Manage 单例 | 并发请求串数据 | 只使用 Hook 的 `req` 参数和请求级 Operation 实例 |
+
 ## 指定 Manage 数据源（服务级 `GetList`）
 
 Manage **应当**使用 `ModelList`，以获得默认筛选、排序、分页等标准能力（适合管理人员配置系统，不追求业务级吞吐）。
@@ -214,7 +325,7 @@ Manage 路由、服务与控制器中英标题以及 `ReportDef` 菜单。管理
 ## 可复用 Button（跨服务通用操作）
 
 
-Button 是 Manage 页面上非 CRUD 的自定义操作入口，实现 `manage.Operation[T]` 接口。
+Button 是 Manage 页面上非 CRUD 的自定义操作入口，以值嵌入 `manage.Operation[T]`。
 
 #### 放置规则
 
@@ -248,9 +359,12 @@ type Retry[T persisttypes.IModel] struct {
 }
 
 func NewRetry[T persisttypes.IModel](own interface{}) *Retry[T] {
-    r := &Retry[T]{}
-    r.Operation = *manage.NewOperation[T](own)
-    return r
+    return &Retry[T]{Operation: manage.NewOperation[T](own)}
+}
+
+// New 为每次请求创建独立命令实例，并保留最终 Manage owner。
+func (own *Retry[T]) New(instance interface{}) stypes.IRouter {
+    return NewRetry[T](instance)
 }
 
 func (own *Retry[T]) RouterInfo() *stypes.RouterInfo {
@@ -258,17 +372,24 @@ func (own *Retry[T]) RouterInfo() *stypes.RouterInfo {
 }
 
 func (own *Retry[T]) Do(req stypes.IRequest) (interface{}, error) {
-    list := entity.NewModelList[T](nil)
-    if err := list.LoadByID(req); err != nil {
+    // 复用 owner.GetList()，数据源仍由 models.NewManageModelList 决定。
+    provider := own.GetInstance().(manage.IGetModelList)
+    list := provider.GetList().(*entity.ModelList[T])
+    item := own.Model
+    // 通过反射将 RetryCount 重置为 0、将 Status 置为待处理
+    utils.SetPropertyValue(item, "RetryCount", 0)
+    utils.SetPropertyValue(item, "Status", 0)
+    if err := list.Update(item); err != nil {
         return nil, err
     }
-    item := list.GetItem()
-    // 通过反射将 RetryCount 重置为 0、将 Status 置为待处理
-    utils.SetProperty(item, "RetryCount", 0)
-    utils.SetProperty(item, "Status", 0)
-    return list.Save()
+    if err := list.Save(); err != nil {
+        return nil, err
+    }
+    return item, nil
 }
 ```
+
+上例只说明请求级 `Operation`、模型绑定和通过 owner `GetList()` 保持数据源边界，不定义自定义写命令的权限处理方式。
 
 **在 Manage 控制器的 Routers() 中注册：**
 
