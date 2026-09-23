@@ -1,6 +1,6 @@
 ---
 name: use-digitalway-core
-description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、MQ 消息生命周期、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
+description: Use when 使用或审查 github.com/digitalwayhk/core 的服务、IRouter、PublicError 公共错误分类、基础资料 Model/业务事实 Model 分类、Model/Manage 继承、Manage 动态分库 IDBName、Casdoor/JWT/HMAC 认证、WebSocket、缓存、本地可靠写、EventBridge、MQ 消息生命周期、业务统计、经营分析、服务报表、多服务运行图 Runtime API、配置、集成测试、性能或兼容性时。
 ---
 
 # 使用 Digitalway Core
@@ -22,9 +22,9 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 任务 | 分片 |
 | --- | --- |
 | 目录结构、业务层分层、启动组合根 | [project-layout.md](project-layout.md) |
-| IRouter、RouterInfo、路径规则、Public/Private、DTO | [routing-and-dto.md](routing-and-dto.md) |
-| 模型分类与继承、持久化边界、**建库建表与字段迁移** | [models.md](models.md) |
-| Manage CRUD、Hook 继承、`GetList` 数据源、动态分库 | [manage.md](manage.md) |
+| IRouter、RouterInfo、路径规则、PublicError 分类、Public/Private、DTO | [routing-and-dto.md](routing-and-dto.md) |
+| 模型分类与继承、持久化错误、**建库建表与字段迁移** | [models.md](models.md) |
+| Manage CRUD 公开错误、Hook 继承、`GetList` 数据源、动态分库 | [manage.md](manage.md) |
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
 | 多服务调用、EventBridge、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
@@ -121,6 +121,7 @@ entity.Model
 34. **业务统计、经营分析与服务报表不是零接线自动 CRUD**：必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层刷新服务自己的 `stats.Store`，API 只读快照。`ReportDef` 只描述展示，不会自动创建事实数据、Runner 或 API。详见 [stats-and-reports.md](stats-and-reports.md)。
 35. 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。
 36. 服务开启 `Auth` 后默认仍使用原有 Bearer Access Token；`HMACAuth` 配置不是开关。只有确实需要 API Key/HMAC 的具体服务显式实现 `IHMACAuthProvider` 时，该 `ServiceContext` 才增加 HMAC 备选。Core 只负责抽取凭证、限流/超时和注入可信身份，业务服务负责验签、nonce/重放、凭证撤销与权限。仅 Auth 用户域在无 Bearer 时进入，Bearer 永远优先，Manage/ServerManage 不得复用该分支。
+37. `TypeError` 的 600/700/800 仅是内部执行阶段码，不得覆盖嵌套 PublicError 的公开契约。只有显式 `ErrorKindBusiness` 才返回 422；未分类 Do/持久化/程序错误必须安全返回 500，唯一约束冲突返回 409，并保留 cause。详细规则见 [routing-and-dto.md](routing-and-dto.md)、[models.md](models.md) 与 [manage.md](manage.md)。
 
 ## 工作流
 
