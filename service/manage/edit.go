@@ -1,8 +1,6 @@
 package manage
 
 import (
-	"errors"
-
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -35,14 +33,14 @@ func (own *Edit[T]) Validation(req types.IRequest) error {
 	}
 	id := (*own.Model).GetID()
 	if id == 0 {
-		return errors.New("id 不能为空")
+		return newRecordIDRequiredError()
 	}
 	old, err := own.list.SearchId(id)
 	if err != nil {
 		return err
 	}
 	if old == nil {
-		return errors.New("edit item not found")
+		return newRecordNotFoundError()
 	}
 	own.OldItem = old
 	err = own.Operation.ValidationAfter(own, req)

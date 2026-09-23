@@ -20,6 +20,12 @@ func NewProductManage() *ProductManage {
 
 自动生成的操作为 View、Search、Add、Edit、Remove、Submit、Release。
 
+标准 CRUD 的框架错误使用稳定 PublicError：Add 的 ID/hash 写前重复和数据库唯一约束冲突
+返回 Conflict / HTTP 409 / `record already exists`；Edit 缺少 ID 返回 Validation /
+HTTP 400 / `record id is required`；Edit、Remove 目标不存在返回 NotFound / HTTP 404 /
+`record not found`。这些通用文案不得携带 ID、hash、SQL 或具体业务模型名称。消费方若需要
+更具体的业务提示，应在自己的显式校验中返回 PublicError，不能依赖数据库原文。
+
 ## 指定 Manage 数据源（服务级 `GetList`）
 
 Manage **应当**使用 `ModelList`，以获得默认筛选、排序、分页等标准能力（适合管理人员配置系统，不追求业务级吞吐）。

@@ -55,7 +55,7 @@
 | --- | --- | --- | --- |
 | 普通 public/private 路由 | Stable | `/api/{service}/{router}`；private 要求认证 | `router.DefaultRouterInfo`、`examples/01-simple-shop` 集成测试 |
 | 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；受保护的内部 OpenAPI `x-internal-callers` |
-| Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}` | `service/manage.RouterInfo`、CRUD 测试 |
+| Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}`；重复记录→409，缺少 Edit ID→400，Edit/Remove 不存在→404，统一安全文案 | `service/manage.RouterInfo`、CRUD 测试 |
 | ServerManage | Stable | `/api/servermanage/{router}`，注册时按服务重写 | server API 与 `TestToken` 文档 |
 | Runtime 运行图 API | Experimental | `POST /api/servermanage/runtimetopology`、`POST /api/servermanage/runtimeservice`；窗口 `15s|5m|1h`；指标 `null+state` 不得伪装为零 | runtime 包与 public 路由测试；浏览器不直连 Prometheus |
 | 路由元数据 | Stable | method、path、pathType、auth、service | `internal/compat/testdata/routes.golden.json` |
@@ -63,9 +63,10 @@
 | OpenAPI HTTP 入口 | Stable security | `/api/openapi` 匿名且过滤内部专用 Public；`/api/internal/openapi` 使用 ServerManageAuth，可用 `service` 筛选并禁止缓存 | run/public/rest 定向测试 |
 | 默认成功/失败 JSON | Stable baseline | `traceid/errorCode/errorMessage/success/duration/data/host/showType` | `pkg/server/router.Response`；15.2 改造前不得改字段名或含义 |
 | 自定义 `INewResponse` | Stable | 响应实例与 JSON 由服务拥有，框架只依赖 `IResponse` | `pkg/server/router.Request.NewResponse` |
-| 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；`payload_too_large` 固定为 HTTP 413 / `41300`；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
-| 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和 600/700/800 保留；parse/validation→400，do→422，panic/未知→500 | `pkg/server/types/typeerror.go`、兼容测试 |
+| 类型化公共错误 | Stable | `ErrorKind` 决定 HTTP 状态、默认公共码与安全消息；嵌套 PublicError 的 Kind/Code/HTTPStatus/Message 完整透传；`payload_too_large` 固定为 HTTP 413 / `41300`；支持 `%w`、`errors.Join` 和 `errors.Is/As` | `pkg/server/types/publicerror.go`、REST 表驱动测试 |
+| 历史 `TypeError` 阶段码 | Stable compatibility | `NewTypeError` 签名和内部 600/700/800 字段保留，但不覆盖公开 Code；未分类 parse/validation→400，do/panic/未知→500；只有显式 Business PublicError→422 | `pkg/server/types/typeerror.go`、兼容测试 |
 | 未分类普通错误 | Stable security | 固定返回 HTTP 500、`50000` 和 `internal server error`，不得按错误文字猜状态 | `pkg/server/trans/rest/error.go`、安全测试 |
+| OLTP 写入错误 | Stable security | GORM/MySQL/SQLite 唯一约束→409 / `40900` / `record already exists`；未知错误→500；均保留 cause 且响应不公开驱动原文 | `pkg/persistence/database/oltp/error.go`、adapter/REST 回归测试 |
 | Casdoor 配置与回调 | Stable | `/api/casdoor?type=auth|manage&service=<name>` 返回目标服务对应域配置；回调路径为 `/api/casdoor/callback` 并保留可选 `service`；旧 `/api/callback` 已删除 | `pkg/server/api/public/casdoor.go`、`casdoorcallback.go`、真实集成测试 |
 | Token 刷新 | Stable security | `/api/refresh?service=<name>` 只接受目标服务的框架 Refresh Token；Auth/Manage 密钥、用途和撤销域严格隔离 | `pkg/server/api/public/refresh.go`、认证生命周期测试 |
 | Casdoor Webhook | Stable security | `/api/casdoor/webhook?type=auth|manage`；独立 Bearer Secret、64KiB 上限、域绑定、幂等控制事件 | `pkg/server/api/public/casdoorwebhook.go`、authstate 测试 |

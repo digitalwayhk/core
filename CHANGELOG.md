@@ -76,6 +76,8 @@
 
 ### Fixed
 
+- 修复未分类 `Do()`、数据库和程序错误被 `TypeError` 默认公开为 HTTP 422 / `business rule rejected` 的缺陷：未分类 Do 现在 fail closed 为 500，内层 PublicError 的 Kind、Code、HTTPStatus、Message 不再被 legacy 700/800 阶段码覆盖。标准 Manage 重复记录、缺少 Edit ID、Edit/Remove 不存在改为安全的 409/400/404；GORM、MySQL 1062 和 SQLite 唯一约束统一返回 409 并保留原始 cause，不向响应泄露 SQL、索引、DSN 或驱动原文。该兼容安全修复建议发布为 v1.2.2。
+
 - 修复跨节点 WebSocket 通知只遍历消费节点本地订阅 hash、导致仅存在于对等 Gateway 的用户订阅收不到业务事件的问题；标准 broker 通过加性的远端订阅索引合并本地与对等节点 hash，自定义 forwarder 未实现该能力时保持原兼容语义。
 
 - 修复示例 06/07 Outbox 批量确认静默跳过零主键或缺失记录的问题；先验证完整集合，失败整批回滚。增加确认失败后的发布器重启重试与真实 MySQL 原子性验证。

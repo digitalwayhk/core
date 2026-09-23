@@ -226,6 +226,62 @@ func TestAdd_DoAfter_CalledAfterSuccessfulInsert(t *testing.T) {
 	assert.True(t, svc.doAfterCalled, "DoAfter should be called after a successful insert")
 }
 
+// TestEditValidationRequiresID 验证标准 Edit 缺少 ID 时返回安全的公开校验错误。
+func TestEditValidationRequiresID(t *testing.T) {
+	svc := newTestManageSvc[testItem](&extendedMockDataAction{})
+	edit := manage.NewEdit[testItem](nil)
+	edit.New(svc)
+	item := &testItem{Name: "missing-id"}
+	item.NewModel()
+	edit.Model = item
+
+	err := edit.Validation(&crudRequest{})
+	contract := st.ResolvePublicError(err)
+	require.Equal(t, st.ErrorKindValidation, contract.Kind)
+	require.Equal(t, st.PublicCodeValidation, contract.Code)
+	require.Equal(t, 400, contract.HTTPStatus)
+	require.Equal(t, "record id is required", contract.Message)
+	require.NotContains(t, contract.Message, "missing-id")
+}
+
+// TestEditValidationReturnsNotFound 验证标准 Edit 找不到目标时返回安全的 404。
+func TestEditValidationReturnsNotFound(t *testing.T) {
+	svc := newTestManageSvc[testItem](&extendedMockDataAction{})
+	edit := manage.NewEdit[testItem](nil)
+	edit.New(svc)
+	item := &testItem{Name: "missing-record"}
+	item.NewModel()
+	item.ID = 42
+	edit.Model = item
+
+	err := edit.Validation(&crudRequest{})
+	contract := st.ResolvePublicError(err)
+	require.Equal(t, st.ErrorKindNotFound, contract.Kind)
+	require.Equal(t, st.PublicCodeNotFound, contract.Code)
+	require.Equal(t, 404, contract.HTTPStatus)
+	require.Equal(t, "record not found", contract.Message)
+	require.NotContains(t, contract.Message, "42")
+}
+
+// TestRemoveValidationReturnsNotFound 验证标准 Remove 找不到目标时返回安全的 404。
+func TestRemoveValidationReturnsNotFound(t *testing.T) {
+	svc := newTestManageSvc[testItem](&extendedMockDataAction{})
+	remove := manage.NewRemove[testItem](nil)
+	remove.New(svc)
+	item := &testItem{Name: "missing-record"}
+	item.NewModel()
+	item.ID = 43
+	remove.Model = item
+
+	err := remove.Validation(&crudRequest{})
+	contract := st.ResolvePublicError(err)
+	require.Equal(t, st.ErrorKindNotFound, contract.Kind)
+	require.Equal(t, st.PublicCodeNotFound, contract.Code)
+	require.Equal(t, 404, contract.HTTPStatus)
+	require.Equal(t, "record not found", contract.Message)
+	require.NotContains(t, contract.Message, "43")
+}
+
 // loadFunc is called by mockDataAction.Load to populate results.
 // The function signature must cast result to the appropriate slice pointer.
 type loadResult struct {

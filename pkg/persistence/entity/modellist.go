@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
+	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"gorm.io/gorm"
 
@@ -152,7 +152,12 @@ func modelAddValid[T types.IModel](list *ModelList[T], item interface{}) error {
 			old = list.searchList[0]
 		}
 		if old != nil {
-			return errors.New("id or hash already exists id:" + strconv.Itoa(int(id)) + " hash:" + hash)
+			return servertypes.NewPublicError(
+				servertypes.ErrorKindConflict,
+				servertypes.PublicCodeConflict,
+				"record already exists",
+				errors.New("model id or hash already exists"),
+			)
 		}
 		if imv, ok := item.(types.IModelValidHook); ok {
 			return imv.AddValid()
@@ -187,7 +192,12 @@ func modelUpdateValid[T types.IModel](list *ModelList[T], item interface{}) erro
 			return err
 		}
 		if old == nil {
-			return errors.New("update item not found")
+			return servertypes.NewPublicError(
+				servertypes.ErrorKindNotFound,
+				servertypes.PublicCodeNotFound,
+				"record not found",
+				errors.New("model update target not found"),
+			)
 		}
 		if rc, ok := item.(types.IRowCode); ok {
 			hash := rc.GetHash()
@@ -197,7 +207,12 @@ func modelUpdateValid[T types.IModel](list *ModelList[T], item interface{}) erro
 					return err
 				}
 				if len(values) > 0 {
-					return errors.New("hash already exists hash:" + hash)
+					return servertypes.NewPublicError(
+						servertypes.ErrorKindConflict,
+						servertypes.PublicCodeConflict,
+						"record already exists",
+						errors.New("model hash already exists"),
+					)
 				}
 			}
 			rc.SetHashcode(hash)

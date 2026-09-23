@@ -79,6 +79,21 @@ userID, userName := req.GetUser()
 
 ## DTO 与响应契约
 
+### 公共错误分类
+
+路由执行阶段与公开错误语义必须分离。`TypeError` 的 `600/700/800` 只记录
+Parse、Validation、Do 的内部 legacy 阶段，不是公开业务错误码：
+
+- cause 已实现 `PublicErrorContract` 时，完整保留其 Kind、Code、HTTPStatus 和 Message；
+- 未分类 Parse/Validation 错误返回安全的 Validation / HTTP 400；
+- 未分类 Do、panic、数据库、网络和程序错误返回安全的 Internal / HTTP 500；
+- 只有业务代码显式返回 `ErrorKindBusiness` 时才允许 HTTP 422；
+- 原始 cause 保留给 `errors.Is` / `errors.As`、日志和 trace，HTTP 响应只写安全消息。
+
+不得按错误字符串猜测类型，也不得把 SQL、索引名、DSN、主机地址或驱动原文写入响应。
+跨服务收到历史阶段码时，`600/700` 只恢复为安全 Validation，`800` fail closed 为
+Internal；新版本应传递稳定的 PublicError code，不再把阶段码作为 wire 业务码。
+
 public/private API 返回独立 `api/dto` 类型，不直接序列化持久化模型。原因包括：
 
 - 持久化模型可能具有很深的嵌入关系和内部字段。
@@ -137,4 +152,3 @@ Public API 无需身份，但仍执行参数解析、校验、类型化错误和
 ### 删除本人订单
 
 删除先以 `ID + UserID` 查询所有权，再物理删除。不存在与不属于当前用户返回同一公开错误，避免泄露其他用户订单是否存在。持久化成功后发布 `deleted` 通知。
-

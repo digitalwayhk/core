@@ -49,24 +49,15 @@ func (own *TypeError) PublicErrorContract() PublicErrorContract {
 	if own.cause != nil {
 		var provider publicErrorProvider
 		if errors.As(own.cause, &provider) {
-			contract := provider.PublicErrorContract()
-			if own.Code != 0 {
-				contract.Code = own.Code
-			}
-			return contract
+			return provider.PublicErrorContract()
 		}
 	}
 	var contract PublicErrorContract
 	switch own.Type {
 	case "parse", "validation":
 		contract = defaultPublicErrorContract(ErrorKindValidation)
-	case "do":
-		contract = defaultPublicErrorContract(ErrorKindBusiness)
 	default:
 		contract = defaultPublicErrorContract(ErrorKindInternal)
-	}
-	if own.Code != 0 {
-		contract.Code = own.Code
 	}
 	return contract
 }

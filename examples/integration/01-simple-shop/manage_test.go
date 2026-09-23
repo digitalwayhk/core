@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +37,10 @@ func TestManageAPIs(t *testing.T) {
 	t.Run("ProductManageAdd", testProductManageAddCommand)
 	t.Run("ProductManageSearch", testProductManageSearchCommand)
 	t.Run("ProductManageEdit", testProductManageEditCommand)
+	t.Run("ProductManageEditRequiresID", testProductManageEditRequiresID)
+	t.Run("ProductManageEditNotFound", testProductManageEditNotFound)
 	t.Run("ProductManageRemove", testProductManageRemoveCommand)
+	t.Run("ProductManageRemoveNotFound", testProductManageRemoveNotFound)
 	t.Run("OrderManageView", testOrderManageViewCommand)
 	t.Run("OrderManageSearch", testOrderManageSearchCommand)
 	t.Run("OrderManageAddNotRegistered", testOrderManageAddCommandNotRegistered)
@@ -68,6 +72,7 @@ func testProductManageAddCommand(t *testing.T) {
 		"name": productName, "price": "29.90",
 	})
 	assert.Equal(t, http.StatusUnprocessableEntity, duplicate.HTTPStatus)
+	assert.Equal(t, servertypes.PublicCodeBusiness, duplicate.ErrorCode)
 	assert.Equal(t, "商品名称不能重复", duplicate.ErrorMessage)
 }
 
@@ -102,7 +107,9 @@ func testProductManageEditCommand(t *testing.T) {
 	duplicate := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", adminToken, map[string]interface{}{
 		"id": secondProduct.ID, "name": productName, "price": "29.90",
 	})
-	assert.Equal(t, http.StatusUnprocessableEntity, duplicate.HTTPStatus)
+	assert.Equal(t, http.StatusConflict, duplicate.HTTPStatus)
+	assert.Equal(t, servertypes.PublicCodeConflict, duplicate.ErrorCode)
+	assert.Equal(t, "record already exists", duplicate.ErrorMessage)
 	unchanged := suite.GetProducts(t, "?id="+secondProduct.ID)
 	require.Len(t, unchanged, 1)
 	assert.Equal(t, secondName, unchanged[0].Name)
@@ -118,6 +125,28 @@ func testProductManageEditCommand(t *testing.T) {
 	assert.Equal(t, "29.9", updated[0].Price)
 }
 
+// testProductManageEditRequiresID 验证真实 HTTP Edit 缺少 ID 时返回安全的 Validation 契约。
+func testProductManageEditRequiresID(t *testing.T) {
+	response := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", suite.TokenFor(t, "product-edit-id-admin", 1), map[string]interface{}{
+		"name": "缺少编号", "price": "19.90",
+	})
+	assert.Equal(t, http.StatusBadRequest, response.HTTPStatus)
+	assert.Equal(t, servertypes.PublicCodeValidation, response.ErrorCode)
+	assert.Equal(t, "record id is required", response.ErrorMessage)
+	assert.NotContains(t, response.Body, "缺少编号")
+}
+
+// testProductManageEditNotFound 验证真实 HTTP Edit 找不到目标时返回安全的 NotFound 契约。
+func testProductManageEditNotFound(t *testing.T) {
+	response := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/edit", suite.TokenFor(t, "product-edit-missing-admin", 1), map[string]interface{}{
+		"id": "999999", "name": "不存在记录", "price": "19.90",
+	})
+	assert.Equal(t, http.StatusNotFound, response.HTTPStatus)
+	assert.Equal(t, servertypes.PublicCodeNotFound, response.ErrorCode)
+	assert.Equal(t, "record not found", response.ErrorMessage)
+	assert.NotContains(t, response.Body, "999999")
+}
+
 // testProductManageRemoveCommand 验证商品可被物理删除。
 func testProductManageRemoveCommand(t *testing.T) {
 	adminToken := suite.TokenFor(t, "product-remove-admin", 1)
@@ -129,6 +158,17 @@ func testProductManageRemoveCommand(t *testing.T) {
 	})
 	require.True(t, response.Success, response.ErrorMessage)
 	assert.Empty(t, suite.GetProducts(t, "?id="+product.ID))
+}
+
+// testProductManageRemoveNotFound 验证真实 HTTP Remove 找不到目标时返回安全的 NotFound 契约。
+func testProductManageRemoveNotFound(t *testing.T) {
+	response := suite.RequestJSON(t, http.MethodPost, "/api/manage/shop/productmanage/remove", suite.TokenFor(t, "product-remove-missing-admin", 1), map[string]interface{}{
+		"id": "999998", "name": "不存在记录", "price": "19.90",
+	})
+	assert.Equal(t, http.StatusNotFound, response.HTTPStatus)
+	assert.Equal(t, servertypes.PublicCodeNotFound, response.ErrorCode)
+	assert.Equal(t, "record not found", response.ErrorMessage)
+	assert.NotContains(t, response.Body, "999998")
 }
 
 // testOrderManageViewCommand 验证订单管理元数据可被管理员读取。

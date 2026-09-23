@@ -108,6 +108,12 @@ func (own *Product) UpdateValid(_ interface{}) error {
 
 校验应同时覆盖字段格式、数值范围和业务唯一性。公开错误使用框架的类型化公开错误，不直接暴露数据库错误文本。
 
+Core 的 OLTP 写边界会把 GORM `ErrDuplicatedKey`、MySQL 1062，以及 SQLite
+unique/primary-key constraint 的稳定驱动错误统一映射为 Conflict / HTTP 409 /
+`record already exists`。原始驱动错误仍作为 cause 保留，未知持久化错误统一映射为安全的
+Internal / HTTP 500。不得用字符串包含判断新增数据库分类；扩展正式支持的数据库时必须使用
+驱动错误类型或 GORM 稳定哨兵并增加 `errors.Is` / `errors.As` 回归测试。
+
 ## 建库、建表与字段迁移由框架自动完成
 
 **业务代码不需要、也不允许自建库表。** 这是框架能力，不是留给业务实现的空位。

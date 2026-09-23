@@ -13,6 +13,19 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.2.2 公共错误分类修复
+
+候选补丁把未分类 Do 错误从历史误判的 HTTP 422 / `business rule rejected` 收紧为
+HTTP 500 / `50000` / `internal server error`，并把标准 Manage 重复记录及数据库唯一约束
+稳定映射为 HTTP 409 / `40900` / `record already exists`。显式 Business、Conflict、
+NotFound、RateLimited、Unavailable PublicError 的 Kind、Code、HTTPStatus、Message 保持不变。
+
+Bitzoom 升级后应复测 Simple-E4 Manage FuturesSpec 重复市场、普通未知数据库错误、显式业务拒绝、
+跨服务公开码/消息恢复和 Admin 展示。`internal/apierrors.NormalizeServiceBoundary` 中针对 Core 旧版
+`800`/泛化错误的兼容分支可在所有运行节点升级后删除；对混跑旧节点或非 Core 下游的防御性
+Internal fallback 应暂时保留并降级为兜底。本文不把 Core 本地测试当作 Bitzoom smoke；消费方
+实际升级、真实 MySQL/HTTP 回归和部署状态均为 `NOT RUN`，完成后再登记精确 commit 与结果。
+
 ## 任务 15.5 消费方验证
 
 2026-07-13 使用 `/private/tmp` 临时 `go.work` 将 futures 指向当前 Core 工作树，未修改 futures 的 `go.mod/go.sum`。Go 因 futures 的 `go 1.26.1` 要求自动选择 1.26.5；以下 smoke 退出码为 0：

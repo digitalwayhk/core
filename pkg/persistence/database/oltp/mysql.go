@@ -1106,7 +1106,7 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 func (m *MySQL) Insert(data interface{}) error {
 	err := m.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  优化：先尝试插入，失败时再检查表
@@ -1127,18 +1127,18 @@ func (m *MySQL) Insert(data interface{}) error {
 		if m.isTableNotExistsError(insertErr) {
 			// 创建表
 			if err := m.ensureTable(data); err != nil {
-				return err
+				return normalizePersistenceError(err)
 			}
 
 			// 重试插入
 			if m.isTansaction {
-				return createData(m.tx, data)
+				return normalizePersistenceError(createData(m.tx, data))
 			}
-			return createData(m.db, data)
+			return normalizePersistenceError(createData(m.db, data))
 		}
 
 		// 其他类型的错误，尝试自动修复
-		return m.errorHandler(insertErr, data, createData)
+		return normalizePersistenceError(m.errorHandler(insertErr, data, createData))
 	}
 
 	return nil
@@ -1178,7 +1178,7 @@ func isConnectionError(err error) bool {
 func (m *MySQL) Update(data interface{}) error {
 	err := m.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	if rowcode, ok := data.(types.IRowCode); ok {
@@ -1195,15 +1195,15 @@ func (m *MySQL) Update(data interface{}) error {
 	if updateErr != nil {
 		if m.isTableNotExistsError(updateErr) {
 			if err := m.ensureTable(data); err != nil {
-				return err
+				return normalizePersistenceError(err)
 			}
 
 			if m.isTansaction {
-				return updateData(m.tx, data)
+				return normalizePersistenceError(updateData(m.tx, data))
 			}
-			return updateData(m.db, data)
+			return normalizePersistenceError(updateData(m.db, data))
 		}
-		return m.errorHandler(updateErr, data, updateData)
+		return normalizePersistenceError(m.errorHandler(updateErr, data, updateData))
 	}
 
 	return nil
@@ -1213,7 +1213,7 @@ func (m *MySQL) Update(data interface{}) error {
 func (m *MySQL) Delete(data interface{}) error {
 	err := m.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	var deleteErr error
@@ -1228,7 +1228,7 @@ func (m *MySQL) Delete(data interface{}) error {
 			// 删除操作遇到表不存在，直接返回成功（表都不存在了）
 			return nil
 		}
-		return m.errorHandler(deleteErr, data, deleteData)
+		return normalizePersistenceError(m.errorHandler(deleteErr, data, deleteData))
 	}
 
 	return nil

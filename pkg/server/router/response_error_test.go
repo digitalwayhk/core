@@ -56,7 +56,21 @@ func TestResponseRoundTripPreservesDownstreamPublicError(t *testing.T) {
 
 	contract := types.ResolvePublicError(decoded.GetError())
 	require.Equal(t, types.ErrorKindBusiness, contract.Kind)
-	require.Equal(t, 800, contract.Code)
+	require.Equal(t, types.PublicCodeBusiness, contract.Code)
 	require.Equal(t, 422, contract.HTTPStatus)
 	require.Equal(t, "订单数量超过最大下单数量", contract.Message)
+}
+
+func TestResponseLegacyDoStageCodeFailsClosed(t *testing.T) {
+	decoded := &Response{
+		ErrorCode:    800,
+		ErrorMessage: "business rule rejected",
+		Success:      false,
+	}
+
+	contract := types.ResolvePublicError(decoded.GetError())
+	require.Equal(t, types.ErrorKindInternal, contract.Kind)
+	require.Equal(t, types.PublicCodeInternal, contract.Code)
+	require.Equal(t, 500, contract.HTTPStatus)
+	require.Equal(t, "internal server error", contract.Message)
 }

@@ -1,8 +1,6 @@
 package manage
 
 import (
-	"errors"
-
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
@@ -37,7 +35,7 @@ func (own *Remove[T]) Validation(req types.IRequest) error {
 		return err
 	}
 	if old == nil {
-		return errors.New("remove item not found")
+		return newRecordNotFoundError()
 	}
 	err = own.Operation.ValidationAfter(own, req)
 	return err

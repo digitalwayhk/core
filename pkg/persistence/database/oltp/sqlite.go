@@ -426,24 +426,24 @@ func (own *Sqlite) Load(item *types.SearchItem, result interface{}) error {
 func (own *Sqlite) Insert(data interface{}) error {
 	err := own.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	if own.isTansaction {
 		err := createData(own.tx, data)
 		if err != nil {
-			return err
+			return normalizePersistenceError(err)
 		}
 		return nil
 	}
@@ -454,31 +454,31 @@ func (own *Sqlite) Insert(data interface{}) error {
 	if err != nil {
 		err = own.errorHandler(err, data, createData)
 	}
-	return err
+	return normalizePersistenceError(err)
 }
 
 // Update 更新数据
 func (own *Sqlite) Update(data interface{}) error {
 	err := own.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	if own.isTansaction {
 		err := updateData(own.tx, data)
 		if err != nil {
-			return err
+			return normalizePersistenceError(err)
 		}
 		return nil
 	}
@@ -489,31 +489,31 @@ func (own *Sqlite) Update(data interface{}) error {
 	if err != nil {
 		err = own.errorHandler(err, data, updateData)
 	}
-	return err
+	return normalizePersistenceError(err)
 }
 
 // Delete 删除数据
 func (own *Sqlite) Delete(data interface{}) error {
 	err := own.init(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  确保表存在
 	err = own.ensureTable(data)
 	if err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	//  再次检查连接
 	if err := own.ensureValidConnection(); err != nil {
-		return err
+		return normalizePersistenceError(err)
 	}
 
 	if own.isTansaction {
 		err := deleteData(own.tx, data)
 		if err != nil {
-			return err
+			return normalizePersistenceError(err)
 		}
 		return nil
 	}
@@ -524,7 +524,7 @@ func (own *Sqlite) Delete(data interface{}) error {
 	if err != nil {
 		err = own.errorHandler(err, data, deleteData)
 	}
-	return err
+	return normalizePersistenceError(err)
 }
 
 // errorHandler 错误处理（自动迁移）

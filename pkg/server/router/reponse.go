@@ -76,12 +76,19 @@ func (own *Response) GetSuccess() bool {
 }
 func (own *Response) GetError() error {
 	if own.err == nil {
+		cause := errors.New("downstream service returned an error")
+		switch own.ErrorCode {
+		case 600, 700:
+			return types.NewPublicError(types.ErrorKindValidation, 0, "", cause)
+		case 800:
+			return types.NewPublicError(types.ErrorKindInternal, 0, "", cause)
+		}
 		if kind, ok := responseErrorKind(own.ErrorCode); ok {
 			return types.NewPublicError(
 				kind,
 				own.ErrorCode,
 				own.ErrorMessage,
-				errors.New("downstream service returned an error"),
+				cause,
 			)
 		}
 		return errors.New(own.ErrorMessage)
@@ -91,9 +98,9 @@ func (own *Response) GetError() error {
 
 func responseErrorKind(code int) (types.ErrorKind, bool) {
 	switch code {
-	case 600, 700, types.PublicCodeValidation:
+	case types.PublicCodeValidation:
 		return types.ErrorKindValidation, true
-	case 800, types.PublicCodeBusiness:
+	case types.PublicCodeBusiness:
 		return types.ErrorKindBusiness, true
 	case types.PublicCodeUnauthenticated, types.PublicCodeRefreshInvalid, types.PublicCodeRefreshRevoked:
 		return types.ErrorKindUnauthenticated, true
