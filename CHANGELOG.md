@@ -40,6 +40,8 @@
 
 ### Changed
 
+- Runtime 业务监控聚合统一排除 `/api/manage/*` 与 `/api/servermanage/*` 控制面请求；这些请求仍保留访问日志与原始 Prometheus 指标，但不再污染服务 QPS、错误率、p50/p95/p99、路由排行和同步调用边。
+
 - shared 路由缓存失效、Casdoor 身份通知改由框架专用 Redis Pub/Sub / Core NATS 广播并权威补偿，停止创建无界内部消息历史。缓存失效保护与无订阅 Casdoor WebSocket 周期撤销检查闭环，补充通知健康/失败/缓存补偿指标；业务 MQ 的 ACK、必需组、retention-only、重试和 DLQ 不变。**升级须同逻辑服务维护窗口切换，不保证旧/新内部协议混跑，旧内部 Stream 不自动删除，存量内存不会因此全部释放**；见 `docs/codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md`。
 
 - **菜单同步刷新展示标题**：`syncOneMenu` 过去在权限集合未变时直接返回，存量菜单的标题永远停留在首次落库的值。现在权限比较与展示标题比较分开判断，权限未变但代码里的中英标题变了也会写库；`Sort`、`Icon`、`Description` 仍是用户字段，不被生成结果覆盖。目录同步遵循同一规则。

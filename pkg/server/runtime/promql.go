@@ -7,6 +7,8 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/observability"
 )
 
+const controlPlaneRoutePattern = `^/api/(manage|servermanage)(/.*)?$`
+
 // ServiceRequestRateQuery 生成服务请求率 PromQL（HTTP + Core 入站合计优先 HTTP）。
 func ServiceRequestRateQuery(service, window string) (string, error) {
 	if err := validateServiceWindow(service, window); err != nil {
@@ -15,8 +17,8 @@ func ServiceRequestRateQuery(service, window string) (string, error) {
 	svc := observability.NormalizeServiceLabel(service)
 	// 合并 HTTP 入站与 Core 入站（gRPC），避免只统计一种协议。
 	return fmt.Sprintf(
-		`sum(rate(http_server_requests_code_total{service=%q}[%s])) or vector(0) + sum(rate(core_service_request_requests_total{service=%q}[%s])) or vector(0)`,
-		svc, window, svc, window,
+		`sum(rate(http_server_requests_code_total{service=%q,path!~%q}[%s])) or vector(0) + sum(rate(core_service_request_requests_total{service=%q,route!~%q}[%s])) or vector(0)`,
+		svc, controlPlaneRoutePattern, window, svc, controlPlaneRoutePattern, window,
 	), nil
 }
 
@@ -26,7 +28,7 @@ func ServiceHTTPRateByCodeQuery(service, window string) (string, error) {
 		return "", err
 	}
 	svc := observability.NormalizeServiceLabel(service)
-	return fmt.Sprintf(`sum by (code) (rate(http_server_requests_code_total{service=%q}[%s]))`, svc, window), nil
+	return fmt.Sprintf(`sum by (code) (rate(http_server_requests_code_total{service=%q,path!~%q}[%s]))`, svc, controlPlaneRoutePattern, window), nil
 }
 
 // ServiceCoreRateByResultQuery Core 入站按 result_class。
@@ -35,7 +37,7 @@ func ServiceCoreRateByResultQuery(service, window string) (string, error) {
 		return "", err
 	}
 	svc := observability.NormalizeServiceLabel(service)
-	return fmt.Sprintf(`sum by (result_class) (rate(core_service_request_requests_total{service=%q}[%s]))`, svc, window), nil
+	return fmt.Sprintf(`sum by (result_class) (rate(core_service_request_requests_total{service=%q,route!~%q}[%s]))`, svc, controlPlaneRoutePattern, window), nil
 }
 
 // ServiceHTTPP95Query HTTP 延迟 p95。
@@ -59,8 +61,8 @@ func serviceHTTPQuantileQuery(service, window string, q float64) (string, error)
 	}
 	svc := observability.NormalizeServiceLabel(service)
 	return fmt.Sprintf(
-		`histogram_quantile(%g, sum by (le) (rate(http_server_requests_duration_ms_bucket{service=%q}[%s])))`,
-		q, svc, window,
+		`histogram_quantile(%g, sum by (le) (rate(http_server_requests_duration_ms_bucket{service=%q,path!~%q}[%s])))`,
+		q, svc, controlPlaneRoutePattern, window,
 	), nil
 }
 
@@ -70,8 +72,8 @@ func serviceCoreQuantileQuery(service, window string, q float64) (string, error)
 	}
 	svc := observability.NormalizeServiceLabel(service)
 	return fmt.Sprintf(
-		`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
-		q, svc, window,
+		`histogram_quantile(%g, sum by (le) (rate(core_service_request_duration_ms_bucket{service=%q,route!~%q}[%s])))`,
+		q, svc, controlPlaneRoutePattern, window,
 	), nil
 }
 
@@ -81,8 +83,8 @@ func serviceCoreRouteQuantileQuery(service, window string, q float64) (string, e
 	}
 	svc := observability.NormalizeServiceLabel(service)
 	return fmt.Sprintf(
-		`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q}[%s])))`,
-		q, svc, window,
+		`histogram_quantile(%g, sum by (le,route) (rate(core_service_request_duration_ms_bucket{service=%q,route!~%q}[%s])))`,
+		q, svc, controlPlaneRoutePattern, window,
 	), nil
 }
 
@@ -91,7 +93,7 @@ func ServiceCallEdgeRateQuery(window string) (string, error) {
 	if _, ok := ParseWindow(window); !ok {
 		return "", fmt.Errorf("unsupported window %q", window)
 	}
-	return fmt.Sprintf(`sum by (source_service,target_service,protocol,result_class) (rate(core_service_call_requests_total[%s]))`, window), nil
+	return fmt.Sprintf(`sum by (source_service,target_service,protocol,result_class) (rate(core_service_call_requests_total{target_route!~%q}[%s]))`, controlPlaneRoutePattern, window), nil
 }
 
 // ServiceRouteRateQuery 生成服务内路由速率（Core gRPC 入站）。
@@ -100,7 +102,7 @@ func ServiceRouteRateQuery(service, window string) (string, error) {
 		return "", err
 	}
 	svc := observability.NormalizeServiceLabel(service)
-	return fmt.Sprintf(`sum by (route,result_class) (rate(core_service_request_requests_total{service=%q}[%s]))`, svc, window), nil
+	return fmt.Sprintf(`sum by (route,result_class) (rate(core_service_request_requests_total{service=%q,route!~%q}[%s]))`, svc, controlPlaneRoutePattern, window), nil
 }
 
 // ServiceHTTPRouteRateQuery HTTP 路径模板速率。
@@ -109,7 +111,7 @@ func ServiceHTTPRouteRateQuery(service, window string) (string, error) {
 		return "", err
 	}
 	svc := observability.NormalizeServiceLabel(service)
-	return fmt.Sprintf(`sum by (path,code) (rate(http_server_requests_code_total{service=%q}[%s]))`, svc, window), nil
+	return fmt.Sprintf(`sum by (path,code) (rate(http_server_requests_code_total{service=%q,path!~%q}[%s]))`, svc, controlPlaneRoutePattern, window), nil
 }
 
 // ServiceCallP95Query 生成目标服务调用 p95。
@@ -119,8 +121,8 @@ func ServiceCallP95Query(service, window string) (string, error) {
 	}
 	svc := observability.NormalizeServiceLabel(service)
 	return fmt.Sprintf(
-		`histogram_quantile(0.95, sum by (le) (rate(core_service_call_duration_ms_bucket{target_service=%q}[%s])))`,
-		svc, window,
+		`histogram_quantile(0.95, sum by (le) (rate(core_service_call_duration_ms_bucket{target_service=%q,target_route!~%q}[%s])))`,
+		svc, controlPlaneRoutePattern, window,
 	), nil
 }
 
@@ -146,8 +148,8 @@ func ServiceLastSampleTimestampQuery(service string) (string, error) {
 	}
 	// max 覆盖 HTTP 与 Core 入站；任一有样本即可。
 	return fmt.Sprintf(
-		`max(timestamp(http_server_requests_code_total{service=%q}) or timestamp(core_service_request_requests_total{service=%q}))`,
-		svc, svc,
+		`max(timestamp(http_server_requests_code_total{service=%q,path!~%q}) or timestamp(core_service_request_requests_total{service=%q,route!~%q}))`,
+		svc, controlPlaneRoutePattern, svc, controlPlaneRoutePattern,
 	), nil
 }
 
