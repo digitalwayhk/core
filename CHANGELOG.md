@@ -6,6 +6,8 @@
 
 ### Added
 
+- 增加完整的 Manage Admin UI 示例 `examples/08-admin-manage-ui` 及真实 HTTP 集成测试，覆盖 View schema、标准与自定义命令、搜索模式、关联选择、子表、导入导出和命令请求体；权威 AI skill 同步补充 Manage 继承与 Hook 能力说明。
+
 - Write-behind 增加显式自适应同步配置：按不同 pending 数量或首条收集期限提交，成功积压连续排空，失败/零进展有界退避。新增三字段全零保持旧行为，继续复用 `SyncBatchSize`、可靠 pending 和远端条件确认；业务无需重写同步循环。详见 `docs/codex/WRITE_BEHIND_SYNC_GUIDE.md`。
 
 - MQ 生命周期增加显式 `NoRequiredGroups` 策略及独立 capability：纯保留主题无需虚假消费组即可在保留期到期后有界回收；空列表仍默认拒绝，禁止重试配置与普通/可靠建组订阅，意外组保守阻断。Redis 原子空组校验、NATS 无组前沿与删除前复核；保留旧策略指纹，统一设计文档和权威 skill 同步更新。
