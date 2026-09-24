@@ -92,7 +92,7 @@ func (own *ManageRoleModel) validate() error {
 			return protectedManageRole("viewer role definition is immutable")
 		}
 	default:
-		if own.IsSystem || own.Policy != servertype.ManageRolePolicyExplicit {
+		if own.IsSystem || own.IsDefault || own.Policy != servertype.ManageRolePolicyExplicit {
 			return invalidManageRole("custom roles must use explicit policy")
 		}
 	}

@@ -23,6 +23,8 @@ func (own *SystemManage) Routers() []types.IRouter {
 
 	items = append(items, manage.NewDirectoryManage().Routers()...)
 	items = append(items, manage.NewMenuManage().Routers()...)
+	items = append(items, manage.NewManageRoleManage().Routers()...)
+	items = append(items, manage.NewManageRolePermissionManage().Routers()...)
 
 	items = append(items, &public.GetMenu{})
 	return items

@@ -136,13 +136,13 @@
 - Create: `pkg/server/api/manage/managerolemanage_test.go`
 - Modify: `pkg/server/server.go`
 
-- [ ] 写失败测试：角色 CRUD、权限绑定、内置角色不可删除/改 Code/编辑静态权限。
-- [ ] 写失败测试：菜单绑定默认产生 `view`、`search` 两条权限，重复绑定幂等。
-- [ ] 运行 `go test ./pkg/server/api/manage/... ./pkg/server/... -count=1`，确认 RED。
-- [ ] 实现两个标准 Manage 页面并注册；文案保持框架通用，不出现业务项目概念。
-- [ ] 不添加菜单/command 隐藏逻辑。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(manage): add role and permission management`。
+- [x] 写失败测试：角色 CRUD、权限绑定、内置角色不可删除/改 Code/编辑静态权限。
+- [x] 写失败测试：菜单绑定默认产生 `view`、`search` 两条权限，重复绑定幂等。
+- [x] 运行定向 `pkg/server/api/manage`、`pkg/server/smodels` 与 `pkg/server` 测试，确认 RED。
+- [x] 实现两个标准 Manage 页面并注册；文案保持框架通用，不出现业务项目概念。
+- [x] 不添加菜单/command 隐藏逻辑。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(manage): add role and permission management`。
 
 ### Task 9: 新增 09 管理员角色集成示例
 

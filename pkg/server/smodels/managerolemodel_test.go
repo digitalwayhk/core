@@ -55,6 +55,17 @@ func TestManageRoleModelRejectsInvalidPolicyAndCodeChanges(t *testing.T) {
 	require.Error(t, role.UpdateValid(old), "role code must remain immutable")
 }
 
+func TestManageRoleModelRejectsCustomDefaultRole(t *testing.T) {
+	role := NewManageRoleModel()
+	role.Code = "ops.default"
+	role.Name = "Default operator"
+	role.Enabled = true
+	role.IsDefault = true
+	role.Policy = types.ManageRolePolicyExplicit
+
+	require.Error(t, role.AddValid())
+}
+
 func TestManageRoleModelProtectsBuiltInRoles(t *testing.T) {
 	viewer := NewBuiltInManageRoles()[1]
 	require.Error(t, viewer.RemoveValid())
