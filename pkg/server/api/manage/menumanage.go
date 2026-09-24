@@ -201,7 +201,11 @@ func buildMenuModelsForService(snapshot *smodels.MenuServiceSnapshot, dirID uint
 			item.DirectoryModelID = dirID
 			items = append(items, item)
 		}
-		cmd := pathLastSegment(path)
+		cmd := strings.TrimSpace(info.Command)
+		if cmd == "" {
+			// 兼容升级期间尚未携带 Command 的旧服务快照。
+			cmd = pathLastSegment(path)
+		}
 		if cmd != "" {
 			npm := smodels.NewPermissionsModel()
 			npm.Name = cmd

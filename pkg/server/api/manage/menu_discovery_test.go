@@ -281,3 +281,36 @@ func TestBuildMenuModelsForServiceGroupsRemoteManageOperations(t *testing.T) {
 	require.Equal(t, "search", items[0].Permissions[0].Name)
 	require.Equal(t, "edit", items[0].Permissions[1].Name)
 }
+
+func TestBuildMenuModelsForServiceUsesSnapshotCommand(t *testing.T) {
+	snapshot := &smodels.MenuServiceSnapshot{
+		Name: "orders",
+		Routers: []smodels.MenuRouterSnapshot{
+			{
+				Path: "/api/manage/orders/ordermanage/approve", InstanceName: "OrderManage",
+				Command: "approveorder", Title: "订单管理",
+			},
+		},
+	}
+
+	items := buildMenuModelsForService(snapshot, 7)
+
+	require.Len(t, items, 1)
+	require.Len(t, items[0].Permissions, 1)
+	require.Equal(t, "approveorder", items[0].Permissions[0].Name)
+	require.Equal(t, "/api/manage/orders/ordermanage/approve", items[0].Permissions[0].Url)
+}
+
+func TestBuildMenuModelsForServiceKeepsLegacySnapshotFallback(t *testing.T) {
+	snapshot := &smodels.MenuServiceSnapshot{
+		Name: "orders",
+		Routers: []smodels.MenuRouterSnapshot{
+			{Path: "/api/manage/orders/ordermanage/search", InstanceName: "OrderManage"},
+		},
+	}
+
+	items := buildMenuModelsForService(snapshot, 7)
+
+	require.Len(t, items, 1)
+	require.Equal(t, "search", items[0].Permissions[0].Name)
+}

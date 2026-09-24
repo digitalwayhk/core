@@ -91,6 +91,7 @@ func TestNewMenuServiceSnapshotIncludesLocalizedRoutesAndReports(t *testing.T) {
 		ServiceName:  serviceName,
 		PathType:     types.ManageType,
 		InstanceName: "UserManage",
+		StructName:   "Search[example.User]",
 		Method:       "POST",
 	}
 	route.info.SetInstance(route)
@@ -115,6 +116,7 @@ func TestNewMenuServiceSnapshotIncludesLocalizedRoutesAndReports(t *testing.T) {
 	require.Len(t, snapshot.Routers, 1)
 	require.Equal(t, "/api/manage/menu-snapshot-users/usermanage/search", snapshot.Routers[0].Path)
 	require.Equal(t, "UserManage", snapshot.Routers[0].InstanceName)
+	require.Equal(t, "search", snapshot.Routers[0].Command)
 	require.Equal(t, "用户管理", snapshot.Routers[0].Title)
 	require.Equal(t, "Users", snapshot.Routers[0].TitleEN)
 	require.Len(t, snapshot.Reports, 1)

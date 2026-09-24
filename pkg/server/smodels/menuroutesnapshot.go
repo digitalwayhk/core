@@ -6,6 +6,7 @@ package smodels
 type MenuRouterSnapshot struct {
 	Path         string `json:"path"`
 	InstanceName string `json:"instanceName"`
+	Command      string `json:"command,omitempty"`
 	Title        string `json:"title"`
 	TitleEN      string `json:"titleEN"`
 }

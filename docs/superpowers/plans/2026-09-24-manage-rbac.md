@@ -121,12 +121,12 @@
 - Modify: `pkg/server/api/servermanage/menumanage.go`
 - Modify/Create: corresponding `*_test.go`
 
-- [ ] 写失败测试：菜单扫描返回 route path 与标准 command，且旧字段完全保留。
-- [ ] 运行定向测试，确认 RED。
-- [ ] 给内部 `MenuRouterSnapshot` 增加 command 并用于权限绑定候选项。
-- [ ] 不过滤 `/api/servermanage/getmenu` 的菜单或按钮。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): expose stable manage commands to role binding`。
+- [x] 写失败测试：菜单扫描返回 route path 与标准 command，且旧字段完全保留。
+- [x] 运行定向测试，确认 RED。
+- [x] 给内部 `MenuRouterSnapshot` 增加 command 并用于权限绑定候选项。
+- [x] 不过滤 `/api/servermanage/getmenu` 的菜单或按钮。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): expose stable manage commands to role binding`。
 
 ### Task 8: 增加系统角色和权限绑定 Manage 页面
 
