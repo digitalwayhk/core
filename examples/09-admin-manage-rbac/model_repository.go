@@ -93,7 +93,11 @@ func (own *modelAdminRepository) CreateUser(
 	user.IsFirst = total == 0
 	roles := []servertype.ManageRoleRef{{Code: servertype.ManageRoleViewer}}
 	if user.IsFirst {
+		bootstrapSlot := models.BootstrapAdministratorSlot
+		user.BootstrapSlot = &bootstrapSlot
 		roles = []servertype.ManageRoleRef{{Code: servertype.ManageRoleSystemAdmin}}
+	} else {
+		user.BootstrapSlot = nil
 	}
 	if err := users.Add(user); err != nil {
 		return nil, err

@@ -174,7 +174,7 @@ Token 不包含 path、command、权限列表、权限哈希、菜单 ID 或数�
 → 固定绑定 core.viewer
 ```
 
-首用户判断和用户/角色写入必须在同一消费方事务或临界区完成。TestToken、Refresh、Auth 用户域、ServerManage 域均不能触发该规则。
+首用户判断和用户/角色写入必须在同一消费方事务内完成，并由数据库唯一约束仲裁多 authority 实例的并发竞争；进程内互斥只能作为减压手段，不能作为最终保障。09 示例以仅首用户非 NULL 的 `BootstrapSlot` 唯一索引选出一个获胜者，冲突请求回滚后按 `core.viewer` 重试。TestToken、Refresh、Auth 用户域、ServerManage 域均不能触发该规则。
 
 首个系统管理员被禁用或删除后，不得自动把下一名用户提升为系统管理员。恢复必须通过已有系统管理员、受控 TestToken 环境或消费方运维流程完成。
 

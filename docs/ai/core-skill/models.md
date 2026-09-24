@@ -29,7 +29,7 @@ entity.Model
 
 Outbox、Inbox、审计日志属于基础设施/技术记录，可使用独立 store/audit 支路；它们不是第三种业务主数据，也不能用来取消上述业务域两分法。
 
-Core 自身的 `smodels.ManageRoleModel` 与 `ManageRolePermissionModel` 是 Manage 授权控制面模型，也不属于消费方业务域的基础资料/业务事实两分法。角色以不可变 `Code` 为公开稳定键；权限以结构化的 `RoleCode + Service + Path + Command` 唯一行保存，不引用角色、菜单或按钮数据库 ID。内置 `core.system_admin`、`core.viewer` 的权限动态计算，不创建权限明细。消费方自己的管理员用户和用户角色关系放在消费方模型中，关系只保存 RoleCode；完整边界见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) 与 `examples/09-admin-manage-rbac`。
+Core 自身的 `smodels.ManageRoleModel` 与 `ManageRolePermissionModel` 是 Manage 授权控制面模型，也不属于消费方业务域的基础资料/业务事实两分法。角色以不可变 `Code` 为公开稳定键；权限以结构化的 `RoleCode + Service + Path + Command` 唯一行保存，不引用角色、菜单或按钮数据库 ID。该结构化身份由 `GetHash()` 写入继承模型的唯一 `Hashcode`，不要把四个长文本列拼成可能超过 MySQL `utf8mb4` 索引长度的复合唯一索引。内置 `core.system_admin`、`core.viewer` 的权限动态计算，不创建权限明细。消费方自己的管理员用户和用户角色关系放在消费方模型中，关系只保存 RoleCode；完整边界见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) 与 `examples/09-admin-manage-rbac`。
 
 ## 再选择框架结构体
 

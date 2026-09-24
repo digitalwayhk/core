@@ -54,14 +54,24 @@ func (own *ManageRoleProvider) ResolveManagePrincipal(
 		if request.Source != servertype.AuthSourceCallback {
 			return servertype.ManagePrincipal{}, errors.New("administrator does not exist")
 		}
-		user = models.NewAdminUserModel()
-		user.Code = identity.UID
-		user.Username = identity.Username
-		user.Provider = identity.Provider
-		user.ProviderSubject = identity.ProviderSubject
-		user.Enabled = true
-		if _, err := own.repository.CreateUser(ctx, user); err != nil {
-			return servertype.ManagePrincipal{}, err
+		for attempt := 0; attempt < 2; attempt++ {
+			user = newAdminUser(identity)
+			if _, err = own.repository.CreateUser(ctx, user); err == nil {
+				break
+			}
+			if servertype.ResolvePublicError(err).Kind != servertype.ErrorKindConflict {
+				return servertype.ManagePrincipal{}, err
+			}
+			user, err = own.repository.FindUser(ctx, identity.UID)
+			if err != nil {
+				return servertype.ManagePrincipal{}, err
+			}
+			if user != nil {
+				break
+			}
+			if attempt == 1 {
+				return servertype.ManagePrincipal{}, errors.New("administrator bootstrap conflict was not resolved")
+			}
 		}
 	}
 	if !user.Enabled || user.Provider != identity.Provider || user.ProviderSubject != identity.ProviderSubject {
@@ -79,6 +89,16 @@ func (own *ManageRoleProvider) ResolveManagePrincipal(
 		return servertype.ManagePrincipal{}, errors.New("administrator has no roles")
 	}
 	return servertype.ManagePrincipal{Roles: roles}, nil
+}
+
+func newAdminUser(identity servertype.AuthIdentity) *models.AdminUserModel {
+	user := models.NewAdminUserModel()
+	user.Code = identity.UID
+	user.Username = identity.Username
+	user.Provider = identity.Provider
+	user.ProviderSubject = identity.ProviderSubject
+	user.Enabled = true
+	return user
 }
 
 type memoryAdminRepository struct {

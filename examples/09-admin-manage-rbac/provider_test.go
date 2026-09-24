@@ -2,9 +2,11 @@ package adminrbac
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
+	"github.com/digitalwayhk/core/examples/09-admin-manage-rbac/models"
 	servertype "github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
 )
@@ -75,6 +77,20 @@ func TestProviderConcurrentBootstrapCreatesExactlyOneSystemAdmin(t *testing.T) {
 	require.Equal(t, 1, viewerCount)
 }
 
+func TestProviderRetriesBootstrapConflictAsViewerAcrossAuthorityInstances(t *testing.T) {
+	repository := &bootstrapConflictRepository{}
+	provider := NewManageRoleProvider(repository)
+
+	principal, err := provider.ResolveManagePrincipal(
+		context.Background(),
+		callbackPrincipalRequest("user-2", "bob"),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []servertype.ManageRoleRef{{Code: servertype.ManageRoleViewer}}, principal.Roles)
+	require.Equal(t, 2, repository.createCalls)
+}
+
 func TestProviderDoesNotAcceptTestTokenBootstrap(t *testing.T) {
 	repository := newMemoryAdminRepository()
 	provider := NewManageRoleProvider(repository)
@@ -137,4 +153,38 @@ func callbackPrincipalRequest(uid, subject string) servertype.ManagePrincipalReq
 		Source:       servertype.AuthSourceCallback,
 		DefaultRoles: []servertype.ManageRoleRef{{Code: servertype.ManageRoleViewer}},
 	}
+}
+
+type bootstrapConflictRepository struct {
+	user        *models.AdminUserModel
+	createCalls int
+}
+
+func (own *bootstrapConflictRepository) FindUser(_ context.Context, _ string) (*models.AdminUserModel, error) {
+	return own.user, nil
+}
+
+func (own *bootstrapConflictRepository) CreateUser(
+	_ context.Context,
+	user *models.AdminUserModel,
+) ([]servertype.ManageRoleRef, error) {
+	own.createCalls++
+	if own.createCalls == 1 {
+		return nil, servertype.NewPublicError(
+			servertype.ErrorKindConflict,
+			servertype.PublicCodeConflict,
+			"record already exists",
+			errors.New("bootstrap slot already claimed"),
+		)
+	}
+	user.IsFirst = false
+	own.user = user
+	return []servertype.ManageRoleRef{{Code: servertype.ManageRoleViewer}}, nil
+}
+
+func (own *bootstrapConflictRepository) RoleCodes(
+	_ context.Context,
+	_ string,
+) ([]servertype.ManageRoleRef, error) {
+	return []servertype.ManageRoleRef{{Code: servertype.ManageRoleViewer}}, nil
 }

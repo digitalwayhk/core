@@ -9,14 +9,17 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
+const BootstrapAdministratorSlot = "first-casdoor-manage-user"
+
 type AdminUserModel struct {
 	*entity.Model
-	Code            string `json:"code" gorm:"size:128;not null;uniqueIndex"`
-	Username        string `json:"username" gorm:"size:256"`
-	Provider        string `json:"provider" gorm:"size:64;not null"`
-	ProviderSubject string `json:"providerSubject" gorm:"size:256;not null;uniqueIndex"`
-	Enabled         bool   `json:"enabled" gorm:"not null"`
-	IsFirst         bool   `json:"isFirst" gorm:"not null"`
+	Code            string  `json:"code" gorm:"size:128;not null;uniqueIndex"`
+	Username        string  `json:"username" gorm:"size:256"`
+	Provider        string  `json:"provider" gorm:"size:64;not null"`
+	ProviderSubject string  `json:"providerSubject" gorm:"size:256;not null;uniqueIndex"`
+	Enabled         bool    `json:"enabled" gorm:"not null"`
+	IsFirst         bool    `json:"isFirst" gorm:"not null"`
+	BootstrapSlot   *string `json:"-" gorm:"size:64;uniqueIndex"`
 }
 
 func NewAdminUserModel() *AdminUserModel { return &AdminUserModel{Model: entity.NewModel()} }
@@ -44,7 +47,7 @@ func (own *AdminUserModel) UpdateValid(old interface{}) error {
 	previous, ok := old.(*AdminUserModel)
 	if !ok || previous == nil || own.Code != previous.Code ||
 		own.Provider != previous.Provider || own.ProviderSubject != previous.ProviderSubject ||
-		own.IsFirst != previous.IsFirst {
+		own.IsFirst != previous.IsFirst || bootstrapSlotValue(own.BootstrapSlot) != bootstrapSlotValue(previous.BootstrapSlot) {
 		return invalidAdminModel("admin identity is immutable")
 	}
 	return own.validate()
@@ -67,7 +70,17 @@ func (own *AdminUserModel) validate() error {
 	if own.Code == "" || own.Provider != servertype.AuthProviderCasdoor || own.ProviderSubject == "" {
 		return invalidAdminModel("admin identity is invalid")
 	}
+	if own.IsFirst != (bootstrapSlotValue(own.BootstrapSlot) == BootstrapAdministratorSlot) {
+		return invalidAdminModel("bootstrap administrator marker is invalid")
+	}
 	return nil
+}
+
+func bootstrapSlotValue(slot *string) string {
+	if slot == nil {
+		return ""
+	}
+	return *slot
 }
 
 func (*AdminUserModel) GetLocalDBName() string  { return "admin_rbac" }

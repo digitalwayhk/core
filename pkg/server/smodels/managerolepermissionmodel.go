@@ -13,10 +13,10 @@ import (
 // 关系使用稳定业务键，不引用角色或菜单的数据库 ID。
 type ManageRolePermissionModel struct {
 	*entity.Model
-	RoleCode string `json:"roleCode" gorm:"size:128;not null;uniqueIndex:idx_manage_role_permission"`
-	Service  string `json:"service" gorm:"size:128;not null;uniqueIndex:idx_manage_role_permission"`
-	Path     string `json:"path" gorm:"size:512;not null;uniqueIndex:idx_manage_role_permission"`
-	Command  string `json:"command" gorm:"size:128;not null;uniqueIndex:idx_manage_role_permission"`
+	RoleCode string `json:"roleCode" gorm:"size:128;not null;index"`
+	Service  string `json:"service" gorm:"size:128;not null;index"`
+	Path     string `json:"path" gorm:"size:512;not null"`
+	Command  string `json:"command" gorm:"size:128;not null"`
 }
 
 func NewManageRolePermissionModel() *ManageRolePermissionModel {

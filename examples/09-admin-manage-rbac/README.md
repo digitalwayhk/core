@@ -25,7 +25,7 @@ Core 自身维护：
 - `core.system_admin`：动态允许全部 Manage command。
 - `core.viewer`：动态允许所有 Manage 页面的精确 `view` 和 `search` command。
 
-真实 Casdoor Manage callback 第一次创建的管理员分配 `core.system_admin`，后续新管理员分配 `core.viewer`。这个规则只在 callback 创建用户时执行；refresh 不会补建未知管理员。
+真实 Casdoor Manage callback 第一次创建的管理员分配 `core.system_admin`，后续新管理员分配 `core.viewer`。这个规则只在 callback 创建用户时执行；refresh 不会补建未知管理员。示例在事务内使用 nullable unique `BootstrapSlot` 仲裁多个 authority 实例同时创建首用户的竞争：只有一个非 NULL 标记能成功，其余请求回滚后以 `core.viewer` 重试；进程锁不是最终保障。
 
 TestToken 由 Core 直接赋予 `core.system_admin`，不会调用本示例 Provider，也不会占用“首个真实管理员”名额。
 

@@ -2,7 +2,6 @@ package smodels
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -75,7 +74,7 @@ func TestManageRoleModelProtectsBuiltInRoles(t *testing.T) {
 	require.Error(t, changed.UpdateValid(viewer))
 }
 
-func TestManageRolePermissionUsesStructuredCompositeIdentity(t *testing.T) {
+func TestManageRolePermissionUsesHashIdentityWithoutOversizedCompositeIndex(t *testing.T) {
 	permission := NewManageRolePermissionModel()
 	permission.RoleCode = "ops.approver"
 	permission.Service = "orders"
@@ -86,12 +85,19 @@ func TestManageRolePermissionUsesStructuredCompositeIdentity(t *testing.T) {
 	require.NotEmpty(t, permission.GetHash())
 	require.NotContains(t, permission.GetHash(), permission.Path)
 
+	sameIdentity := NewManageRolePermissionModel()
+	sameIdentity.RoleCode = permission.RoleCode
+	sameIdentity.Service = permission.Service
+	sameIdentity.Path = permission.Path
+	sameIdentity.Command = permission.Command
+	require.Equal(t, permission.GetHash(), sameIdentity.GetHash())
+
 	typeOfPermission := reflect.TypeOf(ManageRolePermissionModel{})
 	for _, name := range []string{"RoleCode", "Service", "Path", "Command"} {
 		field, ok := typeOfPermission.FieldByName(name)
 		require.True(t, ok)
 		tag := field.Tag.Get("gorm")
-		require.True(t, strings.Contains(tag, "uniqueIndex:idx_manage_role_permission"), tag)
+		require.NotContains(t, tag, "uniqueIndex:idx_manage_role_permission", tag)
 	}
 }
 
