@@ -27,12 +27,12 @@
 - Modify: `pkg/server/types/routerinfo.go`
 - Modify: `pkg/server/types/routerinfo_test.go`
 
-- [ ] 写失败测试：内置 RoleCode、角色结果结构、权限键和值校验，以及 Manage Router 的稳定 command（忽略泛型后缀）。
-- [ ] 运行 `go test ./pkg/server/types/... -count=1`，确认 RED。
-- [ ] 增加 `ManageRoleIdentity`、`ManagePermissionSet`、`IManageRoleProvider`、内置角色常量和校验函数。
-- [ ] 为 `RouterInfo` 增加 `GetCommand()`，非 Manage 路由返回空字符串。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): define manage role contracts`。
+- [x] 写失败测试：内置 RoleCode、角色结果结构、权限键和值校验，以及 Manage Router 的稳定 command（忽略泛型后缀）。
+- [x] 运行 `go test ./pkg/server/types/... -count=1`，确认 RED。
+- [x] 增加标准角色引用、Principal、`IManageRoleProvider`、内置角色常量和校验函数。
+- [x] 为 `RouterInfo` 增加 `GetCommand()`，非 Manage 路由返回空字符串。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): define manage role contracts`。
 
 ### Task 2: 增加 Core 角色及权限明细模型
 
