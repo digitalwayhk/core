@@ -292,6 +292,45 @@ func TestAuthRequestAuthorityUsesAuthorityRevocationAndTargetHook(t *testing.T) 
 	require.True(t, nextCalled)
 }
 
+func TestCrossServiceManageRBACUsesAuthorityProviderAndTargetRoute(t *testing.T) {
+	target := authRequestServiceContext(nil)
+	target.Service.Name = "orders"
+	target.Config.Name = "orders"
+	authority := authRequestServiceContext(nil)
+	authority.Service.Name = "users"
+	authority.Config.Name = "users"
+	authority.ManageRoleProvider = manageRoleProviderStub{}
+	rbacCalled := false
+	authority.ManageAuthorizer = manageAuthorizerFunc(func(_ context.Context, roles []types.ManageRoleRef, request types.ManageAuthorizationRequest) error {
+		rbacCalled = true
+		require.Equal(t, []types.ManageRoleRef{{Code: "ops.approver"}}, roles)
+		require.Equal(t, "orders", request.Service)
+		require.Equal(t, "/api/manage/orders/ordermanage/approve", request.Path)
+		return nil
+	})
+	info := manageAuthRequestRouterInfo("ApproveOrder")
+	info.ServiceName = "orders"
+	nextCalled := false
+	handler := internalJWTAuthorize(
+		authority,
+		info,
+		authority.Config.ManageAuth.AccessSecret,
+		types.AuthTypeManage,
+		authRequestHandlerWithAuthority(target, authority, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			nextCalled = true
+		})),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, authenticatedManageRequest(
+		t, authority.Config.ManageAuth.AccessSecret, []types.ManageRoleRef{{Code: "ops.approver"}},
+	))
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, rbacCalled)
+	require.True(t, nextCalled)
+}
+
 func TestSecretClaimsOnlyUseVerifiedServerSideChannel(t *testing.T) {
 	hook := authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
 		require.Equal(t, "private-api-key", args.SecretClaims["api_key"])

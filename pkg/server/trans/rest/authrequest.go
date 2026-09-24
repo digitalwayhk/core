@@ -72,7 +72,9 @@ func authRequestHandlerWithAuthority(
 			}
 		}
 		if err == nil && authType == types.AuthTypeManage && info != nil && info.GetPathType() == types.ManageType {
-			provider, authorizer, active := sc.GetManageAuthorizationRuntime()
+			// RoleCode 由 Manage Auth 权威服务签发；跨服务统一入口必须由同一
+			// 权威服务决定是否启用 RBAC。授权目标仍使用目标 Router 的稳定元数据。
+			provider, authorizer, active := authAuthority.GetManageAuthorizationRuntime()
 			if !active {
 				err = requestAuthenticationError(errors.New("manage authorization is closing"))
 			} else if provider != nil {
