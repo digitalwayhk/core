@@ -147,25 +147,26 @@
 ### Task 9: 新增 09 管理员角色集成示例
 
 **Files:**
-- Create: `examples/integration/09-admin-manage-rbac/README.md`
-- Create: `examples/integration/09-admin-manage-rbac/main.go`
-- Create: `examples/integration/09-admin-manage-rbac/models.go`
-- Create: `examples/integration/09-admin-manage-rbac/provider.go`
-- Create: `examples/integration/09-admin-manage-rbac/manage.go`
-- Create: `examples/integration/09-admin-manage-rbac/main_test.go`
+- Create: `examples/09-admin-manage-rbac/README.md`
+- Create: `examples/09-admin-manage-rbac/main/main.go`
+- Create: `examples/09-admin-manage-rbac/models.go`
+- Create: `examples/09-admin-manage-rbac/provider.go`
+- Create: `examples/09-admin-manage-rbac/model_repository.go`
+- Create: `examples/09-admin-manage-rbac/api/manage/*.go`
+- Create: `examples/09-admin-manage-rbac/*_test.go`
 
-- [ ] 写失败测试：消费方管理员用户与用户角色关系只保存 RoleCode。
-- [ ] 写失败测试：首个真实注册用户原子分配 `core.system_admin`，后续用户分配 `core.viewer`；TestToken 不消费首用户名额。
-- [ ] 写失败测试：用户角色变更只在新 token 生效，权限明细变更下一请求生效。
-- [ ] 运行示例测试，确认 RED。
-- [ ] 实现 Provider、用户/关系 Manage 页面和 README；说明 Casdoor 不承载 Core 权限继承。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(examples): demonstrate manage RBAC integration`。
+- [x] 写失败测试：消费方管理员用户与用户角色关系只保存 RoleCode。
+- [x] 写失败测试：首个真实注册用户原子分配 `core.system_admin`，后续用户分配 `core.viewer`；TestToken 不消费首用户名额。
+- [x] 写失败测试：用户角色变更只在新 token 生效，权限明细变更下一请求生效。
+- [x] 运行示例测试，确认 RED。
+- [x] 实现 Provider、用户/关系 Manage 页面和 README；说明 Casdoor 不承载 Core 权限继承。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(examples): demonstrate manage RBAC integration`。
 
 ### Task 10: 覆盖真实 HTTP 授权行为
 
 **Files:**
-- Create/Modify: `examples/integration/09-admin-manage-rbac/http_test.go`
+- Create/Modify: `examples/09-admin-manage-rbac/http_test.go`
 - Modify: `pkg/server/trans/rest/authrequest_test.go`
 
 - [ ] 写端到端失败测试：viewer 的 view/search 成功，add/edit/remove 返回 403，自定义角色精确放行，system_admin 全放行。
