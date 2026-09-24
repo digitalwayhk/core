@@ -57,13 +57,13 @@
 - Create: `pkg/server/manageauth/store.go`
 - Create: `pkg/server/manageauth/store_test.go`
 
-- [ ] 写失败测试：`core.system_admin` 放行全部；`core.viewer` 只放行精确 `view/search`；自定义角色按 path/command 并集授权；无权限拒绝。
-- [ ] 写失败测试：权限修改后下一次请求读取新结果；未知/数据库错误不放行。
-- [ ] 运行 `go test ./pkg/server/manageauth/... -count=1`，确认 RED。
-- [ ] 实现 authorizer 和基于 Core 系统模型的 store，禁止字符串拆分权限。
-- [ ] 将拒绝转换为明确的 Forbidden PublicError，内部查询错误保持安全错误消息。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): authorize manage commands by role`。
+- [x] 写失败测试：`core.system_admin` 放行全部；`core.viewer` 只放行精确 `view/search`；自定义角色按 path/command 并集授权；无权限拒绝。
+- [x] 写失败测试：权限修改后下一次请求读取新结果；未知/数据库错误不放行。
+- [x] 运行 `go test ./pkg/server/manageauth/... -count=1`，确认 RED。
+- [x] 实现 authorizer 和基于 Core 系统模型的 store，禁止字符串拆分权限。
+- [x] 将拒绝转换为明确的 Forbidden PublicError，内部查询错误保持安全错误消息。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): authorize manage commands by role`。
 
 ### Task 4: 只把 RoleCode 写入并恢复 JWT
 
