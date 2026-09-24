@@ -169,11 +169,11 @@
 - Create/Modify: `examples/09-admin-manage-rbac/http_test.go`
 - Modify: `pkg/server/trans/rest/authrequest_test.go`
 
-- [ ] 写端到端失败测试：viewer 的 view/search 成功，add/edit/remove 返回 403，自定义角色精确放行，system_admin 全放行。
-- [ ] 覆盖显式点击无权限 command 的响应状态、公开 code 和安全 message；断言业务 handler 未执行。
-- [ ] 覆盖 Provider 不存在的兼容路径和 Provider 异常的 fail-closed 路径。
-- [ ] 运行 HTTP 示例与 REST 测试，确认 GREEN。
-- [ ] 提交：`test(auth): cover manage RBAC over HTTP`。
+- [x] 写端到端测试：viewer 的 view/search 成功，add/edit/remove 返回 403，自定义角色精确放行，system_admin 全放行。
+- [x] 覆盖显式点击无权限 command 的响应状态、公开 code 和安全 message；断言业务 handler 未执行。
+- [x] 覆盖 Provider 不存在的兼容路径，以及权限存储异常的 fail-closed 路径；Provider 签发异常由 Public API 测试覆盖。
+- [x] 运行 HTTP 示例与 REST 测试，确认 GREEN。
+- [x] 提交：`test(auth): cover manage RBAC over HTTP`。
 
 ### Task 11: 同步权威 skill 和公共兼容性文档
 
