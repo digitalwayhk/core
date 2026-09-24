@@ -1,4 +1,4 @@
-// 本文件定义消费方角色 Provider、Core 授权器和稳定 RoleCode 的公共契约。
+// 本文件定义可选外部角色 Provider、Core 授权器和稳定 RoleCode 的公共契约。
 package types
 
 import (
@@ -33,26 +33,26 @@ const (
 
 var manageRoleCodePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]*$`)
 
-// ManageRoleRef 是跨 Token 和消费方用户角色关系使用的稳定角色引用。
+// ManageRoleRef 是跨 Token 和管理员主体角色关系使用的稳定角色引用。
 // Code 不得使用数据库 ID，也不得携带权限明细。
 type ManageRoleRef struct {
 	Code string `json:"code"`
 }
 
-// ManagePrincipalRequest 是 Core 请求消费方解析 Manage 角色的可信身份快照。
+// ManagePrincipalRequest 是 Core 请求角色 Provider 解析 Manage 角色的可信身份快照。
 type ManagePrincipalRequest struct {
 	Identity     AuthIdentity
 	Source       AuthSource
 	DefaultRoles []ManageRoleRef
 }
 
-// ManagePrincipal 是消费方返回给 Core 的标准 Manage 身份授权信息。
+// ManagePrincipal 是角色 Provider 返回给 Core 的标准 Manage 身份授权信息。
 type ManagePrincipal struct {
 	Roles []ManageRoleRef
 }
 
-// IManageRoleProvider 由服务可选实现，用于解析消费方用户与 Core RoleCode 的绑定。
-// Provider 只返回角色，不返回 path/command 权限明细。
+// IManageRoleProvider 允许服务在角色权威位于外部 IAM 时覆盖 Core 默认主体映射。
+// Provider 只返回角色，不返回 path/command 权限明细，也不接收 Core 存储 action。
 type IManageRoleProvider interface {
 	ResolveManagePrincipal(context.Context, ManagePrincipalRequest) (ManagePrincipal, error)
 }

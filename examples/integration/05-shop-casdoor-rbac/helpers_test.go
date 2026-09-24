@@ -148,6 +148,13 @@ func (s *shopSuite) TokenFor(t testing.TB, subject string, tokenType int) string
 	return s.TokenPairFor(t, subject, tokenType).AccessToken
 }
 
+// ManageAdminToken 使用框架 TestToken 的固定系统管理员身份准备业务测试数据。
+// 真实 Casdoor Manage 用户仍由 TokenFor 覆盖首用户与 viewer 契约。
+func (s *shopSuite) ManageAdminToken(t testing.TB) string {
+	t.Helper()
+	return s.Suite.TokenFor(t, "admin", 1)
+}
+
 // TokenPairFor 通过 Casdoor callback 获取可刷新的框架 Token 对。
 func (s *shopSuite) TokenPairFor(t testing.TB, subject string, tokenType int) integration.TokenResponse {
 	t.Helper()

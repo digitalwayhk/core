@@ -45,12 +45,22 @@ type Sqlite struct {
 	tables       map[string]*TableMaster
 	IsLog        bool
 	writeLock    sync.Mutex //  全局写锁
+	fixedName    bool
 }
 
 func NewSqlite() *Sqlite {
 	return &Sqlite{
 		tables: make(map[string]*TableMaster),
 	}
+}
+
+// NewFixedSqlite 创建固定使用指定库名的 SQLite action。
+// 适用于由配置统一选库、不允许模型 IDBName 改写路由的控制面。
+func NewFixedSqlite(name string) *Sqlite {
+	own := NewSqlite()
+	own.Name = strings.TrimSpace(name)
+	own.fixedName = true
+	return own
 }
 
 const defaultSqliteMmapSize int64 = 256 << 20
@@ -259,7 +269,9 @@ func (own *Sqlite) newDB() (*gorm.DB, error) {
 
 // HasTable 检查表是否存在（只创建主表，不递归处理嵌套表）
 func (own *Sqlite) HasTable(model interface{}) error {
-	if config.IsServerInitializing() || (own.db != nil && own.db.DryRun) {
+	// 普通业务模型仍延迟到首次数据访问；固定库名的进程级控制面则必须
+	// 在监听前显式完成建表，不能被全局服务初始化标记跳过。
+	if (config.IsServerInitializing() && !own.fixedName) || (own.db != nil && own.db.DryRun) {
 		return nil
 	}
 
@@ -601,6 +613,7 @@ func (own *Sqlite) Clone() types.IDataAction {
 		IsLog:        own.IsLog,
 		tx:           nil,
 		isTansaction: false,
+		fixedName:    own.fixedName,
 	}
 	if own.db != nil {
 		clone.db = own.db.Session(&gorm.Session{NewDB: true})
@@ -732,6 +745,12 @@ func (own *Sqlite) clearTableCache() {
 
 // GetDBName 获取数据库名称
 func (own *Sqlite) GetDBName(data interface{}) error {
+	if own.fixedName {
+		if strings.TrimSpace(own.Name) == "" {
+			return errors.New("db name is empty")
+		}
+		return nil
+	}
 	if idb, ok := data.(types.IDBName); ok {
 		own.Name = idb.GetLocalDBName()
 		if own.Name == "" {

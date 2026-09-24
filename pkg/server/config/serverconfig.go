@@ -40,6 +40,7 @@ type ServerConfig struct {
 	RouteCache            RouteCacheConfig           `json:",optional"`
 	AuthRevocation        AuthRevocationConfig       `json:",optional"`
 	RuntimeObservability  RuntimeObservabilityConfig `json:",optional"`
+	ManageStore           *ManageStoreConfig         `json:",optional,omitempty"`
 }
 
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
@@ -59,10 +60,27 @@ func (con *ServerConfig) ApplyDefaults() {
 	con.AuthRevocation.ApplyDefaults(con.Name)
 	con.RuntimeObservability.ApplyDefaults()
 	con.HMACAuth.ApplyDefaults()
+	if strings.EqualFold(strings.TrimSpace(con.Name), "server") {
+		if con.ManageStore == nil {
+			con.ManageStore = legacyManageStoreConfig()
+		} else {
+			con.ManageStore.ApplyDefaults()
+		}
+	}
 }
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
 func (con *ServerConfig) Validate() error {
+	if strings.EqualFold(strings.TrimSpace(con.Name), "server") {
+		if con.ManageStore == nil {
+			return fmt.Errorf("ManageStore is required for server")
+		}
+		if err := con.ManageStore.Validate(); err != nil {
+			return err
+		}
+	} else if con.ManageStore != nil {
+		return fmt.Errorf("ManageStore is only supported in server.json")
+	}
 	for i, proxy := range con.TrustedProxies {
 		proxy = strings.TrimSpace(proxy)
 		if _, err := netip.ParseAddr(proxy); err == nil {
@@ -340,6 +358,9 @@ func NewServiceDefaultConfig(servicename string, port int) *ServerConfig {
 	con.WhiteList = make([]string, 0)
 	con.TrustedProxies = make([]string, 0)
 	con.MelodyConfigPath = ""
+	if strings.EqualFold(strings.TrimSpace(servicename), "server") {
+		con.ManageStore = DefaultManageStoreConfig()
+	}
 	con.ApplyDefaults()
 	if err := con.Validate(); err != nil {
 		panic(err)

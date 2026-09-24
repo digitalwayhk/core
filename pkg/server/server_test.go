@@ -18,4 +18,10 @@ func TestSystemManageRegistersRoleManagementPages(t *testing.T) {
 	require.Contains(t, paths, "/api/manage/server/managerolemanage/search")
 	require.Contains(t, paths, "/api/manage/server/managerolepermissionmanage/view")
 	require.Contains(t, paths, "/api/manage/server/managerolepermissionmanage/bindmenu")
+	require.Contains(t, paths, "/api/manage/server/manageprincipalmanage/view")
+	require.Contains(t, paths, "/api/manage/server/manageprincipalmanage/edit")
+	require.NotContains(t, paths, "/api/manage/server/manageprincipalmanage/add")
+	require.NotContains(t, paths, "/api/manage/server/manageprincipalmanage/remove")
+	require.Contains(t, paths, "/api/manage/server/manageprincipalrolemanage/add")
+	require.Contains(t, paths, "/api/manage/server/manageprincipalrolemanage/remove")
 }

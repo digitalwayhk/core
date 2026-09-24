@@ -14,6 +14,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server"
 	"github.com/digitalwayhk/core/pkg/server/api/release"
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/manageauth"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
@@ -58,6 +59,7 @@ type WebServer struct {
 	stopCh                     chan struct{}
 	group                      *service.ServiceGroup
 	saveConfig                 func(*config.ServerConfig) error
+	manageControlPlane         *manageauth.ControlPlaneRuntime
 }
 
 func (own *WebServer) persistConfig(cfg *config.ServerConfig) error {
@@ -91,10 +93,42 @@ func NewWebServer() *WebServer {
 		serverOption:    make(map[string]*types.ServerOption),
 	}
 	ws.beginInitialization()
-	ws.AddIService(&server.SystemManage{})
+	system := router.NewServiceContext(&server.SystemManage{})
+	if err := ws.initializeManageControlPlane(system.Config); err != nil {
+		panic(fmt.Sprintf("manage control-plane initialization failed: %v", err))
+	}
+	ws.AddServiceContext(system)
 	return ws
 }
+
+func (own *WebServer) initializeManageControlPlane(cfg *config.ServerConfig) error {
+	if cfg == nil || cfg.ManageStore == nil {
+		return errors.New("server ManageStore config is required")
+	}
+	action, err := manageauth.NewControlPlaneAction(*cfg.ManageStore)
+	if err != nil {
+		return err
+	}
+	runtime, err := manageauth.NewControlPlaneRuntime(action)
+	if err != nil {
+		return err
+	}
+	own.manageControlPlane = runtime
+	return nil
+}
+
+func (own *WebServer) bindManageAuthorization(sc *router.ServiceContext) {
+	if own == nil || sc == nil || own.manageControlPlane == nil {
+		return
+	}
+	if sc.ManageRoleProvider == nil {
+		sc.ManageRoleProvider = own.manageControlPlane.PrincipalProvider()
+	}
+	sc.ManageAuthorizer = own.manageControlPlane.Authorizer()
+}
+
 func (own *WebServer) AddServiceContext(sc *router.ServiceContext) {
+	own.bindManageAuthorization(sc)
 	sc.Router.AddServerRouters(release.Routers()...)
 	name := strings.ToLower(sc.Service.Name)
 	own.Lock()

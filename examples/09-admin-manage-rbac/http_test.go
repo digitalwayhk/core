@@ -148,7 +148,7 @@ func newRBACHTTPFixture(t *testing.T, enabled bool) *rbacHTTPFixture {
 	}
 	fixture.context.Router = router.NewServiceRouter(fixture.context, service)
 	if enabled {
-		fixture.context.ManageRoleProvider = NewManageRoleProvider(newMemoryAdminRepository())
+		fixture.context.ManageRoleProvider = rbacHTTPRoleProvider{}
 		fixture.context.ManageAuthorizer = coremanageauth.NewAuthorizer(fixture.store)
 	}
 	for command, info := range fixture.routes {
@@ -156,6 +156,15 @@ func newRBACHTTPFixture(t *testing.T, enabled bool) *rbacHTTPFixture {
 		require.NotNil(t, fixture.routes[command])
 	}
 	return fixture
+}
+
+type rbacHTTPRoleProvider struct{}
+
+func (rbacHTTPRoleProvider) ResolveManagePrincipal(
+	context.Context,
+	servertype.ManagePrincipalRequest,
+) (servertype.ManagePrincipal, error) {
+	return servertype.ManagePrincipal{}, nil
 }
 
 func (own *rbacHTTPFixture) request(

@@ -305,7 +305,7 @@ func setManageRolesForIssue(
 	manageTestIdentity bool,
 ) error {
 	// 只有 Core 自己签发并在 Refresh Token 中标记的 TestToken 身份可绕过
-	// 消费方 Provider；普通无 Provider 的旧 Token 不能被提升为系统管理员。
+	// 主体 Provider；普通无角色的旧 Token 不能被提升为系统管理员。
 	if source == types.AuthSourceTestToken ||
 		(source == types.AuthSourceRefresh && manageTestIdentity) {
 		return claims.SetManageRoles([]types.ManageRoleRef{{Code: types.ManageRoleSystemAdmin}})

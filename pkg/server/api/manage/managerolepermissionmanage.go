@@ -221,14 +221,14 @@ func defaultMenuPermissionRows(
 type modelManageRoleBindingStore struct{}
 
 func (*modelManageRoleBindingStore) FindRole(_ context.Context, code string) (*smodels.ManageRoleModel, error) {
-	list := entity.NewModelList[smodels.ManageRoleModel](nil)
+	list := smodels.NewManageModelList[smodels.ManageRoleModel]()
 	return list.SearchOne(func(search *persistencetype.SearchItem) {
 		search.AddWhereN("Code", code)
 	})
 }
 
 func (*modelManageRoleBindingStore) FindMenu(_ context.Context, path string) (*smodels.MenuModel, error) {
-	list := entity.NewModelList[smodels.MenuModel](nil)
+	list := smodels.NewManageModelList[smodels.MenuModel]()
 	return list.SearchOne(func(search *persistencetype.SearchItem) {
 		search.AddWhereN("Url", path)
 	})
@@ -238,7 +238,7 @@ func (*modelManageRoleBindingStore) EnsurePermissions(
 	_ context.Context,
 	rows []*smodels.ManageRolePermissionModel,
 ) (err error) {
-	list := entity.NewModelList[smodels.ManageRolePermissionModel](nil)
+	list := smodels.NewManageModelList[smodels.ManageRolePermissionModel]()
 	probe := list.GetSearchItem()
 	probe.Model = smodels.NewManageRolePermissionModel()
 	action := list.GetDBAdapter(probe)

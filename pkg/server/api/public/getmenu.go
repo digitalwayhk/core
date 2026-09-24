@@ -3,7 +3,6 @@ package public
 import (
 	"net/http"
 
-	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
 	"github.com/digitalwayhk/core/pkg/server/locale"
@@ -23,7 +22,23 @@ func (own *GetMenu) Validation(req types.IRequest) error {
 	return nil
 }
 func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
-	list := entity.NewModelList[smodels.DirectoryModel](nil)
+	dirs, err := loadStoredMenus()
+	if err != nil {
+		return nil, err
+	}
+	if utils.HasLocalIPAddr(req.GetClientIP()) {
+		localMenu, err := getLocalMenu()
+		if err != nil {
+			return nil, err
+		}
+		dirs = append(dirs, localMenu)
+	}
+	applyMenuLocale(dirs, locale.FromRequest(req))
+	return dirs, nil
+}
+
+func loadStoredMenus() ([]*smodels.DirectoryModel, error) {
+	list := smodels.NewManageModelList[smodels.DirectoryModel]()
 	dirs, _, err := list.SearchAll(1, 1000, func(item *pt.SearchItem) {
 		item.AddSortN("Sort", false)
 	})
@@ -32,7 +47,7 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 	}
 	if len(dirs) > 0 {
 		for _, dir := range dirs {
-			list := entity.NewModelList[smodels.MenuModel](nil)
+			list := smodels.NewManageModelList[smodels.MenuModel]()
 			rows, _, err := list.SearchAll(1, 1000, func(item *pt.SearchItem) {
 				item.AddWhereN("DirectoryModelID", dir.ID)
 				item.AddSortN("Sort", false)
@@ -43,14 +58,6 @@ func (own *GetMenu) Do(req types.IRequest) (interface{}, error) {
 			dir.MenuItems = rows
 		}
 	}
-	if utils.HasLocalIPAddr(req.GetClientIP()) {
-		localMenu, err := getLocalMenu()
-		if err != nil {
-			return nil, err
-		}
-		dirs = append(dirs, localMenu)
-	}
-	applyMenuLocale(dirs, locale.FromRequest(req))
 	return dirs, nil
 }
 

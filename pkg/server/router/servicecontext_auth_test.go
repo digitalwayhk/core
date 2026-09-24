@@ -55,6 +55,7 @@ func TestServiceContextCapturesAuthHookProvider(t *testing.T) {
 	require.Same(t, service, sc.CasdoorEventHookProvider)
 	require.Same(t, service, sc.HMACAuthProvider)
 	require.Same(t, service, sc.ManageRoleProvider)
+	require.Nil(t, sc.ManageAuthorizer, "ServiceContext 不得绕过 WebServer 控制面私自创建 SQLite Authorizer")
 }
 
 // TestServiceContextWithoutHMACProviderKeepsRuntimeNil 验证旧服务未实现第四 Hook 时保持零值兼容。

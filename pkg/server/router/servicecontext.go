@@ -15,7 +15,6 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
-	"github.com/digitalwayhk/core/pkg/server/manageauth"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
@@ -366,7 +365,8 @@ func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IA
 }
 
 // GetManageAuthorizationRuntime 返回当前 Manage RBAC Provider 与授权器快照。
-// Provider 为 nil 表示消费方未启用 RBAC；active 为 false 表示服务已终止。
+// 标准 WebServer 会绑定 Core 默认实现；直接构造的 ServiceContext 可能仍为空。
+// active 为 false 表示服务已终止。
 func (own *ServiceContext) GetManageAuthorizationRuntime() (types.IManageRoleProvider, types.IManageAuthorizer, bool) {
 	if own == nil {
 		return nil, nil, false
@@ -876,7 +876,6 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	}
 	if provider, ok := service.(types.IManageRoleProvider); ok {
 		sc.ManageRoleProvider = provider
-		sc.ManageAuthorizer = manageauth.NewAuthorizer(manageauth.NewModelStore(nil))
 	}
 	if provider, ok := service.(types.IHMACAuthProvider); ok {
 		sc.HMACAuthProvider = provider
