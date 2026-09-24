@@ -84,6 +84,7 @@ type ServiceContext struct {
 	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
 	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
 	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
+	ManageRoleProvider       types.IManageRoleProvider       `json:"-"`
 	HMACAuthProvider         types.IHMACAuthProvider         `json:"-"`
 	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
 	hmacAuthSlots            chan struct{}
@@ -857,6 +858,9 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	if provider, ok := service.(types.IAuthRequestHookProvider); ok {
 		sc.AuthRequestHookProvider = provider
 	}
+	if provider, ok := service.(types.IManageRoleProvider); ok {
+		sc.ManageRoleProvider = provider
+	}
 	if provider, ok := service.(types.IHMACAuthProvider); ok {
 		sc.HMACAuthProvider = provider
 		sc.hmacAuthLifecycle = newHMACAuthLifecycle()
@@ -1257,6 +1261,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.AuthRevocationManager = nil
 		own.CasdoorClients = nil
 		own.AuthRequestHookProvider = nil
+		own.ManageRoleProvider = nil
 		own.HMACAuthProvider = nil
 		own.hmacAuthLifecycle = nil
 		own.CasdoorEventHookProvider = nil

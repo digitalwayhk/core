@@ -269,6 +269,11 @@ func issueWithSchedule(
 			return safe.TokenPairResponse{}, err
 		}
 	}
+	if authType == types.AuthTypeManage {
+		if err := setManageRolesForIssue(ctx, sc, claims, identity, source); err != nil {
+			return safe.TokenPairResponse{}, err
+		}
+	}
 
 	return safe.IssueTokenPair(safe.TokenIssueRequest{
 		Claims:               claims,
@@ -281,6 +286,50 @@ func issueWithSchedule(
 		RefreshExpireSeconds: auth.RefreshExpire,
 		IssueRefresh:         issueRefresh,
 	})
+}
+
+func setManageRolesForIssue(
+	ctx context.Context,
+	sc *router.ServiceContext,
+	claims *safe.Claims,
+	identity types.AuthIdentity,
+	source types.AuthSource,
+) error {
+	// TestToken 及其无外部 Provider 的刷新都属于框架测试身份，不能触发消费方
+	// 管理员建档或占用 Casdoor 首用户 bootstrap。
+	if source == types.AuthSourceTestToken ||
+		(source == types.AuthSourceRefresh && identity.Provider == "") {
+		return claims.SetManageRoles([]types.ManageRoleRef{{Code: types.ManageRoleSystemAdmin}})
+	}
+	if sc == nil || sc.ManageRoleProvider == nil {
+		return nil
+	}
+
+	request := types.ManagePrincipalRequest{
+		Identity: identity,
+		Source:   source,
+	}
+	if source == types.AuthSourceCallback {
+		request.DefaultRoles = []types.ManageRoleRef{{Code: types.ManageRoleViewer}}
+	}
+	principal, err := sc.ManageRoleProvider.ResolveManagePrincipal(ctx, request)
+	if err != nil {
+		return types.NewPublicError(
+			types.ErrorKindInternal,
+			types.PublicCodeInternal,
+			"internal server error",
+			err,
+		)
+	}
+	if err := claims.SetManageRoles(principal.Roles); err != nil {
+		return types.NewPublicError(
+			types.ErrorKindInternal,
+			types.PublicCodeInternal,
+			"internal server error",
+			err,
+		)
+	}
+	return nil
 }
 
 func authSecretForType(sc *router.ServiceContext, authType types.AuthType) (*config.AuthSecret, error) {

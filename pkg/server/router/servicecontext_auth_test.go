@@ -28,6 +28,9 @@ func (s *authHookTestService) OnAuth(_ context.Context, args *types.AuthHookArgs
 	s.captured = args
 	return nil
 }
+func (*authHookTestService) ResolveManagePrincipal(context.Context, types.ManagePrincipalRequest) (types.ManagePrincipal, error) {
+	return types.ManagePrincipal{Roles: []types.ManageRoleRef{{Code: types.ManageRoleViewer}}}, nil
+}
 func (*authHookTestService) OnAuthRequest(context.Context, types.AuthRequestArgs) error { return nil }
 func (*authHookTestService) OnCasdoorEvent(context.Context, types.CasdoorEvent) error   { return nil }
 func (*authHookTestService) AuthenticateHMAC(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error) {
@@ -51,6 +54,7 @@ func TestServiceContextCapturesAuthHookProvider(t *testing.T) {
 	require.Same(t, service, sc.AuthRequestHookProvider)
 	require.Same(t, service, sc.CasdoorEventHookProvider)
 	require.Same(t, service, sc.HMACAuthProvider)
+	require.Same(t, service, sc.ManageRoleProvider)
 }
 
 // TestServiceContextWithoutHMACProviderKeepsRuntimeNil 验证旧服务未实现第四 Hook 时保持零值兼容。

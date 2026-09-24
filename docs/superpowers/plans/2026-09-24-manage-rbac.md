@@ -91,13 +91,13 @@
 - Modify: `pkg/server/api/public/testtoken.go`
 - Modify/Create: corresponding `*_test.go`
 
-- [ ] 写失败测试：存在 Provider 时登录/刷新加载角色；Provider 错误 fail closed；Provider 不存在保持兼容。
-- [ ] 写失败测试：Manage TestToken 固定携带 `core.system_admin`，且不触发真实用户“首个用户”分配。
-- [ ] 运行 `go test ./pkg/server/api/public/... ./pkg/server/types/... -count=1`，确认 RED。
-- [ ] 在 `ServiceContext` 发现 `IManageRoleProvider`，统一在 token 签发前写角色。
-- [ ] 保持 Casdoor 只负责身份；角色初始化由消费方 Provider 完成。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): issue manage roles in auth tokens`。
+- [x] 写失败测试：存在 Provider 时登录/刷新加载角色；Provider 错误 fail closed；Provider 不存在保持兼容。
+- [x] 写失败测试：Manage TestToken 固定携带 `core.system_admin`，且不触发真实用户“首个用户”分配。
+- [x] 运行 `go test ./pkg/server/api/public/... ./pkg/server/router/... -count=1`，确认 RED。
+- [x] 在 `ServiceContext` 发现 `IManageRoleProvider`，统一在 token 签发前写角色。
+- [x] 保持 Casdoor 只负责身份；角色初始化由消费方 Provider 完成。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): issue manage roles in auth tokens`。
 
 ### Task 6: 在 REST Manage 链路集中鉴权
 

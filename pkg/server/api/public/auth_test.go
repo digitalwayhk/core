@@ -24,6 +24,26 @@ type authHookRecorder struct {
 	mutate   func(*types.AuthHookArgs)
 }
 
+type manageRoleProviderRecorder struct {
+	calls    int
+	requests []types.ManagePrincipalRequest
+	roles    [][]types.ManageRoleRef
+	err      error
+}
+
+func (p *manageRoleProviderRecorder) ResolveManagePrincipal(_ context.Context, request types.ManagePrincipalRequest) (types.ManagePrincipal, error) {
+	p.calls++
+	p.requests = append(p.requests, request)
+	if p.err != nil {
+		return types.ManagePrincipal{}, p.err
+	}
+	index := p.calls - 1
+	if index >= len(p.roles) {
+		index = len(p.roles) - 1
+	}
+	return types.ManagePrincipal{Roles: p.roles[index]}, nil
+}
+
 func (h *authHookRecorder) OnAuth(_ context.Context, args *types.AuthHookArgs) error {
 	h.calls++
 	h.captured = args
@@ -99,6 +119,81 @@ func TestIssueForServiceCarriesCasdoorIdentityToHookAndTokens(t *testing.T) {
 	require.Equal(t, access["auth_provider"], refresh["auth_provider"])
 	require.Equal(t, access["provider_subject"], refresh["provider_subject"])
 	require.Equal(t, access["auth_generation"], refresh["auth_generation"])
+}
+
+func TestManageCallbackAndRefreshResolveCurrentRoles(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	provider := &manageRoleProviderRecorder{roles: [][]types.ManageRoleRef{
+		{{Code: types.ManageRoleViewer}},
+		{{Code: "ops.approver"}},
+	}}
+	sc := authTestServiceContext(&authHookRecorder{})
+	sc.ManageRoleProvider = provider
+	identity := types.AuthIdentity{
+		UID: "user-1", Username: "Alice", AuthType: types.AuthTypeManage,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "alice", Generation: 4,
+	}
+
+	original, err := issueForServiceIdentityAt(
+		context.Background(), sc, identity, types.AuthSourceCallback, nil, now,
+	)
+	require.NoError(t, err)
+	require.Equal(t, `["core.viewer"]`, decodeAuthToken(t, original.AccessToken, "manage-access")[types.ManageRolesClaim])
+	require.Equal(t, []types.ManageRoleRef{{Code: types.ManageRoleViewer}}, provider.requests[0].DefaultRoles)
+
+	refreshed, err := refreshForServiceWithDependenciesAt(
+		context.Background(), sc, original.RefreshToken, types.AuthTypeManage, now.Add(time.Hour),
+		activeCallbackClient(), &callbackAuthorityStub{
+			current: authstate.State{Generation: 4}, confirmed: authstate.State{Generation: 4},
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, `["ops.approver"]`, decodeAuthToken(t, refreshed.AccessToken, "manage-access")[types.ManageRolesClaim])
+	require.Empty(t, provider.requests[1].DefaultRoles, "刷新不得再次执行新用户默认角色初始化")
+	require.Equal(t, types.AuthSourceRefresh, provider.requests[1].Source)
+}
+
+func TestManageTestTokenAlwaysUsesSystemAdminWithoutProvider(t *testing.T) {
+	provider := &manageRoleProviderRecorder{err: errors.New("must not be called")}
+	sc := authTestServiceContext(&authHookRecorder{})
+	sc.ManageRoleProvider = provider
+
+	pair, err := issueForServiceAt(
+		context.Background(), sc, "test-manager", "", types.AuthTypeManage, types.AuthSourceTestToken, nil, time.Now().UTC(),
+	)
+	require.NoError(t, err)
+	require.Zero(t, provider.calls)
+	require.Equal(t, `["core.system_admin"]`, decodeAuthToken(t, pair.AccessToken, "manage-access")[types.ManageRolesClaim])
+
+	refreshed, err := refreshForServiceAt(context.Background(), sc, pair.RefreshToken, types.AuthTypeManage, time.Now().UTC())
+	require.NoError(t, err)
+	require.Zero(t, provider.calls, "TestToken 刷新也不得创建消费方管理员")
+	require.Equal(t, `["core.system_admin"]`, decodeAuthToken(t, refreshed.AccessToken, "manage-access")[types.ManageRolesClaim])
+}
+
+func TestManageTokenWithoutProviderPreservesCompatibility(t *testing.T) {
+	sc := authTestServiceContext(&authHookRecorder{})
+
+	pair, err := issueForServiceAt(
+		context.Background(), sc, "manager-1", "", types.AuthTypeManage, types.AuthSourceCallback, nil, time.Now().UTC(),
+	)
+	require.NoError(t, err)
+	require.NotContains(t, decodeAuthToken(t, pair.AccessToken, "manage-access"), types.ManageRolesClaim)
+}
+
+func TestManageRoleProviderFailureReturnsSafeInternalError(t *testing.T) {
+	cause := errors.New("role database at private-host is unavailable")
+	sc := authTestServiceContext(&authHookRecorder{})
+	sc.ManageRoleProvider = &manageRoleProviderRecorder{err: cause}
+
+	pair, err := issueForServiceAt(
+		context.Background(), sc, "manager-1", "", types.AuthTypeManage, types.AuthSourceCallback, nil, time.Now().UTC(),
+	)
+	require.Empty(t, pair.AccessToken)
+	require.ErrorIs(t, err, cause)
+	contract := types.ResolvePublicError(err)
+	require.Equal(t, types.ErrorKindInternal, contract.Kind)
+	require.Equal(t, "internal server error", contract.Message)
 }
 
 func TestAuthHookCannotRewriteCanonicalIdentity(t *testing.T) {
