@@ -1,3 +1,4 @@
+// 本文件定义 Core Manage 角色目录、内置动态策略和不可变边界。
 package smodels
 
 import (
@@ -22,16 +23,19 @@ type ManageRoleModel struct {
 	Policy      string `json:"policy" gorm:"size:32;not null"`
 }
 
+// NewManageRoleModel 创建已初始化的角色模型。
 func NewManageRoleModel() *ManageRoleModel {
 	return &ManageRoleModel{Model: entity.NewModel()}
 }
 
+// NewModel 补齐反射创建时的嵌入模型。
 func (own *ManageRoleModel) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
 }
 
+// GetHash 使用规范化 RoleCode 生成唯一哈希。
 func (own *ManageRoleModel) GetHash() string {
 	code := strings.ToLower(strings.TrimSpace(own.Code))
 	if code == "" {
@@ -43,10 +47,12 @@ func (own *ManageRoleModel) GetHash() string {
 	return utils.HashCodes(code)
 }
 
+// AddValid 校验新增角色及其策略。
 func (own *ManageRoleModel) AddValid() error {
 	return own.validate()
 }
 
+// UpdateValid 保护稳定 RoleCode 与内置策略。
 func (own *ManageRoleModel) UpdateValid(old interface{}) error {
 	previous, ok := old.(*ManageRoleModel)
 	if !ok || previous == nil {
@@ -64,6 +70,7 @@ func (own *ManageRoleModel) UpdateValid(old interface{}) error {
 	return own.validate()
 }
 
+// RemoveValid 禁止删除内置或系统角色。
 func (own *ManageRoleModel) RemoveValid() error {
 	if IsBuiltInManageRoleCode(own.Code) || own.IsSystem {
 		return protectedManageRole("built-in role cannot be removed")
@@ -99,6 +106,7 @@ func (own *ManageRoleModel) validate() error {
 	return nil
 }
 
+// IsBuiltInManageRoleCode 判断 RoleCode 是否属于 Core 动态内置角色。
 func IsBuiltInManageRoleCode(code string) bool {
 	switch strings.ToLower(strings.TrimSpace(code)) {
 	case servertype.ManageRoleSystemAdmin, servertype.ManageRoleViewer:
@@ -108,6 +116,7 @@ func IsBuiltInManageRoleCode(code string) bool {
 	}
 }
 
+// NewBuiltInManageRoles 返回系统管理员和只读查看者角色定义。
 func NewBuiltInManageRoles() []*ManageRoleModel {
 	admin := NewManageRoleModel()
 	admin.Code = servertype.ManageRoleSystemAdmin

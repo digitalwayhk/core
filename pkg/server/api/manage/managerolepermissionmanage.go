@@ -1,3 +1,4 @@
+// 本文件提供自定义角色精确权限页面及 view/search 菜单默认绑定操作。
 package manage
 
 import (
@@ -20,6 +21,7 @@ type ManageRolePermissionManage struct {
 	bindingStore manageRoleBindingStore
 }
 
+// NewManageRolePermissionManage 创建角色权限 Manage 页面。
 func NewManageRolePermissionManage() *ManageRolePermissionManage {
 	own := &ManageRolePermissionManage{}
 	own.DmpBase = NewDmpBase[smodels.ManageRolePermissionModel](own)
@@ -27,12 +29,14 @@ func NewManageRolePermissionManage() *ManageRolePermissionManage {
 	return own
 }
 
+// Routers 提供精确权限 CRUD 与菜单默认权限绑定。
 func (own *ManageRolePermissionManage) Routers() []servertype.IRouter {
 	routers := own.DmpBase.Routers()
 	routers = append(routers, own.Add, own.Remove, NewBindMenu(own))
 	return routers
 }
 
+// ViewCommandModel 配置菜单默认权限绑定命令。
 func (own *ManageRolePermissionManage) ViewCommandModel(command *view.CommandModel) {
 	if command.Command == "bindmenu" {
 		command.Title = "绑定菜单默认权限"
@@ -42,6 +46,7 @@ func (own *ManageRolePermissionManage) ViewCommandModel(command *view.CommandMod
 	}
 }
 
+// ViewFieldModel 配置结构化权限字段。
 func (own *ManageRolePermissionManage) ViewFieldModel(model interface{}, field *view.FieldModel) {
 	own.DmpBase.ViewFieldModel(model, field)
 	switch {
@@ -66,18 +71,22 @@ type ManageRoleMenuBinding struct {
 	MenuPath string
 }
 
+// BindMenu 为自定义角色幂等绑定菜单的 view/search 权限。
 type BindMenu struct {
 	manageservice.Operation[smodels.ManageRolePermissionModel]
 }
 
+// NewBindMenu 创建菜单默认权限绑定操作。
 func NewBindMenu(instance interface{}) *BindMenu {
 	return &BindMenu{Operation: manageservice.NewOperation[smodels.ManageRolePermissionModel](instance)}
 }
 
+// New 创建请求级 BindMenu 操作实例。
 func (own *BindMenu) New(instance interface{}) servertype.IRouter {
 	return NewBindMenu(instance)
 }
 
+// Validation 校验表单中的角色、服务和菜单路径。
 func (own *BindMenu) Validation(servertype.IRequest) error {
 	if own.Model == nil {
 		return invalidRoleBinding("binding input is required")
@@ -89,6 +98,7 @@ func (own *BindMenu) Validation(servertype.IRequest) error {
 	})
 }
 
+// Do 执行幂等菜单默认权限绑定。
 func (own *BindMenu) Do(_ servertype.IRequest) (interface{}, error) {
 	manager, ok := own.GetInstance().(*ManageRolePermissionManage)
 	if !ok || manager == nil || manager.bindingStore == nil {
@@ -103,6 +113,7 @@ func (own *BindMenu) Do(_ servertype.IRequest) (interface{}, error) {
 	})
 }
 
+// RouterInfo 返回标准 Manage 自定义命令元数据。
 func (own *BindMenu) RouterInfo() *servertype.RouterInfo { return manageservice.RouterInfo(own) }
 
 type manageRoleBindingStore interface {

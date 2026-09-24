@@ -1,3 +1,4 @@
+// 本文件提供 Core 系统角色目录的 Manage 页面及内置角色保护。
 package manage
 
 import (
@@ -14,18 +15,21 @@ type ManageRoleManage struct {
 	*DmpBase[smodels.ManageRoleModel]
 }
 
+// NewManageRoleManage 创建系统角色 Manage 页面。
 func NewManageRoleManage() *ManageRoleManage {
 	own := &ManageRoleManage{}
 	own.DmpBase = NewDmpBase[smodels.ManageRoleModel](own)
 	return own
 }
 
+// Routers 提供角色查看、搜索、编辑、新增和删除路由。
 func (own *ManageRoleManage) Routers() []types.IRouter {
 	routers := own.DmpBase.Routers()
 	routers = append(routers, own.Add, own.Remove)
 	return routers
 }
 
+// GetDefaultItems 返回必须存在且不可删除的内置角色。
 func (*ManageRoleManage) GetDefaultItems() []*smodels.ManageRoleModel {
 	return smodels.NewBuiltInManageRoles()
 }
@@ -47,6 +51,7 @@ func (own *ManageRoleManage) ParseAfter(sender interface{}, _ types.IRequest) er
 	return nil
 }
 
+// ViewFieldModel 配置角色控制面字段属性。
 func (own *ManageRoleManage) ViewFieldModel(model interface{}, field *view.FieldModel) {
 	own.DmpBase.ViewFieldModel(model, field)
 	switch {

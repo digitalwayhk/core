@@ -1,4 +1,4 @@
-// Package manageauth implements Core's server-side Manage RBAC boundary.
+// Package manageauth 实现 Core 服务端 Manage RBAC 的角色解析、精确匹配与安全失败边界。
 package manageauth
 
 import (
@@ -10,27 +10,30 @@ import (
 	servertype "github.com/digitalwayhk/core/pkg/server/types"
 )
 
+// ErrManagePermissionDenied 是服务端精确权限拒绝的可识别 cause。
 var ErrManagePermissionDenied = errors.New("manage permission denied")
 
 // Request 是 Manage 授权目标的兼容别名。
 type Request = servertype.ManageAuthorizationRequest
 
-// Store resolves enabled custom roles and their exact permissions.
+// Store 查询启用的自定义角色及其精确权限。
 type Store interface {
 	FindRole(ctx context.Context, code string) (*smodels.ManageRoleModel, error)
 	HasPermission(ctx context.Context, roleCode, service, path, command string) (bool, error)
 }
 
+// Authorizer 动态计算内置策略并查询自定义角色权限。
 type Authorizer struct {
 	store Store
 }
 
+// NewAuthorizer 使用给定权限存储创建授权器。
 func NewAuthorizer(store Store) *Authorizer {
 	return &Authorizer{store: store}
 }
 
-// Authorize evaluates built-in policies dynamically and custom role permissions as a union.
-// It deliberately does not cache custom permission rows, so permission changes affect the next request.
+// Authorize 动态计算内置策略，并以并集方式精确匹配自定义角色权限。
+// 自定义权限不缓存，因此变更会在下一次请求生效。
 func (own *Authorizer) Authorize(ctx context.Context, roles []servertype.ManageRoleRef, request Request) error {
 	request.Service = strings.TrimSpace(request.Service)
 	request.Path = strings.TrimSpace(request.Path)

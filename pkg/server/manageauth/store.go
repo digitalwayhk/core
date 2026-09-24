@@ -1,3 +1,4 @@
+// 本文件通过 Core 系统模型按请求查询自定义角色及其精确权限。
 package manageauth
 
 import (
@@ -16,12 +17,13 @@ type manageRolePermissionList interface {
 	SearchWhere(string, interface{}, ...func(*persistencetype.SearchItem)) ([]*smodels.ManageRolePermissionModel, error)
 }
 
-// ModelStore queries Core system role models through the standard persistence boundary.
+// ModelStore 通过标准持久化边界查询 Core 系统角色模型。
 type ModelStore struct {
 	newRoleList       func() manageRoleList
 	newPermissionList func() manageRolePermissionList
 }
 
+// NewModelStore 创建模型权限存储；nil action 使用 Core 默认系统数据库。
 func NewModelStore(action persistencetype.IDataAction) *ModelStore {
 	return newModelStoreWithLists(
 		func() manageRoleList {
@@ -40,6 +42,7 @@ func newModelStoreWithLists(
 	return &ModelStore{newRoleList: roles, newPermissionList: permissions}
 }
 
+// FindRole 按稳定 RoleCode 查询角色。
 func (own *ModelStore) FindRole(_ context.Context, code string) (*smodels.ManageRoleModel, error) {
 	if own == nil || own.newRoleList == nil {
 		return nil, nil
@@ -51,6 +54,7 @@ func (own *ModelStore) FindRole(_ context.Context, code string) (*smodels.Manage
 	return items[0], nil
 }
 
+// HasPermission 精确匹配 RoleCode、service、path 与 command。
 func (own *ModelStore) HasPermission(
 	_ context.Context,
 	roleCode string,

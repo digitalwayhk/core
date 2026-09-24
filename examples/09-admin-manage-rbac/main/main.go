@@ -1,3 +1,4 @@
+// 本文件提供 09 Manage RBAC 示例的可运行 WebServer 入口。
 package main
 
 import (

@@ -1,3 +1,4 @@
+// 本文件定义消费方角色 Provider、Core 授权器和稳定 RoleCode 的公共契约。
 package types
 
 import (
@@ -17,8 +18,11 @@ const (
 	// ManageRoleViewer 是动态允许 view/search Manage command 的内置角色。
 	ManageRoleViewer = "core.viewer"
 
+	// ManageRolePolicyGrantAll 表示动态允许全部 Manage command。
 	ManageRolePolicyGrantAll = "grant_all"
+	// ManageRolePolicyReadOnly 表示动态只允许 view/search。
 	ManageRolePolicyReadOnly = "read_only"
+	// ManageRolePolicyExplicit 表示从权限明细表精确查询。
 	ManageRolePolicyExplicit = "explicit"
 
 	// MaxManageRoleCodes 限制单个身份可写入 Token 的角色数量。

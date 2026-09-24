@@ -1,3 +1,4 @@
+// 本文件验证 Core SystemManage 注册角色与权限控制面页面。
 package server
 
 import (

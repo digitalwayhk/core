@@ -1,3 +1,4 @@
+// 本文件定义管理员与 Core RoleCode 的绑定页面，关系不依赖数据库角色 ID。
 package manage
 
 import (
@@ -9,20 +10,24 @@ import (
 	"github.com/digitalwayhk/core/service/manage/view"
 )
 
+// AdminUserRoleManage 提供管理员与角色的选择和绑定页面。
 type AdminUserRoleManage struct {
 	*manageservice.ManageService[models.AdminUserRoleModel]
 }
 
+// NewAdminUserRoleManage 创建管理员角色绑定页面。
 func NewAdminUserRoleManage() *AdminUserRoleManage {
 	own := &AdminUserRoleManage{}
 	own.ManageService = manageservice.NewManageService[models.AdminUserRoleModel](own)
 	return own
 }
 
+// Routers 只开放查看、搜索、绑定和解除绑定。
 func (own *AdminUserRoleManage) Routers() []servertype.IRouter {
 	return []servertype.IRouter{own.View, own.Search, own.Add, own.Remove}
 }
 
+// GetLocaleTitle 返回管理员角色绑定页面标题。
 func (*AdminUserRoleManage) GetLocaleTitle(locale string) string {
 	if locale == "en-US" {
 		return "Administrator Roles"
@@ -30,6 +35,7 @@ func (*AdminUserRoleManage) GetLocaleTitle(locale string) string {
 	return "管理员角色绑定"
 }
 
+// ViewFieldModel 使用用户 Code 和 RoleCode 作为选择器稳定键。
 func (*AdminUserRoleManage) ViewFieldModel(_ interface{}, field *view.FieldModel) {
 	switch {
 	case field.IsFieldOrTitle("usercode"):

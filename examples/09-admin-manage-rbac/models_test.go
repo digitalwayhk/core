@@ -1,3 +1,4 @@
+// 本文件验证示例模型只保存稳定业务键并保护管理员与角色关系身份。
 package adminrbac
 
 import (

@@ -1,3 +1,4 @@
+// 本文件验证内置角色、自定义角色并集、动态权限读取和 fail-closed 授权策略。
 package manageauth
 
 import (

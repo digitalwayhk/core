@@ -1,3 +1,4 @@
+// 本文件演示消费方如何把可信 Casdoor Manage 身份解析为 Core RoleCode 列表。
 package adminrbac
 
 import (
@@ -22,10 +23,12 @@ type ManageRoleProvider struct {
 	bootstrap  sync.Mutex
 }
 
+// NewManageRoleProvider 使用消费方管理员仓库创建角色 Provider。
 func NewManageRoleProvider(repository adminRepository) *ManageRoleProvider {
 	return &ManageRoleProvider{repository: repository}
 }
 
+// ResolveManagePrincipal 只接受可信 Casdoor Manage callback 或 refresh 身份。
 func (own *ManageRoleProvider) ResolveManagePrincipal(
 	ctx context.Context,
 	request servertype.ManagePrincipalRequest,

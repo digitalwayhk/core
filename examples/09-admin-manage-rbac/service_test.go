@@ -1,3 +1,4 @@
+// 本文件验证示例服务同时公开管理员页面并实现 Manage 角色 Provider。
 package adminrbac
 
 import (

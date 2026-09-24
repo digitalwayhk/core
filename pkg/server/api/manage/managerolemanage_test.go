@@ -1,3 +1,4 @@
+// 本文件验证系统角色页面、精确权限 CRUD 和菜单默认权限绑定契约。
 package manage
 
 import (

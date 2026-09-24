@@ -1,3 +1,4 @@
+// 本文件验证公共 Manage 角色常量、规范化限制和授权请求结构。
 package types
 
 import (

@@ -1,3 +1,4 @@
+// 本文件验证管理员角色绑定页面使用稳定 Code 选择器，不引入跨库 ID 外键。
 package manage
 
 import (

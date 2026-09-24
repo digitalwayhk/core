@@ -1,3 +1,4 @@
+// 本文件验证首用户、并发冲突、刷新和 TestToken 隔离等角色解析边界。
 package adminrbac
 
 import (

@@ -1,3 +1,4 @@
+// 本文件定义自定义 Manage 角色的结构化精确权限行和安全校验。
 package smodels
 
 import (
@@ -19,16 +20,19 @@ type ManageRolePermissionModel struct {
 	Command  string `json:"command" gorm:"size:128;not null"`
 }
 
+// NewManageRolePermissionModel 创建已初始化的精确权限模型。
 func NewManageRolePermissionModel() *ManageRolePermissionModel {
 	return &ManageRolePermissionModel{Model: entity.NewModel()}
 }
 
+// NewModel 补齐反射创建时的嵌入模型。
 func (own *ManageRolePermissionModel) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
 }
 
+// GetHash 使用四段结构化身份生成唯一哈希，避免超长数据库复合索引。
 func (own *ManageRolePermissionModel) GetHash() string {
 	roleCode := strings.ToLower(strings.TrimSpace(own.RoleCode))
 	service := strings.ToLower(strings.TrimSpace(own.Service))
@@ -43,10 +47,12 @@ func (own *ManageRolePermissionModel) GetHash() string {
 	return utils.HashCodes(strings.Join([]string{roleCode, service, path, command}, "\x00"))
 }
 
+// AddValid 校验新增精确权限。
 func (own *ManageRolePermissionModel) AddValid() error {
 	return own.validate()
 }
 
+// UpdateValid 禁止修改已保存权限的结构化身份。
 func (own *ManageRolePermissionModel) UpdateValid(old interface{}) error {
 	previous, ok := old.(*ManageRolePermissionModel)
 	if !ok || previous == nil {
@@ -58,6 +64,7 @@ func (own *ManageRolePermissionModel) UpdateValid(old interface{}) error {
 	return own.validate()
 }
 
+// RemoveValid 允许删除自定义角色权限。
 func (own *ManageRolePermissionModel) RemoveValid() error { return nil }
 
 func (own *ManageRolePermissionModel) validate() error {

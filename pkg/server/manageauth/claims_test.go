@@ -1,3 +1,4 @@
+// 本文件验证 RoleCode Claim 的格式、容量、去重排序和非法输入拒绝。
 package manageauth
 
 import (

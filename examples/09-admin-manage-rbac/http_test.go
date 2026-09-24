@@ -1,3 +1,4 @@
+// 本文件从 JWT 到 Router 响应验证 Manage RBAC 的真实 HTTP 授权闭环和失败边界。
 package adminrbac
 
 import (

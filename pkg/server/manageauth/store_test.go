@@ -1,3 +1,4 @@
+// 本文件验证模型权限存储的精确查询条件和错误传播。
 package manageauth
 
 import (

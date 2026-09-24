@@ -1,3 +1,4 @@
+// 本文件定义消费方管理员身份模型及跨 authority 实例安全的首用户标记。
 package models
 
 import (
@@ -9,8 +10,10 @@ import (
 	"github.com/digitalwayhk/core/pkg/utils"
 )
 
+// BootstrapAdministratorSlot 是数据库中只允许出现一次的首管理员仲裁值。
 const BootstrapAdministratorSlot = "first-casdoor-manage-user"
 
+// AdminUserModel 保存消费方管理员身份，不保存权限明细。
 type AdminUserModel struct {
 	*entity.Model
 	Code            string  `json:"code" gorm:"size:128;not null;uniqueIndex"`
@@ -22,14 +25,17 @@ type AdminUserModel struct {
 	BootstrapSlot   *string `json:"-" gorm:"size:64;uniqueIndex"`
 }
 
+// NewAdminUserModel 创建已初始化的管理员模型。
 func NewAdminUserModel() *AdminUserModel { return &AdminUserModel{Model: entity.NewModel()} }
 
+// NewModel 补齐反射创建时的嵌入模型。
 func (own *AdminUserModel) NewModel() {
 	if own.Model == nil {
 		own.Model = entity.NewModel()
 	}
 }
 
+// GetHash 使用稳定用户 Code 生成唯一哈希。
 func (own *AdminUserModel) GetHash() string {
 	code := strings.TrimSpace(own.Code)
 	if code == "" {
@@ -41,8 +47,10 @@ func (own *AdminUserModel) GetHash() string {
 	return utils.HashCodes(code)
 }
 
+// AddValid 校验新增管理员身份与首用户标记。
 func (own *AdminUserModel) AddValid() error { return own.validate() }
 
+// UpdateValid 禁止修改管理员身份和首用户标记。
 func (own *AdminUserModel) UpdateValid(old interface{}) error {
 	previous, ok := old.(*AdminUserModel)
 	if !ok || previous == nil || own.Code != previous.Code ||
@@ -53,6 +61,7 @@ func (own *AdminUserModel) UpdateValid(old interface{}) error {
 	return own.validate()
 }
 
+// RemoveValid 禁止删除 bootstrap 管理员。
 func (own *AdminUserModel) RemoveValid() error {
 	if own.IsFirst {
 		return servertype.NewPublicError(
@@ -83,7 +92,10 @@ func bootstrapSlotValue(slot *string) string {
 	return *slot
 }
 
-func (*AdminUserModel) GetLocalDBName() string  { return "admin_rbac" }
+// GetLocalDBName 返回示例本地数据库名。
+func (*AdminUserModel) GetLocalDBName() string { return "admin_rbac" }
+
+// GetRemoteDBName 返回示例远端数据库名。
 func (*AdminUserModel) GetRemoteDBName() string { return "admin_rbac" }
 
 func invalidAdminModel(detail string) error {

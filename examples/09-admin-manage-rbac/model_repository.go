@@ -1,3 +1,4 @@
+// 本文件用 Core ModelList 实现管理员和 RoleCode 关系的事务持久化与首用户仲裁。
 package adminrbac
 
 import (

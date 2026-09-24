@@ -1,3 +1,4 @@
+// 本文件验证数据库唯一标记能够仲裁多实例首个 Casdoor 管理员竞争。
 package models
 
 import (

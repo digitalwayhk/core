@@ -1,3 +1,4 @@
+// 本文件验证角色稳定键、内置策略保护和权限哈希唯一身份。
 package smodels
 
 import (

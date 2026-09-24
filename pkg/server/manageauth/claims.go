@@ -1,3 +1,4 @@
+// 本文件从已验签 JWT Claims 中严格恢复规范化 Manage RoleCode。
 package manageauth
 
 import (
