@@ -14,6 +14,7 @@
 - private WebSocket 未实现可信身份注入和用户级通知过滤。
 - 把 `IHMACAuthProvider` 当成第二套授权链：在 Core 保存 Secret/nonce、让 HMAC 进入 Manage/ServerManage、返回 Casdoor Provider，或在 WebSocket 每次订阅重放签名。正确做法是 Provider 只建立 Auth 用户身份，之后复用同一 `OnAuthRequest` 授权链。
 - 认为服务开启 `Auth` 或填了 `HMACAuth` Header 就会全局启用 HMAC。默认始终是原有 Bearer；只有显式实现 `IHMACAuthProvider` 的具体服务才启用该服务的 HMAC 备选。
+- Manage 权限只在前端隐藏按钮、`ValidationBefore` 或自定义命令的 `DoBefore` 判断，或者把 path/command 权限明细写入 token。正确做法是认证权威服务实现 `IManageRoleProvider`，token 只带 RoleCode，由 Core 在 Router 前按注册元数据集中鉴权；业务 Hook 只补充 owner/租户限域和审计。
 - 绕过 models 持久化边界/`ServiceContext`，或在 API 层直接绑定具体数据库驱动。
 - public/private 直接 `NewModelList` 或套用 Manage Search/CRUD 做业务读写（正确：models 业务方法 + `IDataAction`）。
 - Manage 不用 `ModelList` 却手写 Search `stop=true` 破坏筛选分页；或该重写服务级 `GetList` 时未重写；分库场景用 per-market 自研列表代替 `IDBName` 标准管道。

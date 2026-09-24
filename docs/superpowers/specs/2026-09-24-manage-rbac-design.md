@@ -99,7 +99,7 @@ Core 保证以下角色幂等存在：
 - 菜单变化后动态获得对应能力，无需重新同步权限；
 - 在角色管理界面正常显示，但字段只读。
 
-自定义角色必须使用 `explicit`，权限来自 `ManageRolePermissionModel`。第一版只允许一个启用的普通默认角色；内置 `core.viewer` 是缺省默认角色。设置新的自定义默认角色时，事务内取消原普通默认角色。`grant_all` 角色不能成为默认角色。
+自定义角色必须使用 `explicit`，权限来自 `ManageRolePermissionModel`。第一版不支持把自定义角色设为默认角色；唯一默认角色固定为内置 `core.viewer`。消费方需要额外权限时，由管理员显式建立用户与自定义 RoleCode 的关系。
 
 ## 公共接口
 
@@ -129,7 +129,7 @@ Provider 的职责：
 
 - 使用 `AuthIdentity.UID` 及 Provider 信息定位消费方管理员；
 - 首次出现时建立管理员用户；
-- 首次出现时把 `DefaultRoles` 物化为用户角色关系；
+- 首次出现时按消费方明确策略建立用户角色关系；`DefaultRoles` 只是 Core 提供的建议默认值，09 示例固定首个真实用户为 `core.system_admin`、后续用户为 `core.viewer`；
 - 返回当前有效 RoleCode；
 - 使用消费方自己的事务、唯一约束或锁保证首次初始化幂等。
 
@@ -171,7 +171,7 @@ Token 不包含 path、command、权限列表、权限哈希、菜单 ID 或数�
 → 绑定 core.system_admin
 
 后续首次建立的 AdminUser
-→ 绑定当前普通默认角色，缺省为 core.viewer
+→ 固定绑定 core.viewer
 ```
 
 首用户判断和用户/角色写入必须在同一消费方事务或临界区完成。TestToken、Refresh、Auth 用户域、ServerManage 域均不能触发该规则。
@@ -272,4 +272,3 @@ Core `SystemManage` 新增：
 - 受影响包 `-race`；
 - `quick`、`security`、`api-compat`、`public-api`、`config-contract`、`release-contract`；
 - `gofmt`、`git diff --check` 和日志检查。
-

@@ -6,6 +6,8 @@
 
 ### Added
 
+- 增加可选的 Manage RoleCode RBAC：服务实现 `IManageRoleProvider` 后，Casdoor callback/refresh 只把角色编码写入 Manage Access Token，Core 在 Router 前按稳定 `service + path + command` 授权；内置 `core.system_admin` 动态全权、`core.viewer` 动态只读，自定义角色使用结构化权限行。新增系统角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留所有菜单和按钮可见，无权限操作统一返回安全 403。未实现 Provider 的服务保持旧行为。该加性公共能力建议作为 v1.3.0 MINOR 发布。
+
 - 增加完整的 Manage Admin UI 示例 `examples/08-admin-manage-ui` 及真实 HTTP 集成测试，覆盖 View schema、标准与自定义命令、搜索模式、关联选择、子表、导入导出和命令请求体；权威 AI skill 同步补充 Manage 继承与 Hook 能力说明。
 
 - Write-behind 增加显式自适应同步配置：按不同 pending 数量或首条收集期限提交，成功积压连续排空，失败/零进展有界退避。新增三字段全零保持旧行为，继续复用 `SyncBatchSize`、可靠 pending 和远端条件确认；业务无需重写同步循环。详见 `docs/codex/WRITE_BEHIND_SYNC_GUIDE.md`。
@@ -59,6 +61,8 @@
 - BREAKING: REST 认证移除 Logto，仅保留框架 JWT 与 Casdoor 身份生命周期；同步服务发现统一使用 `ServiceResolver`，异步事件统一使用 EventBridge。
 
 ### Deprecated
+
+- `smodels.UserPeermissionsModel` 及其构造器仅为源码兼容保留；新代码使用消费方用户-RoleCode 关系和 Core `ManageRolePermissionModel`，不得继续按用户保存菜单权限数据库 ID。最早删除版本登记为 v2.0.0。
 
 - 进程级请求状态、CrossNode 转发和 TestResult 兼容入口，详见 `docs/codex/DEPRECATION_REGISTER.md`。
 - 旧 `RouterStats` / `GetAllRouterStats` / 未注册 `Statistics` 统计链路；生产路径不再产生统计，替代为 Runtime Aggregator + Prometheus。删除须进入批准的破坏性版本。

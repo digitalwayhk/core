@@ -52,6 +52,45 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 - shared Casdoor WebSocket 从登录开始（包含无订阅会话）每 1 秒查权威，单次 3 秒预算、每 Manager 至多 64 个检查在途，5 秒 watchdog 防停滞。通知断线/恢复代次变化、漏撤销或无法确认时关闭旧会话；不恢复旧身份，不影响其他认证域。完整条件、容量与维护窗口迁移见 [内部通知标准](../../codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md)。不得将原生通知接受等同于每个副本已完成撤销。
 - WebSocket 登录与每次认证订阅都重新验证 Access Token 和撤销权威；更高世代、blocked 事件或共享权威不可用会关闭旧 Casdoor 连接。
 
+## Manage RoleCode RBAC
+
+Core 的 Manage 角色授权是可选的服务级能力。认证权威服务实现 `types.IManageRoleProvider` 后，Core 在 Casdoor Manage callback 与 refresh 签发 Access Token 前，用可信 `AuthIdentity` 查询消费方自己的管理员与角色关系；Provider 只返回标准 `[]ManageRoleRef`，不返回权限明细：
+
+```go
+type IManageRoleProvider interface {
+	ResolveManagePrincipal(context.Context, ManagePrincipalRequest) (ManagePrincipal, error)
+}
+```
+
+消费方用稳定 `RoleCode` 绑定用户，不保存 Core 角色表的数据库 ID。Token 的保留 claim `manage_roles` 只保存规范化 RoleCode JSON 数组；不保存菜单、path、command、权限列表、权限哈希或数据库 ID。角色关系改变后，用户需 refresh 或重新登录取得新 token；角色权限明细由 Core 在请求时读取，改变后下一请求生效。
+
+Core 内置并保护两个动态角色：
+
+| RoleCode | 行为 |
+| --- | --- |
+| `core.system_admin` | 允许全部 Manage command |
+| `core.viewer` | 只允许精确 `view`、`search` |
+
+自定义角色固定使用 `explicit` 策略，权限由 `ManageRolePermissionModel` 的 `RoleCode + Service + Path + Command` 行保存。第一版不支持自定义默认角色；`core.viewer` 是唯一默认角色。角色 Code 创建后不可变，用户关系和权限关系都不得改用数据库 ID 或逗号分隔字符串。
+
+Manage REST 的固定顺序是：
+
+```text
+Access Token 验签与认证域隔离
+→ Casdoor 撤销权威
+→ Core Manage RBAC
+→ 业务 IAuthRequestHookProvider
+→ Router Parse / Validation / Do
+```
+
+授权目标来自已注册 `RouterInfo` 的稳定 `service + path + command`。标准与自定义 command 都在 Router 前覆盖；不允许在 `ManageService.ValidationBefore`、`DoBefore` 或前端按钮隐藏中另造这层授权。没有权限返回 HTTP 403、公开码 `40300`、安全消息 `permission denied`，Router 和业务 Hook 都不执行。权限查询错误返回安全 500，不泄露数据库原文。
+
+实现 Provider 即显式启用 RBAC：claim 缺失/非法、Provider 或权限存储异常都 fail closed。未实现 Provider 的服务保留旧行为，认证成功的 Manage Token 不要求角色 claim。多服务 HTMLServer 使用选定的 Manage 认证权威服务的 Provider 与角色权限库，但仍按目标服务 RouterInfo 鉴权。
+
+TestToken 的 Manage 身份由 Core 直接赋予 `core.system_admin`，不会调用消费方 Provider，也不会占用真实 Casdoor 首用户。首个真实管理员策略属于消费方：标准 09 示例在同一事务/临界区把第一个 Casdoor Manage callback 创建的管理员绑定为 `core.system_admin`，后续用户固定绑定 `core.viewer`；refresh 不创建未知用户，Casdoor 角色也不继承或同步到 Core。
+
+Core `SystemManage` 提供角色与角色权限管理页，“绑定菜单默认权限”只为自定义角色幂等创建该菜单的 `view`、`search` 两条权限。当前版本不裁剪菜单或按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整消费方模型、RoleCode 选择绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
+
 ## 可选 HMAC 请求认证
 
 服务可选实现 `types.IHMACAuthProvider`，用于在没有 Bearer 的 **Auth 用户域**验证请求签名。未实现时 Private REST 与用户 WebSocket 继续只认框架 Access Token，Manage 与 ServerManage 无论是否携带 HMAC Header 都不进入该 Hook。

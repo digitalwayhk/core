@@ -183,16 +183,20 @@
 - Modify: `docs/ai/core-skill/manage.md`
 - Modify: `docs/ai/core-skill/models.md`
 - Modify: `docs/ai/core-skill/testing-and-release.md`
+- Modify: `docs/ai/core-skill/project-layout.md`
+- Modify: `docs/ai/core-skill/common-mistakes.md`
 - Modify: `docs/codex/API_COMPATIBILITY_SURFACE.md`
 - Modify: `docs/codex/CONSUMER_AI_SKILL_SETUP.md`
+- Modify: `docs/codex/CONSUMER_COMPATIBILITY_MATRIX.md`
+- Modify: `docs/codex/DEPRECATION_REGISTER.md`
 - Modify: `README.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] 补充角色模型、Provider、claim、内置角色、首用户策略、鉴权顺序和 09 示例入口。
-- [ ] 明确第一版不做菜单/按钮过滤，前端显示不等于授权，后端 403 是权威结果。
-- [ ] 将新能力登记为 additive MINOR 公共契约；记录旧模型 Deprecated 状态，不做移除。
-- [ ] 运行文档链接、skill 校验和兼容性检查。
-- [ ] 提交：`docs(auth): document manage RBAC contracts`。
+- [x] 补充角色模型、Provider、claim、内置角色、首用户策略、鉴权顺序和 09 示例入口。
+- [x] 明确第一版不做菜单/按钮过滤，前端显示不等于授权，后端 403 是权威结果。
+- [x] 将新能力登记为 additive MINOR 公共契约；记录旧模型 Deprecated 状态，不做移除。
+- [x] 运行文档链接、skill 校验和兼容性检查。
+- [x] 提交：`docs(auth): document manage RBAC contracts`。
 
 ### Task 12: 全量验证与交付检查
 

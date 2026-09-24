@@ -29,6 +29,8 @@ entity.Model
 
 Outbox、Inbox、审计日志属于基础设施/技术记录，可使用独立 store/audit 支路；它们不是第三种业务主数据，也不能用来取消上述业务域两分法。
 
+Core 自身的 `smodels.ManageRoleModel` 与 `ManageRolePermissionModel` 是 Manage 授权控制面模型，也不属于消费方业务域的基础资料/业务事实两分法。角色以不可变 `Code` 为公开稳定键；权限以结构化的 `RoleCode + Service + Path + Command` 唯一行保存，不引用角色、菜单或按钮数据库 ID。内置 `core.system_admin`、`core.viewer` 的权限动态计算，不创建权限明细。消费方自己的管理员用户和用户角色关系放在消费方模型中，关系只保存 RoleCode；完整边界见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) 与 `examples/09-admin-manage-rbac`。
+
 ## 再选择框架结构体
 
 `entity.Model` 是中性、最小持久化根，不代表"业务 Model"。新业务应把它包装进服务公共基座，再建立两条语义支路；不要让 Product 和 Order 都直接嵌入框架根而失去分类：

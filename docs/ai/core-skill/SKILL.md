@@ -28,7 +28,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
 | 多服务调用、EventBridge、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
-| Casdoor/JWT 双域、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
+| Casdoor/JWT 双域、Manage RoleCode RBAC、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
 | OpenAPI、Manage View schema、三种 Search、命令执行 | [openapi-and-frontend.md](openapi-and-frontend.md) |
 | 集成测试模板、UAT 角色拆分、发布门禁 | [testing-and-release.md](testing-and-release.md) |
@@ -50,6 +50,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
 | 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、实例级 `OrderWriteRuntime`、共享 MySQL 远程权威库、`OrderRule` 配置同步、Prometheus scrape、Runtime 运行图验收 |
 | 管理界面全能力 | `examples/08-admin-manage-ui` | Manage View 字段/命令/子表配置、外键与子查询、导入导出、自定义 `editshow` 命令，对照 `web/admin` 的 `manage-ui` |
+| Manage 角色权限 | `examples/09-admin-manage-rbac` | Core 角色与 `path + command` 权限、消费方管理员/RoleCode 绑定、首个 Casdoor 管理员、TestToken、真实 HTTP 403 |
 | 业务统计、经营分析与服务报表 | `examples/07-shop-order-scale/order-service` | `stats.StatSpec`、OLTP/ClickHouse 引擎、快照 `Store`、`stats.Dashboard`、`stats.ReportDef`、Manage API 与服务子菜单 |
 | 多服务运行图（框架） | Admin `MonitorSystem` + ServerManage Runtime API | `POST /api/servermanage/runtimetopology`、`runtimeservice`；ClusterProvider + Prometheus；指标 `null+state` |
 
@@ -104,7 +105,7 @@ entity.Model
 16. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。TraceID 从最外层请求生成并透传；EventID 仍是事件幂等键。
 17. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 18. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。匿名 `/api/openapi` 必须过滤这类路由。
-19. 多角色自管理优先复用同一 Manage 和 Search/Do Hook 自动限域，不复制平台/本人两套 API；权限、日志和通用限域只在抽象层实现一次；自定义命令走 owner `DoBefore`。
+19. 多角色自管理优先复用同一 Manage 和业务 Hook 做 owner/租户限域，不复制平台/本人两套 API。服务实现 `IManageRoleProvider` 后，Core 在 Router 前对所有标准与自定义 Manage command 统一按 `path + command` 鉴权；不得把权限只放在 `ValidationBefore`、`DoBefore` 或前端按钮隐藏里。业务 Hook 仍负责领域限域、审计等横切语义，但不是 Core RBAC 的替代品。
 20. 每个服务必须有服务公共模型基座承载 `GetLocalDBName`/`GetRemoteDBName`、数据库名和 `TraceID`；两条业务支路继承它。不要在每个具体模型重复写数据库名或 TraceID。
 21. 水平扩展必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。
 22. 自动水平扩展必须启用 `AutoMachineID=true`，验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得硬编码固定 MachineID，也不得把注册发现写死到 Redis。

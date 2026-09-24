@@ -13,6 +13,14 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.3.0 Manage RoleCode RBAC 候选
+
+本候选增加 opt-in Manage 授权：只有服务实现 `IManageRoleProvider` 才启用，未实现的消费方继续保持现有 Manage Token 认证后访问行为。启用后，消费方必须保存管理员与稳定 RoleCode 的关系；不得保存 Core 角色数据库 ID，也不得把权限明细或权限哈希塞入 token。Core 内置 `core.system_admin` 与 `core.viewer`，自定义角色权限按精确 `service + path + command` 保存和判断。
+
+Bitzoom 接入时建议先按 `examples/09-admin-manage-rbac` 新增管理员用户/角色关系与 Provider，再做真实 Casdoor Manage callback、refresh 和 HTTP 403 回归。首个真实用户与后续 viewer 的初始化属于消费方事务；TestToken 不得创建用户或占用首用户名额。当前没有修改 Bitzoom，本节也不把 Core 单元/HTTP 测试当作 Bitzoom smoke；消费方升级、真实 Casdoor/MySQL 验证和部署状态均为 `NOT RUN`。
+
+本能力不修改 `web/admin`、不隐藏菜单/按钮，也不改变 `/api/servermanage/getmenu`。测试阶段应明确点击无权 Add/Edit/Remove/自定义 command 并断言 403；用户角色关系改变后 refresh/重新登录，角色权限明细改变后下一请求立即复测。
+
 ## v1.2.2 公共错误分类修复
 
 候选补丁把未分类 Do 错误从历史误判的 HTTP 422 / `business rule rejected` 收紧为

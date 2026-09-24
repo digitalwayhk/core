@@ -129,7 +129,7 @@ func (own *ProductManage) SearchAfter(
 
 自定义命令应以值嵌入 `manage.Operation[T]`，并实现 `New(instance)` 为每次请求创建独立对象。`Operation.Parse` 会调用 owner 的 `ParseBefore/ParseAfter`，并把请求体绑定到 `operation.Model`；不要另建一套平行 Request 再手工复制字段。
 
-自定义写命令的统一权限、审计及其他横切处理方式暂不在本分片定义，待权限方案明确后再补充。当前不要从标准 CRUD 的 Hook 顺序自行推导自定义命令的权限契约。
+Core Manage RBAC 启用后，自定义 command 与标准 CRUD 一样在 Router 执行前按稳定 `path + command` 集中鉴权，不要求命令手工调用 owner `DoBefore` 才获得角色权限。自定义命令仍应按业务需要复用 owner Hook 或 business 层完成 owner/租户限域、审计、缓存失效等领域横切语义；这些语义不能反过来替代 Core RBAC。完整角色契约见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md)，可运行示例见 `examples/09-admin-manage-rbac`。
 
 ### 继承与 Hook 常见错误
 
@@ -389,7 +389,7 @@ func (own *Retry[T]) Do(req stypes.IRequest) (interface{}, error) {
 }
 ```
 
-上例只说明请求级 `Operation`、模型绑定和通过 owner `GetList()` 保持数据源边界，不定义自定义写命令的权限处理方式。
+上例只说明请求级 `Operation`、模型绑定和通过 owner `GetList()` 保持数据源边界。自定义写命令的 Core 角色权限由 Router 前 RBAC 统一处理；命令自身仍负责本节描述的业务持久化与领域 Hook 边界。
 
 **在 Manage 控制器的 Routers() 中注册：**
 

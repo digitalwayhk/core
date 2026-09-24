@@ -95,6 +95,14 @@ examples/08-admin-manage-ui/
 ├── main/main.go
 └── README.md                     # 管理后台操作与前端能力对照
 
+examples/09-admin-manage-rbac/
+├── models/                       # 消费方管理员与用户-RoleCode 关系
+├── api/manage/                   # 管理员与角色绑定页
+├── provider.go                   # IManageRoleProvider 示例
+├── http_test.go                  # JWT→RBAC→Router→Response 真实 HTTP 链路
+├── main/main.go
+└── README.md                     # Casdoor、内置角色与变更生效边界
+
 examples/integration/07-shop-order-scale/
 examples/integration/07-shop-order-scale-multi-process/
 examples/integration/08-admin-manage-ui/
@@ -108,7 +116,7 @@ examples/integration/08-admin-manage-ui/
 
 示例和服务代码必须先让人读得懂再追求复用：每个 Go 文件开头用中文文件级注释说明该文件提供的能力、所属边界和主要读者；每个 public 类型、函数、方法、变量必须有中文注释；private 逻辑在涉及权限、事务、事件、缓存、幂等、跨服务调用或测试编排时也要补充意图说明。单元测试和 `examples/integration` 集成测试同样适用；测试文件的文件级注释必须写清验证的业务闭环、角色、边界和异常权限场景，避免系统复杂后只能靠逐行读代码理解测试目的。
 
-多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现服务级权限、owner 限域、禁用主体拦截、分页、审计或日志；这些横切逻辑必须在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在权限或日志调整时到处修改。自定义 Manage 命令不要引入命令专用 Hook 旁路；命令 `Do` 先调用 owner `DoBefore`，通过服务级权限/限域后再调用 business。
+多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现 owner 限域、禁用主体拦截、分页、审计或日志；这些业务横切逻辑应在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在限域或日志调整时到处修改。Core Manage RBAC 不依赖这棵继承树：启用 `IManageRoleProvider` 后，标准与自定义 command 都在 Router 前集中鉴权。
 
 Manage 日志参考示例 05 的 `ShopManage.logManageResult`：统一使用 `logx.Infow("shop_manage_operation_failed", ...)` 和 `logx.Infow("shop_manage_operation_succeeded", ...)`，字段保持 `owner`、`phase`、`service`、`route`、`trace_id`、失败时 `code`。不要按服务名发明 `shop_user_manage_operation_*`、`shop_supplier_manage_operation_*` 等新事件，也不要记录 token、请求/响应 body、SQL 或对象 dump。
 
@@ -141,11 +149,11 @@ Manage 扩展遵循以下顺序：
 
 1. 通用 CRUD 继续使用 `ManageService[T]` 和 `ModelList`；
 2. 复杂服务可使用 `manage.HookedManageService[T]` 作为可选辅助基类，把 `DoBefore/DoAfter/SearchBefore/SearchAfter` 分派到 `OnView/OnAdd/OnEdit/OnRemove/OnSearch` 等细粒度 Hook；
-3. 服务级 `ShopManage` 或 `ServiceManage` 统一处理授权、日志、分页和查询约束；具体 Manage 只提供 owner column、写入目标 scope 或业务命令 Hook，不重复调用服务级鉴权函数；
+3. 服务级 `ShopManage` 或 `ServiceManage` 统一处理 owner/租户限域、日志、分页和查询约束；Core RoleCode RBAC 在 Router 前集中处理，具体 Manage 不重复实现这层鉴权；
 4. `BaseDataManage` 与 `BusinessManage`/`TransactionManage` 实现模型类别规则，具体 Manage 只重写差异 Hook；需保留父级规则时必须显式先调父级。
 5. 状态字段通过 `ViewFieldModel` 和 `ComBoxValue` 显示中文；
 6. 状态迁移使用自定义 Router，并在 `ViewCommandModel` 中配置按钮；
-7. 自定义 Router 的 `Do` 先调用 owner `DoBefore` 复用服务级权限和限域，再调用 business，不直接修改模型，也不另造 `CommandBefore` 一类命令专用 Hook。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
+7. 自定义 Router 仍通过 business/models 完成受控写入，不直接修改持久化模型。Core RBAC 已在 Router 前覆盖自定义 command；是否复用 owner Hook 取决于该命令需要的领域限域、审计和缓存语义，不能把 `DoBefore` 当作授权边界，也不要另造平行的权限 Hook。`ParseAfter/ValidationAfter` 不是常规业务分层点，只在框架解析阶段确有特殊需求时使用。
 
 支付流水示例不注册通用 Add/Edit/Remove，只注册 View/Search 和确认支付、支付失败、确认退款命令。前端按钮只是能力提示，服务端必须再次校验当前状态。
 
