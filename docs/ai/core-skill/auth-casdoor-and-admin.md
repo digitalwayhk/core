@@ -87,7 +87,7 @@ Access Token 验签与认证域隔离
 
 实现 Provider 即显式启用 RBAC：claim 缺失/非法、Provider 或权限存储异常都 fail closed。未实现 Provider 的服务保留旧行为，认证成功的 Manage Token 不要求角色 claim。多服务 HTMLServer 使用选定的 Manage 认证权威服务的 Provider 与角色权限库，但仍按目标服务 RouterInfo 鉴权。
 
-TestToken 的 Manage 身份由 Core 直接赋予 `core.system_admin`，不会调用消费方 Provider，也不会占用真实 Casdoor 首用户。首个真实管理员策略属于消费方：标准 09 示例在同一事务内把第一个 Casdoor Manage callback 创建的管理员绑定为 `core.system_admin`，后续用户固定绑定 `core.viewer`；跨 authority 实例的首用户竞争由数据库 nullable unique bootstrap slot 仲裁，不能只依赖进程锁。refresh 不创建未知用户，Casdoor 角色也不继承或同步到 Core。
+TestToken 的 Manage 身份由 Core 直接赋予 `core.system_admin`，不会调用消费方 Provider，也不会占用真实 Casdoor 首用户。Core 只在 TestToken 的 Refresh Token 中写入已签名内部标记，以便刷新时继续识别测试身份；普通无 Provider 的旧 Manage Refresh Token 在启用 RBAC 后必须拒绝并要求重新登录，不能提升为系统管理员。首个真实管理员策略属于消费方：标准 09 示例在同一事务内把第一个 Casdoor Manage callback 创建的管理员绑定为 `core.system_admin`，后续用户固定绑定 `core.viewer`；跨 authority 实例的首用户竞争由数据库 nullable unique bootstrap slot 仲裁，不能只依赖进程锁。refresh 不创建未知用户，Casdoor 角色也不继承或同步到 Core。
 
 Core `SystemManage` 提供角色与角色权限管理页，“绑定菜单默认权限”只为自定义角色幂等创建该菜单的 `view`、`search` 两条权限。当前版本不裁剪菜单或按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整消费方模型、RoleCode 选择绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
 

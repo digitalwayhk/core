@@ -171,6 +171,24 @@ func TestManageTestTokenAlwaysUsesSystemAdminWithoutProvider(t *testing.T) {
 	require.Equal(t, `["core.system_admin"]`, decodeAuthToken(t, refreshed.AccessToken, "manage-access")[types.ManageRolesClaim])
 }
 
+func TestProviderlessManageRefreshIsRejectedWhenRBACIsEnabled(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	sc := authTestServiceContext(&authHookRecorder{})
+	original, err := issueForServiceAt(
+		context.Background(), sc, "legacy-manager", "", types.AuthTypeManage, types.AuthSourceCallback, nil, now,
+	)
+	require.NoError(t, err)
+
+	provider := &manageRoleProviderRecorder{roles: [][]types.ManageRoleRef{{{Code: types.ManageRoleViewer}}}}
+	sc.ManageRoleProvider = provider
+	_, err = refreshForServiceAt(
+		context.Background(), sc, original.RefreshToken, types.AuthTypeManage, now.Add(time.Hour),
+	)
+
+	require.Equal(t, 401, types.ResolvePublicError(err).HTTPStatus)
+	require.Zero(t, provider.calls)
+}
+
 func TestManageTokenWithoutProviderPreservesCompatibility(t *testing.T) {
 	sc := authTestServiceContext(&authHookRecorder{})
 

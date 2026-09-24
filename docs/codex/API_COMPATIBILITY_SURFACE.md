@@ -102,7 +102,7 @@
 | MQ lifecycle manifest | Stable（加性） | 未声明时不启动回收；声明后策略在进程内冻结，observe/enforce 切换通过重启；旧配置升级不静默删除消息 | `pkg/server/mq` lifecycle/controller/真 Broker 测试与 `MQ_MESSAGE_LIFECYCLE_GUIDE.md` |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
 | 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
-| Manage 角色与权限生命周期 | Stable opt-in（v1.3 加性） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider；callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
+| Manage 角色与权限生命周期 | Stable opt-in（v1.3 加性） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
 
 ## Casdoor 迁移与运行约束
 

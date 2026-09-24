@@ -6,7 +6,7 @@
 
 ### Added
 
-- 增加可选的 Manage RoleCode RBAC：服务实现 `IManageRoleProvider` 后，Casdoor callback/refresh 只把角色编码写入 Manage Access Token，Core 在 Router 前按稳定 `service + path + command` 授权；内置 `core.system_admin` 动态全权、`core.viewer` 动态只读，自定义角色使用结构化权限行。新增系统角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留所有菜单和按钮可见，无权限操作统一返回安全 403。未实现 Provider 的服务保持旧行为。该加性公共能力建议作为 v1.3.0 MINOR 发布。
+- 增加可选的 Manage RoleCode RBAC：服务实现 `IManageRoleProvider` 后，Casdoor callback/refresh 只把角色编码写入 Manage Access Token，Core 在 Router 前按稳定 `service + path + command` 授权；内置 `core.system_admin` 动态全权、`core.viewer` 动态只读，自定义角色使用结构化权限行。TestToken Refresh 使用已签名内部标记保持 system_admin，普通无 Provider 的旧 Refresh Token 在启用 RBAC 后要求重新登录。新增系统角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留所有菜单和按钮可见，无权限操作统一返回安全 403。未实现 Provider 的服务保持旧行为。该加性公共能力建议作为 v1.3.0 MINOR 发布。
 
 - 增加完整的 Manage Admin UI 示例 `examples/08-admin-manage-ui` 及真实 HTTP 集成测试，覆盖 View schema、标准与自定义命令、搜索模式、关联选择、子表、导入导出和命令请求体；权威 AI skill 同步补充 Manage 继承与 Hook 能力说明。
 

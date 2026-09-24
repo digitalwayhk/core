@@ -12,7 +12,10 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-const authAuthorityServiceClaim = "auth_authority_service"
+const (
+	authAuthorityServiceClaim = "auth_authority_service"
+	manageTestIdentityClaim   = "manage_test_identity"
+)
 
 // TokenPairResponse 是 Callback、TestToken 和 Refresh 共用的 Token 响应。
 type TokenPairResponse struct {
@@ -34,6 +37,8 @@ type TokenIssueRequest struct {
 	RefreshSecret        string
 	RefreshExpireSeconds int64
 	IssueRefresh         bool
+	// ManageTestIdentity 只允许 Core Manage TestToken 签发链设置。
+	ManageTestIdentity bool
 }
 
 // RefreshTokenIdentity 是从已验证 Refresh Token 中提取的不可信任边界后身份。
@@ -45,6 +50,8 @@ type RefreshTokenIdentity struct {
 	ExpiresAt time.Time
 	Identity  types.AuthIdentity
 	Claims    map[string]interface{}
+	// ManageTestIdentity 只由 Core TestToken 签发链写入并从 Refresh Token 恢复。
+	ManageTestIdentity bool
 }
 
 // AccessTokenIdentity 是从已验证 Access Token 中提取的身份。
@@ -63,7 +70,8 @@ var reservedTokenClaims = map[string]struct{}{
 	"uid": {}, "uname": {}, "auth_type": {}, "token_use": {}, "iat": {}, "exp": {},
 	"auth_provider": {}, "provider_subject": {}, "auth_generation": {},
 	authAuthorityServiceClaim: {}, "args": {}, "secret_args": {},
-	types.ManageRolesClaim: {},
+	manageTestIdentityClaim: {},
+	types.ManageRolesClaim:  {},
 }
 
 // IssueTokenPair 使用同一 IssuedAt 颁发 Access Token 和可选的 Refresh Token。
@@ -99,6 +107,9 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 
 	refreshClaims := baseTokenClaims(req.Claims.Uid, req.Claims.Uname, req.AuthType, "refresh", req.IssuedAt, req.RefreshExpireSeconds)
 	addIdentityClaims(refreshClaims, req.Identity)
+	if req.ManageTestIdentity {
+		refreshClaims[manageTestIdentityClaim] = true
+	}
 	refreshToken, err := signMapClaims(refreshClaims, req.RefreshSecret)
 	if err != nil {
 		return TokenPairResponse{}, fmt.Errorf("签名 Refresh Token 失败: %w", err)
@@ -128,6 +139,9 @@ func validateTokenIssueRequest(req TokenIssueRequest) error {
 	}
 	if req.Claims.manageRoles != "" && req.AuthType != types.AuthTypeManage {
 		return errors.New("Manage RoleCode Claim 只能用于 Manage Token")
+	}
+	if req.ManageTestIdentity && (req.AuthType != types.AuthTypeManage || req.Identity.Provider != "") {
+		return errors.New("Manage TestToken 身份标记无效")
 	}
 	if err := req.Claims.validateSecretContext(req.AccessSecret, req.AuthType); err != nil {
 		return fmt.Errorf("秘密 Claim 无效: %w", err)
@@ -320,15 +334,37 @@ func ValidateRefreshToken(tokenString, secret string, expectedAuthType types.Aut
 		return nil, fmt.Errorf("Refresh Token Claims 不完整: %w", err)
 	}
 
+	manageTestIdentity, err := manageTestIdentityFromClaims(claims, expectedAuthType, identity)
+	if err != nil {
+		return nil, fmt.Errorf("Refresh Token Claims 不完整: %w", err)
+	}
+
 	return &RefreshTokenIdentity{
-		UID:       uid,
-		Username:  username,
-		AuthType:  expectedAuthType,
-		IssuedAt:  time.Unix(issuedAt, 0).UTC(),
-		ExpiresAt: time.Unix(expiresAt, 0).UTC(),
-		Identity:  identity,
-		Claims:    types.CloneAuthClaims(map[string]interface{}(claims)),
+		UID:                uid,
+		Username:           username,
+		AuthType:           expectedAuthType,
+		IssuedAt:           time.Unix(issuedAt, 0).UTC(),
+		ExpiresAt:          time.Unix(expiresAt, 0).UTC(),
+		Identity:           identity,
+		Claims:             types.CloneAuthClaims(map[string]interface{}(claims)),
+		ManageTestIdentity: manageTestIdentity,
 	}, nil
+}
+
+func manageTestIdentityFromClaims(
+	claims jwt.MapClaims,
+	authType types.AuthType,
+	identity types.AuthIdentity,
+) (bool, error) {
+	raw, exists := claims[manageTestIdentityClaim]
+	if !exists {
+		return false, nil
+	}
+	marked, ok := raw.(bool)
+	if !ok || !marked || authType != types.AuthTypeManage || identity.Provider != "" {
+		return false, errors.New("manage_test_identity无效")
+	}
+	return true, nil
 }
 
 func tokenIdentity(

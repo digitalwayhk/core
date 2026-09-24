@@ -74,6 +74,7 @@ func issueForServiceIdentityAt(
 		refreshExpireSeconds,
 		refreshExpiresAt,
 		issueRefresh,
+		source == types.AuthSourceTestToken && identity.AuthType == types.AuthTypeManage,
 	)
 }
 
@@ -114,6 +115,10 @@ func refreshForServiceWithDependenciesAt(
 	if err != nil {
 		return safe.TokenPairResponse{}, refreshPublicError(err)
 	}
+	if authType == types.AuthTypeManage && sc != nil && sc.ManageRoleProvider != nil &&
+		identity.Identity.Provider == "" && !identity.ManageTestIdentity {
+		return safe.TokenPairResponse{}, refreshPublicError(errors.New("providerless manage refresh token is not a test identity"))
+	}
 	remaining := int64(identity.ExpiresAt.Sub(now).Seconds())
 	if remaining <= 0 {
 		return safe.TokenPairResponse{}, refreshPublicError(errors.New("refresh token expired"))
@@ -134,6 +139,7 @@ func refreshForServiceWithDependenciesAt(
 		remaining,
 		identity.ExpiresAt,
 		false,
+		identity.ManageTestIdentity,
 	)
 }
 
@@ -219,6 +225,7 @@ func issueWithSchedule(
 	refreshExpireSeconds int64,
 	refreshExpiresAt time.Time,
 	issueRefresh bool,
+	manageTestIdentity bool,
 ) (safe.TokenPairResponse, error) {
 	uid := identity.UID
 	username := identity.Username
@@ -270,7 +277,7 @@ func issueWithSchedule(
 		}
 	}
 	if authType == types.AuthTypeManage {
-		if err := setManageRolesForIssue(ctx, sc, claims, identity, source); err != nil {
+		if err := setManageRolesForIssue(ctx, sc, claims, identity, source, manageTestIdentity); err != nil {
 			return safe.TokenPairResponse{}, err
 		}
 	}
@@ -285,6 +292,7 @@ func issueWithSchedule(
 		RefreshSecret:        auth.RefreshSecret,
 		RefreshExpireSeconds: auth.RefreshExpire,
 		IssueRefresh:         issueRefresh,
+		ManageTestIdentity:   manageTestIdentity,
 	})
 }
 
@@ -294,11 +302,12 @@ func setManageRolesForIssue(
 	claims *safe.Claims,
 	identity types.AuthIdentity,
 	source types.AuthSource,
+	manageTestIdentity bool,
 ) error {
-	// TestToken 及其无外部 Provider 的刷新都属于框架测试身份，不能触发消费方
-	// 管理员建档或占用 Casdoor 首用户 bootstrap。
+	// 只有 Core 自己签发并在 Refresh Token 中标记的 TestToken 身份可绕过
+	// 消费方 Provider；普通无 Provider 的旧 Token 不能被提升为系统管理员。
 	if source == types.AuthSourceTestToken ||
-		(source == types.AuthSourceRefresh && identity.Provider == "") {
+		(source == types.AuthSourceRefresh && manageTestIdentity) {
 		return claims.SetManageRoles([]types.ManageRoleRef{{Code: types.ManageRoleSystemAdmin}})
 	}
 	if sc == nil || sc.ManageRoleProvider == nil {
