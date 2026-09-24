@@ -42,12 +42,12 @@
 - Create: `pkg/server/smodels/managerolemodel_test.go`
 - Modify: `pkg/server/smodels/userpermissionsmodel.go`
 
-- [ ] 写失败测试：RoleCode 唯一且不可变；权限按 `RoleCode + Path + Command` 唯一；内置角色标识可识别。
-- [ ] 运行 `go test ./pkg/server/smodels/... -count=1`，确认 RED。
-- [ ] 实现 `ManageRoleModel` 与 `ManageRolePermissionModel`，权限集合使用结构化行而不是逗号分隔字符串。
-- [ ] 保留旧模型并加 Deprecated 注释，不做破坏性删除。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): add manage role persistence models`。
+- [x] 写失败测试：RoleCode 唯一且不可变；权限按 `RoleCode + Path + Command` 唯一；内置角色标识可识别。
+- [x] 运行 `go test ./pkg/server/smodels/... -count=1`，确认 RED。
+- [x] 实现 `ManageRoleModel` 与 `ManageRolePermissionModel`，权限集合使用结构化行而不是逗号分隔字符串。
+- [x] 保留旧模型并加 Deprecated 注释，不做破坏性删除。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): add manage role persistence models`。
 
 ### Task 3: 实现授权策略与持久化查询
 
