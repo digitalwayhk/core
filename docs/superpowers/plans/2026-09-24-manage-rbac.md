@@ -203,12 +203,15 @@
 **Files:**
 - Verify only; only fix regressions directly caused by this branch.
 
-- [ ] 运行 `gofmt` 检查和 `git diff --check`。
-- [ ] 运行所有受影响包的定向测试与 `-race` 测试。
-- [ ] 运行 09 示例真实 HTTP 测试。
-- [ ] 运行 `CGO_ENABLED=0 ./scripts/test.sh quick`、完整相关测试、release/compatibility checks。
-- [ ] 如本机 macOS SDK 仍阻止 cgo，保留原始失败并明确标记环境失败，不能写 PASS。
-- [ ] 检查 `web/admin`、`pkg/server/run/dist`、原工作树均未改动。
-- [ ] 做最终代码审查，修复后重新执行受影响验证。
-- [ ] 提交必要修复；记录最终 commit、测试矩阵、公共契约变化和建议版本 `v1.3.0`。
-- [ ] 明确未 push、未 tag、未发布、未部署。
+- [x] 运行 `gofmt` 检查和 `git diff --check`。
+- [x] 运行所有受影响包的定向测试与 `-race` 测试。
+- [x] 运行 09 示例真实 HTTP 测试。
+- [x] 运行 `CGO_ENABLED=0 ./scripts/test.sh quick`、完整相关测试、release/compatibility checks。
+- [x] 默认 macOS 27 SDK 的 `.tbd` 链接失败已保留原始证据；改用本机 26.5 SDK 后补齐 cgo、SQLite 与 race 测试，不将首次环境失败记为 PASS。
+- [x] 检查 `web/admin`、`pkg/server/run/dist`、原工作树均未被本分支修改。
+- [x] 做最终代码审查，修复多实例首用户竞争、MySQL 超长复合索引和无标记旧 Refresh Token 提权风险后重新验证。
+- [x] 提交必要修复；最终提交、测试矩阵、公共契约变化和建议版本 `v1.3.0` 记录于交付说明。
+- [x] 明确未 push、未 tag、未发布、未部署。
+
+验证说明：`./scripts/test.sh server` 与受影响包 `go test -race` 使用
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` 运行成功；链接器会提示目标 macOS 27、链接 SDK 26.5 的 warning，但命令退出码为 0。默认 macOS 27 SDK 失败原因为 `.tbd` 中当前 clang 不识别 `arm64e.x1`，不属于代码或测试失败。
