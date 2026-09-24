@@ -221,6 +221,53 @@ func TestIssueTokenPairRejectsHookOverrideOfReservedClaims(t *testing.T) {
 	require.ErrorContains(t, err, "保留Claim")
 }
 
+func TestIssueTokenPairCarriesOnlyManageRoleCodesInAccessToken(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0).UTC()
+	claims := NewClaims("manager-1", "管理员")
+	require.NoError(t, claims.SetManageRoles([]types.ManageRoleRef{
+		{Code: "ops.approver"},
+		{Code: types.ManageRoleViewer},
+		{Code: "ops.approver"},
+	}))
+
+	pair, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeManage, IssuedAt: now,
+		AccessSecret: "manage-access-secret", AccessExpireSeconds: 3600,
+		RefreshSecret: "manage-refresh-secret", RefreshExpireSeconds: 7200, IssueRefresh: true,
+	})
+	require.NoError(t, err)
+
+	access := parseTokenClaims(t, pair.AccessToken, "manage-access-secret")
+	refresh := parseTokenClaims(t, pair.RefreshToken, "manage-refresh-secret")
+	require.Equal(t, `["core.viewer","ops.approver"]`, access[types.ManageRolesClaim])
+	require.NotContains(t, refresh, types.ManageRolesClaim)
+	require.NotContains(t, access, "permissions")
+	require.NotContains(t, access, "path")
+	require.NotContains(t, access, "command")
+}
+
+func TestIssueTokenPairRejectsHookOverrideOfManageRolesClaim(t *testing.T) {
+	claims := NewClaims("manager-1", "管理员")
+	claims.AddData(types.ManageRolesClaim, `["core.system_admin"]`)
+
+	_, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeManage, IssuedAt: time.Now().UTC(),
+		AccessSecret: "manage-access-secret", AccessExpireSeconds: 3600,
+	})
+	require.ErrorContains(t, err, "保留Claim")
+}
+
+func TestIssueTokenPairRejectsManageRolesOnAnotherAuthDomain(t *testing.T) {
+	claims := NewClaims("user-1", "用户")
+	require.NoError(t, claims.SetManageRoles([]types.ManageRoleRef{{Code: types.ManageRoleViewer}}))
+
+	_, err := IssueTokenPair(TokenIssueRequest{
+		Claims: claims, AuthType: types.AuthTypeUser, IssuedAt: time.Now().UTC(),
+		AccessSecret: "access-secret", AccessExpireSeconds: 3600,
+	})
+	require.Error(t, err)
+}
+
 func TestValidateRefreshTokenRejectsAccessToken(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0).UTC()
 	token := signTokenClaims(t, "refresh-secret", jwt.MapClaims{

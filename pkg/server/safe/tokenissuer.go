@@ -63,6 +63,7 @@ var reservedTokenClaims = map[string]struct{}{
 	"uid": {}, "uname": {}, "auth_type": {}, "token_use": {}, "iat": {}, "exp": {},
 	"auth_provider": {}, "provider_subject": {}, "auth_generation": {},
 	authAuthorityServiceClaim: {}, "args": {}, "secret_args": {},
+	types.ManageRolesClaim: {},
 }
 
 // IssueTokenPair 使用同一 IssuedAt 颁发 Access Token 和可选的 Refresh Token。
@@ -74,6 +75,9 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 	accessClaims := baseTokenClaims(req.Claims.Uid, req.Claims.Uname, req.AuthType, "access", req.IssuedAt, req.AccessExpireSeconds)
 	for key, value := range req.Claims.Args {
 		accessClaims[key] = value
+	}
+	if req.Claims.manageRoles != "" {
+		accessClaims[types.ManageRolesClaim] = req.Claims.manageRoles
 	}
 	if len(req.Claims.secretArgs) > 0 {
 		accessClaims[secretArgsClaim] = cloneStringMap(req.Claims.secretArgs)
@@ -121,6 +125,9 @@ func validateTokenIssueRequest(req TokenIssueRequest) error {
 		if _, reserved := reservedTokenClaims[key]; reserved {
 			return fmt.Errorf("认证Hook不能覆盖保留Claim %q", key)
 		}
+	}
+	if req.Claims.manageRoles != "" && req.AuthType != types.AuthTypeManage {
+		return errors.New("Manage RoleCode Claim 只能用于 Manage Token")
 	}
 	if err := req.Claims.validateSecretContext(req.AccessSecret, req.AuthType); err != nil {
 		return fmt.Errorf("秘密 Claim 无效: %w", err)

@@ -9,6 +9,9 @@ import (
 )
 
 const (
+	// ManageRolesClaim 是 Manage Access Token 中保存 RoleCode JSON 数组的保留 Claim。
+	ManageRolesClaim = "manage_roles"
+
 	// ManageRoleSystemAdmin 是动态允许全部 Manage command 的内置角色。
 	ManageRoleSystemAdmin = "core.system_admin"
 	// ManageRoleViewer 是动态允许 view/search Manage command 的内置角色。

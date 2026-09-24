@@ -74,12 +74,12 @@
 - Modify: `pkg/server/safe/claims_test.go`
 - Modify: `pkg/server/safe/jwt_secret.go`
 
-- [ ] 写失败测试：角色 JSON 能往返；顺序稳定、去重、数量和长度受限；权限明细不进入 claim；业务 `AddData` 不能覆盖保留 key。
-- [ ] 运行相关测试，确认 RED。
-- [ ] 增加仅面向角色 claim 的窄接口，将 `manage_roles` 纳入保留字段。
-- [ ] 非法或缺失 claim 在 RBAC 已启用时返回安全的认证/授权错误。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): carry manage role codes in tokens`。
+- [x] 写失败测试：角色 JSON 能往返；顺序稳定、去重、数量和长度受限；权限明细不进入 claim；业务 `AddData` 不能覆盖保留 key。
+- [x] 运行相关测试，确认 RED。
+- [x] 增加仅面向角色 claim 的窄接口，将 `manage_roles` 纳入保留字段。
+- [x] 非法或缺失 claim 在 RBAC 已启用时由解析边界返回错误，供中间件 fail closed。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): carry manage role codes in tokens`。
 
 ### Task 5: 接入登录、刷新与 TestToken
 
