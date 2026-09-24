@@ -106,13 +106,13 @@
 - Modify: `pkg/server/trans/rest/authrequest_test.go`
 - Modify: `pkg/server/trans/rest/restserver.go`
 
-- [ ] 写失败测试验证顺序：JWT/撤销校验 → Core RBAC → 业务 auth hook → Router。
-- [ ] 写失败测试：无权限返回 403；Router/Manage hook 未执行；Provider 缺失沿用旧行为；Provider 启用后 claim 缺失或非法 fail closed。
-- [ ] 运行 `go test ./pkg/server/trans/rest/... -count=1`，确认 RED。
-- [ ] 在认证中间件加入 Manage 路由 authorizer，不在 `ManageService.ValidationBefore` 重复实现。
-- [ ] 确保 `errors.Is/errors.As` 与 PublicError 响应链仍成立。
-- [ ] gofmt 并重跑测试，确认 GREEN。
-- [ ] 提交：`feat(auth): enforce manage RBAC in REST middleware`。
+- [x] 写失败测试验证顺序：JWT/撤销校验 → Core RBAC → 业务 auth hook → Router。
+- [x] 写失败测试：无权限返回 403；Router/Manage hook 未执行；Provider 缺失沿用旧行为；Provider 启用后 claim 缺失或非法 fail closed。
+- [x] 运行 `go test ./pkg/server/trans/rest/... -count=1`，确认 RED。
+- [x] 在认证中间件加入 Manage 路由 authorizer，不在 `ManageService.ValidationBefore` 重复实现。
+- [x] 确保 `errors.Is/errors.As` 与 PublicError 响应链仍成立。
+- [x] gofmt 并重跑测试，确认 GREEN。
+- [x] 提交：`feat(auth): enforce manage RBAC in REST middleware`。
 
 ### Task 7: 为菜单快照保留稳定 command
 

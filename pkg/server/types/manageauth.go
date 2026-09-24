@@ -53,6 +53,18 @@ type IManageRoleProvider interface {
 	ResolveManagePrincipal(context.Context, ManagePrincipalRequest) (ManagePrincipal, error)
 }
 
+// ManageAuthorizationRequest 标识一条需要精确匹配的 Manage Router 权限。
+type ManageAuthorizationRequest struct {
+	Service string
+	Path    string
+	Command string
+}
+
+// IManageAuthorizer 是 REST 认证边界调用的 Manage 授权器契约。
+type IManageAuthorizer interface {
+	Authorize(context.Context, []ManageRoleRef, ManageAuthorizationRequest) error
+}
+
 // NormalizeManageRoleRefs 校验、去重并按 Code 排序角色引用。
 func NormalizeManageRoleRefs(values []ManageRoleRef) ([]ManageRoleRef, error) {
 	if len(values) > MaxManageRoleCodes {

@@ -116,6 +116,131 @@ func TestAuthRequestHookRunsAfterJWTBeforeRouter(t *testing.T) {
 	require.Equal(t, []string{"hook", "router"}, calls)
 }
 
+func TestManageRBACRunsAfterRevocationBeforeBusinessHookAndRouter(t *testing.T) {
+	calls := make([]string, 0, 3)
+	sc := authRequestServiceContext(authRequestHookFunc(func(_ context.Context, _ types.AuthRequestArgs) error {
+		calls = append(calls, "hook")
+		return nil
+	}))
+	sc.ManageRoleProvider = manageRoleProviderStub{}
+	sc.ManageAuthorizer = manageAuthorizerFunc(func(_ context.Context, roles []types.ManageRoleRef, request types.ManageAuthorizationRequest) error {
+		calls = append(calls, "rbac")
+		require.Equal(t, []types.ManageRoleRef{{Code: "ops.approver"}}, roles)
+		require.Equal(t, "auth-request-test", request.Service)
+		require.Equal(t, "/api/manage/orders/ordermanage/approve", request.Path)
+		require.Equal(t, "approveorder", request.Command)
+		return nil
+	})
+	info := manageAuthRequestRouterInfo("ApproveOrder")
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			calls = append(calls, "router")
+		})),
+	)
+	request := authenticatedManageRequest(t, sc.Config.ManageAuth.AccessSecret, []types.ManageRoleRef{{Code: "ops.approver"}})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"rbac", "hook", "router"}, calls)
+}
+
+func TestManageRBACDenialReturns403BeforeBusinessCode(t *testing.T) {
+	hookCalled := false
+	routerCalled := false
+	sc := authRequestServiceContext(authRequestHookFunc(func(context.Context, types.AuthRequestArgs) error {
+		hookCalled = true
+		return nil
+	}))
+	sc.ManageRoleProvider = manageRoleProviderStub{}
+	sc.ManageAuthorizer = manageAuthorizerFunc(func(context.Context, []types.ManageRoleRef, types.ManageAuthorizationRequest) error {
+		return types.NewPublicError(types.ErrorKindForbidden, 0, "", errors.New("exact permission missing"))
+	})
+	info := manageAuthRequestRouterInfo("Add[example.Order]")
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			routerCalled = true
+		})),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, authenticatedManageRequest(
+		t, sc.Config.ManageAuth.AccessSecret, []types.ManageRoleRef{{Code: types.ManageRoleViewer}},
+	))
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.JSONEq(t, `{"success":false,"code":40300,"message":"permission denied"}`, recorder.Body.String())
+	require.False(t, hookCalled)
+	require.False(t, routerCalled)
+}
+
+func TestManageRBACProviderAbsentPreservesAuthenticatedCompatibility(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	info := manageAuthRequestRouterInfo("Remove[example.Order]")
+	called := false
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			called = true
+		})),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, authenticatedRequest(t, sc.Config.ManageAuth.AccessSecret, types.AuthIdentity{
+		UID: "manager-1", AuthType: types.AuthTypeManage,
+	}))
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, called)
+}
+
+func TestManageRBACEnabledRejectsMissingRoleClaim(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.ManageRoleProvider = manageRoleProviderStub{}
+	sc.ManageAuthorizer = manageAuthorizerFunc(func(context.Context, []types.ManageRoleRef, types.ManageAuthorizationRequest) error {
+		t.Fatal("非法 Claim 不得进入 Authorizer")
+		return nil
+	})
+	info := manageAuthRequestRouterInfo("View[example.Order]")
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("缺失角色 Claim 不得进入 Router")
+		})),
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, authenticatedRequest(t, sc.Config.ManageAuth.AccessSecret, types.AuthIdentity{
+		UID: "manager-1", AuthType: types.AuthTypeManage,
+	}))
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "permission denied")
+}
+
+func TestManageRBACDoesNotRunBeforeCasdoorRevocationAuthority(t *testing.T) {
+	sc := authRequestServiceContext(nil)
+	sc.ManageRoleProvider = manageRoleProviderStub{}
+	sc.ManageAuthorizer = manageAuthorizerFunc(func(context.Context, []types.ManageRoleRef, types.ManageAuthorizationRequest) error {
+		t.Fatal("撤销权威不可用时不得进入 Manage RBAC")
+		return nil
+	})
+	info := manageAuthRequestRouterInfo("View[example.Order]")
+	handler := internalJWTAuthorize(sc, info, sc.Config.ManageAuth.AccessSecret, types.AuthTypeManage,
+		authRequestHandler(sc, info, types.AuthTypeManage, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("撤销权威不可用时不得进入 Router")
+		})),
+	)
+	request := authenticatedRequest(t, sc.Config.ManageAuth.AccessSecret, types.AuthIdentity{
+		UID: "manager-1", AuthType: types.AuthTypeManage,
+		Provider: types.AuthProviderCasdoor, ProviderSubject: "alice", Generation: 2,
+	})
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
 func TestAuthRequestAuthorityUsesAuthorityRevocationAndTargetHook(t *testing.T) {
 	hookCalled := false
 	target := authRequestServiceContext(authRequestHookFunc(func(_ context.Context, args types.AuthRequestArgs) error {
@@ -625,6 +750,18 @@ func (f authRequestHookFunc) OnAuthRequest(ctx context.Context, args types.AuthR
 	return f(ctx, args)
 }
 
+type manageRoleProviderStub struct{}
+
+func (manageRoleProviderStub) ResolveManagePrincipal(context.Context, types.ManagePrincipalRequest) (types.ManagePrincipal, error) {
+	return types.ManagePrincipal{}, nil
+}
+
+type manageAuthorizerFunc func(context.Context, []types.ManageRoleRef, types.ManageAuthorizationRequest) error
+
+func (f manageAuthorizerFunc) Authorize(ctx context.Context, roles []types.ManageRoleRef, request types.ManageAuthorizationRequest) error {
+	return f(ctx, roles, request)
+}
+
 type hmacAuthProviderFunc func(context.Context, types.HMACAuthArgs) (*types.HMACAuthResult, error)
 
 func (f hmacAuthProviderFunc) AuthenticateHMAC(ctx context.Context, args types.HMACAuthArgs) (*types.HMACAuthResult, error) {
@@ -666,6 +803,13 @@ func authRequestRouterInfo(pathType types.ApiType) *types.RouterInfo {
 	}
 }
 
+func manageAuthRequestRouterInfo(structName string) *types.RouterInfo {
+	return &types.RouterInfo{
+		Path: "/api/manage/orders/ordermanage/approve", Method: http.MethodPost, Auth: true,
+		PathType: types.ManageType, ServiceName: "auth-request-test", StructName: structName,
+	}
+}
+
 func authenticatedRequest(t *testing.T, secret string, identity types.AuthIdentity) *http.Request {
 	t.Helper()
 	now := time.Now().UTC().Add(-time.Second)
@@ -676,6 +820,23 @@ func authenticatedRequest(t *testing.T, secret string, identity types.AuthIdenti
 	})
 	require.NoError(t, err)
 	request := httptest.NewRequest(http.MethodGet, "/private/orders", nil)
+	request.RemoteAddr = "198.51.100.10:4321"
+	request.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+	return request
+}
+
+func authenticatedManageRequest(t *testing.T, secret string, roles []types.ManageRoleRef) *http.Request {
+	t.Helper()
+	now := time.Now().UTC().Add(-time.Second)
+	identity := types.AuthIdentity{UID: "manager-1", AuthType: types.AuthTypeManage}
+	claims := safe.NewClaims(identity.UID, identity.Username)
+	require.NoError(t, claims.SetManageRoles(roles))
+	pair, err := safe.IssueTokenPair(safe.TokenIssueRequest{
+		Claims: claims, Identity: identity, AuthType: identity.AuthType, IssuedAt: now,
+		AccessSecret: secret, AccessExpireSeconds: 3600,
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/api/manage/orders/ordermanage/approve", nil)
 	request.RemoteAddr = "198.51.100.10:4321"
 	request.Header.Set("Authorization", "Bearer "+pair.AccessToken)
 	return request

@@ -12,12 +12,8 @@ import (
 
 var ErrManagePermissionDenied = errors.New("manage permission denied")
 
-// Request identifies one exact Manage operation.
-type Request struct {
-	Service string
-	Path    string
-	Command string
-}
+// Request 是 Manage 授权目标的兼容别名。
+type Request = servertype.ManageAuthorizationRequest
 
 // Store resolves enabled custom roles and their exact permissions.
 type Store interface {

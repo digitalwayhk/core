@@ -15,6 +15,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
+	"github.com/digitalwayhk/core/pkg/server/manageauth"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
@@ -85,6 +86,7 @@ type ServiceContext struct {
 	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
 	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
 	ManageRoleProvider       types.IManageRoleProvider       `json:"-"`
+	ManageAuthorizer         types.IManageAuthorizer         `json:"-"`
 	HMACAuthProvider         types.IHMACAuthProvider         `json:"-"`
 	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
 	hmacAuthSlots            chan struct{}
@@ -361,6 +363,20 @@ func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IA
 		return nil, nil, false
 	}
 	return own.AuthRevocationManager, own.AuthRequestHookProvider, true
+}
+
+// GetManageAuthorizationRuntime 返回当前 Manage RBAC Provider 与授权器快照。
+// Provider 为 nil 表示消费方未启用 RBAC；active 为 false 表示服务已终止。
+func (own *ServiceContext) GetManageAuthorizationRuntime() (types.IManageRoleProvider, types.IManageAuthorizer, bool) {
+	if own == nil {
+		return nil, nil, false
+	}
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.terminated {
+		return nil, nil, false
+	}
+	return own.ManageRoleProvider, own.ManageAuthorizer, true
 }
 
 // GetHMACAuthRuntime 返回 HMAC Provider 的生命周期快照。
@@ -860,6 +876,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	}
 	if provider, ok := service.(types.IManageRoleProvider); ok {
 		sc.ManageRoleProvider = provider
+		sc.ManageAuthorizer = manageauth.NewAuthorizer(manageauth.NewModelStore(nil))
 	}
 	if provider, ok := service.(types.IHMACAuthProvider); ok {
 		sc.HMACAuthProvider = provider
@@ -1262,6 +1279,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.CasdoorClients = nil
 		own.AuthRequestHookProvider = nil
 		own.ManageRoleProvider = nil
+		own.ManageAuthorizer = nil
 		own.HMACAuthProvider = nil
 		own.hmacAuthLifecycle = nil
 		own.CasdoorEventHookProvider = nil
