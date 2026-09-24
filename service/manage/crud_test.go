@@ -24,6 +24,26 @@ type testItem struct {
 	Name string `json:"Name"`
 }
 
+type protectedRemoveItem struct {
+	*entity.Model
+	Protected bool `json:"-"`
+}
+
+func (t *protectedRemoveItem) NewModel() {
+	if t.Model == nil {
+		t.Model = entity.NewModel()
+	}
+}
+
+func (*protectedRemoveItem) AddValid() error               { return nil }
+func (*protectedRemoveItem) UpdateValid(interface{}) error { return nil }
+func (t *protectedRemoveItem) RemoveValid() error {
+	if t.Protected {
+		return st.NewPublicError(st.ErrorKindForbidden, st.PublicCodeForbidden, "permission denied", errors.New("protected record"))
+	}
+	return nil
+}
+
 func (t *testItem) NewModel() {
 	if t.Model == nil {
 		t.Model = &entity.Model{}
@@ -479,6 +499,32 @@ func TestRemove_HappyPath_CallsDelete(t *testing.T) {
 	_, err := r.Do(req)
 	require.NoError(t, err)
 	require.Len(t, da.deleted, 1, "Delete should be called once for Remove happy path")
+}
+
+// TestRemoveUsesStoredModelForValidation 验证删除校验使用数据库旧记录，而不是缺少隐藏字段的请求模型。
+func TestRemoveUsesStoredModelForValidation(t *testing.T) {
+	da := &extendedMockDataAction{
+		loadFn: func(_ *pt.SearchItem, result interface{}) error {
+			items := result.(*[]*protectedRemoveItem)
+			stored := &protectedRemoveItem{Model: entity.NewModel(), Protected: true}
+			stored.ID = 91
+			*items = append(*items, stored)
+			return nil
+		},
+	}
+	svc := newTestManageSvc[protectedRemoveItem](da)
+	remove := manage.NewRemove[protectedRemoveItem](nil)
+	remove.New(svc)
+	requestModel := &protectedRemoveItem{Model: entity.NewModel()}
+	requestModel.ID = 91
+	remove.Model = requestModel
+
+	require.NoError(t, remove.Validation(&crudRequest{}))
+	_, err := remove.Do(&crudRequest{})
+
+	require.Error(t, err)
+	require.Equal(t, st.ErrorKindForbidden, st.ResolvePublicError(err).Kind)
+	require.Empty(t, da.deleted)
 }
 
 // --- testBaseItem for Submit (requires *entity.BaseModel embedding) ---

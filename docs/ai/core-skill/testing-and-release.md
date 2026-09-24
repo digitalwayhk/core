@@ -18,6 +18,8 @@
 
 不要在每个服务里重新实现进程管理、端口分配、TestToken、HTTP 信封或 WebSocket 通信。只有当验收目标本身是 Casdoor 登录、刷新、撤销或 Webhook 时，才以 `examples/integration/05-shop-casdoor-rbac` 为模板，在服务专属 Suite 中用 Fake Casdoor callback 覆盖 `TokenFor`；该测试不得回退到 TestToken。
 
+Manage RoleCode RBAC 至少分两层验证：`examples/09-admin-manage-rbac` 的 HTTP 测试必须真实经过 JWT、角色 claim、Core authorizer、RouterInfo.Exec 和 Response，覆盖 viewer 的 view/search、写命令 403、自定义角色精确匹配、system_admin、权限存储异常和 Provider 未启用兼容；消费方的真实进程/Fake Casdoor 测试还必须覆盖首个管理员、后续 viewer、refresh 后角色变化以及 TestToken 不占首用户名额。只直接调用 `Authorize` 不能替代 HTTP 链路测试，按钮是否隐藏也不能替代 403 断言。
+
 ### 服务专属 Suite
 
 以 `examples/integration/01-simple-shop/helpers_test.go` 为模板：
@@ -181,4 +183,3 @@ go get github.com/digitalwayhk/core@<commit>
 ```
 
 分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
-

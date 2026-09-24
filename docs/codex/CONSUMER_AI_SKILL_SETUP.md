@@ -49,6 +49,8 @@ CORE="$(go list -m -f '{{.Dir}}' github.com/digitalwayhk/core)"
 
 4. **冲突裁决**：指南与当前代码、测试、公开契约不一致时，以代码、测试和契约为准，并回写文档/skill（在 core 仓库改，不要只改消费方摘要）。
 
+消费方要接入 Manage 角色权限时，还必须阅读权威源的 `auth-casdoor-and-admin.md`、`manage.md` 与 `examples/09-admin-manage-rbac/README.md`。不要只看到 `IManageRoleProvider` 接口就自行把权限列表写入 token，也不要把 Casdoor 角色、Core 角色数据库 ID 或前端按钮隐藏当作服务端授权。
+
 ## 一键脚本
 
 脚本路径：`scripts/link-consumer-skill.sh`。

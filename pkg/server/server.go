@@ -6,8 +6,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-type SystemManage struct {
-}
+type SystemManage struct{}
 
 func (own *SystemManage) ServiceName() string {
 	return "server"
@@ -23,6 +22,10 @@ func (own *SystemManage) Routers() []types.IRouter {
 
 	items = append(items, manage.NewDirectoryManage().Routers()...)
 	items = append(items, manage.NewMenuManage().Routers()...)
+	items = append(items, manage.NewManageRoleManage().Routers()...)
+	items = append(items, manage.NewManageRolePermissionManage().Routers()...)
+	items = append(items, manage.NewManagePrincipalManage().Routers()...)
+	items = append(items, manage.NewManagePrincipalRoleManage().Routers()...)
 
 	items = append(items, &public.GetMenu{})
 	return items

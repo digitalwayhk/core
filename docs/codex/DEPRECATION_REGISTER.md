@@ -5,6 +5,7 @@
 | API | 替代入口 | 首次登记版本 | 最早删除版本 | Owner | 消费方 | 迁移证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `ManageService.Req`、`SetReq`、`IRequestSet` | hook 的显式 `req` 参数、`GetDefaultItemsWithRequest` | v0.0.248 | v0.1.0 | service/manage | futures、框架 Manage 扩展 | `service/manage/request_isolation_test.go` |
+| `smodels.UserPeermissionsModel`、`NewUserPeermissionsModel` | Core `ManagePrincipalRoleModel` + `ManageRolePermissionModel` | v1.3.0 | v2.0.0 | server/smodels | 历史按用户绑定菜单权限 ID 的消费方 | `pkg/server/smodels/manageprincipalmodel_test.go`、`examples/09-admin-manage-rbac` |
 | `MenuManage.GetDefaultItems` | `GetDefaultItemsWithRequest` | v0.0.248 | v0.1.0 | server/api/manage | futures、菜单扩展 | `pkg/server/api/manage/menumanage_request_test.go` |
 | `types.SetCrossNodeForwarder`、`GetCrossNodeForwarder` | `Set/GetCrossNodeForwarderForService` | v0.0.248 | v0.1.0 | server/types | 多服务进程、跨节点通知扩展 | `pkg/server/types/crossnode_test.go` |
 | `router.TestResult` 直接变量 | `SetTestResult`、`GetTestResult` | v0.0.248 | v0.1.0 | server/router | OpenAPI/路由测试扩展 | `pkg/server/router/servicecontext_registry_test.go` |

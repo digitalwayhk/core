@@ -43,7 +43,7 @@ func TestManageAPIs(t *testing.T) {
 }
 
 func testIdentityEventAuditReadOnly(t *testing.T) {
-	admin := suite.TokenFor(t, "identity-audit-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	view := suite.RequestJSON(t, http.MethodPost, "/api/manage/casdoorrbacshop/identityeventmanage/view", admin, nil)
 	require.True(t, view.Success, view.ErrorMessage)
 	assert.Contains(t, string(view.Data), "身份事件审计")
@@ -58,7 +58,7 @@ func testIdentityEventAuditReadOnly(t *testing.T) {
 }
 
 func testRejectEnablingProductForDisabledSupplier(t *testing.T) {
-	admin := suite.TokenFor(t, "disabled-supplier-product-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	supplier := suite.AddSupplier(t, admin, fmt.Sprintf("disabled-enable-supplier-%d", suffix), "禁用启用供应商", true)
 	product := suite.AddProductForSupplier(t, admin, fmt.Sprintf("disabled-enable-product-%d", suffix), "待重新启用商品", "12.80", uintID(t, supplier.ID), true)
@@ -71,7 +71,7 @@ func testRejectEnablingProductForDisabledSupplier(t *testing.T) {
 }
 
 func testSupplierCRUDAndReadOnlyProducts(t *testing.T) {
-	token := suite.TokenFor(t, "manage-supplier", 1)
+	token := suite.ManageAdminToken(t)
 	view := suite.RequestJSON(t, http.MethodPost, "/api/manage/casdoorrbacshop/suppliermanage/view", token, nil)
 	require.True(t, view.Success, view.ErrorMessage)
 	assert.Contains(t, string(view.Data), `"name":"Products"`)
@@ -105,7 +105,7 @@ func testSupplierCRUDAndReadOnlyProducts(t *testing.T) {
 }
 
 func testRejectRemovingUsedSupplier(t *testing.T) {
-	admin := suite.TokenFor(t, "used-supplier-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	supplier := suite.AddSupplier(t, admin, fmt.Sprintf("used-supplier-%d", suffix), "已使用供应商", true)
 	suite.AddProductForSupplier(t, admin, fmt.Sprintf("used-supplier-product-%d", suffix), "供应商引用商品", "9.90", uintID(t, supplier.ID), true)
@@ -115,7 +115,7 @@ func testRejectRemovingUsedSupplier(t *testing.T) {
 }
 
 func testProductCRUD(t *testing.T) {
-	token := suite.TokenFor(t, "manage-product", 1)
+	token := suite.ManageAdminToken(t)
 	view := suite.RequestJSON(t, http.MethodPost, "/api/manage/casdoorrbacshop/productmanage/view", token, nil)
 	require.True(t, view.Success, view.ErrorMessage)
 	product := suite.AddProduct(t, token, fmt.Sprintf("管理商品-%d", time.Now().UnixNano()), "10.00")
@@ -128,7 +128,7 @@ func testProductCRUD(t *testing.T) {
 }
 
 func testRejectRemovingUsedProduct(t *testing.T) {
-	admin := suite.TokenFor(t, "used-product-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "used-product-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("已使用商品-%d", time.Now().UnixNano()), "20.00")
 	suite.AddOrder(t, user, uintID(t, product.ID), 1)
@@ -138,7 +138,7 @@ func testRejectRemovingUsedProduct(t *testing.T) {
 }
 
 func testPaymentTypeCRUDAndStateCommands(t *testing.T) {
-	admin := suite.TokenFor(t, "payment-type-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	item := suite.AddPaymentType(t, admin, fmt.Sprintf("type-%d", time.Now().UnixNano()), "测试支付", false)
 
 	enabled := suite.RequestJSON(t, http.MethodPost, "/api/manage/casdoorrbacshop/paymenttypemanage/enablebasedata", admin, map[string]interface{}{"id": item.ID})
@@ -155,7 +155,7 @@ func testPaymentTypeCRUDAndStateCommands(t *testing.T) {
 }
 
 func testRejectRemovingUsedPaymentType(t *testing.T) {
-	admin := suite.TokenFor(t, "used-payment-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "used-payment-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("支付引用商品-%d", time.Now().UnixNano()), "30.00")
 	typeItem := suite.AddPaymentType(t, admin, fmt.Sprintf("used-%d", time.Now().UnixNano()), "已使用支付", true)
@@ -174,7 +174,7 @@ func testRejectRemovingUsedPaymentType(t *testing.T) {
 }
 
 func testOrderManageReadOnly(t *testing.T) {
-	admin := suite.TokenFor(t, "order-readonly-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	view := suite.RequestJSON(t, http.MethodPost, "/api/manage/casdoorrbacshop/ordermanage/view", admin, nil)
 	require.True(t, view.Success, view.ErrorMessage)
 	assert.Contains(t, string(view.Data), "支付状态")
@@ -185,7 +185,7 @@ func testOrderManageReadOnly(t *testing.T) {
 }
 
 func testPaymentRecordCommands(t *testing.T) {
-	admin := suite.TokenFor(t, "payment-command-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "payment-command-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("支付命令商品-%d", time.Now().UnixNano()), "40.00")
 	typeItem := suite.AddPaymentType(t, admin, fmt.Sprintf("command-%d", time.Now().UnixNano()), "命令支付", true)

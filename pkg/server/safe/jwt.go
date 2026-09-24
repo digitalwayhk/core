@@ -3,6 +3,7 @@ package safe
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -25,6 +26,7 @@ type Claims struct {
 	secretType  types.AuthType
 	secretErr   error
 	secretSizes map[string]int
+	manageRoles string
 }
 
 func NewClaims(userId string, username string) *Claims {
@@ -54,6 +56,31 @@ func (own *Claims) GetData(key string) (string, error) {
 		return value, nil
 	}
 	return "", errors.New("未找到数据")
+}
+
+// SetManageRoles 设置由 Core 签发流程管理的标准 RoleCode Claim。
+// 该值只会进入 Manage Access Token，不会写入 Refresh Token。
+func (own *Claims) SetManageRoles(roles []types.ManageRoleRef) error {
+	if own == nil {
+		return errors.New("Claims 不能为空")
+	}
+	normalized, err := types.NormalizeManageRoleRefs(roles)
+	if err != nil {
+		return err
+	}
+	codes := make([]string, len(normalized))
+	for i, role := range normalized {
+		codes[i] = role.Code
+	}
+	encoded, err := json.Marshal(codes)
+	if err != nil {
+		return fmt.Errorf("编码 Manage RoleCode 失败: %w", err)
+	}
+	if len(encoded) > 4096 {
+		return errors.New("Manage RoleCode Claim 过大")
+	}
+	own.manageRoles = string(encoded)
+	return nil
 }
 
 // GetToken 保留用于源代码兼容；新代码应使用 IssueTokenPair 生成带用途隔离的 Token。

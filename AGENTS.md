@@ -16,7 +16,7 @@
 
 关键原则：
 
-1. 建库、建表和补列由框架在**首次数据访问时**自动完成（`NewModelList[T](nil)` 只是构造列表，本身不建表）；不要另行建立迁移脚本或调用 GORM `AutoMigrate`。删列、改类型等破坏性变更不自动执行，见 `docs/ai/core-skill/models.md`。
+1. 每个服务必须在**启动阶段、接受请求前**调用 models 组合根的 `EnsureStorage()`，由它通过框架数据访问触发自动建库、建表和补列；请求、Provider、Hook 和业务事务不得承担建表。不要另行建立迁移脚本或调用 GORM `AutoMigrate`。删列、改类型等破坏性变更不自动执行，见 `docs/ai/core-skill/models.md`。
 2. handler 通过 `req.GetUser()` 获取当前用户信息。
 3. Private、Manage、ServerManage 路由必须遵守各自的认证域，不得用路径猜测或跨域 token 替代。
 4. 路由注册、目录结构和 TestToken 用法以现行 skill、示例与测试为准，不复制旧项目中的路径约定。

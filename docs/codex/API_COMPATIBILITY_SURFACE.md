@@ -35,9 +35,14 @@
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
 | `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
+| `oltp.NewFixedSqlite` | Stable（v1.3 加性） | persistence、server/manageauth | 为进程级控制面固定 SQLite 库名，不再接受模型 `IDBName` 改写路由 | OLTP、controlplane startup 测试 |
 | `types.SearchItem.SkipCount` | Stable（加性） | persistence | 无需完整总数的有界业务查询跳过 COUNT 往返；零值保持原 Load/Total 语义 | `pkg/persistence/database/oltp` 单查询回归测试 |
 | `service/manage.ManageService`、标准 CRUD、hook、`Operation` | Stable | service/manage | 管理后台 CRUD 与自定义操作 | `service/manage/crud_test.go`、`examples/01-simple-shop` |
 | `service/manage/view` 的 ViewModel、FieldModel 与查询视图类型 | Stable | service/manage | Manage 元数据与管理前端契约 | Manage view/CRUD 测试与 apidiff 基线 |
+| `types.ManageRoleRef`、`ManagePrincipalRequest`、`ManagePrincipal`、`IManageRoleProvider` | Stable（v1.3 加性） | server/types、router | Core 默认映射可信 Manage 主体；外部 IAM 可覆盖 Provider，且只返回角色、不返回权限 | token/callback/refresh/TestToken 测试、`examples/09-admin-manage-rbac` |
+| `types.ManageAuthorizationRequest`、`IManageAuthorizer`、`RouterInfo.GetCommand` | Stable（v1.3 加性） | server/types、manageauth | Router 前按目标 `service + path + command` 鉴权；标准与自定义命令共用 | manageauth、REST 与 09 HTTP 测试 |
+| `smodels.ManageRoleModel`、`ManageRolePermissionModel`、`ManagePrincipalModel`、`ManagePrincipalRoleModel` | Stable（v1.3 加性） | server/smodels | Core 角色、精确权限、管理员主体及主体角色关系；Code/RoleCode 为稳定键；首位主体与引导角色关系受保护 | smodels、系统 Manage 页面测试 |
+| `config.ManageStoreConfig` | Stable（v1.3 加性） | server/config、server/run | `server.json` 选择唯一控制面 SQLite/MySQL；新配置默认 `core_manage`，旧缺字段配置兼容 `models`；WebServer 在监听前初始化七类表并验证首管理员唯一索引 | config-contract、controlplane_store、09 HTTP 测试 |
 | Cluster、Transport、MQ 的已登记 factory/provider 入口 | Stable（按能力矩阵） | server runtime | 可插拔基础设施组装 | 任务 14 config-contract 与六包 race |
 | gRPC Client、Server 与标准 health 入口 | Stable（按能力矩阵） | server/transport | 默认内部同步调用、独立 ServiceContext 生命周期 | gRPC lifecycle/security/resolver 测试与示例 06 三进程测试 |
 | `ManageService.Req`、`SetReq`、`IRequestSet` | Deprecated | service/manage | 旧代码读取共享请求状态 | `service/manage/manageservice.go`、请求隔离回归测试 |
@@ -56,6 +61,7 @@
 | 普通 public/private 路由 | Stable | `/api/{service}/{router}`；private 要求认证 | `router.DefaultRouterInfo`、`examples/01-simple-shop` 集成测试 |
 | 受限内部 Public | Stable security | 普通 HTTP 不具备内部身份；同进程信任 Source ServiceContext；远程要求已验证客户端 SAN 等于 `SourceService`；拒绝早于 Parse | internal caller、gRPC identity、示例 06 集成测试；受保护的内部 OpenAPI `x-internal-callers` |
 | Manage CRUD | Stable | `/api/manage/{service}/{manage}/{operation}`；重复记录→409，缺少 Edit ID→400，Edit/Remove 不存在→404，统一安全文案 | `service/manage.RouterInfo`、CRUD 测试 |
+| Manage RoleCode RBAC | Stable（v1.3 加性） | 标准 WebServer 自动绑定 Core 默认主体 Provider 与 Authorizer；Access Token 只携带 RoleCode，所有 Manage command 在 Router 前精确鉴权；拒绝为 403 / `40300` / `permission denied`。外部 IAM 可显式覆盖 Provider；旧无角色 Token 需重新登录 | `pkg/server/manageauth`、REST 与 `examples/09-admin-manage-rbac/http_test.go` |
 | ServerManage | Stable | `/api/servermanage/{router}`，注册时按服务重写 | server API 与 `TestToken` 文档 |
 | Runtime 运行图 API | Experimental | `POST /api/servermanage/runtimetopology`、`POST /api/servermanage/runtimeservice`；窗口 `15s|5m|1h`；指标 `null+state` 不得伪装为零 | runtime 包与 public 路由测试；浏览器不直连 Prometheus |
 | 路由元数据 | Stable | method、path、pathType、auth、service | `internal/compat/testdata/routes.golden.json` |
@@ -98,6 +104,7 @@
 | MQ lifecycle manifest | Stable（加性） | 未声明时不启动回收；声明后策略在进程内冻结，observe/enforce 切换通过重启；旧配置升级不静默删除消息 | `pkg/server/mq` lifecycle/controller/真 Broker 测试与 `MQ_MESSAGE_LIFECYCLE_GUIDE.md` |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
 | 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
+| Manage 角色与权限生命周期 | Stable opt-in（v1.3 加性） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
 
 ## Casdoor 迁移与运行约束
 

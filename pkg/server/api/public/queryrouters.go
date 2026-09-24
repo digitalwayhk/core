@@ -119,6 +119,7 @@ func NewMenuServiceSnapshot(sc *router.ServiceContext) *smodels.MenuServiceSnaps
 		snapshot.Routers = append(snapshot.Routers, smodels.MenuRouterSnapshot{
 			Path:         info.GetPath(),
 			InstanceName: info.GetInstanceName(),
+			Command:      info.GetCommand(),
 			Title:        title,
 			TitleEN:      locale.Title(instance, locale.EnUS),
 		})

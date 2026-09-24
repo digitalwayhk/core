@@ -84,6 +84,8 @@ type ServiceContext struct {
 	PublicRateLimiter        *ratelimit.Manager              `json:"-"`
 	AuthHookProvider         types.IAuthHookProvider         `json:"-"`
 	AuthRequestHookProvider  types.IAuthRequestHookProvider  `json:"-"`
+	ManageRoleProvider       types.IManageRoleProvider       `json:"-"`
+	ManageAuthorizer         types.IManageAuthorizer         `json:"-"`
 	HMACAuthProvider         types.IHMACAuthProvider         `json:"-"`
 	CasdoorEventHookProvider types.ICasdoorEventHookProvider `json:"-"`
 	hmacAuthSlots            chan struct{}
@@ -360,6 +362,21 @@ func (own *ServiceContext) GetAuthRequestRuntime() (*authstate.Manager, types.IA
 		return nil, nil, false
 	}
 	return own.AuthRevocationManager, own.AuthRequestHookProvider, true
+}
+
+// GetManageAuthorizationRuntime 返回当前 Manage RBAC Provider 与授权器快照。
+// 标准 WebServer 会绑定 Core 默认实现；直接构造的 ServiceContext 可能仍为空。
+// active 为 false 表示服务已终止。
+func (own *ServiceContext) GetManageAuthorizationRuntime() (types.IManageRoleProvider, types.IManageAuthorizer, bool) {
+	if own == nil {
+		return nil, nil, false
+	}
+	own.lifecycleMu.Lock()
+	defer own.lifecycleMu.Unlock()
+	if own.terminated {
+		return nil, nil, false
+	}
+	return own.ManageRoleProvider, own.ManageAuthorizer, true
 }
 
 // GetHMACAuthRuntime 返回 HMAC Provider 的生命周期快照。
@@ -857,6 +874,9 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	if provider, ok := service.(types.IAuthRequestHookProvider); ok {
 		sc.AuthRequestHookProvider = provider
 	}
+	if provider, ok := service.(types.IManageRoleProvider); ok {
+		sc.ManageRoleProvider = provider
+	}
 	if provider, ok := service.(types.IHMACAuthProvider); ok {
 		sc.HMACAuthProvider = provider
 		sc.hmacAuthLifecycle = newHMACAuthLifecycle()
@@ -1257,6 +1277,8 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.AuthRevocationManager = nil
 		own.CasdoorClients = nil
 		own.AuthRequestHookProvider = nil
+		own.ManageRoleProvider = nil
+		own.ManageAuthorizer = nil
 		own.HMACAuthProvider = nil
 		own.hmacAuthLifecycle = nil
 		own.CasdoorEventHookProvider = nil

@@ -21,7 +21,7 @@ func TestPublicAPIs(t *testing.T) {
 }
 
 func testGetProductsCombinesFiltersWithAND(t *testing.T) {
-	admin := suite.TokenFor(t, "public-combined-filter-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	supplierA := suite.AddSupplier(t, admin, fmt.Sprintf("combined-supplier-a-%d", suffix), "组合供应商 A", true)
 	supplierB := suite.AddSupplier(t, admin, fmt.Sprintf("combined-supplier-b-%d", suffix), "组合供应商 B", true)
@@ -44,7 +44,7 @@ func testGetProductsCombinesFiltersWithAND(t *testing.T) {
 }
 
 func testGetSuppliers(t *testing.T) {
-	admin := suite.TokenFor(t, "public-supplier-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	code := fmt.Sprintf("public-supplier-%d", suffix)
 	enabled := suite.AddSupplier(t, admin, code, "公开供应商", true)
@@ -63,7 +63,7 @@ func testGetSuppliers(t *testing.T) {
 }
 
 func testGetProducts(t *testing.T) {
-	admin := suite.TokenFor(t, "public-product-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	name := fmt.Sprintf("公开商品-%d", time.Now().UnixNano())
 	product := suite.AddProduct(t, admin, name, "39.80")
 	response := suite.RequestJSON(t, http.MethodGet, "/api/casdoorrbacshop/getproducts?name="+url.QueryEscape(name), "", nil)
@@ -78,7 +78,7 @@ func testGetProducts(t *testing.T) {
 }
 
 func testSupplierDisableControlsProductVisibility(t *testing.T) {
-	admin := suite.TokenFor(t, "public-supplier-state-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	supplier := suite.AddSupplier(t, admin, fmt.Sprintf("state-supplier-%d", suffix), "状态供应商", true)
 	product := suite.AddProductForSupplier(t, admin, fmt.Sprintf("state-product-%d", suffix), "状态商品", "28.80", uintID(t, supplier.ID), true)
@@ -107,7 +107,7 @@ func testSupplierDisableControlsProductVisibility(t *testing.T) {
 }
 
 func testGetPaymentTypes(t *testing.T) {
-	admin := suite.TokenFor(t, "public-payment-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	suffix := time.Now().UnixNano()
 	code := fmt.Sprintf("public-%d", suffix)
 	enabled := suite.AddPaymentType(t, admin, code, fmt.Sprintf("公开支付-%d", suffix), true)

@@ -7,7 +7,8 @@ import (
 
 type Remove[T pt.IModel] struct {
 	Operation[T]
-	Ids []uint `json:"ids"`
+	Ids     []uint `json:"ids"`
+	OldItem *T
 }
 
 func NewRemove[T pt.IModel](instance interface{}) *Remove[T] {
@@ -37,6 +38,7 @@ func (own *Remove[T]) Validation(req types.IRequest) error {
 	if old == nil {
 		return newRecordNotFoundError()
 	}
+	own.OldItem = old
 	err = own.Operation.ValidationAfter(own, req)
 	return err
 }
@@ -57,7 +59,11 @@ func (own *Remove[T]) Do(req types.IRequest) (interface{}, error) {
 			return nil, err
 		}
 	}
-	err := own.list.Remove(own.Model)
+	item := own.OldItem
+	if item == nil {
+		item = own.Model
+	}
+	err := own.list.Remove(item)
 	if err != nil {
 		return nil, err
 	}

@@ -22,7 +22,7 @@ func TestPrivateAPIs(t *testing.T) {
 }
 
 func testRejectCrossUserOrderMutations(t *testing.T) {
-	admin := suite.TokenFor(t, "cross-user-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	userA := suite.TokenFor(t, "cross-user-a", 0)
 	userB := suite.TokenFor(t, "cross-user-b", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("跨用户商品-%d", time.Now().UnixNano()), "25.00")
@@ -47,7 +47,7 @@ func testRejectCrossUserOrderMutations(t *testing.T) {
 }
 
 func testAddOrder(t *testing.T) {
-	admin := suite.TokenFor(t, "private-add-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "private-add-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("下单商品-%d", time.Now().UnixNano()), "15.00")
 	unauthorized := suite.RequestJSON(t, http.MethodPost, "/api/casdoorrbacshop/addorder", "", map[string]interface{}{"productID": uintID(t, product.ID), "quantity": 1})
@@ -61,7 +61,7 @@ func testAddOrder(t *testing.T) {
 }
 
 func testRejectDisabledSupplierOrder(t *testing.T) {
-	admin := suite.TokenFor(t, "private-disabled-supplier-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "private-disabled-supplier-user", 0)
 	suffix := time.Now().UnixNano()
 	supplier := suite.AddSupplier(t, admin, fmt.Sprintf("private-disabled-supplier-%d", suffix), "下单禁用供应商", true)
@@ -74,7 +74,7 @@ func testRejectDisabledSupplierOrder(t *testing.T) {
 }
 
 func testGetOrders(t *testing.T) {
-	admin := suite.TokenFor(t, "private-get-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	userA := suite.TokenFor(t, "private-get-a", 0)
 	userB := suite.TokenFor(t, "private-get-b", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("查询订单-%d", time.Now().UnixNano()), "16.00")
@@ -84,7 +84,7 @@ func testGetOrders(t *testing.T) {
 }
 
 func testDeleteOrder(t *testing.T) {
-	admin := suite.TokenFor(t, "private-delete-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "private-delete-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("删除订单-%d", time.Now().UnixNano()), "17.00")
 	order := suite.AddOrder(t, user, uintID(t, product.ID), 1)
@@ -94,7 +94,7 @@ func testDeleteOrder(t *testing.T) {
 }
 
 func testCreatePayment(t *testing.T) {
-	admin := suite.TokenFor(t, "private-pay-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "private-pay-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("发起支付-%d", time.Now().UnixNano()), "18.00")
 	disabled := suite.AddPaymentType(t, admin, fmt.Sprintf("disabled-%d", time.Now().UnixNano()), "禁用支付", false)
@@ -111,7 +111,7 @@ func testCreatePayment(t *testing.T) {
 }
 
 func testCancelOrder(t *testing.T) {
-	admin := suite.TokenFor(t, "private-cancel-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	user := suite.TokenFor(t, "private-cancel-user", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("撤销订单-%d", time.Now().UnixNano()), "19.00")
 	typeItem := suite.AddPaymentType(t, admin, fmt.Sprintf("cancel-%d", time.Now().UnixNano()), "撤销支付", true)
@@ -129,7 +129,7 @@ func testCancelOrder(t *testing.T) {
 }
 
 func testWebSocketPaymentFlow(t *testing.T) {
-	admin := suite.TokenFor(t, "ws-payment-admin", 1)
+	admin := suite.ManageAdminToken(t)
 	userA := suite.TokenFor(t, "ws-payment-a", 0)
 	userB := suite.TokenFor(t, "ws-payment-b", 0)
 	product := suite.AddProduct(t, admin, fmt.Sprintf("WS 支付-%d", time.Now().UnixNano()), "21.00")

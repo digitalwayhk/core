@@ -370,6 +370,30 @@ func (own *RouterInfo) GetStructName() string {
 	return own.StructName
 }
 
+// GetCommand 返回 Manage 路由用于授权的稳定 command。
+//
+// 标准泛型操作会去除类型参数和包名前缀，例如
+// "*manage.Search[example.com/app.Order]" 返回 "search"。非 Manage 路由不参与
+// Manage RBAC，返回空字符串。
+func (own *RouterInfo) GetCommand() string {
+	own.RLock()
+	defer own.RUnlock()
+	own.assertMetadataFrozenLocked()
+	if own.PathType != ManageType {
+		return ""
+	}
+
+	name := strings.TrimSpace(own.StructName)
+	if generic := strings.IndexByte(name, '['); generic >= 0 {
+		name = name[:generic]
+	}
+	name = strings.TrimLeft(name, "*")
+	if separator := strings.LastIndexByte(name, '.'); separator >= 0 {
+		name = name[separator+1:]
+	}
+	return strings.ToLower(name)
+}
+
 // GetInstanceName 返回用于生成默认路径的实例名称。
 func (own *RouterInfo) GetInstanceName() string {
 	own.RLock()

@@ -2,12 +2,40 @@
 package public
 
 import (
+	"path/filepath"
 	"testing"
 
+	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
+	"github.com/digitalwayhk/core/pkg/server/internal/managestore"
 	"github.com/digitalwayhk/core/pkg/server/locale"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/stretchr/testify/require"
 )
+
+// TestLoadStoredMenusUsesConfiguredControlPlaneStore 验证兼容 getmenu 也读取 server.json 指定的控制面库。
+func TestLoadStoredMenusUsesConfiguredControlPlaneStore(t *testing.T) {
+	action := oltp.NewFixedSqlite(filepath.Join(t.TempDir(), "getmenu_control_plane"))
+	require.NoError(t, managestore.Configure(action))
+
+	directory := smodels.NewDirectoryModel()
+	directory.Name, directory.Title = "configured", "已配置目录"
+	directories := smodels.NewManageModelList[smodels.DirectoryModel]()
+	require.NoError(t, directories.Add(directory))
+	require.NoError(t, directories.Save())
+
+	menu := smodels.NewMenuModel()
+	menu.Name, menu.Title, menu.Url, menu.DirectoryModelID = "configuredmenu", "已配置菜单", "/api/manage/demo/configured", directory.ID
+	menus := smodels.NewManageModelList[smodels.MenuModel]()
+	require.NoError(t, menus.Add(menu))
+	require.NoError(t, menus.Save())
+
+	loaded, err := loadStoredMenus()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Equal(t, "configured", loaded[0].Name)
+	require.Len(t, loaded[0].MenuItems, 1)
+	require.Equal(t, "configuredmenu", loaded[0].MenuItems[0].Name)
+}
 
 func menuFixture() []*smodels.DirectoryModel {
 	dir := smodels.NewDirectoryModel()

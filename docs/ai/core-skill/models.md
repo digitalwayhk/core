@@ -29,6 +29,8 @@ entity.Model
 
 Outbox、Inbox、审计日志属于基础设施/技术记录，可使用独立 store/audit 支路；它们不是第三种业务主数据，也不能用来取消上述业务域两分法。
 
+Core 自身的 `smodels.ManageRoleModel`、`ManageRolePermissionModel`、`ManagePrincipalModel` 与 `ManagePrincipalRoleModel` 是同一个 Manage 授权控制面模型集合，也不属于消费方业务域的基础资料/业务事实两分法。角色和管理员主体都以不可变 `Code` 为公开稳定键；权限以结构化的 `RoleCode + Service + Path + Command` 唯一行保存，主体角色关系只保存 `PrincipalCode + RoleCode`，均不引用数据库 ID。内置 `core.system_admin`、`core.viewer` 的权限动态计算，不创建权限明细。消费方不要重复建立管理员用户/角色表，也不要按业务服务拆分这些控制面模型；完整边界见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) 与 `examples/09-admin-manage-rbac`。
+
 ## 再选择框架结构体
 
 `entity.Model` 是中性、最小持久化根，不代表"业务 Model"。新业务应把它包装进服务公共基座，再建立两条语义支路；不要让 Product 和 Order 都直接嵌入框架根而失去分类：
@@ -120,7 +122,7 @@ Internal / HTTP 500。不得用字符串包含判断新增数据库分类；扩�
 
 ### SQLite
 
-`Sqlite` 的每个 CRUD 入口都先 `ensureTable`，它转调 `HasTable`：查 `sqlite_master` 判断表是否存在，不存在则 `safeAutoMigrate`（`db.AutoMigrate` 加最多 3 次连接重建重试），结果进 `tableCache` 避免重复检查。错误处理路径还会在遇到 `no such table`、`no such column`、`datatype mismatch` 等错误时再次 `safeAutoMigrate` 并重试一次。嵌套表不递归预建，首次访问时各自触发。
+`Sqlite` 的每个 CRUD 入口仍有防御性的 `ensureTable`，它转调 `HasTable`：查 `sqlite_master` 判断表是否存在，不存在则 `safeAutoMigrate`（`db.AutoMigrate` 加最多 3 次连接重建重试），结果进 `tableCache` 避免重复检查。错误处理路径还会在遇到 `no such table`、`no such column`、`datatype mismatch` 等错误时再次 `safeAutoMigrate` 并重试一次。但这只是底层自愈，正常服务生命周期必须在启动阶段用 `EnsureStorage()` 逐个访问全部模型，不能把首次建表推迟到请求。
 
 默认库文件路径由 `local.GetDbPath` 决定，形如 `<工作目录>/db/<库名>/<库名>.ldb`。SQLite 默认 mmap 预算为 256 MiB/实例，可通过 `Sqlite.MmapSize` 覆盖，负值关闭；不得恢复机器级 30 GB 默认。
 
@@ -144,9 +146,9 @@ MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额�
 
 ### 触发时机
 
-建表发生在**首次数据访问**时，不是构造 `ModelList` 时。`entity.NewModelList[T](nil)` 只是创建列表对象；真正建表在首次落到 `DefaultAdapter.getLocalDB` 绑定该库时调用 `HasTable`，以及各驱动 CRUD 入口的 `ensureTable`。框架启动期间 `config.IsServerInitializing()` 为真时会跳过建表，等正式请求再执行。
+底层建表仍由一次真实数据访问触发，而不是构造 `ModelList` 时触发；服务必须把这次访问集中放进 models 组合根的 `EnsureStorage()`，并在创建/启动 Server、接受请求前执行。`entity.NewModelList[T](nil)` 只是创建列表对象。不要把 `EnsureStorage()` 放进异步 `IStartService.Start()`：该 Hook 在 Server 已运行后异步调用，不能作为建表屏障。
 
-因此"新增字段后重启即自动补列"要理解为：重启后**首次访问该表**时补列。
+因此"新增字段后重启即自动补列"是指启动入口先执行 `EnsureStorage()`，成功后才启动 Server；初始化失败应终止启动，不能等请求触发或静默降级。
 
 ### 边界：不会自动做的事
 
@@ -170,7 +172,7 @@ MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额�
 
 ### `models/schema` 是事务前预热，不是 DDL 层
 
-示例 05/06/07 里的 `models/schema` 包（`EnsureStorage`）经常被误读成"框架要求业务建表"。它的实现只是拿模型做一次空 `Load`，借上面的自动建表机制把表提前建好：
+`models/schema` 包的 `EnsureStorage()` 不是业务 DDL 层；它只在服务启动阶段对每个模型做一次空 `Load`，借框架自动建表机制建立或补齐表：
 
 ```go
 // EnsureModel 确保模型表已创建。
@@ -185,13 +187,15 @@ func EnsureModel(model interface{}) error {
 }
 ```
 
-它存在的唯一理由是事务时序：事务开启后再触发 DDL 会失败，所以 `RunInTransaction(ensureStorage, operation)` 必须先预热。**只有存在这类跨模型事务时才需要 `schema` 包**；示例 01–04 没有该包，完全正常。不要为新服务无条件生成 `models/schema`。
+每个服务都必须提供这一启动初始化入口。模型较少时可直接放在根 `models.EnsureStorage()`；模型按语义拆包后使用 `models/schema` 统一枚举。事务开启后绝不能再触发 DDL，`RunInTransaction` 也不得接收或调用 `ensureStorage`。
 
 ## 模型持久化边界与双路径访问
 
 框架支持多种数据库类型（SQLite、MySQL、PostgreSQL 等）。**SQLite 只是零配置的默认/开发选项**：本地开发与单机测试最简单，无需额外配置即可作为本地库，也可临时当作"远程"权威库；**生产与多进程共享权威库应按 MySQL 等网络库选型**，不是"只能 SQLite"。
 
 推荐在服务**公共模型/持久化组合根**（如 `models/models.go`、`models/data_action.go`、`models/internal/store`）集中选择 `IDataAction`。对 Manage 只公开一个无参数泛型入口 `NewManageModelList[T]()`；实际连接获取方法保持私有，例如 `manageDataAction()`。后续切换库类型时**只改 models 内部实现**，Manage 与 public/private 调用点保持不变。这里共享的是无请求状态的数据访问能力；模型实例、当前用户、查询条件和响应不得放入单例。
+
+框架自身的 Manage 控制面由 `server.json.ManageStore` 和 `run.NewWebServer()` 全部管理，不向消费方公开 `IDataAction`，也不存在 `ConfigureManageModels`。消费方业务模型仍按前述 models 组合根管理自己的数据库；不得为了复用 Core 控制面连接而把管理员模型、业务模型或 `IDataAction` 注入 `SystemManage`、Service、Provider、Hook 或 `api/manage`。
 
 **Manage API 与 public/private 使用数据库的方式不同，不可混用：**
 

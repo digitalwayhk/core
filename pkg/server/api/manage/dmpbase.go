@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
+	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/service/manage"
 	"github.com/digitalwayhk/core/service/manage/view"
@@ -21,6 +22,11 @@ func NewDmpBase[T pt.IModel](instance interface{}) *DmpBase[T] {
 	}
 	own.ManageService = manage.NewManageService[T](instance)
 	return own
+}
+
+// GetList 返回当前控制面存储上的模型列表。
+func (own *DmpBase[T]) GetList() interface{} {
+	return smodels.NewManageModelList[T]()
 }
 
 func (own *DmpBase[T]) Routers() []types.IRouter {

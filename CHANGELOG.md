@@ -6,6 +6,10 @@
 
 ### Added
 
+- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
+
+- 增加 `server.json.ManageStore`，统一选择 SQLite 或共享 MySQL 承载七类 Core Manage 控制面模型；`NewWebServer` 在监听前完成建库建表与内置角色初始化，失败时拒绝启动。业务服务配置不得重复声明，Core 不向消费方暴露控制面 `IDataAction`，SQLite 到 MySQL 的既有数据不自动迁移。
+
 - 增加完整的 Manage Admin UI 示例 `examples/08-admin-manage-ui` 及真实 HTTP 集成测试，覆盖 View schema、标准与自定义命令、搜索模式、关联选择、子表、导入导出和命令请求体；权威 AI skill 同步补充 Manage 继承与 Hook 能力说明。
 
 - Write-behind 增加显式自适应同步配置：按不同 pending 数量或首条收集期限提交，成功积压连续排空，失败/零进展有界退避。新增三字段全零保持旧行为，继续复用 `SyncBatchSize`、可靠 pending 和远端条件确认；业务无需重写同步循环。详见 `docs/codex/WRITE_BEHIND_SYNC_GUIDE.md`。
@@ -59,6 +63,8 @@
 - BREAKING: REST 认证移除 Logto，仅保留框架 JWT 与 Casdoor 身份生命周期；同步服务发现统一使用 `ServiceResolver`，异步事件统一使用 EventBridge。
 
 ### Deprecated
+
+- `smodels.UserPeermissionsModel` 及其构造器仅为源码兼容保留；新代码使用消费方用户-RoleCode 关系和 Core `ManageRolePermissionModel`，不得继续按用户保存菜单权限数据库 ID。最早删除版本登记为 v2.0.0。
 
 - 进程级请求状态、CrossNode 转发和 TestResult 兼容入口，详见 `docs/codex/DEPRECATION_REGISTER.md`。
 - 旧 `RouterStats` / `GetAllRouterStats` / 未注册 `Statistics` 统计链路；生产路径不再产生统计，替代为 Runtime Aggregator + Prometheus。删除须进入批准的破坏性版本。

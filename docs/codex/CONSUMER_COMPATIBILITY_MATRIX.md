@@ -13,6 +13,16 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.3.0 Manage RoleCode RBAC 候选
+
+本候选为标准 WebServer 增加默认启用的 Manage 授权。Core 保存管理员主体与稳定 RoleCode 的关系；消费方不得重复建立管理员/角色关系表，也不得把权限明细或权限哈希塞入 token。Core 内置 `core.system_admin` 与 `core.viewer`，自定义角色权限按精确 `service + path + command` 保存和判断。只有角色权威位于外部 IAM 时，消费方才覆盖 `IManageRoleProvider`。
+
+Bitzoom 接入时不需要新增管理员模型或 Provider；升级后直接使用 Core 的管理员主体与角色绑定页面，再做真实 Casdoor Manage callback、refresh 和 HTTP 403 回归。第一个真实 Manage 用户由 Core 绑定 `core.system_admin`，后续用户绑定 `core.viewer`；TestToken 不创建主体或占用首用户名额。若 Bitzoom 已有仅为该功能增加的本地管理员存储/Provider，可删除；既有 `IAuthHookProvider`、业务限域与审计 Hook 保留，外部 IAM 映射仅在确有需要时作为 Provider 兜底。当前没有修改 Bitzoom，本节也不把 Core 单元/HTTP 测试当作 Bitzoom smoke；消费方升级、真实 Casdoor/MySQL 验证和部署状态均为 `NOT RUN`。
+
+本能力不修改 `web/admin`、不隐藏菜单/按钮，也不改变 `/api/servermanage/getmenu`。测试阶段应明确点击无权 Add/Edit/Remove/自定义 command 并断言 403；用户角色关系改变后 refresh/重新登录，角色权限明细改变后下一请求立即复测。
+
+控制面存储只在 `etc/server.json.ManageStore` 配置一次：新配置默认 SQLite `core_manage`；旧配置缺少该字段时继续使用历史 `models` SQLite 库；正式多进程环境可显式改为共享 MySQL。业务服务 JSON 不得重复配置，同一进程也不能绑定两个不同控制面库。`NewWebServer` 在监听前初始化 Core 的目录、菜单、按钮、角色、权限、管理员主体和主体角色关系；不公开控制面 action，也不需要消费方 `ConfigureStorage`。SQLite 库名切换或 SQLite 到 MySQL 的既有数据迁移不由 Core 自动执行。
+
 ## v1.2.2 公共错误分类修复
 
 候选补丁把未分类 Do 错误从历史误判的 HTTP 422 / `business rule rejected` 收紧为

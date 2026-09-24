@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/manageauth"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -68,6 +69,38 @@ func authRequestHandlerWithAuthority(
 				err = requestAuthenticationError(errors.New("revocation authority unavailable"))
 			} else if authorizeErr := manager.Authorize(r.Context(), identity); authorizeErr != nil {
 				err = requestAuthenticationError(authorizeErr)
+			}
+		}
+		if err == nil && authType == types.AuthTypeManage && info != nil && info.GetPathType() == types.ManageType {
+			// RoleCode 由 Manage Auth 权威服务签发；跨服务统一入口必须由同一
+			// 权威服务决定是否启用 RBAC。授权目标仍使用目标 Router 的稳定元数据。
+			provider, authorizer, active := authAuthority.GetManageAuthorizationRuntime()
+			if !active {
+				err = requestAuthenticationError(errors.New("manage authorization is closing"))
+			} else if provider != nil {
+				roles, claimErr := manageauth.ManageRolesFromClaims(claims)
+				switch {
+				case claimErr != nil:
+					err = types.NewPublicError(
+						types.ErrorKindForbidden,
+						types.PublicCodeForbidden,
+						"permission denied",
+						claimErr,
+					)
+				case authorizer == nil:
+					err = types.NewPublicError(
+						types.ErrorKindInternal,
+						types.PublicCodeInternal,
+						"internal server error",
+						errors.New("manage authorizer unavailable"),
+					)
+				default:
+					err = authorizer.Authorize(r.Context(), roles, types.ManageAuthorizationRequest{
+						Service: info.GetServiceName(),
+						Path:    info.GetPath(),
+						Command: info.GetCommand(),
+					})
+				}
 			}
 		}
 		if err == nil && hook != nil {
