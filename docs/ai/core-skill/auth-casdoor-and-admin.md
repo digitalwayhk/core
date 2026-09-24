@@ -54,7 +54,7 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 
 ## Manage RoleCode RBAC
 
-Core 的 Manage 角色授权是可选的服务级能力。认证权威服务实现 `types.IManageRoleProvider` 后，Core 在 Casdoor Manage callback 与 refresh 签发 Access Token 前，用可信 `AuthIdentity` 查询消费方自己的管理员与角色关系；Provider 只返回标准 `[]ManageRoleRef`，不返回权限明细：
+标准 `run.WebServer` 会自动启用 Core Manage RBAC。Core 在 Casdoor Manage callback 与 refresh 签发 Access Token 前，用可信 `AuthIdentity` 查询共享 `ManageStore` 中的管理员主体与角色关系；Provider 只返回标准 `[]ManageRoleRef`，不返回权限明细：
 
 ```go
 type IManageRoleProvider interface {
@@ -62,7 +62,7 @@ type IManageRoleProvider interface {
 }
 ```
 
-消费方用稳定 `RoleCode` 绑定用户，不保存 Core 角色表的数据库 ID。Token 的保留 claim `manage_roles` 只保存规范化 RoleCode JSON 数组；不保存菜单、path、command、权限列表、权限哈希或数据库 ID。角色关系改变后，用户需 refresh 或重新登录取得新 token；角色权限明细由 Core 在请求时读取，改变后下一请求生效。
+Core 用稳定 `RoleCode` 绑定管理员主体，不保存角色表数据库 ID。Token 的保留 claim `manage_roles` 只保存规范化 RoleCode JSON 数组；不保存菜单、path、command、权限列表、权限哈希或数据库 ID。角色关系改变后，用户需 refresh 或重新登录取得新 token；角色权限明细由 Core 在请求时读取，改变后下一请求生效。
 
 Core 内置并保护两个动态角色：
 
@@ -85,11 +85,25 @@ Access Token 验签与认证域隔离
 
 授权目标来自已注册 `RouterInfo` 的稳定 `service + path + command`。标准与自定义 command 都在 Router 前覆盖；不允许在 `ManageService.ValidationBefore`、`DoBefore` 或前端按钮隐藏中另造这层授权。没有权限返回 HTTP 403、公开码 `40300`、安全消息 `permission denied`，Router 和业务 Hook 都不执行。权限查询错误返回安全 500，不泄露数据库原文。
 
-实现 Provider 即显式启用 RBAC：claim 缺失/非法、Provider 或权限存储异常都 fail closed。未实现 Provider 的服务保留旧行为，认证成功的 Manage Token 不要求角色 claim。多服务 HTMLServer 使用选定的 Manage 认证权威服务的 Provider 与角色权限库，但仍按目标服务 RouterInfo 鉴权。
+标准 WebServer 中 claim 缺失/非法、主体 Provider 或权限存储异常都 fail closed。升级前签发、尚未携带 `manage_roles` 的旧 Manage Access/Refresh Token 必须重新登录，不能继续按历史“认证即放行”行为使用。多服务 HTMLServer 使用选定的 Manage 认证权威服务签发身份，但仍按目标服务 RouterInfo 鉴权。
 
-TestToken 的 Manage 身份由 Core 直接赋予 `core.system_admin`，不会调用消费方 Provider，也不会占用真实 Casdoor 首用户。Core 只在 TestToken 的 Refresh Token 中写入已签名内部标记，以便刷新时继续识别测试身份；普通无 Provider 的旧 Manage Refresh Token 在启用 RBAC 后必须拒绝并要求重新登录，不能提升为系统管理员。首个真实管理员策略属于消费方：标准 09 示例在同一事务内把第一个 Casdoor Manage callback 创建的管理员绑定为 `core.system_admin`，后续用户固定绑定 `core.viewer`；跨 authority 实例的首用户竞争由数据库 nullable unique bootstrap slot 仲裁，不能只依赖进程锁。refresh 不创建未知用户，Casdoor 角色也不继承或同步到 Core。
+TestToken 的 Manage 身份由 Core 直接赋予 `core.system_admin`，不会创建管理员主体，也不会占用真实 Casdoor 首用户。Core 只在 TestToken 的 Refresh Token 中写入已签名内部标记，以便刷新时继续识别测试身份。第一个真实 Casdoor Manage callback 由 Core 在同一事务内创建主体并绑定 `core.system_admin`，后续新主体绑定 `core.viewer`；跨进程竞争由 `ManagePrincipalModel.BootstrapSlot` 的 nullable unique 约束仲裁，进程锁不是最终保障。首位管理员主体不能停用、删除，其引导产生的 `core.system_admin` 关系也不能解绑，避免控制面永久锁死。refresh 不创建未知主体，Casdoor 角色也不继承或同步到 Core。
 
-Core `SystemManage` 提供角色与角色权限管理页，“绑定菜单默认权限”只为自定义角色幂等创建该菜单的 `view`、`search` 两条权限。当前版本不裁剪菜单或按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整消费方模型、RoleCode 选择绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
+`IManageRoleProvider` 不是请求期 Hook：它只在 Casdoor Manage callback/refresh 签发 Access Token 前执行，普通 Manage API 请求不会调用它。标准 WebServer 已绑定 Core 默认实现；消费方只有在角色权威位于外部 IAM、必须自定义身份到 RoleCode 的映射时才实现该接口覆盖默认 Provider。自定义 Provider 仍只能返回角色，不能返回或缓存 path/command 权限。签发顺序是业务 `IAuthHookProvider.OnAuth` 先执行，再解析 Manage RoleCode，最后签名 Token；不能等待可能晚到的 `ICasdoorEventHookProvider` signup webhook。
+
+管理员主体、主体角色关系、角色和权限都属于 Core 控制面。消费方不得再建立 `AdminUserModel`、`AdminUserRoleModel`、管理员 repository/store、专用 `AdminService` 或 `ConfigureManageModels` 桥接。标准启动只有：
+
+```go
+server := run.NewWebServer() // 读取 server.json，创建控制面存储并初始化 Core 系统表
+server.AddIService(NewBusinessService())
+server.Start()
+```
+
+`NewWebServer()` 在监听前根据 `server.json.ManageStore` 同步初始化目录、菜单、按钮、角色、角色权限、管理员主体和主体角色关系七类表，并绑定默认 Provider/Authorizer。启动还会验证首管理员 `BootstrapSlot` 列及唯一索引确实存在；约束缺失或建索引失败必须终止启动，不能在无跨进程仲裁能力时继续服务。不要把 `IDataAction` 沿 `WebServer → SystemManage → 具体 Manage → DmpBase` 逐层注入，也不要增加 `New...ManageWithAction`、`NewAdminService(repository...)`、消费方管理员表或请求期建表逻辑。
+
+新生成的 `server.json` 默认使用 SQLite `core_manage`。升级时若旧 `server.json` 完全没有 `ManageStore` 字段，Core 继续读取历史 `models` SQLite 库，避免目录和菜单看似丢失；需要切换到 `core_manage` 或 MySQL 时必须显式配置并自行迁移既有数据。一个进程只能绑定一个控制面数据库，后续尝试绑定不同数据库会在启动时失败，不能让 CRUD 与鉴权各自读取不同存储。
+
+Core `SystemManage` 提供角色、角色权限、管理员主体和主体角色绑定页。“绑定菜单默认权限”只为自定义角色幂等创建该菜单的 `view`、`search` 两条权限。当前版本不裁剪菜单或按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整启动、RoleCode 绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
 
 ## 可选 HMAC 请求认证
 

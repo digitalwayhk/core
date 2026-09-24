@@ -96,12 +96,9 @@ examples/08-admin-manage-ui/
 └── README.md                     # 管理后台操作与前端能力对照
 
 examples/09-admin-manage-rbac/
-├── models/                       # 消费方管理员与用户-RoleCode 关系
-├── api/manage/                   # 管理员与角色绑定页
-├── provider.go                   # IManageRoleProvider 示例
 ├── http_test.go                  # JWT→RBAC→Router→Response 真实 HTTP 链路
-├── main/main.go
-└── README.md                     # Casdoor、内置角色与变更生效边界
+├── main/main.go                  # 仅启动标准 WebServer；控制面由 Core 内建
+└── README.md                     # ManageStore、首管理员、角色绑定与 403 验证
 
 examples/integration/07-shop-order-scale/
 examples/integration/07-shop-order-scale-multi-process/
@@ -116,7 +113,7 @@ examples/integration/08-admin-manage-ui/
 
 示例和服务代码必须先让人读得懂再追求复用：每个 Go 文件开头用中文文件级注释说明该文件提供的能力、所属边界和主要读者；每个 public 类型、函数、方法、变量必须有中文注释；private 逻辑在涉及权限、事务、事件、缓存、幂等、跨服务调用或测试编排时也要补充意图说明。单元测试和 `examples/integration` 集成测试同样适用；测试文件的文件级注释必须写清验证的业务闭环、角色、边界和异常权限场景，避免系统复杂后只能靠逐行读代码理解测试目的。
 
-多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现 owner 限域、禁用主体拦截、分页、审计或日志；这些业务横切逻辑应在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在限域或日志调整时到处修改。Core Manage RBAC 不依赖这棵继承树：启用 `IManageRoleProvider` 后，标准与自定义 command 都在 Router 前集中鉴权。
+多服务场景必须按服务建立独立 Manage 继承树：`common.ServiceManage[T]` 继承框架可选 `manage.HookedManageService[T]`，`basedata.BaseDataManage[T]` 和 `transaction.TransactionManage[T]` 继承本服务 `ServiceManage[T]`，每个具体 Manage 再继承本目录的基础资料或业务基座。具体 Manage 不直接嵌入 `manage.ManageService[T]`，也不重复实现 owner 限域、禁用主体拦截、分页、审计或日志；这些业务横切逻辑应在 `common.ServiceManage[T]` 或更靠近根部的抽象基座实现一次。具体 Manage 只暴露“业务目标对象是谁”和“业务动作怎么做”，否则复杂系统会在限域或日志调整时到处修改。Core Manage RBAC 不依赖这棵继承树：标准 WebServer 对所有标准与自定义 command 都在 Router 前集中鉴权。
 
 Manage 日志参考示例 05 的 `ShopManage.logManageResult`：统一使用 `logx.Infow("shop_manage_operation_failed", ...)` 和 `logx.Infow("shop_manage_operation_succeeded", ...)`，字段保持 `owner`、`phase`、`service`、`route`、`trace_id`、失败时 `code`。不要按服务名发明 `shop_user_manage_operation_*`、`shop_supplier_manage_operation_*` 等新事件，也不要记录 token、请求/响应 body、SQL 或对象 dump。
 

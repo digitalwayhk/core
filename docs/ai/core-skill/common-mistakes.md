@@ -9,19 +9,26 @@
 - ManageService 传入内嵌实例而非真实 owner。
 - 为切换 Manage 数据库而在 `OnSearchBefore` 手写查询并返回 `stop=true`，导致标准筛选、排序、分页和关联查询失效。
 - 在 `api/manage` 直接调用 `entity.NewModelList`、传入 `IDataAction`，或公开 `ManageDataAction` 给 Manage。正确边界是最低公共 Manage 层只调用无参数 `models.NewManageModelList[T]()`。
+- 为了让系统 Manage 共用数据库，把 `IDataAction` 从 `WebServer` 注入 `SystemManage`，再增加 `NewDirectoryManageWithAction`、`NewMenuManageWithAction` 或 `DmpBase.action`。正确做法是 Core 内部控制面 store 绑定一次，所有系统 Manage 始终使用 `smodels.NewManageModelList[T]()` 无参数工厂。
+- 在消费方重复建立管理员用户/角色模型、`NewAdminService(repository...)`、Provider repository/store，或公开 `ConfigureManageModels` 传递 Core action。标准管理员主体和角色关系属于 Core `ManageStore`；只有外部 IAM 映射才实现无存储注入的自定义 `IManageRoleProvider`。
+- 把 Token 中已有的标准管理员身份再复制成消费方 `AdminUserModel`，并把用户、角色、权限拆到不同业务服务。管理员主体、主体角色、角色和权限是同一个 Core 控制面一致性边界；消费方只保留自身业务用户资料，不能复制一份 Manage 授权事实。
+- 在请求期懒建 Core 控制面表，或直接调用 GORM `AutoMigrate`。`NewWebServer()` 必须在监听前通过 Core 持久化适配器初始化七类控制面表；业务方不建表、不注入 action。
+- 只检查控制面表存在就认为首管理员仲裁安全。Core 启动必须同时验证 `BootstrapSlot` 列和唯一索引；缺失时 fail closed，不能依赖单进程 mutex 代替数据库跨进程约束。
+- 用客户端反序列化模型执行 Remove 校验。`json:"-"`、审计标记和系统保护位不会由请求携带；标准 Remove 必须保存数据库加载的旧记录，并对旧记录执行 `RemoveValid` 和删除。
 - public/private 直接返回持久化模型，或复用 Manage 列表 DTO。
 - WebSocket 把外部用户订阅与内部 EventBridge 混为一谈。
 - private WebSocket 未实现可信身份注入和用户级通知过滤。
 - 把 `IHMACAuthProvider` 当成第二套授权链：在 Core 保存 Secret/nonce、让 HMAC 进入 Manage/ServerManage、返回 Casdoor Provider，或在 WebSocket 每次订阅重放签名。正确做法是 Provider 只建立 Auth 用户身份，之后复用同一 `OnAuthRequest` 授权链。
 - 认为服务开启 `Auth` 或填了 `HMACAuth` Header 就会全局启用 HMAC。默认始终是原有 Bearer；只有显式实现 `IHMACAuthProvider` 的具体服务才启用该服务的 HMAC 备选。
-- Manage 权限只在前端隐藏按钮、`ValidationBefore` 或自定义命令的 `DoBefore` 判断，或者把 path/command 权限明细写入 token。正确做法是认证权威服务实现 `IManageRoleProvider`，token 只带 RoleCode，由 Core 在 Router 前按注册元数据集中鉴权；业务 Hook 只补充 owner/租户限域和审计。
+- Manage 权限只在前端隐藏按钮、`ValidationBefore` 或自定义命令的 `DoBefore` 判断，或者把 path/command 权限明细写入 token。标准 WebServer 已自动启用 Core RBAC；token 只带 RoleCode，由 Core 在 Router 前按注册元数据集中鉴权，业务 Hook 只补充 owner/租户限域和审计。
 - 绕过 models 持久化边界/`ServiceContext`，或在 API 层直接绑定具体数据库驱动。
 - public/private 直接 `NewModelList` 或套用 Manage Search/CRUD 做业务读写（正确：models 业务方法 + `IDataAction`）。
 - Manage 不用 `ModelList` 却手写 Search `stop=true` 破坏筛选分页；或该重写服务级 `GetList` 时未重写；分库场景用 per-market 自研列表代替 `IDBName` 标准管道。
 - 动态分库时 MySQL `Database` 非空、缺 `marketCode` 仍默认真库、View 只带 ID 却期望命中分库。
 - 动态分库只让 `GetRemoteDBName()` 返回空串当作 fail-closed。实现会回退 `GetLocalDBName()`（`entity.Model` 默认 `"models"`），结果静默扫默认库；必须用哨兵库名或两个方法一起置空，并在 `OnSearchBefore` 前置拦截。
-- 手写 `CREATE TABLE`/`CREATE DATABASE`、`init.sql`、`migrations/` 目录、引入版本化迁移框架，或在业务代码调用 GORM `AutoMigrate`——建库建表与补列由框架在首次数据访问时自动完成。
-- 把 `models/schema`（`EnsureStorage`）当成业务 DDL 层，为没有跨模型事务的新服务无条件生成该包。
+- 手写 `CREATE TABLE`/`CREATE DATABASE`、`init.sql`、`migrations/` 目录、引入版本化迁移框架，或在业务代码调用 GORM `AutoMigrate`——服务应在启动阶段调用 `models.EnsureStorage()`，由框架自动完成建库、建表与补列。
+- 把 `EnsureStorage()` 放进请求、Provider、Hook、业务事务或异步 `IStartService.Start()`；它必须在启动 Server、接受请求前作为同步失败屏障执行。
+- 把 Core `ManageStore` 当成消费方业务库并尝试在 `run.NewWebServer()` 前后取得其 action。正确做法是只在 `server.json` 配置控制面；`NewWebServer()` 同步完成七类系统表初始化，消费方业务表继续由各自 models 组合根初始化。
 - 在每个具体 model/API 里散落库连接，未在基础 model/store 集中 DataAction；或把「库类型」与「ModelList vs IDataAction」混为一谈。
 - 集成测试重新实现公共 Suite，只测 handler，或依赖开发机已有配置和数据库。
 - 把某个消费组 ACK 当成全局完成，在 Handler 中直接 `XDEL`/`XTRIM`/TTL，或用 `MAXLEN` 删除离线组、pending、重试中的消息。正确做法是 contract manifest + `RequireMessageLifecycle`，由 Provider 按全部必需组安全前沿回收。

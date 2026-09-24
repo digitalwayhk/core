@@ -158,7 +158,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | 开放匿名查询接口 | `api/public` 包 + `IRouter` | [01](./examples/01-simple-shop) | `go test ./examples/integration/01-simple-shop -run Public` |
 | 开放登录后接口 | `api/private` 包 + `req.GetUser()` | [01](./examples/01-simple-shop) | `go test ./examples/integration/01-simple-shop -run Private` |
 | 给模型配一套后台 CRUD | `manage.NewManageService[T](own)` | [01](./examples/01-simple-shop) | `go test ./service/manage` |
-| 给 Manage 加角色权限 | `IManageRoleProvider` + Core `path + command` RBAC | [09](./examples/09-admin-manage-rbac) | `go test ./examples/09-admin-manage-rbac/...` |
+| 给 Manage 加角色权限 | Core 内建主体/角色 + `path + command` RBAC；外部 IAM 才覆盖 `IManageRoleProvider` | [09](./examples/09-admin-manage-rbac) | `go test ./examples/09-admin-manage-rbac/...` |
 | 建表、加字段 | **无需操作**，首次数据访问时自动完成 | [models 分片](./docs/ai/core-skill/models.md) | 启动后查看表结构 |
 | 实时推送给用户 | `RouterInfo.RegisterWebSocketClient` / `NoticeWebSocket` | [01](./examples/01-simple-shop) | `go test -race ./examples/integration/01-simple-shop -run WebSocket` |
 | 跨模型事务、状态机 | `IDataAction` 事务边界 + business 层 | [02](./examples/02-shop-payment) | `go test ./examples/integration/02-shop-payment` |
@@ -192,7 +192,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | [06-shop-microservices](./examples/06-shop-microservices) | 三服务拆分，Redis 发现，gRPC/mTLS，受限内部 Public，可靠事件，本地投影 | 6261 行 / 120 文件 |
 | [07-shop-order-scale](./examples/07-shop-order-scale) | 订单服务多副本水平扩展，AutoMachineID，共享权威库，Outbox，服务报表 | 6266 行 / 106 文件 |
 | [08-admin-manage-ui](./examples/08-admin-manage-ui) | Manage View schema、外键、子表、控件、导入导出和自定义命令 | 以示例源码为准 |
-| [09-admin-manage-rbac](./examples/09-admin-manage-rbac) | Core 角色与权限、消费方管理员/RoleCode 绑定、首个 Casdoor 管理员、真实 HTTP 403 | 以示例源码为准 |
+| [09-admin-manage-rbac](./examples/09-admin-manage-rbac) | Core 内建管理员/RoleCode 绑定、首个 Casdoor 管理员、角色与精确权限、真实 HTTP 403 | 以示例源码为准 |
 
 <sub>行数只统计业务代码，不含测试。</sub>
 

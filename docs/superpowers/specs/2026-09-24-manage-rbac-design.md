@@ -4,8 +4,7 @@
 
 为 Core Manage 域增加角色授权能力，在不把权限明细写入 Token、不修改 `web/admin`、不隐藏菜单和按钮的前提下，实现：
 
-- Core 统一管理角色和角色权限明细；
-- 消费方管理自己的管理员用户以及用户与角色的绑定；
+- Core 统一管理管理员主体、主体角色关系、角色和角色权限明细；
 - Manage Token 只携带稳定 RoleCode；
 - 所有 Manage Router 在 Parse/Validation/Do 之前按 `service + path + command` 强制鉴权；
 - 首个通过 Casdoor Manage 域注册的管理员成为系统管理员，后续用户成为只读管理员；
@@ -28,14 +27,16 @@
 Casdoor
 └── 身份认证、账号状态、登录、刷新、撤销
 
-消费方 IManageRoleProvider
-└── 管理员用户、用户与 RoleCode 的绑定、首次用户初始化
-
 Core
+├── 管理员主体与主体 RoleCode 绑定
+├── 默认 IManageRoleProvider 与首次用户初始化
 ├── 角色目录
 ├── 角色权限明细
 ├── Manage Token 的 RoleCode Claim
 └── Router 前服务端鉴权
+
+消费方可选 IManageRoleProvider
+└── 仅在角色权威位于外部 IAM 时覆盖主体到 RoleCode 映射
 ```
 
 Casdoor 只作为身份权威。Core 不读取 Casdoor Role/Permission，也不继承 Casdoor 的子角色关系。
@@ -127,15 +128,15 @@ type IManageRoleProvider interface {
 
 Provider 的职责：
 
-- 使用 `AuthIdentity.UID` 及 Provider 信息定位消费方管理员；
-- 首次出现时建立管理员用户；
-- 首次出现时按消费方明确策略建立用户角色关系；`DefaultRoles` 只是 Core 提供的建议默认值，09 示例固定首个真实用户为 `core.system_admin`、后续用户为 `core.viewer`；
+- Core 默认 Provider 使用 `AuthIdentity.UID` 及 Provider 信息定位内建管理员主体；
+- Callback 首次出现时在 Core 事务中建立主体与初始角色关系；
+- 首个真实用户为 `core.system_admin`、后续用户为 `core.viewer`；
 - 返回当前有效 RoleCode；
-- 使用消费方自己的事务、唯一约束或锁保证首次初始化幂等。
+- 使用 Core ManageStore 的事务与唯一约束保证首次初始化幂等。
 
 Provider 不返回权限明细，不决定 Router 是否允许。
 
-服务实现 `IManageRoleProvider` 即显式启用 Manage RBAC。未实现时保持现有“Manage Token 认证成功即可访问”的兼容行为。Provider 已启用后，角色解析失败、Claim 缺失、Claim 非法、角色存储不可用或权限查询失败都必须 fail closed。
+标准 WebServer 自动绑定默认 Provider 并启用 Manage RBAC。服务显式实现 `IManageRoleProvider` 只用于覆盖外部 IAM 映射；角色解析失败、Claim 缺失、Claim 非法、角色存储不可用或权限查询失败都必须 fail closed。
 
 ## Token 契约
 
@@ -153,28 +154,28 @@ Token 不包含 path、command、权限列表、权限哈希、菜单 ID 或数�
 
 ### TestToken
 
-`AuthTypeManage + AuthSourceTestToken` 固定写入 `core.system_admin`，不调用消费方 Provider 创建管理员用户，也不占用 Casdoor 首用户 bootstrap。
+`AuthTypeManage + AuthSourceTestToken` 固定写入 `core.system_admin`，不调用默认 Provider 创建管理员主体，也不占用 Casdoor 首用户 bootstrap。
 
 ### Casdoor Callback 与 Refresh
 
 - Callback 完成 Casdoor Owner、Subject、用户状态和撤销权威校验后，再调用 Provider；
-- Provider 只可根据可信 `AuthIdentity` 建立用户；
+- 默认 Provider 只可根据可信 `AuthIdentity` 建立 Core 主体；
 - Refresh 重新解析当前用户角色，因此用户角色变更最迟在刷新或重新登录后生效；
-- Refresh 不得重新执行“首个 Casdoor 用户”判定，消费方 Provider 必须只在首次建立管理员记录时初始化角色。
+- Refresh 不得重新执行“首个 Casdoor 用户”判定，且不得创建未知主体。
 
 ## 首个 Casdoor 管理员
 
-09 示例的 Provider 实现以下规则：
+Core 默认 Provider 实现以下规则：
 
 ```text
-第一个通过完整 Casdoor Manage Callback 建立的 AdminUser
+第一个通过完整 Casdoor Manage Callback 建立的 ManagePrincipal
 → 绑定 core.system_admin
 
-后续首次建立的 AdminUser
+后续首次建立的 ManagePrincipal
 → 固定绑定 core.viewer
 ```
 
-首用户判断和用户/角色写入必须在同一消费方事务内完成，并由数据库唯一约束仲裁多 authority 实例的并发竞争；进程内互斥只能作为减压手段，不能作为最终保障。09 示例以仅首用户非 NULL 的 `BootstrapSlot` 唯一索引选出一个获胜者，冲突请求回滚后按 `core.viewer` 重试。TestToken、Refresh、Auth 用户域、ServerManage 域均不能触发该规则。
+首用户判断和主体/角色写入在同一 Core 事务内完成，并由数据库唯一约束仲裁多 authority 实例的并发竞争；进程内互斥只能作为减压手段，不能作为最终保障。仅首用户非 NULL 的 `BootstrapSlot` 唯一索引选出一个获胜者，冲突请求回滚后按 `core.viewer` 重试。TestToken、Refresh、Auth 用户域、ServerManage 域均不能触发该规则。
 
 首个系统管理员被禁用或删除后，不得自动把下一名用户提升为系统管理员。恢复必须通过已有系统管理员、受控 TestToken 环境或消费方运维流程完成。
 
@@ -237,13 +238,11 @@ Core `SystemManage` 新增：
 
 ## 09 示例
 
-新增 `examples/09-admin-manage-rbac`：
+`examples/09-admin-manage-rbac` 演示：
 
-- `AdminUserModel`：消费方管理员档案；
-- `AdminUserRoleModel`：使用 `UserCode + RoleCode` 建立稳定绑定；
-- 管理员用户 Manage；
-- 用户角色绑定 Manage；
-- `IManageRoleProvider` 实现；
+- Core `ManagePrincipalModel` 与 `ManagePrincipalRoleModel`；
+- Core 管理员和主体角色绑定 Manage；
+- 标准 WebServer 默认 Provider；
 - TestToken 系统管理员流程；
 - Fake Casdoor 首用户和后续用户流程；
 - 自定义角色授权与 403 验证。
@@ -252,8 +251,8 @@ Core `SystemManage` 新增：
 
 ## 兼容性与发布
 
-- 未实现 Provider 的服务保持旧行为；
-- 新接口、新模型、新 Claim 和新系统 Manage 路由均为加性能力；
+- 外部 IAM 可覆盖 Provider，标准服务使用 Core 默认实现；
+- 新接口、新模型、新 Claim 和新系统 Manage 路由构成 MINOR 能力；旧无角色 Token 需重新登录；
 - `UserPeermissionsModel` 暂不删除，只登记 Deprecated；
 - Manage/OpenAPI 默认响应字段不变；
 - 本能力应作为 MINOR 发布，建议下一个版本为 `v1.3.0`；

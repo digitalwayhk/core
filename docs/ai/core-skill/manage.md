@@ -455,7 +455,7 @@ func (own *OrderManage) GetLocaleTitle(locale string) string {
 
 ### 落库与同步
 
-`DirectoryModel` 和 `MenuModel` 各有 `Title`（默认中文，兼容旧前端与「菜单管理」编辑器）和 `TitleEN`（英文，空则回退 `Title`）两列。`TitleEN` 由框架首次访问时自动补列，**不要写迁移脚本**。
+`DirectoryModel` 和 `MenuModel` 各有 `Title`（默认中文，兼容旧前端与「菜单管理」编辑器）和 `TitleEN`（英文，空则回退 `Title`）两列。`TitleEN` 在服务启动初始化存储时由框架自动补列，**不要写迁移脚本**。
 
 菜单同步以**代码为翻译权威源**：权限集合未变但代码里的中英标题变了，同步仍会更新 `Title` 和 `TitleEN`。`Sort`、`Icon`、`Description` 是用户字段，生成结果不覆盖。改了 `GetLocaleTitle` 的返回值后，下一次菜单同步即可看到新标题，不需要删表重建。
 

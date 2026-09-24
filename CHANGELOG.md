@@ -6,7 +6,9 @@
 
 ### Added
 
-- 增加可选的 Manage RoleCode RBAC：服务实现 `IManageRoleProvider` 后，Casdoor callback/refresh 只把角色编码写入 Manage Access Token，Core 在 Router 前按稳定 `service + path + command` 授权；内置 `core.system_admin` 动态全权、`core.viewer` 动态只读，自定义角色使用结构化权限行。TestToken Refresh 使用已签名内部标记保持 system_admin，普通无 Provider 的旧 Refresh Token 在启用 RBAC 后要求重新登录。新增系统角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留所有菜单和按钮可见，无权限操作统一返回安全 403。未实现 Provider 的服务保持旧行为。该加性公共能力建议作为 v1.3.0 MINOR 发布。
+- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
+
+- 增加 `server.json.ManageStore`，统一选择 SQLite 或共享 MySQL 承载七类 Core Manage 控制面模型；`NewWebServer` 在监听前完成建库建表与内置角色初始化，失败时拒绝启动。业务服务配置不得重复声明，Core 不向消费方暴露控制面 `IDataAction`，SQLite 到 MySQL 的既有数据不自动迁移。
 
 - 增加完整的 Manage Admin UI 示例 `examples/08-admin-manage-ui` 及真实 HTTP 集成测试，覆盖 View schema、标准与自定义命令、搜索模式、关联选择、子表、导入导出和命令请求体；权威 AI skill 同步补充 Manage 继承与 Hook 能力说明。
 
