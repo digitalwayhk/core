@@ -33,6 +33,10 @@
 
 ## MQ 与 Event
 
+`MQ.Mode` 在未配置或为空时默认 `off`：不创建 MQManager、Provider 或 EventBridge，也不探测 Redis。需要跨节点事件的服务必须在自己的 `etc/<service>.json` 中显式设置 `MQ.Mode=on`（连接失败终止启动）或 `auto`（连接失败降级）。系统管理服务的 `etc/server.json` 默认同样关闭，不随业务服务启用。Provider 和 Usage 的默认值只补全配置，不构成启用声明。
+
+迁移说明（2026-09-30）：此前缺省 Mode 会补成 `auto`，现在改为 `off`。已有 JSON 中明确保存的 `Mode=auto/on` 保持原样；如果旧配置曾自动生成 `auto`、而服务不需要 MQ，应手动改为 `off`。依赖缺省自动探测的服务需在升级前显式配置模式和 Broker 地址。
+
 | 字段 | 当前契约 | 运行时消费方/生命周期 | 状态 |
 | --- | --- | --- | --- |
 | Mode、event-stream Usage、Redis Stream、NATS JetStream | factory 创建 provider，ServiceContext 创建 EventStream/EventBridge | ServiceContext 终止型关闭 MQManager；Health/Publish/Subscribe 的 provider 调用受 Manager 读写门禁保护，Close 等待已进入调用并阻止新调用后再按稳定 registry key/name 顺序关闭去重实例；不支持关闭后复用 | supported |

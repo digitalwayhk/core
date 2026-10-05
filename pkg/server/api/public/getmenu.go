@@ -2,6 +2,7 @@ package public
 
 import (
 	"net/http"
+	"strings"
 
 	pt "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/api"
@@ -56,6 +57,14 @@ func loadStoredMenus() ([]*smodels.DirectoryModel, error) {
 				return nil, err
 			}
 			dir.MenuItems = rows
+			// 菜单列表查询不保证预加载关联；权限树需要显式读取已同步的命令。
+			for _, menu := range rows {
+				permissions, err := smodels.NewManageModelList[smodels.PermissionsModel]().SearchWhere("MenuModelID", menu.ID)
+				if err != nil {
+					return nil, err
+				}
+				menu.Permissions = permissions
+			}
 		}
 	}
 	return dirs, nil
@@ -144,6 +153,37 @@ func getLocalMenu() (*smodels.DirectoryModel, error) {
 	// 前端专用页面，对应 web/admin/src/pages/config/ai-provider
 	menu4.Url = "/config/ai-provider"
 	dir.MenuItems = append(dir.MenuItems, menu4)
+
+	// Core 控制面页面使用内置入口，业务 UpdateMenu 不负责同步 server 菜单。
+	for index, entry := range []struct{ name, title, titleEN string }{
+		{"managerolemanage", "角色管理", "Roles"},
+		{"managerolepermissionmanage", "角色权限管理", "Role Permissions"},
+		{"manageprincipalmanage", "管理员", "Administrators"},
+		{"manageprincipalrolemanage", "管理员角色绑定", "Administrator Roles"},
+	} {
+		menu := smodels.NewMenuModel()
+		menu.ID = uint(9987248 + index)
+		menu.DirectoryModelID = dir.ID
+		menu.Name = entry.name
+		menu.Title = entry.title
+		menu.TitleEN = entry.titleEN
+		menu.Sort = 4 + index
+		menu.Url = "/api/manage/server/" + entry.name
+		dir.MenuItems = append(dir.MenuItems, menu)
+	}
+	// 内置菜单不经过 UpdateMenu 落库，命令列表直接读取已注册的系统 Manage 路由。
+	if sc := router.GetContext("server"); sc != nil && sc.Router != nil {
+		for _, menu := range dir.MenuItems {
+			for _, info := range sc.Router.GetTypeRouters(types.ManageType) {
+				if strings.HasPrefix(info.GetPath(), menu.Url+"/") {
+					permission := smodels.NewPermissionsModel()
+					permission.Name = info.GetCommand()
+					permission.Url = info.GetPath()
+					menu.Permissions = append(menu.Permissions, permission)
+				}
+			}
+		}
+	}
 
 	return dir, nil
 }

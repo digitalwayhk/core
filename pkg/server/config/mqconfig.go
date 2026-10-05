@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// MQConfig 消息队列配置。Mode=off 不初始化，Mode=auto 自动检测，Mode=on 强制启用。
+// MQConfig 消息队列配置。默认 Mode=off 不初始化，显式 Mode=auto 自动检测，Mode=on 强制启用。
 type MQConfig struct {
 	Mode          string                `json:",optional"` // off | auto | on
 	Provider      string                `json:",optional"` // redis-stream | nats-jetstream | kafka | rabbitmq | rocketmq
@@ -87,7 +87,7 @@ type RocketMQConfig struct {
 // ApplyDefaults 为 MQConfig 补充缺失的默认值。
 func (m *MQConfig) ApplyDefaults() {
 	if m.Mode == "" {
-		m.Mode = "auto"
+		m.Mode = "off"
 	}
 	if m.Provider == "" {
 		m.Provider = "redis-stream"

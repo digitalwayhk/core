@@ -32,17 +32,33 @@ func NewManageRolePermissionManage() *ManageRolePermissionManage {
 // Routers 提供精确权限 CRUD 与菜单默认权限绑定。
 func (own *ManageRolePermissionManage) Routers() []servertype.IRouter {
 	routers := own.DmpBase.Routers()
-	routers = append(routers, own.Add, own.Remove, NewBindMenu(own))
+	routers = append(routers, own.Add, own.Remove, NewBindMenu(own), NewPermissionSelection(own), NewSavePermissionSelection(own))
 	return routers
+}
+
+// ViewModel 仅输出页面按钮，权限树内部读写接口继续注册为 Manage API。
+func (own *ManageRolePermissionManage) ViewModel(model *view.ViewModel) {
+	own.DmpBase.ViewModel(model)
+	commands := make([]*view.CommandModel, 0, len(model.Commands))
+	for _, command := range model.Commands {
+		if command.Command == "permissionselection" || command.Command == "savepermissionselection" {
+			continue
+		}
+		commands = append(commands, command)
+	}
+	model.Commands = commands
 }
 
 // ViewCommandModel 配置菜单默认权限绑定命令。
 func (own *ManageRolePermissionManage) ViewCommandModel(command *view.CommandModel) {
 	if command.Command == "bindmenu" {
-		command.Title = "绑定菜单默认权限"
+		command.Title = "配置角色权限"
 		command.EditShow = true
 		command.IsSelectRow = false
 		command.IsAlert = false
+	}
+	if command.Command == "permissionselection" || command.Command == "savepermissionselection" {
+		command.Visible = false
 	}
 }
 

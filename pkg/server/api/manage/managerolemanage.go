@@ -25,8 +25,18 @@ func NewManageRoleManage() *ManageRoleManage {
 // Routers 提供角色查看、搜索、编辑、新增和删除路由。
 func (own *ManageRoleManage) Routers() []types.IRouter {
 	routers := own.DmpBase.Routers()
-	routers = append(routers, own.Add, own.Remove)
+	routers = append(routers, own.Add, own.Remove, NewRolePermissions(own))
 	return routers
+}
+
+// ViewCommandModel 从选中角色打开权限树。
+func (*ManageRoleManage) ViewCommandModel(command *view.CommandModel) {
+	if command.Command == "rolepermissions" {
+		command.Title = "配置权限"
+		command.IsSelectRow = true
+		command.EditShow = true
+		command.IsAlert = false
+	}
 }
 
 // GetDefaultItems 返回必须存在且不可删除的内置角色。
@@ -38,6 +48,8 @@ func (*ManageRoleManage) GetDefaultItems() []*smodels.ManageRoleModel {
 func (own *ManageRoleManage) ParseAfter(sender interface{}, _ types.IRequest) error {
 	var role *smodels.ManageRoleModel
 	switch operation := sender.(type) {
+	case *manageservice.Operation[smodels.ManageRoleModel]:
+		role = operation.Model
 	case *manageservice.Add[smodels.ManageRoleModel]:
 		role = operation.Model
 	case *manageservice.Edit[smodels.ManageRoleModel]:

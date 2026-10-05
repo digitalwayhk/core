@@ -44,6 +44,8 @@
 
 ### Changed
 
+- MQ 缺省 `Mode` 从 `auto` 改为 `off`，未配置的服务不再自动探测本机 Redis。需要 MQ 的服务必须在自己的配置文件显式设置 `auto/on` 和 Broker 地址；已有 JSON 中明确保存的 `auto/on` 保持不变，旧版本自动生成的 `auto` 如不需要 MQ 应手动改为 `off`。迁移边界见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
+
 - Runtime 业务监控聚合统一排除 `/api/manage/*` 与 `/api/servermanage/*` 控制面请求；这些请求仍保留访问日志与原始 Prometheus 指标，但不再污染服务 QPS、错误率、p50/p95/p99、路由排行和同步调用边。
 
 - shared 路由缓存失效、Casdoor 身份通知改由框架专用 Redis Pub/Sub / Core NATS 广播并权威补偿，停止创建无界内部消息历史。缓存失效保护与无订阅 Casdoor WebSocket 周期撤销检查闭环，补充通知健康/失败/缓存补偿指标；业务 MQ 的 ACK、必需组、retention-only、重试和 DLQ 不变。**升级须同逻辑服务维护窗口切换，不保证旧/新内部协议混跑，旧内部 Stream 不自动删除，存量内存不会因此全部释放**；见 `docs/codex/CORE_INTERNAL_NOTIFICATION_LIFECYCLE_GUIDE.md`。
@@ -85,6 +87,9 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
+
+- 修复 Core 内部系统菜单遗漏 v1.3 RBAC 页面入口：`getmenu` 现在提供角色管理、角色权限管理、管理员和管理员角色绑定；真实 09 进程测试验证菜单及各页面的 View/Search API。
+- 角色权限支持服务、菜单、命令勾选树、已有权限回显和事务替换保存；取消勾选可撤销授权。两个内部读写接口由后台排除页面按钮。修复 `getmenu` 未加载业务命令关联和真实请求中自定义角色新增未设置 `explicit` 策略的问题。
 
 - 修复未分类 `Do()`、数据库和程序错误被 `TypeError` 默认公开为 HTTP 422 / `business rule rejected` 的缺陷：未分类 Do 现在 fail closed 为 500，内层 PublicError 的 Kind、Code、HTTPStatus、Message 不再被 legacy 700/800 阶段码覆盖。标准 Manage 重复记录、缺少 Edit ID、Edit/Remove 不存在改为安全的 409/400/404；GORM、MySQL 1062 和 SQLite 唯一约束统一返回 409 并保留原始 cause，不向响应泄露 SQL、索引、DSN 或驱动原文。该兼容安全修复建议发布为 v1.2.2。
 

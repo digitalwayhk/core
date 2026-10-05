@@ -1,6 +1,7 @@
 package models
 
 import (
+	"reflect"
 	"sync"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
@@ -27,4 +28,16 @@ func getDataAction() persistencetypes.IDataAction {
 // 模型类型，不得感知或传入 IDataAction，也不得决定数据库位置。
 func NewManageModelList[T persistencetypes.IModel]() *entity.ModelList[T] {
 	return entity.NewModelList[T](getDataAction())
+}
+
+// EnsureStorage 在接受请求前通过框架数据访问初始化资料目录的全部模型表。
+func EnsureStorage() error {
+	for _, model := range []interface{}{NewCategory(), NewCatalogItem(), NewCatalogLine(), NewCatalogSpec()} {
+		rows := reflect.New(reflect.SliceOf(reflect.TypeOf(model))).Interface()
+		search := &persistencetypes.SearchItem{Page: 1, Size: 1, Model: model}
+		if err := getDataAction().Load(search, rows); err != nil {
+			return err
+		}
+	}
+	return nil
 }

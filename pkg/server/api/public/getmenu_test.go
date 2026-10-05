@@ -120,10 +120,14 @@ func TestGetLocalMenuCarriesEnglishTitles(t *testing.T) {
 	require.Equal(t, "System", dir.TitleEN)
 
 	expected := map[string][2]string{
-		"directorymanage": {"目录管理", "Directories"},
-		"menumanage":      {"菜单管理", "Menus"},
-		"configsettings":  {"配置设置", "Settings"},
-		"aiprovider":      {"AI 提供商", "AI Provider"},
+		"directorymanage":            {"目录管理", "Directories"},
+		"menumanage":                 {"菜单管理", "Menus"},
+		"configsettings":             {"配置设置", "Settings"},
+		"aiprovider":                 {"AI 提供商", "AI Provider"},
+		"managerolemanage":           {"角色管理", "Roles"},
+		"managerolepermissionmanage": {"角色权限管理", "Role Permissions"},
+		"manageprincipalmanage":      {"管理员", "Administrators"},
+		"manageprincipalrolemanage":  {"管理员角色绑定", "Administrator Roles"},
 	}
 	require.Len(t, dir.MenuItems, len(expected))
 	for _, item := range dir.MenuItems {

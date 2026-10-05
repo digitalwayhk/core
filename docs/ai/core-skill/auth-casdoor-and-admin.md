@@ -103,7 +103,9 @@ server.Start()
 
 新生成的 `server.json` 默认使用 SQLite `core_manage`。升级时若旧 `server.json` 完全没有 `ManageStore` 字段，Core 继续读取历史 `models` SQLite 库，避免目录和菜单看似丢失；需要切换到 `core_manage` 或 MySQL 时必须显式配置并自行迁移既有数据。一个进程只能绑定一个控制面数据库，后续尝试绑定不同数据库会在启动时失败，不能让 CRUD 与鉴权各自读取不同存储。
 
-Core `SystemManage` 提供角色、角色权限、管理员主体和主体角色绑定页。“绑定菜单默认权限”只为自定义角色幂等创建该菜单的 `view`、`search` 两条权限。当前版本不裁剪菜单或按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整启动、RoleCode 绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
+Core `SystemManage` 提供角色、角色权限、管理员主体和主体角色绑定页。选中自定义角色点击“配置权限”，或从角色权限管理页点击“配置角色权限”并选择角色，打开读取 `getmenu` 的服务、菜单、命令勾选树。`permissionselection` 回显已绑定权限，`savepermissionselection` 在事务中用显式选择集替换该角色权限：取消勾选撤销，空数组清空，未传选择集拒绝保存，权限必须属于已注册的 Manage 命令，内置角色不可修改。这两个内部读写接口由后台从 ViewModel 的按钮列表排除。旧 `bindmenu` API 保留，为自定义角色幂等创建菜单的 `view`、`search` 两条权限。
+
+当前版本不裁剪侧栏菜单或页面按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整启动、RoleCode 绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
 
 ## 可选 HMAC 请求认证
 

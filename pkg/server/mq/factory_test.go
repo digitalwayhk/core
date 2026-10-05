@@ -17,6 +17,22 @@ import (
 
 type factoryTestProvider struct{ name string }
 
+func TestBuildManager_DefaultDoesNotCreateProvider(t *testing.T) {
+	const name = "test-default-mq-off"
+	called := false
+	mq.RegisterProviderFactory(name, func(context.Context, *config.MQConfig) (mq.MQProvider, error) {
+		called = true
+		return &factoryTestProvider{name: name}, nil
+	})
+	t.Cleanup(func() { mq.UnregisterProviderFactory(name) })
+	cfg := &config.MQConfig{Provider: name}
+	cfg.ApplyDefaults()
+	manager, err := mq.BuildManager(context.Background(), cfg)
+	require.NoError(t, err)
+	require.Nil(t, manager)
+	require.False(t, called, "未显式启用 MQ 时不得创建 Provider 或发起连接")
+}
+
 func (p *factoryTestProvider) Name() string                { return p.name }
 func (*factoryTestProvider) Connect(context.Context) error { return nil }
 func (*factoryTestProvider) Close() error                  { return nil }

@@ -50,7 +50,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
 | 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、实例级 `OrderWriteRuntime`、共享 MySQL 远程权威库、`OrderRule` 配置同步、Prometheus scrape、Runtime 运行图验收 |
 | 管理界面全能力 | `examples/08-admin-manage-ui` | Manage View 字段/命令/子表配置、外键与子查询、导入导出、自定义 `editshow` 命令，对照 `web/admin` 的 `manage-ui` |
-| Manage 角色权限 | `examples/09-admin-manage-rbac` | Core 内建管理员与 RoleCode 绑定、`path + command` 权限、首个 Casdoor 管理员、TestToken、真实 HTTP 403 |
+| Manage 角色权限 | `examples/09-admin-manage-rbac` | 复用 08 的分类/条目业务 Manage API、Core 管理员与 RoleCode 绑定、`path + command` 权限、首个 Casdoor 管理员、TestToken、真实 HTTP 403 |
 | 业务统计、经营分析与服务报表 | `examples/07-shop-order-scale/order-service` | `stats.StatSpec`、OLTP/ClickHouse 引擎、快照 `Store`、`stats.Dashboard`、`stats.ReportDef`、Manage API 与服务子菜单 |
 | 多服务运行图（框架） | Admin `MonitorSystem` + ServerManage Runtime API | `POST /api/servermanage/runtimetopology`、`runtimeservice`；ClusterProvider + Prometheus；指标 `null+state` |
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	servertype "github.com/digitalwayhk/core/pkg/server/types"
+	manageservice "github.com/digitalwayhk/core/service/manage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestManageRoleManageExposesStandardCRUD(t *testing.T) {
 		commands = append(commands, route.RouterInfo().GetCommand())
 	}
 
-	require.ElementsMatch(t, []string{"view", "search", "add", "edit", "remove"}, commands)
+	require.ElementsMatch(t, []string{"view", "search", "add", "edit", "remove", "rolepermissions"}, commands)
 }
 
 func TestManageRolePermissionManageExposesBindingAndExactCRUD(t *testing.T) {
@@ -27,7 +28,18 @@ func TestManageRolePermissionManageExposesBindingAndExactCRUD(t *testing.T) {
 		commands = append(commands, route.RouterInfo().GetCommand())
 	}
 
-	require.ElementsMatch(t, []string{"view", "search", "add", "edit", "remove", "bindmenu"}, commands)
+	require.ElementsMatch(t, []string{"view", "search", "add", "edit", "remove", "bindmenu", "permissionselection", "savepermissionselection"}, commands)
+}
+
+func TestRolePermissionViewExcludesInternalAPIButtons(t *testing.T) {
+	manage := NewManageRolePermissionManage()
+	model := manageservice.GetViewModel(manage)
+	manage.ViewModel(model)
+	commands := make([]string, 0, len(model.Commands))
+	for _, command := range model.Commands {
+		commands = append(commands, command.Command)
+	}
+	require.ElementsMatch(t, []string{"add", "edit", "remove", "bindmenu"}, commands)
 }
 
 func TestDefaultMenuPermissionRowsOnlyIncludeViewAndSearch(t *testing.T) {

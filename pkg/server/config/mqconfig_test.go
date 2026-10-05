@@ -14,7 +14,7 @@ func TestMQConfigApplyDefaults_EmptyStruct(t *testing.T) {
 	var m MQConfig
 	m.ApplyDefaults()
 
-	assert.Equal(t, "auto", m.Mode)
+	assert.Equal(t, "off", m.Mode)
 	assert.Equal(t, "redis-stream", m.Provider)
 	assert.Equal(t, 3, m.Retry.RetryCount)
 	assert.Equal(t, 100*time.Millisecond, m.Retry.InitialDelay)
@@ -44,7 +44,7 @@ func TestMQConfigApplyDefaults_OldJSON(t *testing.T) {
 	var m MQConfig
 	require.NoError(t, json.Unmarshal([]byte(oldJSON), &m))
 	assert.NotPanics(t, func() { m.ApplyDefaults() })
-	assert.Equal(t, "auto", m.Mode)
+	assert.Equal(t, "off", m.Mode)
 	assert.Equal(t, "redis-stream", m.Provider)
 }
 
@@ -153,11 +153,22 @@ func TestMQConfigValidate_RejectedErrorsIncludeValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var cfg MQConfig
 			cfg.ApplyDefaults()
+			cfg.Mode = "auto"
 			tt.configure(&cfg)
 			err := cfg.Validate()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.want)
 		})
+	}
+}
+
+// TestMQConfigApplyDefaults_ExplicitModes 验证只有显式配置才启用自动探测或强制连接。
+func TestMQConfigApplyDefaults_ExplicitModes(t *testing.T) {
+	for _, mode := range []string{"off", "auto", "on"} {
+		cfg := MQConfig{Mode: mode}
+		cfg.ApplyDefaults()
+		require.Equal(t, mode, cfg.Mode)
+		require.NoError(t, cfg.Validate())
 	}
 }
 
