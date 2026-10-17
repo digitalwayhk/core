@@ -66,6 +66,44 @@
 
 默认 Outbox 的 100 条是单次取数批量；满批且有进展会连续处理，不存在固定每秒 1000 条调度上限。第一轮仍观察到 Outbox 积压，说明真实发布、确认与数据库路径也有实际成本；本次没有独立 Outbox 饱和压测或剖析，不能把它宣称为已具备 2000 条/秒端到端容量。
 
+## 建议优化顺序（方案，尚未实施）
+
+首期以现有单 order 副本持续处理 2000 笔/秒为目标，保留真实 HTTP、mTLS、远程幂等探测、Badger 持久提交、MySQL 事务、Outbox 与消费 ACK。业务事实及 Outbox 同事务、远端成功才 ACK 本地、同 key 失败屏障、stable 准入与旧 Boot 隔离均保留。
+
+| 路径 | 代价与适用范围 | 选择 |
+| --- | --- | --- |
+| 仅调大批量或缩短 ticker | 修改小，但重复扫描与串行消费仍存在，还可能增加事务/IO 压力 | 可作为对照实验，不作为完整方案 |
+| 直接增加 order 副本 | 能分担本地接单/同步；共享 MySQL 与同一消费组 active owner 仍可能成为瓶颈 | 单副本问题明确后再做容量矩阵 |
+| 接回已有自适应 worker，再优化发布/确认及分 key 消费 | 复用已有恢复、退避、确认及并发能力，分阶段验证每层队列 | 推荐 |
+
+### 1. 先统一 pending 调度，复用现有框架入口
+
+07 当前 `AutoSync=false` 并另启 100ms 业务循环。改为显式配置现有自适应 worker：`AutoSync=true`，候选起点 `SyncBatchSize=512`、`SyncFlushThreshold=32`、`SyncMaxCollectDelay=20ms`、`SyncBacklogDrainDelay=0`；这些是待测参数，不是默认值变更或吞吐承诺。
+
+移除重复的业务 ticker，由标准 `UseWriteBehind(OrderWriteBehindTarget)`、`ServiceContext.UseResource` 统一负责调度和资源关闭。当前 adaptive 构造器已在返回前初始化/恢复索引；正常 worker 调用队列处理，不逐批走 `ForceSyncBatch` 的全前缀重建。因此第一步可以同时避开固定等待和热路径重复扫描，不必先重写通用同步器。手动 `ForceSyncBatch` 的恢复语义需另外审查所有调用方，保持兼容，不能直接删去重建逻辑。
+
+接入时在开始远程事务前保留服务准入检查；通用存储 worker 本身不知道 stable ServiceContext，不能只改 `AutoSync` 而遗漏门禁。已有 Outbox 周期扫描负责可靠兜底，`NotifyOutbox` 只是成功同步后的低延迟唤醒，不是数据可靠性条件。失败/零进展继续退避，恢复沿用原卷，关闭仍检查未确认 pending。
+
+### 2. 再减少 Outbox 的数据库往返
+
+当前 `MarkPublishedBatch` 已合并事务，但 `MarkOutboxPublishedByIDs` 内部仍逐条 Update。先对待处理点查、批量确认查询设置适当的 `SkipCount=true`，并在 models 当前 MySQL 事务内实现真正的有界批量状态更新，只更新 published、发布时间和必要元数据。先核对并锁定完整 ID 集合，保持空集合无事务、已发布幂等成功、缺失 ID 报错及整批回滚，不因优化跳过模型约束、元数据或审计语义。索引是否需要补充由实际执行计划决定，通过框架启动阶段 EnsureStorage 管理。
+
+继续保留 earliest-first 加载、发布成功前缀确认与失败屏障。独立测量发布耗时和确认 SQL 成本后，再通过已有 `UseOutboxWithOptions` 评估分 key 并发；无需为了唤醒或并发新造另一套发布器。
+
+### 3. 消费端按业务 key 并发，复用已有 keyed-reliable
+
+为同一订单的创建/状态/支付事件统一提供稳定 ordering key，例如服务名与 OrderID 的组合；生产侧 Outbox 和 Broker 载荷保持一致。消费者先核对缓存失效、WebSocket 通知和去重处理的并发安全，再显式设置 `Subscription.KeyConcurrency`，依次测试 4、8，必要时才扩至 16。当前 Redis keyed 路径已有有界窗口批量读取和按 key 调度，同订单串行、不同订单并行；保持 owner、reclaim、ACK 及失败 key 隔离，不能把 subject 简单改成无界并发。
+
+先验证现有 keyed 路径是否达到目标；若 owner/ACK 的网络往返仍占主导，再对 Broker 调用做有界批量或 pipeline 优化，先证明所有权检查及 ACK 的原子边界不变。数据库事务、Lua 和 handler 不能被任意合并来换吞吐。单发布实例的 KeyConcurrency 也不代表多个 publisher 间已获得同 key 全局顺序，多副本须单独验证。全局默认仍保持旧串行契约，应用显式启用。
+
+### 4. 每一步独立对照，再做稳态和故障验收
+
+每阶段保持相同业务与持久化参数，对比原始基线和上一阶段，采集三层队列、最旧待处理时间、延迟、SQL 次数、每批条数、CPU、RSS 和磁盘；至少重复 5 次再判断稳定收益。用 CPU profile/SQL 与 Broker 指标定量归因，不把代码中的结构性开销直接当成全部耗时。
+
+最终建议验收为持续 2000 笔/秒 10 分钟：真实发送达到目标且发送器无丢弃，成功率至少 99.9%，已确认数据零丢失/错键，三层队列在稳态无持续增长，消费 lag 和 pending 均可排空。停载后 5 秒内各层排空作为首期目标，属于拟定验收目标，并非当前实测能力。保留本地 pending/磁盘背压；观测缺失或达到既有资源硬界时终止负载并记为未达标，不能提前结束窗口后宣称稳态通过。
+
+再验证断网、重投/重复、同 key 顺序与 revision、失败 key 对其他 key 的隔离、硬崩溃原卷恢复、旧 Boot 与关闭保护，以及相关包 race/公开契约回归；最后才做 1/2/4 副本扩展测试。实际生产消费方升级另列迁移范围，本方案不隐式授权。
+
 ## 复现与证据
 
 新增入口 `TestStableOrderWriteLoad` 默认跳过，只有明确开关和专属依赖时运行：
