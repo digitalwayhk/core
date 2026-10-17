@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -97,12 +98,25 @@ func (m *mockRouter) NoticeFiltersRouter(message interface{}, api types.IRouter)
 }
 func (m *mockRouter) GetHashKey() uint64 { return m.hash }
 
-func newRouterInfo(path string) *types.RouterInfo {
-	return &types.RouterInfo{
+func newRouterInfo(t *testing.T, path string) *types.RouterInfo {
+	t.Helper()
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{})
+	hub := types.NewRouteWebSocketHub("svc", bridge)
+	info := &types.RouterInfo{
 		Path:        path,
 		ServiceName: "svc",
 		PathType:    types.PublicType,
 	}
+	info.SetWebSocketHub("svc", hub)
+	t.Cleanup(func() {
+		if err := hub.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+		if err := bridge.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return info
 }
 
 func newMockRouter(info *types.RouterInfo, hash uint64) *mockRouter {
@@ -187,7 +201,7 @@ func TestCrossNodeBrokerDrainAndStop(t *testing.T) {
 	types.SetCrossNodeForwarder(broker)
 	defer types.SetCrossNodeForwarder(nil)
 
-	info := newRouterInfo("/ws/price")
+	info := newRouterInfo(t, "/ws/price")
 	router := newMockRouter(info, 99)
 	ws := &mockWebSocket{}
 	req := &mockRequest{serviceName: "svc"}
@@ -203,10 +217,10 @@ func TestCrossNodeBrokerDrainAndStop(t *testing.T) {
 // client triggers OnSubscriptionChange(active=true).
 func TestCrossNodeForwarderHookOnRegister(t *testing.T) {
 	capture := &noticeCapture{}
-	types.SetCrossNodeForwarder(capture)
-	defer types.SetCrossNodeForwarder(nil)
+	types.SetCrossNodeForwarderForService("svc", capture)
+	defer types.ClearCrossNodeForwarderForService("svc", capture)
 
-	info := newRouterInfo("/ws/test")
+	info := newRouterInfo(t, "/ws/test")
 	router := newMockRouter(info, 123)
 	ws := &mockWebSocket{}
 	req := &mockRequest{serviceName: "svc"}
@@ -236,10 +250,10 @@ func TestCrossNodeForwarderHookOnRegister(t *testing.T) {
 // after local dispatch.
 func TestCrossNodeForwarderHookOnNotice(t *testing.T) {
 	cap := &noticeCapture{}
-	types.SetCrossNodeForwarder(cap)
-	defer types.SetCrossNodeForwarder(nil)
+	types.SetCrossNodeForwarderForService("svc", cap)
+	defer types.ClearCrossNodeForwarderForService("svc", cap)
 
-	info := newRouterInfo("/ws/trade")
+	info := newRouterInfo(t, "/ws/trade")
 	router := newMockRouter(info, 77)
 	ws := &mockWebSocket{}
 	req := &mockRequest{serviceName: "svc"}
@@ -267,10 +281,10 @@ func TestCrossNodeForwarderHookOnNotice(t *testing.T) {
 // triggers OnSubscriptionChange(active=false).
 func TestCrossNodeForwarderUnregisterHook(t *testing.T) {
 	capture := &noticeCapture{}
-	types.SetCrossNodeForwarder(capture)
-	defer types.SetCrossNodeForwarder(nil)
+	types.SetCrossNodeForwarderForService("svc", capture)
+	defer types.ClearCrossNodeForwarderForService("svc", capture)
 
-	info := newRouterInfo("/ws/order")
+	info := newRouterInfo(t, "/ws/order")
 	routerA := newMockRouter(info, 55)
 	routerB := newMockRouter(info, 66)
 	wsA := &mockWebSocket{}
