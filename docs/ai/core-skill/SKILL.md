@@ -108,7 +108,7 @@ entity.Model
 19. 标准 `WebServer` 自动用 Core `ManageStore` 的主体/角色关系签发 RoleCode，并在 Router 前对所有标准与自定义 Manage command 统一按 `path + command` 鉴权；只有外部 IAM 映射才覆盖 `IManageRoleProvider`。不得把权限只放在 `ValidationBefore`、`DoBefore` 或前端按钮隐藏里。业务 Hook 仍负责领域限域、审计等横切语义，但不是 Core RBAC 的替代品。
 20. 每个服务必须有服务公共模型基座承载 `GetLocalDBName`/`GetRemoteDBName`、数据库名和 `TraceID`；两条业务支路继承它。不要在每个具体模型重复写数据库名或 TraceID。
 21. 水平扩展必须区分服务水平扩展、业务拆库和技术分片。默认不按服务实例拆最终业务库；多实例先写本地可靠 pending，再异步同步到同一个业务域远程权威库。
-22. 自动水平扩展必须启用 `AutoMachineID=true`，验证 ClusterProvider lease、ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和优雅下线恢复；不得硬编码固定 MachineID，也不得把注册发现写死到 Redis。
+22. 自动水平扩展必须启用 `AutoMachineID=true`。需要稳定身份与注册自愈时显式启用 `Cluster.IdentityMode=stable`，使用独占持久身份卷和独立编号账本；发现 lease 只管理节点存活，不分配或释放编号。默认 legacy 保留旧契约，不能据此推导 stable 保证。验证 ServiceInstanceID、多副本发现、本地 pending 目录隔离、共享远程权威库和退出/崩溃恢复；不得硬编码固定 MachineID，也不得把注册发现写死到 Redis。详见 [multiservice-and-observability.md](multiservice-and-observability.md)。
 23. 高吞吐业务写必须**先可靠写入本地 pending，再异步同步到远程权威库**，经 `UseWriteBehind(WriteBehindTarget)` 绑定目标。不得把每进程私有库冒充共享 remote，也不得用 Manage 的 `ModelList` 表轮询充当业务写热路径。
 24. 幂等边界必须在 README 写明当前扩展范围与降级风险，不得隐式失败或假装仍保持全局幂等。
 25. 性能 benchmark 使用示例 04 的模式：fixture 在计时外准备数据，按能力拆分负载，使用 `ReportAllocs/ResetTimer/StopTimer` 与分位数指标；创建业务主键必须用框架 `req.NewID()` 或同源 Snowflake worker。

@@ -8,6 +8,8 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 
 完整配置、实际 WorkerID 别名/容量、时间预留、import/recover/retire、独占卷与回滚要求见 [稳定实例身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不得移动既有 pending、重写历史 ID、把复制卷当成新副本，或用无上下文 `InitRequest.NewID` 生成业务主键。
 
+`UseOutbox` 默认每 100ms 唤醒、单次取数 100 条；取满且有发布进展时立即继续下一批，不是每秒 1000 条限流。失败记录保留重试；发布成功标记不代表消费者已 ACK。Inbox 是否是待处理队列由应用定义，示例 06 的 Inbox 是与业务投影同事务提交的已处理事件去重记录，未成功消息由可靠 MQ 订阅重投/reclaim。纯内存事件中心可注册和订阅，但内存队列自身不跨进程崩溃保留消息。07 的本地 pending 调度不同：当前每 100ms 只做一次至多 100 条同步，存在约 1000 条/秒的调度上限，不能用 Outbox 连续 drain 推导其吞吐。
+
 ## 多服务调用与事件
 
 以 `examples/06-shop-microservices` 为标准模板：

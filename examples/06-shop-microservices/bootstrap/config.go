@@ -54,9 +54,7 @@ func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.
 	return cfg
 }
 
-// DistributedServiceConfig creates the Redis-discovered, application-mTLS
-// configuration used by the three independent service processes.
-// DistributedServiceConfig 执行本文件能力对应的业务操作。
+// DistributedServiceConfig 创建三进程 mTLS 配置，默认 Redis 发现，显式端点可改用 etcd。
 func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *config.ServerConfig {
 	cfg := baseServiceConfig(name, port, dataCenterID, machineID)
 	cfg.Cluster.Mode = "on"
@@ -64,6 +62,10 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 	cfg.Cluster.AdvertiseAddress = AdvertiseAddress()
 	cfg.Cluster.HeartbeatInterval = time.Second
 	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: RedisDiscoveryPrefix(), TTL: 5 * time.Second}
+	if endpoint := strings.TrimSpace(os.Getenv("SHOP_ETCD_DISCOVERY_ENDPOINT")); endpoint != "" {
+		cfg.Cluster.Provider = "etcd"
+		cfg.Cluster.Providers.Etcd = config.EtcdProviderConfig{Endpoints: []string{endpoint}, Prefix: RedisDiscoveryPrefix(), TTL: 5 * time.Second}
+	}
 	serverName := strings.TrimSpace(os.Getenv("SHOP_GRPC_SERVER_NAME"))
 	if serverName == "" {
 		serverName = config.GRPCServerNameTargetService

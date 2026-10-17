@@ -50,12 +50,13 @@
 | 编号/级别 | 证据、影响 | 建议与边界 |
 | --- | --- | --- |
 | F-01 / P2 | HEAD 09f8ae3 的 git tree 无 .github/workflows/ci.yml、ci-scheduled.yml、consumer-smoke.yml；三个独立 workflow shell 门禁明确失败，自动 CI 不能按现有发布文档执行。candidate 脚本本身通过，但没有覆盖这些检查 | 单独恢复与 scripts/ci.sh 相匹配的最小权限、Action SHA 锁定、超时、artifact/summary 的工作流，并重新运行相关门禁。本轮记录并定位，不扩展为 CI 重建或远端发布任务 |
+| F-02 / P2 | 07 order-service/service.go 的 runPendingSyncLoop 每 100ms 只执行一次 DrainOnce，limit=100；理想调度上限约 1000 条/秒，实际还受事务耗时影响。持续写入 2000 条/秒会积压并最终触发背压 | 后续按每轮时间/条数预算连续推进有界批次，有积压且有进展时及时续跑；失败须退避，保留取消、ACK 与幂等契约，并以真实 MySQL/Broker 持续负载验证。本次仅补测与记录，不修改同步调度。Outbox 本身满批有进展会立即续取，不存在相同的固定 1000 条/秒调度上限 |
 
 框架现有 legacy 身份/自动编号仍保留旧限制，这是本候选的兼容选择，不能宣传 legacy 也已自愈。实际 WorkerID 容量有限；跨命名空间不能承诺 ID 唯一。复制身份卷、同时回滚整个权威和身份卷、无隔离证明的强制接管均不由本协议保证安全。
 
 ## 回归结果
 
-最终冻结源码回归于本轮结束：245 包，125 个有测试包通过，120 包无测试文件；两阶段退出码均为 0，Go 源码始末哈希一致。该运行内有 56 个 skip 测试项，包含 Provider 不适用分支、子进程 helper、显式集成开关和缺少外部依赖；不能把这 56 项全部解释为缺陷或已运行。07 原生双副本等另有显式运行证据。
+首次实施封存（提交 `fbf91bb`）回归：245 包，125 个有测试包通过，120 包无测试文件；两阶段退出码均为 0，Go 源码始末哈希一致。该运行内有 56 个 skip 测试项，包含 Provider 不适用分支、子进程 helper、显式集成开关和缺少外部依赖；不能把这 56 项全部解释为缺陷或已运行。后续补测单独记录在文末，不能把此全量结果冒称为补测变更后的再次全量运行。
 
 | 检查 | 当前状态 | 证据 |
 | --- | --- | --- |
@@ -90,9 +91,22 @@
 
 ## 尚未运行及发布边界
 
-- 真实未同步 pending 积压在崩溃时恢复：NOT_RUN；本轮验证原路径保留、订单与幂等事实正常重启，未伪造积压恢复结论。
+- 真实未同步 pending 积压在崩溃时恢复：首轮 NOT_RUN；后续已补跑 PASS，见文末真实记录。
 - Linux 容器中的本候选、原有 Compose stable 部署：NOT_RUN；本轮 Core 进程在 macOS arm64 运行。
-- etcd 多进程断网后的真实 gRPC 调用恢复：NOT_RUN；已运行真实 etcd owner/节点恢复、独立编号客户端和 legacy Provider 集成，不能由 Redis 三进程结果代替该场景。
+- etcd 多进程断网后的真实 gRPC 调用恢复：首轮 NOT_RUN；后续已补跑 PASS，见文末真实记录。
 - Bitzoom/futures 等实际升级、历史数据迁移、生产部署、真实 Casdoor 端到端：NOT_RUN。既有 Fake Casdoor、RBAC HTTP 与普通示例测试另属已运行回归。
 - MongoDB/ClickHouse/Kafka 等未配置外部后端的真实协议测试不由 Go 单元通过替代；以最终 skip 清单为准。
 - 本报告不授权混跑旧二进制、回填历史 ID、重建消费组、强制换主或迁移旧 pending。
+
+## 用户指出遗漏后的补测
+
+前两项隔离验收属于已授权计划，首轮没有环境或权限障碍，结束验收过早；NOT_RUN 是事实标记，不是完成要求的替代品。补测从 `fbf91bb` 开始，仍使用原分支，不更改生产消费方。
+
+- Redis/etcd 三进程断网恢复：PASS，race。`followup-etcd-redis-race-final.log`：两个真实三进程用例均通过；断网超过发现 TTL 后分别约 0.96 秒、2.71 秒恢复；真实 mTLS 业务请求成功，原实例 ID/MachineID/同次 Boot 保持，正常重启改变 Boot，退出不复活。etcd 只代理发现连接，事件与独立编号权威使用专用 Redis。
+- 07 真实积压硬崩溃恢复：PASS，race。`followup-pending-crash-race-sealed.log`：8 笔下单确认后，专用 MySQL 对应订单为 0；硬杀并 wait 两个 order 副本，原卷核对全部 8 条 pending，普通启动均拒绝未释放 Boot。显式 recover 后保留 InstanceID/MachineID/WorkerID、推进 BootEpoch 与时间上界，8 条订单自动汇合，9 条 Outbox 已发布（含原用例的 1 条），逐请求重试返回各自原 ID，真实查询可见；停止后原卷 pending=0。整个原生双副本用例 66.92 秒，崩溃子用例 7.15 秒，测试包退出码 0。这里证明的是进程硬杀后的原卷恢复，不是主机掉电或磁盘故障恢复。
+- Outbox 调度契约：PASS，event 整包 race，`followup-outbox-race.log`。新增 `TestOutboxNotificationDrainsBeyondDefaultBatch`，定时间隔一小时、单次 Notify、默认取数 100，连续确认 2001 条/21 批；此为内存调度契约测试，不证明真实后端能达到 2000 条/秒。07 pending 调度限制单独登记 F-02。
+- skill 已补齐主入口第 22 条及多服务、测试分片，避免主入口仍把 stable 编号描述为发现 lease 分配。`followup-skill-final.log` 校验 13 个权威文件/4 指针通过；`followup-logging.log`、`followup-vet-final.log` 检查通过。
+
+中间失败原样保留：`followup-etcd-redis-race.log` 首次 etcd 夹具误将事件 Redis 连接指向 etcd 网络代理，服务明确失败；修正独立连接后重测。`followup-pending-crash-race.log` 中离线核对工具只关闭 prefix，未关闭本工具进程的共享 Badger manager，导致它自己持锁阻止服务重启；显式关闭本轮专属 manager。`followup-pending-crash-race-final.log` 又暴露调用方 gRPC 连接尚未重连时写请求立即失败；夹具改为先通过真实只读业务查询确认恢复，再发单次幂等重试，不以自动重试写操作掩盖失败。进程 ready 只表示自身准入，不能替代调用方链路的恢复断言。
+
+本次按正确性、资源归属、兼容性和可靠性维度在主线程再次审查，只新增示例 06 显式 etcd 接线、验收测试与文档；没有修改 Core 身份/发现/发号实现和 07 同步调度。没有独立 reviewer。没有重跑首次封存的全框架 245 包，只对本次受影响入口补跑 race、配置单测、vet 和 skill/日志检查；整体框架发布仍受 F-01 与 F-02 及上述未运行范围约束。

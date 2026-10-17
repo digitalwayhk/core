@@ -158,3 +158,5 @@ docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml confi
 ## 显式稳定实例与注册恢复
 
 设置 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERATOR_NAMESPACE、SHOP_GENERATOR_EPOCH 后，bootstrap 从独占持久身份卷恢复稳定实例；必须先离线初始化，默认演示仍是 legacy。步骤、崩溃恢复与迁移见 [指南](../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。真实恢复回归为 `TestStableThreeProcessDiscoveryRecovery`：无通知删键、断网超过 TTL、readiness 503→200、mTLS 调用恢复、正常重启及退出不复活；不触碰共享 Redis。
+
+设置 `SHOP_ETCD_DISCOVERY_ENDPOINT` 可显式将三进程发现改为 etcd；发现命名空间仍用 `SHOP_REDIS_DISCOVERY_PREFIX`。事件和编号的 Redis 连接独立保留。对应真实断网回归为 `TestStableThreeProcessEtcdDiscoveryRecovery`，测试需提供独占 `CORE_TEST_ETCD_ADDR` 与 `CORE_TEST_REDIS_ADDR`。

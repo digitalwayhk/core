@@ -10,6 +10,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/identity"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +23,15 @@ import (
 
 // TestStableThreeProcessDiscoveryRecovery 以真实业务调用确认恢复，检查健康接口不足以代表服务就绪。
 func TestStableThreeProcessDiscoveryRecovery(t *testing.T) {
+	testStableThreeProcessDiscoveryRecovery(t, "redis")
+}
+
+// TestStableThreeProcessEtcdDiscoveryRecovery 验证 etcd 断网超过租约后真实 mTLS 调用恢复。
+func TestStableThreeProcessEtcdDiscoveryRecovery(t *testing.T) {
+	testStableThreeProcessDiscoveryRecovery(t, "etcd")
+}
+
+func testStableThreeProcessDiscoveryRecovery(t *testing.T, provider string) {
 	addr := os.Getenv("CORE_TEST_REDIS_ADDR")
 	if addr == "" {
 		t.Skip("需要独立测试 Redis")
@@ -38,10 +48,22 @@ func TestStableThreeProcessDiscoveryRecovery(t *testing.T) {
 	for _, name := range []string{"shop-user", "shop-supplier", "shop-order"} {
 		require.NoError(t, identity.Create(filepath.Join(root, name, "identity.json"), name, name+"-a"))
 	}
-	proxy := newDiscoveryProxy(t, addr)
+	target := addr
+	if provider == "etcd" {
+		target = os.Getenv("CORE_TEST_ETCD_ADDR")
+		if target == "" {
+			t.Skip("需要独立测试 etcd")
+		}
+	}
+	proxy := newDiscoveryProxy(t, target)
 	defer proxy.close()
 	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
-	user, supplier, order := startShopProcessesWithEnvironment(t, pki, prefix, map[string]string{"SHOP_REDIS_ADDR": proxy.listener.Addr().String(), "SHOP_IDENTITY_ROOT": root, "SHOP_GENERATOR_NAMESPACE": ns, "SHOP_GENERATOR_EPOCH": "epoch-a", "SHOP_GENERATOR_REDIS_ADDR": addr})
+	env := map[string]string{"SHOP_REDIS_ADDR": proxy.listener.Addr().String(), "SHOP_IDENTITY_ROOT": root, "SHOP_GENERATOR_NAMESPACE": ns, "SHOP_GENERATOR_EPOCH": "epoch-a", "SHOP_GENERATOR_REDIS_ADDR": addr}
+	if provider == "etcd" {
+		env["SHOP_REDIS_ADDR"] = addr
+		env["SHOP_ETCD_DISCOVERY_ENDPOINT"] = proxy.listener.Addr().String()
+	}
+	user, supplier, order := startShopProcessesWithEnvironment(t, pki, prefix, env)
 	defer user.Stop()
 	defer supplier.Stop()
 	defer order.Stop()
@@ -50,7 +72,12 @@ func TestStableThreeProcessDiscoveryRecovery(t *testing.T) {
 		waitProcessReady(t, p, "/api/ready", processes...)
 	}
 	waitProcessReady(t, user, "/api/shop-user/getproducts", processes...)
-	registry, err := cluster.NewRedisProvider(addr, 0, prefix+":discovery", 5*time.Second)
+	var registry cluster.DiscoveryProvider
+	if provider == "etcd" {
+		registry, err = cluster.NewEtcdProviderWithPrefix([]string{target}, 5*time.Second, prefix+":discovery")
+	} else {
+		registry, err = cluster.NewRedisProvider(addr, 0, prefix+":discovery", 5*time.Second)
+	}
 	require.NoError(t, err)
 	defer registry.Close()
 	before, err := registry.List(ctx, "", cluster.NodeStatusRunning)
@@ -58,9 +85,20 @@ func TestStableThreeProcessDiscoveryRecovery(t *testing.T) {
 	require.Len(t, before, 3)
 	raw := redis.NewClient(&redis.Options{Addr: addr})
 	defer raw.Close()
+	var etcd *clientv3.Client
+	if provider == "etcd" {
+		etcd, err = clientv3.New(clientv3.Config{Endpoints: []string{target}, DialTimeout: time.Second})
+		require.NoError(t, err)
+		defer etcd.Close()
+	}
 	// 不发送发现事件，直接删本轮节点键，必须由心跳/周期对账恢复。
 	for _, n := range before {
-		require.NoError(t, raw.Del(ctx, prefix+":discovery:nodes:"+n.ServiceName+":"+n.ID).Err())
+		if etcd != nil {
+			_, err = etcd.Delete(ctx, prefix+":discovery/"+n.ServiceName+"/"+n.ID)
+			require.NoError(t, err)
+		} else {
+			require.NoError(t, raw.Del(ctx, prefix+":discovery:nodes:"+n.ServiceName+":"+n.ID).Err())
+		}
 	}
 	require.Eventually(t, func() bool {
 		nodes, e := registry.List(ctx, "", cluster.NodeStatusRunning)
@@ -96,7 +134,7 @@ func TestStableThreeProcessDiscoveryRecovery(t *testing.T) {
 		}
 		require.True(t, found)
 	}
-	t.Logf("真实三进程：断连超过 TTL 后恢复耗时 %s；实例/编号/Boot 不变，mTLS 调用成功", time.Since(started))
+	t.Logf("真实三进程（%s）：断连超过 TTL 后恢复耗时 %s；实例/编号/Boot 不变，mTLS 调用成功", provider, time.Since(started))
 	// 使用原配置、业务目录及身份卷正常重启。
 	order.StopProcess()
 	require.NoError(t, order.Restart())

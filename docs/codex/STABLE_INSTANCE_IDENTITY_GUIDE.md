@@ -156,9 +156,12 @@ export SHOP_GENERATOR_EPOCH=initial-20261018
 
 ```bash
 CORE_TEST_REDIS_ADDR=127.0.0.1:16389 go test ./examples/integration/06-shop-microservices-three-process -run TestStableThreeProcessDiscoveryRecovery -count=1 -v
+CORE_TEST_REDIS_ADDR=127.0.0.1:16389 CORE_TEST_ETCD_ADDR=127.0.0.1:12389 go test ./examples/integration/06-shop-microservices-three-process -run TestStableThreeProcessEtcdDiscoveryRecovery -count=1 -v
 CORE_TEST_REDIS_ADDR=127.0.0.1:16389 CORE_TEST_STABLE_MYSQL_ADDR=127.0.0.1:13389 CORE_TEST_STABLE_MYSQL_PASSWORD='<专用测试库密码>' go test ./examples/integration/07-shop-order-scale-multi-process -run TestStableNativeOrderReplicas -count=1 -v
 ```
 
-06 检查无通知删键、断连超过 TTL、真实 mTLS 调用恢复、身份不变、正常重启及退出不复活。07 检查真实四进程、双订单副本的独立编号、共享 MySQL 订单、重复请求幂等和原卷重启。测试保留失败证据；目录存在不等于制造并恢复了真实 pending 积压，后者须单独验收。
+06 的两个用例分别检查 Redis/etcd 无通知删键、断连超过 TTL、真实 mTLS 调用恢复、身份不变、正常重启及退出不复活。示例可用 `SHOP_ETCD_DISCOVERY_ENDPOINT` 显式切换发现为 etcd，命名空间仍由 `SHOP_REDIS_DISCOVERY_PREFIX` 提供；事件与编号继续使用各自 Redis 连接，不随发现切换。
+
+07 检查真实四进程、双订单副本的独立编号、共享 MySQL 订单、重复请求幂等和原卷重启，并包含真实积压硬崩溃子用例：专用 MySQL 表读锁保持查询可用但阻止订单同步写入；下单确认后核对远端尚无对应订单，硬杀两个副本，从原 Badger 卷核对全部 pending；普通启动应拒绝未释放 Boot，再经显式 recover 沿用原卷，核对编号不变、BootEpoch 增加、远端事实与已发布 Outbox、请求幂等及本地 pending 清空。该用例不代表主机掉电、磁盘损坏或生产消费方迁移已验收。
 
 事件消费组目前仍按既有端点规则派生，历史 ServiceInstanceID 字段不回填；身份迁移不顺带重建消费组或重放历史消息。变更事件游标需要独立方案。

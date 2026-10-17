@@ -104,6 +104,9 @@ func TestStableNativeOrderReplicas(t *testing.T) {
 	retried = createDockerBuyerOrderWithRequest(t, user, token, supplier.ProductID, "stable-native-request")
 	require.Equal(t, created.OrderID, retried.OrderID)
 	t.Logf("07 双 order 副本：编号独立；原卷重启身份不变；共享权威订单及幂等结果保持，pending 路径保留")
+	t.Run("真实积压硬崩溃恢复", func(t *testing.T) {
+		verifyStablePendingCrashRecovery(t, a, mysqlAddr, "core_"+ns, user, token, supplier.ProductID, processes[2:])
+	})
 }
 func freeNativePort(t *testing.T) int {
 	t.Helper()

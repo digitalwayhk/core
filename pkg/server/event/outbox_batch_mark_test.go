@@ -4,6 +4,7 @@ package event_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -187,4 +188,23 @@ func pendingIDs(items []event.OutboxMessage) []string {
 		out = append(out, item.EventID)
 	}
 	return out
+}
+
+// TestOutboxNotificationDrainsBeyondDefaultBatch 验证一次唤醒会连续处理满批，不按定时间隔限流。
+// 使用内存夹具只证明调度契约，不证明真实 Broker/数据库吞吐。
+func TestOutboxNotificationDrainsBeyondDefaultBatch(t *testing.T) {
+	bridge := event.NewServiceEventBridge(event.NewStream(), event.ServiceEventBridgeOptions{SubscriberID: "svc"})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	bridge.SetExternalPublisher(&barrierExternal{})
+	store := &batchMarkStore{}
+	for i := 0; i < 2001; i++ {
+		store.pending = append(store.pending, event.OutboxMessage{EventID: fmt.Sprint(i), EventType: "fill", Subject: "fills", ShardKey: "a"})
+	}
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{SourceService: "trades", Store: store, Interval: time.Hour, External: true}))
+	bridge.NotifyOutbox()
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(store.marked) == 2001 && len(store.pending) == 0 && store.batchCalls == 21
+	}, 5*time.Second, time.Millisecond)
 }
