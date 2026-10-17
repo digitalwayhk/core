@@ -51,6 +51,7 @@
 | --- | --- | --- |
 | F-01 / P2 | HEAD 09f8ae3 的 git tree 无 .github/workflows/ci.yml、ci-scheduled.yml、consumer-smoke.yml；三个独立 workflow shell 门禁明确失败，自动 CI 不能按现有发布文档执行。candidate 脚本本身通过，但没有覆盖这些检查 | 单独恢复与 scripts/ci.sh 相匹配的最小权限、Action SHA 锁定、超时、artifact/summary 的工作流，并重新运行相关门禁。本轮记录并定位，不扩展为 CI 重建或远端发布任务 |
 | F-02 / P2 | 07 order-service/service.go 的 runPendingSyncLoop 每 100ms 只执行一次 DrainOnce，limit=100；理想调度上限约 1000 条/秒，实际还受事务耗时影响。持续写入 2000 条/秒会积压并最终触发背压 | 后续按每轮时间/条数预算连续推进有界批次，有积压且有进展时及时续跑；失败须退避，保留取消、ACK 与幂等契约，并以真实 MySQL/Broker 持续负载验证。本次仅补测与记录，不修改同步调度。Outbox 本身满批有进展会立即续取，不存在相同的固定 1000 条/秒调度上限 |
+| F-03 / P2 | ForceSyncBatch 每轮先 rebuildSyncQueue，全扫描模型前缀及反序列化，再限制本轮同步条数；积压增大时重复扫描增加工作量。随后两轮 2000 次/秒真实负载观察到约 4 万 pending | 旧格式索引重建与正常有界 drain 分离，保留崩溃/升级/并发 ACK 契约；未以 profile 证明其独占耗时。详见 [压测记录 L-02](ORDER_WRITE_LOAD_2026-10-18.md)，本轮未修复 |
 
 框架现有 legacy 身份/自动编号仍保留旧限制，这是本候选的兼容选择，不能宣传 legacy 也已自愈。实际 WorkerID 容量有限；跨命名空间不能承诺 ID 唯一。复制身份卷、同时回滚整个权威和身份卷、无隔离证明的强制接管均不由本协议保证安全。
 
@@ -110,3 +111,5 @@
 中间失败原样保留：`followup-etcd-redis-race.log` 首次 etcd 夹具误将事件 Redis 连接指向 etcd 网络代理，服务明确失败；修正独立连接后重测。`followup-pending-crash-race.log` 中离线核对工具只关闭 prefix，未关闭本工具进程的共享 Badger manager，导致它自己持锁阻止服务重启；显式关闭本轮专属 manager。`followup-pending-crash-race-final.log` 又暴露调用方 gRPC 连接尚未重连时写请求立即失败；夹具改为先通过真实只读业务查询确认恢复，再发单次幂等重试，不以自动重试写操作掩盖失败。进程 ready 只表示自身准入，不能替代调用方链路的恢复断言。
 
 本次按正确性、资源归属、兼容性和可靠性维度在主线程再次审查，只新增示例 06 显式 etcd 接线、验收测试与文档；没有修改 Core 身份/发现/发号实现和 07 同步调度。没有独立 reviewer。没有重跑首次封存的全框架 245 包，只对本次受影响入口补跑 race、配置单测、vet 和 skill/日志检查；整体框架发布仍受 F-01 与 F-02 及上述未运行范围约束。
+
+用户随后要求的真实吞吐压测已另行执行，见 [07 订单写入与消费压测](ORDER_WRITE_LOAD_2026-10-18.md)：两轮各 65000 笔，其中 2000 次/秒窗口各 60000 笔全部接单成功，但出现明显 pending/Outbox/消费组 lag。第二轮等待全部 ACK，核对最终无已确认丢失。短窗口接单通过不代表稳态端到端容量通过；没有修改生产实现或迁移消费方。

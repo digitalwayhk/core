@@ -33,7 +33,7 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 
 以 `examples/07-shop-order-scale` 为标准模板，在 06 的多服务边界之上演示可扩容 order 副本：
 
-- `AutoMachineID=true`：MachineID 由 ClusterProvider lease 分配，不得为可扩容副本硬编码固定 MachineID。
+- `AutoMachineID=true`：legacy 使用原有 ClusterProvider 编号契约；显式 stable 使用独立持久编号账本，发现 lease 不分配或释放编号。不得为可扩容副本硬编码固定 MachineID，详见 [稳定身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。
 - 每副本本地 pending / Outbox / Inbox / 投影目录隔离；最终订单权威库是**共享**远程库（Docker/多进程下为 MySQL 等），不是每进程 SQLite remote。
 - “有序可靠”不等于全局串行。高吞吐 Outbox 只有在 Store 能按 ordering key公平组成有界 batch、同 key按持久顺序恢复、消费者以 Inbox/业务 sequence收敛重复时，才可显式开启 key concurrency。单纯把 `LIMIT 1` 改大仍会被 hot key占满，不构成容量修复。失败案例与认证证据见 `docs/codex/cases/KEYED_RELIABLE_GLOBAL_SERIALIZATION_FAILURE.md`。
 - 下单热路径：public/private → business → `OrderWriteRuntime` → 本地可靠写 → `UseWriteBehind` 同步远程权威库；Manage 继续用 `ModelList` 做后台视图/配置（服务级 `GetList` 绑定同一权威库 DataAction 亦可），但不得替代业务写路径。
@@ -42,6 +42,8 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - 幂等边界必须写进 README：只扩展 order 时 user 入口幂等策略的限制；远程幂等探测在 MySQL 不可达时 fail-closed 或明确文档化降级风险。
 - 部署侧提供 Prometheus scrape 配置（如 `deploy/prometheus*.yml`），标签至少稳定暴露 `service` 与 `service_instance_id`，供 Runtime Aggregator 查询。
 - 集成测试：`examples/integration/07-shop-order-scale` 与 `07-shop-order-scale-multi-process`；多副本 UAT 应采样 discovery 确认 `MachineID`/`ServiceInstanceID` 唯一。
+
+真实容量测试必须区分成功接单、远程事实、Outbox 发布与消费 ACK。07 当前 100ms/100 条调度存在约 1000 条/秒的理论上限，且 `ForceSyncBatch` 每次先重建队列索引，会扫描模型前缀；积压规模会增加额外工作。消费组 pending=0 不代表未读取 lag=0。显式压测入口为 `TestStableOrderWriteLoad`，实测数据与未优化项见 [07 真实链路压测](../../codex/ORDER_WRITE_LOAD_2026-10-18.md)；不得仅凭短窗口 HTTP 成功率宣传稳态容量。
 
 ## PrefixedBadgerDB / ReliableWriteStore
 

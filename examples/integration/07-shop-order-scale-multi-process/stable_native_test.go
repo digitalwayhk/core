@@ -19,54 +19,9 @@ import (
 )
 
 func TestStableNativeOrderReplicas(t *testing.T) {
+	a, ns, processes := startStableNativeProcesses(t, 2)
 	redisAddr := os.Getenv("CORE_TEST_REDIS_ADDR")
 	mysqlAddr := os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR")
-	if redisAddr == "" || mysqlAddr == "" {
-		t.Skip("需要专用 Redis 和 CORE_TEST_STABLE_MYSQL_ADDR")
-	}
-	host, port, err := net.SplitHostPort(mysqlAddr)
-	require.NoError(t, err)
-	ns := fmt.Sprintf("stable-07-%d", time.Now().UnixNano())
-	root := t.TempDir()
-	gc := &config.IDGeneratorConfig{Provider: "redis", Namespace: ns, Epoch: "epoch-a", Providers: config.ClusterProviderConfig{Redis: config.RedisProviderConfig{Addr: redisAddr}}}
-	a, _, err := identity.BuildAuthority(gc)
-	require.NoError(t, err)
-	defer a.Close()
-	require.NoError(t, a.Initialize(context.Background()))
-	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
-	var processes []*integration.Suite
-	defer func() {
-		for _, p := range processes {
-			if t.Failed() {
-				p.PrintLog()
-			}
-			p.Stop()
-		}
-	}()
-	names := []string{"shop-user", "shop-supplier", "shop-order", "shop-order"}
-	binaries := []string{"user", "supplier", "order", "order"}
-	for i, name := range names {
-		replica := fmt.Sprintf("replica-%d", i)
-		stateRoot := filepath.Join(root, replica, "identity")
-		require.NoError(t, identity.Create(filepath.Join(stateRoot, name, "identity.json"), name, replica))
-		cert := pki.Services[name]
-		env := map[string]string{
-			"SHOP_REDIS_ADDR": redisAddr, "SHOP_REDIS_DISCOVERY_PREFIX": ns,
-			"SHOP_IDENTITY_ROOT": stateRoot, "SHOP_GENERATOR_REDIS_ADDR": redisAddr, "SHOP_GENERATOR_NAMESPACE": ns, "SHOP_GENERATOR_EPOCH": "epoch-a",
-			"SHOP_GRPC_SECURITY_MODE": "mtls", "SHOP_GRPC_CA_FILE": pki.CAFile, "SHOP_GRPC_CERT_FILE": cert.CertFile, "SHOP_GRPC_KEY_FILE": cert.KeyFile, "SHOP_GRPC_SERVER_NAME": "{service}", "SHOP_ADVERTISE_ADDRESS": "127.0.0.1",
-			"SHOP_METRICS_HOST": "127.0.0.1", "SHOP_METRICS_PORT": strconv.Itoa(freeNativePort(t)),
-			"SHOP_LOCAL_PENDING_DIR":       filepath.Join(root, replica, "pending"),
-			"SHOP_ORDER_REMOTE_MYSQL_HOST": host, "SHOP_ORDER_REMOTE_MYSQL_PORT": port, "SHOP_ORDER_REMOTE_MYSQL_USER": "root", "SHOP_ORDER_REMOTE_MYSQL_PASSWORD": os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "SHOP_ORDER_REMOTE_MYSQL_DATABASE": "core_" + ns,
-		}
-		count := i + 2
-		if i >= 2 {
-			count = 4
-		}
-		p, e := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/07-shop-order-scale/main/" + binaries[i], BinaryName: replica, ServiceCount: count, ServiceIndex: count - 1, HTTPServiceOffsets: []int{0, count - 1}, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: env, DisableRace: !integration.IsRaceRun()})
-		require.NoError(t, e)
-		processes = append(processes, p)
-		require.Eventually(t, func() bool { return nativeProbe(p.BaseURL+"/api/ready") == http.StatusOK }, 30*time.Second, 100*time.Millisecond, p.BaseURL)
-	}
 	registry, err := cluster.NewRedisProvider(redisAddr, 0, ns, 5*time.Second)
 	require.NoError(t, err)
 	defer registry.Close()
@@ -124,4 +79,58 @@ func nativeProbe(url string) int {
 	}
 	defer r.Body.Close()
 	return r.StatusCode
+}
+
+// startStableNativeProcesses 复用稳定身份、独占卷及真实多进程夹具。
+func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Authority, string, []*integration.Suite) {
+	t.Helper()
+	redisAddr := os.Getenv("CORE_TEST_REDIS_ADDR")
+	mysqlAddr := os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR")
+	if redisAddr == "" || mysqlAddr == "" {
+		t.Skip("需要专用 Redis 和 CORE_TEST_STABLE_MYSQL_ADDR")
+	}
+	host, port, err := net.SplitHostPort(mysqlAddr)
+	require.NoError(t, err)
+	ns := fmt.Sprintf("stable-07-%d", time.Now().UnixNano())
+	root := t.TempDir()
+	gc := &config.IDGeneratorConfig{Provider: "redis", Namespace: ns, Epoch: "epoch-a", Providers: config.ClusterProviderConfig{Redis: config.RedisProviderConfig{Addr: redisAddr}}}
+	a, _, err := identity.BuildAuthority(gc)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, a.Close()) })
+	require.NoError(t, a.Initialize(context.Background()))
+	pki := integration.NewGRPCTestPKI(t, "shop-user", "shop-supplier", "shop-order")
+	var processes []*integration.Suite
+	t.Cleanup(func() {
+		for _, p := range processes {
+			if t.Failed() {
+				p.PrintLog()
+			}
+			p.Stop()
+		}
+	})
+	names := []string{"shop-user", "shop-supplier", "shop-order", "shop-order"}
+	binaries := []string{"user", "supplier", "order", "order"}
+	for i, name := range names[:2+orderReplicas] {
+		replica := fmt.Sprintf("replica-%d", i)
+		stateRoot := filepath.Join(root, replica, "identity")
+		require.NoError(t, identity.Create(filepath.Join(stateRoot, name, "identity.json"), name, replica))
+		cert := pki.Services[name]
+		env := map[string]string{
+			"SHOP_REDIS_ADDR": redisAddr, "SHOP_REDIS_DISCOVERY_PREFIX": ns,
+			"SHOP_IDENTITY_ROOT": stateRoot, "SHOP_GENERATOR_REDIS_ADDR": redisAddr, "SHOP_GENERATOR_NAMESPACE": ns, "SHOP_GENERATOR_EPOCH": "epoch-a",
+			"SHOP_GRPC_SECURITY_MODE": "mtls", "SHOP_GRPC_CA_FILE": pki.CAFile, "SHOP_GRPC_CERT_FILE": cert.CertFile, "SHOP_GRPC_KEY_FILE": cert.KeyFile, "SHOP_GRPC_SERVER_NAME": "{service}", "SHOP_ADVERTISE_ADDRESS": "127.0.0.1",
+			"SHOP_METRICS_HOST": "127.0.0.1", "SHOP_METRICS_PORT": strconv.Itoa(freeNativePort(t)),
+			"SHOP_LOCAL_PENDING_DIR":       filepath.Join(root, replica, "pending"),
+			"SHOP_ORDER_REMOTE_MYSQL_HOST": host, "SHOP_ORDER_REMOTE_MYSQL_PORT": port, "SHOP_ORDER_REMOTE_MYSQL_USER": "root", "SHOP_ORDER_REMOTE_MYSQL_PASSWORD": os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "SHOP_ORDER_REMOTE_MYSQL_DATABASE": "core_" + ns,
+		}
+		count := i + 2
+		if i >= 2 {
+			count = 4
+		}
+		p, e := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/07-shop-order-scale/main/" + binaries[i], BinaryName: replica, ServiceCount: count, ServiceIndex: count - 1, HTTPServiceOffsets: []int{0, count - 1}, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: env, DisableRace: !integration.IsRaceRun()})
+		require.NoError(t, e)
+		processes = append(processes, p)
+		require.Eventually(t, func() bool { return nativeProbe(p.BaseURL+"/api/ready") == http.StatusOK }, 30*time.Second, 100*time.Millisecond, p.BaseURL)
+	}
+	return a, ns, processes
 }

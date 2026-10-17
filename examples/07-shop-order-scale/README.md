@@ -199,6 +199,8 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 
 水平扩容 benchmark 的多个 Badger 目录在逻辑和文件路径上完全隔离，但同机运行时仍共享宿主机 CPU 和物理磁盘，因此结果只用于同机同次趋势评估，不作为固定提升倍数门禁；真实容量评估仍需要按部署拓扑、独立卷、远程库和 MQ 配置重新压测。
 
+真实三进程写入压测使用 `examples/integration/07-shop-order-scale-multi-process` 的 `TestStableOrderWriteLoad`，默认跳过。它保留 HTTP、mTLS、远程幂等探测、本地可靠写、共享 MySQL、Outbox 与 Redis 消费 ACK，并逐笔核对已确认订单；必须显式配置专属依赖与证据目录。复现命令、2000 次/秒实测、三层积压及待优化问题见 [压测记录](../../docs/codex/ORDER_WRITE_LOAD_2026-10-18.md)。本次仅测试，没有调整同步或消费策略。
+
 ## 质量门禁
 
 - 禁止新增 `api/call`。
