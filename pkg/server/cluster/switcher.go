@@ -470,7 +470,17 @@ func reconcileProviderSnapshot(
 		}
 		cloned := cloneNodeInfo(node)
 		desired[cloned.ID] = cloned
-		if err := pending.Register(ctx, cloned); err != nil {
+		var registerErr error
+		if cloned.StableBootEpoch != 0 {
+			owned, ok := pending.(OwnedRegistry)
+			if !ok {
+				return errors.New("cluster: target lacks owned registration")
+			}
+			registerErr = owned.AcquireRegistration(ctx, cloned, RegistrationOwner{BootID: cloned.StableBootID, Epoch: cloned.StableBootEpoch})
+		} else {
+			registerErr = pending.Register(ctx, cloned)
+		}
+		if err := registerErr; err != nil {
 			result = errors.Join(result, fmt.Errorf("注册节点 %s 失败: %w", cloned.ID, err))
 		}
 	}
@@ -486,7 +496,12 @@ func reconcileProviderSnapshot(
 		if _, ok := desired[node.ID]; ok {
 			continue
 		}
-		if err := pending.Deregister(ctx, node.ID); err != nil && err != ErrNodeNotFound {
+		var deregisterErr error
+		if node.StableBootEpoch != 0 {
+			continue
+		}
+		deregisterErr = pending.Deregister(ctx, node.ID)
+		if err := deregisterErr; err != nil && err != ErrNodeNotFound {
 			result = errors.Join(result, fmt.Errorf("注销节点 %s 失败: %w", node.ID, err))
 		}
 	}

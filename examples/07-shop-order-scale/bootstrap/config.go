@@ -62,6 +62,7 @@ func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.
 		cfg.RuntimeObservability.Mode = "prometheus"
 		cfg.RuntimeObservability.QueryURL = "http://127.0.0.1:19090"
 	}
+	applyStableIdentity(cfg)
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -73,7 +74,7 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 	cfg.Cluster.Provider = "redis"
 	cfg.Cluster.AdvertiseAddress = AdvertiseAddress()
 	cfg.Cluster.HeartbeatInterval = time.Second
-	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: "core:discovery:07", TTL: 5 * time.Second}
+	cfg.Cluster.Providers.Redis = config.RedisProviderConfig{Addr: RedisAddress(), Prefix: envString("SHOP_REDIS_DISCOVERY_PREFIX", "core:discovery:07"), TTL: 5 * time.Second}
 	cfg.Transport.GRPC.Security = config.GRPCSecurityConfig{
 		Mode:       envString("SHOP_GRPC_SECURITY_MODE", "mesh"),
 		CAFile:     strings.TrimSpace(os.Getenv("SHOP_GRPC_CA_FILE")),
@@ -81,6 +82,10 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 		KeyFile:    strings.TrimSpace(os.Getenv("SHOP_GRPC_KEY_FILE")),
 		ServerName: envString("SHOP_GRPC_SERVER_NAME", config.GRPCServerNameTargetService),
 	}
+	if cfg.Transport.GRPC.Security.Mode != "mtls" {
+		cfg.Transport.GRPC.Security.ServerName = ""
+	}
+	applyStableIdentity(cfg)
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -91,6 +96,7 @@ func DistributedOrderConfig(port, dataCenterID int) *config.ServerConfig {
 	cfg.Transport.GRPC.Port = OrderGRPCPort(port)
 	cfg.Cluster.Claim.AutoMachineID = true
 	cfg.Cluster.Claim.MachineIDMax = 31
+	applyStableIdentity(cfg)
 	cfg.ApplyDefaults()
 	return cfg
 }

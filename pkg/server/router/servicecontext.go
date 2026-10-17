@@ -15,6 +15,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/cluster"
 	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/event"
+	"github.com/digitalwayhk/core/pkg/server/identity"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
@@ -55,6 +56,7 @@ func init() {
 }
 
 type ServiceContext struct {
+	stableIdentity           *stableIdentityRuntime
 	Config                   *config.ServerConfig
 	Service                  *types.Service
 	snow                     idgen.ISnowWorker
@@ -635,14 +637,16 @@ type serviceContextRegistry struct {
 	mu                   sync.RWMutex
 	contexts             map[string]*ServiceContext
 	initializing         map[string]*contextInitialization
+	readinessFailures    map[string]error
 	nextDefaultSequence  int
 	freeDefaultSequences []int
 }
 
 func newServiceContextRegistry() *serviceContextRegistry {
 	return &serviceContextRegistry{
-		contexts:     make(map[string]*ServiceContext),
-		initializing: make(map[string]*contextInitialization),
+		contexts:          make(map[string]*ServiceContext),
+		initializing:      make(map[string]*contextInitialization),
+		readinessFailures: make(map[string]error),
 	}
 }
 
@@ -723,6 +727,7 @@ func (r *serviceContextRegistry) getOrInitialize(
 	entry.result = result
 	if !entry.panicked && result != nil {
 		r.contexts[name] = result
+		delete(r.readinessFailures, name)
 	} else if reserveDefaultSequence {
 		r.freeDefaultSequences = append(r.freeDefaultSequences, sequence)
 	}
@@ -746,10 +751,17 @@ func assertServiceContextConfig(name, requestedFingerprint string, sc *ServiceCo
 }
 
 func (r *serviceContextRegistry) remove(name string, expected *ServiceContext) bool {
+	var failure error
+	if expected != nil && expected.stableIdentity != nil {
+		failure = errors.Join(expected.RuntimeError(), expected.ShutdownError())
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.contexts[name] != expected {
 		return false
+	}
+	if failure != nil {
+		r.readinessFailures[name] = failure
 	}
 	delete(r.contexts, name)
 	return true
@@ -903,7 +915,15 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 			logx.Field("error", err),
 		)
 	}
-	sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
+	if con.Cluster.IdentityMode == "stable" {
+		var err error
+		sc.stableIdentity, err = initializeStableIdentity(sc)
+		if err != nil {
+			panic(fmt.Sprintf("stable identity initialization failed: %v", err))
+		}
+	} else {
+		sc.ServiceInstanceID = newServiceInstanceID(sc.Service.Name)
+	}
 	if err := observability.RegisterProcessLabels(sc.Service.Name, sc.ServiceInstanceID); err != nil {
 		// 同进程多服务（测试 / all-in-one）时保留首次注册；非冲突错误才记日志。
 		if !errors.Is(err, observability.ErrProcessLabelsConflict) {
@@ -916,7 +936,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	}
 
 	if err := initCluster(sc); err != nil {
-		if con.Cluster.Mode == "on" {
+		if con.Cluster.Mode == "on" || sc.stableIdentity != nil {
 			panic(fmt.Sprintf("cluster: required provider init failed (mode=on): %v", err))
 		}
 		logx.Infow("cluster_degraded",
@@ -928,7 +948,7 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	// Phase 4: claim a unique MachineID before initialising Snowflake.
 	// AutoMachineID uses the configured ClusterProvider; legacy fixed mode keeps
 	// the process-local conflict guard used by earlier examples.
-	if con.Cluster.Mode != "off" {
+	if con.Cluster.Mode != "off" && sc.stableIdentity == nil {
 		machineID, err := claimMachineID(sc, con)
 		if err != nil {
 			if con.Cluster.Claim.AutoMachineID {
@@ -1041,7 +1061,11 @@ func initServiceContextPost(sc *ServiceContext, service types.IService, con *con
 	sc.RouteCacheManager = cacheManager
 	sc.PublicRateLimiter = ratelimit.NewManager(sc.Service.Name, 0)
 
-	sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
+	if sc.stableIdentity != nil {
+		sc.snow = sc.stableIdentity.generator
+	} else {
+		sc.snow = utils.NewAlgorithmSnowFlake(con.MachineID, con.DataCenterID)
+	}
 	sc.Router = NewServiceRouter(sc, service)
 	initialized = true
 }
@@ -1089,6 +1113,9 @@ func cleanupInitializedServiceContext(sc *ServiceContext) {
 	if sc.ownsClusterProvider && sc.ClusterProvider != nil {
 		_ = sc.ClusterProvider.Close()
 	}
+	if sc.stableIdentity != nil {
+		_ = sc.stableIdentity.close(!sc.stableIdentity.attempted.Load())
+	}
 	sc.AuthRevocationManager = nil
 	sc.CasdoorClients = nil
 	sc.RouteWebSocketHub = nil
@@ -1129,6 +1156,18 @@ func GetContexts() map[string]*ServiceContext {
 	return contextRegistry.snapshot()
 }
 func (own *ServiceContext) NewID() uint {
+	if own.stableIdentity != nil {
+		defer func() {
+			if failure := recover(); failure != nil {
+				cause, ok := failure.(error)
+				if !ok || !errors.Is(cause, identity.ErrAdmissionUnavailable) {
+					own.setRuntimeError(fmt.Errorf("stable generator failed: %v", failure))
+					go own.SetRunState(false)
+				}
+				panic(failure)
+			}
+		}()
+	}
 	return uint(own.snow.NextId())
 }
 
@@ -1151,7 +1190,12 @@ func (own *ServiceContext) UseOutboxWithOptions(
 	if own == nil || own.ServiceEventBridge == nil || own.Service == nil {
 		return event.ErrServiceEventBridgeClosed
 	}
+	var admission event.OutboxAdmission
+	if own.stableIdentity != nil {
+		admission = own
+	}
 	if err := own.ServiceEventBridge.UseOutbox(event.OutboxOptions{
+		Admission:      admission,
 		SourceService:  own.Service.Name,
 		Store:          store,
 		KeyConcurrency: options.KeyConcurrency,
@@ -1201,6 +1245,15 @@ func (own *ServiceContext) NotifyOutbox() {
 func (own *ServiceContext) SubscribeEvent(subscription event.Subscription) (func(), error) {
 	if own == nil || own.ServiceEventBridge == nil {
 		return nil, event.ErrServiceEventBridgeClosed
+	}
+	if own.stableIdentity != nil && subscription.Handler != nil {
+		handler := subscription.Handler
+		subscription.Handler = func(ctx context.Context, env *event.Envelope) error {
+			if err := own.CheckServiceAdmission(); err != nil {
+				return err
+			}
+			return handler(ctx, env)
+		}
 	}
 	cancel, err := own.ServiceEventBridge.SubscribeEvent(subscription)
 	if err != nil {
@@ -1288,14 +1341,19 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.ownsClusterProvider = false
 	}
 	own.lifecycleMu.Unlock()
+	if own.stableIdentity != nil && !state {
+		own.stableIdentity.beginStop()
+	}
 	if !state {
 		if cacheNotificationBridge != nil {
 			if err := cacheNotificationBridge.Close(); err != nil {
+				own.recordShutdownError(err)
 				own.recordShutdownError(err)
 			}
 		}
 		if authNotificationBridge != nil {
 			if err := authNotificationBridge.Close(); err != nil {
+				own.recordShutdownError(err)
 				own.recordShutdownError(err)
 			}
 		}
@@ -1327,6 +1385,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 	}
 	if !state {
 		defer func() {
+			if own.stableIdentity != nil {
+				own.recordShutdownError(own.stableIdentity.close(own.ShutdownError() == nil))
+			}
 			contextRegistry.remove(own.Service.Name, own)
 			own.completeShutdown()
 		}()
@@ -1350,7 +1411,10 @@ func (own *ServiceContext) SetRunState(state bool) {
 		if readyErr != nil {
 			own.setRuntimeError(readyErr)
 			own.isStart.Store(false)
-			if own.Config.Cluster.Mode == "on" {
+			if own.stableIdentity != nil {
+				own.stableIdentity.beginStop()
+			}
+			if own.Config.Cluster.Mode == "on" || own.stableIdentity != nil {
 				panic(fmt.Sprintf("grpc: service %s failed before discovery registration: %v", own.Service.Name, readyErr))
 			}
 			return
@@ -1360,7 +1424,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 			var err error
 			membership, err = own.startMembership(provider, node, interval, grpcServer)
 			if err != nil {
-				if own.Config.Cluster.Mode == "auto" && provider != own.localFallback() {
+				if own.Config.Cluster.Mode == "auto" && own.stableIdentity == nil && provider != own.localFallback() {
 					failedProvider := provider
 					registerErr := err
 					if cleanupErr := own.cleanupFailedRegistration(failedProvider, node.ID, registerErr); cleanupErr != nil {
@@ -1399,7 +1463,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 					startupErr := fmt.Errorf("cluster registration failed for service %s using provider %s: %w",
 						own.Service.Name, provider.Name(), err)
 					own.failStartup(startupErr, grpcServer)
-					if own.Config.Cluster.Mode == "on" {
+					if own.Config.Cluster.Mode == "on" || own.stableIdentity != nil {
 						panic(startupErr)
 					}
 					return
@@ -1418,6 +1482,9 @@ func (own *ServiceContext) SetRunState(state bool) {
 		own.membership = membership
 		own.CrossNodeBroker = broker
 		own.lifecycleMu.Unlock()
+		if own.stableIdentity != nil {
+			own.stableIdentity.running.Store(true)
+		}
 		own.superviseGRPC(grpcServer)
 	} else {
 		if shutdown, ok := switcher.(cluster.ProviderSwitchShutdown); ok {
@@ -1462,6 +1529,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		if routeWebSocketHub != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := routeWebSocketHub.Close(ctx); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("route_websocket_hub_close_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("error", err),
@@ -1478,6 +1546,7 @@ func (own *ServiceContext) SetRunState(state bool) {
 		if serviceEventBridge != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := serviceEventBridge.Close(ctx); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("service_event_bridge_close_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("error", err),
@@ -1489,10 +1558,12 @@ func (own *ServiceContext) SetRunState(state bool) {
 			types.ClearCrossNodeForwarderForService(own.Service.Name, broker)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			broker.DrainAndStop(ctx)
+			own.recordShutdownError(ctx.Err())
 			cancel()
 		}
 		if ownsClusterProvider && provider != nil {
 			if err := provider.Close(); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("cluster_provider_close_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("provider", provider.Name()),
@@ -1502,11 +1573,13 @@ func (own *ServiceContext) SetRunState(state bool) {
 		}
 		if mqManager != nil {
 			if err := mqManager.Close(); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorf("mq: close failed: %v", err)
 			}
 		}
 		if authRevocationManager != nil {
 			if err := authRevocationManager.Close(); err != nil {
+				own.recordShutdownError(err)
 				logx.Errorw("auth_revocation_manager_close_failed",
 					logx.Field("service", own.Service.Name),
 					logx.Field("error", err),
@@ -1595,6 +1668,9 @@ func (own *ServiceContext) syncProviderAfterSwitch() error {
 		return nil
 	}
 
+	if own.stableIdentity != nil {
+		own.stableIdentity.observe(time.Now(), identity.ErrAdmissionUnavailable)
+	}
 	if membership != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 		stopErr := membership.Stop(stopCtx)
@@ -1669,6 +1745,11 @@ func (own *ServiceContext) BeginProviderSwitch(ctx context.Context, to cluster.D
 	}
 	if switcher == nil {
 		return closeRejectedSwitchTarget(ctx, to, errors.New("cluster: switcher not initialised"))
+	}
+	if own.stableIdentity != nil {
+		if _, ok := to.(cluster.OwnedRegistry); !ok {
+			return closeRejectedSwitchTarget(ctx, to, errors.New("stable target lacks atomic ownership capability"))
+		}
 	}
 	return beginProviderSwitch(ctx, switcher, to)
 }
@@ -1790,6 +1871,10 @@ func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo,
 		GRPCPort:          own.Config.Transport.GRPC.Port,
 		Weight:            1,
 	}
+	if own.stableIdentity != nil {
+		node.StableBootID = own.stableIdentity.owner.BootID
+		node.StableBootEpoch = own.stableIdentity.owner.Epoch
+	}
 	interval := own.Config.Cluster.HeartbeatInterval
 	if interval == 0 {
 		interval = 3 * time.Second
@@ -1798,6 +1883,9 @@ func (own *ServiceContext) clusterMembershipConfig() (string, *cluster.NodeInfo,
 }
 
 func (own *ServiceContext) clusterNodeID(machineID uint) string {
+	if own.stableIdentity != nil {
+		return identity.InstanceKey(own.Service.Name, own.ServiceInstanceID)
+	}
 	instanceID := own.ServiceInstanceID
 	if instanceID == "" {
 		instanceID = "unknown"
@@ -1823,16 +1911,45 @@ func (own *ServiceContext) startMembership(
 			}
 		}()
 	}
-	if err := provider.Register(registerCtx, node); err != nil {
+	var registerErr error
+	if own.stableIdentity != nil {
+		stable := own.stableIdentity
+		owned, ok := provider.(cluster.OwnedRegistry)
+		if !ok {
+			registerErr = errors.New("stable discovery owner capability unsupported")
+		} else {
+			stable.attempted.Store(true)
+			stable.mu.Lock()
+			stable.ttl = owned.RegistrationTTL()
+			if stable.ttl <= 0 {
+				stable.ttl = 10 * time.Second
+			}
+			stable.mu.Unlock()
+			started := time.Now()
+			registerErr = owned.AcquireRegistration(registerCtx, node, stable.owner)
+			if registerErr == nil {
+				registerErr = cluster.VerifyRegistration(registerCtx, provider, node, stable.owner)
+			}
+			stable.observe(started, registerErr)
+		}
+	} else {
+		registerErr = provider.Register(registerCtx, node)
+	}
+	if registerErr != nil {
 		close(registerDone)
-		return nil, fmt.Errorf("register node %s: %w", node.ID, err)
+		return nil, fmt.Errorf("register node %s: %w", node.ID, registerErr)
 	}
 	close(registerDone)
 	if grpcServer != nil {
 		select {
 		case <-grpcServer.Done():
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
-			cleanupErr := provider.Deregister(cleanupCtx, node.ID)
+			var cleanupErr error
+			if own.stableIdentity != nil {
+				cleanupErr = provider.(cluster.OwnedRegistry).ReleaseRegistration(cleanupCtx, node, own.stableIdentity.owner)
+			} else {
+				cleanupErr = provider.Deregister(cleanupCtx, node.ID)
+			}
 			cleanupCancel()
 			serveErr := grpcServer.Err()
 			if serveErr == nil {
@@ -1845,7 +1962,17 @@ func (own *ServiceContext) startMembership(
 		default:
 		}
 	}
-	membership := cluster.NewMembershipManager(provider, node.ID, interval)
+	options := []cluster.MembershipOption{}
+	if stable := own.stableIdentity; stable != nil {
+		options = append(options, cluster.WithOwnedRegistration(node, stable.owner, stable.verify, func(start time.Time, err error) {
+			stable.observe(start, err)
+			if errors.Is(err, cluster.ErrRegistrationFenced) || errors.Is(err, cluster.ErrRegistrationAuthorityMissing) || errors.Is(err, identity.ErrOwnerConflict) || errors.Is(err, identity.ErrAuthorityMissing) || errors.Is(err, identity.ErrAuthorityInvalid) || errors.Is(err, identity.ErrBindingConflict) {
+				own.setRuntimeError(err)
+				go own.SetRunState(false)
+			}
+		}))
+	}
+	membership := cluster.NewMembershipManager(provider, node.ID, interval, options...)
 	membership.Start(context.Background())
 	return membership, nil
 }
@@ -1889,6 +2016,9 @@ func (own *ServiceContext) localFallback() cluster.DiscoveryProvider {
 func (own *ServiceContext) failStartup(err error, grpcServer types.GRPCServerLifecycle) {
 	own.setRuntimeError(err)
 	own.isStart.Store(false)
+	if own.stableIdentity != nil {
+		own.stableIdentity.beginStop()
+	}
 	if stopper, ok := own.TransportSelector.(interface{ Stop(context.Context) error }); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), own.lifecycleDuration())
 		own.recordShutdownError(stopper.Stop(ctx))
@@ -2297,6 +2427,12 @@ func initCluster(sc *ServiceContext) error {
 	provider, err := cluster.BuildProvider(&sc.Config.Cluster, processLocalRegistry)
 	if err != nil {
 		return err
+	}
+	if sc.stableIdentity != nil && sc.Config.Cluster.Mode != "off" && providerName(provider) != sc.Config.Cluster.Provider {
+		if provider != nil && provider != processLocalRegistry {
+			_ = provider.Close()
+		}
+		return errors.New("stable discovery cannot fall back to another provider")
 	}
 	sc.ClusterProvider = provider
 	sc.ownsClusterProvider = provider != nil && provider != processLocalRegistry

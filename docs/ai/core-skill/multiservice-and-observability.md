@@ -1,5 +1,13 @@
 # 多服务、事件、WebSocket 与可观测
 
+## 稳定实例身份与注册恢复
+
+需要稳定副本身份时显式设置 `Cluster.IdentityMode=stable`，提供绝对 `IdentityFile` 和独立 `IDGenerator` 配置；先用 `cmd/instance-identity` 离线初始化新权威和空身份卷，普通启动不自动 create。注册主键仅来自服务名和 InstanceID；MachineID/最终 WorkerID 由独立持久账本分配，发现 TTL 不释放编号。默认 legacy 维持旧契约。
+
+local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节点丢失由 MembershipManager 按同 Boot 恢复，消费方不写重注册循环。`/api/health` 表示存活，`/api/ready` 表示本进程准入；后台任务开始业务操作前检查 `ServiceContext.CheckServiceAdmission()`。硬崩溃后须先隔离旧进程，再显式 recover，不能凭 TTL 抢占。注册保护不能代替数据库提交 fencing。
+
+完整配置、实际 WorkerID 别名/容量、时间预留、import/recover/retire、独占卷与回滚要求见 [稳定实例身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不得移动既有 pending、重写历史 ID、把复制卷当成新副本，或用无上下文 `InitRequest.NewID` 生成业务主键。
+
 ## 多服务调用与事件
 
 以 `examples/06-shop-microservices` 为标准模板：

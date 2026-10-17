@@ -99,3 +99,9 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 旧 `/api/servermanage/openapi` 已按 `openapi-audience-split-v1` 批准删除。只需普通 Public/Private 描述的工具改用匿名 `GET /api/openapi`；需要内部专用 Public 和 `x-internal-callers` 的联调工具改用 `GET /api/internal/openapi`，携带 ServerManage 域 Token，并可通过 `service` query 筛选服务。
 
 消费方不得继续探测旧路径，也不得把匿名文档缺少内部路由视为接口删除。发布前应分别验证匿名文档不泄露内部调用方，以及内部身份能读取完整文档；当前已登记消费方未声明对旧 OpenAPI HTTP 路径的直接依赖，后续发现实际调用方时必须补充其精确 commit 和 smoke 证据。
+
+## 稳定实例身份候选的消费方门禁
+
+本轮只修改 Core 及其 06/07 示例，没有升级、重启或迁移 Bitzoom/futures 等消费方。消费方实测状态为 NOT_RUN；既有表中的锁定不能当成本候选的兼容证据。
+
+升级前先盘点实际 WorkerID 编码、容量/别名、原身份、可信完整历史时间上界及 pending 路径；旧值冲突或无法证明时停止 stable 迁移。为每个副本准备独占持久卷、显式独立编号权威和运维恢复流程。不得把既有事件消费组按新 InstanceID 自动改名，不回填历史实例字段。先在隔离部署验证断网超过 TTL 的真实调用恢复、原卷重启、硬崩溃拒绝抢占、授权 recover 和退出不复活，再固定精确 Core commit。具体步骤见 [指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。

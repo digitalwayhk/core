@@ -260,3 +260,28 @@
 | `ServerConfig.MQ.RocketMQ` | rejected | MQ factory | 未注册同名自定义 factory 时返回 not implemented |
 | `ServerConfig.MQ.RocketMQ.NameServers` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |
 | `ServerConfig.MQ.RocketMQ.Group` | rejected | MQ factory | 内建 RocketMQ provider 未实现，启用时拒绝 |
+| `ServerConfig.Cluster.IdentityFile` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.Cluster.IdentityMode` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.Cluster.InstanceID` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.LocalPath` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Provider` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Namespace` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Epoch` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.LocalDevelopment` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.ReservationWindow` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.StartupTimeout` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Etcd` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Etcd.Endpoints` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Etcd.Prefix` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Etcd.TTL` | rejected | IDGeneratorConfig.Validate | 非零值拒绝；编号绑定不能挂发现租约 |
+| `ServerConfig.IDGenerator.Providers.Consul` | rejected | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Consul.Address` | rejected | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Consul.Prefix` | rejected | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Consul.TTL` | rejected | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Redis` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Redis.Addr` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Redis.DB` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Redis.Prefix` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
+| `ServerConfig.IDGenerator.Providers.Redis.TTL` | rejected | IDGeneratorConfig.Validate | 非零值拒绝；编号绑定不能挂发现 TTL |

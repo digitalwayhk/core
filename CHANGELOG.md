@@ -6,6 +6,8 @@
 
 ### Added
 
+- 显式 `Cluster.IdentityMode=stable`：服务名与持久 InstanceID 作为注册身份，MachineID/实际 WorkerID 通过独立 local/Redis/etcd 权威绑定；持久 Boot 世代、生成时间预留和 owner 原子检查保护重启与注册恢复。新增离线 `cmd/instance-identity` create/import/recover/retire/capacity、新就绪探针 `/api/ready`、后台准入入口，以及 06/07 稳定副本真实进程回归。默认 legacy 保持；Consul stable 不支持。迁移说明见 `docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md`。
+
 - 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
 
 - 增加 `server.json.ManageStore`，统一选择 SQLite 或共享 MySQL 承载七类 Core Manage 控制面模型；`NewWebServer` 在监听前完成建库建表与内置角色初始化，失败时拒绝启动。业务服务配置不得重复声明，Core 不向消费方暴露控制面 `IDataAction`，SQLite 到 MySQL 的既有数据不自动迁移。
@@ -43,6 +45,8 @@
 - 默认内部 gRPC 传输：复用 go-zero zrpc Client、标准 gRPC health、独立 ServiceContext 生命周期、TLS/mTLS/mesh 和协议级三进程验证。
 
 ### Changed
+
+- stable 的路由、受管理事件订阅和 Outbox 在业务操作前检查自身准入；临时发现故障恢复后可继续，持久权威冲突/损坏停止服务。`OutboxOptions.Admission` 为可选接口，保留零值和结构可比较性。无服务上下文的 `InitRequest.NewID` 不再使用包级备用编号，元数据枚举不得生成真实业务主键；正式主键改由受保护 ServiceContext 获取，迁移说明同上。
 
 - MQ 缺省 `Mode` 从 `auto` 改为 `off`，未配置的服务不再自动探测本机 Redis。需要 MQ 的服务必须在自己的配置文件显式设置 `auto/on` 和 Broker 地址；已有 JSON 中明确保存的 `auto/on` 保持不变，旧版本自动生成的 `auto` 如不需要 MQ 应手动改为 `off`。迁移边界见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
 

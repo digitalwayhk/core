@@ -21,6 +21,7 @@ const redisDiscoveryConnectTimeout = 2 * time.Second
 const redisDiscoveryEventMaxLen = 10000
 
 var redisRegisterNodeScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[6]) == 1 then return -1 end
 local owner = redis.call('GET', KEYS[1])
 if owner and owner ~= ARGV[1] then
   return 0
@@ -34,6 +35,7 @@ return 1
 `)
 
 var redisDeregisterNodeScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[6]) == 1 then return -1 end
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   redis.call('DEL', KEYS[1])
 end
@@ -70,7 +72,7 @@ func NewRedisProvider(addr string, db int, prefix string, ttl time.Duration) (*R
 	if ttl <= 0 {
 		ttl = 10 * time.Second
 	}
-	client := redis.NewClient(&redis.Options{Addr: addr, DB: db})
+	client := redis.NewClient(&redis.Options{Addr: addr, DB: db, ContextTimeoutEnabled: true})
 	ctx, cancelConnect := context.WithTimeout(context.Background(), redisDiscoveryConnectTimeout)
 	err := client.Ping(ctx).Err()
 	cancelConnect()
@@ -106,11 +108,14 @@ func (p *RedisProvider) Register(ctx context.Context, node *NodeInfo) error {
 		return err
 	}
 	result, err := redisRegisterNodeScript.Run(ctx, p.client,
-		[]string{p.slotKey(copyNode), p.nodeKey(copyNode.ServiceName, copyNode.ID), p.indexKey(copyNode.ID), p.serviceKey(copyNode.ServiceName), p.eventsKey()},
+		[]string{p.slotKey(copyNode), p.nodeKey(copyNode.ServiceName, copyNode.ID), p.indexKey(copyNode.ID), p.serviceKey(copyNode.ServiceName), p.eventsKey(), p.prefix + ":owners:" + node.ID},
 		copyNode.ID, data, p.ttl.Milliseconds(), copyNode.ServiceName, redisDiscoveryEventMaxLen,
 	).Int()
 	if err != nil {
 		return fmt.Errorf("redis discovery register %s: %w", copyNode.ID, err)
+	}
+	if result == -1 {
+		return ErrRegistrationFenced
 	}
 	if result == 0 {
 		return fmt.Errorf("%w: service=%s datacenter=%d machine=%d", ErrSlotConflict, copyNode.ServiceName, copyNode.DataCenterID, copyNode.MachineID)
@@ -124,10 +129,13 @@ func (p *RedisProvider) Deregister(ctx context.Context, nodeID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = redisDeregisterNodeScript.Run(ctx, p.client,
-		[]string{p.slotKey(node), p.nodeKey(node.ServiceName, node.ID), p.indexKey(node.ID), p.serviceKey(node.ServiceName), p.eventsKey()},
+	result, err := redisDeregisterNodeScript.Run(ctx, p.client,
+		[]string{p.slotKey(node), p.nodeKey(node.ServiceName, node.ID), p.indexKey(node.ID), p.serviceKey(node.ServiceName), p.eventsKey(), p.prefix + ":owners:" + node.ID},
 		node.ID, node.ServiceName, redisDiscoveryEventMaxLen,
-	).Result()
+	).Int()
+	if result == -1 {
+		return ErrRegistrationFenced
+	}
 	if err != nil {
 		return fmt.Errorf("redis discovery deregister %s: %w", nodeID, err)
 	}

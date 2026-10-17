@@ -21,6 +21,7 @@ import (
 )
 
 type ServerConfig struct {
+	IDGenerator *IDGeneratorConfig `json:",optional,omitempty"`
 	rest.RestConf
 	DataCenterID          uint
 	MachineID             uint
@@ -46,6 +47,9 @@ type ServerConfig struct {
 // ApplyDefaults 为 ServerConfig 及其子配置补充缺失的默认值。
 // ReadConfig、NewServiceDefaultConfig、Save 均必须调用此方法。
 func (con *ServerConfig) ApplyDefaults() {
+	if con.IDGenerator != nil {
+		con.IDGenerator.ApplyDefaults()
+	}
 	if con.WhiteList == nil {
 		con.WhiteList = make([]string, 0)
 	}
@@ -71,6 +75,9 @@ func (con *ServerConfig) ApplyDefaults() {
 
 // Validate 校验 ServerConfig 中各子配置的合法性。
 func (con *ServerConfig) Validate() error {
+	if err := con.validateIdentity(); err != nil {
+		return err
+	}
 	if strings.EqualFold(strings.TrimSpace(con.Name), "server") {
 		if con.ManageStore == nil {
 			return fmt.Errorf("ManageStore is required for server")

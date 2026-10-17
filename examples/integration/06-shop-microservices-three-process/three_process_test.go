@@ -136,10 +136,20 @@ func TestThreeProcessDiscoveryAndRemoteCalls(t *testing.T) {
 // startShopProcesses 并发启动用户、供应商和订单三个真实进程，使用同一 Redis 前缀和独立 mTLS 身份。
 func startShopProcesses(t *testing.T, pki *integration.GRPCTestPKI, redisPrefix string) (*integration.Suite, *integration.Suite, *integration.Suite) {
 	t.Helper()
+	return startShopProcessesWithEnvironment(t, pki, redisPrefix, nil)
+}
+
+func startShopProcessesWithEnvironment(t *testing.T, pki *integration.GRPCTestPKI, redisPrefix string, extra map[string]string) (*integration.Suite, *integration.Suite, *integration.Suite) {
+	t.Helper()
 	specs := []integration.ProcessOptions{
 		{BuildPackage: "./examples/06-shop-microservices/main/user", BinaryName: "shop-user", TempPrefix: "core-shop-user-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-user", redisPrefix), DisableRace: !integration.IsRaceRun()},
 		{BuildPackage: "./examples/06-shop-microservices/main/supplier", BinaryName: "shop-supplier", TempPrefix: "core-shop-supplier-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-supplier", redisPrefix), DisableRace: !integration.IsRaceRun()},
 		{BuildPackage: "./examples/06-shop-microservices/main/order", BinaryName: "shop-order", TempPrefix: "core-shop-order-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: processEnvironment(pki, "shop-order", redisPrefix), DisableRace: !integration.IsRaceRun()},
+	}
+	for i := range specs {
+		for key, value := range extra {
+			specs[i].Environment[key] = value
+		}
 	}
 	results := make([]*integration.Suite, len(specs))
 	errs := make([]error, len(specs))

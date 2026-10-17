@@ -154,3 +154,7 @@ docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml confi
 ```
 
 同进程和三进程测试都经过真实 `ServiceContext`/`ServiceResolver`。三进程测试还断言 User→Order、Order→Supplier 的 gRPC 计数增长、HTTP 计数为零，并拒绝错误 PKI。
+
+## 显式稳定实例与注册恢复
+
+设置 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERATOR_NAMESPACE、SHOP_GENERATOR_EPOCH 后，bootstrap 从独占持久身份卷恢复稳定实例；必须先离线初始化，默认演示仍是 legacy。步骤、崩溃恢复与迁移见 [指南](../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。真实恢复回归为 `TestStableThreeProcessDiscoveryRecovery`：无通知删键、断网超过 TTL、readiness 503→200、mTLS 调用恢复、正常重启及退出不复活；不触碰共享 Redis。

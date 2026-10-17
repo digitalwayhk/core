@@ -121,3 +121,7 @@ CORE_TEST_REDIS=1 ./scripts/test.sh integration
 ## 日志与安全
 
 路由、缓存、事件和 WebSocket 日志只记录稳定事件名、service、route、状态、计数和错误，不记录请求/响应正文、缓存值、WebSocket payload、token、密码或 Redis 密码。逐请求缓存旁路不应重复打印错误；状态转换由拥有恢复或降级决策的边界记录。
+
+## 稳定身份准入
+
+stable 服务的 RouterInfo.Exec 在可信内部调用方授权后、Parse 前检查自身准入；健康和就绪探针按已冻结的实际路由路径豁免，不能信任请求自报路径。InitRequest 元数据请求没有服务上下文时不得生成真实业务 ID；正式主键通过已初始化的 ServiceContext.NewID 获取。后台业务任务自行在开始操作前调用 CheckServiceAdmission。注册隔离不能替代在途数据库事务 fencing，见 [稳定身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。

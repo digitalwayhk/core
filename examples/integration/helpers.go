@@ -25,29 +25,32 @@ import (
 
 // Suite 保存一次集成测试进程共享的服务地址和子进程资源。
 type Suite struct {
-	RootDir      string
-	BasePort     int
-	GRPCBasePort int
-	BaseURL      string
-	WebSocketURL string
-	Binary       string
-	Arguments    []string
-	Environment  map[string]string
-	command      *exec.Cmd
-	outputFile   *os.File
+	RootDir            string
+	BasePort           int
+	GRPCBasePort       int
+	BaseURL            string
+	WebSocketURL       string
+	Binary             string
+	Arguments          []string
+	Environment        map[string]string
+	HTTPServiceOffsets []int
+	command            *exec.Cmd
+	outputFile         *os.File
 }
 
 // ProcessOptions 描述一个与具体业务无关的示例进程启动方式。
 type ProcessOptions struct {
-	BuildPackage     string
-	BinaryName       string
-	TempPrefix       string
-	ServiceCount     int
-	ServiceIndex     int
-	GRPCServiceCount int
-	Arguments        []string
-	Environment      map[string]string
-	DisableRace      bool
+	BuildPackage string
+	BinaryName   string
+	TempPrefix   string
+	ServiceCount int
+	ServiceIndex int
+	// HTTPServiceOffsets 指定稀疏的实际监听偏移；空值保持原来连续端口契约。
+	HTTPServiceOffsets []int
+	GRPCServiceCount   int
+	Arguments          []string
+	Environment        map[string]string
+	DisableRace        bool
 }
 
 // ResponseEnvelope 对应框架默认 HTTP 响应外壳。
@@ -185,6 +188,11 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 	if options.ServiceIndex < 0 || options.ServiceIndex >= options.ServiceCount {
 		return nil, fmt.Errorf("服务索引 %d 超出服务数量 %d", options.ServiceIndex, options.ServiceCount)
 	}
+	for _, offset := range options.HTTPServiceOffsets {
+		if offset < 0 || offset >= options.ServiceCount {
+			return nil, fmt.Errorf("HTTP 监听偏移 %d 超出预留范围", offset)
+		}
+	}
 	if options.TempPrefix == "" {
 		options.TempPrefix = "core-integration-"
 	}
@@ -238,6 +246,7 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		BaseURL:      "http://127.0.0.1:" + strconv.Itoa(basePort+options.ServiceIndex),
 		WebSocketURL: "ws://127.0.0.1:" + strconv.Itoa(basePort+options.ServiceIndex) + "/ws",
 		Binary:       binary, Arguments: arguments, Environment: cloneEnvironment(options.Environment),
+		HTTPServiceOffsets: append([]int(nil), options.HTTPServiceOffsets...),
 	}
 	if err := suite.Restart(); err != nil {
 		cleanup()
@@ -291,6 +300,18 @@ func (s *Suite) waitBoundPorts(httpCount, grpcCount int, timeout time.Duration) 
 
 func (s *Suite) allPortsAccepting(httpCount, grpcCount int) bool {
 	for offset := 0; offset < httpCount; offset++ {
+		if len(s.HTTPServiceOffsets) > 0 {
+			included := false
+			for _, expected := range s.HTTPServiceOffsets {
+				if offset == expected {
+					included = true
+					break
+				}
+			}
+			if !included {
+				continue
+			}
+		}
 		if !tcpPortAccepting(s.BasePort + offset) {
 			return false
 		}

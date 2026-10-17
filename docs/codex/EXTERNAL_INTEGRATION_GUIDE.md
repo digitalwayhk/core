@@ -33,3 +33,7 @@ docker compose -f docker-compose.integration.yml --profile kafka up -d kafka
 ```
 
 Core 没有内建 Kafka `MQProvider`。`BuildManager` 对未注册的 kafka provider 返回配置错误；应用只有在注册自定义 `ProviderFactory` 后才能使用。不得设置或报告 `CORE_TEST_KAFKA`，直到仓库拥有 Kafka provider 契约测试。
+
+## 稳定身份与独立测试资源
+
+stable 发现支持 local、Redis、etcd，Consul 明确拒绝；不能从 legacy Consul 测试通过推断 stable 支持。编号客户端与发现客户端独立持有；编号键和 owner 元数据不能挂发现 TTL。见 [稳定身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。新增单元/契约实测使用 CORE_TEST_REDIS_ADDR 与 CORE_TEST_ETCD_ADDR；06 三进程和 07 原生双副本分别验证运行期恢复和共享 MySQL 业务。测试必须使用独占端口、唯一 Namespace/Prefix，禁止 FLUSHDB 或重启共享 Broker。

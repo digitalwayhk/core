@@ -19,6 +19,9 @@ const (
 
 // ClusterConfig 集群配置。Mode=off 时单机运行，Mode=auto 时自动检测，Mode=on 时强制进入集群流程。
 type ClusterConfig struct {
+	IdentityMode          string                          `json:",optional"`
+	InstanceID            string                          `json:",optional"`
+	IdentityFile          string                          `json:",optional"`
 	Mode                  string                          `json:",optional"` // off | auto | on
 	Provider              string                          `json:",optional"` // local | etcd | consul
 	NodeName              string                          `json:",optional"`

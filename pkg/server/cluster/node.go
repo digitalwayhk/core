@@ -27,6 +27,10 @@ const (
 
 // NodeInfo describes a single service instance in the cluster.
 type NodeInfo struct {
+	// StableBootID 与 StableBootEpoch 是内部所有权诊断字段，不参与注册主键。
+	StableBootID    string `json:"stable_boot_id,omitempty"`
+	StableBootEpoch uint64 `json:"stable_boot_epoch,omitempty"`
+
 	// ID is globally unique, e.g. "<service>-<datacenter>-<machine>-<pid>"
 	ID string `json:"id"`
 

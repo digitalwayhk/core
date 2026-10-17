@@ -32,3 +32,7 @@
 删除条件：仓库内调用清零；futures 等已登记消费方迁移；CHANGELOG Removed 段完整；新旧版本 smoke 证据可复现。
 
 自定义内部 Socket 表面依据 `socket-to-grpc-v1` 的 MAJOR 变更批准直接删除。Logto、静态服务依赖和顶层遗留配置依据 `logto-legacy-service-config-removal-v1` 直接删除；两者均不进入长期 Deprecated 状态。
+
+## 稳定实例身份候选
+
+legacy 注册/自动编号暂保留为兼容默认，未安排删除版本；没有稳定身份与注册自愈保证。新稳定部署使用 IdentityMode=stable 和独立 IDGenerator，旧部署需先完成审计迁移。InitRequest 的无上下文包级 NewID fallback 不再用于真实主键；元数据枚举改为 DTO/类型声明，业务编号由已初始化 ServiceContext 生成。禁止混跑旧二进制与同身份 stable 副本。迁移见 [指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。

@@ -103,3 +103,7 @@ SHOP_RUN_DOCKER_UAT=1 GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test 
 ```
 
 Docker UAT 会读取 Redis discovery 中的 `shop-order` 节点，确认两个副本拥有不同 `MachineID` 和 `ServiceInstanceID`；买家角色还会用相同 `requestID` 重试下单，确认入口层幂等不会返回漂移的订单号。
+
+## stable 身份迁移边界
+
+本目录现有 Compose 默认保留 legacy。启用 stable 前，按 [指南](../../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md) 为每个固定/扩容副本离线创建身份，配置独立编号权威，并将 SHOP_IDENTITY_ROOT 挂到副本独占持久卷；与原 pending 卷一同备份。当前匿名 pending 卷不能被当成身份初始化或跨容器替换保证。不要删除/改名原 pending 卷，也不要在未初始化身份时直接给整套已有 Compose 打开 stable。

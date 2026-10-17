@@ -12,6 +12,7 @@ import (
 // but has no network distribution; all nodes must share the same process
 // (or the registry must be passed by pointer).
 type LocalProvider struct {
+	owners           map[string]RegistrationOwner
 	mu               sync.RWMutex
 	nodes            map[string]*NodeInfo // nodeID → node
 	watchers         map[string][]watcherEntry
@@ -67,6 +68,9 @@ func (p *LocalProvider) Register(_ context.Context, node *NodeInfo) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if _, owned := p.owners[node.ID]; owned {
+		return ErrRegistrationFenced
+	}
 	now := time.Now()
 
 	// Check for slot conflicts.
@@ -101,6 +105,9 @@ func (p *LocalProvider) Register(_ context.Context, node *NodeInfo) error {
 func (p *LocalProvider) Deregister(_ context.Context, nodeID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, owned := p.owners[nodeID]; owned {
+		return ErrRegistrationFenced
+	}
 	node, ok := p.nodes[nodeID]
 	if !ok {
 		return ErrNodeNotFound
@@ -114,6 +121,9 @@ func (p *LocalProvider) Deregister(_ context.Context, nodeID string) error {
 func (p *LocalProvider) Heartbeat(_ context.Context, nodeID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, owned := p.owners[nodeID]; owned {
+		return ErrRegistrationFenced
+	}
 	node, ok := p.nodes[nodeID]
 	if !ok {
 		return ErrNodeNotFound

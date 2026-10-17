@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 // MembershipManager sends heartbeats for a registered node and handles
 // graceful deregistration on shutdown.
 type MembershipManager struct {
+	ownedNode   *NodeInfo
+	owner       RegistrationOwner
+	verifyOwner func(context.Context) error
+	observe     func(time.Time, error)
+
 	registry        ClusterRegistry
 	nodeID          string
 	interval        time.Duration
@@ -54,6 +60,9 @@ func WithDeregisterTimeout(timeout time.Duration) MembershipOption {
 
 // NewMembershipManager creates a manager that heartbeats every interval.
 func NewMembershipManager(registry ClusterRegistry, nodeID string, interval time.Duration, options ...MembershipOption) *MembershipManager {
+	if interval <= 0 {
+		interval = time.Second
+	}
 	manager := &MembershipManager{
 		registry:    registry,
 		nodeID:      nodeID,
@@ -157,7 +166,16 @@ func (m *MembershipManager) deregister(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		err := m.registry.Deregister(ctx, m.nodeID)
+		var err error
+		if m.ownedNode != nil {
+			owned, ok := m.registry.(OwnedRegistry)
+			if !ok {
+				return errors.New("cluster: owned registration unsupported")
+			}
+			err = owned.ReleaseRegistration(ctx, m.ownedNode, m.owner)
+		} else {
+			err = m.registry.Deregister(ctx, m.nodeID)
+		}
 		if err == nil || errors.Is(err, ErrNodeNotFound) {
 			return nil
 		}
@@ -178,18 +196,88 @@ func (m *MembershipManager) deregister(ctx context.Context) error {
 }
 
 func (m *MembershipManager) run(ctx context.Context) {
-	ticker := time.NewTicker(m.interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(m.interval)
+	defer timer.Stop()
+	failures := 0
 	for {
 		select {
 		case <-m.stopCh:
 			return
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if err := m.registry.Heartbeat(ctx, m.nodeID); err != nil {
-				logx.Errorf("cluster membership: heartbeat %s: %v", m.nodeID, err)
+		case <-timer.C:
+			started := time.Now()
+			budget := m.interval
+			if budget > 5*time.Second {
+				budget = 5 * time.Second
 			}
+			round, cancel := context.WithTimeout(ctx, budget)
+			err := m.heartbeat(round)
+			cancel()
+			if m.observe != nil {
+				m.observe(started, err)
+			}
+			if err != nil {
+				logx.Errorw("cluster_membership_heartbeat_failed", logx.Field("node_id", m.nodeID), logx.Field("error", err))
+				failures++
+			} else {
+				failures = 0
+			}
+			delay := m.interval
+			if m.ownedNode != nil && failures > 0 {
+				delay = membershipRecoveryDelay(m.interval, failures)
+			}
+			timer.Reset(delay)
 		}
 	}
+}
+
+// WithOwnedRegistration 为稳定实例保存完整节点信息、权威检查和就绪观察器。
+func WithOwnedRegistration(node *NodeInfo, owner RegistrationOwner, verify func(context.Context) error, observe func(time.Time, error)) MembershipOption {
+	return func(m *MembershipManager) {
+		m.ownedNode = cloneNode(node)
+		m.owner = owner
+		m.verifyOwner = verify
+		m.observe = observe
+	}
+}
+
+func (m *MembershipManager) heartbeat(ctx context.Context) error {
+	if m.ownedNode == nil {
+		return m.registry.Heartbeat(ctx, m.nodeID)
+	}
+	owned, ok := m.registry.(OwnedRegistry)
+	if !ok {
+		return errors.New("cluster: owned registration unsupported")
+	}
+	if m.verifyOwner != nil {
+		if err := m.verifyOwner(ctx); err != nil {
+			return err
+		}
+	}
+	if err := owned.RenewRegistration(ctx, m.ownedNode, m.owner); err != nil {
+		return err
+	}
+	return VerifyRegistration(ctx, m.registry, m.ownedNode, m.owner)
+}
+
+// VerifyRegistration 读回完整节点，确认注册可见且属于本次启动。
+func VerifyRegistration(ctx context.Context, registry ClusterRegistry, expected *NodeInfo, owner RegistrationOwner) error {
+	node, err := registry.Get(ctx, expected.ID)
+	if err != nil {
+		return err
+	}
+	if node.ID != expected.ID || node.ServiceName != expected.ServiceName || node.ServiceInstanceID != expected.ServiceInstanceID || node.Address != expected.Address || node.Port != expected.Port || node.GRPCPort != expected.GRPCPort || node.Status != NodeStatusRunning || node.StableBootID != owner.BootID || node.StableBootEpoch != owner.Epoch {
+		return ErrRegistrationFenced
+	}
+	return nil
+}
+
+func membershipRecoveryDelay(interval time.Duration, failures int) time.Duration {
+	delay := min(interval, 30*time.Second)
+	for i := 1; i < min(failures, 8); i++ {
+		delay = min(delay*2, 30*time.Second)
+	}
+	// 75% 至 100% 的抖动，避免多个副本同步重试；上限固定为 30 秒。
+	return delay*3/4 + time.Duration(rand.Int64N(max(1, int64(delay/4))))
 }

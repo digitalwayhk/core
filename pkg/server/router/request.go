@@ -392,8 +392,6 @@ func ToRequest(own *types.PayLoad) types.IRequest {
 	return req
 }
 
-var snow = utils.NewAlgorithmSnowFlake(1000, 1000)
-
 type InitRequest struct {
 	Request
 	CallRouters map[string]types.IRouter
@@ -433,5 +431,20 @@ func (own *InitRequest) GetTraceId() string {
 }
 
 func (own *InitRequest) NewID() uint {
-	return uint(snow.NextId())
+	if own.service == nil {
+		panic("metadata request cannot allocate a business ID without a service context")
+	}
+	return own.service.NewID()
+}
+
+// CheckServiceAdmission 在 Parse/业务执行前检查自身稳定注册准入，健康探针保持可访问。
+func (own *Request) CheckServiceAdmission() error {
+	if own.service == nil {
+		return nil
+	}
+
+	if err := own.service.CheckServiceAdmission(); err != nil {
+		return types.NewPublicError(types.ErrorKindUnavailable, types.PublicCodeUnavailable, "service unavailable", err)
+	}
+	return nil
 }

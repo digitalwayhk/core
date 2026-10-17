@@ -442,8 +442,14 @@ func (own *RouterInfo) GetPoolSize() int {
 //	}
 func (own *RouterInfo) Exec(req IRequest) (resp IResponse) {
 	own.assertMetadataFrozen()
+
 	if err := own.AuthorizeInternalCaller(req); err != nil {
 		return req.NewResponse(nil, err)
+	}
+	if gate, ok := req.(interface{ CheckServiceAdmission() error }); ok && own.GetPath() != "/api/health" && own.GetPath() != "/api/ready" {
+		if err := gate.CheckServiceAdmission(); err != nil {
+			return req.NewResponse(nil, err)
+		}
 	}
 	api := own.New()
 	delegated := false

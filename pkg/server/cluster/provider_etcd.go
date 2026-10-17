@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -22,6 +23,7 @@ const (
 //
 //	/core/cluster/<serviceName>/<nodeID>
 type EtcdProvider struct {
+	mu     sync.Mutex
 	client *clientv3.Client
 	prefix string
 	leases map[string]clientv3.LeaseID
@@ -74,6 +76,8 @@ func (e *EtcdProvider) Close() error {
 // Register stores the node in etcd with a lease. If the DC+MachineID slot
 // is already taken by a running node with a different ID, returns ErrSlotConflict.
 func (e *EtcdProvider) Register(ctx context.Context, node *NodeInfo) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	// Check for slot conflicts.
 	existing, err := e.List(ctx, node.ServiceName, NodeStatusRunning)
 	if err != nil {
@@ -101,9 +105,13 @@ func (e *EtcdProvider) Register(ctx context.Context, node *NodeInfo) error {
 		return err
 	}
 	key := e.nodeKey(node.ServiceName, node.ID)
-	_, err = e.client.Put(ctx, key, string(data), clientv3.WithLease(lease.ID))
+	result, err := e.client.Txn(ctx).If(clientv3.Compare(clientv3.Version(e.ownerKey(node)), "=", 0)).Then(clientv3.OpPut(key, string(data), clientv3.WithLease(lease.ID))).Commit()
 	if err != nil {
 		return fmt.Errorf("etcd: put node: %w", err)
+	}
+	if !result.Succeeded {
+		_, _ = e.client.Revoke(ctx, lease.ID)
+		return ErrRegistrationFenced
 	}
 	e.leases[node.ID] = lease.ID
 	return nil
@@ -111,23 +119,20 @@ func (e *EtcdProvider) Register(ctx context.Context, node *NodeInfo) error {
 
 // Deregister marks a node offline and revokes its lease.
 func (e *EtcdProvider) Deregister(ctx context.Context, nodeID string) error {
-	// Find and update the node to offline status.
-	resp, err := e.client.Get(ctx, e.nodeKeyByID(nodeID), clientv3.WithPrefix())
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	node, err := e.Get(ctx, nodeID)
 	if err != nil {
-		return err
-	}
-	if len(resp.Kvs) == 0 {
-		return ErrNodeNotFound
-	}
-	var node NodeInfo
-	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
 		return err
 	}
 	node.Status = NodeStatusOffline
 	data, _ := json.Marshal(node)
-	_, err = e.client.Put(ctx, string(resp.Kvs[0].Key), string(data))
+	result, err := e.client.Txn(ctx).If(clientv3.Compare(clientv3.Version(e.ownerKey(node)), "=", 0)).Then(clientv3.OpPut(e.nodeKey(node.ServiceName, node.ID), string(data))).Commit()
 	if err != nil {
 		return err
+	}
+	if !result.Succeeded {
+		return ErrRegistrationFenced
 	}
 	// Revoke lease so the key will be cleaned up.
 	if leaseID, ok := e.leases[nodeID]; ok {
@@ -139,11 +144,20 @@ func (e *EtcdProvider) Deregister(ctx context.Context, nodeID string) error {
 
 // Heartbeat keeps alive the node's etcd lease.
 func (e *EtcdProvider) Heartbeat(ctx context.Context, nodeID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	owner, err := e.client.Get(ctx, e.prefix+"-owners/"+nodeID)
+	if err != nil {
+		return err
+	}
+	if len(owner.Kvs) > 0 {
+		return ErrRegistrationFenced
+	}
 	leaseID, ok := e.leases[nodeID]
 	if !ok {
 		return ErrNodeNotFound
 	}
-	_, err := e.client.KeepAliveOnce(ctx, leaseID)
+	_, err = e.client.KeepAliveOnce(ctx, leaseID)
 	if err != nil {
 		return fmt.Errorf("etcd: keepalive %s: %w", nodeID, err)
 	}
@@ -152,18 +166,20 @@ func (e *EtcdProvider) Heartbeat(ctx context.Context, nodeID string) error {
 
 // Get returns the node with the given ID.
 func (e *EtcdProvider) Get(ctx context.Context, nodeID string) (*NodeInfo, error) {
-	resp, err := e.client.Get(ctx, e.nodeKeyByID(nodeID), clientv3.WithPrefix())
+	resp, err := e.get(ctx, e.nodeKeyByID(nodeID), clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Kvs) == 0 {
-		return nil, ErrNodeNotFound
+	for _, kv := range resp.Kvs {
+		var node NodeInfo
+		if err = json.Unmarshal(kv.Value, &node); err != nil {
+			return nil, err
+		}
+		if node.ID == nodeID {
+			return &node, nil
+		}
 	}
-	var node NodeInfo
-	if err := json.Unmarshal(resp.Kvs[0].Value, &node); err != nil {
-		return nil, err
-	}
-	return &node, nil
+	return nil, ErrNodeNotFound
 }
 
 // List returns all nodes for the given service, optionally filtered by status.

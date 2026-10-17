@@ -140,3 +140,13 @@
 ```
 
 废弃版本和消费方精确版本将在任务 15.4 完成；在对应小节完成前不提前声明发布门禁已生效。
+
+## 稳定实例身份与注册恢复候选
+
+加性入口：`config.IDGeneratorConfig`、`ClusterConfig.IdentityMode/InstanceID/IdentityFile`、`cluster.OwnedRegistry`、`RegistrationOwner`、`ServiceContext.CheckServiceAdmission()` 和 `GET /api/ready`。stable 需显式启用，legacy 为兼容默认；旧 DiscoveryProvider 接口签名不变，未实现 OwnedRegistry 的 Provider 不支持 stable。低层 `pkg/server/identity` 作为候选工具/框架组合入口，暂按 Experimental 管理；消费方优先使用正式配置与 ServiceContext。
+
+stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新增诊断字段；历史业务数据不回填。NewID 维持 uint 签名，以 panic 拒绝无保护编号；临时未就绪可恢复，永久错误触发停止。无服务上下文的 InitRequest.NewID 不再使用包级备用生成器，元数据枚举不得依赖其生成真实业务主键。旧 legacy 编号布局及普通注册路径保持；legacy 接口不能操作带 stable owner 的节点。
+
+`/api/health` 保持存活语义；`/api/ready` 只检查本进程自身服务，未就绪为安全 HTTP 503，不输出内部身份或连接信息。完整迁移和证据边界见 [稳定实例身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
+
+实现复审补充：`CheckProcessAdmission()` 保留已清理 stable 服务的终态故障，只有同名服务成功重建才清除；`OutboxOptions.Admission` 为可选 `OutboxAdmission` 接口，保持结构可比较，零值保持旧行为，ServiceContext 仅为 stable 自动注入。stable 的 SubscribeEvent 在业务 Handler 前检查准入，可靠订阅失败不 ACK；它不新增无 MQ 时的启动依赖。

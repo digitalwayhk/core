@@ -1,5 +1,11 @@
 # 集成测试、UAT 与发布门禁
 
+## 稳定身份回归
+
+启用 stable 时，除普通回归外必须运行 identity、cluster、router 的定向与 race 检查，以及示例 06 的 `TestStableThreeProcessDiscoveryRecovery`、07 的 `TestStableNativeOrderReplicas`。分别验证 Local/Redis/etcd，不互相推断。06 故障用例使用独立网络代理，不停止共享 Redis；07 必须显式提供专用 MySQL 地址，默认跳过。仅 health=200 不能代表发现或真实调用已恢复。
+
+MQ 命令计数测试读取 Redis 全局统计，不能与其他包的流量共用同一实例并行执行；完整外部依赖回归使用独占 Redis，并以 `go test -p 1` 或独立实例隔离。失败、依赖跳过、未运行的生产消费方迁移分别登记，不以重试覆盖原始失败日志。详情见 [稳定实例身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。
+
 ## 标准集成测试模板
 
 集成测试是平台服务的标准能力，不是可选示例。为新服务创建集成测试时，必须优先复用以下两层模板。

@@ -24,7 +24,8 @@ cmd/*
 main/*
 *.ldb
 .idea/
-/cmd
+!/cmd/
+!/cmd/instance-identity/
 /main
 db
 etc

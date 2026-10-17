@@ -49,6 +49,7 @@ func LocalServiceConfig(name string, port, dataCenterID, machineID int) *config.
 	cfg.Cluster.Mode = "on"
 	cfg.Cluster.Provider = "local"
 	cfg.Transport.GRPC.Security = config.GRPCSecurityConfig{Mode: "insecure"}
+	applyStableIdentity(cfg)
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -74,6 +75,7 @@ func DistributedServiceConfig(name string, port, dataCenterID, machineID int) *c
 		KeyFile:    strings.TrimSpace(os.Getenv("SHOP_GRPC_KEY_FILE")),
 		ServerName: serverName,
 	}
+	applyStableIdentity(cfg)
 	cfg.ApplyDefaults()
 	return cfg
 }

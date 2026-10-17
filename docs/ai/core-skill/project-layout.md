@@ -370,3 +370,7 @@ func (own *BaseManageService[T]) DoBefore(sender interface{}, req stypes.IReques
 ```
 
 ---
+
+## 稳定身份状态与工具
+
+稳定副本身份和生成器绑定集中保存在绝对 IdentityFile 中，`.lock` 为旁路排他锁；配置目录可以只读，状态必须位于副本独占持久卷。不要建立另一个生成器状态副本，不移动业务 pending 或自动扫描目录猜测身份。离线工具位于根模块 `cmd/instance-identity`，不放进独立 `tools/go.mod` 模块。初始化和迁移见 [稳定身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。

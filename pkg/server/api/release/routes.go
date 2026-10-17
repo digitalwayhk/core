@@ -21,6 +21,7 @@ func Routers() []types.IRouter {
 		&public.QueryService{},
 		&public.GetMenu{},
 		&public.Health{},
+		&public.Ready{},
 		&public.CasdoorCallback{},
 		&public.CasdoorWebhook{},
 		&public.Refresh{},

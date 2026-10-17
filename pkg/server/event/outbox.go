@@ -51,7 +51,13 @@ type OutboxBatchMarker interface {
 	MarkPublishedBatch(ctx context.Context, messages []OutboxMessage) error
 }
 
+// OutboxAdmission 在发布器开始操作前检查服务自身状态。
+// 使用接口保持 OutboxOptions 的可比较性；零值不增加准入限制。
+type OutboxAdmission interface{ CheckServiceAdmission() error }
+
 type OutboxOptions struct {
+	// Admission 是可选本地检查；失败时保留未发布记录供恢复后重试。
+	Admission     OutboxAdmission
 	SourceService string
 	Store         OutboxStore
 	Interval      time.Duration
@@ -63,6 +69,7 @@ type OutboxOptions struct {
 }
 
 type outboxPublisher struct {
+	admission      func() error
 	source         string
 	store          OutboxStore
 	interval       time.Duration
@@ -109,6 +116,9 @@ func newOutboxPublisher(bridge *ServiceEventBridge, options OutboxOptions) (*out
 		external: options.External, bridge: bridge,
 		notify: make(chan struct{}, 1), cancel: cancel,
 	}
+	if options.Admission != nil {
+		publisher.admission = options.Admission.CheckServiceAdmission
+	}
 	publisher.wg.Add(1)
 	go publisher.run(ctx)
 	return publisher, nil
@@ -138,6 +148,9 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 	p.blockedKeys.Store(0)
 	noProgressRounds := 0
 	for {
+		if p.admission != nil && p.admission() != nil {
+			return
+		}
 		items, err := p.loadPending(ctx, blocked)
 		if err != nil {
 			p.loadFailed.Store(true)
@@ -446,6 +459,11 @@ func outboxOrderingKey(item OutboxMessage) string {
 }
 
 func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error {
+	if p.admission != nil {
+		if err := p.admission(); err != nil {
+			return err
+		}
+	}
 	env := NewEnvelope(p.source, item.EventType, item.Payload)
 	if item.EventID != "" {
 		env.ID = item.EventID
