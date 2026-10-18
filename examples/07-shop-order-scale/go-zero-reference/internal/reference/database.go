@@ -36,6 +36,7 @@ func openDatabase(role, path string) (*gorm.DB, error) {
 		dsn.ParseTime = true
 		dsn.Loc = time.Local
 		dsn.Params = map[string]string{"charset": "utf8mb4"}
+		dsn.InterpolateParams = true
 		db, err = gorm.Open(mysql.Open(dsn.FormatDSN()), c)
 	}
 	if err != nil {

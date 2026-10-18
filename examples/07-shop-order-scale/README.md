@@ -223,3 +223,9 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 
 
 2026-10-18 的 `5b04799` 验证了事务消息接入、重复确认计数与自动恢复；六轮累计 805096 个确认请求逐键匹配且最终队列排空。持续 2000/s 的 600 秒目标仍未达标，不能将示例参数当作生产容量承诺；详细失败结果与建议见上述实施审计。
+
+## MySQL协议与性能验证
+
+07在 `remoteMySQLConfig` 显式启用驱动 `InterpolateParams`，字符集固定utf8mb4；Core全局零值仍false，GORM PrepareStmt仍false。完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未写 `interpolateParams=true` 时保持旧协议；无效DSN在启动阶段拒绝，错误不包含DSN或凭据。该选项保留参数绑定，不允许手工拼SQL。
+
+单变量三组结果见[性能记录](../../docs/codex/ORDER_QUEUE_PERFORMANCE_2026-10-19.md)。SQL协议往返减少不等于600秒容量通过，最终组合和长窗结果以该文档及[执行记录](../../docs/codex/ORDER_QUEUE_EXECUTION_2026-10-19.md)为准。

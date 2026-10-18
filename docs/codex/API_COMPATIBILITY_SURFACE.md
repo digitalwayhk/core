@@ -117,6 +117,10 @@
 - `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
 - 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
 
+## MySQL显式驱动插值
+
+`oltp.Config.InterpolateParams bool` 为加性字段，零值false保持旧驱动协议。`MysqlDSN`、`SetMysqlDSN`及内部两条DSN路径透传；非法布尔配置报错，建池在插值启用时仅支持默认/显式utf8mb4，其他字符集连接前拒绝。不同协议的共享池隔离，GORM PrepareStmt仍false。07示例与原生对照显式启用，完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未带此参数时保留false；无效DSN在启动组合根拒绝且不输出原DSN。既有SQL事务、写入不重放和错误契约保持。
+
 ## MySQL共享池身份隔离
 
 同地址/最终数据库下，不同认证或驱动语义现在建立独立连接池，错误凭据不再借用首个账号的已认证池。同配置仍复用；池容量和日志参数仍由首次拥有者决定。`GetSyncPoolKey` 与连接管理器键均为进程内不透明身份，不能依赖旧 `host:port/db` 完整字符串、跨进程比较或持久保存。新键使用随机进程密钥生成认证摘要，不暴露密码或固定的可离线猜解摘要。模型、HTTP及数据库事实不变。

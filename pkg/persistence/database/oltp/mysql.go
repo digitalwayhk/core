@@ -43,6 +43,8 @@ type Config struct {
 	MaxOpenConns int
 	MaxLifetime  time.Duration
 	IsLog        bool
+	// InterpolateParams 显式启用驱动插值；仅支持已验证的 utf8mb4，默认关闭。
+	InterpolateParams bool
 }
 
 func (c *Config) MysqlDSN() string {
@@ -68,6 +70,9 @@ func (c *Config) MysqlDSN() string {
 	}
 	if c.IsLog {
 		dsn += "&isLog=true"
+	}
+	if c.InterpolateParams {
+		dsn += "&interpolateParams=true"
 	}
 	return dsn
 }
@@ -117,6 +122,12 @@ func (c *Config) SetMysqlDSN(dsn string) error {
 				continue
 			}
 			switch kvParts[0] {
+			case "interpolateParams":
+				value, err := strconv.ParseBool(kvParts[1])
+				if err != nil {
+					return errors.New("invalid interpolateParams value")
+				}
+				c.InterpolateParams = value
 			case "charset":
 				c.Charset = kvParts[1]
 			case "parseTime":
@@ -490,6 +501,9 @@ func (m *MySQL) init(data interface{}) error {
 
 // newDB 创建新的数据库连接（完全对标 SQLite 配置）
 func (m *MySQL) newDB() (*gorm.DB, error) {
+	if m.config.InterpolateParams && m.config.Charset != "" && !strings.EqualFold(m.config.Charset, "utf8mb4") {
+		return nil, errors.New("MySQL 驱动插值仅支持 utf8mb4")
+	}
 	var dsn string
 	var db *gorm.DB
 	var err error
@@ -566,7 +580,7 @@ func (m *MySQL) buildDSN() string {
 	if m.config.Loc == "" {
 		m.config.Loc = "Local"
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=%s&parseTime=true&loc=%s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=%s&parseTime=true&loc=%s",
 		m.config.Username,
 		m.config.Password,
 		m.config.Host,
@@ -574,6 +588,10 @@ func (m *MySQL) buildDSN() string {
 		m.config.Charset,
 		m.config.Loc,
 	)
+	if m.config.InterpolateParams {
+		dsn += "&interpolateParams=true"
+	}
+	return dsn
 }
 
 // buildDSNWithDB 构建带数据库名的 DSN（直接连接到指定数据库）
@@ -587,7 +605,7 @@ func (m *MySQL) buildDSNWithDB(dbName string) string {
 	if m.config.Loc == "" {
 		m.config.Loc = "Local"
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
 		m.config.Username,
 		m.config.Password,
 		m.config.Host,
@@ -596,6 +614,10 @@ func (m *MySQL) buildDSNWithDB(dbName string) string {
 		m.config.Charset,
 		m.config.Loc,
 	)
+	if m.config.InterpolateParams {
+		dsn += "&interpolateParams=true"
+	}
+	return dsn
 }
 
 // ==================== 辅助方法 ====================

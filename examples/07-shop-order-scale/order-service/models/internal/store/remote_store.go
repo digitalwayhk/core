@@ -28,21 +28,25 @@ func GetRemote() persistencetypes.IDataAction {
 // remoteMySQLConfig 从环境变量创建 07 订单共享权威库配置。
 func remoteMySQLConfig() *oltp.Config {
 	config := &oltp.Config{
-		Host:         envString("SHOP_ORDER_REMOTE_MYSQL_HOST", "127.0.0.1"),
-		Port:         envInt("SHOP_ORDER_REMOTE_MYSQL_PORT", 3306),
-		Username:     envString("SHOP_ORDER_REMOTE_MYSQL_USER", "root"),
-		Password:     envString("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", ""),
-		Database:     envString("SHOP_ORDER_REMOTE_MYSQL_DATABASE", common.RemoteDatabaseName),
-		Charset:      "utf8mb4",
-		ParseTime:    true,
-		Loc:          "Local",
-		MaxIdleConns: envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 5),
-		MaxOpenConns: envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20),
-		MaxLifetime:  30 * time.Minute,
-		IsLog:        envString("SHOP_ORDER_REMOTE_MYSQL_LOG", "") == "true",
+		Host:              envString("SHOP_ORDER_REMOTE_MYSQL_HOST", "127.0.0.1"),
+		Port:              envInt("SHOP_ORDER_REMOTE_MYSQL_PORT", 3306),
+		Username:          envString("SHOP_ORDER_REMOTE_MYSQL_USER", "root"),
+		Password:          envString("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", ""),
+		Database:          envString("SHOP_ORDER_REMOTE_MYSQL_DATABASE", common.RemoteDatabaseName),
+		Charset:           "utf8mb4",
+		InterpolateParams: true,
+		ParseTime:         true,
+		Loc:               "Local",
+		MaxIdleConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 5),
+		MaxOpenConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20),
+		MaxLifetime:       30 * time.Minute,
+		IsLog:             envString("SHOP_ORDER_REMOTE_MYSQL_LOG", "") == "true",
 	}
 	if dsn := os.Getenv("SHOP_ORDER_REMOTE_MYSQL_DSN"); dsn != "" {
-		_ = config.SetMysqlDSN(dsn)
+		config.InterpolateParams = false // 完整DSN未声明时保持旧协议。
+		if err := config.SetMysqlDSN(dsn); err != nil {
+			panic("无效的 SHOP_ORDER_REMOTE_MYSQL_DSN 配置")
+		}
 	}
 	return config
 }

@@ -6,6 +6,8 @@
 
 ### Added
 
+- `oltp.Config.InterpolateParams` 显式驱动插值，框架零值关闭、建池仅支持已验证的utf8mb4；07及原生对照启用，完整DSN未声明时保持旧协议。保留参数绑定、事务和写入不重放契约。
+
 - 07独立标准库发送进程、run/stage幂等命名空间、分预算轻量采样及真实在途结束计时；增加本地准入/队列/提交、SQL池和Outbox阶段累计指标。
 
 - 显式 `Cluster.IdentityMode=stable`：服务名与持久 InstanceID 作为注册身份，MachineID/实际 WorkerID 通过独立 local/Redis/etcd 权威绑定；持久 Boot 世代、生成时间预留和 owner 原子检查保护重启与注册恢复。新增离线 `cmd/instance-identity` create/import/recover/retire/capacity、新就绪探针 `/api/ready`、后台准入入口，以及 06/07 稳定副本真实进程回归。默认 legacy 保持；Consul stable 不支持。迁移说明见 `docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md`。
