@@ -1,3 +1,4 @@
+// 本文件实现 MySQL 数据访问、事务连接绑定及共享池故障恢复。
 package oltp
 
 import (
@@ -235,9 +236,20 @@ func (m *MySQL) ensureValidConnection() error {
 	if m.isTansaction && m.tx != nil {
 		return nil
 	}
+	// Clone 可能持有已被替换的池；新操作重绑当前池，活动事务仍使用原绑定连接。
+	if current, ok := connManager.GetConnection(m.getConnectionKey()); ok {
+		if sameConnectionPool(m.db, current) {
+			return nil
+		}
+		m.db = current
+		if m.isClone {
+			m.db = current.Session(&gorm.Session{NewDB: true})
+		}
+		return nil
+	}
 
 	// m.db 为 nil 表示本实例尚未关联连接（懒加载），直接从连接池获取，不走重建流程
-	if m.db == nil {
+	if m.db == nil || m.isClone {
 		db, err := m.GetDB()
 		if err != nil {
 			return err
@@ -259,8 +271,8 @@ func (m *MySQL) ensureValidConnection() error {
 
 // 重建连接的方法（增强版）
 func (m *MySQL) recreateConnection() error {
-	// 先从本实例和共享管理器清除失效句柄；GetDB 不再通过预先 Ping
-	// 判断健康状态，因此重建入口必须显式驱逐旧引用。
+	// 显式重建驱逐本实例所指的旧池。只读物理故障恢复已先释放本地引用，
+	// 此时不会驱逐共享池，GetDB 会复用驱动仍可使用的原池。
 	m.invalidateConnection()
 
 	//  添加重试机制
@@ -316,6 +328,26 @@ func (m *MySQL) invalidateConnection() {
 	m.db = nil
 }
 
+// forgetFailedConnection 由驱动回收坏物理连接；仅整池关闭时才驱逐共享池，写入仍不重放。
+func (m *MySQL) forgetFailedConnection(cause error) {
+	if m.isTansaction {
+		return
+	}
+	if isConnectionPoolClosed(cause) {
+		m.invalidateConnection()
+		return
+	}
+	m.db = nil
+}
+
+// retryReadAfterConnectionError 保留一次只读重试；任何活动事务都不得换池或重放。
+func (m *MySQL) retryReadAfterConnectionError(initial error, inTransaction bool, retry func() error) error {
+	return retryReadAfterConnectionError(initial, inTransaction || m.isTansaction, func() error {
+		m.forgetFailedConnection(initial)
+		return m.recreateConnection()
+	}, retry)
+}
+
 // retryReadAfterConnectionError 为无副作用只读操作提供一次恢复重试。
 // 非连接错误和活动事务原样返回；刷新失败同时保留原始错误链。
 func retryReadAfterConnectionError(initial error, inTransaction bool, refresh func() error, retry func() error) error {
@@ -331,7 +363,7 @@ func retryReadAfterConnectionError(initial error, inTransaction bool, refresh fu
 // 延迟表检查方法
 func (m *MySQL) ensureTable(data interface{}) error {
 	err := m.HasTable(data)
-	return retryReadAfterConnectionError(err, m.isTansaction, m.recreateConnection, func() error {
+	return m.retryReadAfterConnectionError(err, m.isTansaction, func() error {
 		// HasTable 在表缺失时会执行幂等建表/补列；连接错误发生在首次尝试时，
 		// 刷新后仍由同一框架迁移契约收敛并发建表结果。
 		return m.HasTable(data)
@@ -445,7 +477,10 @@ func (m *MySQL) init(data interface{}) error {
 				err := m.tx.Error
 				m.tx = nil
 				m.isTansaction = false
-				return fmt.Errorf("懒加载事务失败: %v", err)
+				if isConnectionError(err) {
+					m.forgetFailedConnection(err)
+				}
+				return fmt.Errorf("懒加载事务失败: %w", err)
 			}
 		}
 	}
@@ -927,7 +962,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 	}
 	if item.IsStatistical {
 		runSum := func() error { return sum(m.db, item, result) }
-		return retryReadAfterConnectionError(runSum(), m.isTansaction, m.recreateConnection, runSum)
+		return m.retryReadAfterConnectionError(runSum(), m.isTansaction, runSum)
 	}
 
 	runLoad := func() error {
@@ -949,7 +984,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 		}
 		return runLoad()
 	}
-	return retryReadAfterConnectionError(loadErr, m.isTansaction, m.recreateConnection, runLoad)
+	return m.retryReadAfterConnectionError(loadErr, m.isTansaction, runLoad)
 }
 
 func (m *MySQL) Raw(sql string, data interface{}) error {
@@ -959,7 +994,7 @@ func (m *MySQL) Raw(sql string, data interface{}) error {
 		return err
 	}
 	runRaw := func() error { return m.db.Raw(sql).Scan(data).Error }
-	return retryReadAfterConnectionError(runRaw(), m.isTansaction, m.recreateConnection, runRaw)
+	return m.retryReadAfterConnectionError(runRaw(), m.isTansaction, runRaw)
 }
 
 func (m *MySQL) Exec(sql string, data interface{}) error {
@@ -970,7 +1005,7 @@ func (m *MySQL) Exec(sql string, data interface{}) error {
 	err = m.db.Exec(sql, data).Error
 	if !m.isTansaction && isConnectionError(err) {
 		// Exec 可承载任意写入，连接错误时提交结果未知，不得自动重放。
-		m.invalidateConnection()
+		m.forgetFailedConnection(err)
 	}
 	return err
 }
@@ -1089,11 +1124,11 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 		return fn(m.db, data)
 	}
 
-	// 连接级错误下写入的提交结果可能未知。非事务写只驱逐失效句柄并返回原错误，
+	// 连接级错误下写入的提交结果可能未知。非事务写只释放本地引用并返回原错误，
 	// 由上层业务幂等边界决定是否重试；活动事务保持原连接并由 Rollback 收敛。
 	if !m.isTansaction && isConnectionError(err) {
-		logx.Infof(" 检测到写入连接错误，驱逐失效连接但不自动重放: %v", err)
-		m.invalidateConnection()
+		logx.Infof(" 检测到写入连接错误，释放失效引用但不自动重放: %v", err)
+		m.forgetFailedConnection(err)
 		return err
 	}
 
@@ -1157,7 +1192,7 @@ func (m *MySQL) isTableNotExistsError(err error) bool {
 
 // isConnectionError 判断是否是连接级错误（坏连接、MySQL 协议失步等）。
 // go-sql-driver 的 "commands out of sync" / "invalid connection" 不返回 driver.ErrBadConn，
-// 所以 database/sql 不会自动重试，需要在业务层主动处理。
+// 所以不能依赖 database/sql 自动重试；本适配器仅对无副作用读恢复一次，写入由业务幂等边界决定。
 func isConnectionError(err error) bool {
 	if err == nil {
 		return false
@@ -1376,7 +1411,7 @@ func (m *MySQL) Exists(data interface{}) (bool, error) {
 	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
 		return exists, readErr
 	}
-	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+	readErr = m.retryReadAfterConnectionError(readErr, false, func() error {
 		exists, readErr = existsData(m.db, data)
 		return readErr
 	})
@@ -1407,7 +1442,7 @@ func (m *MySQL) ExistsByCondition(model interface{}, condition string, args ...i
 	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
 		return exists, readErr
 	}
-	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+	readErr = m.retryReadAfterConnectionError(readErr, false, func() error {
 		exists, readErr = existsByCondition(m.db, model, condition, args...)
 		return readErr
 	})
@@ -1438,7 +1473,7 @@ func (m *MySQL) ExistsByHashcode(model interface{}, hashcode string) (bool, erro
 	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
 		return exists, readErr
 	}
-	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+	readErr = m.retryReadAfterConnectionError(readErr, false, func() error {
 		exists, readErr = existsByHashcode(m.db, model, hashcode)
 		return readErr
 	})
@@ -1469,7 +1504,7 @@ func (m *MySQL) ExistsByID(model interface{}, id int64) (bool, error) {
 	if readErr == nil || m.isTansaction || !isConnectionError(readErr) {
 		return exists, readErr
 	}
-	readErr = retryReadAfterConnectionError(readErr, false, m.recreateConnection, func() error {
+	readErr = m.retryReadAfterConnectionError(readErr, false, func() error {
 		exists, readErr = existsByID(m.db, model, id)
 		return readErr
 	})

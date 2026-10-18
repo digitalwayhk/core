@@ -19,7 +19,8 @@ func PendingOutbox(limit int) ([]*OutboxRecord, error) {
 	query.SkipCount = true
 	query.AddWhereN("Published", false)
 	query.AddSortN("ID", false)
-	err := store.GetRemote().Load(query, &items)
+	// 每次读取使用独立 action，避免恢复时共享基座与 Clone 并发改写连接引用。
+	err := store.RunRemoteRead(func(action persistencetypes.IDataAction) error { return action.Load(query, &items) })
 	return items, err
 }
 
