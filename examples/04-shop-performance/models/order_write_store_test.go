@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"

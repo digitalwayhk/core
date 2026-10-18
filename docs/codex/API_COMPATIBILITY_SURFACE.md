@@ -117,6 +117,12 @@
 - `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
 - 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
 
+## Badger v4.9.6 存储适配
+
+Core后端由v3.2103.5适配至v4.9.6，外部存储接口及配置默认值保持；Badger对象仍为内部实现，不新增面向业务的原生DB/Txn接口。固定版本的普通/加密人工夹具已验证物理副本直接打开、Backup/Load及升级后新增事实经备份回退，见[验证记录](BADGER_QUEUE_REPRO_2026-10-19.md)。此结果不扩大为任意旧目录和未来版本的双向兼容保证。
+
+迁移说明：停准入并停止旧写入进程，保留完整原件，在副本验证值、版本、TTL、删除和重开后再切换。pending及authstate保持fail策略；禁止清库、truncate或把它们当可重建缓存。新版本接单后回退必须保全新增事实，停写后从新版本Backup并在新目录验证Load；不能直接切回旧快照，也不能未经验证让v3打开v4已写目录。Core不执行自动清库或备份还原。
+
 ## 快照规则
 
 - 路由和 OpenAPI 快照由生产 `RouterInfo`、`ServiceRouter` 和 `run.GetInternalOpenApi` 生成；外部与内部视图共同委托 `pkg/server/internal/openapidoc`，不维护第二套生成器。
