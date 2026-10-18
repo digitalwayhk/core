@@ -19,4 +19,6 @@
 - 当前目录为已存在的linked worktree，分支`feat/transactional-messaging-throughput`，不新建嵌套worktree。
 - 原生队列包及Core nosql包基线均通过，日志`.temp/order-queue-repair-20261019/baseline.log`。
 - 用户要求补充Badger参数规范，权威skill已增加独立配置分片；明确可靠写约束、实际默认、未暴露字段和候选调参，不宣称当前已最优。
-- G0只读核对器、G1复现和后续修复/回归结果在实施后逐项补记。根因未确定前不调整默认参数、不升级项目依赖。
+- G0只读核对器已实现，健康/畸形夹具、只读哈希和原生队列race回归通过。新副本只读核对仍发现1785项缺索引事实，原件和副本哈希均不变。
+- 上游内部压缩删除复现：v3连续3次失败，v4连续3次通过；开启SyncWrites和DetectConflicts后分别重复3次，结果相同。测试人为控制私有层级，不等同07现场条件。
+- 完整记录见[Badger队列核对与删除复现](BADGER_QUEUE_REPRO_2026-10-19.md)。G0/G1整体仍为Partial；根因未确定前不调整默认参数、不升级项目依赖，后续关卡未执行。
