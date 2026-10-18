@@ -43,7 +43,9 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - 部署侧提供 Prometheus scrape 配置（如 `deploy/prometheus*.yml`），标签至少稳定暴露 `service` 与 `service_instance_id`，供 Runtime Aggregator 查询。
 - 集成测试：`examples/integration/07-shop-order-scale` 与 `07-shop-order-scale-multi-process`；多副本 UAT 应采样 discovery 确认 `MachineID`/`ServiceInstanceID` 唯一。
 
-真实容量测试必须区分成功接单、远程事实、Outbox 发布与消费 ACK。07 当前 100ms/100 条调度存在约 1000 条/秒的理论上限，且 `ForceSyncBatch` 每次先重建队列索引，会扫描模型前缀；积压规模会增加额外工作。消费组 pending=0 不代表未读取 lag=0。显式压测入口为 `TestStableOrderWriteLoad`，实测数据与未优化项见 [07 真实链路压测](../../codex/ORDER_WRITE_LOAD_2026-10-18.md)；不得仅凭短窗口 HTTP 成功率宣传稳态容量。
+pending 缓存计数与持久同步索引必须分开核对；幂等 ACK 成功数不一定等于本次移除的索引数，重复确认不能再次扣减。出现负值或计数不一致时，保留原卷并核对 `GetPendingSyncCount()`，不得清零指标或删除记录制造排空。显式长压证据目录还须保留身份与本地 pending；不能让测试临时目录清理销毁失败后的恢复事实。
+
+真实容量测试必须区分成功接单、远程事实、Outbox 发布与消费 ACK。07 压测基线中的 100ms/100 条业务调度曾有约 1000 条/秒上限；当前服务已接回框架自适应 worker，使用 512 条上限、32 条触发阈值及最长 20ms 收集，并保留 target 的 stable 准入。框架公共 `ForceSyncBatch` 仍保留索引重建兼容语义，正常自动同步不逐批重建。消费组 pending=0 不代表未读取 lag=0。显式压测入口为 `TestStableOrderWriteLoad`，历史基线见 [07 真实链路压测](../../codex/ORDER_WRITE_LOAD_2026-10-18.md)，本次实施与回归见 [事务消息与吞吐审计](../../codex/TRANSACTIONAL_MESSAGE_PLAN_REVIEW_2026-10-18.md)；不得把候选参数或功能回归当作稳态容量认证。
 
 ## PrefixedBadgerDB / ReliableWriteStore
 

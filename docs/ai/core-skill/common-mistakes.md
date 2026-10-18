@@ -39,6 +39,7 @@
 - 单元测试隐式依赖 Docker/本机数据库。
 - 已需要高吞吐写时仍去找已删除的全局 `StartOrderWriteStore`、或使用兼容层 `SetSyncDB` 与 Manage 式列表轮询，未采用「本地可靠写 → `UseWriteBehind` → 远程权威库」。
 - 把 `OutboxStore` 必选方法改成只支持批量，或为了减少 MySQL commit 自写发布循环。正确做法是保留 `LoadPending`/`MarkPublished`，高吞吐再实现可选 `OutboxBatchMarker`。
+- 未与使用者确认就强制新增独立 Outbox/Inbox 表、替业务选择主/子投递状态或合并事件；或看到多个订阅服务就自行创建生产方投递子表。先按 [Outbox/Inbox 业务确认清单](multiservice-and-observability.md#outboxinbox-接入前的业务确认) 确认，允许复用业务记录，但保持同事务、事件版本和消费幂等边界。
 - 水平扩展把最终业务库按副本分片，或用每进程私有库冒充共享 remote（开发用 SQLite、生产换共享 MySQL 是 DataAction 切换，不是分片）。
 - 恢复 `RouterStats`/`Statistics`；Runtime 把未采集指标写成 0；浏览器直连 Prometheus 或其他实例 `/metrics`。
 - 开发或测试时用 `-view 0` 启动服务。该参数默认 `80`（`0` 表示不启用视图服务，只用于正式部署），置 0 后没有管理后台，也没有 `/api/web/bootstrap`。默认端口属特权端口，本地应显式指定如 `-view 8888`。

@@ -18,7 +18,7 @@
 | 服务 | 对外能力 | 内部能力 | 水平扩展要求 |
 | --- | --- | --- | --- |
 | `shop-user` | 普通用户注册、资料、地址、下单入口、订单查询、WebSocket 订单订阅 | 调用 supplier/order 的受限 Public API | 入口服务可扩展，但缓存只放在入口 facade |
-| `shop-supplier` | 供应商后台资料、产品上下架、供应商订单查询 | 提供供应商和商品受限 Public API，消费订单事件生成本地引用 | 保持供应商域权威库独立 |
+| `shop-supplier` | 供应商后台资料、产品上下架 | 提供供应商和商品受限 Public API | 保持供应商域权威库独立；07 未接入供应商订单事件消费，事务投影演示见 06 |
 | `shop-order` | 不暴露外部端口，只面向管理员 Manage | 提供下单、撤单、支付、支付类型、订单查询等受限 Public API | 多副本共享 MySQL 远程 order 权威库，每个副本独立 Badger pending |
 
 内部专用 Public API 必须使用 `WithInternalCallers`，调用方身份只能来自可信 ServiceContext 或 mTLS SAN，不能相信 HTTP Header 或请求体自报。
@@ -34,12 +34,14 @@ buyer request
   -> order 权威事实与 Outbox 同 MySQL 事务写入
   -> sc.UseOutbox(models.OutboxStore{}) 发布标准事件
   -> EventBridge 投递 OrderCreated/OrderStatusChanged/PaymentChanged
-  -> user/supplier 消费事件更新本地投影和缓存失效
+  -> user 消费事件失效订单缓存并推送在线用户 WebSocket
 ```
 
-本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用框架 `ReliableWriteStore[Order]`，只绑定一次业务 `OrderWriteBehindTarget`；订单 target 只负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox，Group Commit、背压、磁盘指标、pending ACK 与关闭恢复由框架统一处理。后台循环每次调用 `ForceSyncBatch(ctx, 100)`；`Badger.SyncBatchSize=1000` 同时作为手动同步硬上限，调用方传入更大 limit 时自动截断，不会形成无界远端批次或 Badger ACK 事务。
+本地 pending 是可靠写入队列，不是缓存，也不是 SQLite 业务表。服务重启、扩容、缩容或同步失败时，pending 必须可恢复、可重试、可观测。`shop-order` 使用框架 `ReliableWriteStore[Order]`，只绑定一次业务 `OrderWriteBehindTarget`；订单 target 负责 `UserID+RequestID` 幂等 upsert 和同事务写 Outbox，Group Commit、背压、磁盘指标、pending ACK 与关闭恢复由框架统一处理。同步使用框架自适应 worker，单批最多 512 条，32 条触发或最长收集 20ms，积压有进展时立即继续；取消原业务 ticker，不在每批热路径重新扫描全部 pending。target 在新批次前检查服务准入，MySQL 提交后唤醒标准发布器。runtime 与资源托管成功后才启动 worker。
 
 `Service` 持有实例级 `OrderWriteRuntime`，路由、`LocalOrderWriter`、查询和同步器都通过显式 `OrderWriteAccess` 注入。store 由 `ServiceContext.UseResource` 关闭，不存在包级全局 store registry。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单链路必须走 business + 专用 target。
+
+规则与远端幂等的单条只读查询使用模型层独立 action，不额外开启事务或读取分页总数；多条读取需要一致性快照时仍使用事务。默认规则未配置时不缓存回退值，管理员新增后下一次读取即可生效。远端幂等键不存在可继续接单，数据库读取失败必须返回错误。
 
 ## 管理配置同步
 
@@ -55,9 +57,9 @@ buyer request
 ## 自动水平扩展约束
 
 - 示例必须启用 `AutoMachineID=true`，不能为 order 副本硬编码 `MachineID=1/2/3`。
-- 框架需要通过当前 ClusterProvider 申请 MachineID lease，并在 Snowflake 初始化前完成绑定。
+- 默认 `legacy` 模式通过 ClusterProvider 申请 MachineID lease；显式 `stable` 模式使用独立编号账本，发现注册不分配或释放编号。两者都须在 Snowflake 初始化前完成绑定。本示例设置 `SHOP_IDENTITY_ROOT` 及 `SHOP_GENERATOR_*` 后启用 stable，独占状态卷不得由两个活跃副本共用。
 - 每个副本必须拥有唯一 `ServiceInstanceID`，并记录到业务事实、pending、Outbox、Inbox、同步状态和诊断日志；`ServiceInstanceIP` 只用于诊断。
-- 本地目录固定追加 `<service>/dc-<DataCenterID>/machine-<MachineID>`。AutoMachineID 变化会进入新目录，不会自动接管旧 MachineID 的 pending；缩容或重新分配前必须完成 drain，或由编排层显式把旧独立卷交给恢复流程。
+- 本地 pending 目录按服务与已绑定编号隔离。legacy 的 AutoMachineID 变化会进入新目录，不会自动接管旧编号的 pending；缩容或重新分配前必须完成 drain，或由编排层显式把旧独立卷交给恢复流程。stable 必须保留身份及独立编号状态，并按现行恢复契约接管原卷，不能仅凭相同 IP 接管。
 - Docker 扩容时不固定暴露多个 order 业务端口；副本通过配置的发现机制注册，调用方只通过 ServiceResolver 选择实例。
 - `shop-order` scale 模板不传固定 `-p/-grpc`；需要覆盖容器内监听端口时使用 `SHOP_ORDER_HTTP_PORT/SHOP_ORDER_GRPC_PORT`。
 - 注册发现机制不应绑定 Redis；Redis、局域网发现或其他中间件由配置决定，示例只验证框架抽象可用。
@@ -199,13 +201,14 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 
 水平扩容 benchmark 的多个 Badger 目录在逻辑和文件路径上完全隔离，但同机运行时仍共享宿主机 CPU 和物理磁盘，因此结果只用于同机同次趋势评估，不作为固定提升倍数门禁；真实容量评估仍需要按部署拓扑、独立卷、远程库和 MQ 配置重新压测。
 
-真实三进程写入压测使用 `examples/integration/07-shop-order-scale-multi-process` 的 `TestStableOrderWriteLoad`，默认跳过。它保留 HTTP、mTLS、远程幂等探测、本地可靠写、共享 MySQL、Outbox 与 Redis 消费 ACK，并逐笔核对已确认订单；必须显式配置专属依赖与证据目录。复现命令、2000 次/秒实测、三层积压及待优化问题见 [压测记录](../../docs/codex/ORDER_WRITE_LOAD_2026-10-18.md)。本次仅测试，没有调整同步或消费策略。
+真实三进程写入压测使用 `examples/integration/07-shop-order-scale-multi-process` 的 `TestStableOrderWriteLoad`，默认跳过。 `CORE_TEST_LOAD_SECONDS` 可设为 1–600，省略为 30 秒；`CORE_TEST_LOAD_EVIDENCE_DIR` 必须是每轮独立的绝对路径，显式压测将本地身份与 pending 保留在其 `state-*` 子目录，测试结束不自动删除。它保留 HTTP、mTLS、远程幂等探测、本地可靠写、共享 MySQL、Outbox 与 Redis 消费 ACK，并逐笔核对已确认订单；必须显式配置专属依赖与证据目录。历史复现命令、2000 次/秒基线及三层积压见 [压测记录](../../docs/codex/ORDER_WRITE_LOAD_2026-10-18.md)，本次优化及回归结果见 [实施审计](../../docs/codex/TRANSACTIONAL_MESSAGE_PLAN_REVIEW_2026-10-18.md)。
 
 ## 质量门禁
 
 - 禁止新增 `api/call`。
 - 禁止内部权威 Public API 重复入口 facade 缓存。
-- 禁止发布方关心消费者；事件发布只通过 `sc.UseOutbox(models.OutboxStore{})`，订阅只通过 `sc.SubscribeEvent(...)`。07 `OutboxStore` 实现可选 `OutboxBatchMarker`，由框架对已发布前缀一次确认，不自写发布循环。
+- 发布使用 `sc.UseOutboxWithOptions`，显式设置 4 个 key 并发；订阅使用 `sc.SubscribeEvent`，显式设置 8 个 key 并发。创建、状态和支付事件统一按 OrderID 分键，同 key 串行。多个 publisher 的全局顺序不由该设置保证。07 `OutboxStore` 通过 Core `message.Run` / `ConfirmPublishedWith` 在当前 MySQL 事务中锁定完整 ID 集合、批量确认发布状态，不自写发布循环、不等待所有消费服务完成。
+- 用户 facade 只做缓存失效和 WebSocket 通知，`sync.Map` 去重仅在进程内有效；重启后可能重复通知，也不提供离线用户必达。不能把此处 ACK 或缓存/WebSocket 副作用宣称为持久事务型 Inbox。数据库业务的消费幂等接入参考 06 Supplier 的 `message.ConsumeInboxWith`，记录复用方式仍由具体项目与使用者确认。
 - 禁止固定水平副本 MachineID；必须使用 `AutoMachineID=true` 并测试自动分配。
 - 禁止把最终业务库按技术副本拆分；只允许按业务域拆库。
 - 禁止用每进程 SQLite 冒充共享远程权威库；07 order 权威库必须是 MySQL 等真实共享网络数据库。
@@ -215,3 +218,6 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERATOR_NAMESPACE、SHOP_GENERATOR_EPOCH 显式启用 stable；每个副本使用独立持久 root 和实例 ID，并保留原 SHOP_LOCAL_PENDING_DIR。SHOP_REDIS_DISCOVERY_PREFIX 可用于隔离演示。初始化及历史编号/时间上界迁移见 [指南](../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不能复制身份卷扩容，或通过 TTL 回收编号。
 
 `TestStableNativeOrderReplicas` 使用专用 Redis/MySQL 启动真实四进程，验证双 order 独立编号、下单幂等、共享权威订单查询和原卷重启。现有 Compose 默认保留 legacy，不能把此原生进程测试称为 Compose stable 部署验收。
+
+
+2026-10-18 的 `5b04799` 验证了事务消息接入、重复确认计数与自动恢复；六轮累计 805096 个确认请求逐键匹配且最终队列排空。持续 2000/s 的 600 秒目标仍未达标，不能将示例参数当作生产容量承诺；详细失败结果与建议见上述实施审计。

@@ -26,7 +26,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 模型分类与继承、持久化错误、**建库建表与字段迁移** | [models.md](models.md) |
 | Manage CRUD 公开错误、Hook 继承、`GetList` 数据源、动态分库 | [manage.md](manage.md) |
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
-| 多服务调用、EventBridge、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
+| 多服务调用、EventBridge、Outbox/Inbox 业务确认、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
 | Casdoor/JWT 双域、Manage RoleCode RBAC、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
@@ -79,7 +79,7 @@ entity.Model
         └── PaymentRecord         # OrderID/PaymentTypeID + 业务事实
 ```
 
-两类具体模型不得互相继承，也不得让 `BusinessModel` 继承 `BaseDataModel`。共享数据库名、TraceID、租户字段和 DataAction 的 `ServiceModel` 只是**服务公共模型基座**；它不参与业务分类。Outbox、Inbox、审计日志等技术记录属于基础设施持久化模型，单独放 `internal/store`/`audit`。
+两类具体模型不得互相继承，也不得让 `BusinessModel` 继承 `BaseDataModel`。共享数据库名、TraceID、租户字段和 DataAction 的 `ServiceModel` 只是**服务公共模型基座**；它不参与业务分类。独立保存的 Outbox、Inbox、审计日志等技术记录属于基础设施持久化模型，放 `internal/store`/`audit`；是否独立保存消息记录，或复用业务记录的投递状态、流水及幂等依据，按 [Outbox/Inbox 业务确认](multiservice-and-observability.md#outboxinbox-接入前的业务确认) 与使用者确认，不强制额外建表。
 
 业务事实保存基础资料 ID 作为关联权威，并按审计需要保存名称、编码、价格等历史快照。若一个"商品"结构同时承载无上限的库存或价格变动，应拆成稳定 `Product` 基础资料与 `InventoryRecord`/`PriceRecord` 业务事实。
 
@@ -102,7 +102,7 @@ entity.Model
 13. 日志使用 `logx` 稳定事件和字段，不记录 token、payload/body/response、SQL、参数或对象 dump。
 14. 修改公共 Go API、HTTP/JSON、配置或错误前后运行兼容/发布契约并登记迁移。
 15. 跨进程调用直接构造目标 API，但 Go 目录名与稳定服务名不同时必须在注册前用 `WithServiceName` 和 `WithPath` 显式声明；地址只由 ClusterProvider + ServiceResolver 解析。
-16. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 幂等；业务事实与 Outbox 必须同事务。TraceID 从最外层请求生成并透传；EventID 仍是事件幂等键。
+16. 跨服务控制事件使用逻辑服务消费组、可返回 error 的 Handler、成功后 ACK、pending reclaim 和 Inbox 或等价业务事实幂等；业务事实与持久投递意图必须同事务。新增或改变 Outbox/Inbox 接入前，按 [业务确认清单](multiservice-and-observability.md#outboxinbox-接入前的业务确认) 与使用者确认事件语义、目标、状态及记录复用方式，Core 和 AI 不得自行推断。TraceID 从最外层请求生成并透传；EventID 仍是事件幂等键。
 17. gRPC Client 复用 zrpc；每个 ServiceContext 独立管理 grpc-go Server。跨主机生产使用 mTLS 或已有双向身份的 mesh，禁止 insecure。
 18. 内部专用 Public 必须用 `WithInternalCallers` 声明白名单；HTTP 和调用方自报字段不能建立内部身份，拒绝必须早于 Parse。匿名 `/api/openapi` 必须过滤这类路由。
 19. 标准 `WebServer` 自动用 Core `ManageStore` 的主体/角色关系签发 RoleCode，并在 Router 前对所有标准与自定义 Manage command 统一按 `path + command` 鉴权；只有外部 IAM 映射才覆盖 `IManageRoleProvider`。不得把权限只放在 `ValidationBefore`、`DoBefore` 或前端按钮隐藏里。业务 Hook 仍负责领域限域、审计等横切语义，但不是 Core RBAC 的替代品。

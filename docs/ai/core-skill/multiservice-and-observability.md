@@ -8,7 +8,7 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 
 完整配置、实际 WorkerID 别名/容量、时间预留、import/recover/retire、独占卷与回滚要求见 [稳定实例身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不得移动既有 pending、重写历史 ID、把复制卷当成新副本，或用无上下文 `InitRequest.NewID` 生成业务主键。
 
-`UseOutbox` 默认每 100ms 唤醒、单次取数 100 条；取满且有发布进展时立即继续下一批，不是每秒 1000 条限流。失败记录保留重试；发布成功标记不代表消费者已 ACK。Inbox 是否是待处理队列由应用定义，示例 06 的 Inbox 是与业务投影同事务提交的已处理事件去重记录，未成功消息由可靠 MQ 订阅重投/reclaim。纯内存事件中心可注册和订阅，但内存队列自身不跨进程崩溃保留消息。07 的本地 pending 调度不同：当前每 100ms 只做一次至多 100 条同步，存在约 1000 条/秒的调度上限，不能用 Outbox 连续 drain 推导其吞吐。
+`UseOutbox` 默认每 100ms 唤醒、单次取数 100 条；取满且有发布进展时立即继续下一批，不是每秒 1000 条限流。失败记录保留重试；发布成功标记不代表消费者已 ACK。Inbox 是否是待处理队列由应用定义，示例 06 的 Inbox 是与业务投影同事务提交的已处理事件去重记录，未成功消息由可靠 MQ 订阅重投/reclaim。纯内存事件中心可注册和订阅，但内存队列自身不跨进程崩溃保留消息。07 已接回框架自适应 write-behind worker，不再使用原 100ms/100 条业务 ticker；该调整不改变 Outbox 的全局默认调度。
 
 ## 多服务调用与事件
 
@@ -28,7 +28,7 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
 - 低频、幂等的副本收敛控制事件（例如市场准备/激活）可显式设置 `Reliable:true, Broadcast:true`，每个稳定服务端点使用独立 consumer group 各消费一次。该选项不得用于价格、成交、结算等高频数据面；数据面仍使用逻辑服务共享组或按 key 分区。
 - 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
-- 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。发布方只负责发布事实，不知道也不等待消费者处理完成。
+- 生产写路径必须同事务保存业务事实和持久投递意图（独立 Outbox 或经确认的等价业务记录）；消费方的 Inbox 或等价幂等事实必须与对应业务更新同事务提交，成功后才 ACK。具体存储方式先按下节与使用者确认；发布方的 MQ 发布确认不表示消费者处理完成。
 - User 下单必须提供业务 `requestID`；事实服务用 `{UserID}:{requestID}` 唯一约束和请求指纹收敛并发重试。
 - Supplier 使用统一 Manage Hook 同时处理本人和管理员权限；Order 可靠事件按 `OrderID` 幂等写本地永久 `SupplierOrder`，删除 Hook 只查询该投影，禁止同步查询远端判断能否删除。
 - WebSocket 仅把本服务已消费的订单摘要推送给当前最终用户，不承担服务间传输和离线积压。
@@ -50,6 +50,35 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 验收必须同时运行 `examples/integration/06-shop-microservices` 和 `examples/integration/06-shop-microservices-three-process`。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
+
+### Outbox/Inbox 接入前的业务确认
+
+新增或改变业务可靠消息接入时，**以下属于应用业务决策，必须与使用者确认后再实施，Core 和 AI 不得根据模型字段、服务数量或示例自行猜测**。先核对已有需求、项目文档和当前会话中的明确决定；已有明确结论直接沿用，不重复询问。缺失项应列出具体选项、推荐及代价，等待使用者明确回复；未决项只记录为待确认，不据此新增表、字段、状态机、目标或清理策略。确认结论记录在具体项目的设计文档/README 中。
+
+| 确认项 | 必须明确的业务含义 |
+| --- | --- |
+| 事件语义与版本 | 每次业务变化是否都必须投递，还是只同步最新状态、允许合并中间版本；事件身份、版本及重试时使用的内容如何保存或从不可变事实重建 |
+| 投递目标 | 是一次发布 MQ 后由多个逻辑消费组订阅，还是生产方需执行多个独立目标的投递；必需目标及后续变更、历史补投如何定义 |
+| 完成状态 | 主状态和子状态分别表示 Broker 接管、接收方持久接收还是业务完成；是否需要业务回执，失败后如何重试/处置 |
+| 生产方记录复用 | 复用业务记录的投递状态/业务流水，还是独立 Outbox；单目标是否省去投递子表，多目标是否需要子状态及其完成度汇总 |
+| 消费方幂等 | 复用已有业务唯一键/流水，还是独立 Inbox；以什么稳定消费身份及 EventID/业务版本防重，是否跨副本有效 |
+| 事务与保留 | 业务事实、投递意图和消费幂等依据各由谁在什么事务内提交；消息正文、投递明细及去重依据何时可回收，需覆盖哪些重试/重放范围 |
+
+确认方案时保留以下技术边界，不把可选存储形式写成统一业务默认：
+
+- **事件数量与目标数量分开判断。** 一条不可变业务记录对应一个事件、一个发布目标时，可以直接保存投递状态；需要多个独立目标时，可按需增加目标子状态。同一订单若有创建、支付、取消等必须保留的多个事件，即使只有一个目标，也要保留各事件身份、内容与状态，可复用既有业务流水。只有使用者确认允许合并时，才可只保留最新状态。
+- **MQ 扇出不自动产生生产方子状态。** 一次发布到一个 Subject、多个消费组各自处理，通常仍只有一个发布目标；是否需要逐服务业务完成度由使用者定义。`published` 不能被解释为所有服务已处理，也不得据此删除 Broker 消息。发布确认等级须满足已声明的 Provider 能力要求。
+- **复用业务记录仍须守住事务与版本。** 投递意图随业务变化同事务提交；确认更新匹配具体事件/版本及目标，避免旧确认覆盖新 pending。Inbox 或复用的业务幂等事实随消费业务同事务提交，持久唯一约束等机制保证并发与跨副本防重。业务写 MySQL、消息标记单独写 Badger 不构成同一事务。
+- **复用存储不改变框架入口。** 已确认的业务记录可通过适配 `OutboxStore` 接入现有 `UseOutbox`，可靠消费仍走 `SubscribeEvent`；不得为省表另写发布轮询或重复订阅。现有接口不会自动识别业务状态，应用须实现对应存储适配；不能把本节建议描述为 Core 已自动完成。
+
+#### 可选事务消息工具
+
+`pkg/persistence/message` 提供加性工具，不持有数据库连接配置，不预设消息表；业务方案仍须按上表确认：
+
+- `message.Run(ctx, base, operation)`：从支持 `Clone` 的 `IDataAction` 创建独立事务；错误、取消及 panic 回滚，成功才提交，不自动重放提交结果未知的写入。建表必须在启动阶段完成，不在回调中 EnsureStorage。
+- `message.ConsumeInboxWith(ctx, action, receipt, identity, apply)`：加入调用方已经开启的 SQL 事务。应用提供消费依据模型、完整幂等查询条件及数据库唯一约束，工具查重后执行业务并插入依据。它也支持把依据保存为业务流水；提交成功后才 ACK。并发冲突必须回滚并返回，由可靠订阅重投；回调中的 HTTP/WebSocket 不在事务保证内。
+- `message.ConfirmPublishedWith(ctx, action, model, ids, fields)`：通过显式 `PublishedFields` 指定布尔发布字段及可选时间字段，锁定并核对完整主键集合后，分批执行状态更新；空批次不访问数据库。仅支持每行一个不可变事件且无逐行业务更新 Hook 的模型。可变业务行的版本条件、目标子状态和业务完成度仍由项目适配，不能省略版本比较后直接调用。
+- SQLite/MySQL action 提供可选 `types.ITransactionDB.GetTransactionDB()`，只返回已经开启的事务连接，未开启/未完成懒初始化则拒绝。不要用 `GetRunDB()` 作为事务连接；其原有基础连接语义保持不变。现有 `IDataAction` 实现无需新增必选方法，未支持显式 SQL 事务能力的适配器须保留原逐条路径或明确拒绝，不得悄悄使用基础连接。
 
 ### Outbox 批量确认边界
 
