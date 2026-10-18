@@ -117,6 +117,10 @@
 - `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
 - 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
 
+## MySQL共享池身份隔离
+
+同地址/最终数据库下，不同认证或驱动语义现在建立独立连接池，错误凭据不再借用首个账号的已认证池。同配置仍复用；池容量和日志参数仍由首次拥有者决定。`GetSyncPoolKey` 与连接管理器键均为进程内不透明身份，不能依赖旧 `host:port/db` 完整字符串、跨进程比较或持久保存。新键使用随机进程密钥生成认证摘要，不暴露密码或固定的可离线猜解摘要。模型、HTTP及数据库事实不变。
+
 ## 写路径观测加性字段
 
 写路径观测加性字段：`BatchCommitMetrics.TotalQueueWaitDuration`、`WriteAdmissionMetrics.Attempts/TotalDuration`；既有字段、写入返回值、准入和确认语义保持。Runtime白名单新增固定的本地阶段、SQL池及Outbox阶段累计指标；无业务ID标签，未采集字段不伪装为0。阶段计数与耗时仅供观测，不作为写重试、ACK或业务状态依据。

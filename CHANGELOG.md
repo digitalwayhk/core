@@ -48,6 +48,8 @@
 
 ### Changed
 
+- MySQL共享池按认证、最终数据库和驱动语义隔离，修复不同账号/密码借用首个账号连接的问题；同配置仍复用。池及同步限流键为进程内不透明身份，不应持久化或解析。
+
 - Badger后端适配v4.9.6，保留可靠写默认约束；迁移和包含新事实的备份回退边界见`docs/codex/API_COMPATIBILITY_SURFACE.md`。
 
 - stable 的路由、受管理事件订阅和 Outbox 在业务操作前检查自身准入；临时发现故障恢复后可继续，持久权威冲突/损坏停止服务。`OutboxOptions.Admission` 为可选接口，保留零值和结构可比较性。无服务上下文的 `InitRequest.NewID` 不再使用包级备用编号，元数据枚举不得生成真实业务主键；正式主键改由受保护 ServiceContext 获取，迁移说明同上。

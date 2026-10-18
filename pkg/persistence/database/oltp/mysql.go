@@ -222,7 +222,7 @@ func (m *MySQL) GetSyncPoolKey(data interface{}) string {
 	if dbName == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d/%s", m.config.Host, m.config.Port, dbName)
+	return mysqlConnectionIdentity(m.config, dbName)
 }
 
 // ==================== 核心方法（与 SQLite 保持一致）====================
@@ -657,7 +657,7 @@ func (m *MySQL) configureConnectionPool(db *gorm.DB) error {
 // getConnectionKey 获取连接键
 func (m *MySQL) getConnectionKey() string {
 	// 使用 Name 而不是 config.Database，因为 Name 是最终确定的数据库名
-	return fmt.Sprintf("%s:%d/%s", m.config.Host, m.config.Port, m.Name)
+	return mysqlConnectionIdentity(m.config, m.Name)
 }
 
 // ensureDatabase 确保数据库存在
