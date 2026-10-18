@@ -53,3 +53,5 @@ go list -deps ./examples/07-shop-order-scale/go-zero-reference/main
 真实事务回滚测试还需显式 `CORE_REFERENCE_TEST_MYSQL=1` 和 `SHOP_ORDER_REMOTE_MYSQL_*` 指向已准备的独占 schema。测试会插入自己的记录，不清理或删除其他记录。
 
 首次烟测7,000个确认请求全部逐键匹配，仅作为闭环证据。正式对照结果见 [对照报告](../../../docs/codex/GO_ZERO_ORDER_COMPARISON_2026-10-18.md)。
+
+修正恢复逻辑后的原生600秒复验中，680649个确认请求全部匹配，停载约128.05秒后各层排空；失败率、发送器丢弃和排空时长仍未达到容量门槛。完整运行与恢复通过不代表2000/s容量通过，版本和原始失败记录均在报告中单列。
