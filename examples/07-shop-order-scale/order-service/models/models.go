@@ -66,10 +66,14 @@ const (
 )
 
 var (
+	// RunRemoteRead 为单条只读业务查询提供独立 action，不开启数据库事务。
+	RunRemoteRead = store.RunRemoteRead
 	// ErrOrderWriteStoreUnavailable 表示当前服务实例订单可靠 store 不可用。
 	ErrOrderWriteStoreUnavailable = transaction.ErrOrderWriteStoreUnavailable
 	// ErrOrderRuleNotFound 表示权威库尚未配置指定订单规则。
 	ErrOrderRuleNotFound = basedata.ErrOrderRuleNotFound
+	// ErrRemoteOrderNotFound 表示远端幂等键不存在，不代表数据库访问失败。
+	ErrRemoteOrderNotFound = transaction.ErrRemoteOrderNotFound
 
 	// NewServiceBaseModel 创建服务级基础模型。
 	NewServiceBaseModel = common.NewServiceBaseModel

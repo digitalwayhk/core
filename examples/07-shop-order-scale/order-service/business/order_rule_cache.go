@@ -55,7 +55,7 @@ func (c *OrderRuleCache) Get() (*models.OrderRule, error) {
 
 func loadEnabledOrderRule(ruleCode string) (*models.OrderRule, error) {
 	var rule *models.OrderRule
-	err := models.RunRemoteTransaction(func(action models.DataAction) error {
+	err := models.RunRemoteRead(func(action models.DataAction) error {
 		var err error
 		rule, err = models.GetEnabledOrderRuleWith(action, ruleCode)
 		return err

@@ -57,6 +57,8 @@ func start07AllInOne(t *testing.T) (*integration.Suite, *integration.Suite) {
 		ServiceIndex:     1,
 		GRPCServiceCount: 4,
 		Arguments:        []string{"-view", "0"},
+		// 独占业务库，避免管理员规则 UAT 的最小数量设置影响本场景。
+		Environment: map[string]string{"SHOP_ORDER_REMOTE_MYSQL_DATABASE": fmt.Sprintf("core_07_ws_uat_%d", time.Now().UnixNano())},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

@@ -2,6 +2,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"sync"
@@ -70,4 +71,19 @@ func EnsureRemoteModel(model interface{}) error {
 // RunRemoteTransaction 在共享远程权威库中执行独立 MySQL 事务。
 func RunRemoteTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) error {
 	return runTransaction(nil, &remoteEnsureMu, GetRemote, ensureStorage, operation)
+}
+
+// RunRemoteRead 为单条只读查询克隆独立 action，不开启事务；表须在启动时建好。
+func RunRemoteRead(operation func(persistencetypes.IDataAction) error) error {
+	remoteEnsureMu.Lock()
+	cloner, ok := GetRemote().(interface {
+		Clone() persistencetypes.IDataAction
+	})
+	if !ok {
+		remoteEnsureMu.Unlock()
+		return errors.New("数据操作器不支持独立读取")
+	}
+	action := cloner.Clone()
+	remoteEnsureMu.Unlock()
+	return operation(action)
 }
