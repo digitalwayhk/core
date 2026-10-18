@@ -203,6 +203,8 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 
 真实三进程写入压测使用 `examples/integration/07-shop-order-scale-multi-process` 的 `TestStableOrderWriteLoad`，默认跳过。 `CORE_TEST_LOAD_SECONDS` 可设为 1–600，省略为 30 秒；`CORE_TEST_LOAD_EVIDENCE_DIR` 必须是每轮独立的绝对路径，显式压测将本地身份与 pending 保留在其 `state-*` 子目录，测试结束不自动删除。它保留 HTTP、mTLS、远程幂等探测、本地可靠写、共享 MySQL、Outbox 与 Redis 消费 ACK，并逐笔核对已确认订单；必须显式配置专属依赖与证据目录。历史复现命令、2000 次/秒基线及三层积压见 [压测记录](../../docs/codex/ORDER_WRITE_LOAD_2026-10-18.md)，本次优化及回归结果见 [实施审计](../../docs/codex/TRANSACTIONAL_MESSAGE_PLAN_REVIEW_2026-10-18.md)。
 
+独立的原生 go-zero 下单实现放在 [go-zero-reference](go-zero-reference/README.md)，应用不调用 Core 封装；使用 `TestNativeGoZeroOrderWriteLoad` 复用同一负载与数据核对。它比较当前下单及订单创建事件闭环，不替代整个 07 的功能；实现差异与容量证据见 [对照报告](../../docs/codex/GO_ZERO_ORDER_COMPARISON_2026-10-18.md)。
+
 ## 质量门禁
 
 - 禁止新增 `api/call`。

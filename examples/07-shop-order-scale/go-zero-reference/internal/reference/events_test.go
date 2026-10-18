@@ -25,6 +25,8 @@ func TestNativeConsumerValidatesBeforeACK(t *testing.T) {
 	if !isBusyGroup(e) {
 		require.NoError(t, e)
 	}
+	before, e := r.XPending(ctx, streamName, "shop-user").Result()
+	require.NoError(t, e)
 	p := orderChanged{SchemaVersion: 1, EventID: "native-ack-test-" + time.Now().String(), EventType: "OrderCreated", OrderID: 3, UserID: 720001}
 	for _, valid := range []bool{true, true, false} {
 		if !valid {
@@ -47,5 +49,5 @@ func TestNativeConsumerValidatesBeforeACK(t *testing.T) {
 	require.Equal(t, 1, count)
 	pending, e := r.XPending(ctx, streamName, "shop-user").Result()
 	require.NoError(t, e)
-	require.EqualValues(t, 1, pending.Count)
+	require.EqualValues(t, before.Count+1, pending.Count)
 }

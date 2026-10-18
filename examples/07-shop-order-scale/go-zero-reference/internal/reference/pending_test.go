@@ -82,3 +82,16 @@ func TestPendingOtherKeySurvivesRepeatedConfirmation(t *testing.T) {
 	require.Len(t, items, 1)
 	require.Equal(t, "b", items[0].RequestID)
 }
+
+// TestNativeOrderLanesUseAllWorkers 验证低位相同的 Snowflake 订单仍能分布到所有事件 worker。
+func TestNativeOrderLanesUseAllWorkers(t *testing.T) {
+	for _, workers := range []uint{4, 8} {
+		counts := make([]int, workers)
+		for i := range 8000 {
+			counts[orderLane(uint(1700000000+i)<<22, workers)]++
+		}
+		for lane, count := range counts {
+			require.InDelta(t, 8000/int(workers), count, 8000/float64(workers)*0.15, "workers=%d lane=%d counts=%v", workers, lane, counts)
+		}
+	}
+}

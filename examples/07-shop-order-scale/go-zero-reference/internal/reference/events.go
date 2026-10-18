@@ -75,7 +75,7 @@ func (a *application) publishBatch(ctx context.Context, items []*OutboxRecord) (
 		if payload.OrderID == 0 {
 			return nil, errors.New("事件缺少订单 ID")
 		}
-		n := payload.OrderID % 4
+		n := orderLane(payload.OrderID, 4)
 		lanes[n] = append(lanes[n], o)
 	}
 	var wg sync.WaitGroup
@@ -131,7 +131,7 @@ func (a *application) handleMessages(messages []redis.XMessage) {
 		if json.Unmarshal(env.Data, &payload) != nil || payload.SchemaVersion != 1 || payload.EventID == "" || payload.OrderID == 0 || payload.UserID == 0 {
 			continue
 		}
-		n := payload.OrderID % 8
+		n := orderLane(payload.OrderID, 8)
 		lanes[n] = append(lanes[n], m)
 	}
 	var wg sync.WaitGroup
