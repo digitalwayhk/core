@@ -35,8 +35,12 @@ func replaceWithNativeGoZero(t *testing.T, original []*integration.Suite, eviden
 	supplierDB := findReferenceFile(t, original[1].RootDir, func(path string, _ []byte) bool { return strings.HasSuffix(path, "shop-supplier-scale.ldb") })
 	processes := make([]*integration.Suite, 3)
 	t.Cleanup(func() {
-		for _, p := range processes {
+		for i, p := range processes {
 			if p != nil {
+				p.StopProcess()
+				data, e := os.ReadFile(filepath.Join(p.RootDir, "service.log"))
+				require.NoError(t, e)
+				require.NoError(t, os.WriteFile(filepath.Join(evidence, fmt.Sprintf("process-%d.log", i)), data, 0600))
 				p.Stop()
 			}
 		}

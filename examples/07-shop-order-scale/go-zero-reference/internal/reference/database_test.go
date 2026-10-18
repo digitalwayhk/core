@@ -49,6 +49,8 @@ func TestNativeTransactionRollbackKeepsPending(t *testing.T) {
 	require.EqualValues(t, 1, count)
 	require.NoError(t, db.Model(&OutboxRecord{}).Where("event_id = ?", "order:"+strconv.FormatUint(uint64(id), 10)+":OrderCreated").Count(&count).Error)
 	require.EqualValues(t, 1, count)
+	require.NoError(t, a.verifyOrphans([]queueOrphan{{id: id, dataKey: localKey(o)}}))
+	require.Error(t, a.verifyOrphans([]queueOrphan{{id: id, dataKey: []byte("p:wrong-owner")}}))
 	require.NoError(t, s.confirm(items))
 	require.Zero(t, s.depth.Load())
 }

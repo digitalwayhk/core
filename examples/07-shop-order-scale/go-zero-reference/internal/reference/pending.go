@@ -2,12 +2,14 @@
 package reference
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,16 +18,17 @@ import (
 )
 
 type pending struct {
-	db        *badger.DB
-	mu        sync.Mutex
-	submit    sync.RWMutex
-	closed    bool
-	queue     chan *submission
-	done      chan struct{}
-	depth     atomic.Int64
-	admission chan struct{}
-	softSince time.Time
-	wake      chan struct{}
+	db            *badger.DB
+	mu            sync.Mutex
+	submit        sync.RWMutex
+	closed        bool
+	queue         chan *submission
+	done          chan struct{}
+	depth         atomic.Int64
+	admission     chan struct{}
+	softSince     time.Time
+	wake          chan struct{}
+	verifyOrphans func([]queueOrphan) error
 }
 
 func openPending(path string) (*pending, error) {
@@ -40,7 +43,7 @@ func openPending(path string) (*pending, error) {
 	err = db.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		for it.Seek([]byte("q:")); it.ValidForPrefix([]byte("q:")); it.Next() {
+		for it.Seek([]byte("p:")); it.ValidForPrefix([]byte("p:")); it.Next() {
 			s.depth.Add(1)
 		}
 		return nil
@@ -203,6 +206,7 @@ func (s *pending) commit(batch []*submission) {
 
 func (s *pending) batch(limit int) ([]*Order, error) {
 	items := make([]*Order, 0, limit)
+	var orphans []queueOrphan
 	err := s.db.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
@@ -212,6 +216,15 @@ func (s *pending) batch(limit int) ([]*Order, error) {
 				return e
 			}
 			value, e := tx.Get(key)
+			if errors.Is(e, badger.ErrKeyNotFound) {
+				qKey := it.Item().KeyCopy(nil)
+				id, parseErr := strconv.ParseUint(string(qKey[2:]), 10, 64)
+				if parseErr != nil {
+					return parseErr
+				}
+				orphans = append(orphans, queueOrphan{queueKey: qKey, dataKey: key, id: uint(id)})
+				continue
+			}
 			if e != nil {
 				return e
 			}
@@ -223,7 +236,47 @@ func (s *pending) batch(limit int) ([]*Order, error) {
 		}
 		return nil
 	})
+	if err == nil && len(orphans) > 0 {
+		if s.verifyOrphans == nil {
+			return nil, errors.New("孤儿队列索引需要远端事实核验")
+		}
+		if err = s.verifyOrphans(orphans); err == nil {
+			err = s.clearVerifiedOrphans(orphans)
+		}
+	}
 	return items, err
+}
+
+func (s *pending) clearVerifiedOrphans(items []queueOrphan) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.db.Update(func(tx *badger.Txn) error {
+		for _, o := range items {
+			if _, e := tx.Get(o.dataKey); e == nil {
+				continue
+			} else if !errors.Is(e, badger.ErrKeyNotFound) {
+				return e
+			}
+			q, e := tx.Get(o.queueKey)
+			if errors.Is(e, badger.ErrKeyNotFound) {
+				continue
+			}
+			if e != nil {
+				return e
+			}
+			key, e := q.ValueCopy(nil)
+			if e != nil {
+				return e
+			}
+			if !bytes.Equal(key, o.dataKey) {
+				continue
+			}
+			if e = tx.Delete(o.queueKey); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
 }
 
 func (s *pending) confirm(items []*Order) error {
@@ -232,12 +285,19 @@ func (s *pending) confirm(items []*Order) error {
 	removed := int64(0)
 	err := s.db.Update(func(tx *badger.Txn) error {
 		for _, o := range items {
-			_, e := tx.Get(queueKey(o))
+			value, e := tx.Get(localKey(o))
 			if errors.Is(e, badger.ErrKeyNotFound) {
 				continue
 			}
 			if e != nil {
 				return e
+			}
+			var current Order
+			if e = value.Value(func(b []byte) error { return json.Unmarshal(b, &current) }); e != nil {
+				return e
+			}
+			if current.ID != o.ID || current.RequestFingerprint != o.RequestFingerprint {
+				return errors.New("同步期间本地订单发生变化")
 			}
 			if e = tx.Delete(localKey(o)); e != nil {
 				return e

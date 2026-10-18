@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,45 @@ import (
 
 func testOrder(id uint, request string) *Order {
 	return &Order{ID: id, UserID: 720001, SupplierID: 2, ProductID: 3, RequestID: request, RequestFingerprint: request, UnitPrice: decimal.NewFromInt(21), Quantity: 2, TotalAmount: decimal.NewFromInt(42), OrderRevision: 1, OrderStatus: "accepted", PaymentStatus: "unpaid"}
+}
+
+// TestVerifiedOrphanDoesNotBlockQueue 验证先经远端事实核验的残留索引不会挡住后续订单。
+func TestVerifiedOrphanDoesNotBlockQueue(t *testing.T) {
+	s, e := openPending(t.TempDir())
+	require.NoError(t, e)
+	defer s.close()
+	_, e = s.accept(context.Background(), testOrder(100, "healthy"))
+	require.NoError(t, e)
+	require.NoError(t, s.db.Update(func(tx *badger.Txn) error { return tx.Set([]byte("q:00000000000000000001"), []byte("p:missing")) }))
+	verified := false
+	s.verifyOrphans = func(q []queueOrphan) error {
+		require.Len(t, q, 1)
+		require.EqualValues(t, 1, q[0].id)
+		verified = true
+		return nil
+	}
+	items, e := s.batch(512)
+	require.NoError(t, e)
+	require.True(t, verified)
+	require.Len(t, items, 1)
+	require.NoError(t, s.confirm(items))
+	require.Zero(t, s.depth.Load())
+	require.NoError(t, s.db.View(func(tx *badger.Txn) error {
+		_, e := tx.Get([]byte("q:00000000000000000001"))
+		require.ErrorIs(t, e, badger.ErrKeyNotFound)
+		return nil
+	}))
+}
+
+// TestUnverifiedOrphanIsRetained 验证没有远端事实证明时保留索引并报告错误。
+func TestUnverifiedOrphanIsRetained(t *testing.T) {
+	s, e := openPending(t.TempDir())
+	require.NoError(t, e)
+	defer s.close()
+	require.NoError(t, s.db.Update(func(tx *badger.Txn) error { return tx.Set([]byte("q:00000000000000000001"), []byte("p:missing")) }))
+	_, e = s.batch(512)
+	require.Error(t, e)
+	require.NoError(t, s.db.View(func(tx *badger.Txn) error { _, e := tx.Get([]byte("q:00000000000000000001")); return e }))
 }
 
 // TestPendingConcurrentGroupCommit 验证并发合批逐条回执与真实队列条数一致。
