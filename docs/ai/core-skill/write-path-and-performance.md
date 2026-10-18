@@ -49,6 +49,8 @@ pending 缓存计数与持久同步索引必须分开核对；幂等 ACK 成功�
 
 ## PrefixedBadgerDB / ReliableWriteStore
 
+Badger参数选择先读[配置与调参](badger-configuration.md)：区分官方默认、工厂默认和实际Options；可靠性参数不可降级，候选性能值不等于最优。当前16MiB memtable/1MiB vlog不代表全部内存预算，block/index缓存等仍可能继承依赖默认。
+
 - 自适应 write-behind 只在组合根显式配置：复用 `SyncBatchSize`，设置 `SyncFlushThreshold=32`、`SyncMaxCollectDelay=20*time.Millisecond`、`SyncBacklogDrainDelay=0` 可按数量/期限收集并连续排空。新三字段全零保持旧模式；不能只改 `SyncBatchDelay` 就宣称解决积压等待。错误/零进展仍退避，业务不自建同步循环；20 ms 不包含远端执行时间，也不保证低流量 fsync 下降。完整配置与升级边界见 [同步指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md)。
 
 - 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。

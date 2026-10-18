@@ -26,6 +26,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 模型分类与继承、持久化错误、**建库建表与字段迁移** | [models.md](models.md) |
 | Manage CRUD 公开错误、Hook 继承、`GetList` 数据源、动态分库 | [manage.md](manage.md) |
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
+| Badger参数、官方/项目默认值、内存预算、GC与升级验证 | [badger-configuration.md](badger-configuration.md) |
 | 多服务调用、EventBridge、Outbox/Inbox 业务确认、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
 | Casdoor/JWT 双域、Manage RoleCode RBAC、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
