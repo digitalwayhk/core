@@ -161,7 +161,7 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - Local cluster：`Stable`。
 - etcd/Consul：`Conditional`，需要显式配置和外部依赖。
 - 内部同步传输默认 gRPC，HTTP 只作为显式备用；自定义 Socket 已删除，迁移见 `docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
-- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
+- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.3 的 zrpc.RpcServer.Stop 仍只关闭日志、不能独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
 - 对需要可靠保留、重放或安全回收的 Subject，应用必须在组合根通过 `ServiceContext.RequireMessageLifecycle(ctx, policy)` 声明真实必需逻辑消费组、起点、保留、重试、DLQ、容量与回收预算。完整状态机、Provider 能力矩阵、迁移和扩展标准见 [MQ 消息生命周期与 Provider 扩展标准](../../codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md)。
