@@ -1,0 +1,26 @@
+# 07 原生 go-zero 下单对照实施计划
+
+用户已明确：在 `examples/07-shop-order-scale/` 新建目录，按 07 的业务逻辑独立实现，不复用 Core 封装，使用相同数据量测试。当前主 Agent 直接完成，禁止子 Agent。
+
+## 比较边界
+
+目标是复现当前 `TestStableOrderWriteLoad` 的下单闭环，不扩展支付、报表及 Manage 界面。user → supplier 商品读取 → order 接单；Badger 同步持久化后返回 accepted；异步将订单与 Outbox 同事务写 MySQL；Redis Streams 发布、user 幂等处理、成功 ACK。所有应用代码只依赖 go-zero、grpc-go、GORM、Badger、go-redis 等底层库，禁止导入 Core 的框架、业务、模型、DTO。
+
+比较前由原有集成夹具准备相同表结构、商品、证书、JWT 和独占资源，再停止原服务；对照进程只检查既有 schema 并直接访问数据库。建表不进热路径，不新增迁移脚本。数据准备复用不等于业务执行复用。
+
+## 实施顺序
+
+- [ ] 新增 `go-zero-reference/internal/reference` 原生订单、队列、SQL、RPC、事件、HTTP 实现和测试；新增 `main` 入口。
+- [ ] 测试覆盖本地重新打开恢复、重复请求/指纹冲突、同步失败保留、订单/Outbox 回滚、消费成功后 ACK；依赖检查拒绝 Core 导入。
+- [ ] 原负载夹具增加独立入口，复用同一发送器、请求体、采样与逐键验证；原入口默认行为保持。
+- [ ] 相同资源下交替运行 Core / go-zero：500/s 预热 10 秒、2000/s 30 秒短窗，长窗目标 600 秒；保留每轮原始请求、采样、日志与源码指纹。
+- [ ] 比较确认吞吐、成功率、超时/503、发送器丢弃、本地 pending、SQL unpublished、Broker lag/PEL、排空和资源；测试未完成/观测缺失独立标记。
+- [ ] 直接审查差异、定向/race/静态检查，写入对照 README 和中文结果文档。
+
+## 公平性与证据
+
+双方都用三进程、mTLS、相同 JWT、原版本依赖、同类数据和原 schema、相同 MySQL 连接上限 20/idle 5、SyncWrites=true、批提交 128/1ms、同步 512/阈值32/20ms、Outbox100/并发4、消费并发8、HTTP5s/RPC2s、512在途。原服务 user HTTP 支持 WebSocket，压测下没有连接；对照只验证被负载覆盖的下单闭环，不声称复制整个 07。
+
+原生实现可以使用更简单的数据布局和业务 SQL，这是对比对象；必须记录其与 Core 在 pending 索引、生命周期/注册、自愈、度量、缓存及后台任务上的差异，不能把差异一律归因 go-zero 引擎。双方运行时的中间件和有效超时必须记录。原生服务使用测试启动器分配的固定 peer 地址，不宣称验收服务发现恢复。
+
+守护维持 pending40000、连续三次采样失败停发及360秒排空。不得跳过 fsync、删除 Outbox、提前 ACK、禁用熔断或修改成功率门槛制造优势。观测 COUNT 开销保持一致并标注。保留原证据和用户未跟踪前端资料，只创建本轮专用依赖，不触碰旧数据库。

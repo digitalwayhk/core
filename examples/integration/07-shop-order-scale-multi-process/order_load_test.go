@@ -52,6 +52,15 @@ type orderLoadSample struct {
 
 // TestStableOrderWriteLoad 默认跳过；只接受显式提供的隔离依赖，不修改业务调度。
 func TestStableOrderWriteLoad(t *testing.T) {
+	runOrderWriteLoad(t, false)
+}
+
+// TestNativeGoZeroOrderWriteLoad 仅替换被测应用，实现与 Core 相同的负载和最终逐键核对。
+func TestNativeGoZeroOrderWriteLoad(t *testing.T) {
+	runOrderWriteLoad(t, true)
+}
+
+func runOrderWriteLoad(t *testing.T, native bool) {
 	if os.Getenv("CORE_TEST_ORDER_LOAD") != "1" {
 		t.Skip("仅显式 CORE_TEST_ORDER_LOAD=1 运行压测")
 	}
@@ -74,6 +83,12 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	supplier := prepareDockerSupplierFixture(t, processes[1], admin)
 	user := processes[0]
 	token := user.TokenFor(t, "720001", 0)
+	implementation := "core"
+	if native {
+		processes = replaceWithNativeGoZero(t, processes, evidence)
+		user = processes[0]
+		implementation = "go-zero-native"
+	}
 	warmup := createDockerBuyerOrderWithRequest(t, user, token, supplier.ProductID, "load-warmup")
 	waitDockerOrderVisible(t, user, token, warmup.OrderID)
 	config := mysql.NewConfig()
@@ -160,6 +175,7 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	writeLoadJSON(t, filepath.Join(evidence, "samples.json"), samples)
 	output, _ := exec.Command("git", "rev-parse", "HEAD").Output()
 	summary := map[string]interface{}{"source_head": strings.TrimSpace(string(output)), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "logical_cpus": runtime.NumCPU(), "order_replicas": 1, "namespace": ns, "stages": stages, "drained": drained, "drain_seconds": time.Since(loadEnd).Seconds(), "store_drain_seconds": storeDrainSeconds, "final": final, "sample_count": len(samples)}
+	summary["implementation"] = implementation
 	// 核对每个已确认的 requestID/OrderID；超时失败可能已落库，单独登记未知结果，不能当作已确认丢失。
 	rows, err := db.Query("SELECT id,request_id FROM `order`")
 	require.NoError(t, err)

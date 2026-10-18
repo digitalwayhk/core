@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package reference07transport;
+
+option go_package = "github.com/digitalwayhk/core/examples/07-shop-order-scale/go-zero-reference/internal/wire;wire";
+
+// OrderTransport is the gRPC service for inter-service calls within the core framework.
+service OrderTransport {
+  // Call forwards a PayloadRequest to the target service and returns its response.
+  rpc Call(PayloadRequest) returns (PayloadResponse);
+}
+
+message PayloadRequest {
+  reserved 2, 3, 4, 6, 7, 8;
+  reserved "source_address", "source_port", "source_socket_port";
+  reserved "target_address", "target_port", "target_socket_port";
+
+  string trace_id       = 1;
+  string source_service = 5;
+  string target_service = 9;
+  string source_path    = 10;
+  string target_path    = 11;
+  string user_id        = 12;
+  string user_name      = 13;
+  string client_ip      = 14;
+  bool   auth           = 15;
+  bytes  data           = 16;
+  string http_method    = 17;
+  string token          = 18;
+}
+
+message PayloadResponse {
+  bytes  data  = 1;
+  string error = 2;
+}
