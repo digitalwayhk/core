@@ -122,11 +122,12 @@ func (s *Service) newOrderWriteStore(sc *router.ServiceContext) (*transaction.Or
 		nosql.ReliableWriteStoreConfig{
 			BasePath: basePath,
 			Badger:   badgerConfig,
-			// Group Commit 最多用 1ms 收集 128 个并发请求，队列留出 8 个批次的有界等待空间。
+			// 已有一个请求排队时启动 1ms 合批；低积压仍立即提交，避免默认 16 条门槛退化为逐笔落盘。
 			Batch: nosql.BatchCommitConfig{
-				MaxBatch:      128,
-				CollectWindow: time.Millisecond,
-				QueueCapacity: 1024,
+				MaxBatch:       128,
+				CollectBacklog: 1,
+				CollectWindow:  time.Millisecond,
+				QueueCapacity:  1024,
 			},
 			// 准入控制保护单副本的 fsync、pending 积压和磁盘容量，达到硬边界时 fail closed。
 			Admission: nosql.WriteAdmissionConfig{
