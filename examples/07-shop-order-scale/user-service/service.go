@@ -66,9 +66,9 @@ func (s *Service) registerEventSubscriptions(sc *router.ServiceContext) {
 // userEventSubscriptions 描述用户服务需要消费的内部事件集合。
 func userEventSubscriptions() []event.Subscription {
 	return []event.Subscription{
-		{Subject: contract.SubjectOrderChanged, EventType: contract.EventOrderCreated, Reliable: true, Handler: handleUserOrderEvent},
-		{Subject: contract.SubjectOrderChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, Handler: handleUserOrderEvent},
-		{Subject: contract.SubjectOrderChanged, EventType: contract.EventPaymentChanged, Reliable: true, Handler: handleUserOrderEvent},
+		{Subject: contract.SubjectOrderChanged, EventType: contract.EventOrderCreated, Reliable: true, KeyConcurrency: 4, Handler: handleUserOrderEvent},
+		{Subject: contract.SubjectOrderChanged, EventType: contract.EventOrderStatusChanged, Reliable: true, KeyConcurrency: 4, Handler: handleUserOrderEvent},
+		{Subject: contract.SubjectOrderChanged, EventType: contract.EventPaymentChanged, Reliable: true, KeyConcurrency: 4, Handler: handleUserOrderEvent},
 	}
 }
 

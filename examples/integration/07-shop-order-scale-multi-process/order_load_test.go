@@ -55,6 +55,8 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	if os.Getenv("CORE_TEST_ORDER_LOAD") != "1" {
 		t.Skip("仅显式 CORE_TEST_ORDER_LOAD=1 运行压测")
 	}
+	loadSeconds, err := parseOrderLoadSeconds(os.Getenv("CORE_TEST_LOAD_SECONDS"))
+	require.NoError(t, err)
 	evidence := os.Getenv("CORE_TEST_LOAD_EVIDENCE_DIR")
 	require.NotEmpty(t, evidence, "需要明确证据目录")
 	require.True(t, filepath.IsAbs(evidence))
@@ -83,14 +85,35 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	broker := redis.NewClient(&redis.Options{Addr: os.Getenv("CORE_TEST_REDIS_ADDR")})
 	defer broker.Close()
 	sampleCtx, stopSample := context.WithCancel(context.Background())
+	loadCtx, stopLoad := context.WithCancel(context.Background())
+	defer stopLoad()
+	guardianStop := ""
 	var samples []orderLoadSample
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		consecutiveErrors := 0
 		for {
-			samples = append(samples, takeOrderLoadSample(db, broker, processes))
+			sample := takeOrderLoadSample(db, broker, processes)
+			samples = append(samples, sample)
+			if len(sample.Errors) > 0 {
+				consecutiveErrors++
+			} else {
+				consecutiveErrors = 0
+			}
+			if guardianStop == "" {
+				if sample.Pending != nil && *sample.Pending >= 40_000 {
+					guardianStop = "pending 达到 40000，停止发送，保留恢复数据"
+				}
+				if consecutiveErrors >= 3 {
+					guardianStop = "连续三次观测失败，停止发送"
+				}
+				if guardianStop != "" {
+					stopLoad()
+				}
+			}
 			select {
 			case <-sampleCtx.Done():
 				return
@@ -104,8 +127,11 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	start := time.Now()
 	var results []orderLoadResult
 	var stages []map[string]interface{}
-	for _, stage := range []struct{ rate, seconds int }{{500, 10}, {2000, 30}} {
-		batch, summary := runOrderLoadStage(client, user.BaseURL, token, supplier.ProductID, stage.rate, time.Duration(stage.seconds)*time.Second, start)
+	for _, stage := range []struct{ rate, seconds int }{{500, 10}, {2000, loadSeconds}} {
+		if loadCtx.Err() != nil {
+			break
+		}
+		batch, summary := runOrderLoadStage(loadCtx, client, user.BaseURL, token, supplier.ProductID, stage.rate, time.Duration(stage.seconds)*time.Second, start)
 		results = append(results, batch...)
 		stages = append(stages, summary)
 		t.Logf("负载窗口：%s", mustLoadJSON(summary))
@@ -163,14 +189,33 @@ func TestStableOrderWriteLoad(t *testing.T) {
 		sampleErrors += len(sample.Errors)
 	}
 	summary["sample_errors"] = sampleErrors
+	summary["requested_load_seconds"], summary["guardian_stop"] = loadSeconds, guardianStop
 	writeLoadJSON(t, filepath.Join(evidence, "summary.json"), summary)
 	t.Logf("负载结果：%s", mustLoadJSON(summary))
 	require.True(t, drained, "停止发送后 360 秒持久化或消费 ACK 仍未排空")
 	require.Zero(t, missing, "已确认订单不得丢失或改变主键")
 	require.Zero(t, sampleErrors, "观测缺失必须标记为不完整，不能用零代替")
+	require.Empty(t, guardianStop, "守护停发必须判定未达标，不能把提前结束当容量通过")
+	for _, stage := range stages {
+		require.Equal(t, false, stage["interrupted"])
+		require.Zero(t, stage["generator_dropped"], "发送器丢弃不能冒充服务吞吐")
+		require.Equal(t, stage["scheduled"], stage["started"])
+		require.GreaterOrEqual(t, float64(stage["successful"].(int))/float64(stage["scheduled"].(int)), 0.999)
+	}
 }
 
-func runOrderLoadStage(client *http.Client, url, token string, product uint, rate int, duration time.Duration, origin time.Time) ([]orderLoadResult, map[string]interface{}) {
+func parseOrderLoadSeconds(value string) (int, error) {
+	if value == "" {
+		return 30, nil
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds < 1 || seconds > 600 {
+		return 0, fmt.Errorf("CORE_TEST_LOAD_SECONDS 必须为 1 至 600")
+	}
+	return seconds, nil
+}
+
+func runOrderLoadStage(ctx context.Context, client *http.Client, url, token string, product uint, rate int, duration time.Duration, origin time.Time) ([]orderLoadResult, map[string]interface{}) {
 	start := time.Now()
 	total := int(duration.Seconds() * float64(rate))
 	slots := make(chan struct{}, 512)
@@ -180,13 +225,22 @@ func runOrderLoadStage(client *http.Client, url, token string, product uint, rat
 	dropped, maxLagMS := 0, 0.0
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
+sendLoop:
 	for scheduled := 0; scheduled < total; {
-		now := <-ticker.C
+		var now time.Time
+		select {
+		case <-ctx.Done():
+			break sendLoop
+		case now = <-ticker.C:
+		}
 		due := int(now.Sub(start).Seconds() * float64(rate))
 		if due > total {
 			due = total
 		}
 		for scheduled < due {
+			if ctx.Err() != nil {
+				break sendLoop
+			}
 			index := scheduled
 			scheduled++
 			lag := time.Since(start).Seconds()*1000 - float64(index)*1000/float64(rate)
@@ -207,7 +261,7 @@ func runOrderLoadStage(client *http.Client, url, token string, product uint, rat
 				body := fmt.Sprintf(`{"productID":%d,"quantity":2,"requestID":%q,"address":{"addressID":1,"receiverName":"压测买家","phone":"13800000000","province":"广东","city":"深圳","district":"南山","detail":"测试"}}`, product, requestID)
 				began := time.Now()
 				result := orderLoadResult{RequestID: requestID, StartedMS: began.Sub(origin).Seconds() * 1000}
-				req, _ := http.NewRequest(http.MethodPost, url+"/api/shop-user/addorder", bytes.NewBufferString(body))
+				req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/shop-user/addorder", bytes.NewBufferString(body))
 				req.Header.Set("Authorization", "Bearer "+token)
 				req.Header.Set("Content-Type", "application/json")
 				resp, err := client.Do(req)
@@ -261,7 +315,7 @@ func runOrderLoadStage(client *http.Client, url, token string, product uint, rat
 		}
 		return latency[int(float64(len(latency)-1)*p)]
 	}
-	return results, map[string]interface{}{"target_rps": rate, "window_seconds": duration.Seconds(), "elapsed_including_inflight_seconds": elapsed, "scheduled": total, "started": len(results), "generator_dropped": dropped, "generator_max_lag_ms": maxLagMS, "successful": success, "failed": len(results) - success, "success_rps_over_window": float64(success) / duration.Seconds(), "success_rps_including_inflight": float64(success) / elapsed, "p50_ms": quantile(.50), "p95_ms": quantile(.95), "p99_ms": quantile(.99), "statuses": statuses, "window_start_ms": start.Sub(origin).Seconds() * 1000}
+	return results, map[string]interface{}{"target_rps": rate, "window_seconds": duration.Seconds(), "elapsed_including_inflight_seconds": elapsed, "scheduled": total, "started": len(results), "generator_dropped": dropped, "generator_max_lag_ms": maxLagMS, "successful": success, "failed": len(results) - success, "success_rps_over_window": float64(success) / duration.Seconds(), "success_rps_including_inflight": float64(success) / elapsed, "p50_ms": quantile(.50), "p95_ms": quantile(.95), "p99_ms": quantile(.99), "statuses": statuses, "window_start_ms": start.Sub(origin).Seconds() * 1000, "interrupted": ctx.Err() != nil}
 }
 
 func takeOrderLoadSample(db *sql.DB, broker *redis.Client, processes []*integration.Suite) orderLoadSample {

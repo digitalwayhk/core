@@ -72,6 +72,18 @@ func TestOutboxBatchMySQLAtomicity(t *testing.T) {
 	for _, item := range readPending() {
 		require.False(t, item.Published)
 	}
+	// SQL 批量路径更新成功后再注入业务错误，证明更新使用当前事务而非基础连接。
+	err = store.RunRemoteTransaction(func() error { return nil }, func(action persistencetypes.IDataAction) error {
+		if err := MarkOutboxPublishedByIDs(action, ids); err != nil {
+			return err
+		}
+		return errors.New("批量确认后回滚")
+	})
+	require.EqualError(t, err, "批量确认后回滚")
+	for _, item := range readPending() {
+		require.False(t, item.Published)
+		require.Nil(t, item.PublishedAt)
+	}
 	adapter := OutboxStore{}
 	invalid := append(append([]event.OutboxMessage(nil), messages...), event.OutboxMessage{ID: ^uint(0) >> 1})
 	require.Error(t, adapter.MarkPublishedBatch(context.Background(), invalid))

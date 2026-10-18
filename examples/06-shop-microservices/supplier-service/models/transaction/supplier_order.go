@@ -2,6 +2,7 @@
 package transaction
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/basedata"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/common"
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/internal/store"
+	"github.com/digitalwayhk/core/pkg/persistence/message"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"github.com/shopspring/decimal"
@@ -74,42 +76,36 @@ func ApplyOrderEvent(event eventdto.OrderChanged) error {
 		return err
 	}
 	return store.RunInTransaction(ensureTransactionStorage, func(action persistencetypes.IDataAction) error {
-		var inboxItems []*Inbox
-		inboxQuery := store.NewSearch(NewInbox(), 1)
-		inboxQuery.AddWhereN("EventID", event.EventID)
-		if err := action.Load(inboxQuery, &inboxItems); err != nil {
-			return err
-		}
-		if len(inboxItems) > 0 {
-			return nil
-		}
-
-		var orders []*SupplierOrder
-		orderQuery := store.NewSearch(NewSupplierOrder(), 1)
-		orderQuery.AddWhereN("OrderID", event.OrderID)
-		if err := action.Load(orderQuery, &orders); err != nil {
-			return err
-		}
-		if len(orders) == 0 {
-			item := NewSupplierOrder()
-			applyOrderSnapshot(item, event)
-			item.SetHashcode(item.GetHash())
-			if err := action.Insert(item); err != nil {
-				return err
-			}
-		} else if event.OrderRevision > orders[0].OrderRevision {
-			applyOrderSnapshot(orders[0], event)
-			orders[0].SetUpdatedAt(time.Now().UTC())
-			if err := action.Update(orders[0]); err != nil {
-				return err
-			}
-		}
-
 		inbox := NewInbox()
 		inbox.TraceID = event.TraceID
 		inbox.EventID, inbox.EventType = event.EventID, event.EventType
 		inbox.SetHashcode(inbox.GetHash())
-		return action.Insert(inbox)
+		inboxQuery := store.NewSearch(NewInbox(), 1)
+		inboxQuery.AddWhereN("EventID", event.EventID)
+		return message.ConsumeInboxWith(context.Background(), action, inbox, inboxQuery, func(action persistencetypes.IDataAction) error {
+			var orders []*SupplierOrder
+			orderQuery := store.NewSearch(NewSupplierOrder(), 1)
+			orderQuery.AddWhereN("OrderID", event.OrderID)
+			if err := action.Load(orderQuery, &orders); err != nil {
+				return err
+			}
+			if len(orders) == 0 {
+				item := NewSupplierOrder()
+				applyOrderSnapshot(item, event)
+				item.SetHashcode(item.GetHash())
+				if err := action.Insert(item); err != nil {
+					return err
+				}
+			} else if event.OrderRevision > orders[0].OrderRevision {
+				applyOrderSnapshot(orders[0], event)
+				orders[0].SetUpdatedAt(time.Now().UTC())
+				if err := action.Update(orders[0]); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
 	})
 }
 

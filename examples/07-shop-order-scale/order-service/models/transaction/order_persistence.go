@@ -14,6 +14,7 @@ import (
 func FindRemoteOrderByIdempotencyWith(action persistencetypes.IDataAction, userID uint, requestID string) (*Order, error) {
 	var items []*Order
 	query := store.NewSearch(NewOrder(), 1)
+	query.SkipCount = true
 	query.AddWhereN("UserID", userID)
 	query.AddWhereN("RequestID", strings.TrimSpace(requestID))
 	if err := action.Load(query, &items); err != nil {
@@ -89,6 +90,7 @@ func UpsertRemoteOrdersWith(action persistencetypes.IDataAction, orders []*Order
 
 	var existing []*Order
 	query := store.NewSearch(NewOrder(), len(hashes))
+	query.SkipCount = true
 	query.AddWhereNS("Hashcode", persistencetypes.SymbolIn, hashes)
 	if err := action.Load(query, &existing); err != nil {
 		return nil, err

@@ -2,11 +2,13 @@
 package transaction
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/internal/store"
+	"github.com/digitalwayhk/core/pkg/persistence/message"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
@@ -14,6 +16,7 @@ import (
 func PendingOutbox(limit int) ([]*OutboxRecord, error) {
 	var items []*OutboxRecord
 	query := store.NewSearch(NewOutbox(), limit)
+	query.SkipCount = true
 	query.AddWhereN("Published", false)
 	query.AddSortN("ID", false)
 	err := store.GetRemote().Load(query, &items)
@@ -27,6 +30,7 @@ func InsertOutboxIfMissingWith(action persistencetypes.IDataAction, item *Outbox
 	}
 	var items []*OutboxRecord
 	query := store.NewSearch(NewOutbox(), 1)
+	query.SkipCount = true
 	query.AddWhereN("EventID", strings.TrimSpace(item.EventID))
 	if err := action.Load(query, &items); err != nil {
 		return err
@@ -67,6 +71,7 @@ func InsertOutboxesIfMissingWith(action persistencetypes.IDataAction, items []*O
 
 	var existing []*OutboxRecord
 	query := store.NewSearch(NewOutbox(), len(hashes))
+	query.SkipCount = true
 	query.AddWhereNS("Hashcode", persistencetypes.SymbolIn, hashes)
 	if err := action.Load(query, &existing); err != nil {
 		return err
@@ -111,6 +116,10 @@ func MarkOutboxPublishedByID(action persistencetypes.IDataAction, id uint) error
 // MarkOutboxPublishedByIDs 在当前事务中按主键批量标记事件已发布。
 // 空切片立即成功；已发布记录视为成功。
 func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) error {
+	return markOutboxPublishedByIDs(context.Background(), action, ids)
+}
+
+func markOutboxPublishedByIDs(ctx context.Context, action persistencetypes.IDataAction, ids []uint) error {
 	if action == nil {
 		return errors.New("数据操作器不能为空")
 	}
@@ -122,6 +131,10 @@ func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) e
 	}
 	if len(unique) == 0 {
 		return nil
+	}
+	if _, ok := action.(persistencetypes.ITransactionDB); ok {
+		return message.ConfirmPublishedWith(ctx, action, NewOutbox(), unique,
+			message.PublishedFields{Published: "Published", PublishedAt: "PublishedAt", UpdatedAt: "UpdatedAt"})
 	}
 	var items []*OutboxRecord
 	query := store.NewSearch(NewOutbox(), len(unique))
