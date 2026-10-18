@@ -59,7 +59,7 @@ func openDatabase(role, path string) (*gorm.DB, error) {
 		}
 	} else {
 		pool.SetMaxOpenConns(envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20))
-		pool.SetMaxIdleConns(envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 5))
+		pool.SetMaxIdleConns(envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 20))
 		pool.SetConnMaxLifetime(30 * time.Minute)
 	}
 	tables := []string{"order", "outbox_record", "order_rule"}

@@ -61,3 +61,5 @@ go list -deps ./examples/07-shop-order-scale/go-zero-reference/main
 后续[v1.10.2与v1.10.3版本对照](../../../docs/codex/GO_ZERO_VERSION_COMPARISON_2026-10-18.md)中，两版长窗都未达容量目标，并出现负数pending；新版还有已在远端汇合的无索引本地残留。该参考实现的长压队列状态仍需专项复现，不能把一次成功排空当成稳定性保证。实验使用独立modfile，仓库默认依赖未变。
 
 原生对照与Core示例都显式使用utf8mb4驱动插值，GORM PrepareStmt仍false，不通过Core封装访问SQL。参数引号、反斜线、Unicode、NUL、二进制、NULL、精确金额及真实写事务回滚另有专项；协议减少与容量通过分别记录，见[本轮性能结果](../../../docs/codex/ORDER_QUEUE_PERFORMANCE_2026-10-19.md)。
+
+原生订单MySQL池与Core示例保持最大20、空闲20，同样接受原有环境变量覆盖；这是减少已观测连接反复开关的应用配置，不修改Core全局默认，也不宣称通用最优池大小。

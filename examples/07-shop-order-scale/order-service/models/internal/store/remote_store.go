@@ -37,7 +37,7 @@ func remoteMySQLConfig() *oltp.Config {
 		InterpolateParams: true,
 		ParseTime:         true,
 		Loc:               "Local",
-		MaxIdleConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 5),
+		MaxIdleConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 20),
 		MaxOpenConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20),
 		MaxLifetime:       30 * time.Minute,
 		IsLog:             envString("SHOP_ORDER_REMOTE_MYSQL_LOG", "") == "true",

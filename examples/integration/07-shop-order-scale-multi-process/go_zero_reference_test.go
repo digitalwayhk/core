@@ -68,7 +68,7 @@ func replaceWithNativeGoZero(t *testing.T, original []*integration.Suite, eviden
 		processes[i] = p
 		require.Eventually(t, func() bool { return nativeProbe(p.BaseURL+"/api/ready") == 200 }, 30*time.Second, 100*time.Millisecond)
 	}
-	writeLoadJSON(t, filepath.Join(evidence, "native-fixture.json"), map[string]interface{}{"schema_prepared_by": "原 07 启动阶段，计时前已停止全部 Core 应用", "roles": []string{"user", "supplier", "order"}, "mtls": true, "mysql_max_open": 20, "mysql_max_idle": 5, "sync_writes": true, "peer_resolution": "测试夹具分配静态地址；不比较服务发现/注册自愈", "scope": "下单与同步事件负载，不是完整 07 功能替代"})
+	writeLoadJSON(t, filepath.Join(evidence, "native-fixture.json"), map[string]interface{}{"schema_prepared_by": "原 07 启动阶段，计时前已停止全部 Core 应用", "roles": []string{"user", "supplier", "order"}, "mtls": true, "mysql_max_open": 20, "mysql_max_idle": 20, "mysql_interpolate_params": true, "sync_writes": true, "peer_resolution": "测试夹具分配静态地址；不比较服务发现/注册自愈", "scope": "下单与同步事件负载，不是完整 07 功能替代"})
 	return processes
 }
 
