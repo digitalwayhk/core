@@ -21,38 +21,27 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type PayloadRequest struct {
+type ProductQuery struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TraceId       string                 `protobuf:"bytes,1,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	SourceService string                 `protobuf:"bytes,5,opt,name=source_service,json=sourceService,proto3" json:"source_service,omitempty"`
-	TargetService string                 `protobuf:"bytes,9,opt,name=target_service,json=targetService,proto3" json:"target_service,omitempty"`
-	SourcePath    string                 `protobuf:"bytes,10,opt,name=source_path,json=sourcePath,proto3" json:"source_path,omitempty"`
-	TargetPath    string                 `protobuf:"bytes,11,opt,name=target_path,json=targetPath,proto3" json:"target_path,omitempty"`
-	UserId        string                 `protobuf:"bytes,12,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	UserName      string                 `protobuf:"bytes,13,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
-	ClientIp      string                 `protobuf:"bytes,14,opt,name=client_ip,json=clientIp,proto3" json:"client_ip,omitempty"`
-	Auth          bool                   `protobuf:"varint,15,opt,name=auth,proto3" json:"auth,omitempty"`
-	Data          []byte                 `protobuf:"bytes,16,opt,name=data,proto3" json:"data,omitempty"`
-	HttpMethod    string                 `protobuf:"bytes,17,opt,name=http_method,json=httpMethod,proto3" json:"http_method,omitempty"`
-	Token         string                 `protobuf:"bytes,18,opt,name=token,proto3" json:"token,omitempty"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PayloadRequest) Reset() {
-	*x = PayloadRequest{}
+func (x *ProductQuery) Reset() {
+	*x = ProductQuery{}
 	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PayloadRequest) String() string {
+func (x *ProductQuery) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PayloadRequest) ProtoMessage() {}
+func (*ProductQuery) ProtoMessage() {}
 
-func (x *PayloadRequest) ProtoReflect() protoreflect.Message {
+func (x *ProductQuery) ProtoReflect() protoreflect.Message {
 	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -64,118 +53,568 @@ func (x *PayloadRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PayloadRequest.ProtoReflect.Descriptor instead.
-func (*PayloadRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ProductQuery.ProtoReflect.Descriptor instead.
+func (*ProductQuery) Descriptor() ([]byte, []int) {
 	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *PayloadRequest) GetTraceId() string {
+func (x *ProductQuery) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type ProductSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	SupplierId    uint64                 `protobuf:"varint,2,opt,name=supplier_id,json=supplierId,proto3" json:"supplier_id,omitempty"`
+	SupplierCode  string                 `protobuf:"bytes,3,opt,name=supplier_code,json=supplierCode,proto3" json:"supplier_code,omitempty"`
+	SupplierName  string                 `protobuf:"bytes,4,opt,name=supplier_name,json=supplierName,proto3" json:"supplier_name,omitempty"`
+	Code          string                 `protobuf:"bytes,5,opt,name=code,proto3" json:"code,omitempty"`
+	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
+	Price         string                 `protobuf:"bytes,7,opt,name=price,proto3" json:"price,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProductSnapshot) Reset() {
+	*x = ProductSnapshot{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProductSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProductSnapshot) ProtoMessage() {}
+
+func (x *ProductSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProductSnapshot.ProtoReflect.Descriptor instead.
+func (*ProductSnapshot) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProductSnapshot) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ProductSnapshot) GetSupplierId() uint64 {
+	if x != nil {
+		return x.SupplierId
+	}
+	return 0
+}
+
+func (x *ProductSnapshot) GetSupplierCode() string {
+	if x != nil {
+		return x.SupplierCode
+	}
+	return ""
+}
+
+func (x *ProductSnapshot) GetSupplierName() string {
+	if x != nil {
+		return x.SupplierName
+	}
+	return ""
+}
+
+func (x *ProductSnapshot) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *ProductSnapshot) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProductSnapshot) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+type Products struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*ProductSnapshot     `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Products) Reset() {
+	*x = Products{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Products) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Products) ProtoMessage() {}
+
+func (x *Products) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Products.ProtoReflect.Descriptor instead.
+func (*Products) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Products) GetItems() []*ProductSnapshot {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type Address struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AddressId     uint64                 `protobuf:"varint,1,opt,name=address_id,json=addressId,proto3" json:"address_id,omitempty"`
+	ReceiverName  string                 `protobuf:"bytes,2,opt,name=receiver_name,json=receiverName,proto3" json:"receiver_name,omitempty"`
+	Phone         string                 `protobuf:"bytes,3,opt,name=phone,proto3" json:"phone,omitempty"`
+	Province      string                 `protobuf:"bytes,4,opt,name=province,proto3" json:"province,omitempty"`
+	City          string                 `protobuf:"bytes,5,opt,name=city,proto3" json:"city,omitempty"`
+	District      string                 `protobuf:"bytes,6,opt,name=district,proto3" json:"district,omitempty"`
+	Detail        string                 `protobuf:"bytes,7,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Address) Reset() {
+	*x = Address{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Address) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Address) ProtoMessage() {}
+
+func (x *Address) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Address.ProtoReflect.Descriptor instead.
+func (*Address) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Address) GetAddressId() uint64 {
+	if x != nil {
+		return x.AddressId
+	}
+	return 0
+}
+
+func (x *Address) GetReceiverName() string {
+	if x != nil {
+		return x.ReceiverName
+	}
+	return ""
+}
+
+func (x *Address) GetPhone() string {
+	if x != nil {
+		return x.Phone
+	}
+	return ""
+}
+
+func (x *Address) GetProvince() string {
+	if x != nil {
+		return x.Province
+	}
+	return ""
+}
+
+func (x *Address) GetCity() string {
+	if x != nil {
+		return x.City
+	}
+	return ""
+}
+
+func (x *Address) GetDistrict() string {
+	if x != nil {
+		return x.District
+	}
+	return ""
+}
+
+func (x *Address) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type CreateOrderRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderId       uint64                 `protobuf:"varint,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId        uint64                 `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SupplierId    uint64                 `protobuf:"varint,3,opt,name=supplier_id,json=supplierId,proto3" json:"supplier_id,omitempty"`
+	ProductId     uint64                 `protobuf:"varint,4,opt,name=product_id,json=productId,proto3" json:"product_id,omitempty"`
+	Quantity      int64                  `protobuf:"varint,5,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	RequestId     string                 `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SupplierCode  string                 `protobuf:"bytes,7,opt,name=supplier_code,json=supplierCode,proto3" json:"supplier_code,omitempty"`
+	SupplierName  string                 `protobuf:"bytes,8,opt,name=supplier_name,json=supplierName,proto3" json:"supplier_name,omitempty"`
+	ProductCode   string                 `protobuf:"bytes,9,opt,name=product_code,json=productCode,proto3" json:"product_code,omitempty"`
+	ProductName   string                 `protobuf:"bytes,10,opt,name=product_name,json=productName,proto3" json:"product_name,omitempty"`
+	UnitPrice     string                 `protobuf:"bytes,11,opt,name=unit_price,json=unitPrice,proto3" json:"unit_price,omitempty"`
+	Address       *Address               `protobuf:"bytes,12,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateOrderRequest) Reset() {
+	*x = CreateOrderRequest{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateOrderRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateOrderRequest) ProtoMessage() {}
+
+func (x *CreateOrderRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateOrderRequest.ProtoReflect.Descriptor instead.
+func (*CreateOrderRequest) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CreateOrderRequest) GetOrderId() uint64 {
+	if x != nil {
+		return x.OrderId
+	}
+	return 0
+}
+
+func (x *CreateOrderRequest) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *CreateOrderRequest) GetSupplierId() uint64 {
+	if x != nil {
+		return x.SupplierId
+	}
+	return 0
+}
+
+func (x *CreateOrderRequest) GetProductId() uint64 {
+	if x != nil {
+		return x.ProductId
+	}
+	return 0
+}
+
+func (x *CreateOrderRequest) GetQuantity() int64 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *CreateOrderRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetSupplierCode() string {
+	if x != nil {
+		return x.SupplierCode
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetSupplierName() string {
+	if x != nil {
+		return x.SupplierName
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetProductCode() string {
+	if x != nil {
+		return x.ProductCode
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetProductName() string {
+	if x != nil {
+		return x.ProductName
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetUnitPrice() string {
+	if x != nil {
+		return x.UnitPrice
+	}
+	return ""
+}
+
+func (x *CreateOrderRequest) GetAddress() *Address {
+	if x != nil {
+		return x.Address
+	}
+	return nil
+}
+
+type OrderQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        uint64                 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OrderQuery) Reset() {
+	*x = OrderQuery{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderQuery) ProtoMessage() {}
+
+func (x *OrderQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderQuery.ProtoReflect.Descriptor instead.
+func (*OrderQuery) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OrderQuery) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type OrderSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderId       uint64                 `protobuf:"varint,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId        uint64                 `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SupplierId    uint64                 `protobuf:"varint,3,opt,name=supplier_id,json=supplierId,proto3" json:"supplier_id,omitempty"`
+	ProductId     uint64                 `protobuf:"varint,4,opt,name=product_id,json=productId,proto3" json:"product_id,omitempty"`
+	Quantity      int64                  `protobuf:"varint,5,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	UnitPrice     string                 `protobuf:"bytes,6,opt,name=unit_price,json=unitPrice,proto3" json:"unit_price,omitempty"`
+	TotalAmount   string                 `protobuf:"bytes,7,opt,name=total_amount,json=totalAmount,proto3" json:"total_amount,omitempty"`
+	OrderStatus   string                 `protobuf:"bytes,8,opt,name=order_status,json=orderStatus,proto3" json:"order_status,omitempty"`
+	PaymentStatus string                 `protobuf:"bytes,9,opt,name=payment_status,json=paymentStatus,proto3" json:"payment_status,omitempty"`
+	TraceId       string                 `protobuf:"bytes,10,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	OrderRevision uint64                 `protobuf:"varint,11,opt,name=order_revision,json=orderRevision,proto3" json:"order_revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OrderSnapshot) Reset() {
+	*x = OrderSnapshot{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderSnapshot) ProtoMessage() {}
+
+func (x *OrderSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderSnapshot.ProtoReflect.Descriptor instead.
+func (*OrderSnapshot) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OrderSnapshot) GetOrderId() uint64 {
+	if x != nil {
+		return x.OrderId
+	}
+	return 0
+}
+
+func (x *OrderSnapshot) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *OrderSnapshot) GetSupplierId() uint64 {
+	if x != nil {
+		return x.SupplierId
+	}
+	return 0
+}
+
+func (x *OrderSnapshot) GetProductId() uint64 {
+	if x != nil {
+		return x.ProductId
+	}
+	return 0
+}
+
+func (x *OrderSnapshot) GetQuantity() int64 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *OrderSnapshot) GetUnitPrice() string {
+	if x != nil {
+		return x.UnitPrice
+	}
+	return ""
+}
+
+func (x *OrderSnapshot) GetTotalAmount() string {
+	if x != nil {
+		return x.TotalAmount
+	}
+	return ""
+}
+
+func (x *OrderSnapshot) GetOrderStatus() string {
+	if x != nil {
+		return x.OrderStatus
+	}
+	return ""
+}
+
+func (x *OrderSnapshot) GetPaymentStatus() string {
+	if x != nil {
+		return x.PaymentStatus
+	}
+	return ""
+}
+
+func (x *OrderSnapshot) GetTraceId() string {
 	if x != nil {
 		return x.TraceId
 	}
 	return ""
 }
 
-func (x *PayloadRequest) GetSourceService() string {
+func (x *OrderSnapshot) GetOrderRevision() uint64 {
 	if x != nil {
-		return x.SourceService
+		return x.OrderRevision
 	}
-	return ""
+	return 0
 }
 
-func (x *PayloadRequest) GetTargetService() string {
-	if x != nil {
-		return x.TargetService
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetSourcePath() string {
-	if x != nil {
-		return x.SourcePath
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetTargetPath() string {
-	if x != nil {
-		return x.TargetPath
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetUserName() string {
-	if x != nil {
-		return x.UserName
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetClientIp() string {
-	if x != nil {
-		return x.ClientIp
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetAuth() bool {
-	if x != nil {
-		return x.Auth
-	}
-	return false
-}
-
-func (x *PayloadRequest) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *PayloadRequest) GetHttpMethod() string {
-	if x != nil {
-		return x.HttpMethod
-	}
-	return ""
-}
-
-func (x *PayloadRequest) GetToken() string {
-	if x != nil {
-		return x.Token
-	}
-	return ""
-}
-
-type PayloadResponse struct {
+type Orders struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	Items         []*OrderSnapshot       `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PayloadResponse) Reset() {
-	*x = PayloadResponse{}
-	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[1]
+func (x *Orders) Reset() {
+	*x = Orders{}
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PayloadResponse) String() string {
+func (x *Orders) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PayloadResponse) ProtoMessage() {}
+func (*Orders) ProtoMessage() {}
 
-func (x *PayloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[1]
+func (x *Orders) ProtoReflect() protoreflect.Message {
+	mi := &file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -186,52 +625,89 @@ func (x *PayloadResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PayloadResponse.ProtoReflect.Descriptor instead.
-func (*PayloadResponse) Descriptor() ([]byte, []int) {
-	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{1}
+// Deprecated: Use Orders.ProtoReflect.Descriptor instead.
+func (*Orders) Descriptor() ([]byte, []int) {
+	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *PayloadResponse) GetData() []byte {
+func (x *Orders) GetItems() []*OrderSnapshot {
 	if x != nil {
-		return x.Data
+		return x.Items
 	}
 	return nil
-}
-
-func (x *PayloadResponse) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
 }
 
 var File_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto protoreflect.FileDescriptor
 
 const file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDesc = "" +
 	"\n" +
-	"Jexamples/07-shop-order-scale/go-zero-reference/internal/wire/payload.proto\x12\x14reference07transport\"\xf3\x03\n" +
-	"\x0ePayloadRequest\x12\x19\n" +
-	"\btrace_id\x18\x01 \x01(\tR\atraceId\x12%\n" +
-	"\x0esource_service\x18\x05 \x01(\tR\rsourceService\x12%\n" +
-	"\x0etarget_service\x18\t \x01(\tR\rtargetService\x12\x1f\n" +
-	"\vsource_path\x18\n" +
-	" \x01(\tR\n" +
-	"sourcePath\x12\x1f\n" +
-	"\vtarget_path\x18\v \x01(\tR\n" +
-	"targetPath\x12\x17\n" +
-	"\auser_id\x18\f \x01(\tR\x06userId\x12\x1b\n" +
-	"\tuser_name\x18\r \x01(\tR\buserName\x12\x1b\n" +
-	"\tclient_ip\x18\x0e \x01(\tR\bclientIp\x12\x12\n" +
-	"\x04auth\x18\x0f \x01(\bR\x04auth\x12\x12\n" +
-	"\x04data\x18\x10 \x01(\fR\x04data\x12\x1f\n" +
-	"\vhttp_method\x18\x11 \x01(\tR\n" +
-	"httpMethod\x12\x14\n" +
-	"\x05token\x18\x12 \x01(\tR\x05tokenJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tR\x0esource_addressR\vsource_portR\x12source_socket_portR\x0etarget_addressR\vtarget_portR\x12target_socket_port\";\n" +
-	"\x0fPayloadResponse\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error2e\n" +
-	"\x0eOrderTransport\x12S\n" +
-	"\x04Call\x12$.reference07transport.PayloadRequest\x1a%.reference07transport.PayloadResponseB`Z^github.com/digitalwayhk/core/examples/07-shop-order-scale/go-zero-reference/internal/wire;wireb\x06proto3"
+	"Jexamples/07-shop-order-scale/go-zero-reference/internal/wire/payload.proto\x12\vreference07\"\x1e\n" +
+	"\fProductQuery\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\xca\x01\n" +
+	"\x0fProductSnapshot\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1f\n" +
+	"\vsupplier_id\x18\x02 \x01(\x04R\n" +
+	"supplierId\x12#\n" +
+	"\rsupplier_code\x18\x03 \x01(\tR\fsupplierCode\x12#\n" +
+	"\rsupplier_name\x18\x04 \x01(\tR\fsupplierName\x12\x12\n" +
+	"\x04code\x18\x05 \x01(\tR\x04code\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\x12\x14\n" +
+	"\x05price\x18\a \x01(\tR\x05price\">\n" +
+	"\bProducts\x122\n" +
+	"\x05items\x18\x01 \x03(\v2\x1c.reference07.ProductSnapshotR\x05items\"\xc7\x01\n" +
+	"\aAddress\x12\x1d\n" +
+	"\n" +
+	"address_id\x18\x01 \x01(\x04R\taddressId\x12#\n" +
+	"\rreceiver_name\x18\x02 \x01(\tR\freceiverName\x12\x14\n" +
+	"\x05phone\x18\x03 \x01(\tR\x05phone\x12\x1a\n" +
+	"\bprovince\x18\x04 \x01(\tR\bprovince\x12\x12\n" +
+	"\x04city\x18\x05 \x01(\tR\x04city\x12\x1a\n" +
+	"\bdistrict\x18\x06 \x01(\tR\bdistrict\x12\x16\n" +
+	"\x06detail\x18\a \x01(\tR\x06detail\"\xa2\x03\n" +
+	"\x12CreateOrderRequest\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\x04R\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x1f\n" +
+	"\vsupplier_id\x18\x03 \x01(\x04R\n" +
+	"supplierId\x12\x1d\n" +
+	"\n" +
+	"product_id\x18\x04 \x01(\x04R\tproductId\x12\x1a\n" +
+	"\bquantity\x18\x05 \x01(\x03R\bquantity\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\x12#\n" +
+	"\rsupplier_code\x18\a \x01(\tR\fsupplierCode\x12#\n" +
+	"\rsupplier_name\x18\b \x01(\tR\fsupplierName\x12!\n" +
+	"\fproduct_code\x18\t \x01(\tR\vproductCode\x12!\n" +
+	"\fproduct_name\x18\n" +
+	" \x01(\tR\vproductName\x12\x1d\n" +
+	"\n" +
+	"unit_price\x18\v \x01(\tR\tunitPrice\x12.\n" +
+	"\aaddress\x18\f \x01(\v2\x14.reference07.AddressR\aaddress\"%\n" +
+	"\n" +
+	"OrderQuery\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x04R\x06userId\"\xed\x02\n" +
+	"\rOrderSnapshot\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\x04R\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x1f\n" +
+	"\vsupplier_id\x18\x03 \x01(\x04R\n" +
+	"supplierId\x12\x1d\n" +
+	"\n" +
+	"product_id\x18\x04 \x01(\x04R\tproductId\x12\x1a\n" +
+	"\bquantity\x18\x05 \x01(\x03R\bquantity\x12\x1d\n" +
+	"\n" +
+	"unit_price\x18\x06 \x01(\tR\tunitPrice\x12!\n" +
+	"\ftotal_amount\x18\a \x01(\tR\vtotalAmount\x12!\n" +
+	"\forder_status\x18\b \x01(\tR\vorderStatus\x12%\n" +
+	"\x0epayment_status\x18\t \x01(\tR\rpaymentStatus\x12\x19\n" +
+	"\btrace_id\x18\n" +
+	" \x01(\tR\atraceId\x12%\n" +
+	"\x0eorder_revision\x18\v \x01(\x04R\rorderRevision\":\n" +
+	"\x06Orders\x120\n" +
+	"\x05items\x18\x01 \x03(\v2\x1a.reference07.OrderSnapshotR\x05items2R\n" +
+	"\x0fSupplierService\x12?\n" +
+	"\vGetProducts\x12\x19.reference07.ProductQuery\x1a\x15.reference07.Products2\x95\x01\n" +
+	"\fOrderService\x12J\n" +
+	"\vCreateOrder\x12\x1f.reference07.CreateOrderRequest\x1a\x1a.reference07.OrderSnapshot\x129\n" +
+	"\tGetOrders\x12\x17.reference07.OrderQuery\x1a\x13.reference07.OrdersB`Z^github.com/digitalwayhk/core/examples/07-shop-order-scale/go-zero-reference/internal/wire;wireb\x06proto3"
 
 var (
 	file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescOnce sync.Once
@@ -245,19 +721,32 @@ func file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_p
 	return file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDescData
 }
 
-var file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_goTypes = []any{
-	(*PayloadRequest)(nil),  // 0: reference07transport.PayloadRequest
-	(*PayloadResponse)(nil), // 1: reference07transport.PayloadResponse
+	(*ProductQuery)(nil),       // 0: reference07.ProductQuery
+	(*ProductSnapshot)(nil),    // 1: reference07.ProductSnapshot
+	(*Products)(nil),           // 2: reference07.Products
+	(*Address)(nil),            // 3: reference07.Address
+	(*CreateOrderRequest)(nil), // 4: reference07.CreateOrderRequest
+	(*OrderQuery)(nil),         // 5: reference07.OrderQuery
+	(*OrderSnapshot)(nil),      // 6: reference07.OrderSnapshot
+	(*Orders)(nil),             // 7: reference07.Orders
 }
 var file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_depIdxs = []int32{
-	0, // 0: reference07transport.OrderTransport.Call:input_type -> reference07transport.PayloadRequest
-	1, // 1: reference07transport.OrderTransport.Call:output_type -> reference07transport.PayloadResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: reference07.Products.items:type_name -> reference07.ProductSnapshot
+	3, // 1: reference07.CreateOrderRequest.address:type_name -> reference07.Address
+	6, // 2: reference07.Orders.items:type_name -> reference07.OrderSnapshot
+	0, // 3: reference07.SupplierService.GetProducts:input_type -> reference07.ProductQuery
+	4, // 4: reference07.OrderService.CreateOrder:input_type -> reference07.CreateOrderRequest
+	5, // 5: reference07.OrderService.GetOrders:input_type -> reference07.OrderQuery
+	2, // 6: reference07.SupplierService.GetProducts:output_type -> reference07.Products
+	6, // 7: reference07.OrderService.CreateOrder:output_type -> reference07.OrderSnapshot
+	7, // 8: reference07.OrderService.GetOrders:output_type -> reference07.Orders
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_init() }
@@ -271,9 +760,9 @@ func file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_p
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDesc), len(file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   8,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_goTypes,
 		DependencyIndexes: file_examples_07_shop_order_scale_go_zero_reference_internal_wire_payload_proto_depIdxs,

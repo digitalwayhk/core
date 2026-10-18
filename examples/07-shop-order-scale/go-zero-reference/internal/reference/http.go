@@ -83,16 +83,7 @@ func (a *application) addOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace := uuid.NewString()
-	var products []struct {
-		ID           uint            `json:"id"`
-		SupplierID   uint            `json:"supplierID"`
-		SupplierCode string          `json:"supplierCode"`
-		SupplierName string          `json:"supplierName"`
-		Code         string          `json:"code"`
-		Name         string          `json:"name"`
-		Price        decimal.Decimal `json:"price"`
-	}
-	e = a.call(r.Context(), "shop-supplier", "/api/shop-supplier/getproducts", user, trace, map[string]uint{"id": q.ProductID}, &products)
+	products, e := a.productRPC(r.Context(), q.ProductID)
 	if e != nil {
 		writeResponse(w, 500, nil, e)
 		return
@@ -103,24 +94,27 @@ func (a *application) addOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	p := products[0]
 	q.UserID = user
-	q.SupplierID = p.SupplierID
+	q.SupplierID = uint(p.SupplierId)
 	q.SupplierCode = p.SupplierCode
 	q.SupplierName = p.SupplierName
 	q.ProductCode = p.Code
 	q.ProductName = p.Name
-	q.UnitPrice = p.Price
+	q.UnitPrice, e = decimal.NewFromString(p.Price)
+	if e != nil {
+		writeResponse(w, 500, nil, e)
+		return
+	}
 	q.OrderID, e = a.requestID(user, q.RequestID)
 	if e != nil {
 		writeResponse(w, 500, nil, e)
 		return
 	}
-	var order Order
-	e = a.call(r.Context(), "shop-order", "/api/shop-order/createorder", user, trace, &q, &order)
+	order, e := a.createRPC(r.Context(), &q, trace)
 	if e != nil {
 		writeResponse(w, 500, nil, e)
 		return
 	}
-	writeResponse(w, 200, &order, nil)
+	writeResponse(w, 200, order, nil)
 }
 
 func (a *application) getOrders(w http.ResponseWriter, r *http.Request) {
@@ -129,8 +123,7 @@ func (a *application) getOrders(w http.ResponseWriter, r *http.Request) {
 		writeResponse(w, 401, nil, e)
 		return
 	}
-	var orders []*Order
-	e = a.call(r.Context(), "shop-order", "/api/shop-order/getorders", user, uuid.NewString(), map[string]uint{"userID": user}, &orders)
+	orders, e := a.ordersRPC(r.Context(), user)
 	if e != nil {
 		writeResponse(w, 500, nil, e)
 		return

@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -36,4 +37,15 @@ func TestReferenceDoesNotImportCore(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+// TestReferenceUsesBusinessRPC 防止原生应用照搬通用 Payload/Call 封装而掩盖传输设计成本。
+func TestReferenceUsesBusinessRPC(t *testing.T) {
+	data, e := os.ReadFile(filepath.Join("..", "wire", "payload.proto"))
+	require.NoError(t, e)
+	for _, method := range []string{"GetProducts", "CreateOrder", "GetOrders"} {
+		require.Contains(t, string(data), "rpc "+method+"(")
+	}
+	require.NotContains(t, string(data), "bytes data")
+	require.NotContains(t, string(data), "rpc Call(")
 }

@@ -1,35 +1,15 @@
 syntax = "proto3";
-
-package reference07transport;
-
+package reference07;
 option go_package = "github.com/digitalwayhk/core/examples/07-shop-order-scale/go-zero-reference/internal/wire;wire";
-
-// OrderTransport is the gRPC service for inter-service calls within the core framework.
-service OrderTransport {
-  // Call forwards a PayloadRequest to the target service and returns its response.
-  rpc Call(PayloadRequest) returns (PayloadResponse);
-}
-
-message PayloadRequest {
-  reserved 2, 3, 4, 6, 7, 8;
-  reserved "source_address", "source_port", "source_socket_port";
-  reserved "target_address", "target_port", "target_socket_port";
-
-  string trace_id       = 1;
-  string source_service = 5;
-  string target_service = 9;
-  string source_path    = 10;
-  string target_path    = 11;
-  string user_id        = 12;
-  string user_name      = 13;
-  string client_ip      = 14;
-  bool   auth           = 15;
-  bytes  data           = 16;
-  string http_method    = 17;
-  string token          = 18;
-}
-
-message PayloadResponse {
-  bytes  data  = 1;
-  string error = 2;
-}
+// 原生供应商业务服务，直接传业务类型。
+service SupplierService { rpc GetProducts(ProductQuery) returns (Products); }
+// 原生订单业务服务，不经过通用路由载荷。
+service OrderService { rpc CreateOrder(CreateOrderRequest) returns (OrderSnapshot); rpc GetOrders(OrderQuery) returns (Orders); }
+message ProductQuery { uint64 id = 1; }
+message ProductSnapshot { uint64 id = 1; uint64 supplier_id = 2; string supplier_code = 3; string supplier_name = 4; string code = 5; string name = 6; string price = 7; }
+message Products { repeated ProductSnapshot items = 1; }
+message Address { uint64 address_id = 1; string receiver_name = 2; string phone = 3; string province = 4; string city = 5; string district = 6; string detail = 7; }
+message CreateOrderRequest { uint64 order_id = 1; uint64 user_id = 2; uint64 supplier_id = 3; uint64 product_id = 4; int64 quantity = 5; string request_id = 6; string supplier_code = 7; string supplier_name = 8; string product_code = 9; string product_name = 10; string unit_price = 11; Address address = 12; }
+message OrderQuery { uint64 user_id = 1; }
+message OrderSnapshot { uint64 order_id = 1; uint64 user_id = 2; uint64 supplier_id = 3; uint64 product_id = 4; int64 quantity = 5; string unit_price = 6; string total_amount = 7; string order_status = 8; string payment_status = 9; string trace_id = 10; uint64 order_revision = 11; }
+message Orders { repeated OrderSnapshot items = 1; }
