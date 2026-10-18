@@ -115,6 +115,10 @@ func (own *Sqlite) init(data interface{}) error {
 
 // ensureValidConnection 确保连接有效
 func (own *Sqlite) ensureValidConnection() error {
+	// 活动事务独占池连接；额外 Ping 基础池会在池满时自锁，也不能重连后继续旧事务。
+	if own.isTansaction && own.tx != nil {
+		return nil
+	}
 	if own.db == nil {
 		_, err := own.GetDB()
 		return err
