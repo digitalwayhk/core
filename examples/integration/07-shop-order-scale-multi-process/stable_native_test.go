@@ -123,6 +123,11 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 			"SHOP_LOCAL_PENDING_DIR":       filepath.Join(root, replica, "pending"),
 			"SHOP_ORDER_REMOTE_MYSQL_HOST": host, "SHOP_ORDER_REMOTE_MYSQL_PORT": port, "SHOP_ORDER_REMOTE_MYSQL_USER": "root", "SHOP_ORDER_REMOTE_MYSQL_PASSWORD": os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "SHOP_ORDER_REMOTE_MYSQL_DATABASE": "core_" + ns,
 		}
+		if os.Getenv("CORE_TEST_ORDER_LOAD") == "1" {
+			privateTemp := filepath.Join(root, replica, "diagnostics")
+			require.NoError(t, os.MkdirAll(privateTemp, 0700))
+			env["TMPDIR"] = privateTemp
+		}
 		if i >= 2 && os.Getenv("CORE_TEST_LOAD_PROFILE") == "1" {
 			env["SHOP_PROFILE_PORT"] = strconv.Itoa(freeNativePort(t))
 		}

@@ -127,6 +127,7 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 				}
 				if guardianStop != "" {
 					stopLoad()
+					captureOrderLoadDiagnostics(t, evidence, processes, guardianStop)
 				}
 			}
 			select {
