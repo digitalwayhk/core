@@ -5,9 +5,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
-	"strings"
 )
 
 var mysqlPoolIdentitySecret = func() []byte {
@@ -20,23 +19,24 @@ var mysqlPoolIdentitySecret = func() []byte {
 
 func mysqlConnectionIdentity(config *Config, name string) string {
 	canonical := *config
-	canonical.Database = name
 	if canonical.Charset == "" {
 		canonical.Charset = "utf8mb4"
 	}
-	canonical.Charset = strings.ToLower(canonical.Charset)
 	if canonical.Loc == "" {
 		canonical.Loc = "Local"
 	}
-	canonical.ParseTime = true // 当前驱动DSN始终启用parseTime。
-	// 池容量和日志沿用首次拥有者配置，不另建同认证池。
-	canonical.MaxIdleConns = 0
-	canonical.MaxOpenConns = 0
-	canonical.MaxLifetime = 0
-	canonical.IsLog = false
-	data, err := json.Marshal(canonical)
-	if err != nil {
-		panic("无法编码MySQL连接池身份")
+	// 仅编码驱动实际使用字段；parseTime始终true，池容量/日志沿用首次拥有者。
+	// 长度前缀无损保留原始字节，避免分隔符歧义或JSON非法UTF8替换。
+	data := make([]byte, 0, 128)
+	for _, field := range []string{canonical.Host, canonical.Username, canonical.Password, name, canonical.Charset, canonical.Loc} {
+		data = binary.AppendUvarint(data, uint64(len(field)))
+		data = append(data, field...)
+	}
+	data = binary.AppendVarint(data, int64(canonical.Port))
+	if canonical.InterpolateParams {
+		data = append(data, 1)
+	} else {
+		data = append(data, 0)
 	}
 	mac := hmac.New(sha256.New, mysqlPoolIdentitySecret)
 	_, _ = mac.Write(data)
