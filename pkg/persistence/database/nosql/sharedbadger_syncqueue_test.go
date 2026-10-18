@@ -1,3 +1,4 @@
+// 本文件验证持久同步索引与 pending 计数、重复确认和删除的边界。
 package nosql
 
 import (
@@ -68,6 +69,51 @@ func TestPendingCountSetThenDeleteDoesNotDoubleCount(t *testing.T) {
 	cached = db.pendingCountCache
 	db.pendingCountMutex.RUnlock()
 	require.Zero(t, cached)
+}
+
+// TestRepeatedConfirmationDoesNotConsumeAnotherPending 验证旧 ACK 重放不能扣减其他事实的 pending。
+func TestRepeatedConfirmationDoesNotConsumeAnotherPending(t *testing.T) {
+	db := newTestDBLocalWithConfig(t, newTestConfig(t.TempDir()))
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+	first := newFund("confirmed", "spot", 1)
+	remaining := newFund("still-pending", "spot", 2)
+	require.NoError(t, db.Set(first, 0))
+	require.NoError(t, db.Set(remaining, 0))
+	key := db.generateKey(first)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	times := map[string]time.Time{key: wrapper.UpdatedAt}
+	_, err = db.confirmSyncSuccess([]string{key}, times, nil)
+	require.NoError(t, err)
+	_, err = db.physicalDeleteKeys([]string{key})
+	require.NoError(t, err)
+	_, err = db.confirmSyncSuccess([]string{key}, times, nil)
+	require.NoError(t, err)
+	exact, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, exact)
+	require.Equal(t, exact, db.GetCachedPendingSyncCount(), "旧 ACK 不得消耗另一个待同步事实的缓存计数")
+}
+
+// TestRemovedValueConfirmationConsumesItsQueue 验证远端删除已移除本地值时，仍正常确认并扣减其索引。
+func TestRemovedValueConfirmationConsumesItsQueue(t *testing.T) {
+	db := newTestDBLocalWithConfig(t, newTestConfig(t.TempDir()))
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+	item := newFund("removed-value", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(key)) }))
+	confirmed, err := db.confirmSyncSuccess([]string{key, key}, nil, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, confirmed)
+	exact, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, exact)
+	require.Zero(t, db.GetCachedPendingSyncCount())
 }
 
 func TestMalformedSyncItemStopsBatchWithoutDeletingEvidence(t *testing.T) {

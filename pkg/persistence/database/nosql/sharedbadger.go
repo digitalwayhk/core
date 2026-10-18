@@ -1,3 +1,4 @@
+// 本文件实现共享 Badger 持久队列、可靠确认与同步后本地回收。
 package nosql
 
 import (
@@ -1991,12 +1992,12 @@ func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotT
 	if len(successKeys) == 0 {
 		return successKeys, nil
 	}
-	confirmedKeys, err := p.batchUpdateSyncedStatusKeys(successKeys, snapshotTimes)
+	confirmedKeys, removedPending, err := p.batchConfirmSyncedStatus(successKeys, snapshotTimes)
 	if err != nil {
 		logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
 		return nil, err
 	}
-	p.incrementPendingCount(-len(confirmedKeys))
+	p.incrementPendingCount(-removedPending)
 	p.scheduleSyncAfterDelete(p.collectConfirmedDeleteCandidates(candidates, confirmedKeys))
 	return confirmedKeys, nil
 }
@@ -3133,8 +3134,24 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusCount(keys []string, snapsh
 }
 
 func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapshotTimes map[string]time.Time) ([]string, error) {
+	confirmed, _, err := p.batchConfirmSyncedStatus(keys, snapshotTimes)
+	return confirmed, err
+}
+
+// batchConfirmSyncedStatus 分开返回幂等确认和实际移除的 pending；旧 ACK 不得重复扣减计数。
+func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTimes map[string]time.Time) ([]string, int, error) {
 	if len(keys) == 0 {
-		return nil, nil
+		return nil, 0, nil
+	}
+	removeQueue := func(txn *badger.Txn, key string) (bool, error) {
+		queueKey := []byte(p.syncQueueKey(key))
+		if _, err := txn.Get(queueKey); err != nil {
+			if err == badger.ErrKeyNotFound {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, txn.Delete(queueKey)
 	}
 
 	now := time.Now()
@@ -3143,14 +3160,19 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		confirmedKeys := make([]string, 0, len(keys))
+		removedPending := 0
 		err := p.manager.db.Update(func(txn *badger.Txn) error {
 			for _, key := range keys {
 				item, err := txn.Get([]byte(key))
 				if err != nil {
 					if err == badger.ErrKeyNotFound {
 						// 远程删除成功后本地数据已物理移除，清理队列并计为确认。
-						if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
+						removed, err := removeQueue(txn, key)
+						if err != nil {
 							return err
+						}
+						if removed {
+							removedPending++
 						}
 						confirmedKeys = append(confirmedKeys, key)
 						continue
@@ -3192,8 +3214,12 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 					return err // 把错误传播出去触发整体回滚
 				}
 				// 同步成功，删除同步队列索引条目
-				if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
+				removed, err := removeQueue(txn, key)
+				if err != nil {
 					return err
+				}
+				if removed {
+					removedPending++
 				}
 				confirmedKeys = append(confirmedKeys, key)
 			}
@@ -3201,7 +3227,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 		})
 
 		if err == nil {
-			return confirmedKeys, nil
+			return confirmedKeys, removedPending, nil
 		}
 
 		// 并发冲突：重试
@@ -3211,9 +3237,9 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 			continue
 		}
 
-		return nil, err
+		return nil, 0, err
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (p *PrefixedBadgerDB[T]) Count() (int, error) {
