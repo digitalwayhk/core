@@ -1,0 +1,1040 @@
+{
+  "说明": "原始请求、采样、日志、物理核对、指纹和归档保存在本轮.temp证据目录；本文件不含凭据或请求明细。",
+  "generated_at": "2026-10-18T23:15:17.235079+00:00",
+  "plan": "docs/superpowers/plans/2026-10-19-order-queue-repair-and-throughput.md",
+  "source_sha": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
+  "configuration": {
+    "go": "1.26.6",
+    "badger": "4.9.6",
+    "go_zero": "1.10.3",
+    "mysql_max_open": 20,
+    "mysql_max_idle": 20,
+    "interpolate_params": true,
+    "charset": "utf8mb4",
+    "outbox_batch": 100,
+    "publish_concurrency": 4,
+    "consumer_concurrency": 8,
+    "profile": false
+  },
+  "final_checks": {
+    "final-r3-full-with-dependencies": {
+      "exitCode": 0,
+      "seconds": 779.52,
+      "changedSourceFiles": []
+    },
+    "final-release-contract": {
+      "command": [
+        "bash",
+        "scripts/test.sh",
+        "release-contract"
+      ],
+      "goflags": "-p=1",
+      "exit": 0,
+      "seconds": 94.244,
+      "head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550"
+    },
+    "final-auth-cache-race": {
+      "command": [
+        "go",
+        "test",
+        "-p",
+        "1",
+        "-race",
+        "./pkg/server/authstate",
+        "./pkg/server/routecache",
+        "-count=1"
+      ],
+      "goflags": "-p=1",
+      "exit": 0,
+      "seconds": 12.812,
+      "head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550"
+    },
+    "final-logging": {
+      "command": [
+        "bash",
+        "scripts/check-logging.sh"
+      ],
+      "goflags": "-p=1",
+      "exit": 0,
+      "seconds": 0.135,
+      "head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550"
+    },
+    "final-format": {
+      "files_checked": [
+        "examples/07-shop-order-scale/go-zero-reference/internal/reference/database.go",
+        "examples/07-shop-order-scale/order-service/models/internal/store/remote_store.go",
+        "examples/07-shop-order-scale/order-service/models/internal/store/remote_store_config_test.go",
+        "examples/integration/07-shop-order-scale-multi-process/go_zero_reference_test.go",
+        "pkg/persistence/database/oltp/mysql.go",
+        "pkg/persistence/database/oltp/mysql_interpolation_test.go",
+        "pkg/persistence/database/oltp/mysql_pool_identity.go",
+        "pkg/persistence/database/oltp/mysql_pool_identity_bytes_test.go",
+        "pkg/persistence/database/oltp/mysql_pool_identity_race_test.go",
+        "pkg/persistence/database/oltp/mysql_pool_identity_test.go"
+      ],
+      "unformatted": []
+    }
+  },
+  "cases": [
+    {
+      "name": "final-stair-500-core-r1",
+      "spec": {
+        "name": "final-stair-500-core-r1",
+        "implementation": "core",
+        "rate": 500,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "PASS",
+      "test_exit": 0,
+      "gates": {
+        "full_window": true,
+        "no_generator_drop": true,
+        "success_999": true,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.00266475,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 0,
+        "generator_max_lag_ms": 15.283750000000083,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:18:40.936099Z",
+        "interrupted": false,
+        "p50_ms": 1.9730830000000001,
+        "p95_ms": 3.4940420000000003,
+        "p99_ms": 14.021083,
+        "scheduled": 30000,
+        "started": 30000,
+        "success_rps_including_inflight": 499.97779473619124,
+        "success_rps_over_window": 500,
+        "successful": 30000,
+        "target_rps": 500,
+        "window_seconds": 60,
+        "window_start_ms": 10415.625
+      },
+      "confirmed_including_warmup": 35000,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.327541,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 12,
+      "peak_broker_lag": 4,
+      "final": {
+        "pending": 0,
+        "orders": 35001,
+        "outbox": 35001,
+        "published": 35001,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-500-native-r1",
+      "spec": {
+        "name": "final-stair-500-native-r1",
+        "implementation": "native",
+        "rate": 500,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "PASS",
+      "test_exit": 0,
+      "gates": {
+        "full_window": true,
+        "no_generator_drop": true,
+        "success_999": true,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.001475,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 0,
+        "generator_max_lag_ms": 7.485082999998468,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:21:40.453424Z",
+        "interrupted": false,
+        "p50_ms": 1.430458,
+        "p95_ms": 2.834584,
+        "p99_ms": 5.322583,
+        "scheduled": 30000,
+        "started": 30000,
+        "success_rps_including_inflight": 499.98770863549606,
+        "success_rps_over_window": 500,
+        "successful": 30000,
+        "target_rps": 500,
+        "window_seconds": 60,
+        "window_start_ms": 10192.597
+      },
+      "confirmed_including_warmup": 35000,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.549485,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 26,
+      "peak_broker_lag": 7,
+      "final": {
+        "pending": 0,
+        "orders": 35001,
+        "outbox": 35001,
+        "published": 35001,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-1000-core-r1",
+      "spec": {
+        "name": "final-stair-1000-core-r1",
+        "implementation": "core",
+        "rate": 1000,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.001588416,
+        "failed": 1183,
+        "failure_classes": {
+          "transport": 1183
+        },
+        "generator_dropped": 2071,
+        "generator_max_lag_ms": 6.4541660000010665,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:23:58.646302Z",
+        "interrupted": false,
+        "p50_ms": 2.185041,
+        "p95_ms": 78.075834,
+        "p99_ms": 1721.2943329999998,
+        "scheduled": 60000,
+        "started": 57929,
+        "success_rps_including_inflight": 945.7416294810645,
+        "success_rps_over_window": 945.7666666666667,
+        "successful": 56746,
+        "target_rps": 1000,
+        "window_seconds": 60,
+        "window_start_ms": 10436.137
+      },
+      "confirmed_including_warmup": 61746,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.299142,
+      "sample_errors": 2,
+      "guardian_stop": "",
+      "peak_pending": 100,
+      "peak_broker_lag": 36,
+      "final": {
+        "pending": 0,
+        "orders": 61747,
+        "outbox": 61747,
+        "published": 61747,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-1000-native-r1",
+      "spec": {
+        "name": "final-stair-1000-native-r1",
+        "implementation": "native",
+        "rate": 1000,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "PASS",
+      "test_exit": 0,
+      "gates": {
+        "full_window": true,
+        "no_generator_drop": true,
+        "success_999": true,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.00131525,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 0,
+        "generator_max_lag_ms": 14.141875000000766,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:26:45.159897Z",
+        "interrupted": false,
+        "p50_ms": 1.2675,
+        "p95_ms": 2.863083,
+        "p99_ms": 5.845416,
+        "scheduled": 60000,
+        "started": 60000,
+        "success_rps_including_inflight": 999.9780796471791,
+        "success_rps_over_window": 1000,
+        "successful": 60000,
+        "target_rps": 1000,
+        "window_seconds": 60,
+        "window_start_ms": 10190.341999999999
+      },
+      "confirmed_including_warmup": 65000,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.54522,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 53,
+      "peak_broker_lag": 16,
+      "final": {
+        "pending": 0,
+        "orders": 65001,
+        "outbox": 65001,
+        "published": 65001,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-1500-core-r1",
+      "spec": {
+        "name": "final-stair-1500-core-r1",
+        "implementation": "core",
+        "rate": 1500,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.003100458,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 7687,
+        "generator_max_lag_ms": 13.69745833333576,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:29:12.195755Z",
+        "interrupted": false,
+        "p50_ms": 2.954,
+        "p95_ms": 141.877875,
+        "p99_ms": 1674.9687500000002,
+        "scheduled": 90000,
+        "started": 82313,
+        "success_rps_including_inflight": 1371.8124458854609,
+        "success_rps_over_window": 1371.8833333333334,
+        "successful": 82313,
+        "target_rps": 1500,
+        "window_seconds": 60,
+        "window_start_ms": 10427.078
+      },
+      "confirmed_including_warmup": 87313,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.3234219999999999,
+      "sample_errors": 1,
+      "guardian_stop": "",
+      "peak_pending": 87,
+      "peak_broker_lag": 33,
+      "final": {
+        "pending": 0,
+        "orders": 87314,
+        "outbox": 87314,
+        "published": 87314,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-1500-native-r1",
+      "spec": {
+        "name": "final-stair-1500-native-r1",
+        "implementation": "native",
+        "rate": 1500,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.001913208,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 2329,
+        "generator_max_lag_ms": 20.54800033333703,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:31:55.850659Z",
+        "interrupted": false,
+        "p50_ms": 1.867083,
+        "p95_ms": 4.087458000000001,
+        "p99_ms": 59.390499999999996,
+        "scheduled": 90000,
+        "started": 87671,
+        "success_rps_including_inflight": 1461.1367423582572,
+        "success_rps_over_window": 1461.1833333333334,
+        "successful": 87671,
+        "target_rps": 1500,
+        "window_seconds": 60,
+        "window_start_ms": 10195.803
+      },
+      "confirmed_including_warmup": 92671,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.53816,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 452,
+      "peak_broker_lag": 12,
+      "final": {
+        "pending": 0,
+        "orders": 92672,
+        "outbox": 92672,
+        "published": 92672,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-2000-core-r1",
+      "spec": {
+        "name": "final-stair-2000-core-r1",
+        "implementation": "core",
+        "rate": 2000,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.007277584,
+        "failed": 1582,
+        "failure_classes": {
+          "timeout": 512,
+          "transport": 1070
+        },
+        "generator_dropped": 9490,
+        "generator_max_lag_ms": 10.204624999996724,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:34:07.462656Z",
+        "interrupted": false,
+        "p50_ms": 3.50325,
+        "p95_ms": 78.919875,
+        "p99_ms": 171.178416,
+        "scheduled": 120000,
+        "started": 110510,
+        "success_rps_including_inflight": 1815.2464898531564,
+        "success_rps_over_window": 1815.4666666666667,
+        "successful": 108928,
+        "target_rps": 2000,
+        "window_seconds": 60,
+        "window_start_ms": 10185.228000000001
+      },
+      "confirmed_including_warmup": 113928,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 512,
+      "drain_seconds": 1.544586,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 1222,
+      "peak_broker_lag": 42,
+      "final": {
+        "pending": 0,
+        "orders": 114441,
+        "outbox": 114441,
+        "published": 114441,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-stair-2000-native-r1",
+      "spec": {
+        "name": "final-stair-2000-native-r1",
+        "implementation": "native",
+        "rate": 2000,
+        "seconds": 60,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "PASS",
+      "test_exit": 0,
+      "gates": {
+        "full_window": true,
+        "no_generator_drop": true,
+        "success_999": true,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "nonnegative_pending": true,
+        "drained_5s": true,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 60.002279417,
+        "failed": 0,
+        "failure_classes": {},
+        "generator_dropped": 0,
+        "generator_max_lag_ms": 26.025749999999448,
+        "generator_not_started": 0,
+        "inflight_end_at": "2026-10-18T22:36:57.375773Z",
+        "interrupted": false,
+        "p50_ms": 2.0847919999999998,
+        "p95_ms": 5.089708,
+        "p99_ms": 33.499874999999996,
+        "scheduled": 120000,
+        "started": 120000,
+        "success_rps_including_inflight": 1999.924022319747,
+        "success_rps_over_window": 2000,
+        "successful": 120000,
+        "target_rps": 2000,
+        "window_seconds": 60,
+        "window_start_ms": 10449.795999999998
+      },
+      "confirmed_including_warmup": 125000,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 0,
+      "drain_seconds": 1.287171,
+      "sample_errors": 0,
+      "guardian_stop": "",
+      "peak_pending": 145,
+      "peak_broker_lag": 21,
+      "final": {
+        "pending": 0,
+        "orders": 125001,
+        "outbox": 125001,
+        "published": 125001,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "SHORT_WINDOW_ONLY",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      }
+    },
+    {
+      "name": "final-capacity-core-r1",
+      "spec": {
+        "name": "final-capacity-core-r1",
+        "implementation": "core",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 481.313864708,
+        "failed": 246418,
+        "failure_classes": {
+          "cancelled": 512,
+          "http_server": 245394,
+          "timeout": 512
+        },
+        "generator_dropped": 48954,
+        "generator_max_lag_ms": 67.56179100001009,
+        "generator_not_started": 237380,
+        "inflight_end_at": "2026-10-18T23:04:59.378717Z",
+        "interrupted": true,
+        "p50_ms": 5.294709,
+        "p95_ms": 161.960166,
+        "p99_ms": 483.839333,
+        "scheduled": 1200000,
+        "started": 913666,
+        "success_rps_including_inflight": 1386.3053797646182,
+        "success_rps_over_window": 1112.08,
+        "successful": 667248,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10177.291000000001
+      },
+      "confirmed_including_warmup": 672248,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 921,
+      "drain_seconds": 31.249218,
+      "sample_errors": 10,
+      "guardian_stop": "连续三次观测失败，停止发送",
+      "peak_pending": 39383,
+      "peak_broker_lag": 78,
+      "final": {
+        "pending": 0,
+        "orders": 673170,
+        "outbox": 673170,
+        "published": 673170,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            201932800,
+            358047744.0,
+            458055680.0,
+            541761536.0
+          ],
+          "peak": 633831424,
+          "last": 631357440
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            579,
+            600.5,
+            592.0,
+            582.0
+          ],
+          "peak": 1098,
+          "last": 59
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            96223232,
+            220467200.0,
+            287461376.0,
+            375091200.0
+          ],
+          "peak": 543653888,
+          "last": 346939392
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            76308480.0,
+            76480512,
+            76349440.0,
+            76824576
+          ],
+          "peak": 90259456,
+          "last": 77234176
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            50.0,
+            50,
+            49.0,
+            49
+          ],
+          "peak": 119,
+          "last": 49
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            12836864.0,
+            13705216,
+            14135296.0,
+            14647296
+          ],
+          "peak": 23388160,
+          "last": 20987904
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            363585536.0,
+            406093824,
+            583221248.0,
+            603193344
+          ],
+          "peak": 746323968,
+          "last": 668336128
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            99.5,
+            138,
+            127.5,
+            121
+          ],
+          "peak": 677,
+          "last": 88
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            166477824.0,
+            166494208,
+            272777216.0,
+            263815168
+          ],
+          "peak": 535625728,
+          "last": 183869440
+        }
+      },
+      "gc_pause_increments": [
+        {
+          "process": 0,
+          "at": "2026-10-18T23:04:59.906366Z",
+          "increment_seconds": 3.163464083
+        },
+        {
+          "process": 2,
+          "at": "2026-10-18T23:04:53.626216Z",
+          "increment_seconds": 0.8797729590000001
+        }
+      ],
+      "observation_errors": [
+        {
+          "at": "2026-10-18T22:59:22.624843Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded",
+            "broker: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-18T23:00:04.121012Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-18T23:04:53.183483Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-18T23:04:57.375397Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded",
+            "metrics_0: Get \"http://127.0.0.1:60930/metrics\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+          ]
+        },
+        {
+          "at": "2026-10-18T23:04:58.374207Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded",
+            "metrics_0: Get \"http://127.0.0.1:60930/metrics\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+          ]
+        },
+        {
+          "at": "2026-10-18T23:04:59.37514Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded",
+            "metrics_0: Get \"http://127.0.0.1:60930/metrics\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+          ]
+        }
+      ],
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-core-r1-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 3579156,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792364169544201000/outbox_record.ibd 763363328 1490952",
+          "/evidence/core_stable@002d07@002d1792364169544201000/payment_type.ibd 196608 384",
+          "/evidence/core_stable@002d07@002d1792364169544201000/order_rule.ibd 196608 384",
+          "/evidence/core_stable@002d07@002d1792364169544201000/order.ibd 994050048 1941512",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 673170,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5444.472783992156
+      }
+    },
+    {
+      "name": "final-capacity-native-r1",
+      "spec": {
+        "name": "final-capacity-native-r1",
+        "implementation": "native",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "NOT_RUN_SPACE",
+      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+    },
+    {
+      "name": "final-capacity-core-r2",
+      "spec": {
+        "name": "final-capacity-core-r2",
+        "implementation": "core",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "NOT_RUN_SPACE",
+      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+    },
+    {
+      "name": "final-capacity-native-r2",
+      "spec": {
+        "name": "final-capacity-native-r2",
+        "implementation": "native",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "NOT_RUN_SPACE",
+      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+    },
+    {
+      "name": "final-capacity-core-r3",
+      "spec": {
+        "name": "final-capacity-core-r3",
+        "implementation": "core",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "NOT_RUN_SPACE",
+      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+    },
+    {
+      "name": "final-capacity-native-r3",
+      "spec": {
+        "name": "final-capacity-native-r3",
+        "implementation": "native",
+        "rate": 2000,
+        "seconds": 600,
+        "candidate": "baseline",
+        "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
+      },
+      "status": "NOT_RUN_SPACE",
+      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+    }
+  ],
+  "overall": {
+    "status": "INCOMPLETE_SPACE_BLOCKED",
+    "completed_long_windows": 1,
+    "planned_long_windows": 6,
+    "core_2000_per_second_600_seconds": "FAIL_CURRENT_CONFIGURATION",
+    "native_2000_per_second_600_seconds": "NOT_RUN",
+    "待确认": "是否允许仅将本轮新失败测试卷无损归档、恢复校验后回收原卷；尚未批准。",
+    "长期内存边界": "两侧user facade的幂等映射和事件去重sync.Map无回收路径，不能宣称长期有界。"
+  },
+  "independent_runtime_diagnosis": {
+    "说明": "不依赖Core的标准库诊断；不能作为07业务同因已证实或容量成绩。",
+    "runs": [
+      {
+        "name": "pipe-stw-1-baseline",
+        "mode": "baseline",
+        "roundtrips": 47539,
+        "seconds": 5.890835291240364,
+        "maximum_reply_seconds": 1.7010146253742278,
+        "stalled": true,
+        "reason": "reply_timeout_2s",
+        "exit": 2,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      },
+      {
+        "name": "pipe-stw-2-timer",
+        "mode": "timer",
+        "roundtrips": 422977,
+        "seconds": 15.001722000073642,
+        "maximum_reply_seconds": 0.09025741601362824,
+        "stalled": false,
+        "reason": "window_complete",
+        "exit": -15,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      },
+      {
+        "name": "pipe-stw-3-baseline",
+        "mode": "baseline",
+        "roundtrips": 134411,
+        "seconds": 6.632755249738693,
+        "maximum_reply_seconds": 0.002065124921500683,
+        "stalled": true,
+        "reason": "reply_timeout_2s",
+        "exit": 2,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      },
+      {
+        "name": "pipe-stw-4-timer",
+        "mode": "timer",
+        "roundtrips": 423106,
+        "seconds": 15.00170375034213,
+        "maximum_reply_seconds": 0.07697220891714096,
+        "stalled": false,
+        "reason": "window_complete",
+        "exit": -15,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      },
+      {
+        "name": "pipe-stw-5-baseline",
+        "mode": "baseline",
+        "roundtrips": 67409,
+        "seconds": 4.29758141702041,
+        "maximum_reply_seconds": 0.0021516247652471066,
+        "stalled": true,
+        "reason": "reply_timeout_2s",
+        "exit": 2,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      },
+      {
+        "name": "pipe-stw-6-timer",
+        "mode": "timer",
+        "roundtrips": 432293,
+        "seconds": 15.001638957764953,
+        "maximum_reply_seconds": 0.010437000077217817,
+        "stalled": false,
+        "reason": "window_complete",
+        "exit": -15,
+        "diagnostic_only": true,
+        "source_sha256": "22db9a55598c6d184bddca69059de97a2ffae79d0263919c375ca0b76ffa9e89",
+        "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
+      }
+    ]
+  }
+}

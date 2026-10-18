@@ -106,3 +106,7 @@ order日志中，两版均观察到本地背压及`invalid connection`，包括�
 ## 范围
 
 仅比较07下单、SQL事务Outbox及订单创建事件路径。没有更改Core生产实现，没有将新版设为仓库默认，也未运行生产部署、多副本故障或07所有业务的等价验收。此前Core与原生方案对照见[原报告](GO_ZERO_ORDER_COMPARISON_2026-10-18.md)。
+
+## 后续实施记录
+
+以上保持版本对照当时的范围与结论。后续修复分支已将go-zero v1.10.3独立维护升级，并完成最终Core全框架与发布门禁；Badger适配和SQL候选也分别提交。新发送器/计时基线、单变量及最终组合结果见[执行记录](ORDER_QUEUE_EXECUTION_2026-10-19.md)、[性能记录](ORDER_QUEUE_PERFORMANCE_2026-10-19.md)与[最终容量记录](ORDER_QUEUE_FINAL_CAPACITY_2026-10-19.md)。升级通过回归不表示解决了历史异常根因或达到2000/s×600秒容量。

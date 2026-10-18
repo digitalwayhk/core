@@ -119,7 +119,7 @@
 
 ## MySQL显式驱动插值
 
-`oltp.Config.InterpolateParams bool` 为加性字段，零值false保持旧驱动协议。`MysqlDSN`、`SetMysqlDSN`及内部两条DSN路径透传；非法布尔配置报错，建池在插值启用时仅支持默认/显式utf8mb4，其他字符集连接前拒绝。不同协议的共享池隔离，GORM PrepareStmt仍false。07示例与原生对照显式启用，完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未带此参数时保留false；无效DSN在启动组合根拒绝且不输出原DSN。既有SQL事务、写入不重放和错误契约保持。
+`oltp.Config.InterpolateParams bool` 为加性字段，零值false保持旧驱动协议。`MysqlDSN`、`SetMysqlDSN`及内部两条DSN路径透传；非法布尔配置报错，建池在插值启用时仅支持默认/显式utf8mb4，其他字符集连接前拒绝。不同协议的共享池隔离，GORM PrepareStmt仍false。07示例与原生对照显式启用，完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未带此参数时保留false；现有解析器识别出的DSN格式/参数错误在启动组合根拒绝且不输出原DSN。该入口沿用Config字段映射，不是任意驱动参数的DSN直通；未知参数仍未接线。既有SQL事务、写入不重放和错误契约保持。
 
 ## MySQL共享池身份隔离
 
