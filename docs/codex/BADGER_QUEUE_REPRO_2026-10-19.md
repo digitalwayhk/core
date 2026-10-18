@@ -48,3 +48,25 @@ rtk proxy go run ./examples/07-shop-order-scale/tools/inspect-order-pending \
 - NOT_RUN：同现场参数的公共API自然压缩/GC/硬杀矩阵、v3→v4数据兼容、整框架回归和新长窗。G0运行期Core缓存计数与物理事实关联尚未补齐；G0/G1整体仍为Partial。
 
 下一项区分实验是用纯Badger公共API重放原生p/q写入与删除，在现场相同Options下记录事务成功集合、删除前后可见键及后台压缩变化，并对v3/v4分别运行。内部缺陷复现与现场可达性必须分开；在该边界收敛前不以调高阈值或清零计数推进容量结论。
+
+## 继续执行：公共API、原生并发与迁移
+
+新增两个独立模块`examples/07-shop-order-scale/go-zero-reference/experiments/badger-repro/{v3,v4}`，分别固定v3.2103.5与v4.9.6。操作序列、随机种子和现场参数相同，差异仅为依赖import；预期状态只在事务成功后更新，逐键比较值哈希，不用计数相等替代事实核对。人工数据不包含用户资料或凭证。
+
+| 场景 | v3 | v4 | 证据边界 |
+| --- | --- | --- | --- |
+| 自然压缩3轮，分别262144、786432、786432条事实 | PASS | PASS | 未复现现场异常，不能称根因已消除 |
+| Core关闭策略CompactL0OnClose=true，262144条 | PASS | PASS | 与原生默认关闭策略分开 |
+| 显式Flatten，262144条 | PASS | PASS | 诊断变量，不冒充自然压缩 |
+| SIGKILL后原路径重开，32768条写入、保留4096条事实 | PASS | PASS | 对剩余事实值及已删除键逐键核对 |
+| 有效vlog GC，524288条写入、2048字节随机payload | PASS，100次rewrite | PASS，100次rewrite | 诊断阈值1024；前三次零rewrite结果保留，不计为有效GC |
+| 原生应用4生产者、并发确认及重复确认，131072条 | PASS | 尚未切换应用依赖 | 静止点depth、p、q均0，重开后仍0 |
+| Core运行期缓存/索引/事实/墓碑三方核对 | PASS | 尚未切换项目依赖 | 保留合法已同步缓存，不改生产算法 |
+
+证据：`public-matrix.json`、`public-*-natural-r1.jsonl`、`public-*-gc-r4.jsonl`、`application-stress-v3.log`及`core-invariant.log`。GC轮次为产生真实可回收统计单独持久化head并触发重叠SST压缩；这些条件和更低值阈值均在程序及Options输出中明确，不扩大为07现场条件。
+
+普通及加密人工夹具均完成v3物理副本→v4直接打开、v3 Backup→v4 Load、v4新增事实后Backup→v3新目录Load及再次重开。750份最新值的版本/内容摘要一致，250份删除键不出现，过期记录不可见，活跃TTL元数据保持，升级后的新事实可回退保全。仅证明这些固定版本和夹具；不得自动将v4写过的实际目录交给v3打开。
+
+加密首轮因未设置IndexCache在flush时panic，已保留失败记录；按官方要求设置16MiB IndexCache后在全新目录重跑通过。此为诊断夹具配置问题，未据此修改未启用加密的Core配置。证据`compat-results.json`与`compat-encrypted-r2-results.json`。
+
+**决策边界：** 现场同参数与原生应用尚未复现负数depth/不可达p；仍为NOT_REPRODUCED。已确认v3库内部删除缺陷，v4通过其固定回归，兼容/备份回退验证允许继续在当前隔离开发分支评估v4适配。升级收益须由Core各使用点、真实恢复及新负载验证；不能将其预先称为现场异常根因修复。

@@ -49,7 +49,7 @@ Core目前未暴露NumMemtables、BlockCacheSize、IndexCacheSize等字段，不
 | GC周期/ratio | GC要有可回收的vlog文件，并与前台争用I/O | 先确认实际执行、回收字节和停顿；ErrNoRewrite不是发生了有效回收 |
 | CompactL0OnClose | 影响关闭延迟和关闭后布局，是恢复测试的重要变量 | 保留原控制组，分别核对关闭前后；不能当删除复现的绕过开关 |
 
-总内存预算应包含`MemTableSize × NumMemtables`的缓冲上界、block cache预算、索引/bloom、压缩工作区、mmap驻留和业务堆；预算不等于即时分配或精确RSS。按每个物理库/进程累计，不能因memtable仅16MiB就宣称低内存。`IndexCacheSize=0`与`BlockCacheSize=0`的语义不同，不是两个都禁用缓存。
+总内存预算应包含`MemTableSize × NumMemtables`的缓冲上界、block cache预算、索引/bloom、压缩工作区、mmap驻留和业务堆；预算不等于即时分配或精确RSS。按每个物理库/进程累计，不能因memtable仅16MiB就宣称低内存。`IndexCacheSize=0`与`BlockCacheSize=0`的语义不同，不是两个都禁用缓存。启用Badger原生加密时必须显式配置非零IndexCache，否则可在flush建表时panic；16MiB仅为已验证的迁移夹具取值，实际预算仍需按索引规模选择。
 
 [官方使用说明](https://github.com/dgraph-io/badger/blob/v4.9.6/docs/quickstart.md)解释事务、值生命周期、备份与内存取舍。Core的512条/32阈值/20ms以及128条/1ms分别属于远端同步和本地合批，不是Badger原生参数，见[写路径](write-path-and-performance.md)，不能混成一组官方推荐值。
 
