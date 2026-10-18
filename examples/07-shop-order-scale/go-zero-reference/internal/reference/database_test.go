@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,4 +54,40 @@ func TestNativeTransactionRollbackKeepsPending(t *testing.T) {
 	require.Error(t, a.verifyOrphans([]queueOrphan{{id: id, dataKey: []byte("p:wrong-owner")}}))
 	require.NoError(t, s.confirm(items))
 	require.Zero(t, s.depth.Load())
+}
+
+// TestNativeFactRecoverySQLProof 用真实事务验证不可达p的证明、内容冲突拒绝及精确清理。
+func TestNativeFactRecoverySQLProof(t *testing.T) {
+	if os.Getenv("CORE_REFERENCE_TEST_MYSQL") != "1" {
+		t.Skip("需要显式隔离MySQL schema")
+	}
+	db, err := openDatabase("order", "")
+	require.NoError(t, err)
+	pool, err := db.DB()
+	require.NoError(t, err)
+	defer pool.Close()
+	s, err := openPending(t.TempDir())
+	require.NoError(t, err)
+	defer s.close()
+	now := time.Now().UTC()
+	id := uint(now.UnixNano() >> 8)
+	o := testOrder(id, "fact-recovery-"+strconv.FormatUint(uint64(id), 10))
+	o.CreatedAt = &now
+	o.UpdatedAt = &now
+	o.AcceptedAt = now
+	_, err = s.accept(context.Background(), o)
+	require.NoError(t, err)
+	require.NoError(t, s.db.Update(func(tx *badger.Txn) error { return tx.Delete(queueKey(o)) }))
+	a := &application{db: db, clock: clock{worker: 3}}
+	require.Error(t, s.reconcileFactOrphans(a.verifyFactOrphans))
+	require.EqualValues(t, 1, s.depth.Load())
+	require.NoError(t, a.syncBatch(context.Background(), []*Order{o}))
+	conflict := *o
+	conflict.AddressDetail = "different-accepted-address"
+	require.Error(t, a.verifyFactOrphans([]*Order{&conflict}))
+	require.NoError(t, s.reconcileFactOrphans(a.verifyFactOrphans))
+	require.Zero(t, s.depth.Load())
+	stored, err := s.find(o.UserID, o.RequestID)
+	require.NoError(t, err)
+	require.Nil(t, stored)
 }

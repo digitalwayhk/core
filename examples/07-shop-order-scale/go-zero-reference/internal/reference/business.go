@@ -108,13 +108,20 @@ func (a *application) create(r *OrderRequest, trace string) (*Order, error) {
 }
 
 func (a *application) orders(user uint) ([]*Order, error) {
+	if a.local.depth.Load() < 0 {
+		return nil, errInvalidPendingState
+	}
 	var remote []*Order
 	if e := a.db.Where("user_id = ?", user).Order("id DESC").Limit(100).Find(&remote).Error; e != nil {
 		return nil, e
 	}
-	local, e := a.local.batch(int(a.local.depth.Load()))
+	// 缓存depth不能作为分配大小或物理读取上限；保留固定安全上限且不重算/清零计数。
+	local, e := a.local.batch(pendingHardLimit)
 	if e != nil {
 		return nil, e
+	}
+	if len(local) == pendingHardLimit {
+		return nil, errors.New("本地订单列表达到安全读取上限，等待队列恢复后重试")
 	}
 	byID := map[uint]*Order{}
 	for _, o := range remote {

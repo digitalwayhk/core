@@ -64,6 +64,7 @@ func Run(c Config) error {
 			return e
 		}
 		a.local.verifyOrphans = a.verifyOrphans
+		if e = a.local.reconcileFactOrphans(a.verifyFactOrphans); e != nil { return e }
 	}
 	if c.Role == "user" || c.Role == "order" {
 		a.redis = redis.NewClient(&redis.Options{Addr: os.Getenv("SHOP_REDIS_ADDR")})

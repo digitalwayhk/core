@@ -31,6 +31,10 @@ type pending struct {
 	verifyOrphans func([]queueOrphan) error
 }
 
+var errInvalidPendingState = errors.New("本地队列状态无效，停止新接单并保留现场")
+
+const pendingHardLimit = 50000
+
 func openPending(path string) (*pending, error) {
 	opts := badger.DefaultOptions(path).WithLogger(nil).WithSyncWrites(true).
 		WithDetectConflicts(true).WithNumCompactors(2).WithValueLogFileSize(1 << 20).
@@ -91,13 +95,17 @@ func (s *pending) accept(ctx context.Context, o *Order) (*Order, error) {
 	defer func() { <-s.admission }()
 	s.mu.Lock()
 	depth := s.depth.Load()
+	if depth < 0 {
+		s.mu.Unlock()
+		return nil, errInvalidPendingState
+	}
 	if depth < 10000 {
 		s.softSince = time.Time{}
 	} else if s.softSince.IsZero() {
 		s.softSince = time.Now()
 	}
 	lsm, vlog := s.db.Size()
-	blocked := depth >= 50000 || lsm+vlog >= 1<<30 || (!s.softSince.IsZero() && time.Since(s.softSince) >= 30*time.Second)
+	blocked := depth >= pendingHardLimit || lsm+vlog >= 1<<30 || (!s.softSince.IsZero() && time.Since(s.softSince) >= 30*time.Second)
 	s.mu.Unlock()
 	if blocked {
 		return nil, errors.New("本地队列背压")
