@@ -1,5 +1,13 @@
 # 写路径、缓存与水平扩展
 
+## 写路径分段观测
+
+本地准入、排队和提交必须分开：`WriteAdmissionMetrics.Attempts/TotalDuration`是准入调用累计值；`BatchCommitMetrics.TotalQueueWaitDuration`按本地操作累计进入提交队列前至开始提交的等待，包含排队发送等待；`TotalCommitDuration`按批累计实际提交耗时。这些累计和SQL池`WaitDuration`都不是壁钟耗时，比较时按同一窗口取增量并检查进程/连接池重置。
+
+07通过现有Runtime提供者暴露`write_path`低基数指标，包含上述阶段和已有MySQL池的WaitCount/WaitDuration、InUse/Idle、关闭原因计数。Outbox组件增加取批、发布、确认的`*_seconds_total`与`*_attempts_total`；分key发布累计时间允许大于壁钟。不得使用订单ID、requestID或EventID作指标标签，也不得为了取指标触发建连、DDL或强制GC。
+
+07负载实际发送由独立stdlib进程执行；凭证只经权限受限文件传入，run/stage命名空间避免预热和主档幂等键碰撞。排空起点取发送进程全部在途结束的时间，不能延后到结果序列化或父进程读完文件。窗口采样用有界索引EXISTS和独立SQL/Broker/metrics预算，缺失为null并保留错误；计时前后仍全量逐键核验。profile仅显式`core_benchmark_profile`构建及本机测试端口启用，正式容量不带此标签。统计入口GC的微基准不是业务容量收益，不据此自动改变全局GC策略。
+
 ## RouterInfo 缓存与高性能写
 
 API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCache` 时默认使用 local L1；Badger L2 和 shared Redis L3 才需显式配置。

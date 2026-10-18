@@ -22,6 +22,7 @@ var (
 
 type batchCommitRequest[T types.IModel] struct {
 	operations []WriteOperation[T]
+	queuedAt   time.Time
 	result     chan batchCommitResponse
 }
 
@@ -40,16 +41,19 @@ type BatchCommitMetrics struct {
 	MaxQueueDepth         int
 	TotalCommitDuration   time.Duration
 	AverageCommitDuration time.Duration
+	// TotalQueueWaitDuration 按操作累计从排队前到开始提交的等待；不是壁钟耗时。
+	TotalQueueWaitDuration time.Duration
 }
 
 type batchCommitMetricState struct {
-	submitted     atomic.Uint64
-	committed     atomic.Uint64
-	batches       atomic.Uint64
-	failedBatches atomic.Uint64
-	maxBatchSize  atomic.Int64
-	maxQueueDepth atomic.Int64
-	totalNanos    atomic.Int64
+	submitted      atomic.Uint64
+	committed      atomic.Uint64
+	batches        atomic.Uint64
+	failedBatches  atomic.Uint64
+	maxBatchSize   atomic.Int64
+	maxQueueDepth  atomic.Int64
+	totalNanos     atomic.Int64
+	queueWaitNanos atomic.Int64
 }
 
 // BatchCommitter 把短窗口内的并发 Save/Delete 请求合并为有序本地事务。
@@ -122,6 +126,7 @@ func (b *BatchCommitter[T]) SubmitBatch(
 		return BatchWriteResult{}, nil
 	}
 	request := batchCommitRequest[T]{
+		queuedAt:   time.Now(),
 		operations: append([]WriteOperation[T](nil), operations...),
 		result:     make(chan batchCommitResponse, 1),
 	}
@@ -187,14 +192,15 @@ func (b *BatchCommitter[T]) Metrics() BatchCommitMetrics {
 		average = total / time.Duration(batches)
 	}
 	return BatchCommitMetrics{
-		Submitted:             b.metrics.submitted.Load(),
-		Committed:             b.metrics.committed.Load(),
-		Batches:               batches,
-		FailedBatches:         b.metrics.failedBatches.Load(),
-		MaxBatchSize:          int(b.metrics.maxBatchSize.Load()),
-		MaxQueueDepth:         int(b.metrics.maxQueueDepth.Load()),
-		TotalCommitDuration:   total,
-		AverageCommitDuration: average,
+		Submitted:              b.metrics.submitted.Load(),
+		Committed:              b.metrics.committed.Load(),
+		Batches:                batches,
+		FailedBatches:          b.metrics.failedBatches.Load(),
+		MaxBatchSize:           int(b.metrics.maxBatchSize.Load()),
+		MaxQueueDepth:          int(b.metrics.maxQueueDepth.Load()),
+		TotalCommitDuration:    total,
+		AverageCommitDuration:  average,
+		TotalQueueWaitDuration: time.Duration(b.metrics.queueWaitNanos.Load()),
 	}
 }
 
@@ -239,6 +245,11 @@ func (b *BatchCommitter[T]) run() {
 
 func (b *BatchCommitter[T]) finishBatch(batch []batchCommitRequest[T]) {
 	started := time.Now()
+	for _, request := range batch {
+		if !request.queuedAt.IsZero() {
+			b.metrics.queueWaitNanos.Add(started.Sub(request.queuedAt).Nanoseconds() * int64(len(request.operations)))
+		}
+	}
 	result, err := b.commitSafely(batch)
 	duration := time.Since(started)
 	b.metrics.batches.Add(1)

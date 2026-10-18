@@ -81,3 +81,19 @@ func TestOutboxRuntimeMetricsReportConfiguredKeyConcurrency(t *testing.T) {
 	require.Contains(t, snapshot.Gauges, "blocked_keys")
 	require.Contains(t, snapshot.Gauges, "batch_size")
 }
+
+// TestOutboxStageMetricsObserveRealLoad 验证空批取数仍记录阶段尝试及耗时，不虚构发布或确认。
+func TestOutboxStageMetricsObserveRealLoad(t *testing.T) {
+	bridge := event.NewServiceEventBridge(nil, event.ServiceEventBridgeOptions{})
+	t.Cleanup(func() { require.NoError(t, bridge.Close(context.Background())) })
+	require.NoError(t, bridge.UseOutbox(event.OutboxOptions{SourceService: "metrics-test", Store: runtimeMetricsOutboxStore{}, Interval: time.Hour}))
+	bridge.NotifyOutbox()
+	provider := bridge.OutboxRuntimeMetricProvider()
+	require.Eventually(t, func() bool {
+		s := provider.RuntimeMetricSnapshot(context.Background())
+		return s.Gauges["load_attempts_total"] > 0 && s.Gauges["load_seconds_total"] > 0
+	}, time.Second, time.Millisecond)
+	s := provider.RuntimeMetricSnapshot(context.Background())
+	require.Zero(t, s.Gauges["publish_attempts_total"])
+	require.Zero(t, s.Gauges["mark_attempts_total"])
+}

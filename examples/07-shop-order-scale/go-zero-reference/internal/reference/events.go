@@ -40,7 +40,10 @@ func (a *application) publishLoop() {
 		}
 		for a.ctx.Err() == nil {
 			var pending []*OutboxRecord
-			if e := a.db.WithContext(a.ctx).Where("published = ?", false).Order("id ASC").Limit(100).Find(&pending).Error; e != nil {
+			start := time.Now()
+			loadErr := a.db.WithContext(a.ctx).Where("published = ?", false).Order("id ASC").Limit(100).Find(&pending).Error
+			a.observePhase("outbox_load", start)
+			if e := loadErr; e != nil {
 				recordError("outbox_load", e)
 				break
 			}
@@ -98,10 +101,12 @@ func (a *application) publishBatch(ctx context.Context, items []*OutboxRecord) (
 					continue
 				}
 				env := envelope{ID: o.EventID, Source: "shop-order", SpecVersion: "1.0", Type: o.EventType, Subject: o.Subject, Time: time.Now().UTC(), DataContentType: "application/json", Data: o.Payload, TraceID: o.TraceID, IdempotencyKey: o.EventID, ShardKey: key}
+				publishStart := time.Now()
 				b, e := json.Marshal(env)
 				if e == nil {
 					e = a.redis.XAdd(ctx, &redis.XAddArgs{Stream: streamName, Values: map[string]interface{}{"data": b, "idempotency_key": o.EventID, "ordering_key": key}}).Err()
 				}
+				a.observePhase("outbox_publish", publishStart)
 				mu.Lock()
 				if e != nil {
 					firstError = e

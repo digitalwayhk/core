@@ -80,6 +80,8 @@ func hashCodes(parts ...string) string {
 }
 
 func (a *application) syncBatch(ctx context.Context, items []*Order) error {
+	start := time.Now()
+	defer a.observePhase("sql_sync", start)
 	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		hashes := make([]string, 0, len(items))
 		for _, o := range items {
@@ -155,6 +157,8 @@ func (a *application) markPublished(ctx context.Context, items []*OutboxRecord) 
 	if len(items) == 0 {
 		return nil
 	}
+	start := time.Now()
+	defer a.observePhase("outbox_mark", start)
 	ids := make([]uint, 0, len(items))
 	for _, o := range items {
 		ids = append(ids, o.ID)

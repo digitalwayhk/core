@@ -117,6 +117,10 @@
 - `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
 - 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
 
+## 写路径观测加性字段
+
+写路径观测加性字段：`BatchCommitMetrics.TotalQueueWaitDuration`、`WriteAdmissionMetrics.Attempts/TotalDuration`；既有字段、写入返回值、准入和确认语义保持。Runtime白名单新增固定的本地阶段、SQL池及Outbox阶段累计指标；无业务ID标签，未采集字段不伪装为0。阶段计数与耗时仅供观测，不作为写重试、ACK或业务状态依据。
+
 ## Badger v4.9.6 存储适配
 
 Core后端由v3.2103.5适配至v4.9.6，外部存储接口及配置默认值保持；Badger对象仍为内部实现，不新增面向业务的原生DB/Txn接口。固定版本的普通/加密人工夹具已验证物理副本直接打开、Backup/Load及升级后新增事实经备份回退，见[验证记录](BADGER_QUEUE_REPRO_2026-10-19.md)。此结果不扩大为任意旧目录和未来版本的双向兼容保证。

@@ -6,6 +6,8 @@
 
 ### Added
 
+- 07独立标准库发送进程、run/stage幂等命名空间、分预算轻量采样及真实在途结束计时；增加本地准入/队列/提交、SQL池和Outbox阶段累计指标。
+
 - 显式 `Cluster.IdentityMode=stable`：服务名与持久 InstanceID 作为注册身份，MachineID/实际 WorkerID 通过独立 local/Redis/etcd 权威绑定；持久 Boot 世代、生成时间预留和 owner 原子检查保护重启与注册恢复。新增离线 `cmd/instance-identity` create/import/recover/retire/capacity、新就绪探针 `/api/ready`、后台准入入口，以及 06/07 稳定副本真实进程回归。默认 legacy 保持；Consul stable 不支持。迁移说明见 `docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md`。
 
 - 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
@@ -45,6 +47,8 @@
 - 默认内部 gRPC 传输：复用 go-zero zrpc Client、标准 gRPC health、独立 ServiceContext 生命周期、TLS/mTLS/mesh 和协议级三进程验证。
 
 ### Changed
+
+- Badger后端适配v4.9.6，保留可靠写默认约束；迁移和包含新事实的备份回退边界见`docs/codex/API_COMPATIBILITY_SURFACE.md`。
 
 - stable 的路由、受管理事件订阅和 Outbox 在业务操作前检查自身准入；临时发现故障恢复后可继续，持久权威冲突/损坏停止服务。`OutboxOptions.Admission` 为可选接口，保留零值和结构可比较性。无服务上下文的 `InitRequest.NewID` 不再使用包级备用编号，元数据枚举不得生成真实业务主键；正式主键改由受保护 ServiceContext 获取，迁移说明同上。
 
@@ -91,6 +95,8 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
+
+- 07原生对照在启动时证明并清理历史不可达pending；无证明时保留并报错，负数计数停止准入，列表不再按失真计数分配内存。
 
 - 修复 Core 内部系统菜单遗漏 v1.3 RBAC 页面入口：`getmenu` 现在提供角色管理、角色权限管理、管理员和管理员角色绑定；真实 09 进程测试验证菜单及各页面的 View/Search API。
 - 角色权限支持服务、菜单、命令勾选树、已有权限回显和事务替换保存；取消勾选可撤销授权。两个内部读写接口由后台排除页面按钮。修复 `getmenu` 未加载业务命令关联和真实请求中自定义角色新增未设置 `explicit` 策略的问题。

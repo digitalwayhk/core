@@ -32,6 +32,7 @@ type application struct {
 	clients    map[string]zrpc.Client
 	requestIDs sync.Map
 	processed  sync.Map
+	phases     map[string]*phaseMetric
 	ruleMu     sync.RWMutex
 	rule       *OrderRule
 	notify     chan struct{}
@@ -47,6 +48,7 @@ func Run(c Config) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &application{c: c, file: f, ctx: ctx, cancel: cancel, clients: map[string]zrpc.Client{}, notify: make(chan struct{}, 1)}
+	a.phases = map[string]*phaseMetric{"sql_sync": {}, "outbox_load": {}, "outbox_publish": {}, "outbox_mark": {}}
 	a.clock.worker = 1
 	if c.Role == "order" {
 		a.clock.worker = 2
@@ -64,7 +66,9 @@ func Run(c Config) error {
 			return e
 		}
 		a.local.verifyOrphans = a.verifyOrphans
-		if e = a.local.reconcileFactOrphans(a.verifyFactOrphans); e != nil { return e }
+		if e = a.local.reconcileFactOrphans(a.verifyFactOrphans); e != nil {
+			return e
+		}
 	}
 	if c.Role == "user" || c.Role == "order" {
 		a.redis = redis.NewClient(&redis.Options{Addr: os.Getenv("SHOP_REDIS_ADDR")})
@@ -202,6 +206,6 @@ func recordError(phase string, e error) {
 	if errors.Is(e, context.Canceled) {
 		return
 	}
-	b, _ := json.Marshal(map[string]string{"event": "native_operation_failed", "phase": phase, "error": e.Error()})
+	b, _ := json.Marshal(map[string]string{"event": "native_operation_failed", "phase": phase, "failure_class": errorClass(e), "error": e.Error()})
 	fmt.Fprintln(os.Stderr, string(b))
 }

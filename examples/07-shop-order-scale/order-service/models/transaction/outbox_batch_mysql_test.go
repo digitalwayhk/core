@@ -40,7 +40,7 @@ func TestOutboxBatchMySQLAtomicity(t *testing.T) {
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_HOST", host)
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PORT", port)
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_USER", "root")
-	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", "")
+	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", os.Getenv("CORE_OUTBOX_MYSQL_PASSWORD"))
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_DSN", "")
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_DATABASE", fmt.Sprintf("core_outbox_%d", time.Now().UnixNano()))
 	require.NoError(t, store.EnsureRemoteModel(NewOutbox()))

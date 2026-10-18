@@ -28,6 +28,23 @@ func (a *application) startMetrics() (*http.Server, error) {
 		registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "native_db_wait_seconds_total"}, func() float64 { return pool.Stats().WaitDuration.Seconds() }))
 		registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "native_db_in_use"}, func() float64 { return float64(pool.Stats().InUse) }))
 	}
+	for phase, metric := range a.phases {
+		registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "native_phase_seconds_total", ConstLabels: prometheus.Labels{"phase": phase}}, func() float64 { return float64(metric.nanos.Load()) / 1e9 }))
+		registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "native_phase_attempts_total", ConstLabels: prometheus.Labels{"phase": phase}}, func() float64 { return float64(metric.attempts.Load()) }))
+	}
+	if a.db != nil {
+		pool, err := a.db.DB()
+		if err != nil {
+			return nil, err
+		}
+		fields := map[string]func() float64{
+			"wait_count_total": func() float64 { return float64(pool.Stats().WaitCount) }, "idle": func() float64 { return float64(pool.Stats().Idle) }, "open": func() float64 { return float64(pool.Stats().OpenConnections) },
+			"idle_closed_total": func() float64 { return float64(pool.Stats().MaxIdleClosed) }, "idle_time_closed_total": func() float64 { return float64(pool.Stats().MaxIdleTimeClosed) }, "lifetime_closed_total": func() float64 { return float64(pool.Stats().MaxLifetimeClosed) },
+		}
+		for name, read := range fields {
+			registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "native_db_" + name}, read))
+		}
+	}
 	port := os.Getenv("SHOP_METRICS_PORT")
 	listener, e := net.Listen("tcp", "127.0.0.1:"+port)
 	if e != nil {

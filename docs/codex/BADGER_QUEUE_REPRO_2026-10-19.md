@@ -1,6 +1,6 @@
 # Badger队列核对与删除复现记录
 
-本轮依据[修复优化计划](../superpowers/plans/2026-10-19-order-queue-repair-and-throughput.md)执行。当前只完成离线核对工具、基本契约回归和上游内部缺陷验证；**未证明07现场异常的根因，未修改Badger版本或运行参数，未通过容量目标。**
+本轮依据[修复优化计划](../superpowers/plans/2026-10-19-order-queue-repair-and-throughput.md)执行。已完成独立核对、公共API与内部缺陷对照、迁移回退，并在隔离开发分支适配v4.9.6；**未证明07现场异常的根因，未调整运行参数，未通过容量目标。** 后续代码、真实恢复及性能进度见[执行记录](ORDER_QUEUE_EXECUTION_2026-10-19.md)，下文保留各阶段的原始结果与当时边界。
 
 ## 离线只读核对
 

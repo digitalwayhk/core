@@ -185,7 +185,7 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 				SyncFail:  float64(m.Sync.Failures),
 			}
 		},
-	}); err != nil {
+	}, writePathProvider{snapshot: store.Metrics}); err != nil {
 		logx.Errorw("runtime_metric_provider_register_failed",
 			logx.Field("service", sc.Service.Name),
 			logx.Field("component", "pending"),

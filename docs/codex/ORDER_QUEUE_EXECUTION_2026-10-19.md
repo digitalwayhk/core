@@ -1,0 +1,31 @@
+# 队列修复与吞吐优化执行记录
+
+执行对象为[原计划](../superpowers/plans/2026-10-19-order-queue-repair-and-throughput.md)。以下是执行中的状态，不代表计划整体完成；未通过的容量目标不会用定向测试或对照方失败替代。
+
+| 原任务 | 当前结果 | 证据及边界 |
+| --- | --- | --- |
+| 1：G0独立核对 | PASS | 新副本只读复核1785项缺索引p；原件/副本哈希不变。原生静止点、Core缓存/索引/事实/墓碑核对及畸形夹具通过 |
+| 2：G1复现 | 库内部FAIL/新版PASS；现场NOT_REPRODUCED | v3上游内部删除复现稳定失败、v4通过。公共API自然压缩3轮、关闭策略、显式压缩、有效GC和硬杀逐键通过；原生并发确认131072条通过。不能预先归因现场异常 |
+| 3：版本适配 | 定向验证PASS，整体回归待完成 | `29df6a2`独立适配v4.9.6，未改变go-zero或运行参数；普通/加密直接打开、Backup/Load和保全新事实的回退通过 |
+| 4：G2状态修复 | 代码及专项PASS | `792d698`修复原生历史不可达p恢复、异常准入和有界列表；Core没有加入未复现的算法补丁。真实SQL回滚、Outbox确认原子性、双实例8条积压硬杀恢复通过；SQL提交/本地确认前和发布/标记前的子进程SIGKILL通过 |
+| 5：G3独立发送和采样 | 代码完成，定向PASS，真实窗口待运行 | 独立stdlib进程，0600凭证文件，命名空间隔离；窗口不做全表COUNT，终局逐键核验保留。排空起点取发送进程的在途结束时间，不延后到序列化结束 |
+| 6：G3阶段观测 | 代码与专项通过；应用profile待运行 | 本地准入/队列/提交、SQL池、Outbox取批/发布/确认累计指标及固定错误分类；真实Redis ACK/reclaim、分key并发和生命周期专项通过 |
+| 7：G4 SQL单变量 | NOT_RUN | D1/D2/D3/D4尚未运行，不先更改默认值；D2/D3互斥 |
+| 8：G4发布积压 | NOT_RUN | 尚未根据阶段证据选优化点，发布4/消费8保持 |
+| 9：G5完整容量 | NOT_RUN | 尚未进行新600秒窗口及三轮验收；旧失败结果保留 |
+
+## 已运行的真实依赖和控制实验
+
+本轮专用依赖为`core-queue-repair-{mysql,redis}-20261019`，标签`core.task=order-queue-repair-20261019`；与旧验收卷隔离，凭证仅存0600文件。结果在`.temp/order-queue-repair-20261019/`。
+
+- `correctness-results.json`：真实MySQL事务回滚、Outbox整批提交/回滚/重复确认、稳定身份双实例原卷硬杀恢复均退出0。
+- `correctness-recovery-r2-results.json`：不可达p无证明时保留、内容冲突拒绝、匹配的远端订单/Outbox证明后CAS清理通过。
+- `correctness-crash-r4-results.json`及`native-sql-crash-windows-r4.log`：SQL已提交但本地未确认、MQ已发布但Outbox未标记两个真实SIGKILL窗口通过；原ID和远端单条事实保持，后者同EventID重投2份符合至少一次语义。文件最初误用`_windows_test.go`后缀导致macOS未收集；旧r3不能计为该项通过，改跨平台文件名后独立显式运行。
+- `redis-reliability-result.json`：真实Broker可靠订阅、失败pending reclaim、接管顺序、分key并发和回收前沿专项退出0。消费者ACK窗口由这些Broker专项覆盖，07 facade仍只有进程内去重，不冒充持久Inbox。
+- `stats-gc-{baseline,control}.log`：统计函数微基准分别约323783ns/op与58088ns/op。控制用编译overlay仅去除统计入口强制GC，生产代码未修改。2MiB堆上的微基准不是订单容量收益；统计任务每5分钟执行，短窗没有触发不等于长窗无影响。
+
+## 回归与资源边界
+
+首次串行全框架回归中，06 all-in-one/三进程用例仍连接默认127.0.0.1:6379而失败；日志保留在`v4-full-regression.log`。这次不是整体PASS，必须用本轮专用Redis重新执行，不通过禁用MQ、跳过用例或修改断言解决。
+
+磁盘当前约24GiB可用；只读统计旧约70万请求长窗的MySQL卷约3.28GiB。后续长窗须按实际增长预算保留线，不删除旧证据或失败卷；不能无预算同时创建六套完整长窗依赖。通过轮是否需要归档、后续空间能否容纳，按首轮实际增长继续核对。
