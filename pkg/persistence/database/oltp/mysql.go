@@ -571,49 +571,20 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 
 // buildDSN 构建不带数据库名的 DSN（用于管理操作或创建数据库）
 func (m *MySQL) buildDSN() string {
-	if m.config.Charset == "" {
-		m.config.Charset = "utf8mb4"
-	}
-	if m.config.ParseTime == false {
-		m.config.ParseTime = true
-	}
-	if m.config.Loc == "" {
-		m.config.Loc = "Local"
-	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=%s&parseTime=true&loc=%s",
-		m.config.Username,
-		m.config.Password,
-		m.config.Host,
-		m.config.Port,
-		m.config.Charset,
-		m.config.Loc,
-	)
-	if m.config.InterpolateParams {
-		dsn += "&interpolateParams=true"
-	}
-	return dsn
+	return m.buildDSNWithDB("")
 }
 
-// buildDSNWithDB 构建带数据库名的 DSN（直接连接到指定数据库）
+// buildDSNWithDB 只读配置构建DSN，默认化不得与并发连接池身份读取竞争。
 func (m *MySQL) buildDSNWithDB(dbName string) string {
-	if m.config.Charset == "" {
-		m.config.Charset = "utf8mb4"
+	charset := m.config.Charset
+	if charset == "" {
+		charset = "utf8mb4"
 	}
-	if m.config.ParseTime == false {
-		m.config.ParseTime = true
+	loc := m.config.Loc
+	if loc == "" {
+		loc = "Local"
 	}
-	if m.config.Loc == "" {
-		m.config.Loc = "Local"
-	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
-		m.config.Username,
-		m.config.Password,
-		m.config.Host,
-		m.config.Port,
-		dbName,
-		m.config.Charset,
-		m.config.Loc,
-	)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s", m.config.Username, m.config.Password, m.config.Host, m.config.Port, dbName, charset, loc)
 	if m.config.InterpolateParams {
 		dsn += "&interpolateParams=true"
 	}
@@ -698,8 +669,12 @@ func (m *MySQL) ensureDatabase(db *gorm.DB) error {
 
 	// 数据库不存在，创建它
 	if count == 0 {
+		charset := m.config.Charset
+		if charset == "" {
+			charset = "utf8mb4"
+		}
 		createSQL := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET %s COLLATE %s_general_ci",
-			m.Name, m.config.Charset, m.config.Charset)
+			m.Name, charset, charset)
 
 		if err := db.Exec(createSQL).Error; err != nil {
 			return fmt.Errorf("创建数据库失败: %v", err)
