@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,6 +98,7 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	defer stopLoad()
 	guardianStop := ""
 	var samples []orderLoadSample
+	var samplesMu sync.Mutex
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -105,7 +107,9 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 		consecutiveErrors := 0
 		for {
 			sample := takeOrderLoadSample(db, broker, processes)
+			samplesMu.Lock()
 			samples = append(samples, sample)
+			samplesMu.Unlock()
 			if len(sample.Errors) > 0 {
 				consecutiveErrors++
 			} else {
@@ -168,25 +172,16 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	drained := false
 	storeDrainSeconds := -1.0
 	drainSeconds := -1.0
-	convergedSamples := 0
-	for deadline := time.Now().Add(360 * time.Second); time.Now().Before(deadline); {
-		sample := takeOrderLoadSample(db, broker, processes)
-		if len(sample.Errors) == 0 && sample.Pending != nil && *sample.Pending == 0 && sample.Unpublished != nil && !*sample.Unpublished {
-			if storeDrainSeconds < 0 {
-				storeDrainSeconds = time.Since(loadEnd).Seconds()
-			}
-			if sample.converged() {
-				convergedSamples++
-			} else {
-				convergedSamples = 0
-			}
-			if convergedSamples >= 2 {
-				drained = true
-				drainSeconds = time.Since(loadEnd).Seconds()
-				break
-			}
-		} else {
-			convergedSamples = 0
+	for {
+		samplesMu.Lock()
+		storeDrainSeconds, drainSeconds = observedOrderDrain(loadEnd, samples)
+		samplesMu.Unlock()
+		if drainSeconds >= 0 {
+			drained = true
+			break
+		}
+		if !time.Now().Before(loadEnd.Add(360 * time.Second)) {
+			break
 		}
 		time.Sleep(time.Second)
 	}
@@ -195,7 +190,7 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	// defer 中重复读取已关闭 channel 安全；采样结果在 join 后读取。
 	verificationStart := time.Now()
 	final := takeOrderLoadSample(db, broker, processes, true)
-	if len(final.Errors) > 0 || final.Orders == nil || final.Outbox == nil || final.Published == nil || *final.Orders != *final.Outbox || *final.Outbox != *final.Published {
+	if !final.converged() || final.Orders == nil || final.Outbox == nil || final.Published == nil || *final.Orders != *final.Outbox || *final.Outbox != *final.Published {
 		drained = false
 	}
 	writeLoadJSON(t, filepath.Join(evidence, "requests.json"), results)
@@ -203,6 +198,7 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	output, _ := exec.Command("git", "rev-parse", "HEAD").Output()
 	summary := map[string]interface{}{"source_head": strings.TrimSpace(string(output)), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "logical_cpus": runtime.NumCPU(), "order_replicas": 1, "namespace": ns, "stages": stages, "drained": drained, "drain_seconds": drainSeconds, "initial": initial, "drain_probe_interval_ms": 1000, "store_drain_seconds": storeDrainSeconds, "final": final, "sample_count": len(samples)}
 	summary["implementation"] = implementation
+	summary["drain_timing_source"] = "completed_background_samples"
 	// 核对每个已确认的 requestID/OrderID；超时失败可能已落库，单独登记未知结果，不能当作已确认丢失。
 	rows, err := db.Query("SELECT id,request_id FROM `order`")
 	require.NoError(t, err)

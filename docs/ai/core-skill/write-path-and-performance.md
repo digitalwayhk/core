@@ -68,3 +68,7 @@ Badger参数选择先读[配置与调参](badger-configuration.md)：区分官�
 - `SetSyncDB`、`EnableWriteBehind(ModelList)` 是仍可编译的 Deprecated 兼容路径，不得作为新热路径设计中心。
 - 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
 - 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
+
+### 排空观测与结果文件处理
+
+容量测试以独立发送器的 `inflight_end_at` 为排空起点；后台每秒观测继续运行。排空终点取该起点之后连续两次完整收敛观测的实际完成时间，不取父进程解码结果文件后的当前时间。结果文件写盘、传回及解码耗时单列，不能算成服务排空，也不能通过后移起点隐藏积压。负数、缺失、SQL/Broker/metrics错误仍打断连续收敛；最终全量核对保留，5秒门槛保持。结果使用 `drain_timing_source=completed_background_samples` 标识该测量口径。

@@ -142,3 +142,29 @@ func takeOrderLoadSample(db *sql.DB, broker *redis.Client, processes []*integrat
 	sample.At = time.Now().UTC()
 	return sample
 }
+
+// observedOrderDrain 使用采样实际完成时刻；结果序列化/读取耗时不属于服务排空。
+// 只接受在全部在途结束后连续两次完整收敛的观测，缺失和错误仍打断连续性。
+func observedOrderDrain(loadEnd time.Time, samples []orderLoadSample) (store, drain float64) {
+	store, drain = -1, -1
+	consecutive := 0
+	for _, sample := range samples {
+		if !sample.At.After(loadEnd) {
+			continue
+		}
+		if len(sample.Errors) == 0 && sample.Pending != nil && *sample.Pending == 0 && sample.Unpublished != nil && !*sample.Unpublished {
+			if store < 0 {
+				store = sample.At.Sub(loadEnd).Seconds()
+			}
+		}
+		if !sample.converged() {
+			consecutive = 0
+			continue
+		}
+		consecutive++
+		if consecutive >= 2 {
+			return store, sample.At.Sub(loadEnd).Seconds()
+		}
+	}
+	return store, drain
+}
