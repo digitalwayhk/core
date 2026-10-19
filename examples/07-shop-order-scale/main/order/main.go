@@ -4,15 +4,11 @@ package main
 import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/bootstrap"
 	orderservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service"
-	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/run"
 )
 
 func main() {
-	if err := models.EnsureStorage(); err != nil {
-		panic(err)
-	}
 	httpPort := bootstrap.OrderHTTPPort()
 	service := &orderservice.Service{}
 	server := run.NewWebServer()

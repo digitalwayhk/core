@@ -152,6 +152,8 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 ## 测试与发布
 
+服务接入 `IInitializeService` 时，至少验证：初始化先于任何监听器构造，初始化错误保留 cause 并阻止启动，后续构造失败会释放已初始化资源。必要资源绑定不能放在异步 `Start()` 或通过测试 sleep 弥补；07 首单回归使用受控延迟确认该边界。
+
 ```bash
 ./scripts/test.sh quick
 ./scripts/test.sh security

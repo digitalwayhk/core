@@ -33,13 +33,13 @@ func (*Service) Routers() []servertypes.IRouter {
 	}
 }
 
-// Start 订阅订单服务发布的可靠事件，用于失效买家订单缓存并通知 WebSocket。
-func (s *Service) Start() {
+// Initialize 在监听前订阅订单事件，避免首笔订单发布时尚无必要消费者。
+func (s *Service) Initialize() error {
 	sc := router.GetContext(contract.UserServiceName)
 	if sc == nil {
-		panic(fmt.Errorf("用户服务缺失 ServiceContext: %s", contract.UserServiceName))
+		return fmt.Errorf("用户服务缺失 ServiceContext: %s", contract.UserServiceName)
 	}
-	s.registerEventSubscriptions(sc)
+	return s.registerEventSubscriptions(sc)
 }
 
 // Stop 释放用户服务启动时注册的事件订阅。
@@ -50,17 +50,18 @@ func (s *Service) Stop() {
 }
 
 // registerEventSubscriptions 注册用户入口服务消费的内部订单事件。
-func (s *Service) registerEventSubscriptions(sc *router.ServiceContext) {
+func (s *Service) registerEventSubscriptions(sc *router.ServiceContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, subscription := range userEventSubscriptions() {
 		cancel, err := sc.SubscribeEvent(subscription)
 		if err != nil {
 			s.cancelEventSubscriptions()
-			panic(err)
+			return err
 		}
 		s.cancels = append(s.cancels, cancel)
 	}
+	return nil
 }
 
 // userEventSubscriptions 描述用户服务需要消费的内部事件集合。

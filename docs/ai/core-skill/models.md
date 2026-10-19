@@ -156,6 +156,8 @@ MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额�
 
 因此"新增字段后重启即自动补列"是指启动入口先执行 `EnsureStorage()`，成功后才启动 Server；初始化失败应终止启动，不能等请求触发或静默降级。
 
+标准 WebServer 支持可选的 `types.IInitializeService.Initialize() error`。服务可在 `service.go` 的此方法中调用 `models.EnsureStorage()` 并绑定必要存储，无需 main 处理具体模型。全部此类钩子成功前不会构造监听器；原有异步 `Start()` 行为不变。失败回滚和生命周期边界见 [服务组合根](project-layout.md)。不要只定义同名 `EnsureStorage()` 方法并假定框架会自动调用。
+
 ### 边界：不会自动做的事
 
 | 变更 | 是否自动 |

@@ -10,6 +10,7 @@
 
 ### Added
 
+- 可选 `types.IInitializeService.Initialize() error`：标准 WebServer 在任何监听器构造前同步完成资源初始化，失败反向回滚；旧 `IService` 与异步 `IStartService` 契约保留。消费方接入及同签名方法检查见升级指导。
 - 显式 `Cluster.IdentityMode=stable`：持久服务实例身份、独立编号权威、Boot 隔离、注册恢复、`/api/ready` 与后台准入入口；新增离线 `cmd/instance-identity` 工具及 06/07 多进程故障恢复测试。默认仍为 legacy；Consul stable 不支持。
 - Experimental 可选事务消息工具 `pkg/persistence/message` 与 MySQL/SQLite `ITransactionDB`，供已确认的业务方案组合事务；不强制建 Outbox/Inbox 表，不改变 `IDataAction` 必选接口。
 - `SearchItem.Context` 可传递 MySQL/SQLite 查询取消，nil 兼容，JSON 忽略；不扩大为整个写事务取消契约。
@@ -34,6 +35,7 @@
 
 ### Fixed
 
+- 修复 07 ready 成功但订单 runtime 尚未绑定导致的首单 500：订单建表/存储绑定和用户必要订阅移至监听前初始化，失败拒绝启动并释放资源。
 - 修复 09 业务 Manage 演示不完整、系统菜单遗漏角色/权限/管理员页面、`getmenu` 命令关联未加载及自定义角色未使用 explicit 策略。权限树支持回显、增减勾选和事务替换；内部读写接口继续鉴权，后台不生成按钮。
 - 修复权限树读取/替换使用默认 500 条查询而遗漏跨页授权：601 条权限取消全部勾选后不再残留 101 条；保存失败回滚全量删除，其他角色保持。
 - stable 同进程和 gRPC 内部分发在解析结构化载荷前检查目标准入，避免绕过 HTTP 的检查；内部身份授权仍优先，恢复后可继续调用。

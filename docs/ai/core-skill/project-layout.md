@@ -182,7 +182,9 @@ func (*ShopService) Routers() []types.IRouter {
 
 ```
 
-`IService` 只声明稳定服务名和路由。内部异步事件统一在 `Start()` 中使用 `sc.SubscribeEvent(...)`；外部用户通知使用 WebSocket 运行时。
+`IService` 只声明稳定服务名和路由。服务可选实现 `types.IInitializeService.Initialize() error`：标准 WebServer 在配置校验后、任何 HTTP/gRPC 监听器构造前同步执行全部初始化钩子，用于调用 models 组合根的 `EnsureStorage()`、绑定必要资源和注册 `sc.SubscribeEvent(...)`。钩子不得等待本进程监听或调用尚未启动的下游服务。失败时拒绝启动，反向调用已尝试初始化服务的 `Stop()`（包括失败服务），并关闭其 ServiceContext 托管资源；`Stop()` 须支持部分初始化和重复调用。资源通过 `sc.UseResource` 托管，避免自行重复关闭。
+
+已有 `IStartService.Start()` 保持服务运行后异步调用，供不影响首请求的后台任务使用，不能承担必要存储或订阅的初始化屏障。尚未接入新钩子的服务不会自动改变时序；旧组合根在监听前调用 `EnsureStorage()` 的方式继续兼容。外部用户通知使用 WebSocket 运行时。
 
 main 只负责创建 WebServer、注册 Service 和 ServerOption，然后启动。单服务运行配置由框架首次运行生成，示例和集成测试不提交临时运行配置。示例 06 为了让同进程和三进程使用完全相同的 Redis 契约，由 `bootstrap.ServiceConfig` 在组合根显式构造配置，仍不提交运行后 JSON。
 

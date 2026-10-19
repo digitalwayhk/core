@@ -4,7 +4,6 @@ package main
 import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/bootstrap"
 	orderservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service"
-	ordermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	supplierservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service"
 	suppliermodels "github.com/digitalwayhk/core/examples/07-shop-order-scale/supplier-service/models"
 	userservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/user-service"
@@ -15,7 +14,7 @@ import (
 
 // main 启动 user、supplier 和 order 服务；WebSocket 只在 user 开启。
 func main() {
-	mustInitializeStorage(suppliermodels.EnsureStorage, ordermodels.EnsureStorage)
+	mustInitializeStorage(suppliermodels.EnsureStorage)
 	server := run.NewWebServer()
 	// 保留直接运行的默认端口；显式参数交给框架解析，便于隔离启动真实 UAT。
 	setDefaultPorts(server, os.Args[1:])

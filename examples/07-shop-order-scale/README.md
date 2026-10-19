@@ -15,6 +15,8 @@
 
 ## 服务边界
 
+订单服务实现 `IInitializeService.Initialize()`，在 HTTP/gRPC 监听前完成 `models.EnsureStorage()` 和本地可靠 store 绑定；用户服务在相同阶段完成必要事件订阅。原有异步 `Start()` 只启动订单 Outbox 和统计任务。初始化失败会拒绝启动并释放已初始化资源，避免 ready 已成功但首笔下单仍因 runtime 未绑定而返回 500。
+
 | 服务 | 对外能力 | 内部能力 | 水平扩展要求 |
 | --- | --- | --- | --- |
 | `shop-user` | 普通用户注册、资料、地址、下单入口、订单查询、WebSocket 订单订阅 | 调用 supplier/order 的受限 Public API | 入口服务可扩展，但缓存只放在入口 facade |

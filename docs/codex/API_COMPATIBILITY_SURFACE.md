@@ -36,6 +36,7 @@
 | `Subscription.Broadcast`、`ServiceEventBridgeOptions.InstanceSubscriberID` | Stable（加性） | server/event、router | 可靠、幂等的低频控制事件可按稳定副本端点广播；默认 false 继续使用逻辑服务共享组 | broadcast 组身份、缺失稳定身份与非可靠订阅 fail-closed 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
+| `types.IInitializeService.Initialize() error` | Stable（v1.4 加性） | server/run | 标准 WebServer 配置校验后、监听器构造前同步调用；失败反向回滚 Stop 与托管资源。旧 IService 不增加必选方法，旧 Start 保持异步；已有同签名方法须核对升级行为 | `service_initialization_test.go` 的顺序/错误/panic/托管资源回滚，07 受控延迟首单与 WebSocket 回归 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
 | `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
 | `oltp.NewFixedSqlite` | Stable（v1.3 加性） | persistence、server/manageauth | 为进程级控制面固定 SQLite 库名，不再接受模型 `IDBName` 改写路由 | OLTP、controlplane startup 测试 |

@@ -71,27 +71,33 @@ func (*Service) OnAuthRequest(ctx context.Context, args servertypes.AuthRequestA
 	return nil
 }
 
-// Start 启用订单服务标准 Outbox 发布能力。
-func (s *Service) Start() {
+// Initialize 在监听前完成建表和实例级可靠 store 绑定，失败时拒绝启动。
+func (s *Service) Initialize() error {
 	// ServiceContext 提供当前副本已领取的机房和机器身份，是本地 pending 目录隔离的唯一来源。
 	sc := router.GetContext(contract.OrderServiceName)
 	if sc == nil {
-		panic(fmt.Errorf("订单服务缺失 ServiceContext: %s", contract.OrderServiceName))
+		return fmt.Errorf("订单服务缺失 ServiceContext: %s", contract.OrderServiceName)
 	}
 	// 远程 MySQL 是订单最终权威库；启动前建表失败时必须 fail fast，不允许进入半可用状态。
 	if err := models.EnsureStorage(); err != nil {
-		panic(err)
+		return err
 	}
 
 	// 创建阶段只打开当前副本的本地可靠 store，尚不向路由暴露，也不启动远程同步。
 	store, err := s.newOrderWriteStore(sc)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	// 只有 target、runtime 和 ServiceContext 资源托管全部成功后，API/business 才能使用该 store。
 	if err := s.bindOrderWriteStore(sc, store); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
+}
+
+// Start 在资源初始化完成后启用订单服务标准 Outbox 与统计任务。
+func (s *Service) Start() {
+	sc := router.GetContext(contract.OrderServiceName)
 	// Outbox 依赖已受托管的 store，因此必须最后启动。
 	if err := s.startOrderInfrastructure(sc); err != nil {
 		panic(err)
