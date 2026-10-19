@@ -79,4 +79,6 @@ Go代码最终提交为 `258b45a`，最终全框架回归、发布候选、认�
 
 业务秒级停顿与工具链独立STW复现的同因关系仍未证实；没有改Go工具链、加入忙定时器或放宽750ms观测。07消费facade仍非持久Inbox，Broker AOF everysec不保证主机断电零丢失；NATS、etcd及生产消费方迁移保持NOT_RUN。本轮交付已验证修复及完整测量，不推送、合并或发布。
 
+原卷后续状态：用户随后授权保护Bitzoom、清理其他Docker应用后继续复测。上述新五轮的10个原卷现已完整归档、逐文件SHA及真实MySQL逐键/Redis消费恢复核对通过后回收；归档和全部结果仍保留，历史FAIL不变。最新清理范围及新一组对照另见[容量专项记录](ORDER_CAPACITY_FOCUS_2026-10-19.md)，不能继续将历史快照中的“原卷保留”解释为当前Docker原卷仍存在。
+
 历史单变量结果见[独立对照](ORDER_QUEUE_PERFORMANCE_2026-10-19.md)，已修复及未解决问题见[自审](ORDER_QUEUE_CANDIDATE_REVIEW_2026-10-19.md)，执行、工具链诊断及覆盖边界见[执行记录](ORDER_QUEUE_EXECUTION_2026-10-19.md)。
