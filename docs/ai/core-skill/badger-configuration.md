@@ -13,6 +13,8 @@
 
 当前后端适配Badger v4.9.6，独立复现模块保留v3.2103.5作对照。下面列出的原生默认值在这两个固定版本中相同，并非建议所有服务照抄；升级仍须重新导出有效Options，不能从注释推定。
 
+从 v1.3.0 升级需按[消费方指南](../../codex/UPGRADE_FROM_V1_3.md#badger-数据与错误兼容)核对旧目录副本和回退。Core 方法签名保持，但底层错误来自 Badger v4；直接用 v3 sentinel 比较错误的项目须调整并回归，不能只用编译通过证明行为兼容。
+
 | 参数 | Badger DefaultOptions | Core Production / Shared | 07原生对照 |
 | --- | --- | --- | --- |
 | SyncWrites | false | true / false | true |

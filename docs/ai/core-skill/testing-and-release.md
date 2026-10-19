@@ -181,6 +181,8 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 它比对 `git ls-tree HEAD web/admin` 的**已提交**指针与 `build-info.json` 的 `frontend_commit`。不要改成读子模块工作区 HEAD——本地 checkout 会让它跟着漂移，从而放过已提交的不一致。
 
+此门禁不证明子模块提交已经在远端发布。正式发布前须另外在不共享本机对象的空裸库实际 fetch 精确 gitlink SHA，并校验提交对象存在；远端返回 `not our ref` 是发布阻断。本地已有对象时 fetch 可能返回成功，不能据此计为冷获取 PASS。新检出失败不能通过重写 gitlink、伪造 build-info 或删除子模块来绕过。
+
 发布前不得自动创建 tag。开发消费方可临时引用分支或精确 commit：
 
 ```bash
@@ -189,3 +191,5 @@ go get github.com/digitalwayhk/core@<commit>
 ```
 
 分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
+
+从 v1.3.0 升级时必须结合[消费方升级指南](../../codex/UPGRADE_FROM_V1_3.md)盘点 MQ 缺省 off、Badger 存量数据与原生错误比较、MySQL 账号池隔离、无上下文 InitRequest.NewID，以及可选 stable 的身份/编号迁移。公共签名检查通过不代表这些行为和数据边界已验收；Core 门禁与消费方精确提交 smoke 分别登记，禁止把旧版本的迁移记录重复算作本候选通过。

@@ -2,7 +2,7 @@
 
 ## 版本规则
 
-- 使用 SemVer 标签 `vMAJOR.MINOR.PATCH`。当前 `v0.x` 阶段仍保护已登记公共表面，不能以未到 1.0 为由静默破坏。
+- 使用 SemVer 标签 `vMAJOR.MINOR.PATCH`，保护已登记公共表面；历史 `v0.x` 版本也不能以未到 1.0 为由静默破坏。
 - PATCH：兼容修复；MINOR：加性 API/能力；MAJOR：经批准且附迁移证据的破坏性变更。
 - 安全修复允许有意收紧行为，但必须在 changelog 的 Security/Changed 中说明迁移影响。
 
@@ -15,6 +15,7 @@
 5. 废弃项满足登记窗口，不能提前删除。
 6. 发布人显式创建签名或 annotated tag；脚本不得自动 tag、push 或发布。
 7. 经批准的直接删除不得进入 PATCH/MINOR；候选版本必须提升 MAJOR，并在消费方矩阵记录精确提交 smoke。
+8. 已提交子模块的精确 SHA 必须能从其配置远端在空对象库获取。`check-web-dist-sync` 仅验证 gitlink 与内嵌产物一致，不联网；本机已经存在对象时的 `git fetch <sha>` 可能假通过，不能替代冷获取验证。配套源码不可获取时不得正式发布。
 
 ## 发布流程
 

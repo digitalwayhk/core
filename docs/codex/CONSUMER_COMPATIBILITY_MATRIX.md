@@ -13,6 +13,14 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.4.0 候选升级准备（2026-10-19）
+
+上版基线为 `v1.3.0` / `7cdf8d998d9ac54a9e880736284536d27380838b`，本轮功能审查起点为 `5df05bbb2bc31a53e0e3691baa59cea64d844558`；最终候选提交与回归范围见[发布准备记录](RELEASE_PREPARATION_2026-10-19.md)。上述历史表不代表当前生产锁定或本候选 smoke，禁止把旧通过结果覆盖成本轮通过。
+
+本轮未修改、升级、重启或部署 Bitzoom/futures 等消费方，消费方精确提交 smoke 与实际存量卷迁移均为 `NOT_RUN`。已完成的 Core 自测仅属于本仓库证据。升级者须按[从 v1.3.0 升级](UPGRADE_FROM_V1_3.md)核对 MQ 缺省、Badger 数据及 v3 原生错误比较、MySQL 认证池隔离、可选 stable 身份与编号迁移，再登记自己的项目/Core 精确提交和结果。依赖本地 Badger 的项目未通过旧卷副本恢复前不得直接切正式流量。
+
+当前合并发布为 `NO-GO`：固定提交全仓回归中，07 在 ready 已返回 200 后首次下单得到 500；另有候选 `web/admin` gitlink `b705b5b49a879517e56f973e38c129039a10201c` 无法从 `.gitmodules` 远端冷获取，返回 `not our ref`。两项须先解除并复测，不能把本地 dist 同步通过或初轮通过当作候选完整可复现；消费方尚未完成升级。
+
 ## v1.3.0 Manage RoleCode RBAC 候选
 
 本候选为标准 WebServer 增加默认启用的 Manage 授权。Core 保存管理员主体与稳定 RoleCode 的关系；消费方不得重复建立管理员/角色关系表，也不得把权限明细或权限哈希塞入 token。Core 内置 `core.system_admin` 与 `core.viewer`，自定义角色权限按精确 `service + path + command` 保存和判断。只有角色权威位于外部 IAM 时，消费方才覆盖 `IManageRoleProvider`。

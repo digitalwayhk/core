@@ -107,7 +107,7 @@
 | MQ lifecycle manifest | Stable（加性） | 未声明时不启动回收；声明后策略在进程内冻结，observe/enforce 切换通过重启；旧配置升级不静默删除消息 | `pkg/server/mq` lifecycle/controller/真 Broker 测试与 `MQ_MESSAGE_LIFECYCLE_GUIDE.md` |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
 | 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
-| Manage 角色与权限生命周期 | Stable opt-in（v1.3 加性） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
+| Manage 角色与权限生命周期 | Stable（标准 WebServer 自 v1.3 默认启用） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
 
 ## Casdoor 迁移与运行约束
 
@@ -135,6 +135,8 @@
 
 Core后端由v3.2103.5适配至v4.9.6，外部存储接口及配置默认值保持；Badger对象仍为内部实现，不新增面向业务的原生DB/Txn接口。固定版本的普通/加密人工夹具已验证物理副本直接打开、Backup/Load及升级后新增事实经备份回退，见[验证记录](BADGER_QUEUE_REPRO_2026-10-19.md)。此结果不扩大为任意旧目录和未来版本的双向兼容保证。
 
+公开方法签名保持不代表底层错误身份保持：直接比较 `badger/v3.ErrKeyNotFound` 等 sentinel 的消费方须调整到 v4 并回归。Go 官方 apidiff 不覆盖此运行时行为；存量卷、错误比较及完整升级检查见[从 v1.3.0 升级](UPGRADE_FROM_V1_3.md)。
+
 迁移说明：停准入并停止旧写入进程，保留完整原件，在副本验证值、版本、TTL、删除和重开后再切换。pending及authstate保持fail策略；禁止清库、truncate或把它们当可重建缓存。新版本接单后回退必须保全新增事实，停写后从新版本Backup并在新目录验证Load；不能直接切回旧快照，也不能未经验证让v3打开v4已写目录。Core不执行自动清库或备份还原。
 
 ## 快照规则
@@ -160,7 +162,7 @@ Core后端由v3.2103.5适配至v4.9.6，外部存储接口及配置默认值保�
 ./scripts/test.sh config-contract
 ```
 
-废弃版本和消费方精确版本将在任务 15.4 完成；在对应小节完成前不提前声明发布门禁已生效。
+废弃窗口与消费方精确版本分别见当前废弃登记和消费方矩阵。上述门禁已由仓库脚本执行；它们不替代本候选的消费方 smoke、持久数据迁移或正式发布验收。
 
 ## 稳定实例身份与注册恢复候选
 

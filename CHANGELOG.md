@@ -4,19 +4,55 @@
 
 ## [Unreleased]
 
+本节仅列相对 `v1.3.0` 的改动，候选 `v1.4.0`；正式发布前仍须通过候选门禁。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
+
+当前合并发布为 **NO-GO**：固定提交的 07 真实回归出现 ready 后首单 500，且配套前端 gitlink 无法远端冷获取；证据与解除步骤见[发布准备记录](docs/codex/RELEASE_PREPARATION_2026-10-19.md)。
+
 ### Added
 
-- `SearchItem.Context`可选MySQL/SQLite查询执行上下文，nil保持原行为且不进入JSON。07 Outbox通过既有`IDataAction.Load`传递取消，保留分页、顺序及只读连接恢复；订单规则改为每次读取共享权威库，修正管理保存后继续使用旧规则的问题，原生对照同步修正。旧规则调用面保留，不改变内建默认回退及禁用规则的业务语义。
+- 显式 `Cluster.IdentityMode=stable`：持久服务实例身份、独立编号权威、Boot 隔离、注册恢复、`/api/ready` 与后台准入入口；新增离线 `cmd/instance-identity` 工具及 06/07 多进程故障恢复测试。默认仍为 legacy；Consul stable 不支持。
+- Experimental 可选事务消息工具 `pkg/persistence/message` 与 MySQL/SQLite `ITransactionDB`，供已确认的业务方案组合事务；不强制建 Outbox/Inbox 表，不改变 `IDataAction` 必选接口。
+- `SearchItem.Context` 可传递 MySQL/SQLite 查询取消，nil 兼容，JSON 忽略；不扩大为整个写事务取消契约。
+- `OutboxRuntimeOptions.BatchSize` 显式批量上限，非正值保持默认 100；新增固定低基数写路径、SQL 池及 Outbox 阶段指标。
+- `oltp.Config.InterpolateParams` 为显式、默认关闭的驱动选项，仅支持已验证的 utf8mb4。新增 07 独立原生 go-zero 对照与诊断工具，容量限制继续如实登记。
 
-- `OutboxRuntimeOptions.BatchSize` 将底层已有批量上限暴露给服务组合根，非正值仍默认100；07的512/并发4候选未通过长窗，示例继续默认100。保持同key串行、失败屏障和批量事务确认。
+### Changed
 
-- `oltp.Config.InterpolateParams` 显式驱动插值，框架零值关闭、建池仅支持已验证的utf8mb4；07及原生对照启用，完整DSN未声明时保持旧协议。保留参数绑定、事务和写入不重放契约。
+- **MQ 缺省 Mode 从 auto 改为 off**，不再自动探测本机 Redis。已有显式 auto/on 保持；依赖旧缺省的服务须在自己的配置中明确启用。无 MQ 仍保留进程内事件中心和订阅/发布能力。
+- Badger 后端 `v3.2103.5 → v4.9.6`，go-zero `v1.10.2 → v1.10.3`。Badger 公开方法签名保持，但底层 sentinel 来自 v4；直接比较 v3 错误的消费方须调整。旧卷升级及保全新增事实的回退须先在副本验证，禁止清 pending/authstate。
+- MySQL 共享池按认证、最终库名与实际驱动语义隔离；池键为进程内不透明身份。配置默认化不再回写共享配置，身份编码无损保留原始字节，避免竞争和配置碰撞。
+- 无服务上下文的 `InitRequest.NewID()` 不再使用包级备用生成器；元数据枚举不得生成业务主键，真实编号来自已初始化的 `ServiceContext`。
+- 07 与原生对照逐次读取权威规则，不再保留永久正向快照；权威读取失败不使用旧值放行。07 的 SQL 插值及空闲连接 20 只属于示例覆盖，Core 全局默认不变；此前缓存版本的性能数据不代表当前实现。
 
-- 07独立标准库发送进程、run/stage幂等命名空间、分预算轻量采样及真实在途结束计时；增加本地准入/队列/提交、SQL池和Outbox阶段累计指标。
+### Deprecated
 
-- 显式 `Cluster.IdentityMode=stable`：服务名与持久 InstanceID 作为注册身份，MachineID/实际 WorkerID 通过独立 local/Redis/etcd 权威绑定；持久 Boot 世代、生成时间预留和 owner 原子检查保护重启与注册恢复。新增离线 `cmd/instance-identity` create/import/recover/retire/capacity、新就绪探针 `/api/ready`、后台准入入口，以及 06/07 稳定副本真实进程回归。默认 legacy 保持；Consul stable 不支持。迁移说明见 `docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md`。
+- 本轮未删除既有废弃入口；07 的 `OrderRuleCache`、构造器与 `Invalidate()` 保留调用兼容，后者已无需手工调用。
 
-- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
+### Removed
+
+- 无新增公共 API 删除；历史破坏性删除已包含在上版，不重复视为本轮变化。
+
+### Fixed
+
+- 修复 09 业务 Manage 演示不完整、系统菜单遗漏角色/权限/管理员页面、`getmenu` 命令关联未加载及自定义角色未使用 explicit 策略。权限树支持回显、增减勾选和事务替换；内部读写接口继续鉴权，后台不生成按钮。
+- 修复权限树读取/替换使用默认 500 条查询而遗漏跨页授权：601 条权限取消全部勾选后不再残留 101 条；保存失败回滚全量删除，其他角色保持。
+- stable 同进程和 gRPC 内部分发在解析结构化载荷前检查目标准入，避免绕过 HTTP 的检查；内部身份授权仍优先，恢复后可继续调用。
+- MySQL 故障恢复区分坏物理连接和整池关闭，修复过期 Clone 引用，保持只读有界恢复、活动事务不换池及写入不重放；SQLite 活动事务不再额外借用池连接。
+- SharedBadger 按实际移除的同步队列项扣减 pending，防止幂等重复 ACK 再次扣减；原生对照负数计数拒绝准入，历史不可达 pending 仅在证明远端事实后恢复，原始产生根因仍为 NOT_REPRODUCED。
+- 06/07 使用统一事务消息入口；07 Outbox 查询传递实际 ctx，并保留 earliest-first、分页及只读连接恢复。批量确认和事件消费的既有事务、失败屏障及幂等边界保留。
+
+### Security
+
+- 不同 MySQL 凭据不再错误复用首个账号的已认证池；错误账号可能在升级后开始正确报错，须检查自己的权限和池容量。
+- stable 内部分发准入和跨页撤权修复已增加失败复现与回归，不以健康检查或界面成功响应代替业务拒绝验证。
+
+## [v1.3.0] - 2026-09-24
+
+以下保留该 tag 中的历史累计记录，包含更早版本已发布的功能；不能当作本次相对 v1.3.0 的新增清单。精确发布差异以 tag 比较为准。
+
+### Added
+
+- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力随 v1.3.0 发布。
 
 - 增加 `server.json.ManageStore`，统一选择 SQLite 或共享 MySQL 承载七类 Core Manage 控制面模型；`NewWebServer` 在监听前完成建库建表与内置角色初始化，失败时拒绝启动。业务服务配置不得重复声明，Core 不向消费方暴露控制面 `IDataAction`，SQLite 到 MySQL 的既有数据不自动迁移。
 
@@ -53,22 +89,6 @@
 - 默认内部 gRPC 传输：复用 go-zero zrpc Client、标准 gRPC health、独立 ServiceContext 生命周期、TLS/mTLS/mesh 和协议级三进程验证。
 
 ### Changed
-
-- MySQL池身份无损编码凭据及驱动配置的原始字节，避免JSON替换非法UTF8造成不同配置键碰撞；随机进程密钥和同配置复用保持。
-
-- MySQL内部DSN默认化不再回写共享配置，避免并发建池/身份读取的数据竞争；默认字符集建库和驱动行为保持。
-
-- go-zero独立维护升级至v1.10.3；Badger固定v4.9.6，订单业务、可靠性和已选SQL配置不在该提交改变。
-
-- 07及原生对照的订单MySQL空闲连接默认5→20，最大连接仍20、环境覆盖保留；减少三组实际观测到的连接反复开关，Core全局默认不变。
-
-- MySQL共享池按认证、最终数据库和驱动语义隔离，修复不同账号/密码借用首个账号连接的问题；同配置仍复用。池及同步限流键为进程内不透明身份，不应持久化或解析。
-
-- Badger后端适配v4.9.6，保留可靠写默认约束；迁移和包含新事实的备份回退边界见`docs/codex/API_COMPATIBILITY_SURFACE.md`。
-
-- stable 的路由、受管理事件订阅和 Outbox 在业务操作前检查自身准入；临时发现故障恢复后可继续，持久权威冲突/损坏停止服务。`OutboxOptions.Admission` 为可选接口，保留零值和结构可比较性。无服务上下文的 `InitRequest.NewID` 不再使用包级备用编号，元数据枚举不得生成真实业务主键；正式主键改由受保护 ServiceContext 获取，迁移说明同上。
-
-- MQ 缺省 `Mode` 从 `auto` 改为 `off`，未配置的服务不再自动探测本机 Redis。需要 MQ 的服务必须在自己的配置文件显式设置 `auto/on` 和 Broker 地址；已有 JSON 中明确保存的 `auto/on` 保持不变，旧版本自动生成的 `auto` 如不需要 MQ 应手动改为 `off`。迁移边界见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
 
 - Runtime 业务监控聚合统一排除 `/api/manage/*` 与 `/api/servermanage/*` 控制面请求；这些请求仍保留访问日志与原始 Prometheus 指标，但不再污染服务 QPS、错误率、p50/p95/p99、路由排行和同步调用边。
 
@@ -111,11 +131,6 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
-
-- 07原生对照在启动时证明并清理历史不可达pending；无证明时保留并报错，负数计数停止准入，列表不再按失真计数分配内存。
-
-- 修复 Core 内部系统菜单遗漏 v1.3 RBAC 页面入口：`getmenu` 现在提供角色管理、角色权限管理、管理员和管理员角色绑定；真实 09 进程测试验证菜单及各页面的 View/Search API。
-- 角色权限支持服务、菜单、命令勾选树、已有权限回显和事务替换保存；取消勾选可撤销授权。两个内部读写接口由后台排除页面按钮。修复 `getmenu` 未加载业务命令关联和真实请求中自定义角色新增未设置 `explicit` 策略的问题。
 
 - 修复未分类 `Do()`、数据库和程序错误被 `TypeError` 默认公开为 HTTP 422 / `business rule rejected` 的缺陷：未分类 Do 现在 fail closed 为 500，内层 PublicError 的 Kind、Code、HTTPStatus、Message 不再被 legacy 700/800 阶段码覆盖。标准 Manage 重复记录、缺少 Edit ID、Edit/Remove 不存在改为安全的 409/400/404；GORM、MySQL 1062 和 SQLite 唯一约束统一返回 409 并保留原始 cause，不向响应泄露 SQL、索引、DSN 或驱动原文。该兼容安全修复建议发布为 v1.2.2。
 
@@ -172,5 +187,6 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.3.0...HEAD
+[v1.3.0]: https://github.com/digitalwayhk/core/compare/v1.2.3...v1.3.0
 [v1.2.0]: https://github.com/digitalwayhk/core/compare/v1.1.2...v1.2.0
