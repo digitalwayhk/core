@@ -1,5 +1,7 @@
 # 07 队列正确性修复与吞吐优化实施计划
 
+> 2026-10-19收尾：用户要求停止性能工作并清理自有MySQL/Redis。已验证修复、未关闭问题与逐任务核查见[收尾记录](../../codex/ORDER_PLAN_CLOSEOUT_2026-10-19.md)。原始任务清单保留为设计要求，不能据阶段执行完毕推导所有问题已修复；现场根因仍未复现，容量仍FAIL。
+
 > 执行要求：由当前主 Agent 使用 `superpowers:executing-plans` 逐项执行并自审；遵守 `CLAUDE.md`，禁止派发子 Agent。复现、修复、依赖升级和性能优化分别提交。本文是计划，不代表已修复或容量已通过。
 
 **目标：** 查清负数 pending 与无索引本地残留，验证 Badger 升级必要性，在不降低可靠性、认证或验收标准的前提下推进 2000/s 持续600秒。
@@ -38,7 +40,7 @@
 | value-log GC 后删除复现 | [上游修正 #2310](https://github.com/dgraph-io/badger/pull/2310) | 独立覆盖GC场景，不与压缩场景合并归因 |
 | 后续性能修正 | [v4.9.6发布 #2330](https://github.com/dgraph-io/badger/releases/tag/v4.9.6) | 不停留在v4.9.4；验证修复正确性及写入放大/停顿 |
 
-[v4.0.0记录](https://github.com/dgraph-io/badger/blob/v4.9.6/CHANGELOG.md#400---2023-02-27)说明当时未改变磁盘格式；这不能推导v3至v4.9.6的完整双向兼容。[官方备份说明](https://github.com/dgraph-io/badger/blob/v4.9.6/docs/quickstart.md#database-backup)提供Backup/Load路径。当前没有执行Badger升级或兼容测试，不宣称新版已解决本项目异常。
+[v4.0.0记录](https://github.com/dgraph-io/badger/blob/v4.9.6/CHANGELOG.md#400---2023-02-27)说明当时未改变磁盘格式；这不能推导v3至v4.9.6的完整双向兼容。[官方备份说明](https://github.com/dgraph-io/badger/blob/v4.9.6/docs/quickstart.md#database-backup)提供Backup/Load路径。以上是制定计划时的版本判断；后续已执行升级与兼容测试，见收尾记录，但仍不宣称新版解决了现场原始异常根因。
 
 ## 三、阶段与关卡
 
