@@ -6,7 +6,7 @@
 
 ### Added
 
-- `OutboxRuntimeOptions.BatchSize` 将底层已有批量上限暴露给服务组合根，非正值仍默认100；07显式试用512/并发4，仍待长窗验收。保持同key串行、失败屏障和批量事务确认。
+- `OutboxRuntimeOptions.BatchSize` 将底层已有批量上限暴露给服务组合根，非正值仍默认100；07的512/并发4候选未通过长窗，示例继续默认100。保持同key串行、失败屏障和批量事务确认。
 
 - `oltp.Config.InterpolateParams` 显式驱动插值，框架零值关闭、建池仅支持已验证的utf8mb4；07及原生对照启用，完整DSN未声明时保持旧协议。保留参数绑定、事务和写入不重放契约。
 

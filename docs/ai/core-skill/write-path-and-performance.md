@@ -43,7 +43,7 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 
 - `AutoMachineID=true`：legacy 使用原有 ClusterProvider 编号契约；显式 stable 使用独立持久编号账本，发现 lease 不分配或释放编号。不得为可扩容副本硬编码固定 MachineID，详见 [稳定身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。
 - 每副本本地 pending / Outbox / Inbox / 投影目录隔离；最终订单权威库是**共享**远程库（Docker/多进程下为 MySQL 等），不是每进程 SQLite remote。
-- `UseOutboxWithOptions`可显式传入`OutboxRuntimeOptions{KeyConcurrency: 4, BatchSize: 512}`；`BatchSize<=0`保持底层默认100，扫描间隔不变，满批且有进展时继续drain。批量上限与并发数分开测量，不能只用100ms/100条推断固定吞吐，也不得把07的512候选当稳态容量认证。
+- `UseOutboxWithOptions`可显式传入`OutboxRuntimeOptions{KeyConcurrency: 4, BatchSize: 512}`；`BatchSize<=0`保持底层默认100，扫描间隔不变，满批且有进展时继续drain。批量上限与并发数分开测量，不能只用100ms/100条推断固定吞吐，07的512试验未通过长窗，当前示例仍默认100，不能将参数入口可用当容量认证。
 - “有序可靠”不等于全局串行。高吞吐 Outbox 只有在 Store 能按 ordering key公平组成有界 batch、同 key按持久顺序恢复、消费者以 Inbox/业务 sequence收敛重复时，才可显式开启 key concurrency。单纯把 `LIMIT 1` 改大仍会被 hot key占满，不构成容量修复。失败案例与认证证据见 `docs/codex/cases/KEYED_RELIABLE_GLOBAL_SERIALIZATION_FAILURE.md`。
 - 下单热路径：public/private → business → `OrderWriteRuntime` → 本地可靠写 → `UseWriteBehind` 同步远程权威库；Manage 继续用 `ModelList` 做后台视图/配置（服务级 `GetList` 绑定同一权威库 DataAction 亦可），但不得替代业务写路径。
 - `OrderRule` 等可配置规则应由 Manage 更新权威事实，再通过可靠事件或等价版本机制刷新副本缓存。当前07实际正向缓存无TTL，管理保存路径尚未接入 `Invalidate`，缺失规则时仍查远端并回退内建默认；不能据此宣称配置更新/禁用/恢复已端到端传播。该应用接入缺口见[候选审查](../../codex/ORDER_QUEUE_CANDIDATE_REVIEW_2026-10-19.md)，不要复制为已完整实现的缓存模板。
