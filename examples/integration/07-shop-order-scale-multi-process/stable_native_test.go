@@ -128,8 +128,11 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 			require.NoError(t, os.MkdirAll(privateTemp, 0700))
 			env["TMPDIR"] = privateTemp
 		}
-		if i >= 2 && os.Getenv("CORE_TEST_LOAD_PROFILE") == "1" {
+		if os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1" || i >= 2 && os.Getenv("CORE_TEST_LOAD_PROFILE") == "1" {
 			env["SHOP_PROFILE_PORT"] = strconv.Itoa(freeNativePort(t))
+			if os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1" {
+				env["SHOP_FLIGHT_RECORDER"] = "1"
+			}
 		}
 		count := i + 2
 		if i >= 2 {

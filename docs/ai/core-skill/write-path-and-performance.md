@@ -76,3 +76,9 @@ Badger参数选择先读[配置与调参](badger-configuration.md)：区分官�
 观测错误按字段计数与连续失败轮数分别记录；`pending`上限守护和观测缺失分开判定，零观测错误仍可能因真实积压而失败。SQL探测超时不直接等于索引缺失：先核对真实索引和执行计划；排空副本的快速查询也不能替代负载时的MVCC、I/O和调度现场。07最终六轮测量中Core/原生各0/3通过，结果与边界见[最终容量验收](../../codex/ORDER_QUEUE_FINAL_CAPACITY_2026-10-19.md)，不能将依赖升级或短窗通过当作2000/s稳态保证。
 
 应用facade的请求幂等映射、事件去重集合与可靠pending分别核算。07及原生对照的这些进程内集合当前没有回收路径，不能用pending排空或有限窗口内GC后堆下降宣称长期有界。是否采用持久权威、保留多久及如何淘汰须与业务使用者确认，不能在Core猜测TTL而改变重复请求或重投语义。
+
+### 长尾故障取证
+
+07负载入口可显式设置`CORE_TEST_LOAD_DIAGNOSTICS=1`，仅向证据目录输出本轮进程的二进制、metrics端口与诊断目录，不输出凭证。需要故障前运行时trace时，另加`GOFLAGS=-tags=core_benchmark_profile`和`CORE_TEST_LOAD_FLIGHT=1`；仅Core三进程在loopback开放`/debug/pprof/flight`，原生对照尚不支持此开关。默认构建不接入该端口，未显式开启flight时端点不存在。
+
+FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载大小，并用`go tool trace`验证快照；HTTP 200、trace前缀或无错误trailer均不能单独证明快照完整。`WriteTo`会推动trace刷新，诊断活动也会影响调度，必须与无flight对照分开，不能将诊断轮当容量认证。Go 1.26 syscall/STW的[上游问题](https://github.com/golang/go/issues/81759)及[候选修复](https://github.com/golang/go/pull/81835)在2026-10-19查询时仍开放；`schedtrace`可能掩盖该问题的复现，不得用开关后的未复现宣称修复，也不得据此认定所有业务长尾同因。使用进程外时钟、Redis探针和系统采样区分Go进程停顿与依赖延迟，不关闭GC、刷盘或stable准入来换取成绩。

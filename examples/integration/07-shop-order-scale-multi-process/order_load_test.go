@@ -54,6 +54,7 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	if os.Getenv("CORE_TEST_ORDER_LOAD") != "1" {
 		t.Skip("仅显式 CORE_TEST_ORDER_LOAD=1 运行压测")
 	}
+	require.False(t, native && os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1", "原生对照尚未实现flight recorder，不得把诊断端口误报为可用")
 	loadRate, rateErr := parseOrderLoadRate(os.Getenv("CORE_TEST_LOAD_RATE"))
 	require.NoError(t, rateErr)
 	loadSeconds, err := parseOrderLoadSeconds(os.Getenv("CORE_TEST_LOAD_SECONDS"))
@@ -80,6 +81,13 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 		processes = replaceWithNativeGoZero(t, processes, evidence)
 		user = processes[0]
 		implementation = "go-zero-native"
+	}
+	if os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1" || os.Getenv("CORE_TEST_LOAD_DIAGNOSTICS") == "1" {
+		profiles := make([]map[string]string, 0, len(processes))
+		for _, process := range processes {
+			profiles = append(profiles, map[string]string{"binary": process.Binary, "profile_port": process.Environment["SHOP_PROFILE_PORT"], "metrics_port": process.Environment["SHOP_METRICS_PORT"], "diagnostics_dir": process.Environment["TMPDIR"]})
+		}
+		writeLoadJSON(t, filepath.Join(evidence, "diagnostic-endpoints.json"), profiles)
 	}
 	warmup := createDockerBuyerOrderWithRequest(t, user, token, supplier.ProductID, "load-warmup")
 	waitDockerOrderVisible(t, user, token, warmup.OrderID)
