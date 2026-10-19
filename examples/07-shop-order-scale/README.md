@@ -209,7 +209,7 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 
 - 禁止新增 `api/call`。
 - 禁止内部权威 Public API 重复入口 facade 缓存。
-- 发布使用 `sc.UseOutboxWithOptions`，显式设置 4 个 key 并发；订阅使用 `sc.SubscribeEvent`，显式设置 8 个 key 并发。创建、状态和支付事件统一按 OrderID 分键，同 key 串行。多个 publisher 的全局顺序不由该设置保证。07 `OutboxStore` 通过 Core `message.Run` / `ConfirmPublishedWith` 在当前 MySQL 事务中锁定完整 ID 集合、批量确认发布状态，不自写发布循环、不等待所有消费服务完成。
+- 发布使用 `sc.UseOutboxWithOptions`，显式设置 4 个 key 并发和每批 512（容量候选，尚未证明 2000/s 稳态达标）；订阅使用 `sc.SubscribeEvent`，显式设置 8 个 key 并发。创建、状态和支付事件统一按 OrderID 分键，同 key 串行。多个 publisher 的全局顺序不由该设置保证。07 `OutboxStore` 通过 Core `message.Run` / `ConfirmPublishedWith` 在当前 MySQL 事务中锁定完整 ID 集合、批量确认发布状态，不自写发布循环、不等待所有消费服务完成。
 - 用户 facade 只做缓存失效和 WebSocket 通知，`sync.Map` 去重仅在进程内有效；重启后可能重复通知，也不提供离线用户必达。不能把此处 ACK 或缓存/WebSocket 副作用宣称为持久事务型 Inbox。数据库业务的消费幂等接入参考 06 Supplier 的 `message.ConsumeInboxWith`，记录复用方式仍由具体项目与使用者确认。
 - 禁止固定水平副本 MachineID；必须使用 `AutoMachineID=true` 并测试自动分配。
 - 禁止把最终业务库按技术副本拆分；只允许按业务域拆库。
@@ -233,3 +233,9 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 单变量三组结果见[性能记录](../../docs/codex/ORDER_QUEUE_PERFORMANCE_2026-10-19.md)。SQL协议往返减少不等于600秒容量通过，最终组合的独立阶梯与长窗见[最终容量记录](../../docs/codex/ORDER_QUEUE_FINAL_CAPACITY_2026-10-19.md)，修复、回归和未解决边界见[执行记录](../../docs/codex/ORDER_QUEUE_EXECUTION_2026-10-19.md)。
 
 最终8个阶梯及Core/原生各三轮2000/s×600秒目标测试均已执行，长窗各0/3通过；全部确认请求逐键匹配，仍有守护停发、发送失败/丢弃及超5秒排空。两侧用户facade幂等/去重映射无回收，长期资源边界未关闭。本示例当前不能作为该容量等级已达标的模板。
+
+### 业务容量与规则准备
+
+`TestStableOrderWriteLoad` 压测业务下单，不对 Manage API 设吞吐目标。显式设置 `CORE_TEST_LOAD_SEED_RULE=1` 可在计时外经 Manage 一次性配置与内建默认值相同的规则，并让 Core 与原生对照共用该事实；规则缺失仍按现有语义逐次查库后回退，不负缓存。配置完整与缺规则的成绩分别记录。
+
+`OutboxRuntimeOptions.BatchSize` 非正值保持历史100；07试用512而不增大4个key并发。100ms是空闲扫描间隔，有积压时继续drain，不能按100条/100ms推断固定上限。候选只改变每批扫描/确认数量，不降低刷盘、同key顺序或失败屏障；长窗结果见[长尾专项](../../docs/codex/ORDER_TAIL_ROOTCAUSE_2026-10-19.md)。

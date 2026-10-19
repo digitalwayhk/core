@@ -1175,6 +1175,8 @@ func (own *ServiceContext) NewID() uint {
 // KeyConcurrency 零值和 1 保持历史串行行为。
 type OutboxRuntimeOptions struct {
 	KeyConcurrency int
+	// BatchSize 是单次扫描和确认的消息上限；非正值保持底层默认100。
+	BatchSize int
 }
 
 // UseOutbox 启用当前服务的可靠 Outbox 发布器。事件来源服务名固定为当前 ServiceContext。
@@ -1198,6 +1200,7 @@ func (own *ServiceContext) UseOutboxWithOptions(
 		Admission:      admission,
 		SourceService:  own.Service.Name,
 		Store:          store,
+		BatchSize:      options.BatchSize,
 		KeyConcurrency: options.KeyConcurrency,
 		External:       own.ServiceEventBridge.HasExternalPublisher(),
 	}); err != nil {

@@ -198,7 +198,7 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 // startOrderInfrastructure 在可靠 store 已绑定且已受生命周期托管后，启动远程汇合配套设施。
 func (s *Service) startOrderInfrastructure(sc *router.ServiceContext) error {
 	// MySQL Outbox 与订单 upsert 同事务写入，由标准 ServiceEventBridge 发布，业务不自建 worker。
-	if err := sc.UseOutboxWithOptions(models.OutboxStore{}, router.OutboxRuntimeOptions{KeyConcurrency: 4}); err != nil {
+	if err := sc.UseOutboxWithOptions(models.OutboxStore{}, router.OutboxRuntimeOptions{KeyConcurrency: 4, BatchSize: 512}); err != nil {
 		return err
 	}
 	// 业务统计：定时聚合 Order → StatsStore，API 只读快照。
