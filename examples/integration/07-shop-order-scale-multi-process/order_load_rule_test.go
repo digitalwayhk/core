@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ func prepareOrderLoadDefaultRule(t *testing.T, order *integration.Suite, evidenc
 		"maxOrderAmount": rule.MaxOrderAmount, "enabled": rule.Enabled,
 		"ruleRevision": rule.RuleRevision,
 	}
-	token := order.TokenFor(t, "900001", 1)
+	token := order.TokenFor(t, contract.PlatformAdminUserID, 1)
 	response := order.RequestJSON(t, http.MethodPost, "/api/manage/shop-order/orderrulemanage/add", token, payload)
 	require.True(t, response.Success, response.ErrorMessage)
 	require.NotZero(t, parseDockerManageID(t, response.Data))

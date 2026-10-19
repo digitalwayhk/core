@@ -30,3 +30,7 @@
 ## 上游运行时线索
 
 2026-10-19 查询的 Go [问题 #81759](https://github.com/golang/go/issues/81759)及[候选修复 #81835](https://github.com/golang/go/pull/81835)仍开放，与此前独立 pipe/GC 复现相近，但没有证明本轮业务同因。上游指出 `schedtrace` 会掩盖其复现，因此本轮仅 `gctrace=1`，不加入忙定时器，不修改全局 Go 工具链。后续若启用 FlightRecorder，必须单列观测扰动并验证 trace 解码，不把未复现当修复。
+
+## 一次性配置夹具纠正
+
+`configured-rule-core-r1` 在业务发压前因 Manage 403 停止，没有生成容量样本。原因是夹具复用了供应商管理员数字 UID，而订单服务 `OnAuthRequest` 要求 `contract.PlatformAdminUserID`（`platform-admin`）。改为引用现行契约常量，不改鉴权实现、不跨认证域。失败轮的新卷及日志保留，下一轮仍从新空存储启动；本次失败不归因于 Manage 性能。
