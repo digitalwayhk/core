@@ -4,9 +4,35 @@
 
 ## [Unreleased]
 
-本节仅列相对 `v1.3.0` 的改动，候选 `v1.4.0`；正式发布前仍须通过候选门禁。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
+### Added
 
-本次变更已按用户要求合入本地 `main`（快进目标 `c3b3ee8`），尚未推送或打 tag。当前正式发布为 **NO-GO**：固定提交的 07 真实回归出现 ready 后首单 500；证据与解除步骤见[发布准备记录](docs/codex/RELEASE_PREPARATION_2026-10-19.md)。Core 使用已提交的内嵌前端产物，前端子模块远端获取失败仅影响源码维护与重建，不阻断该产物的使用或 Core 发布。
+- 无。
+
+### Changed
+
+- 无。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 无。
+
+### Security
+
+- 无。
+
+## [v1.4.0] - 2026-10-20
+
+本节仅列相对 `v1.3.0` 的改动。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
+
+07 启动窗口首单 500 已在 `7b5795b` 修复；固定源码全仓回归与变更范围 race 通过，结果和保留限制见[发布记录](docs/codex/RELEASE_V1_4_0_2026-10-20.md)。Core 使用已提交的内嵌前端产物，普通 Go 构建和运行无需获取前端子模块源码。
 
 ### Added
 
@@ -189,6 +215,7 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.0...HEAD
+[v1.4.0]: https://github.com/digitalwayhk/core/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/digitalwayhk/core/compare/v1.2.3...v1.3.0
 [v1.2.0]: https://github.com/digitalwayhk/core/compare/v1.1.2...v1.2.0

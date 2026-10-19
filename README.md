@@ -22,7 +22,7 @@ Digitalway Core 不做通用技术框架，而是把商业服务的开发方式*
 go get github.com/digitalwayhk/core@latest
 ```
 
-从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份，数据卷及配置需要按使用场景验证。
+`v1.4.0` 的变更与验证见[发布记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
 
 ## 目录
 
