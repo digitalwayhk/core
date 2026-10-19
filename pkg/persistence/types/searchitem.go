@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -36,9 +37,11 @@ func init() {
 }
 
 type SearchItem struct {
-	Page  int
-	Size  int
-	Total int64
+	// Context 可选MySQL/SQLite查询执行上下文；nil保持旧行为，不参与JSON绑定或序列化。
+	Context context.Context `json:"-"`
+	Page    int
+	Size    int
+	Total   int64
 	// SkipCount 供无需完整总数的业务热路径跳过 COUNT 往返；Total 保持为零。
 	SkipCount     bool
 	WhereList     []*WhereItem

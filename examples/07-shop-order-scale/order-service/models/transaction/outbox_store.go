@@ -23,8 +23,8 @@ var (
 )
 
 // LoadPending 读取等待发布的事件批次。
-func (OutboxStore) LoadPending(_ context.Context, limit int) ([]event.OutboxMessage, error) {
-	items, err := PendingOutbox(limit)
+func (OutboxStore) LoadPending(ctx context.Context, limit int) ([]event.OutboxMessage, error) {
+	items, err := pendingOutbox(ctx, limit)
 	if err != nil {
 		return nil, err
 	}

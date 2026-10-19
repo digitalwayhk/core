@@ -14,8 +14,19 @@ import (
 
 // PendingOutbox 读取尚未发布的 MySQL Outbox 事件。
 func PendingOutbox(limit int) ([]*OutboxRecord, error) {
+	return pendingOutbox(context.Background(), limit)
+}
+
+func pendingOutbox(ctx context.Context, limit int) ([]*OutboxRecord, error) {
+	if ctx == nil {
+		return nil, errors.New("Outbox 查询上下文不能为空")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var items []*OutboxRecord
 	query := store.NewSearch(NewOutbox(), limit)
+	query.Context = ctx
 	query.SkipCount = true
 	query.AddWhereN("Published", false)
 	query.AddSortN("ID", false)
