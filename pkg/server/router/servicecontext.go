@@ -2333,6 +2333,13 @@ func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.Pay
 		resultClass = observability.ClassifyError(err)
 		return nil, err
 	}
+	// 内部分发不经过 Exec；在解析结构化载荷前直接检查目标服务准入。
+	if info.GetPath() != "/api/health" && info.GetPath() != "/api/ready" {
+		if err := target.CheckServiceAdmission(); err != nil {
+			resultClass = observability.ResultUnavailable
+			return nil, types.NewPublicError(types.ErrorKindUnavailable, types.PublicCodeUnavailable, "service unavailable", err)
+		}
+	}
 	api, err := info.ParseNew(payload.Instance)
 	if err != nil {
 		resultClass = observability.ClassifyError(err)
