@@ -33,8 +33,6 @@ type application struct {
 	requestIDs sync.Map
 	processed  sync.Map
 	phases     map[string]*phaseMetric
-	ruleMu     sync.RWMutex
-	rule       *OrderRule
 	notify     chan struct{}
 	grpcServer *grpc.Server
 	serverMu   sync.Mutex

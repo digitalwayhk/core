@@ -1,24 +1,21 @@
-// Package business 实现 07 订单服务共享规则的本地缓存能力。
+// Package business 实现 07 订单服务的共享权威规则读取与校验。
 package business
 
 import (
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models"
 	"github.com/shopspring/decimal"
 )
 
-// OrderRuleCache 缓存共享远程权威库中的订单规则快照。
+// OrderRuleCache 保留示例原调用面；内部权威服务每次读取共享规则，不保留旧快照。
 type OrderRuleCache struct {
 	ruleCode string
-	mu       sync.RWMutex
-	cached   *models.OrderRule
 	loader   func(ruleCode string) (*models.OrderRule, error)
 }
 
-// NewOrderRuleCache 创建指定规则编码的订单规则缓存。
+// NewOrderRuleCache 创建指定规则编码的权威读取器，名称保留兼容。
 func NewOrderRuleCache(ruleCode string) *OrderRuleCache {
 	if strings.TrimSpace(ruleCode) == "" {
 		ruleCode = "default"
@@ -29,15 +26,8 @@ func NewOrderRuleCache(ruleCode string) *OrderRuleCache {
 	}
 }
 
-// Get 读取订单规则；缓存 miss 时访问共享远程权威库。
+// Get 每次读取共享权威规则，管理修改完成后的新读取不依赖失效通知或进程重启。
 func (c *OrderRuleCache) Get() (*models.OrderRule, error) {
-	c.mu.RLock()
-	if c.cached != nil {
-		item := *c.cached
-		c.mu.RUnlock()
-		return &item, nil
-	}
-	c.mu.RUnlock()
 	rule, err := c.loader(c.ruleCode)
 	if errors.Is(err, models.ErrOrderRuleNotFound) {
 		// 权威库尚未配置时使用内建默认值，但不缓存该回退值。
@@ -46,9 +36,6 @@ func (c *OrderRuleCache) Get() (*models.OrderRule, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	c.cached = rule
-	c.mu.Unlock()
 	item := *rule
 	return &item, nil
 }
@@ -63,12 +50,9 @@ func loadEnabledOrderRule(ruleCode string) (*models.OrderRule, error) {
 	return rule, err
 }
 
-// Invalidate 失效当前实例的订单规则缓存。
-func (c *OrderRuleCache) Invalidate() {
-	c.mu.Lock()
-	c.cached = nil
-	c.mu.Unlock()
-}
+// Invalidate 保留旧调用兼容；权威读取器已不保存快照，无需手工失效。
+// Deprecated: 规则每次从共享权威库读取。
+func (c *OrderRuleCache) Invalidate() {}
 
 // ValidateQuantityAndAmount 按当前共享订单规则校验数量和总金额。
 func (c *OrderRuleCache) ValidateQuantityAndAmount(quantity int, totalAmount decimal.Decimal) error {

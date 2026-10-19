@@ -6,6 +6,8 @@
 
 ### Added
 
+- `SearchItem.Context`可选MySQL/SQLite查询执行上下文，nil保持原行为且不进入JSON。07 Outbox通过既有`IDataAction.Load`传递取消，保留分页、顺序及只读连接恢复；订单规则改为每次读取共享权威库，修正管理保存后继续使用旧规则的问题，原生对照同步修正。旧规则调用面保留，不改变内建默认回退及禁用规则的业务语义。
+
 - `OutboxRuntimeOptions.BatchSize` 将底层已有批量上限暴露给服务组合根，非正值仍默认100；07的512/并发4候选未通过长窗，示例继续默认100。保持同key串行、失败屏障和批量事务确认。
 
 - `oltp.Config.InterpolateParams` 显式驱动插值，框架零值关闭、建池仅支持已验证的utf8mb4；07及原生对照启用，完整DSN未声明时保持旧协议。保留参数绑定、事务和写入不重放契约。

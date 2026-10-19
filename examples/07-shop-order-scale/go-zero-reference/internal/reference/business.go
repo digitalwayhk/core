@@ -48,23 +48,13 @@ func (a *application) products(id uint) ([]map[string]interface{}, error) {
 }
 
 func (a *application) validateRule(r *OrderRequest) error {
-	a.ruleMu.RLock()
-	rule := a.rule
-	a.ruleMu.RUnlock()
-	if rule == nil {
-		var loaded OrderRule
-		e := a.db.Where("rule_code = ? AND enabled = ?", "default", true).Take(&loaded).Error
-		if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
-			return e
-		}
-		if errors.Is(e, gorm.ErrRecordNotFound) {
-			rule = &OrderRule{MinQuantity: 1, MaxQuantity: 100, MaxOrderAmount: decimal.NewFromInt(99999), Enabled: true}
-		} else {
-			rule = &loaded
-			a.ruleMu.Lock()
-			a.rule = rule
-			a.ruleMu.Unlock()
-		}
+	var rule OrderRule
+	e := a.db.Where("rule_code = ? AND enabled = ?", "default", true).Take(&rule).Error
+	if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
+		return e
+	}
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		rule = OrderRule{MinQuantity: 1, MaxQuantity: 100, MaxOrderAmount: decimal.NewFromInt(99999), Enabled: true}
 	}
 	if !rule.Enabled || r.Quantity < rule.MinQuantity || r.Quantity > rule.MaxQuantity || r.UnitPrice.Mul(decimal.NewFromInt(int64(r.Quantity))).GreaterThan(rule.MaxOrderAmount) {
 		return errors.New("订单不满足业务规则")

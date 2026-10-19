@@ -46,7 +46,8 @@ API 只通过 `info.UseCache(ttl)` 声明启用结果缓存。未配置 `RouteCa
 - `UseOutboxWithOptions`可显式传入`OutboxRuntimeOptions{KeyConcurrency: 4, BatchSize: 512}`；`BatchSize<=0`保持底层默认100，扫描间隔不变，满批且有进展时继续drain。批量上限与并发数分开测量，不能只用100ms/100条推断固定吞吐，07的512试验未通过长窗，当前示例仍默认100，不能将参数入口可用当容量认证。
 - “有序可靠”不等于全局串行。高吞吐 Outbox 只有在 Store 能按 ordering key公平组成有界 batch、同 key按持久顺序恢复、消费者以 Inbox/业务 sequence收敛重复时，才可显式开启 key concurrency。单纯把 `LIMIT 1` 改大仍会被 hot key占满，不构成容量修复。失败案例与认证证据见 `docs/codex/cases/KEYED_RELIABLE_GLOBAL_SERIALIZATION_FAILURE.md`。
 - 下单热路径：public/private → business → `OrderWriteRuntime` → 本地可靠写 → `UseWriteBehind` 同步远程权威库；Manage 继续用 `ModelList` 做后台视图/配置（服务级 `GetList` 绑定同一权威库 DataAction 亦可），但不得替代业务写路径。
-- `OrderRule` 等可配置规则应由 Manage 更新权威事实，再通过可靠事件或等价版本机制刷新副本缓存。当前07实际正向缓存无TTL，管理保存路径尚未接入 `Invalidate`，缺失规则时仍查远端并回退内建默认；不能据此宣称配置更新/禁用/恢复已端到端传播。该应用接入缺口见[候选审查](../../codex/ORDER_QUEUE_CANDIDATE_REVIEW_2026-10-19.md)，不要复制为已完整实现的缓存模板。
+- `OrderRule`等规则由Manage更新共享权威事实。当前07内部订单服务和原生对照每次校验直接读取权威规则，不保留正向快照，不依赖配置事件或手工失效；旧`OrderRuleCache/Invalidate`调用面仅为示例兼容。数据库失败必须返回错误，不能用旧规则继续放行。未找到启用规则时仍按既有语义回退内建默认值，本次未重新定义禁用规则的业务含义。只有确需增加副本缓存时才另行接入并验证版本/失效机制，不复制历史未接线的缓存模板；见[修复验证](../../codex/ORDER_RULE_AND_OUTBOX_FIXES_2026-10-19.md)。
+- MySQL/SQLite可在`SearchItem.Context`传入查询执行上下文；普通COUNT/读取、免COUNT和统计分支均传给GORM。nil保持旧行为，JSON忽略；不承诺其他适配器或初始建连支持取消。07 Outbox继续使用独立action的`Load`保留连接恢复，不为传ctx绕过框架读取或增加事务/建表。
 - 多实例诊断字段记录 `TraceID`、`ServiceName`、`ServiceInstanceID`；`ServiceInstanceIP` 仅诊断。
 - 幂等边界必须写进 README：只扩展 order 时 user 入口幂等策略的限制；远程幂等探测在 MySQL 不可达时 fail-closed 或明确文档化降级风险。
 - 部署侧提供 Prometheus scrape 配置（如 `deploy/prometheus*.yml`），标签至少稳定暴露 `service` 与 `service_instance_id`，供 Runtime Aggregator 查询。

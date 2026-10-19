@@ -41,7 +41,7 @@ buyer request
 
 `Service` 持有实例级 `OrderWriteRuntime`，路由、`LocalOrderWriter`、查询和同步器都通过显式 `OrderWriteAccess` 注入。store 由 `ServiceContext.UseResource` 关闭，不存在包级全局 store registry。`ModelList` 只服务 Manage/视图/低频管理 CRUD；下单、支付、撤单链路必须走 business + 专用 target。
 
-规则与远端幂等的单条只读查询使用模型层独立 action，不额外开启事务或读取分页总数；多条读取需要一致性快照时仍使用事务。默认规则未配置时不缓存回退值，管理员新增后下一次读取即可生效。远端幂等键不存在可继续接单，数据库读取失败必须返回错误。
+规则与远端幂等的单条只读查询使用模型层独立 action，不额外开启事务或读取分页总数；多条读取需要一致性快照时仍使用事务。订单权威服务每次校验均读取共享规则，不保存正向快照；管理员修改提交后的新读取直接生效，数据库失败不能用旧规则继续放行。未配置时仍回退内建默认值，不改变原有启用/禁用查询语义。`OrderRuleCache`及`Invalidate`名称仅保留已有调用兼容，不再需要手工失效。远端幂等键不存在可继续接单，数据库读取失败必须返回错误。
 
 ## 管理配置同步
 
@@ -52,7 +52,7 @@ buyer request
 - 最小下单数量。
 - 是否允许撤单或支付的状态规则。
 
-任意 order 副本处理下单时，都必须读取同一份 MySQL 规则权威数据。配置变更后通过标准 EventBridge 发布控制事件，入口 facade 只在 `shop-user` 缓存并主动失效。
+任意 order 副本处理下单时，都读取同一份 MySQL 规则权威数据，当前规则读取不依赖配置事件或副本缓存。入口 facade 的查询结果缓存仍只放在`shop-user`，由相应业务事件主动失效。
 
 ## 自动水平扩展约束
 
@@ -237,5 +237,7 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 ### 业务容量与规则准备
 
 `TestStableOrderWriteLoad` 压测业务下单，不对 Manage API 设吞吐目标。显式设置 `CORE_TEST_LOAD_SEED_RULE=1` 可在计时外经 Manage 一次性配置与内建默认值相同的规则，并让 Core 与原生对照共用该事实；规则缺失仍按现有语义逐次查库后回退，不负缓存。配置完整与缺规则的成绩分别记录。
+
+2026-10-19规则正确性修复后，已配置规则也每次从权威库读取；此前正向缓存参与的成绩只属于其原源码。性能工作已按用户要求停止，不据旧成绩评价新实现。Outbox取批将EventBridge上下文传入实际SQL，可取消锁等待；旧`PendingOutbox(limit)`调用面保留，仍只取未发布项、按ID升序并保持原分页上限。修复与验证见[专项记录](../../docs/codex/ORDER_RULE_AND_OUTBOX_FIXES_2026-10-19.md)。
 
 `OutboxRuntimeOptions.BatchSize` 非正值保持历史100；07的512试验未通过长窗，当前恢复默认100/并发4。100ms是空闲扫描间隔，有积压时继续drain，不能按100条/100ms推断固定上限。候选只改变每批扫描/确认数量，不降低刷盘、同key顺序或失败屏障；长窗结果见[长尾专项](../../docs/codex/ORDER_TAIL_ROOTCAUSE_2026-10-19.md)。
