@@ -19,6 +19,8 @@ db/*
 *.sqllite
 *.bolt
 *.json
+# 内嵌前端的 JSON 属于公开编译产物，不能被运行配置的忽略规则漏掉。
+!pkg/server/run/dist/**/*.json
 cmd/*
 .secret
 main/*

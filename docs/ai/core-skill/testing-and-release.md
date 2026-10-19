@@ -183,6 +183,8 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 它比对 `git ls-tree HEAD web/admin` 的**已提交**指针与 `build-info.json` 的 `frontend_commit`。不要改成读子模块工作区 HEAD——本地 checkout 会让它跟着漂移，从而放过已提交的不一致。
 
+产物内容指纹还须针对已提交树或实际下载的 Go 模块核对，不能只计算本地 dist：被忽略但未提交的 JSON 也会参与本地指纹，却不会进入发布包。dist 下的公开编译 JSON 已加入忽略例外；v1.4.1 补齐了这一实际遗漏。指针一致不等于全部产物已经提交。
+
 Core 的 Go 构建通过 `pkg/server/run/htmlserver.go` 的 `//go:embed dist` 嵌入上述已提交产物，不读取 `web/admin` 源码，也不执行前端构建。普通消费方不需要拉取子模块。可用无前端源码的检出验证构建边界；不得把子模块远端冷获取失败误列为使用既有内嵌产物的发布阻断。
 
 需要修改、重新构建前端或独立部署其源码时，才另行核对精确 gitlink SHA 的远端可获取性；空对象库 fetch 返回 `not our ref` 表示该源码获取路径不可用，不表示已提交的内嵌产物不可用。本地已有对象时 fetch 可能假通过；保留真实失败记录，不通过重写 gitlink、伪造 build-info 或删除子模块掩盖源码维护问题。

@@ -28,6 +28,12 @@
 
 - 无。
 
+## [v1.4.1] - 2026-10-20
+
+### Fixed
+
+- 补齐 v1.4.0 因全局 `*.json` 忽略规则漏提交的内嵌前端 mock 数据文件，使发布包内容与 `build-info.json` 的产物指纹一致；增加 dist JSON 的忽略例外。未修改前端源码、Go 源码、依赖或业务行为。推荐消费方使用 v1.4.1，说明见[补丁记录](docs/codex/RELEASE_V1_4_1_2026-10-20.md)。
+
 ## [v1.4.0] - 2026-10-20
 
 本节仅列相对 `v1.3.0` 的改动。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
@@ -215,7 +221,8 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.1...HEAD
+[v1.4.1]: https://github.com/digitalwayhk/core/compare/v1.4.0...v1.4.1
 [v1.4.0]: https://github.com/digitalwayhk/core/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/digitalwayhk/core/compare/v1.2.3...v1.3.0
 [v1.2.0]: https://github.com/digitalwayhk/core/compare/v1.1.2...v1.2.0

@@ -1,0 +1,901 @@
+{
+    "data": {
+        "visitData": [
+            {
+                "x": "2025-11-24",
+                "y": 7
+            },
+            {
+                "x": "2025-11-25",
+                "y": 5
+            },
+            {
+                "x": "2025-11-26",
+                "y": 4
+            },
+            {
+                "x": "2025-11-27",
+                "y": 2
+            },
+            {
+                "x": "2025-11-28",
+                "y": 4
+            },
+            {
+                "x": "2025-11-29",
+                "y": 7
+            },
+            {
+                "x": "2025-11-30",
+                "y": 5
+            },
+            {
+                "x": "2025-12-01",
+                "y": 6
+            },
+            {
+                "x": "2025-12-02",
+                "y": 5
+            },
+            {
+                "x": "2025-12-03",
+                "y": 9
+            },
+            {
+                "x": "2025-12-04",
+                "y": 6
+            },
+            {
+                "x": "2025-12-05",
+                "y": 3
+            },
+            {
+                "x": "2025-12-06",
+                "y": 1
+            },
+            {
+                "x": "2025-12-07",
+                "y": 5
+            },
+            {
+                "x": "2025-12-08",
+                "y": 3
+            },
+            {
+                "x": "2025-12-09",
+                "y": 6
+            },
+            {
+                "x": "2025-12-10",
+                "y": 5
+            }
+        ],
+        "visitData2": [
+            {
+                "x": "2025-11-24",
+                "y": 1
+            },
+            {
+                "x": "2025-11-25",
+                "y": 6
+            },
+            {
+                "x": "2025-11-26",
+                "y": 4
+            },
+            {
+                "x": "2025-11-27",
+                "y": 8
+            },
+            {
+                "x": "2025-11-28",
+                "y": 3
+            },
+            {
+                "x": "2025-11-29",
+                "y": 7
+            },
+            {
+                "x": "2025-11-30",
+                "y": 2
+            }
+        ],
+        "salesData": [
+            {
+                "x": "1月",
+                "y": 236
+            },
+            {
+                "x": "2月",
+                "y": 877
+            },
+            {
+                "x": "3月",
+                "y": 665
+            },
+            {
+                "x": "4月",
+                "y": 1122
+            },
+            {
+                "x": "5月",
+                "y": 946
+            },
+            {
+                "x": "6月",
+                "y": 644
+            },
+            {
+                "x": "7月",
+                "y": 466
+            },
+            {
+                "x": "8月",
+                "y": 802
+            },
+            {
+                "x": "9月",
+                "y": 762
+            },
+            {
+                "x": "10月",
+                "y": 903
+            },
+            {
+                "x": "11月",
+                "y": 854
+            },
+            {
+                "x": "12月",
+                "y": 1127
+            }
+        ],
+        "searchData": [
+            {
+                "index": 1,
+                "keyword": "交易对-0",
+                "count": 393,
+                "range": 43,
+                "status": 0
+            },
+            {
+                "index": 2,
+                "keyword": "交易对-1",
+                "count": 528,
+                "range": 4,
+                "status": 0
+            },
+            {
+                "index": 3,
+                "keyword": "交易对-2",
+                "count": 591,
+                "range": 74,
+                "status": 0
+            },
+            {
+                "index": 4,
+                "keyword": "交易对-3",
+                "count": 990,
+                "range": 61,
+                "status": 1
+            },
+            {
+                "index": 5,
+                "keyword": "交易对-4",
+                "count": 231,
+                "range": 82,
+                "status": 1
+            },
+            {
+                "index": 6,
+                "keyword": "交易对-5",
+                "count": 837,
+                "range": 67,
+                "status": 0
+            },
+            {
+                "index": 7,
+                "keyword": "交易对-6",
+                "count": 263,
+                "range": 36,
+                "status": 0
+            },
+            {
+                "index": 8,
+                "keyword": "交易对-7",
+                "count": 310,
+                "range": 58,
+                "status": 0
+            },
+            {
+                "index": 9,
+                "keyword": "交易对-8",
+                "count": 469,
+                "range": 68,
+                "status": 1
+            },
+            {
+                "index": 10,
+                "keyword": "交易对-9",
+                "count": 799,
+                "range": 49,
+                "status": 1
+            },
+            {
+                "index": 11,
+                "keyword": "交易对-10",
+                "count": 891,
+                "range": 7,
+                "status": 1
+            },
+            {
+                "index": 12,
+                "keyword": "交易对-11",
+                "count": 684,
+                "range": 60,
+                "status": 0
+            },
+            {
+                "index": 13,
+                "keyword": "交易对-12",
+                "count": 391,
+                "range": 46,
+                "status": 0
+            },
+            {
+                "index": 14,
+                "keyword": "交易对-13",
+                "count": 130,
+                "range": 66,
+                "status": 1
+            },
+            {
+                "index": 15,
+                "keyword": "交易对-14",
+                "count": 623,
+                "range": 73,
+                "status": 1
+            },
+            {
+                "index": 16,
+                "keyword": "交易对-15",
+                "count": 592,
+                "range": 35,
+                "status": 1
+            },
+            {
+                "index": 17,
+                "keyword": "交易对-16",
+                "count": 112,
+                "range": 4,
+                "status": 1
+            },
+            {
+                "index": 18,
+                "keyword": "交易对-17",
+                "count": 67,
+                "range": 65,
+                "status": 1
+            },
+            {
+                "index": 19,
+                "keyword": "交易对-18",
+                "count": 405,
+                "range": 58,
+                "status": 1
+            },
+            {
+                "index": 20,
+                "keyword": "交易对-19",
+                "count": 799,
+                "range": 98,
+                "status": 1
+            },
+            {
+                "index": 21,
+                "keyword": "交易对-20",
+                "count": 798,
+                "range": 34,
+                "status": 1
+            },
+            {
+                "index": 22,
+                "keyword": "交易对-21",
+                "count": 70,
+                "range": 26,
+                "status": 0
+            },
+            {
+                "index": 23,
+                "keyword": "交易对-22",
+                "count": 609,
+                "range": 9,
+                "status": 0
+            },
+            {
+                "index": 24,
+                "keyword": "交易对-23",
+                "count": 475,
+                "range": 34,
+                "status": 0
+            },
+            {
+                "index": 25,
+                "keyword": "交易对-24",
+                "count": 101,
+                "range": 56,
+                "status": 1
+            },
+            {
+                "index": 26,
+                "keyword": "交易对-25",
+                "count": 421,
+                "range": 85,
+                "status": 1
+            },
+            {
+                "index": 27,
+                "keyword": "交易对-26",
+                "count": 819,
+                "range": 60,
+                "status": 1
+            },
+            {
+                "index": 28,
+                "keyword": "交易对-27",
+                "count": 966,
+                "range": 6,
+                "status": 1
+            },
+            {
+                "index": 29,
+                "keyword": "交易对-28",
+                "count": 934,
+                "range": 60,
+                "status": 0
+            },
+            {
+                "index": 30,
+                "keyword": "交易对-29",
+                "count": 529,
+                "range": 15,
+                "status": 1
+            },
+            {
+                "index": 31,
+                "keyword": "交易对-30",
+                "count": 849,
+                "range": 68,
+                "status": 1
+            },
+            {
+                "index": 32,
+                "keyword": "交易对-31",
+                "count": 638,
+                "range": 26,
+                "status": 1
+            },
+            {
+                "index": 33,
+                "keyword": "交易对-32",
+                "count": 573,
+                "range": 95,
+                "status": 1
+            },
+            {
+                "index": 34,
+                "keyword": "交易对-33",
+                "count": 142,
+                "range": 51,
+                "status": 1
+            },
+            {
+                "index": 35,
+                "keyword": "交易对-34",
+                "count": 426,
+                "range": 72,
+                "status": 1
+            },
+            {
+                "index": 36,
+                "keyword": "交易对-35",
+                "count": 453,
+                "range": 77,
+                "status": 0
+            },
+            {
+                "index": 37,
+                "keyword": "交易对-36",
+                "count": 19,
+                "range": 64,
+                "status": 1
+            },
+            {
+                "index": 38,
+                "keyword": "交易对-37",
+                "count": 527,
+                "range": 72,
+                "status": 1
+            },
+            {
+                "index": 39,
+                "keyword": "交易对-38",
+                "count": 539,
+                "range": 46,
+                "status": 1
+            },
+            {
+                "index": 40,
+                "keyword": "交易对-39",
+                "count": 398,
+                "range": 8,
+                "status": 1
+            },
+            {
+                "index": 41,
+                "keyword": "交易对-40",
+                "count": 450,
+                "range": 81,
+                "status": 0
+            },
+            {
+                "index": 42,
+                "keyword": "交易对-41",
+                "count": 97,
+                "range": 12,
+                "status": 0
+            },
+            {
+                "index": 43,
+                "keyword": "交易对-42",
+                "count": 955,
+                "range": 96,
+                "status": 0
+            },
+            {
+                "index": 44,
+                "keyword": "交易对-43",
+                "count": 29,
+                "range": 27,
+                "status": 0
+            },
+            {
+                "index": 45,
+                "keyword": "交易对-44",
+                "count": 6,
+                "range": 28,
+                "status": 0
+            },
+            {
+                "index": 46,
+                "keyword": "交易对-45",
+                "count": 729,
+                "range": 89,
+                "status": 1
+            },
+            {
+                "index": 47,
+                "keyword": "交易对-46",
+                "count": 698,
+                "range": 18,
+                "status": 1
+            },
+            {
+                "index": 48,
+                "keyword": "交易对-47",
+                "count": 868,
+                "range": 4,
+                "status": 1
+            },
+            {
+                "index": 49,
+                "keyword": "交易对-48",
+                "count": 821,
+                "range": 45,
+                "status": 0
+            },
+            {
+                "index": 50,
+                "keyword": "交易对-49",
+                "count": 164,
+                "range": 9,
+                "status": 1
+            }
+        ],
+        "offlineData": [
+            {
+                "name": "Stores 0",
+                "cvr": 0.2
+            },
+            {
+                "name": "Stores 1",
+                "cvr": 0.2
+            },
+            {
+                "name": "Stores 2",
+                "cvr": 0.3
+            },
+            {
+                "name": "Stores 3",
+                "cvr": 0.7
+            },
+            {
+                "name": "Stores 4",
+                "cvr": 0.8
+            },
+            {
+                "name": "Stores 5",
+                "cvr": 0.4
+            },
+            {
+                "name": "Stores 6",
+                "cvr": 0.8
+            },
+            {
+                "name": "Stores 7",
+                "cvr": 0.7
+            },
+            {
+                "name": "Stores 8",
+                "cvr": 0.9
+            },
+            {
+                "name": "Stores 9",
+                "cvr": 0.2
+            }
+        ],
+        "offlineChartData": [
+            {
+                "date": "19:11",
+                "type": "客流量",
+                "value": 17
+            },
+            {
+                "date": "19:11",
+                "type": "支付笔数",
+                "value": 60
+            },
+            {
+                "date": "19:41",
+                "type": "客流量",
+                "value": 58
+            },
+            {
+                "date": "19:41",
+                "type": "支付笔数",
+                "value": 30
+            },
+            {
+                "date": "20:11",
+                "type": "客流量",
+                "value": 27
+            },
+            {
+                "date": "20:11",
+                "type": "支付笔数",
+                "value": 105
+            },
+            {
+                "date": "20:41",
+                "type": "客流量",
+                "value": 109
+            },
+            {
+                "date": "20:41",
+                "type": "支付笔数",
+                "value": 60
+            },
+            {
+                "date": "21:11",
+                "type": "客流量",
+                "value": 45
+            },
+            {
+                "date": "21:11",
+                "type": "支付笔数",
+                "value": 89
+            },
+            {
+                "date": "21:41",
+                "type": "客流量",
+                "value": 41
+            },
+            {
+                "date": "21:41",
+                "type": "支付笔数",
+                "value": 25
+            },
+            {
+                "date": "22:11",
+                "type": "客流量",
+                "value": 71
+            },
+            {
+                "date": "22:11",
+                "type": "支付笔数",
+                "value": 53
+            },
+            {
+                "date": "22:41",
+                "type": "客流量",
+                "value": 100
+            },
+            {
+                "date": "22:41",
+                "type": "支付笔数",
+                "value": 102
+            },
+            {
+                "date": "23:11",
+                "type": "客流量",
+                "value": 40
+            },
+            {
+                "date": "23:11",
+                "type": "支付笔数",
+                "value": 20
+            },
+            {
+                "date": "23:41",
+                "type": "客流量",
+                "value": 51
+            },
+            {
+                "date": "23:41",
+                "type": "支付笔数",
+                "value": 69
+            },
+            {
+                "date": "00:11",
+                "type": "客流量",
+                "value": 62
+            },
+            {
+                "date": "00:11",
+                "type": "支付笔数",
+                "value": 66
+            },
+            {
+                "date": "00:41",
+                "type": "客流量",
+                "value": 24
+            },
+            {
+                "date": "00:41",
+                "type": "支付笔数",
+                "value": 21
+            },
+            {
+                "date": "01:11",
+                "type": "客流量",
+                "value": 24
+            },
+            {
+                "date": "01:11",
+                "type": "支付笔数",
+                "value": 37
+            },
+            {
+                "date": "01:41",
+                "type": "客流量",
+                "value": 106
+            },
+            {
+                "date": "01:41",
+                "type": "支付笔数",
+                "value": 67
+            },
+            {
+                "date": "02:11",
+                "type": "客流量",
+                "value": 31
+            },
+            {
+                "date": "02:11",
+                "type": "支付笔数",
+                "value": 65
+            },
+            {
+                "date": "02:41",
+                "type": "客流量",
+                "value": 83
+            },
+            {
+                "date": "02:41",
+                "type": "支付笔数",
+                "value": 107
+            },
+            {
+                "date": "03:11",
+                "type": "客流量",
+                "value": 38
+            },
+            {
+                "date": "03:11",
+                "type": "支付笔数",
+                "value": 73
+            },
+            {
+                "date": "03:41",
+                "type": "客流量",
+                "value": 75
+            },
+            {
+                "date": "03:41",
+                "type": "支付笔数",
+                "value": 92
+            },
+            {
+                "date": "04:11",
+                "type": "客流量",
+                "value": 28
+            },
+            {
+                "date": "04:11",
+                "type": "支付笔数",
+                "value": 29
+            },
+            {
+                "date": "04:41",
+                "type": "客流量",
+                "value": 55
+            },
+            {
+                "date": "04:41",
+                "type": "支付笔数",
+                "value": 44
+            }
+        ],
+        "salesTypeData": [
+            {
+                "x": "BTC/USDT",
+                "y": 4544
+            },
+            {
+                "x": "ETH/USDT",
+                "y": 3321
+            },
+            {
+                "x": "TON/USDT",
+                "y": 3113
+            },
+            {
+                "x": "BNB/USDT",
+                "y": 2341
+            },
+            {
+                "x": "AVAX/USDT",
+                "y": 1231
+            },
+            {
+                "x": "其他",
+                "y": 1231
+            }
+        ],
+        "salesTypeDataOnline": [
+            {
+                "x": "BTC/USDT",
+                "y": 244
+            },
+            {
+                "x": "ETH/USDT",
+                "y": 321
+            },
+            {
+                "x": "TON/USDT",
+                "y": 311
+            },
+            {
+                "x": "BNB/USDT",
+                "y": 41
+            },
+            {
+                "x": "AVAX/USDT",
+                "y": 121
+            },
+            {
+                "x": "其他",
+                "y": 111
+            }
+        ],
+        "salesTypeDataOffline": [
+            {
+                "x": "BTC/USDT",
+                "y": 99
+            },
+            {
+                "x": "ETH/USDT",
+                "y": 188
+            },
+            {
+                "x": "TON/USDT",
+                "y": 344
+            },
+            {
+                "x": "BNB/USDT",
+                "y": 255
+            },
+            {
+                "x": "其他",
+                "y": 65
+            }
+        ],
+        "radarData": [
+            {
+                "name": "个人",
+                "label": "引用",
+                "value": 10
+            },
+            {
+                "name": "个人",
+                "label": "口碑",
+                "value": 8
+            },
+            {
+                "name": "个人",
+                "label": "产量",
+                "value": 4
+            },
+            {
+                "name": "个人",
+                "label": "贡献",
+                "value": 5
+            },
+            {
+                "name": "个人",
+                "label": "热度",
+                "value": 7
+            },
+            {
+                "name": "团队",
+                "label": "引用",
+                "value": 3
+            },
+            {
+                "name": "团队",
+                "label": "口碑",
+                "value": 9
+            },
+            {
+                "name": "团队",
+                "label": "产量",
+                "value": 6
+            },
+            {
+                "name": "团队",
+                "label": "贡献",
+                "value": 3
+            },
+            {
+                "name": "团队",
+                "label": "热度",
+                "value": 1
+            },
+            {
+                "name": "部门",
+                "label": "引用",
+                "value": 4
+            },
+            {
+                "name": "部门",
+                "label": "口碑",
+                "value": 1
+            },
+            {
+                "name": "部门",
+                "label": "产量",
+                "value": 6
+            },
+            {
+                "name": "部门",
+                "label": "贡献",
+                "value": 5
+            },
+            {
+                "name": "部门",
+                "label": "热度",
+                "value": 7
+            }
+        ]
+    }
+}
