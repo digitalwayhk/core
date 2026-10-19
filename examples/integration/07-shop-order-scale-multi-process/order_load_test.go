@@ -77,6 +77,9 @@ func runOrderWriteLoad(t *testing.T, native bool) {
 	user := processes[0]
 	token := user.TokenFor(t, "720001", 0)
 	implementation := "core"
+	if os.Getenv("CORE_TEST_LOAD_SEED_RULE") == "1" {
+		prepareOrderLoadDefaultRule(t, processes[2], evidence)
+	}
 	if native {
 		processes = replaceWithNativeGoZero(t, processes, evidence)
 		user = processes[0]

@@ -13,8 +13,9 @@ import (
 func TestWritePathSnapshotPreservesCumulativeFacts(t *testing.T) {
 	provider := writePathProvider{snapshot: func() nosql.ReliableWriteMetrics {
 		return nosql.ReliableWriteMetrics{
-			Batch: nosql.BatchCommitMetrics{Committed: 12, Batches: 3, TotalCommitDuration: 2 * time.Second},
-			Sync:  nosql.SyncMetrics{Attempts: 4, TotalDuration: 5 * time.Second},
+			Batch:     nosql.BatchCommitMetrics{Committed: 12, Batches: 3, TotalCommitDuration: 2 * time.Second},
+			Sync:      nosql.SyncMetrics{Attempts: 4, TotalDuration: 5 * time.Second},
+			Admission: nosql.WriteAdmissionMetrics{RejectedConcurrency: 2, RejectedPending: 3, RejectedDisk: 4},
 		}
 	}}
 	snapshot := provider.RuntimeMetricSnapshot(context.Background())
@@ -22,4 +23,7 @@ func TestWritePathSnapshotPreservesCumulativeFacts(t *testing.T) {
 	require.EqualValues(t, 12, snapshot.Gauges["local_committed_total"])
 	require.EqualValues(t, 2, snapshot.Gauges["local_commit_seconds_total"])
 	require.EqualValues(t, 5, snapshot.Gauges["sync_seconds_total"])
+	require.EqualValues(t, 2, snapshot.Gauges["admission_rejected_concurrency_total"])
+	require.EqualValues(t, 3, snapshot.Gauges["admission_rejected_pending_total"])
+	require.EqualValues(t, 4, snapshot.Gauges["admission_rejected_disk_total"])
 }

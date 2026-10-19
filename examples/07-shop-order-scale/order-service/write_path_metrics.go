@@ -25,7 +25,10 @@ func (p writePathProvider) RuntimeMetricSnapshot(context.Context) observability.
 	m := p.snapshot()
 	values := map[string]float64{
 		"local_queue_wait_seconds_total": m.Batch.TotalQueueWaitDuration.Seconds(), "admission_seconds_total": m.Admission.TotalDuration.Seconds(), "admission_attempts_total": float64(m.Admission.Attempts),
-		"local_commit_seconds_total": m.Batch.TotalCommitDuration.Seconds(), "local_committed_total": float64(m.Batch.Committed), "local_batches_total": float64(m.Batch.Batches),
+		"admission_rejected_concurrency_total": float64(m.Admission.RejectedConcurrency),
+		"admission_rejected_pending_total":     float64(m.Admission.RejectedPending),
+		"admission_rejected_disk_total":        float64(m.Admission.RejectedDisk),
+		"local_commit_seconds_total":           m.Batch.TotalCommitDuration.Seconds(), "local_committed_total": float64(m.Batch.Committed), "local_batches_total": float64(m.Batch.Batches),
 		"sync_seconds_total": m.Sync.TotalDuration.Seconds(), "sync_attempts_total": float64(m.Sync.Attempts),
 	}
 	seen := map[*sql.DB]bool{}

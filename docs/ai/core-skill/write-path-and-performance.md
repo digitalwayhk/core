@@ -79,6 +79,8 @@ Badger参数选择先读[配置与调参](badger-configuration.md)：区分官�
 
 ### 长尾故障取证
 
+业务下单容量轮先明确订单规则是否已配置：缺失规则会沿现行语义每次查询后回退，不能用负缓存隐藏该路径。07可显式设置`CORE_TEST_LOAD_SEED_RULE=1`，在计时外经既有Manage写入`NewOrderRule()`的相同默认值，Core与原生对照共用该事实，并留存fixture。Manage仅用于准备数据，不纳入业务下单吞吐目标。配置完整与规则缺失的结果应分别标注。
+
 07负载入口可显式设置`CORE_TEST_LOAD_DIAGNOSTICS=1`，仅向证据目录输出本轮进程的二进制、metrics端口与诊断目录，不输出凭证。需要故障前运行时trace时，另加`GOFLAGS=-tags=core_benchmark_profile`和`CORE_TEST_LOAD_FLIGHT=1`；仅Core三进程在loopback开放`/debug/pprof/flight`，原生对照尚不支持此开关。默认构建不接入该端口，未显式开启flight时端点不存在。
 
 FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载大小，并用`go tool trace`验证快照；HTTP 200、trace前缀或无错误trailer均不能单独证明快照完整。`WriteTo`会推动trace刷新，诊断活动也会影响调度，必须与无flight对照分开，不能将诊断轮当容量认证。Go 1.26 syscall/STW的[上游问题](https://github.com/golang/go/issues/81759)及[候选修复](https://github.com/golang/go/pull/81835)在2026-10-19查询时仍开放；`schedtrace`可能掩盖该问题的复现，不得用开关后的未复现宣称修复，也不得据此认定所有业务长尾同因。使用进程外时钟、Redis探针和系统采样区分Go进程停顿与依赖延迟，不关闭GC、刷盘或stable准入来换取成绩。
