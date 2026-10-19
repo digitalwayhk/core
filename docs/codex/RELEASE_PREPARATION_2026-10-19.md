@@ -12,7 +12,9 @@
 
 **本地合并已完成；正式发布结论仍为 NO-GO。** 按用户明确指令，本工作区已切换到 `main`，由 `7cdf8d9` 快进至 `c3b3ee85bc768632d193619f53e44e210db6ca5b`，纳入功能分支的 51 个提交；合并后树与功能分支完全一致，既有两处未跟踪 WIP 保留。没有新增代码、重跑测试、创建 tag 或 push。本地已有前端对象可用，合并不会将该对象上传到远端。此前将本地合并和正式发布一并阻断的表述已更正。
 
-有两项未解除的实际阻断：配套前端 SHA 无法远端冷获取；固定提交全仓回归的 07 WebSocket 场景首次下单返回 500。Core 已提交 gitlink 与内嵌产物均指向 `b705b5b49a879517e56f973e38c129039a10201c`，但空对象库 fetch 返回 `upload-pack: not our ref`。不能用本机可打开、产物哈希一致或初轮测试通过代替最终候选可发布。
+仍有一项未解除的功能回归失败：固定提交全仓回归的 07 WebSocket 场景首次下单返回 500。不能用初轮通过或前端产物检查通过代替该问题的处理与验证。
+
+2026-10-20 更正发布边界：Core 已提交 gitlink 与内嵌产物均指向 `b705b5b49a879517e56f973e38c129039a10201c`，但远端空对象库 fetch 返回 `upload-pack: not our ref`。这个失败属实，影响前端源码维护与重建；`htmlserver.go` 通过 `//go:embed dist` 使用主仓库中已提交的 `pkg/server/run/dist`，普通 Go 构建、运行及 Core 发布不需要该子模块源码。此前将其列为 Core 发布阻断是审查边界错误，现已撤销，并同步发布策略与权威 skill。没有推送前端、修改源码、gitlink 或内嵌产物。
 
 ## 差异与修复项目
 
@@ -32,7 +34,7 @@
 1. **权限撤销跨页遗漏（P1）**：`PermissionSelection` 和 `replaceRolePermissions` 都使用默认 500 条 `SearchWhere`。实测保存 601 条后取消全部，仍残留 101 条。改为完整分页读取后事务替换，未放宽权限身份校验，也不改前端。提交 `ccc6b0c`；覆盖跨页回显、全部撤权、失败回滚及既有其他角色保持。
 2. **stable 内部分发绕过准入（P1）**：同进程和 gRPC handler 走 `dispatchLocal → ParseNew → ExecDo`，没有经过 `RouterInfo.Exec` 的 HTTP 准入检查。实测未就绪时两入口仍返回成功。改为在共同分发入口验证内部身份后，解析结构化载荷前直接检查目标服务准入；失效拒绝，恢复放行，健康探针保留。提交 `9a258ce`；检查错调用方仍先返回身份拒绝。
 3. **发布/升级说明漂移**：Unreleased 混有上版已发布内容，比较链接停在 v1.2.0；配置矩阵误写 MQ off 会关闭整个 EventBridge；README 把请求时建表描述成规范。已按实际 tag 分开本轮与历史，修正内存事件边界、启动前 EnsureStorage 要求和已知示例差距，集中新增消费方升级指导。
-4. **配套前端提交未在远端可获取（发布阻断，未擅自推送）**：后台远端 main 为 `7f8cdf58c96bd6c0bb365c6835386c3e1c914fd2`，不包含当前 gitlink。共享本地对象的裸库 fetch 曾返回成功，不能作为远端存在证明；改用完全空的独占裸库真实 fetch，返回明确的 `not our ref`。未改前端代码、gitlink 或产物来掩盖此问题，未 push。维护者需先把已有 `b705b5b` 发布到配置的远端可访问 ref，再从全新对象库获取并重新跑 dist 同步门禁。
+4. **配套前端提交未在远端可获取（源码维护限制，不阻断 Core 内嵌产物发布）**：后台远端 main 为 `7f8cdf58c96bd6c0bb365c6835386c3e1c914fd2`，不包含当前 gitlink。共享本地对象的裸库 fetch 曾返回成功，不能作为远端存在证明；完全空对象库的真实 fetch 返回明确的 `not our ref`。2026-10-20 重查仍失败，原始证据保留。只有需要从远端获取源码以修改、重建前端时才需先发布该提交；普通 Core 消费方使用已提交 dist，无需此步骤。未改前端代码、gitlink 或产物，未 push。
 5. **固定提交真实回归发现 07 启动窗口下单 500（发布阻断，未标为已修复）**：`TestUATBuyerWebSocketOrderSubscription` 在 `create07BuyerOrder` 失败，尚未进入事件推送断言。日志中三个服务 `/api/ready` 已为 200，`service_hook_starting` 在首笔下单前后才出现，订单返回 HTTP 500 / `internal server error`。源码显示 legacy 的准入默认放行，而 `OrderWriteRuntime` 要到异步 `Service.Start` 才 Bind；测试的 ready+getproducts 也不能证明订单资源完成绑定。这与历史 R07 一致，但本次日志未保留完整业务 cause，不能直接宣布唯一根因或归因于本轮 stable 分发修复；该场景为 legacy，不能通过修改 stable 验收结论掩盖。原始失败封存为 `startup-window-failure.jsonl`。下一步需受控延迟 Bind、核对实际失败 cause，并在资源未就绪时拒绝 ready/业务准入或在监听前完成绑定，再回归；不能只增加 sleep、重跑通过或删除断言。
 
 ## 审查与验证
@@ -50,9 +52,10 @@
 | 权限/授权定向 race | PASS，18.650 秒，`permissions-green.json`；随后包含最终源码的扩大 race 继续通过 |
 | 最终相关包 race | PASS，16 包、872 项测试，130.481 秒，`race.json`；包括真实独占 MySQL/Redis/etcd 的相关用例，不代表未启动的外部存储已验收 |
 | 固定提交全仓功能回归 | FAIL，961.071 秒，132 包通过；2649 个测试/子测试通过、1 个测试失败、55 个跳过，失败包为 07 单进程集成。见 `full-candidate.json`，不能用初轮通过覆盖 |
-| 发布候选脚本契约 | PASS，114.001 秒，`release.json`；包括 API/OpenAPI、公共 Go API、配置与安全检查。脚本范围通过不覆盖 07 真实回归失败或前端远端可获取性 |
+| 发布候选脚本契约 | PASS，114.001 秒，`release.json`；包括 API/OpenAPI、公共 Go API、配置与安全检查。脚本范围通过不覆盖 07 真实回归失败 |
 | 内嵌后台与日志门禁 | PASS，dist 同步 6.132 秒、日志 0.149 秒；均只读，不证明浏览器操作或子模块冷获取成功 |
-| 子模块精确 SHA 远端冷获取 | FAIL，`b705b5b` 返回 `not our ref`；本机已有对象的 fetch 不算通过，正式发布保持 NO-GO |
+| 无前端源码的 Go 构建（2026-10-20） | PASS，从 `a4e739a` 的主仓库 `git archive` 创建隔离检出，确认 `web/admin` 无源码后运行 `go build -mod=readonly ./pkg/server/run` 成功；`scripts/test.sh web-dist-sync` 契约及指针检查也通过。证据 `.temp/embedded-build-20261020.json`，不代表 07 功能失败已修复 |
+| 子模块精确 SHA 远端冷获取 | FAIL，`b705b5b` 返回 `not our ref`；属于前端源码维护限制，不阻断使用已提交 dist 的 Core 发布 |
 | 消费方升级/实际旧卷/浏览器/生产部署 | NOT_RUN，不动 Bitzoom，不以本仓库自测代替 |
 | 性能容量 | 既有 2000/s × 600s 为 FAIL；本轮未运行负载或调参 |
 
@@ -75,7 +78,7 @@ API 对比不检测行为与数据格式：Badger v3 sentinel 比较、MQ 缺省
 
 候选、升级文档及代码已合入本地 main；本次仅同步合并状态，不创建 tag、不 push。既有前端研究 WIP 必须留在原工作区；正式发布检查应在候选的干净独立检出运行，不能 stash、删除 WIP 或绕过干净门禁。
 
-先修复并验证 07 启动窗口实际失败，再解除前端可获取性阻断。维护者可将已有 `b705b5b` 提交发布到 `.gitmodules` 对应仓库的可访问分支/tag；这不要求重写前端代码，但属于远端写入，本轮准备工作没有执行。必须在不共享本机对象的全新裸库中实际 fetch 该 SHA 并验证对象存在，不能只运行已有工作区的 `git fetch <sha>`。
+先查清并修复、验证 07 启动窗口实际失败，再执行正式发布门禁。前端源码维护者若需远端重建，可另将已有 `b705b5b` 提交发布到 `.gitmodules` 对应仓库的可访问分支/tag，再从空对象库验证；该操作属于独立前端维护，不是 Core 发布前置条件，本轮没有执行。
 
 正式发布前，维护者须重新核对远端 main；若远端已前进，先整合差异并回归受影响范围，再执行正式发布门禁。本地 main 已完成快进合并，不重复执行合并。`v1.4.0` 是建议版本，未发布前不得让消费方引用不存在的 tag。
 

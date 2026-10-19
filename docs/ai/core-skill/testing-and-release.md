@@ -181,7 +181,9 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 它比对 `git ls-tree HEAD web/admin` 的**已提交**指针与 `build-info.json` 的 `frontend_commit`。不要改成读子模块工作区 HEAD——本地 checkout 会让它跟着漂移，从而放过已提交的不一致。
 
-此门禁不证明子模块提交已经在远端发布。正式发布前须另外在不共享本机对象的空裸库实际 fetch 精确 gitlink SHA，并校验提交对象存在；远端返回 `not our ref` 是发布阻断。本地已有对象时 fetch 可能返回成功，不能据此计为冷获取 PASS。新检出失败不能通过重写 gitlink、伪造 build-info 或删除子模块来绕过。
+Core 的 Go 构建通过 `pkg/server/run/htmlserver.go` 的 `//go:embed dist` 嵌入上述已提交产物，不读取 `web/admin` 源码，也不执行前端构建。普通消费方不需要拉取子模块。可用无前端源码的检出验证构建边界；不得把子模块远端冷获取失败误列为使用既有内嵌产物的发布阻断。
+
+需要修改、重新构建前端或独立部署其源码时，才另行核对精确 gitlink SHA 的远端可获取性；空对象库 fetch 返回 `not our ref` 表示该源码获取路径不可用，不表示已提交的内嵌产物不可用。本地已有对象时 fetch 可能假通过；保留真实失败记录，不通过重写 gitlink、伪造 build-info 或删除子模块掩盖源码维护问题。
 
 发布前不得自动创建 tag。开发消费方可临时引用分支或精确 commit：
 
