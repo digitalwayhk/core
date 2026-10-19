@@ -6,7 +6,7 @@
 
 本节仅列相对 `v1.3.0` 的改动，候选 `v1.4.0`；正式发布前仍须通过候选门禁。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
 
-当前合并发布为 **NO-GO**：固定提交的 07 真实回归出现 ready 后首单 500，且配套前端 gitlink 无法远端冷获取；证据与解除步骤见[发布准备记录](docs/codex/RELEASE_PREPARATION_2026-10-19.md)。
+本次变更已按用户要求合入本地 `main`（快进目标 `c3b3ee8`），尚未推送或打 tag。当前正式发布为 **NO-GO**：固定提交的 07 真实回归出现 ready 后首单 500，且配套前端 gitlink 无法远端冷获取；证据与解除步骤见[发布准备记录](docs/codex/RELEASE_PREPARATION_2026-10-19.md)。
 
 ### Added
 
