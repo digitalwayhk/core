@@ -1,8 +1,9 @@
 {
   "说明": "原始请求、采样、日志、物理核对、指纹和归档保存在本轮.temp证据目录；本文件不含凭据或请求明细。",
-  "generated_at": "2026-10-18T23:15:17.235079+00:00",
+  "generated_at": "2026-10-19T06:12:38.534263+00:00",
   "plan": "docs/superpowers/plans/2026-10-19-order-queue-repair-and-throughput.md",
-  "source_sha": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
+  "source_code_commit": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
+  "source_note": "首轮长窗及阶梯HEAD为258b45a；续跑HEAD为仅文档提交24b2a66。每轮源码manifest与最终全量回归的1428个Go/依赖文件逐文件一致，具体HEAD与二进制SHA见各case。",
   "configuration": {
     "go": "1.26.6",
     "badger": "4.9.6",
@@ -73,6 +74,42 @@
         "pkg/persistence/database/oltp/mysql_pool_identity_test.go"
       ],
       "unformatted": []
+    },
+    "capacity_source_audit": {
+      "code_commit": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
+      "files": 1428,
+      "cases": [
+        {
+          "name": "final-capacity-core-r1",
+          "head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
+          "matches_final_regression_manifest": true
+        },
+        {
+          "name": "final-capacity-native-r1",
+          "head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+          "matches_final_regression_manifest": true
+        },
+        {
+          "name": "final-capacity-core-r2",
+          "head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+          "matches_final_regression_manifest": true
+        },
+        {
+          "name": "final-capacity-native-r2",
+          "head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+          "matches_final_regression_manifest": true
+        },
+        {
+          "name": "final-capacity-core-r3",
+          "head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+          "matches_final_regression_manifest": true
+        },
+        {
+          "name": "final-capacity-native-r3",
+          "head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+          "matches_final_regression_manifest": true
+        }
+      ]
     }
   },
   "cases": [
@@ -86,6 +123,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "PASS",
       "test_exit": 0,
       "gates": {
@@ -94,6 +132,7 @@
         "success_999": true,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -137,6 +176,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -155,6 +195,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "PASS",
       "test_exit": 0,
       "gates": {
@@ -163,6 +204,7 @@
         "success_999": true,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -206,6 +248,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -226,6 +269,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "FAIL",
       "test_exit": 1,
       "gates": {
@@ -234,6 +278,7 @@
         "success_999": false,
         "all_confirmed_match": true,
         "observations_complete": false,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -279,6 +324,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -297,6 +343,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "PASS",
       "test_exit": 0,
       "gates": {
@@ -305,6 +352,7 @@
         "success_999": true,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -348,6 +396,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -369,6 +418,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "FAIL",
       "test_exit": 1,
       "gates": {
@@ -377,6 +427,7 @@
         "success_999": false,
         "all_confirmed_match": true,
         "observations_complete": false,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -420,6 +471,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -438,6 +490,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "FAIL",
       "test_exit": 1,
       "gates": {
@@ -446,6 +499,7 @@
         "success_999": false,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -489,6 +543,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -510,6 +565,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "FAIL",
       "test_exit": 1,
       "gates": {
@@ -518,6 +574,7 @@
         "success_999": false,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -564,6 +621,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -582,6 +640,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "PASS",
       "test_exit": 0,
       "gates": {
@@ -590,6 +649,7 @@
         "success_999": true,
         "all_confirmed_match": true,
         "observations_complete": true,
+        "no_guardian_stop": true,
         "nonnegative_pending": true,
         "drained_5s": true,
         "physical_consistent": true,
@@ -633,6 +693,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "SHORT_WINDOW_ONLY",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -654,6 +715,7 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
+      "source_head": "258b45a3e5a669bac9edf0389da6afbdfe0d9550",
       "status": "FAIL",
       "test_exit": 1,
       "gates": {
@@ -662,6 +724,7 @@
         "success_999": false,
         "all_confirmed_match": true,
         "observations_complete": false,
+        "no_guardian_stop": false,
         "nonnegative_pending": true,
         "drained_5s": false,
         "physical_consistent": true,
@@ -709,6 +772,7 @@
         "broker_pending": 0,
         "broker_lag": 0
       },
+      "non_request_fixture_orders": 1,
       "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
       "binary_sha256": {
         "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
@@ -725,7 +789,9 @@
             541761536.0
           ],
           "peak": 633831424,
-          "last": 631357440
+          "first": 58884096,
+          "last": 631357440,
+          "count": 519
         },
         "process_0_go_goroutines": {
           "quartile_medians": [
@@ -735,7 +801,9 @@
             582.0
           ],
           "peak": 1098,
-          "last": 59
+          "first": 60,
+          "last": 59,
+          "count": 519
         },
         "process_0_go_memstats_heap_inuse_bytes": {
           "quartile_medians": [
@@ -745,7 +813,9 @@
             375091200.0
           ],
           "peak": 543653888,
-          "last": 346939392
+          "first": 10772480,
+          "last": 346939392,
+          "count": 519
         },
         "process_1_process_resident_memory_bytes": {
           "quartile_medians": [
@@ -755,7 +825,9 @@
             76824576
           ],
           "peak": 90259456,
-          "last": 77234176
+          "first": 58277888,
+          "last": 77234176,
+          "count": 522
         },
         "process_1_go_goroutines": {
           "quartile_medians": [
@@ -765,7 +837,9 @@
             49
           ],
           "peak": 119,
-          "last": 49
+          "first": 50,
+          "last": 49,
+          "count": 522
         },
         "process_1_go_memstats_heap_inuse_bytes": {
           "quartile_medians": [
@@ -775,7 +849,9 @@
             14647296
           ],
           "peak": 23388160,
-          "last": 20987904
+          "first": 10199040,
+          "last": 20987904,
+          "count": 522
         },
         "process_2_process_resident_memory_bytes": {
           "quartile_medians": [
@@ -785,7 +861,9 @@
             603193344
           ],
           "peak": 746323968,
-          "last": 668336128
+          "first": 63848448,
+          "last": 668336128,
+          "count": 522
         },
         "process_2_go_goroutines": {
           "quartile_medians": [
@@ -795,7 +873,9 @@
             121
           ],
           "peak": 677,
-          "last": 88
+          "first": 70,
+          "last": 88,
+          "count": 522
         },
         "process_2_go_memstats_heap_inuse_bytes": {
           "quartile_medians": [
@@ -805,7 +885,9 @@
             263815168
           ],
           "peak": 535625728,
-          "last": 183869440
+          "first": 35037184,
+          "last": 183869440,
+          "count": 522
         }
       },
       "gc_pause_increments": [
@@ -862,6 +944,96 @@
           ]
         }
       ],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_2_core_component_gauge{component=\"outbox\",name=\"load_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 43.912982134,
+          "peak": 43.912982134,
+          "observed_delta": 43.912982134
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"mark_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 197.711159724,
+          "peak": 197.711159724,
+          "observed_delta": 197.711159724
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"publish_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 1059.256233482,
+          "peak": 1059.256233482,
+          "observed_delta": 1059.256233482
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_time_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_in_use\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_lifetime_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_max_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 20,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_count_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 431535,
+          "peak": 431535,
+          "observed_delta": 431535
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 14984.524963606,
+          "peak": 14984.524963606,
+          "observed_delta": 14984.524963606
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 17438,
+        "Com_insert": 16618,
+        "Com_rollback": 0,
+        "Com_select": 1479392,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 30,
+        "Innodb_buffer_pool_reads": 485183,
+        "Innodb_data_fsyncs": 514829,
+        "Innodb_log_waits": 0,
+        "Threads_created": 22
+      },
       "storage_budget": {
         "volume": "core-queue-perf-20261019-final-capacity-core-r1-mysql-data",
         "original_stopped": true,
@@ -877,7 +1049,8 @@
         ],
         "final_business_orders": 673170,
         "gross_volume_bytes_per_order_including_fixed_overhead": 5444.472783992156
-      }
+      },
+      "error_sample_rounds": 6
     },
     {
       "name": "final-capacity-native-r1",
@@ -889,8 +1062,443 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
-      "status": "NOT_RUN_SPACE",
-      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+      "source_head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "no_guardian_stop": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 410.807524541,
+        "failed": 189322,
+        "failure_classes": {
+          "cancelled": 512,
+          "http_server": 188810
+        },
+        "generator_dropped": 95984,
+        "generator_max_lag_ms": 109.19458300000201,
+        "generator_not_started": 378410,
+        "inflight_end_at": "2026-10-19T05:29:01.65825Z",
+        "interrupted": true,
+        "p50_ms": 3.8959580000000003,
+        "p95_ms": 407.679834,
+        "p99_ms": 1457.879042,
+        "scheduled": 1200000,
+        "started": 725606,
+        "success_rps_including_inflight": 1305.4386007150094,
+        "success_rps_over_window": 893.8066666666666,
+        "successful": 536284,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10434.401
+      },
+      "confirmed_including_warmup": 541284,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 2936,
+      "drain_seconds": 20.490782,
+      "sample_errors": 8,
+      "guardian_stop": "连续三次观测失败，停止发送",
+      "peak_pending": 34411,
+      "peak_broker_lag": 27,
+      "final": {
+        "pending": 0,
+        "orders": 544221,
+        "outbox": 544221,
+        "published": 544221,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "non_request_fixture_orders": 1,
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            150700032.0,
+            312049664,
+            385613824,
+            462225408
+          ],
+          "peak": 507641856,
+          "first": 45645824,
+          "last": 476790784,
+          "count": 443
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            393.0,
+            560,
+            550,
+            550
+          ],
+          "peak": 1057,
+          "first": 27,
+          "last": 27,
+          "count": 443
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            75866112.0,
+            204808192,
+            248291328,
+            317374464
+          ],
+          "peak": 428154880,
+          "first": 7094272,
+          "last": 271736832,
+          "count": 443
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            63889408.0,
+            64864256,
+            65880064,
+            60637184
+          ],
+          "peak": 75595776,
+          "first": 46694400,
+          "last": 56623104,
+          "count": 443
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            24.0,
+            24,
+            23,
+            23
+          ],
+          "peak": 91,
+          "first": 23,
+          "last": 23,
+          "count": 443
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            10539008.0,
+            10952704,
+            11485184,
+            11280384
+          ],
+          "peak": 21471232,
+          "first": 6995968,
+          "last": 14598144,
+          "count": 443
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            334487552.0,
+            344129536,
+            366297088,
+            458801152
+          ],
+          "peak": 563691520,
+          "first": 54083584,
+          "last": 283017216,
+          "count": 443
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            67.0,
+            78,
+            91,
+            70
+          ],
+          "peak": 1531,
+          "first": 41,
+          "last": 60,
+          "count": 443
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            73969664.0,
+            123109376,
+            158900224,
+            182829056
+          ],
+          "peak": 445030400,
+          "first": 37855232,
+          "last": 114769920,
+          "count": 443
+        }
+      },
+      "gc_pause_increments": [
+        {
+          "process": 2,
+          "at": "2026-10-19T05:25:43.688583Z",
+          "increment_seconds": 0.21728504200000004
+        }
+      ],
+      "observation_errors": [
+        {
+          "at": "2026-10-19T05:25:51.724463Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:25:52.678137Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:26:00.717964Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:26:12.650455Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:26:13.651136Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:28:59.645121Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:29:00.647194Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:29:01.646029Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        }
+      ],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_0_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle": {
+          "first": 1,
+          "last": 1,
+          "peak": 1,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 140171,
+          "peak": 140171,
+          "observed_delta": 140171
+        },
+        "process_1_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_in_use": {
+          "first": 0,
+          "last": 0,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_open": {
+          "first": 1,
+          "last": 1,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_wait_count_total": {
+          "first": 0,
+          "last": 111501,
+          "peak": 111501,
+          "observed_delta": 111501
+        },
+        "process_1_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 77.522404922,
+          "peak": 77.522404922,
+          "observed_delta": 77.522404922
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_in_use": {
+          "first": 0,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_open": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_native_db_wait_count_total": {
+          "first": 0,
+          "last": 302259,
+          "peak": 302259,
+          "observed_delta": 302259
+        },
+        "process_2_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 56709.994632872,
+          "peak": 56709.994632872,
+          "observed_delta": 56709.994632872
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0.154102168,
+          "last": 50.646902647,
+          "peak": 50.646902647,
+          "observed_delta": 50.492800478999996
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 152.515130005,
+          "peak": 152.515130005,
+          "observed_delta": 152.515130005
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 772.582900697,
+          "peak": 772.582900697,
+          "observed_delta": 772.582900697
+        },
+        "process_2_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 318.375650923,
+          "peak": 318.375650923,
+          "observed_delta": 318.375650923
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 16541,
+        "Com_insert": 15806,
+        "Com_rollback": 0,
+        "Com_select": 1165746,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 33,
+        "Innodb_buffer_pool_reads": 39292,
+        "Innodb_data_fsyncs": 245017,
+        "Innodb_log_waits": 0,
+        "Threads_created": 22
+      },
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-native-r1-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 2760512,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792387253152741000/outbox_record.ibd 612368384 1196040",
+          "/evidence/core_stable@002d07@002d1792387253152741000/payment_type.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792387253152741000/order_rule.ibd 196608 384",
+          "/evidence/core_stable@002d07@002d1792387253152741000/order.ibd 587202560 1146888",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 544221,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5194.147759825512
+      },
+      "error_sample_rounds": 8
     },
     {
       "name": "final-capacity-core-r2",
@@ -902,8 +1510,303 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
-      "status": "NOT_RUN_SPACE",
-      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+      "source_head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "no_guardian_stop": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 255.296123792,
+        "failed": 2701,
+        "failure_classes": {
+          "cancelled": 297,
+          "http_server": 2404
+        },
+        "generator_dropped": 21597,
+        "generator_max_lag_ms": 29.443125000000066,
+        "generator_not_started": 689416,
+        "inflight_end_at": "2026-10-19T05:34:46.351508Z",
+        "interrupted": true,
+        "p50_ms": 5.504625,
+        "p95_ms": 169.32225,
+        "p99_ms": 464.140459,
+        "scheduled": 1200000,
+        "started": 488987,
+        "success_rps_including_inflight": 1904.7919442607624,
+        "success_rps_over_window": 810.4766666666667,
+        "successful": 486286,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10460.905
+      },
+      "confirmed_including_warmup": 491286,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 301,
+      "drain_seconds": 49.988384,
+      "sample_errors": 2,
+      "guardian_stop": "pending 达到 40000，停止发送，保留恢复数据",
+      "peak_pending": 40172,
+      "peak_broker_lag": 47,
+      "final": {
+        "pending": 0,
+        "orders": 491588,
+        "outbox": 491588,
+        "published": 491588,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "non_request_fixture_orders": 1,
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            134135808.0,
+            279232512,
+            346537984,
+            456851456
+          ],
+          "peak": 466354176,
+          "first": 58327040,
+          "last": 440893440,
+          "count": 315
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            369.0,
+            590,
+            589,
+            83
+          ],
+          "peak": 1102,
+          "first": 60,
+          "last": 59,
+          "count": 315
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            59314176.0,
+            157818880,
+            208289792,
+            277356544
+          ],
+          "peak": 361480192,
+          "first": 10657792,
+          "last": 226295808,
+          "count": 315
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            71958528,
+            77398016,
+            81117184,
+            82198528
+          ],
+          "peak": 85065728,
+          "first": 58556416,
+          "last": 77561856,
+          "count": 316
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            50,
+            50,
+            49,
+            48
+          ],
+          "peak": 165,
+          "first": 50,
+          "last": 48,
+          "count": 316
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            12566528,
+            14016512,
+            13565952,
+            16007168
+          ],
+          "peak": 20283392,
+          "first": 10444800,
+          "last": 19488768,
+          "count": 316
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            393035776,
+            385515520,
+            500989952,
+            435765248
+          ],
+          "peak": 530808832,
+          "first": 63242240,
+          "last": 422641664,
+          "count": 316
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            120,
+            138,
+            135,
+            114
+          ],
+          "peak": 641,
+          "first": 70,
+          "last": 89,
+          "count": 316
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            152641536,
+            179544064,
+            192102400,
+            183566336
+          ],
+          "peak": 370098176,
+          "first": 34750464,
+          "last": 221814784,
+          "count": 316
+        }
+      },
+      "gc_pause_increments": [
+        {
+          "process": 0,
+          "at": "2026-10-19T05:33:52.339421Z",
+          "increment_seconds": 1.281310458
+        }
+      ],
+      "observation_errors": [
+        {
+          "at": "2026-10-19T05:33:52.087325Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded",
+            "metrics_0: Get \"http://127.0.0.1:55864/metrics\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+          ]
+        }
+      ],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_2_core_component_gauge{component=\"outbox\",name=\"load_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 23.712366747,
+          "peak": 23.712366747,
+          "observed_delta": 23.712366747
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"mark_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 106.23263959,
+          "peak": 106.23263959,
+          "observed_delta": 106.23263959
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"publish_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 697.048858192,
+          "peak": 697.048858192,
+          "observed_delta": 697.048858192
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_time_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_in_use\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_lifetime_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_max_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 20,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_count_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 216926,
+          "peak": 216926,
+          "observed_delta": 216926
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 6698.082311317,
+          "peak": 6698.082311317,
+          "observed_delta": 6698.082311317
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 13049,
+        "Com_insert": 13214,
+        "Com_rollback": 0,
+        "Com_select": 1009826,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 25,
+        "Innodb_buffer_pool_reads": 164778,
+        "Innodb_data_fsyncs": 270116,
+        "Innodb_log_waits": 0,
+        "Threads_created": 20
+      },
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-core-r2-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 2704152,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792387784399928000/outbox_record.ibd 562036736 1097736",
+          "/evidence/core_stable@002d07@002d1792387784399928000/payment_type.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792387784399928000/order_rule.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792387784399928000/order.ibd 742391808 1449992",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 491588,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5632.870712873382
+      },
+      "error_sample_rounds": 1
     },
     {
       "name": "final-capacity-native-r2",
@@ -915,8 +1818,452 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
-      "status": "NOT_RUN_SPACE",
-      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+      "source_head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "no_guardian_stop": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 288.808766583,
+        "failed": 1521,
+        "failure_classes": {
+          "cancelled": 512,
+          "http_server": 1009
+        },
+        "generator_dropped": 25036,
+        "generator_max_lag_ms": 34.090208000002804,
+        "generator_not_started": 622398,
+        "inflight_end_at": "2026-10-19T05:42:06.695972Z",
+        "interrupted": true,
+        "p50_ms": 3.5100000000000002,
+        "p95_ms": 93.059833,
+        "p99_ms": 358.441959,
+        "scheduled": 1200000,
+        "started": 552566,
+        "success_rps_including_inflight": 1907.9926365103483,
+        "success_rps_over_window": 918.4083333333333,
+        "successful": 551045,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10430.276
+      },
+      "confirmed_including_warmup": 556045,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 1494,
+      "drain_seconds": 28.494895,
+      "sample_errors": 3,
+      "guardian_stop": "连续三次观测失败，停止发送",
+      "peak_pending": 13569,
+      "peak_broker_lag": 27,
+      "final": {
+        "pending": 0,
+        "orders": 557540,
+        "outbox": 557540,
+        "published": 557540,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "non_request_fixture_orders": 1,
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            131006464.0,
+            258760704.0,
+            371998720.0,
+            482328576
+          ],
+          "peak": 512770048,
+          "first": 47857664,
+          "last": 487915520,
+          "count": 329
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            503.0,
+            548.0,
+            550.0,
+            546
+          ],
+          "peak": 1051,
+          "first": 28,
+          "last": 27,
+          "count": 329
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            64942080.0,
+            161427456.0,
+            240635904.0,
+            313712640
+          ],
+          "peak": 418250752,
+          "first": 7593984,
+          "last": 278757376,
+          "count": 329
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            60653568.0,
+            66502656.0,
+            68468736.0,
+            62701568
+          ],
+          "peak": 77168640,
+          "first": 46186496,
+          "last": 58818560,
+          "count": 329
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            24.0,
+            24.0,
+            24.0,
+            23
+          ],
+          "peak": 41,
+          "first": 24,
+          "last": 23,
+          "count": 329
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            9764864.0,
+            11341824.0,
+            11923456.0,
+            11026432
+          ],
+          "peak": 23805952,
+          "first": 6717440,
+          "last": 12673024,
+          "count": 329
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            312950784.0,
+            321978368.0,
+            336265216.0,
+            371998720
+          ],
+          "peak": 472891392,
+          "first": 53936128,
+          "last": 339378176,
+          "count": 329
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            68.0,
+            69.0,
+            71.0,
+            69
+          ],
+          "peak": 573,
+          "first": 41,
+          "last": 60,
+          "count": 329
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            79282176.0,
+            121896960.0,
+            137510912.0,
+            124928000
+          ],
+          "peak": 316735488,
+          "first": 37888000,
+          "last": 126115840,
+          "count": 329
+        }
+      },
+      "gc_pause_increments": [],
+      "observation_errors": [
+        {
+          "at": "2026-10-19T05:42:04.821104Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:42:05.690125Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        },
+        {
+          "at": "2026-10-19T05:42:06.68885Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        }
+      ],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_0_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle": {
+          "first": 1,
+          "last": 1,
+          "peak": 1,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 160036,
+          "peak": 160036,
+          "observed_delta": 160036
+        },
+        "process_1_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_in_use": {
+          "first": 0,
+          "last": 0,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_open": {
+          "first": 1,
+          "last": 1,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_wait_count_total": {
+          "first": 0,
+          "last": 39257,
+          "peak": 39257,
+          "observed_delta": 39257
+        },
+        "process_1_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 6.719857944,
+          "peak": 6.719857944,
+          "observed_delta": 6.719857944
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_in_use": {
+          "first": 0,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_open": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_native_db_wait_count_total": {
+          "first": 0,
+          "last": 114985,
+          "peak": 114985,
+          "observed_delta": 114985
+        },
+        "process_2_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 3846.730528284,
+          "peak": 3846.730528284,
+          "observed_delta": 3846.730528284
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0.157129121,
+          "last": 19.665892158,
+          "peak": 19.665892158,
+          "observed_delta": 19.508763036999998
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 113.210718355,
+          "peak": 113.210718355,
+          "observed_delta": 113.210718355
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 634.491019928,
+          "peak": 634.491019928,
+          "observed_delta": 634.491019928
+        },
+        "process_2_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 236.541058725,
+          "peak": 236.541058725,
+          "observed_delta": 236.541058725
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 15636,
+        "Com_insert": 16356,
+        "Com_rollback": 0,
+        "Com_select": 1148033,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 28,
+        "Innodb_buffer_pool_reads": 43814,
+        "Innodb_data_fsyncs": 265726,
+        "Innodb_log_waits": 0,
+        "Threads_created": 22
+      },
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-native-r2-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 2825396,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792388161346542000/outbox_record.ibd 633339904 1237000",
+          "/evidence/core_stable@002d07@002d1792388161346542000/payment_type.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792388161346542000/order_rule.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792388161346542000/order.ibd 599785472 1171464",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 557540,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5189.233963482441
+      },
+      "sql_clone_audit": {
+        "source_case": "final-capacity-native-r2",
+        "source_volume": "core-queue-perf-20261019-final-capacity-native-r2-mysql-data",
+        "original_stopped": true,
+        "original_read_only_mount": true,
+        "clone_volume": "core-sql-audit-20261019-final-capacity-native-r2-data",
+        "source_image_id": "sha256:b7e118f56c5963e079252e0d6e2978c9c010eb7fc7aaaec100e367796b5dd08f",
+        "queries": [
+          {
+            "name": "create",
+            "elapsed_including_docker_exec_seconds": 0.05535087501630187,
+            "sha256": "7ba40276067e15ac1ae94a1e6acab4008e021d445c02c4840de56350c65d2bc7"
+          },
+          {
+            "name": "indexes",
+            "elapsed_including_docker_exec_seconds": 0.06193291675299406,
+            "sha256": "545652a4950c57bb3d85dfb53f101749f80172f09704c3e72d5aea6482426299"
+          },
+          {
+            "name": "exists_plan",
+            "elapsed_including_docker_exec_seconds": 0.05405120784416795,
+            "sha256": "2b3c051f00ff1b692ad4d5d7b82ec83cf3e751bd64d746542bb5ddf098985fdb"
+          },
+          {
+            "name": "load_plan",
+            "elapsed_including_docker_exec_seconds": 0.05640891706570983,
+            "sha256": "26cdf6b0ca2f7a25ca1576d58f79e06f53141ce6811c16783b9def90f5bba8f5"
+          },
+          {
+            "name": "exists_analyze",
+            "elapsed_including_docker_exec_seconds": 0.05677341669797897,
+            "sha256": "dab7400dfd5c5be6f7f2487a23504d26e997c1fbe85e5c1c54fffa2085915b82"
+          }
+        ],
+        "exists_latency_control_seconds": [
+          0.04935274971649051,
+          0.0634950827807188,
+          0.061220459174364805,
+          0.0516101666726172,
+          0.06258912477642298
+        ],
+        "status": "PASS_AUDIT_EXECUTED",
+        "original_files_unchanged": true,
+        "diagnostic_clone_removed": true
+      },
+      "error_sample_rounds": 3
     },
     {
       "name": "final-capacity-core-r3",
@@ -928,8 +2275,334 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
-      "status": "NOT_RUN_SPACE",
-      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+      "source_head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": true,
+        "no_guardian_stop": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 373.258672375,
+        "failed": 92755,
+        "failure_classes": {
+          "cancelled": 512,
+          "http_server": 92243
+        },
+        "generator_dropped": 29959,
+        "generator_max_lag_ms": 29.99999999999818,
+        "generator_not_started": 453507,
+        "inflight_end_at": "2026-10-19T05:50:01.672773Z",
+        "interrupted": true,
+        "p50_ms": 7.436541,
+        "p95_ms": 186.560417,
+        "p99_ms": 642.825667,
+        "scheduled": 1200000,
+        "started": 716534,
+        "success_rps_including_inflight": 1671.1708157535077,
+        "success_rps_over_window": 1039.6316666666667,
+        "successful": 623779,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10495.920999999998
+      },
+      "confirmed_including_warmup": 628779,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 591,
+      "drain_seconds": 92.988304,
+      "sample_errors": 0,
+      "guardian_stop": "pending 达到 40000，停止发送，保留恢复数据",
+      "peak_pending": 40079,
+      "peak_broker_lag": 127,
+      "final": {
+        "pending": 0,
+        "orders": 629371,
+        "outbox": 629371,
+        "published": 629371,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "non_request_fixture_orders": 1,
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            171360256,
+            304431104.0,
+            426360832,
+            491347968.0
+          ],
+          "peak": 527351808,
+          "first": 59686912,
+          "last": 527351808,
+          "count": 478
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            607,
+            593.0,
+            586,
+            72.5
+          ],
+          "peak": 1105,
+          "first": 60,
+          "last": 59,
+          "count": 478
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            72261632,
+            168583168.0,
+            260030464,
+            331239424.0
+          ],
+          "peak": 459898880,
+          "first": 10821632,
+          "last": 370597888,
+          "count": 478
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            75382784,
+            75628544.0,
+            75464704,
+            66551808.0
+          ],
+          "peak": 79183872,
+          "first": 58277888,
+          "last": 65437696,
+          "count": 478
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            50,
+            50.0,
+            49,
+            48.0
+          ],
+          "peak": 367,
+          "first": 50,
+          "last": 48,
+          "count": 478
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            12984320,
+            13545472.0,
+            13787136,
+            19763200.0
+          ],
+          "peak": 25550848,
+          "first": 10395648,
+          "last": 20447232,
+          "count": 478
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            443334656,
+            412041216.0,
+            518160384,
+            499843072.0
+          ],
+          "peak": 670597120,
+          "first": 64503808,
+          "last": 312541184,
+          "count": 478
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            165,
+            122.5,
+            124,
+            105.5
+          ],
+          "peak": 672,
+          "first": 71,
+          "last": 88,
+          "count": 478
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            165232640,
+            169340928.0,
+            221626368,
+            226603008.0
+          ],
+          "peak": 473759744,
+          "first": 35053568,
+          "last": 221036544,
+          "count": 478
+        }
+      },
+      "gc_pause_increments": [],
+      "observation_errors": [],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_2_core_component_gauge{component=\"outbox\",name=\"load_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 47.998888872,
+          "peak": 47.998888872,
+          "observed_delta": 47.998888872
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"mark_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 154.926990872,
+          "peak": 154.926990872,
+          "observed_delta": 154.926990872
+        },
+        "process_2_core_component_gauge{component=\"outbox\",name=\"publish_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 1055.866195635,
+          "peak": 1055.866195635,
+          "observed_delta": 1055.866195635
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_idle_time_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_in_use\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_lifetime_closed_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_max_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 20,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 0
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_open\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_count_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 384757,
+          "peak": 384757,
+          "observed_delta": 384757
+        },
+        "process_2_core_component_gauge{component=\"write_path\",name=\"sql_wait_seconds_total\",service=\"shop-order\",state=\"ok\"}": {
+          "first": 0,
+          "last": 15936.476917969,
+          "peak": 15936.476917969,
+          "observed_delta": 15936.476917969
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 10466,
+        "Com_insert": 6766,
+        "Com_rollback": 0,
+        "Com_select": 1328997,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 24,
+        "Innodb_buffer_pool_reads": 414129,
+        "Innodb_data_fsyncs": 407129,
+        "Innodb_log_waits": 0,
+        "Threads_created": 20
+      },
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-core-r3-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 3344992,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792388575795193000/outbox_record.ibd 708837376 1384456",
+          "/evidence/core_stable@002d07@002d1792388575795193000/payment_type.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792388575795193000/order_rule.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792388575795193000/order.ibd 918552576 1794056",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 629371,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5442.373112202501
+      },
+      "sql_clone_audit": {
+        "source_case": "final-capacity-core-r3",
+        "source_volume": "core-queue-perf-20261019-final-capacity-core-r3-mysql-data",
+        "original_stopped": true,
+        "original_read_only_mount": true,
+        "clone_volume": "core-sql-audit-20261019-final-capacity-core-r3-data",
+        "source_image_id": "sha256:b7e118f56c5963e079252e0d6e2978c9c010eb7fc7aaaec100e367796b5dd08f",
+        "queries": [
+          {
+            "name": "create",
+            "elapsed_including_docker_exec_seconds": 0.11216095788404346,
+            "sha256": "9152a0cddb070ec52275a5ef5fcf263e5141a8137b4505cdc7aa7ac37715baad"
+          },
+          {
+            "name": "indexes",
+            "elapsed_including_docker_exec_seconds": 0.08431333396583796,
+            "sha256": "6685d73113d73a41843b0878fa2fb8f6794fd93d27f3d05729f9030a4b044742"
+          },
+          {
+            "name": "exists_plan",
+            "elapsed_including_docker_exec_seconds": 0.0634998339228332,
+            "sha256": "d435ceaf25aaf84d8f4beed0563a74d6072d095a246b8830d1d38810f5773ca0"
+          },
+          {
+            "name": "load_plan",
+            "elapsed_including_docker_exec_seconds": 0.07024816703051329,
+            "sha256": "8e3824dc12ab37f3638a4a4efc490593b210a166bfaf33877fa3cee5ab6c518b"
+          },
+          {
+            "name": "exists_analyze",
+            "elapsed_including_docker_exec_seconds": 0.07781083323061466,
+            "sha256": "a281a5b335b8ddc9c1047fd8adc1c1b1e4907d73f75f07ec0e56e115de8c29cf"
+          }
+        ],
+        "exists_latency_control_seconds": [
+          0.06722454214468598,
+          0.06529654189944267,
+          0.07413308322429657,
+          0.07040800014510751,
+          0.07914891699329019
+        ],
+        "status": "PASS_AUDIT_EXECUTED",
+        "original_files_unchanged": true,
+        "diagnostic_clone_removed": true
+      },
+      "error_sample_rounds": 0
     },
     {
       "name": "final-capacity-native-r3",
@@ -941,18 +2614,414 @@
         "candidate": "baseline",
         "configuration_label": "final-D1+D3-gozero1.10.3-badger4.9.6"
       },
-      "status": "NOT_RUN_SPACE",
-      "说明": "没有启动负载，不作为零吞吐或实现失败。"
+      "source_head": "24b2a66ad38e927044e3ff8e8f50cd34b94b2b85",
+      "status": "FAIL",
+      "test_exit": 1,
+      "gates": {
+        "full_window": false,
+        "no_generator_drop": false,
+        "success_999": false,
+        "all_confirmed_match": true,
+        "observations_complete": false,
+        "no_guardian_stop": false,
+        "nonnegative_pending": true,
+        "drained_5s": false,
+        "physical_consistent": true,
+        "source_frozen": true,
+        "runtime_fingerprints_recorded": true
+      },
+      "main": {
+        "elapsed_including_inflight_seconds": 349.190255208,
+        "failed": 1557,
+        "failure_classes": {
+          "cancelled": 20,
+          "http_server": 1025,
+          "timeout": 512
+        },
+        "generator_dropped": 30517,
+        "generator_max_lag_ms": 55.54349999997339,
+        "generator_not_started": 501622,
+        "inflight_end_at": "2026-10-19T05:59:08.710429Z",
+        "interrupted": true,
+        "p50_ms": 3.616583,
+        "p95_ms": 126.968417,
+        "p99_ms": 423.727333,
+        "scheduled": 1200000,
+        "started": 667861,
+        "success_rps_including_inflight": 1908.1403047834392,
+        "success_rps_over_window": 1110.5066666666667,
+        "successful": 666304,
+        "target_rps": 2000,
+        "window_seconds": 600,
+        "window_start_ms": 10550.618
+      },
+      "confirmed_including_warmup": 671304,
+      "confirmed_missing_or_mismatched": 0,
+      "unknown_persisted": 1552,
+      "drain_seconds": 33.997302,
+      "sample_errors": 1,
+      "guardian_stop": "pending 达到 40000，停止发送，保留恢复数据",
+      "peak_pending": 40122,
+      "peak_broker_lag": 26,
+      "final": {
+        "pending": 0,
+        "orders": 672857,
+        "outbox": 672857,
+        "published": 672857,
+        "broker_pending": 0,
+        "broker_lag": 0
+      },
+      "non_request_fixture_orders": 1,
+      "resource_review": "FAIL_UNBOUNDED_FACADE_MAPS",
+      "binary_sha256": {
+        "replica-0": "63527034e889becd789113650f9f6bc809a5c692f43fda0d3024f5090e6c2863",
+        "replica-1": "23e435a6a14430ac16cdba5dae9522d307d5795f22aca26618d40af68641ff81",
+        "replica-2": "50e824e02e47a293a4fe0b60646336f434066b0da632b09ccfa4611493c75375",
+        "native-order": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-supplier": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "native-user": "ec403b30dff7f11b473a1c57c64d072e55c8074f6f29372de7e1632a195a9476",
+        "order-load": "567ebcc49cc9c17ccf26ff4af367c493ed20d4d1d0b784313c04ee457e3b4b8f"
+      },
+      "resources": {
+        "process_0_process_resident_memory_bytes": {
+          "quartile_medians": [
+            132374528.0,
+            303431680,
+            429867008.0,
+            559972352
+          ],
+          "peak": 571080704,
+          "first": 46071808,
+          "last": 571080704,
+          "count": 394
+        },
+        "process_0_go_goroutines": {
+          "quartile_medians": [
+            249.0,
+            548,
+            547.0,
+            546
+          ],
+          "peak": 1054,
+          "first": 27,
+          "last": 26,
+          "count": 394
+        },
+        "process_0_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            65081344.0,
+            185786368,
+            292364288.0,
+            379904000
+          ],
+          "peak": 478855168,
+          "first": 7356416,
+          "last": 407789568,
+          "count": 394
+        },
+        "process_1_process_resident_memory_bytes": {
+          "quartile_medians": [
+            62726144.0,
+            71139328,
+            66322432.0,
+            65142784
+          ],
+          "peak": 74629120,
+          "first": 47022080,
+          "last": 65830912,
+          "count": 394
+        },
+        "process_1_go_goroutines": {
+          "quartile_medians": [
+            24.0,
+            24,
+            24.0,
+            23
+          ],
+          "peak": 131,
+          "first": 23,
+          "last": 23,
+          "count": 394
+        },
+        "process_1_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            10371072.0,
+            11362304,
+            11993088.0,
+            12992512
+          ],
+          "peak": 23355392,
+          "first": 6995968,
+          "last": 14221312,
+          "count": 394
+        },
+        "process_2_process_resident_memory_bytes": {
+          "quartile_medians": [
+            325435392.0,
+            339591168,
+            346202112.0,
+            394051584
+          ],
+          "peak": 413958144,
+          "first": 54067200,
+          "last": 407519232,
+          "count": 394
+        },
+        "process_2_go_goroutines": {
+          "quartile_medians": [
+            68.0,
+            69,
+            69.0,
+            69
+          ],
+          "peak": 585,
+          "first": 43,
+          "last": 60,
+          "count": 394
+        },
+        "process_2_go_memstats_heap_inuse_bytes": {
+          "quartile_medians": [
+            73035776.0,
+            136642560,
+            147034112.0,
+            169779200
+          ],
+          "peak": 321765376,
+          "first": 38420480,
+          "last": 147685376,
+          "count": 394
+        }
+      },
+      "gc_pause_increments": [],
+      "observation_errors": [
+        {
+          "at": "2026-10-19T05:58:29.828589Z",
+          "errors": [
+            "sql_pending_exists: context deadline exceeded"
+          ]
+        }
+      ],
+      "gc_increment_note": "采样间go_gc_duration_seconds_sum增量；可能包含多次GC，不能直接当成单次STW耗时或业务停顿因果。",
+      "pool_and_phase_observations": {
+        "process_0_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_0_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle": {
+          "first": 1,
+          "last": 1,
+          "peak": 1,
+          "observed_delta": 0
+        },
+        "process_1_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 190642,
+          "peak": 190642,
+          "observed_delta": 190642
+        },
+        "process_1_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_in_use": {
+          "first": 0,
+          "last": 0,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_db_open": {
+          "first": 1,
+          "last": 1,
+          "peak": 2,
+          "observed_delta": 0
+        },
+        "process_1_native_db_wait_count_total": {
+          "first": 0,
+          "last": 63173,
+          "peak": 63173,
+          "observed_delta": 63173
+        },
+        "process_1_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 23.568175274,
+          "peak": 23.568175274,
+          "observed_delta": 23.568175274
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_1_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle": {
+          "first": 1,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 19
+        },
+        "process_2_native_db_idle_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_idle_time_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_in_use": {
+          "first": 1,
+          "last": 0,
+          "peak": 20,
+          "observed_delta": -1
+        },
+        "process_2_native_db_lifetime_closed_total": {
+          "first": 0,
+          "last": 0,
+          "peak": 0,
+          "observed_delta": 0
+        },
+        "process_2_native_db_open": {
+          "first": 2,
+          "last": 20,
+          "peak": 20,
+          "observed_delta": 18
+        },
+        "process_2_native_db_wait_count_total": {
+          "first": 0,
+          "last": 186726,
+          "peak": 186726,
+          "observed_delta": 186726
+        },
+        "process_2_native_db_wait_seconds_total": {
+          "first": 0,
+          "last": 8489.979584444,
+          "peak": 8489.979584444,
+          "observed_delta": 8489.979584444
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_load\"}": {
+          "first": 0.203087121,
+          "last": 28.827259766,
+          "peak": 28.827259766,
+          "observed_delta": 28.624172645
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_mark\"}": {
+          "first": 0,
+          "last": 128.514023584,
+          "peak": 128.514023584,
+          "observed_delta": 128.514023584
+        },
+        "process_2_native_phase_seconds_total{phase=\"outbox_publish\"}": {
+          "first": 0.000472584,
+          "last": 772.862266692,
+          "peak": 772.862266692,
+          "observed_delta": 772.861794108
+        },
+        "process_2_native_phase_seconds_total{phase=\"sql_sync\"}": {
+          "first": 0.004635792,
+          "last": 298.349331889,
+          "peak": 298.349331889,
+          "observed_delta": 298.344696097
+        }
+      },
+      "pool_phase_note": "累计值含预热、主窗和排空；并行操作秒不能当成壁钟。缺少进程或阶段的指标不能写为0。",
+      "mysql_protocol_deltas": {
+        "Com_commit": 16667,
+        "Com_insert": 17280,
+        "Com_rollback": 0,
+        "Com_select": 1380427,
+        "Com_stmt_close": 0,
+        "Com_stmt_execute": 0,
+        "Com_stmt_prepare": 0,
+        "Connections": 26,
+        "Innodb_buffer_pool_reads": 80241,
+        "Innodb_data_fsyncs": 342772,
+        "Innodb_log_waits": 0,
+        "Threads_created": 20
+      },
+      "storage_budget": {
+        "volume": "core-queue-perf-20261019-final-capacity-native-r3-mysql-data",
+        "original_stopped": true,
+        "read_only_mount": true,
+        "allocated_kib": 3352064,
+        "ibd_file_stat_name_logicalbytes_blocks": [
+          "/evidence/core_stable@002d07@002d1792389119742905000/outbox_record.ibd 767557632 1499144",
+          "/evidence/core_stable@002d07@002d1792389119742905000/payment_type.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792389119742905000/order_rule.ibd 196608 392",
+          "/evidence/core_stable@002d07@002d1792389119742905000/order.ibd 717225984 1400840",
+          "/evidence/sys/sys_config.ibd 114688 224",
+          "/evidence/mysql.ibd 32505856 63496"
+        ],
+        "final_business_orders": 672857,
+        "gross_volume_bytes_per_order_including_fixed_overhead": 5101.401242760348
+      },
+      "error_sample_rounds": 1
     }
   ],
   "overall": {
-    "status": "INCOMPLETE_SPACE_BLOCKED",
-    "completed_long_windows": 1,
     "planned_long_windows": 6,
+    "长期内存边界": "两侧user facade的幂等映射和事件去重sync.Map无回收路径，不能宣称长期有界。",
+    "status": "EXECUTED_CAPACITY_FAIL",
+    "completed_long_windows": 6,
     "core_2000_per_second_600_seconds": "FAIL_CURRENT_CONFIGURATION",
-    "native_2000_per_second_600_seconds": "NOT_RUN",
-    "待确认": "是否允许仅将本轮新失败测试卷无损归档、恢复校验后回收原卷；尚未批准。",
-    "长期内存边界": "两侧user facade的幂等映射和事件去重sync.Map无回收路径，不能宣称长期有界。"
+    "core_raw_window_passes": 0,
+    "native_2000_per_second_600_seconds": "FAIL_CURRENT_CONFIGURATION",
+    "native_raw_window_passes": 0
+  },
+  "data_retention": {
+    "说明": "用户两次明确清理本机Docker，旧测试SQL/Redis原卷包括首个Core长窗已回收；原请求、结果、日志和Badger核对副本仍在。不能宣称旧SQL原卷仍可恢复。此次续跑的新失败卷保留，其他项目未清理。",
+    "cleanup_records": [
+      ".temp/disk-cleanup-20261019-123334/",
+      ".temp/disk-cleanup-followup-20261019-124433/"
+    ]
   },
   "independent_runtime_diagnosis": {
     "说明": "不依赖Core的标准库诊断；不能作为07业务同因已证实或容量成绩。",
@@ -1036,5 +3105,42 @@
         "binary_sha256": "4970326c9fa6af84a4727464bb33330504c1fc77daf04f34d44ee831048d8622"
       }
     ]
+  },
+  "environment_observation": {
+    "snapshot_at": "2026-10-19T06:11:46.585959+00:00",
+    "stability": "NOT_ESTABLISHED",
+    "unchanged_other_containers": 27,
+    "unchanged_other_mount_sets": 31,
+    "observed_runtime_changes": [
+      {
+        "name": "/bitzoom-e4-cross-liq-uat-20261017-position-1",
+        "new_started_at": "2026-10-19T05:42:18.818985422Z",
+        "id_changed": true,
+        "image_changed": true,
+        "mounts_unchanged": true
+      },
+      {
+        "name": "/bitzoom-e4-cross-liq-uat-20261017-user-1",
+        "new_started_at": "2026-10-19T05:42:18.82786263Z",
+        "id_changed": true,
+        "image_changed": true,
+        "mounts_unchanged": true
+      },
+      {
+        "name": "/bitzoom-e4-cross-liq-uat-20261017-fund-1",
+        "new_started_at": "2026-10-19T06:11:07.764118178Z",
+        "id_changed": true,
+        "image_changed": true,
+        "mounts_unchanged": true
+      },
+      {
+        "name": "/bitzoom-e4-cross-liq-uat-20261017-trade-1",
+        "new_started_at": "2026-10-19T06:03:46.524561835Z",
+        "id_changed": true,
+        "image_changed": true,
+        "mounts_unchanged": true
+      }
+    ],
+    "说明": "截至该快照，其他项目user/position在负载中、trade/fund在负载结束后的核对期间发生重建；本轮未操作它们，来源未查证。背景并非恒定，不能从Core/原生数值差直接推导框架开销或生产容量。"
   }
 }

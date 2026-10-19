@@ -231,3 +231,5 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 07在 `remoteMySQLConfig` 显式启用驱动 `InterpolateParams`，字符集固定utf8mb4；Core全局零值仍false，GORM PrepareStmt仍false。完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未写 `interpolateParams=true` 时保持旧协议；现有解析器识别出的格式/参数错误在启动阶段拒绝，错误不包含DSN或凭据。DSN入口沿用Config字段映射，不是任意驱动参数直通，未知参数未接线。该选项保留参数绑定，不允许手工拼SQL。
 
 单变量三组结果见[性能记录](../../docs/codex/ORDER_QUEUE_PERFORMANCE_2026-10-19.md)。SQL协议往返减少不等于600秒容量通过，最终组合的独立阶梯与长窗见[最终容量记录](../../docs/codex/ORDER_QUEUE_FINAL_CAPACITY_2026-10-19.md)，修复、回归和未解决边界见[执行记录](../../docs/codex/ORDER_QUEUE_EXECUTION_2026-10-19.md)。
+
+最终8个阶梯及Core/原生各三轮2000/s×600秒目标测试均已执行，长窗各0/3通过；全部确认请求逐键匹配，仍有守护停发、发送失败/丢弃及超5秒排空。两侧用户facade幂等/去重映射无回收，长期资源边界未关闭。本示例当前不能作为该容量等级已达标的模板。
