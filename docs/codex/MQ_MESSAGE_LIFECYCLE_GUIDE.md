@@ -175,7 +175,7 @@ Redis 在真实投递前持久增加 Subject+Group+Message attempt。Handler 成
 
 JetStream 使用 Broker delivery count；达到上限时以源 stream sequence、Subject 和 group 生成稳定 `Nats-Msg-Id`，同步发布 DLQ 并等待 ACK，之后才 `Term`。发布失败时 NAK 原消息。`MaxAckPending` 使用 Broker 原生背压。
 
-Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。超时后可能与迟迟不退出的旧调用短暂重叠，业务幂等仍是硬要求。
+Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。Redis 显式 `KeyConcurrency>1` 的可靠订阅在超时/取消后继续占住原 worker，直到真实 handler 退出，防止旧调用与同 key 重试重叠；不合作的 handler 会延迟会话退出和 `Close`。Redis 串行分支及其他 Provider 的既有超时实现未在本次分 key 修复中变更，不能据此推断它们具备同样的退出等待保证。业务幂等仍是硬要求，见[跨窗口修复与验收](REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 
 ## 容量与故障窗口
 

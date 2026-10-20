@@ -86,7 +86,10 @@ type ReliableSubscribeOptions struct {
 	Consumer      string
 	MinIdle       time.Duration
 	ClaimInterval time.Duration
-	Count         int64
+	// Count 在 Redis 分 key 模式中同时限制分页和本 owner 的预取预算；
+	// 有效值至少为 KeyConcurrency，未设置时为 KeyConcurrency*4。
+	// 接管的既有超限 PEL 只分页恢复；串行模式仍固定为 1。
+	Count int64
 	// KeyConcurrency 是同一 active owner 内可并行处理的 OrderingKey 数。
 	// 零值和 1 保持整 subject 串行。
 	KeyConcurrency int

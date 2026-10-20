@@ -10,7 +10,7 @@
 
 ### Changed
 
-- 无。
+- Redis 分 key 可靠订阅的 `Count` 同时约束分页和本 owner 的预取预算；默认 `KeyConcurrency*4`，有效下限为 `KeyConcurrency`。预算耗尽时背压新读取，接管的既有超限 PEL 只分页恢复。零值/1 的订阅仍串行。
 
 ### Deprecated
 
@@ -22,7 +22,7 @@
 
 ### Fixed
 
-- 无。
+- Redis 可靠订阅移除跨读取批次的等待屏障，使用会话级固定 worker；同 key 保留最早失败屏障，独立 key 可跨窗口继续。补齐 owner 原子 ACK/读取校验、超时 handler 退出等待、ACK 响应丢失后的 PEL 复核及低基数观测。真实 Redis、正式 EventBridge 链、兼容性和未验证项见[修复验收记录](docs/codex/REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 
 ### Security
 

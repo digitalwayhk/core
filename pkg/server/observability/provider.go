@@ -67,6 +67,7 @@ var allowedGaugeNames = map[string]struct{}{
 	"retained_bytes":                       {},
 	"backlog_messages":                     {},
 	"pending_messages":                     {},
+	"prefetch_capacity":                    {}, "prefetched_messages": {}, "queued_work": {},
 }
 
 var allowedCounterNames = map[string]struct{}{
@@ -84,6 +85,10 @@ var allowedCounterNames = map[string]struct{}{
 	"dead_letter_total":                 {},
 	"dead_letter_fail_total":            {},
 	"publish_rejected_total":            {},
+	"reliable_new_read_total":           {}, "reliable_reclaim_read_total": {},
+	"reliable_publish_to_read_seconds_total": {}, "reliable_schedule_wait_seconds_total": {},
+	"reliable_handler_seconds_total": {}, "reliable_pel_wait_seconds_total": {},
+	"reliable_pel_wait_samples_total": {}, "reliable_scheduled_total": {}, "reliable_handler_calls_total": {},
 }
 
 func filterGauges(in map[string]float64) map[string]float64 {

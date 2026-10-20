@@ -12,6 +12,9 @@ import (
 )
 
 var redisReliableAckScript = redis.NewScript(`
+if redis.call("GET", KEYS[3]) ~= ARGV[3] then
+  return redis.error_reply("RELIABLE_OWNER_LOST")
+end
 local retryType = redis.call("TYPE", KEYS[2])["ok"]
 if retryType ~= "none" and retryType ~= "hash" then
   return redis.error_reply("RETRY_STATE_WRONG_TYPE")
@@ -22,6 +25,9 @@ return acked
 `)
 
 var redisReliableDeadLetterScript = redis.NewScript(`
+if redis.call("GET", KEYS[5]) ~= ARGV[8] then
+  return redis.error_reply("RELIABLE_OWNER_LOST")
+end
 local retryType = redis.call("TYPE", KEYS[2])["ok"]
 local dedupeType = redis.call("TYPE", KEYS[3])["ok"]
 local dlqType = redis.call("TYPE", KEYS[4])["ok"]
@@ -50,6 +56,13 @@ redis.call("HDEL", KEYS[2], ARGV[2])
 return 1
 `)
 
+var redisReliablePlainAckScript = redis.NewScript(`
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then
+  return redis.error_reply("RELIABLE_OWNER_LOST")
+end
+return redis.call("XACK", KEYS[1], ARGV[1], ARGV[2])
+`)
+
 type redisReliableRetryError struct {
 	cause error
 	delay time.Duration
@@ -64,17 +77,6 @@ func redisReliableRetryDelay(err error) time.Duration {
 		return retry.delay
 	}
 	return 50 * time.Millisecond
-}
-
-func nextRedisReliableRetry(now time.Time, failures []reliableKeyedFailure) time.Time {
-	next := now
-	for _, failure := range failures {
-		candidate := now.Add(redisReliableRetryDelay(failure.err))
-		if candidate.After(next) {
-			next = candidate
-		}
-	}
-	return next
 }
 
 func redisRetryDelay(policy RetryPolicy, attempt int64) time.Duration {
@@ -131,17 +133,24 @@ func (r *RedisStreamProvider) processReliableMessage(
 	message := &Message{ID: messageID, Subject: subject, Data: data}
 
 	policy := options.lifecycle
+	invoke := callReliableHandler
+	if options.KeyConcurrency > 1 {
+		invoke = callReliableKeyedHandler
+	}
 	if policy == nil || policy.Retry.MaxDeliveries == 0 {
 		message.Ack = func() error {
-			return r.client.XAck(ctx, streamKey, options.Group, messageID).Err()
+			return errors.New("redis-stream: reliable delivery is acknowledged after handler success")
 		}
-		if err := callReliableHandler(ctx, 0, handler, message); err != nil {
+		if err := invoke(ctx, 0, handler, message); err != nil {
 			return err
 		}
-		if !r.refreshOwner(ctx, subject, options) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !r.renewOwner(ctx, subject, options) {
 			return errors.New("redis-stream: reliable owner lost before ack")
 		}
-		return r.client.XAck(ctx, streamKey, options.Group, messageID).Err()
+		return redisReliablePlainAckScript.Run(ctx, r.client, []string{streamKey, r.ownerLockKey(subject, options.Group)}, options.Group, messageID, options.Consumer).Err()
 	}
 
 	retryKey := r.redisReliableRetryKey(subject, options.Group)
@@ -153,12 +162,15 @@ func (r *RedisStreamProvider) processReliableMessage(
 		r.lifecycleMetrics.redelivered.Add(1)
 	}
 	if attempt <= int64(policy.Retry.MaxDeliveries) {
-		err = callReliableHandler(ctx, policy.Retry.HandlerTimeout, handler, message)
+		err = invoke(ctx, policy.Retry.HandlerTimeout, handler, message)
 		if err == nil {
-			if !r.refreshOwner(ctx, subject, options) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !r.renewOwner(ctx, subject, options) {
 				return errors.New("redis-stream: reliable owner lost before ack")
 			}
-			if ackErr := redisReliableAckScript.Run(ctx, r.client, []string{streamKey, retryKey}, options.Group, messageID).Err(); ackErr != nil {
+			if ackErr := redisReliableAckScript.Run(ctx, r.client, []string{streamKey, retryKey, r.ownerLockKey(subject, options.Group)}, options.Group, messageID, options.Consumer).Err(); ackErr != nil {
 				return fmt.Errorf("redis-stream: ack successful delivery: %w", ackErr)
 			}
 			return nil
@@ -168,7 +180,10 @@ func (r *RedisStreamProvider) processReliableMessage(
 		}
 	}
 
-	if !r.refreshOwner(ctx, subject, options) {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !r.renewOwner(ctx, subject, options) {
 		return errors.New("redis-stream: reliable owner lost before dead letter")
 	}
 	dedupeID := redisDeadLetterDedupeID(subject, options.Group, messageID)
@@ -177,13 +192,32 @@ func (r *RedisStreamProvider) processReliableMessage(
 		retryKey,
 		r.redisReliableDeadLetterDedupeKey(subject, options.Group),
 		r.streamKey(policy.Retry.DeadLetterSubject),
-	}, options.Group, messageID, dedupeID, data, subject, orderingKey, idempotencyKey).Err()
+		r.ownerLockKey(subject, options.Group),
+	}, options.Group, messageID, dedupeID, data, subject, orderingKey, idempotencyKey, options.Consumer).Err()
 	if err != nil {
 		r.lifecycleMetrics.deadLetterFailed.Add(1)
 		return fmt.Errorf("redis-stream: dead letter transfer: %w", err)
 	}
 	r.lifecycleMetrics.deadLetters.Add(1)
 	return nil
+}
+
+// 超时/取消是未知结果。占住原 worker，直到实际 handler 退出，才能释放同 key
+// 的失败屏障；否则每次超时都会遗留 goroutine，并与下一次重试并行业务写入。
+func callReliableKeyedHandler(ctx context.Context, timeout time.Duration, handler func(*Message) error, message *Message) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	done := make(chan struct{})
+	err := callReliableHandler(ctx, timeout, func(message *Message) error {
+		defer close(done)
+		return handler(message)
+	}, message)
+	<-done
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func callReliableHandler(ctx context.Context, timeout time.Duration, handler func(*Message) error, message *Message) (err error) {
