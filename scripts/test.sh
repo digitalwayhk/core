@@ -16,6 +16,7 @@ case "${1:-quick}" in
     ;;
   security)
     security_packages=(
+      ./pkg/server/internal/openapiutil
       ./pkg/server/config
       ./pkg/server/safe/casdoor
       ./pkg/server/authstate

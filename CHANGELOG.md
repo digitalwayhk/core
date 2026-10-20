@@ -28,6 +28,12 @@
 
 - 无。
 
+## [v1.4.3] - 2026-10-20
+
+### Security
+
+- `kin-openapi v0.144.0 → v0.149.0`，间接依赖 `jsonschema/v6 v6.0.2 → v6.0.3`。覆盖响应头 content 空指针、OAS 3.1 非有限 YAML 数值、递归组合 schema、缺失 array items 和编码路径鉴权错配五项上游公告；新增实际 RED→GREEN 回归并纳入 `security` 门禁。Core 标准运行链不接入该依赖的请求/响应过滤中间件，本次不改变 Core 的认证域、公开 API 或 Redis 行为。升级及验证边界见 [v1.4.3 发布说明](docs/codex/RELEASE_V1_4_3_2026-10-20.md)。
+
 ## [v1.4.2] - 2026-10-20
 
 ### Fixed

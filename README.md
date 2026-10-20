@@ -22,7 +22,7 @@ Digitalway Core 不做通用技术框架，而是把商业服务的开发方式*
 go get github.com/digitalwayhk/core@latest
 ```
 
-推荐使用 `v1.4.2`（[Redis 可靠订阅跨窗口修复与升级说明](./docs/codex/RELEASE_V1_4_2_2026-10-20.md)），包含 v1.4.1 的内嵌编译产物补齐；此前功能与 Go 源码验证见 [v1.4.0 记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
+推荐使用 `v1.4.3`（[OpenAPI 依赖安全升级说明](./docs/codex/RELEASE_V1_4_3_2026-10-20.md)），包含 [v1.4.2 的 Redis 可靠订阅跨窗口修复](./docs/codex/RELEASE_V1_4_2_2026-10-20.md)及 v1.4.1 的内嵌编译产物补齐；此前功能与 Go 源码验证见 [v1.4.0 记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
 
 ## 目录
 
