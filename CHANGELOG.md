@@ -6,11 +6,11 @@
 
 ### Added
 
-- 无。
+- Redis Streams 加性连接预算 CommandPoolSize/BlockingReadPoolSize 与 WithConfig 构造器，默认command8/blocking16；真实双池低基数观测及CPU1/2、正式EventBridge链回归。详见[候选验收](docs/codex/RELEASE_V1_4_5_2026-10-20.md)。
 
 ### Changed
 
-- 无。
+- 每Provider隔离阻塞XREADGROUP与控制命令，连接数有界且不依赖CPU；读预算不足仍背压。关闭先打断阻塞I/O再等待handler并释放命令池，Close幂等且终态；重复consumer登记拒绝。
 
 ### Deprecated
 
@@ -22,7 +22,7 @@
 
 ### Fixed
 
-- 无。
+- 多空闲主题阻塞读取不再占尽owner续租/校验、ACK、发布和生命周期的连接；取消清理订阅登记并消除登记与关闭的WaitGroup竞态。保留跨窗口持续调度、顺序、失败屏障和安全回收，不改跨实例owner。
 
 ### Security
 

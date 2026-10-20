@@ -8,6 +8,8 @@ MQ 命令计数测试读取 Redis 全局统计，不能与其他包的流量共�
 
 ## 标准集成测试模板
 
+Redis连接池变更必须以独占真实Redis运行CPU1/2、多空闲阻塞主题与活跃主题，受控确认长轮询未退出时renew/check/ACK/publish可取得命令资源；保留旧源码RED，不以加长阈值或mock代替。覆盖serial/keyed、慢handler取消、断连恢复、pending顺序、订阅启停资源、ServiceContext正式链，并运行mq/event/router/config/observability完整普通与race。固定负载对照需同订阅数/总预算/handler，显式CORE_TEST_POOL_MEASURE=1运行TestRedisPoolFixedWorkloadMeasurement；池累计等待不等于单协程等待比例，短窗积压排空不等于稳态吞吐。详见[连接池验收](../../codex/REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。
+
 集成测试是平台服务的标准能力，不是可选示例。为新服务创建集成测试时，必须优先复用以下两层模板。
 
 ### 公共测试能力

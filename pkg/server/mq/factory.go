@@ -88,7 +88,10 @@ func buildProvider(ctx context.Context, cfg *config.MQConfig) (MQProvider, error
 
 	switch cfg.Provider {
 	case "", "redis-stream":
-		provider := NewRedisStreamProvider(cfg.RedisStream.Addr, cfg.RedisStream.Prefix, cfg.RedisStream.DB)
+		if err := cfg.RedisStream.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProviderConfiguration, err)
+		}
+		provider := NewRedisStreamProviderWithConfig(cfg.RedisStream)
 		if err := provider.Connect(ctx); err != nil {
 			return nil, fmt.Errorf("%w: connect redis-stream: %v", ErrProviderUnavailable, err)
 		}

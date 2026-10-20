@@ -180,6 +180,14 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 
 go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 
+## Redis Streams 单实例连接预算
+
+Redis Provider 将阻塞 XREADGROUP 与命令分为两个有限连接池；旧构造器和零配置分别采用 command8、blocking16，不再按 CPU 推导。MQ.RedisStream 的 CommandPoolSize/BlockingReadPoolSize 可显式配置，0用默认，负数拒绝；MQ缺省仍off。每池 PoolSize=MaxActiveConns，单Provider预算C+B，多Provider、发现和缓存另计，不为每个订阅新建池。
+
+按普通订阅和串行可靠订阅的潜在阻塞并发选择B；超过B只在读池背压，不再占尽续租/ACK/发布的命令连接。keyed无BLOCK调度仍使用命令池；C也可能因真实命令负载排队，8/16不是所有项目的最优配置。用固定command/blocking角色的pool limit/total/idle/in_use、wait_total/wait_seconds_total/timeouts_total及redis_blocking_subscriptions核对。后者是含standby的登记数，不是实际blocked数；未采集不能填0。go-redis9.21等待统计只含等待成功取连接路径，不能冒充全部取消等待。
+
+取消删除登记，但不承诺立即打断已发网络读；Close先关闭读池打断I/O、等待真实handler退出、再关命令池。Close终态且幂等，重启新建Provider；不合作handler仍可能延迟关闭。禁止通过提前ACK、延长PoolTimeout、调整GOMAXPROCS、扩大主题容量或清pending掩盖资源饥饿。具体预算、指标口径及真实RED/GREEN见[连接池专项](../../codex/REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。不改变owner、业务幂等与生命周期契约。
+
 ## 日志与错误
 
 - `logx.Infow`：生命周期、切换、成功降级。

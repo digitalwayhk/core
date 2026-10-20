@@ -89,6 +89,8 @@
 
 ## 配置
 
+Redis连接池隔离新增 `mq.NewRedisStreamProviderWithConfig(config.RedisStreamMQConfig)`，旧三参构造器保留；零预算采用有限command8/blocking16。字段闭集在配置矩阵维护。Connect校验实际预算；Close幂等且终态，重启需新Provider；同consumer重复登记明确拒绝。消息/group/PEL/ACK与跨窗口调度不变，无需清历史；取消不保证已发socket读取立即返回，Close仍等待真实handler退出。详见[升级与验证](REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。
+
 - 项目自有 Server/Auth、Cluster、Transport、MQ 字段、默认值、owner、支持状态和运行时证据仅维护在 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
 - `supported` 值属于兼容表面；`rejected` 值只承诺在启动前返回可操作错误；`upstream` 字段遵循 go-zero 对应版本的契约。
 - `Cluster.Mode=off` 和 `MQ.Mode=off` 的旧字段保留规则属于迁移兼容，不代表关闭字段已获得运行时支持。

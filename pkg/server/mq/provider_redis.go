@@ -20,21 +20,28 @@ import (
 // RedisStreamProvider implements MQProvider using Redis Streams.
 // It is the default development-friendly provider requiring only Redis.
 type RedisStreamProvider struct {
-	addr             string
-	db               int
-	prefix           string
-	client           *redis.Client
-	mu               sync.Mutex
-	subs             map[string]context.CancelFunc
-	reliableMetrics  map[string]*redisReliableSubscriptionMetrics
-	lifecycleMetrics lifecycleProviderMetrics
-	deliveryMetrics  redisReliableDeliveryMetrics
-	wg               sync.WaitGroup
+	addr                 string
+	db                   int
+	prefix               string
+	client               *redis.Client
+	blockingClient       *redis.Client
+	commandPoolSize      int
+	blockingReadPoolSize int
+	closed               bool
+	closeOnce            sync.Once
+	closeErr             error
+	mu                   sync.Mutex
+	subs                 map[string]context.CancelFunc
+	reliableMetrics      map[string]*redisReliableSubscriptionMetrics
+	lifecycleMetrics     lifecycleProviderMetrics
+	deliveryMetrics      redisReliableDeliveryMetrics
+	wg                   sync.WaitGroup
 }
 
 type redisReliableSubscriptionMetrics struct {
 	*redisReliableDeliveryMetrics
 	configured       int64
+	blockingReads    bool
 	inflight         atomic.Int64
 	peak             atomic.Int64
 	activeKeys       atomic.Int64
@@ -83,32 +90,10 @@ func NewRedisStreamProvider(addr, prefix string, db int) *RedisStreamProvider {
 func (r *RedisStreamProvider) Name() string { return "redis-stream" }
 
 // Connect initialises the Redis client. A PING is issued to verify connectivity.
-func (r *RedisStreamProvider) Connect(ctx context.Context) error {
-	r.client = redis.NewClient(&redis.Options{
-		Addr:                  r.addr,
-		DB:                    r.db,
-		ContextTimeoutEnabled: true,
-	})
-	if err := r.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("redis-stream: connect to %s: %w", r.addr, err)
-	}
-	return nil
-}
+func (r *RedisStreamProvider) Connect(ctx context.Context) error { return r.connectRedisPools(ctx) }
 
-// Close unsubscribes all consumers and closes the Redis connection.
-func (r *RedisStreamProvider) Close() error {
-	r.mu.Lock()
-	for _, cancel := range r.subs {
-		cancel()
-	}
-	r.subs = make(map[string]context.CancelFunc)
-	r.mu.Unlock()
-	r.wg.Wait()
-	if r.client != nil {
-		return r.client.Close()
-	}
-	return nil
-}
+// Close 取消订阅、打断阻塞读取，再等待原有工作者与owner释放，最后关闭命令池。
+func (r *RedisStreamProvider) Close() error { return r.closeRedisPools() }
 
 // OrderedReliableInfo 声明 Redis Streams 在单 active owner 下的 ordered-reliable 能力。
 // 零值保持整 stream 串行；显式 KeyConcurrency 在单 owner 内按 key 并行。
@@ -163,20 +148,20 @@ func (r *RedisStreamProvider) Subscribe(ctx context.Context, subject string, han
 
 	cctx, cancel := context.WithCancel(ctx)
 
-	r.mu.Lock()
-	r.subs[subject] = cancel
-	r.mu.Unlock()
-
-	r.wg.Add(1)
+	stop, err := r.registerRedisSubscription(subject+"|observer|"+consumer, cancel, nil)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		defer r.wg.Done()
+		defer stop()
 		for {
 			select {
 			case <-cctx.Done():
 				return
 			default:
 			}
-			entries, err := r.client.XReadGroup(cctx, &redis.XReadGroupArgs{
+			entries, err := r.blockingClient.XReadGroup(cctx, &redis.XReadGroupArgs{
 				Group:    group,
 				Consumer: consumer,
 				Streams:  []string{key, ">"},
@@ -205,7 +190,7 @@ func (r *RedisStreamProvider) Subscribe(ctx context.Context, subject string, han
 			}
 		}
 	}()
-	return cancel, nil
+	return stop, nil
 }
 
 // SubscribeReliable 使用调用方提供的逻辑服务组消费。处理失败的消息保持 pending，
@@ -276,7 +261,7 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	subscriptionKey := subject + "|" + options.Group + "|" + options.Consumer
-	metrics := &redisReliableSubscriptionMetrics{configured: int64(options.KeyConcurrency), redisReliableDeliveryMetrics: &r.deliveryMetrics}
+	metrics := &redisReliableSubscriptionMetrics{configured: int64(options.KeyConcurrency), blockingReads: options.KeyConcurrency == 1 && !options.SharedKeys, redisReliableDeliveryMetrics: &r.deliveryMetrics}
 	observedHandler := func(message *Message) error {
 		metrics.handlerCalls.Add(1)
 		started := time.Now()
@@ -296,26 +281,20 @@ func (r *RedisStreamProvider) SubscribeReliable(
 		defer metrics.inflight.Add(-1)
 		return handler(message)
 	}
-	r.mu.Lock()
-	r.subs[subscriptionKey] = cancel
-	r.reliableMetrics[subscriptionKey] = metrics
-	r.mu.Unlock()
-	r.wg.Add(1)
+	stop, err := r.registerRedisSubscription(subscriptionKey, cancel, metrics)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		defer r.wg.Done()
+		defer stop()
 		if options.KeyConcurrency > 1 || options.SharedKeys {
 			r.runReliableKeyedSubscriber(cctx, key, subject, options, observedHandler, metrics)
 			return
 		}
 		r.runReliableSubscriber(cctx, key, subject, options, observedHandler)
 	}()
-	return func() {
-		cancel()
-		r.mu.Lock()
-		delete(r.subs, subscriptionKey)
-		delete(r.reliableMetrics, subscriptionKey)
-		r.mu.Unlock()
-	}, nil
+	return stop, nil
 }
 
 // SupportsKeyedReliableConcurrency 声明 Redis provider 实现 owner 内分键调度。
@@ -483,7 +462,8 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
-		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		readStarted := time.Now()
+		entries, err := r.blockingClient.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group: options.Group, Consumer: options.Consumer,
 			Streams: []string{key, ">"}, Count: readCount, Block: 200 * time.Millisecond,
 		}).Result()
@@ -493,7 +473,13 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
+		readAt := time.Now()
 		for _, stream := range entries {
+			observeRedisKeyedRead(ctx, readStarted, readAt, "new", key, options.Group, stream.Messages)
+			for _, item := range stream.Messages {
+				r.deliveryMetrics.newRead.Add(1)
+				r.deliveryMetrics.publishToReadNanos.Add(redisMessageAge(item.ID, readAt).Nanoseconds())
+			}
 			if delay := r.handleReliableMessages(ctx, key, subject, options, stream.Messages, handler); delay > 0 {
 				select {
 				case <-ctx.Done():
@@ -508,21 +494,32 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 func (*RedisStreamProvider) ComponentName() string { return "mq" }
 
 func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observability.RuntimeComponentSnapshot {
-	if r == nil || r.client == nil {
+	if r == nil {
 		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
 	}
 	r.mu.Lock()
+	if r.closed || r.client == nil {
+		r.mu.Unlock()
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	blockingSubscriptions := len(r.subs) - len(r.reliableMetrics)
 	metrics := make([]*redisReliableSubscriptionMetrics, 0, len(r.reliableMetrics))
 	for _, item := range r.reliableMetrics {
 		metrics = append(metrics, item)
+		if item.blockingReads {
+			blockingSubscriptions++
+		}
 	}
 	r.mu.Unlock()
 	gauges := map[string]float64{
 		"key_concurrency": 0, "handler_inflight": 0, "handler_peak": 0,
-		"active_keys": 0, "blocked_keys": 0, "pending_keys": 0,
+		"redis_blocking_subscriptions": float64(blockingSubscriptions),
+		"active_keys":                  0, "blocked_keys": 0, "pending_keys": 0,
 		"prefetch_capacity": 0, "prefetched_messages": 0, "queued_work": 0,
 	}
 	counters := r.lifecycleMetrics.snapshot()
+	redisPoolMetrics("command", r.client, gauges, counters)
+	redisPoolMetrics("blocking", r.blockingClient, gauges, counters)
 	for _, item := range metrics {
 		gauges["key_concurrency"] += float64(item.configured)
 		gauges["handler_inflight"] += float64(item.inflight.Load())

@@ -247,6 +247,8 @@
 | `ServerConfig.MQ.RedisStream.Addr` | supported | RedisStream provider | Redis client 构造消费 |
 | `ServerConfig.MQ.RedisStream.DB` | supported | RedisStream provider | Redis DB 选择消费 |
 | `ServerConfig.MQ.RedisStream.Prefix` | supported | RedisStream provider | stream key/subject 构造消费 |
+| `ServerConfig.MQ.RedisStream.CommandPoolSize` | supported | Redis Provider 命令client | 零值8；owner/ACK/发布/生命周期和非阻塞Lua共用有限命令池；PoolSize=MaxActiveConns，负数/超int32拒绝 |
+| `ServerConfig.MQ.RedisStream.BlockingReadPoolSize` | supported | Redis Provider 阻塞读client | 零值16；仅现有阻塞XREADGROUP，超过预算排队；不按CPU或每订阅增池 |
 | `ServerConfig.MQ.NATSJetStream` | supported | NATS JetStream provider | factory 透传连接参数并由 MQManager 关闭 |
 | `ServerConfig.MQ.NATSJetStream.URL` | supported | NATS JetStream provider | NATS 连接构造消费 |
 | `ServerConfig.MQ.NATSJetStream.StreamPrefix` | supported | NATS JetStream provider | stream/subject 命名消费 |

@@ -138,6 +138,8 @@ NATS 使用 durable consumer 的 `AckFloor.Stream`、`NumAckPending`、`NumPendi
 
 ## Provider 能力矩阵
 
+Redis单实例阻塞读取与控制命令使用有限独立池，默认command8/blocking16；按部署潜在阻塞订阅数配置读预算并核对PoolStats，见[连接池预算与验证](REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。连接饥饿可拖慢消费和回收，但不等于已证明capacity reached的唯一根因。隔离连接不改变必需组、保留、安全前沿、主题硬限或回收门禁，不得以扩大容量、observe或清pending掩盖问题。
+
 ### 多实例 worker、预算与容量采集
 
 内置 Redis/NATS 的后台轮次在完整 Inspect 之前取得 subject 所有权。owner 跨周期续持有界租约，standby 不做全组或 pending 扫描；Redis standby 用 GET 排除竞争，只有 owner 原子续约，不能把检查放大转移成所有实例执行 Lua。租约有效期为 `max(1 秒, 3×Interval + 3×TimeBudget)`，复用既有 owner key / KV 锁编码。进程退出后停止续约，关闭时所有租约释放共享 1 秒预算，未成功释放的由 TTL/到期接管。旧 owner 不得释放新 owner 的锁。
