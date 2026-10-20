@@ -28,7 +28,7 @@ cd /tmp/core-demo10-worker2
 CORE_DEMO10_ROLE=worker CORE_DEMO10_INDEX=2 CORE_DEMO10_REDIS_ADDR=127.0.0.1:16379 CORE_DEMO10_PREFIX=example10-local /tmp/core-demo10 -p 50300 -grpc 51300 -view 0
 ```
 
-系统端口为上述 `-p`，业务端口分别为 `50101/50201/50301`。实例编号必须唯一；每个运行目录保存自身配置/身份。内部 insecure gRPC 仅用于本机演示，生产须采用 mTLS 或可信 mesh。
+系统端口为上述 `-p`，业务端口分别为 `50101/50201/50301`。实例编号必须唯一；每个运行目录保存自身配置；本例沿用框架默认实例身份模式，不承诺 instanceID 跨重启不变，执行租约 token 也不永久绑定实例。内部 insecure gRPC 仅用于本机演示，生产须采用 mTLS 或可信 mesh。
 
 ## 操作与观察
 

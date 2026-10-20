@@ -38,9 +38,23 @@ stop, err := sc.SubscribeEvent(event.Subscription{
 
 共享读取 Lua 将 PEL 数检查与 `XREADGROUP` 放在同一个原子命令，多个实例不能分别突破 W。每轮 PEL 和新消息各最多一页，有限轮询，无整批完成等待；失败只保留本 key 的 retryAt，Broker 租约也保存短退避，其他实例不能绕过 Backoff。旧 PEL 已超过 W 时分页恢复，不继续扩大。
 
-每实例 tasks、readTimes 各不超过 W；worker 为 N，续约 goroutine 至多 N，结果通道 N。活跃执行租约到期清理，模式标记每组一条。总实例内存随部署副本数线性增加，业务 handler 自己分配的内存不由 MQ 限制。Redis 历史 consumer 元数据沿用原机制，不承诺无限次崩溃重启后其基数自动归零。
+每实例 tasks、readTimes 各不超过 W；worker 为 N，续约 goroutine 至多 N，结果通道 N。活跃执行租约到期清理，模式标记每组一条。总实例内存随部署副本数线性增加，内存按有限消息数量约束，单条 payload 大小和业务 handler 自己分配的内存不由此预算限制，不是独立字节配额。Redis 历史 consumer 元数据沿用原机制，不承诺无限次崩溃重启后其基数自动归零。
 
 公平性受资源预算约束：已准入 key 按准入顺序争 worker，PEL 恢复每轮与新读取交替；若 W 条全是同一阻塞 key，W 之后的新 key 仍需等预算释放。超限旧 PEL 必须先恢复；不能声称能越过任意长热点找到后方 key。
+
+## 修改文件与入口
+
+| 文件 | 主要函数/合同 |
+| --- | --- |
+| `pkg/server/event/subscription.go`、`servicebridge.go`、`mqbridge.go` | Subscription/Prefetch 校验、外部引用冲突、EnsureSharedKeyReliable 与 SubscribeReliableWithOptions 透传 |
+| `pkg/server/mq/mq.go`、`manager.go` | SharedKeyReliableCapability、RequireSharedKeyReliable、SubscribeReliable、SetCurrent/BeginSwitch 门禁 |
+| `pkg/server/mq/provider_redis_shared.go` | ensureReliableGroupMode、sharedRedisWindow、processSharedReliableMessage 与分键租约 Lua |
+| `pkg/server/mq/provider_redis_keyed.go` | claimReliableKeyed/readReliableKeyed、runReliableKeyedSubscriber/runReliableKeyedOwner；沿用持续调度 |
+| `pkg/server/mq/provider_redis.go`、`provider_redis_retry.go` | SubscribeReliable、reliableKeyedWorks、renewOwner、processReliableMessage；ACK/DLQ token 校验 |
+| `pkg/server/mq/provider_redis_keyed_observability.go`、`pkg/server/observability/provider.go` | observeReliableAck、固定指标白名单 |
+| `pkg/server/mq/provider_nats_reliable.go`、`shared_key_conformance.go` | 不支持者拒绝、通用双连接行为 helper |
+| `pkg/server/event/shared_key_*test.go`、`pkg/server/mq/*shared*test.go` | 真进程/网络/原生 lease、能力、预算、ACK 与生命周期回归 |
+| `examples/10-reliable-multi-instance`、`examples/integration/10-reliable-multi-instance` | 标准服务、Private API、有界演示进度与三服务 HTTP 验收 |
 
 ## 顺序、失败、取消与 fencing
 
@@ -72,7 +86,7 @@ stop, err := sc.SubscribeEvent(event.Subscription{
 | `prefetch-switch-RED.log` | Prefetch 丢失及共享要求后能切换 Provider，FAIL→GREEN |
 | `initial-GREEN.log` | 真实双进程分别处理，慢 A 期间 B1/B2 完成 |
 | `full-lease-crash-race.log` | 原生两分钟租约，硬杀 PID 40291 后 PID 40306 接管；恢复约 2m0.036s，A1 后才 A2，其他 key 继续 |
-| `final-*.log/.json` | 最终代码普通/race、原生租约恢复、三服务 HTTP 示例与 vet 的命令及退出码 |
+| `final-*`、`after-review-*`、`example10-loopback-race` 日志/结果 | 最终代码普通/race、原生租约恢复、三服务 HTTP 示例与 vet 的命令及退出码 |
 
 复现命令（必须是独占 Redis，不能与全局命令计数测试并行）：
 

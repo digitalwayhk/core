@@ -14,7 +14,7 @@
 
 ## 最小实现选择
 
-- 加性 `SharedKeys` 显式要求与独立 capability；false 逐字保留旧默认。该要求必须 reliable、有 subject、不能与 Broadcast 合用；缺外部桥或 capability 必须拒绝。相同 subject 的外部引用必须检查并发和分担模式冲突。
+- 加性 `SharedKeys` 显式要求与独立 capability；false 保留旧默认行为。该要求必须 reliable、有 subject、不能与 Broadcast 合用；缺外部桥或 capability 必须拒绝。相同 subject 的外部引用必须检查并发和分担模式冲突。
 - Redis 沿用原 Stream/group/游标。所有实例分页读取同组 PEL；每 key 仅保存最早未完成 work，真正得到空闲 worker 时才竞争该 key 的短租约，避免空闲实例被另一实例的本地预排队占住 key。
 - 原子 acquire 同时校验消息仍 pending、建立随机执行 token、XCLAIM。运行期间有界续约；ACK/DLQ 脚本校验该执行 token。失主不能重获旧 token 并 ACK；旧 handler 未退出仍占用原 worker，远端业务调用不会因 lease 到期自动停止。
 - 新读取用 Lua 将共享 PEL 数检查与 XREADGROUP 合并，Count 为共享模式的组级预算，各参与者必须一致；MaxAckPending 小值优先。接管旧超限 PEL 只分页恢复。有限预算不保证穿过任意长热 key 前缀找到后方冷 key。
@@ -23,18 +23,18 @@
 
 ## 执行清单
 
-- [ ] 先写真实 Redis 双子进程用例，通过正式 SubscribeEvent；A 阻塞时 B 必须在另一 PID 执行。旧基线先 RED，保留日志和 SHA。
-- [ ] 补通用能力、桥接传递、引用冲突及 NATS/旧自定义 Provider 拒绝测试，先 RED 再最小实现。文件：event/subscription.go、servicebridge.go、mqbridge.go；mq/mq.go、manager.go、provider_nats_reliable.go。
-- [ ] 实现 Redis 私有分键租约、共享组模式 fence、原子有界新读取与 PEL 分页；修改 provider_redis.go、provider_redis_keyed.go、provider_redis_retry.go，新增 provider_redis_shared.go；不改 Publish payload。
-- [ ] 用真实 Broker 覆盖同 key/失败、慢 key/跨窗口、入退成员、硬杀/重启、lease 失主/迟到完成、网络中断、ACK 响应丢失、已 ACK 不异常再执行、旧 PEL/新消息及旧默认兼容。原生 lease 等待和加速 TTL 用例分开记录。
-- [ ] 增加通用分担 conformance，注明多对象 conformance 不是跨进程证明，另保留真实双进程验收。使用专属随机端口无盘 Redis，逐轮串行避免全局命令统计污染。
-- [ ] 补读取/调度/handler/ACK 时钟、实例处理量、实际并发、group pending、key owner 变更固定指标；不记录正文、OrderingKey、业务 ID 或凭据。
-- [ ] 独立容量调查：核对 allowPublish 的硬容量条件、容量快照 freshness、worker 和安全回收；真实 Broker 复现已 ACK 历史仍占容量、未完成必需组禁止删除、原策略恢复后重新放行。没有现场状态不编造现场根因，不通过提阈值、清消息或改 observe 过关。结果写独立文档；确认具体代码缺陷才另做 RED→GREEN 修复。
-- [ ] 更新生命周期/NATS/能力矩阵/API 兼容文档、权威 skill 与中文验收报告；普通/race/原跨窗口回归、公开 API/配置/安全发布门禁通过后才合 main。未运行生产 Broker 拓扑与业务部署逐项 NOT_RUN。
+- [x] 先写真实 Redis 双子进程用例，通过正式 SubscribeEvent；A 阻塞时 B 必须在另一 PID 执行。旧基线先 RED，保留日志和 SHA。
+- [x] 补通用能力、桥接传递、引用冲突及 NATS/旧自定义 Provider 拒绝测试，先 RED 再最小实现。文件：event/subscription.go、servicebridge.go、mqbridge.go；mq/mq.go、manager.go、provider_nats_reliable.go。
+- [x] 实现 Redis 私有分键租约、共享组模式 fence、原子有界新读取与 PEL 分页；修改 provider_redis.go、provider_redis_keyed.go、provider_redis_retry.go，新增 provider_redis_shared.go；不改 Publish payload。
+- [x] 用真实 Broker 覆盖同 key/失败、慢 key/跨窗口、入退成员、硬杀/重启、lease 失主/迟到完成、网络中断、ACK 响应丢失、已 ACK 不异常再执行、旧 PEL/新消息及旧默认兼容。原生 lease 等待和加速 TTL 用例分开记录。
+- [x] 增加通用分担 conformance，注明多对象 conformance 不是跨进程证明，另保留真实双进程验收。使用专属随机端口无盘 Redis，逐轮串行避免全局命令统计污染。
+- [x] 补读取/调度/handler/ACK 时钟、实例处理量、实际并发、group pending、key owner 变更固定指标；不记录正文、OrderingKey、业务 ID 或凭据。
+- [x] 独立容量调查：核对 allowPublish 的硬容量条件、容量快照 freshness、worker 和安全回收；真实 Broker 复现已 ACK 历史仍占容量、未完成必需组禁止删除、原策略恢复后重新放行。没有现场状态不编造现场根因，不通过提阈值、清消息或改 observe 过关。结果写独立文档；确认具体代码缺陷才另做 RED→GREEN 修复。
+- [x] 更新生命周期/NATS/能力矩阵/API 兼容文档、权威 skill 与中文验收报告；普通/race/原跨窗口回归、公开 API/配置/安全发布门禁通过后才合 main。未运行生产 Broker 拓扑与业务部署逐项 NOT_RUN。
 
 ## 补充：第 10 个多实例服务演示
 
-- 使用 `examples/10-reliable-multi-instance` 和 `examples/integration/10-reliable-multi-instance`，真实 Core WebServer 启动一个发布服务和两个同名消费服务；通过正式 ServiceContext.Initialize/SubscribeEvent 建立共享逻辑组。
+- 使用 `examples/10-reliable-multi-instance` 和 `examples/integration/10-reliable-multi-instance`，真实 Core WebServer 启动一个发布服务和两个同名消费服务；通过正式 IInitializeService.Initialize 与 ServiceContext.SubscribeEvent 建立共享逻辑组。
 - Private 提交接口从 req.GetUser() 取得用户、建立 user:<UID> 顺序键和稳定请求事件身份；消费 API 返回本用户在当前实例的有界演示进度及固定 MQ 指标。
 - 演示调度结果保存在每进程有界内存，只用于验证处理分布，不假装成跨副本数据库 Inbox/业务事务，不声称 exactly-once。生产业务需自行选择持久幂等/事务方案。
 - 真实 HTTP 多进程测试覆盖 JWT 未登录拒绝、不同用户隔离、慢 A 时 B 在另一 PID 完成、同键序列、失败重试与事件身份；复用 examples/integration/helpers.go 管理进程/端口/Token。
@@ -49,3 +49,7 @@ Redis 官方 `XPENDING`、`XCLAIM` 和 Lua 原子执行语义：
 - https://redis.io/docs/latest/commands/xpending/
 - https://redis.io/docs/latest/commands/xclaim/
 - https://redis.io/docs/latest/develop/programmability/eval-intro/
+
+## 实施验收状态
+
+核心实现与第10例已完成；包级普通/race、原生两分钟硬崩溃接管、TCP断网及迟到ACK、持续输入预算、三服务HTTP、134包全仓回归与首轮发布门禁通过。容量现场根因未确认，独立文档保留诊断边界。最终合main与v1.4.4发布按用户授权进行，精确提交、最终门禁与官方模块核验记录在本地验收证据。

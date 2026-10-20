@@ -30,6 +30,7 @@ func main() {
 	}
 	s := &demo.Service{Worker: role == "worker"}
 	cfg := config.NewServiceDefaultConfig(s.ServiceName(), 50101)
+	cfg.Host = "127.0.0.1"
 	cfg.DataCenterID = 2
 	cfg.MachineID = uint(index)
 	cfg.Cluster.Mode = "on"
