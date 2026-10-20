@@ -1,6 +1,6 @@
 # Redis 可靠订阅跨窗口等待修复与验收
 
-日期：2026-10-20。基线：`v1.4.1` / `60791a7c0907acf55fc8fa3b3216c43ff929dcac`。本地分支：`fix/redis-reliable-cross-window`。本次未发布版本、未修改消费方依赖、未修改或运行 Bitzoom 业务代码。
+日期：2026-10-20。基线：`v1.4.1` / `60791a7c0907acf55fc8fa3b3216c43ff929dcac`。验收提交：`65806a2`，原分支：`fix/redis-reliable-cross-window`。本记录封存时尚未发布；后续已纳入 main 的 v1.4.2 发布范围，发布状态和升级命令见 [v1.4.2 说明](RELEASE_V1_4_2_2026-10-20.md)。未修改消费方依赖、未修改或运行 Bitzoom 业务代码。
 
 ## 根因与归因边界
 

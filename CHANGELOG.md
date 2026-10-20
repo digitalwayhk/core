@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Redis 分 key 可靠订阅的 `Count` 同时约束分页和本 owner 的预取预算；默认 `KeyConcurrency*4`，有效下限为 `KeyConcurrency`。预算耗尽时背压新读取，接管的既有超限 PEL 只分页恢复。零值/1 的订阅仍串行。
+- 无。
 
 ### Deprecated
 
@@ -22,11 +22,26 @@
 
 ### Fixed
 
-- Redis 可靠订阅移除跨读取批次的等待屏障，使用会话级固定 worker；同 key 保留最早失败屏障，独立 key 可跨窗口继续。补齐 owner 原子 ACK/读取校验、超时 handler 退出等待、ACK 响应丢失后的 PEL 复核及低基数观测。真实 Redis、正式 EventBridge 链、兼容性和未验证项见[修复验收记录](docs/codex/REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
+- 无。
 
 ### Security
 
 - 无。
+
+## [v1.4.2] - 2026-10-20
+
+### Fixed
+
+- Redis 可靠订阅移除跨读取批次的等待屏障，改为 owner 会话级固定 worker。同 key 保留最早失败屏障，独立 key 可跨窗口继续；ACK 响应丢失后先复核 PEL，避免调度器异常重放已 ACK 消息。补充发布、读取、PEL、调度与 handler 观测及真实 Redis/race 回归。
+
+### Changed
+
+- Redis 分 key 模式的 `Count` 同时约束分页和本 owner 的预取预算；默认 `KeyConcurrency*4`，有效下限为并发度，且受较小 `MaxAckPending` 限制。预算满时背压新读取，已有超限 PEL 只分页恢复，不重置消息或消费组。
+- Redis 分 key 超时/取消后等待原 handler 真正退出，再重试或结束会话；不合作的 handler 会延迟 `Close`。零值/1 仍使用串行入口，公开 API、消息编码和依赖不变。
+
+### Security
+
+- owner 校验与 Redis 分 key 读取/认领、可靠 ACK/DLQ 分别原子执行；旧 handler 不得重新抢占已丢失租约后 ACK。可靠 handler 必须返回成功后由 provider 确认，原来手动提前调用 `Message.Ack` 的代码需移除该调用。升级边界与未验证项见 [v1.4.2 发布说明](docs/codex/RELEASE_V1_4_2_2026-10-20.md)及[完整修复验收](docs/codex/REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 
 ## [v1.4.1] - 2026-10-20
 
