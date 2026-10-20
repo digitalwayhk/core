@@ -6,7 +6,33 @@
 
 ### Added
 
-- Redis Streams 加性连接预算 CommandPoolSize/BlockingReadPoolSize 与 WithConfig 构造器，默认command8/blocking16；真实双池低基数观测及CPU1/2、正式EventBridge链回归。详见[候选验收](docs/codex/RELEASE_V1_4_5_2026-10-20.md)。
+- 无。
+
+### Changed
+
+- 无。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 无。
+
+### Security
+
+- 无。
+
+## [v1.4.5] - 2026-10-20
+
+### Added
+
+- Redis Streams 加性连接预算 CommandPoolSize/BlockingReadPoolSize 与 WithConfig 构造器，默认command8/blocking16；真实双池低基数观测及CPU1/2、正式EventBridge链回归。详见[发布与验收](docs/codex/RELEASE_V1_4_5_2026-10-20.md)。
 
 ### Changed
 
@@ -258,7 +284,8 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.5...HEAD
+[v1.4.5]: https://github.com/digitalwayhk/core/compare/v1.4.4...v1.4.5
 [v1.4.1]: https://github.com/digitalwayhk/core/compare/v1.4.0...v1.4.1
 [v1.4.0]: https://github.com/digitalwayhk/core/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/digitalwayhk/core/compare/v1.2.3...v1.3.0
