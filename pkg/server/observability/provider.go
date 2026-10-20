@@ -63,6 +63,7 @@ var allowedGaugeNames = map[string]struct{}{
 	"handler_peak":                         {},
 	"active_keys":                          {},
 	"pending_keys":                         {},
+	"shared_key_leases":                    {},
 	"retained_messages":                    {},
 	"retained_bytes":                       {},
 	"backlog_messages":                     {},
@@ -71,6 +72,8 @@ var allowedGaugeNames = map[string]struct{}{
 }
 
 var allowedCounterNames = map[string]struct{}{
+	"shared_key_acquired_total": {}, "shared_key_contended_total": {}, "shared_key_owner_lost_total": {},
+	"reliable_ack_total": {}, "reliable_ack_fail_total": {}, "reliable_ack_seconds_total": {},
 	"notification_published_total":      {},
 	"notification_gap_total":            {},
 	"notification_reconcile_total":      {},

@@ -134,7 +134,7 @@ func (r *RedisStreamProvider) processReliableMessage(
 
 	policy := options.lifecycle
 	invoke := callReliableHandler
-	if options.KeyConcurrency > 1 {
+	if options.KeyConcurrency > 1 || options.SharedKeys {
 		invoke = callReliableKeyedHandler
 	}
 	if policy == nil || policy.Retry.MaxDeliveries == 0 {
@@ -150,7 +150,9 @@ func (r *RedisStreamProvider) processReliableMessage(
 		if !r.renewOwner(ctx, subject, options) {
 			return errors.New("redis-stream: reliable owner lost before ack")
 		}
-		return redisReliablePlainAckScript.Run(ctx, r.client, []string{streamKey, r.ownerLockKey(subject, options.Group)}, options.Group, messageID, options.Consumer).Err()
+		return r.observeReliableAck(ctx, streamKey, options.Group, messageID, func() error {
+			return redisReliablePlainAckScript.Run(ctx, r.client, []string{streamKey, r.reliableOwnerKey(subject, options)}, options.Group, messageID, reliableOwnerToken(options)).Err()
+		})
 	}
 
 	retryKey := r.redisReliableRetryKey(subject, options.Group)
@@ -170,7 +172,9 @@ func (r *RedisStreamProvider) processReliableMessage(
 			if !r.renewOwner(ctx, subject, options) {
 				return errors.New("redis-stream: reliable owner lost before ack")
 			}
-			if ackErr := redisReliableAckScript.Run(ctx, r.client, []string{streamKey, retryKey, r.ownerLockKey(subject, options.Group)}, options.Group, messageID, options.Consumer).Err(); ackErr != nil {
+			if ackErr := r.observeReliableAck(ctx, streamKey, options.Group, messageID, func() error {
+				return redisReliableAckScript.Run(ctx, r.client, []string{streamKey, retryKey, r.reliableOwnerKey(subject, options)}, options.Group, messageID, reliableOwnerToken(options)).Err()
+			}); ackErr != nil {
 				return fmt.Errorf("redis-stream: ack successful delivery: %w", ackErr)
 			}
 			return nil
@@ -187,13 +191,15 @@ func (r *RedisStreamProvider) processReliableMessage(
 		return errors.New("redis-stream: reliable owner lost before dead letter")
 	}
 	dedupeID := redisDeadLetterDedupeID(subject, options.Group, messageID)
-	err = redisReliableDeadLetterScript.Run(ctx, r.client, []string{
-		streamKey,
-		retryKey,
-		r.redisReliableDeadLetterDedupeKey(subject, options.Group),
-		r.streamKey(policy.Retry.DeadLetterSubject),
-		r.ownerLockKey(subject, options.Group),
-	}, options.Group, messageID, dedupeID, data, subject, orderingKey, idempotencyKey, options.Consumer).Err()
+	err = r.observeReliableAck(ctx, streamKey, options.Group, messageID, func() error {
+		return redisReliableDeadLetterScript.Run(ctx, r.client, []string{
+			streamKey,
+			retryKey,
+			r.redisReliableDeadLetterDedupeKey(subject, options.Group),
+			r.streamKey(policy.Retry.DeadLetterSubject),
+			r.reliableOwnerKey(subject, options),
+		}, options.Group, messageID, dedupeID, data, subject, orderingKey, idempotencyKey, reliableOwnerToken(options)).Err()
+	})
 	if err != nil {
 		r.lifecycleMetrics.deadLetterFailed.Add(1)
 		return fmt.Errorf("redis-stream: dead letter transfer: %w", err)

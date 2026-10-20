@@ -24,7 +24,7 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
 - HTTP 仅可作为显式发送前 fallback；gRPC 开始发送后不得跨协议重试。内部异步事件使用 EventBridge，WebSocket 只面向最终用户。
 - Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 必选 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。高吞吐服务应再实现可选 `event.OutboxBatchMarker.MarkPublishedBatch`：框架先按现有规则逐条发布成功前缀，再一次事务确认这些 EventID；未实现时仍逐条 `MarkPublished`。空切片必须立即成功。崩溃发生在 MQ 发布后、批量确认提交前只形成 at-least-once 重复，消费者继续用 EventID/Inbox 幂等。不要为此自写 Outbox 发布循环。
-- `UseOutbox` 和 `Subscription` 的零值永远保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
+- `UseOutbox` 和 `Subscription` 的零值保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
 - 低频、幂等的副本收敛控制事件（例如市场准备/激活）可显式设置 `Reliable:true, Broadcast:true`，每个稳定服务端点使用独立 consumer group 各消费一次。该选项不得用于价格、成交、结算等高频数据面；数据面仍使用逻辑服务共享组或按 key 分区。
 - 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
@@ -190,3 +190,15 @@ go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 请求/跨服务失败携带 `trace_id`、service、route/target、operation 和 error。错误由拥有重试、降级、响应或终止决策的边界记录一次。
 
 禁止记录凭据、token、cookie、TOTP、完整 payload/body/response、DSN、SQL、参数和对象 dump。
+
+## 可靠事件跨实例分键分担（v1.4.4）
+
+- 需要多个同逻辑服务副本分担一个主题时，使用正式 `sc.SubscribeEvent(Subscription{Reliable:true, SharedKeys:true, KeyConcurrency:N, Prefetch:W, ...})`。Group 仍是逻辑服务名；业务只提供稳定 ShardKey，不自建 Redis worker/锁、独立每实例业务组或第二套适配器。
+- `KeyConcurrency` 单独使用只代表单 active owner 内的并发。SharedKeys 是另一项显式 capability，Bridge/Manager/Provider 必须校验；不支持直接失败。Redis 支持，NATS 不声明有序/keyed/shared，显式要求拒绝。
+- N 是每个实例有限 worker，W 对应 MQ Count：零值4*N、至少N，再受更小MaxAckPending限制。有效 W 是同 subject/group 全实例共享 PEL 新预取预算，所有副本一致并持久冻结。扩容时设置一致显式 W，不能仅调大 N 冒充横向分担。
+- 保留同 subject/group/key 的 Broker 接收顺序、最早失败屏障和成功后 ACK，不承诺跨 subject 用户全局顺序或 exactly-once。租约过期不证明旧业务已退出；ACK/DLQ fencing 不替代业务数据库跨副本幂等、版本约束与调用超时。
+- 启用前停旧订阅，确认实际 handler 结束、旧 owner 租约释放；恢复原 PEL，不删历史/组/游标。Shared 模式与有效 W 冻结，在线 Provider 切换、调预算、Shared→legacy 原地回退未提供。旧版本不能直接混跑共享组，不能删除标记绕过。
+- 预算满可能阻塞后方未读取的独立 key，尤其窗口全是失败热点消息；只承诺可调度独立 key 不受整批完成屏障，不承诺无限越过热点。有限 N/W 与容量预算都要按应用选择。
+- 第10例不含数据库模型，只演示 Broker 调度与有界本地进度，不建立空壳 EnsureStorage；它的直接 Broker 接收接口不承诺业务数据库原子提交。持久业务仍按前述 Outbox/Inbox 业务确认执行，不能复制演示进度当生产幂等。
+- 验收必须真实 Broker + 两个独立 PID，包含加入/退出/硬杀/重启、旧 owner 迟到 ACK、网络中断、旧 pending 与新消息顺序及有限预取。双连接 helper 不能替代跨进程证据；明确 NOT_RUN。见[完整边界与命令](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+- capacity reached 是 retained 数/字节的独立安全背压；不要因某个组 pending=0 就清数据/提阈值/改 observe。先关联冻结 manifest、全部组 lag/pending、保留期、快照新鲜度与回收进度，见[独立调查](../../codex/MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)。

@@ -16,6 +16,7 @@ var (
 	ErrControlQueueTimeout               = errors.New("service event bridge control queue timeout")
 	ErrOrderedReliableUnsupported        = errors.New("event ordered reliable unsupported")
 	ErrKeyedReliableSubscribeUnsupported = errors.New("event keyed reliable subscribe unsupported")
+	ErrSharedKeyReliableUnsupported      = errors.New("event shared key reliable subscribe unsupported")
 )
 
 // orderedReliableEnsurer 由外部适配器（如 MQBridge）实现，用于启动 fail-closed 检查。
@@ -56,9 +57,17 @@ type ReliableExternalSubscriber interface {
 }
 
 // ReliableExternalSubscribeOptions 是可靠订阅的加性运行时选项。
-// KeyConcurrency 零值和 1 保持整 subject 串行。
+// 未启用 SharedKeys 时，KeyConcurrency 零值和 1 保持整 subject 串行。
 type ReliableExternalSubscribeOptions struct {
 	KeyConcurrency int
+	SharedKeys     bool
+	Prefetch       int64
+}
+
+// SharedKeyReliableExternalSubscriber 显式验证跨实例合同，不能只接受选项后忽略。
+type SharedKeyReliableExternalSubscriber interface {
+	KeyedReliableExternalSubscriber
+	EnsureSharedKeyReliable() error
 }
 
 // KeyedReliableExternalSubscriber 是不同 ordering key 并行消费的可选能力。
@@ -312,6 +321,9 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	if err := validateSubscription(sub); err != nil {
 		return nil, err
 	}
+	if sub.SharedKeys && !b.canSubscribeExternal(true) {
+		return nil, ErrSharedKeyReliableUnsupported
+	}
 	match := func(env *Envelope) bool {
 		if env == nil {
 			return false
@@ -356,7 +368,7 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	var externalCancel func()
 	if sub.Subject != "" && b.canSubscribeExternal(sub.Reliable) {
 		externalCancel, err = b.subscribeExternalRef(
-			context.Background(), sub.Reliable, sub.Broadcast, sub.Subject, sub.KeyConcurrency,
+			context.Background(), sub.Reliable, sub.Broadcast, sub.Subject, sub.KeyConcurrency, sub.SharedKeys, sub.Prefetch,
 		)
 		if err != nil {
 			if localCancel != nil {
@@ -416,6 +428,16 @@ func (b *ServiceEventBridge) subscribeExternalControlWithOptions(
 	}
 	if subscriberID == "" {
 		return nil, ErrExternalProviderUnavailable
+	}
+	if options.SharedKeys {
+		shared, ok := subscriber.(SharedKeyReliableExternalSubscriber)
+		if !ok {
+			return nil, ErrSharedKeyReliableUnsupported
+		}
+		if err := shared.EnsureSharedKeyReliable(); err != nil {
+			return nil, err
+		}
+		return shared.SubscribeReliableWithOptions(ctx, subject, subscriberID, options)
 	}
 	if options.KeyConcurrency > 1 {
 		if keyedSubscriber == nil {

@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -55,6 +56,13 @@ type redisReliableDeliveryMetrics struct {
 	pelWaitSamples     atomic.Int64
 	scheduled          atomic.Int64
 	handlerCalls       atomic.Int64
+	sharedLeases       atomic.Int64
+	sharedAcquired     atomic.Int64
+	sharedContended    atomic.Int64
+	sharedOwnerLost    atomic.Int64
+	ackSucceeded       atomic.Int64
+	ackFailed          atomic.Int64
+	ackNanos           atomic.Int64
 }
 
 // NewRedisStreamProvider creates a provider targeting the given Redis address.
@@ -249,9 +257,17 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	// 零值/1 保持历史整 subject 串行。只有显式 opt-in 才进入 owner 内分键调度。
 	if options.KeyConcurrency <= 1 {
 		options.KeyConcurrency = 1
+	}
+	if options.KeyConcurrency == 1 && !options.SharedKeys {
 		options.Count = 1
 	} else if options.Count <= 0 {
 		options.Count = int64(options.KeyConcurrency * 4)
+	}
+	if options.Count < int64(options.KeyConcurrency) {
+		options.Count = int64(options.KeyConcurrency)
+	}
+	if err := r.ensureReliableGroupMode(ctx, subject, options); err != nil {
+		return nil, err
 	}
 	key := r.streamKey(subject)
 	err := r.client.XGroupCreateMkStream(ctx, key, options.Group, "0").Err()
@@ -287,7 +303,7 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		if options.KeyConcurrency > 1 {
+		if options.KeyConcurrency > 1 || options.SharedKeys {
 			r.runReliableKeyedSubscriber(cctx, key, subject, options, observedHandler, metrics)
 			return
 		}
@@ -349,7 +365,7 @@ return 0
 `)
 
 func (r *RedisStreamProvider) renewOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
-	n, err := redisOwnerRenewScript.Run(ctx, r.client, []string{r.ownerLockKey(subject, options.Group)}, options.Consumer, ownerLeaseTTL(options).Milliseconds()).Int()
+	n, err := redisOwnerRenewScript.Run(ctx, r.client, []string{r.reliableOwnerKey(subject, options)}, reliableOwnerToken(options), ownerLeaseTTL(options).Milliseconds()).Int()
 	return err == nil && n == 1
 }
 
@@ -527,6 +543,13 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 	counters["reliable_pel_wait_samples_total"] = float64(r.deliveryMetrics.pelWaitSamples.Load())
 	counters["reliable_scheduled_total"] = float64(r.deliveryMetrics.scheduled.Load())
 	counters["reliable_handler_calls_total"] = float64(r.deliveryMetrics.handlerCalls.Load())
+	gauges["shared_key_leases"] = float64(r.deliveryMetrics.sharedLeases.Load())
+	counters["shared_key_acquired_total"] = float64(r.deliveryMetrics.sharedAcquired.Load())
+	counters["shared_key_contended_total"] = float64(r.deliveryMetrics.sharedContended.Load())
+	counters["shared_key_owner_lost_total"] = float64(r.deliveryMetrics.sharedOwnerLost.Load())
+	counters["reliable_ack_total"] = float64(r.deliveryMetrics.ackSucceeded.Load())
+	counters["reliable_ack_fail_total"] = float64(r.deliveryMetrics.ackFailed.Load())
+	counters["reliable_ack_seconds_total"] = float64(r.deliveryMetrics.ackNanos.Load()) / float64(time.Second)
 	return observability.RuntimeComponentSnapshot{
 		Component: "mq", State: "ok", Gauges: gauges, Counters: counters,
 	}
@@ -554,6 +577,9 @@ func (r *RedisStreamProvider) reliableKeyedWorks(
 				if orderingKey == "" {
 					return ErrOrderingKeyRequired
 				}
+				if options.SharedKeys {
+					return r.processSharedReliableMessage(ctx, streamKey, subject, options, item, handler)
+				}
 				return r.processReliableMessage(ctx, streamKey, subject, options, item, handler)
 			},
 		})
@@ -562,6 +588,9 @@ func (r *RedisStreamProvider) reliableKeyedWorks(
 }
 
 func (r *RedisStreamProvider) logReliableKeyedFailure(subject string, failure reliableKeyedFailure) {
+	if errors.Is(failure.err, errSharedKeyBusy) {
+		return
+	}
 	logx.Errorw("mq_redis_reliable_keyed_handler_failed",
 		logx.Field("subject", subject),
 		logx.Field("failure_class", "handler_or_delivery_failed"),

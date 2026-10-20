@@ -199,3 +199,7 @@ go get github.com/digitalwayhk/core@<commit>
 分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
 
 从 v1.3.0 升级时必须结合[消费方升级指南](../../codex/UPGRADE_FROM_V1_3.md)盘点 MQ 缺省 off、Badger 存量数据与原生错误比较、MySQL 账号池隔离、无上下文 InitRequest.NewID，以及可选 stable 的身份/编号迁移。公共签名检查通过不代表这些行为和数据边界已验收；Core 门禁与消费方精确提交 smoke 分别登记，禁止把旧版本的迁移记录重复算作本候选通过。
+
+## 跨实例可靠消费验收
+
+`VerifyKeyedReliableConcurrency` 仅验证单订阅内的 key 并发；`VerifySharedKeyReliableDistribution` 验证两个连接，也不能替代独立进程。涉及 SharedKeys 时必须以独占 Redis 串行执行 mq/event 普通与 race、真实独立进程故障测试，以及 `examples/integration/10-reliable-multi-instance` 的三服务 HTTP 验收。原生默认租约崩溃恢复需显式 `CORE_TEST_SHARED_FULL_LEASE=1`，不能将加速 TTL 的网络故障注入当作原生接管时延。保留原 RED、夹具失败和最终源码哈希，未配置 NATS/MySQL/etcd 或生产迁移登记 NOT_RUN。详见[共享消费验收](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。

@@ -285,3 +285,17 @@
 | `ServerConfig.IDGenerator.Providers.Redis.DB` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
 | `ServerConfig.IDGenerator.Providers.Redis.Prefix` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
 | `ServerConfig.IDGenerator.Providers.Redis.TTL` | rejected | IDGeneratorConfig.Validate | 非零值拒绝；编号绑定不能挂发现 TTL |
+
+## v1.4.4：可靠消费运行时选项
+
+这些是启动组合根的 Go 选项，不增加 MQ JSON 默认值；MQ 仍缺省 off。
+
+| 选项/能力 | Redis Streams | NATS JetStream | 校验及边界 |
+| --- | --- | --- | --- |
+| `Subscription.SharedKeys` / `ReliableSubscribeOptions.SharedKeys` | 显式支持 | 明确拒绝 | 零值保留单主题 owner；true 要求可靠、Subject、逻辑组，禁止 Broadcast |
+| `Subscription.KeyConcurrency` | 每实例有界 worker；默认1 | >1 拒绝 | SharedKeys=false 的 >1 仅 owner 内并发，不能推断跨实例 |
+| `Subscription.Prefetch` → `Count` | 共享组 PEL 预算 | SharedKeys 不支持 | 仅共享模式可非零，负值拒绝；零取4*N、至少N，再受更小MaxAckPending限制；有效W跨副本一致、持久冻结 |
+| `SharedKeyReliableMQProvider` | 有序、fenced ACK、有限预取声明 | 不声明 | Manager及Bridge启动校验，不能静默降级 |
+| Shared 模式在线 Provider 切换 | 拒绝 | 拒绝 | 建立要求后 SetCurrent/BeginSwitch 拒绝；新上下文维护迁移 |
+
+存量 PEL、旧新版本及回退边界见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。

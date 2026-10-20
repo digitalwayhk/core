@@ -28,6 +28,22 @@
 
 - 无。
 
+## [v1.4.4] - 2026-10-20
+
+### Added
+
+- 显式共享可靠消费合同 `Subscription.SharedKeys/Prefetch`、`SharedKeyReliableMQProvider` 与启动校验。Redis 复用原 Stream/group，按 key 执行租约，多个独立进程可共同处理不同 key；保留有限 worker/PEL 预算、同 key 顺序、失败屏障、pending 恢复和成功后 fenced ACK。零值继续旧单 owner，NATS 不支持则拒绝。
+- `examples/10-reliable-multi-instance`：一个发布服务与两个消费副本的真实 HTTP 演示，覆盖独立 PID 分担、慢 key、失败重投与用户隔离；配套真实崩溃/断网/迟到 ACK/race 验收，以及 lease/ACK 低基数观测。
+
+### Changed
+
+- 显式共享模式和有效预取预算按组持久冻结；激活前需维护窗口停旧消费者并确认实际 handler 退出，禁止旧新混跑或在线 Provider 切换；不删历史、PEL、组或重置游标。迁移说明见 [v1.4.4 发布说明](docs/codex/RELEASE_V1_4_4_2026-10-20.md)。
+- 独立记录 capacity reached 的 retained 容量判定及真实两组回收验证；现场根因证据不足仍未确认，不扩大容量或削弱安全回收。同步能力矩阵及权威 skill。
+
+### Fixed
+
+- 可靠事件显式横向分担时不再被整主题 owner 限在一个副本；保留 v1.4.2 跨读取窗口修复，不重新引入整批等待。租约 fencing 仅保证 Broker ACK/DLQ，业务仍为 at-least-once，跨副本业务副作用须由应用事务幂等保护。
+
 ## [v1.4.3] - 2026-10-20
 
 ### Security

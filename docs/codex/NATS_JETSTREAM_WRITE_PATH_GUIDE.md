@@ -130,3 +130,7 @@ go test -race ./pkg/server/mq -run '^TestNATS|MessageLifecycleConformance' -coun
 ```
 
 发布前还要验证真实生产拓扑下的进程重启、Broker 重启、慢/离线消费者、漏 ACK、重复投递、DLQ 故障、并发发布/ACK/回收、容量拒绝和受控组变更。未运行的场景明确写 `NOT RUN`，不能用 mock 代替。
+
+## 跨实例有序能力声明
+
+v1.4.4 的 NATS Provider 仍未声明 `OrderedReliableMQProvider`、`KeyedReliableMQProvider` 或 `SharedKeyReliableMQProvider`。共享 durable 的普通可靠 ACK 不能证明同 key 有序。显式 SharedKeys 要求或 KeyConcurrency>1 会被拒绝，禁止静默退回普通共享竞争。本轮没有强行实现 NATS 分键调度，也没有运行 NATS 真 Broker 故障验证（NOT_RUN）。通用合同、Redis 已验证实现和迁移边界见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。

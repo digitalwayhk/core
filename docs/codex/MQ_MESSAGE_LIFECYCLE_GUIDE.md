@@ -175,7 +175,7 @@ Redis 在真实投递前持久增加 Subject+Group+Message attempt。Handler 成
 
 JetStream 使用 Broker delivery count；达到上限时以源 stream sequence、Subject 和 group 生成稳定 `Nats-Msg-Id`，同步发布 DLQ 并等待 ACK，之后才 `Term`。发布失败时 NAK 原消息。`MaxAckPending` 使用 Broker 原生背压。
 
-Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。Redis 显式 `KeyConcurrency>1` 的可靠订阅在超时/取消后继续占住原 worker，直到真实 handler 退出，防止旧调用与同 key 重试重叠；不合作的 handler 会延迟会话退出和 `Close`。Redis 串行分支及其他 Provider 的既有超时实现未在本次分 key 修复中变更，不能据此推断它们具备同样的退出等待保证。业务幂等仍是硬要求，见[跨窗口修复与验收](REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
+Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。Redis 显式 `KeyConcurrency>1` 或 `SharedKeys=true` 的可靠订阅在超时/取消后继续占住原 worker，直到真实 handler 退出，防止旧调用与同 key 重试重叠；不合作的 handler 会延迟会话退出和 `Close`。Redis 串行分支及其他 Provider 的既有超时实现未在本次分 key 修复中变更，不能据此推断它们具备同样的退出等待保证。业务幂等仍是硬要求，见[跨窗口修复与验收](REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 
 ## 容量与故障窗口
 
@@ -263,3 +263,11 @@ go test -race ./pkg/server/mq -count=1
 ./scripts/test.sh api-compat
 ./scripts/check-logging.sh
 ```
+
+## v1.4.4：跨实例分键与容量的独立边界
+
+`Subscription{Reliable:true, SharedKeys:true, KeyConcurrency:N, Prefetch:W}` 显式启用跨实例分担；默认仍是单 owner。N 是每实例并发，W 是归一化并受 MaxAckPending 限制后的组级 PEL 预算。使用原 Stream/group 与历史 pending，按 key 执行租约和 fenced ACK，不将 Redis 实现暴露给业务。只有同 subject/group/key 有序，不保证不同 subject 全局用户顺序。NATS 未声明该能力且明确拒绝，不将共享 durable ACK 当有序。
+
+W 与模式持久冻结。启用前必须停旧订阅、确认实际 handler 已退出并等待旧租约释放；禁止旧新模式混跑。原地回退、在线调预算和跨 Broker 热切换不在本轮能力内；不得删组、标记或历史消息绕过。租约过期不证明旧业务调用终止，旧 owner 不能有效 ACK，但业务仍需跨副本事务幂等。具体资源预算、公平性及真实故障证据见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)和[示例10](../../examples/10-reliable-multi-instance)。
+
+`message lifecycle capacity reached` 根据 retained 数/字节触发，与单 owner 问题分开诊断。某组 pending=0 时，其他必需组或正常保留期仍可阻止物理回收。真实两组验收和现场缺失证据见[独立容量调查](MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)，不应提容量或改 observe 掩盖。

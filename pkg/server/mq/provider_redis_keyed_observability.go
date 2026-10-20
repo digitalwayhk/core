@@ -93,3 +93,20 @@ func (r *RedisStreamProvider) observeRedisKeyedWork(
 	}
 	return work
 }
+
+// ACK 时钟单独记录，handler 结束不能被当成 broker 已确认。
+func (r *RedisStreamProvider) observeReliableAck(ctx context.Context, key, group, id string, ack func() error) error {
+	_, span := otel.Tracer("github.com/digitalwayhk/core/mq").Start(ctx, "redis.reliable.ack")
+	span.SetAttributes(attribute.String("messaging.message.id", id), attribute.String("messaging.redis.stream_hash", redisLifecycleSubjectHash(key)), attribute.String("messaging.redis.group_hash", redisLifecycleGroupHash(group)))
+	defer span.End()
+	started := time.Now()
+	err := ack()
+	r.deliveryMetrics.ackNanos.Add(time.Since(started).Nanoseconds())
+	if err != nil {
+		r.deliveryMetrics.ackFailed.Add(1)
+		span.SetStatus(codes.Error, "ack_failed_or_unknown")
+	} else {
+		r.deliveryMetrics.ackSucceeded.Add(1)
+	}
+	return err
+}

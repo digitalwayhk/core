@@ -22,7 +22,7 @@ Digitalway Core 不做通用技术框架，而是把商业服务的开发方式*
 go get github.com/digitalwayhk/core@latest
 ```
 
-推荐使用 `v1.4.3`（[OpenAPI 依赖安全升级说明](./docs/codex/RELEASE_V1_4_3_2026-10-20.md)），包含 [v1.4.2 的 Redis 可靠订阅跨窗口修复](./docs/codex/RELEASE_V1_4_2_2026-10-20.md)及 v1.4.1 的内嵌编译产物补齐；此前功能与 Go 源码验证见 [v1.4.0 记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
+推荐使用 `v1.4.4`（[可靠事件跨实例分担与升级说明](./docs/codex/RELEASE_V1_4_4_2026-10-20.md)），包含 [v1.4.2 的 Redis 可靠订阅跨窗口修复](./docs/codex/RELEASE_V1_4_2_2026-10-20.md)及 v1.4.1 的内嵌编译产物补齐；此前功能与 Go 源码验证见 [v1.4.0 记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
 
 ## 目录
 
@@ -161,6 +161,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | 开放登录后接口 | `api/private` 包 + `req.GetUser()` | [01](./examples/01-simple-shop) | `go test ./examples/integration/01-simple-shop -run Private` |
 | 给模型配一套后台 CRUD | `manage.NewManageService[T](own)` | [01](./examples/01-simple-shop) | `go test ./service/manage` |
 | 给 Manage 加角色权限 | 复用 08 的分类/条目 Manage API，演示 Core 主体/角色与精确命令 RBAC；外部 IAM 才覆盖 `IManageRoleProvider` | [09](./examples/09-admin-manage-rbac) | `go test ./examples/09-admin-manage-rbac/... ./examples/integration/09-admin-manage-rbac` |
+| 可靠事件跨实例分担 | 同逻辑服务共享消费组，稳定 ShardKey，显式 SharedKeys、有限并发和组级预取；同 key 有序与失败屏障 | [10](./examples/10-reliable-multi-instance) | `CORE_TEST_REDIS_ADDR=<独占Redis> go test -p 1 -race ./examples/integration/10-reliable-multi-instance` |
 | 建表、加字段 | 服务启动前由 models 组合根 `EnsureStorage()` 触发框架自动完成 | [models 分片](./docs/ai/core-skill/models.md) | 接受请求前验证存储就绪 |
 | 实时推送给用户 | `RouterInfo.RegisterWebSocketClient` / `NoticeWebSocket` | [01](./examples/01-simple-shop) | `go test -race ./examples/integration/01-simple-shop -run WebSocket` |
 | 跨模型事务、状态机 | `IDataAction` 事务边界 + business 层 | [02](./examples/02-shop-payment) | `go test ./examples/integration/02-shop-payment` |
@@ -182,7 +183,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 
 ## 能力阶梯
 
-九个示例组成一条递进阶梯；01–07 覆盖同一个商城业务域，08–09 分别集中演示管理界面与 Manage 角色授权。
+十个示例组成能力阶梯；01–07 覆盖商城业务域，08–09 演示管理界面与角色授权，10 用三个独立服务进程验证可靠事件跨实例分键消费。
 
 | 示例 | 在前一级之上新增 | 业务代码 |
 | :--- | :--- | ---: |
@@ -195,6 +196,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | [07-shop-order-scale](./examples/07-shop-order-scale) | 订单服务多副本水平扩展，AutoMachineID，共享权威库，Outbox，服务报表 | 6266 行 / 106 文件 |
 | [08-admin-manage-ui](./examples/08-admin-manage-ui) | Manage View schema、外键、子表、控件、导入导出和自定义命令 | 以示例源码为准 |
 | [09-admin-manage-rbac](./examples/09-admin-manage-rbac) | 复用 08 的分类/条目业务页面与 Manage API，演示管理员/RoleCode 绑定、只读与精确写权限、真实 HTTP 403 | 以示例源码为准 |
+| [10-reliable-multi-instance](./examples/10-reliable-multi-instance) | 一个发布服务、两个消费副本；真实 PID 分担、慢 key、同 key 顺序、失败重投与用户隔离 | 显式 Redis/实例参数，见示例 README |
 
 <sub>行数只统计业务代码，不含测试。</sub>
 

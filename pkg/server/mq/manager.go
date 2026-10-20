@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/observability"
@@ -14,14 +15,15 @@ import (
 
 // MQManager 管理当前 MQ Provider、动态注册表和可选的无停机迁移状态。
 type MQManager struct {
-	mu        sync.RWMutex
-	current   MQProvider
-	registry  map[string]MQProvider
-	switcher  *Switcher
-	closed    bool
-	closeOnce sync.Once
-	closeErr  error
-	lifecycle *lifecycleController
+	mu             sync.RWMutex
+	current        MQProvider
+	registry       map[string]MQProvider
+	switcher       *Switcher
+	closed         bool
+	closeOnce      sync.Once
+	closeErr       error
+	lifecycle      *lifecycleController
+	sharedRequired atomic.Bool
 }
 
 // NewManager returns an initialised MQManager with no active provider.
@@ -72,6 +74,9 @@ func (m *MQManager) SetCurrent(name string) error {
 	defer m.mu.Unlock()
 	if m.closed {
 		return ErrNotConnected
+	}
+	if m.sharedRequired.Load() {
+		return fmt.Errorf("%w: shared-key provider changes require a maintenance restart", ErrSharedKeyReliableUnsupported)
 	}
 	p, ok := m.registry[name]
 	if !ok {
@@ -250,11 +255,20 @@ func (m *MQManager) SubscribeReliable(
 	if !ok {
 		return nil, ErrReliableSubscribeUnsupported
 	}
+	if options.SharedKeys {
+		shared, supported := m.current.(SharedKeyReliableMQProvider)
+		if !supported || !validSharedKeyProvider(shared) || m.switcher != nil {
+			return nil, ErrSharedKeyReliableUnsupported
+		}
+	}
 	if options.KeyConcurrency > 1 {
 		keyed, supported := m.current.(KeyedReliableMQProvider)
 		if !supported || !keyed.SupportsKeyedReliableConcurrency() {
 			return nil, ErrKeyedReliableSubscribeUnsupported
 		}
+	}
+	if options.SharedKeys {
+		m.sharedRequired.Store(true)
 	}
 	return provider.SubscribeReliable(ctx, subject, options, handler)
 }
@@ -292,6 +306,26 @@ func (m *MQManager) RequireOrderedReliable() error {
 	return nil
 }
 
+// RequireSharedKeyReliable 校验独立的跨实例分键合同，不从普通可靠 ACK 推断。
+func (m *MQManager) RequireSharedKeyReliable() error {
+	if m == nil {
+		return ErrSharedKeyReliableUnsupported
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.current.(SharedKeyReliableMQProvider)
+	if m.closed || !ok || !validSharedKeyProvider(p) || m.switcher != nil {
+		return ErrSharedKeyReliableUnsupported
+	}
+	m.sharedRequired.Store(true)
+	return nil
+}
+
+func validSharedKeyProvider(p SharedKeyReliableMQProvider) bool {
+	info := p.SharedKeyReliableInfo()
+	return info.Valid() && p.OrderedReliableInfo().Valid() && info.Ordered == p.OrderedReliableInfo() && p.SupportsKeyedReliableConcurrency()
+}
+
 // BeginSwitch 启动到 newProvider 的无停机迁移。
 // 连接前先占用迁移槽，避免并发请求启动第二次迁移。
 func (m *MQManager) BeginSwitch(ctx context.Context, newProvider MQProvider, rollbackOnFailure bool) error {
@@ -299,6 +333,10 @@ func (m *MQManager) BeginSwitch(ctx context.Context, newProvider MQProvider, rol
 	if m.closed {
 		m.mu.Unlock()
 		return ErrNotConnected
+	}
+	if m.sharedRequired.Load() {
+		m.mu.Unlock()
+		return fmt.Errorf("%w: shared-key migration requires a maintenance restart", ErrSharedKeyReliableUnsupported)
 	}
 	if m.switcher != nil {
 		m.mu.Unlock()

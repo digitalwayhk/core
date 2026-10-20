@@ -16,6 +16,9 @@ var ErrReliableSubscribeUnsupported = errors.New("mq: reliable subscribe unsuppo
 
 var ErrKeyedReliableSubscribeUnsupported = errors.New("mq: keyed reliable subscribe unsupported")
 
+var ErrSharedKeyReliableUnsupported = errors.New("mq: shared key reliable subscribe unsupported")
+var ErrReliableGroupModeConflict = errors.New("mq: reliable group mode or prefetch conflicts")
+
 // ErrOrderedReliableUnsupported 表示当前 provider 未声明或不满足 ordered-reliable 契约。
 var ErrOrderedReliableUnsupported = errors.New("mq: ordered reliable unsupported")
 
@@ -91,8 +94,14 @@ type ReliableSubscribeOptions struct {
 	// 接管的既有超限 PEL 只分页恢复；串行模式仍固定为 1。
 	Count int64
 	// KeyConcurrency 是同一 active owner 内可并行处理的 OrderingKey 数。
-	// 零值和 1 保持整 subject 串行。
+	// 未启用 SharedKeys 时，零值和 1 保持整 subject 串行。
 	KeyConcurrency int
+	// SharedKeys 显式要求同 subject/group 的不同 key 由多个实例分担。
+	// false 保留旧行为；Count 在该模式中是所有实例共享的 PEL 预算，必须一致。
+	SharedKeys bool
+	// 以下只由 Redis provider 为一次执行注入，不属于应用可设置的合同。
+	ownerKey   string
+	ownerToken string
 	// lifecycle 仅由 MQManager 从已冻结的 Subject manifest 注入。
 	// 应用必须通过 RequireMessageLifecycle 声明策略，不能绕过 Manager 设置。
 	lifecycle *LifecyclePolicy
@@ -121,6 +130,32 @@ type KeyedReliableMQProvider interface {
 type OrderedReliableMQProvider interface {
 	ReliableMQProvider
 	OrderedReliableInfo() OrderedReliableCapability
+}
+
+// SharedKeyReliableCapability 将跨实例分担与单 owner 内的并发能力区分。
+// 顺序仅限同 subject/group/key；不提供跨 subject 全局顺序或业务数据库 fencing。
+type SharedKeyReliableCapability struct {
+	Ordered         OrderedReliableCapability
+	Scope           string
+	FencedAck       bool
+	BoundedPrefetch bool
+}
+
+const SharedKeyOrderingScope = "SUBJECT_GROUP_ORDERING_KEY"
+
+func DefaultSharedKeyReliableCapability() SharedKeyReliableCapability {
+	return SharedKeyReliableCapability{DefaultOrderedReliableCapability(), SharedKeyOrderingScope, true, true}
+}
+
+func (c SharedKeyReliableCapability) Valid() bool {
+	return c.Ordered.Valid() && c.Scope == SharedKeyOrderingScope && c.FencedAck && c.BoundedPrefetch
+}
+
+// SharedKeyReliableMQProvider 是显式的跨实例分键分担能力，必须另做真实多进程验收。
+type SharedKeyReliableMQProvider interface {
+	OrderedReliableMQProvider
+	KeyedReliableMQProvider
+	SharedKeyReliableInfo() SharedKeyReliableCapability
 }
 
 // MQProvider is the interface that every message-queue backend must implement.

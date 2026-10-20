@@ -25,13 +25,27 @@ return redis.call("XREADGROUP", "GROUP", ARGV[1], ARGV[2], "COUNT", ARGV[3], "ST
 `
 
 func (r *RedisStreamProvider) claimReliableKeyed(ctx context.Context, key, subject string, options ReliableSubscribeOptions, cursor string, count int64) ([]redis.XMessage, string, error) {
-	cmd := redis.NewXAutoClaimCmd(ctx, "eval", redisKeyedClaimScript, 2, key, r.ownerLockKey(subject, options.Group), options.Group, options.Consumer, cursor, count)
+	script := redisKeyedClaimScript
+	args := []interface{}{options.Group, options.Consumer, cursor, count}
+	if options.SharedKeys {
+		script = redisSharedPendingScript
+		args = []interface{}{options.Group, cursor, count, redisSharedMarker(options)}
+	}
+	command := []interface{}{"eval", script, 2, key, r.ownerLockKey(subject, options.Group)}
+	cmd := redis.NewXAutoClaimCmd(ctx, append(command, args...)...)
 	_ = r.client.Process(ctx, cmd)
 	return cmd.Result()
 }
 
 func (r *RedisStreamProvider) readReliableKeyed(ctx context.Context, key, subject string, options ReliableSubscribeOptions, count int64) ([]redis.XStream, error) {
-	cmd := redis.NewXStreamSliceCmd(ctx, "eval", redisKeyedReadScript, 2, key, r.ownerLockKey(subject, options.Group), options.Group, options.Consumer, count)
+	script := redisKeyedReadScript
+	args := []interface{}{options.Group, options.Consumer, count}
+	if options.SharedKeys {
+		script = redisSharedReadScript
+		args = append(args, redisSharedMarker(options), sharedRedisWindow(options))
+	}
+	command := []interface{}{"eval", script, 2, key, r.ownerLockKey(subject, options.Group)}
+	cmd := redis.NewXStreamSliceCmd(ctx, append(command, args...)...)
 	_ = r.client.Process(ctx, cmd)
 	return cmd.Result()
 }
@@ -49,6 +63,10 @@ func (r *RedisStreamProvider) runReliableKeyedSubscriber(
 	ctx context.Context, key, subject string, options ReliableSubscribeOptions,
 	handler func(*Message) error, metrics *redisReliableSubscriptionMetrics,
 ) {
+	if options.SharedKeys {
+		r.runReliableKeyedOwner(ctx, key, subject, options, handler, metrics)
+		return
+	}
 	defer r.releaseOwner(context.Background(), subject, options)
 	for ctx.Err() == nil {
 		if r.refreshOwner(ctx, subject, options) {
@@ -72,6 +90,9 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 	window := options.Count
 	if window < int64(options.KeyConcurrency) {
 		window = int64(options.KeyConcurrency)
+	}
+	if options.SharedKeys {
+		window = sharedRedisWindow(options)
 	}
 	metrics.prefetchCapacity.Store(window)
 	jobs := make(chan reliableKeyedWork)
@@ -136,7 +157,7 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 			}
 		}
 		// 会话内只续约，绝不因租约丢失而重新占用并确认旧工作。
-		if !r.renewOwner(ctx, subject, options) {
+		if !options.SharedKeys && !r.renewOwner(ctx, subject, options) {
 			return
 		}
 		blocked := int64(0)
