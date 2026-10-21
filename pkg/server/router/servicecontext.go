@@ -2066,6 +2066,10 @@ func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *t
 	if payload != nil && (own.Service == nil || payload.TargetService != own.Service.Name) {
 		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
 	}
+	// 可信业务服务身份不授予ServerManage权限，WS仅放行两个精确中继路径。
+	if payload != nil && (payload.TargetPath == "/api/servermanage" || strings.HasPrefix(payload.TargetPath, "/api/servermanage/")) && !isWebSocketRelayPath(payload.TargetPath) {
+		return nil, types.ErrInternalCallerForbidden
+	}
 	if handled, data, err := own.handleOwnedWebSocketRelay(ctx, payload); handled {
 		return data, err
 	}

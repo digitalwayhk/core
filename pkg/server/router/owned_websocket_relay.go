@@ -1,4 +1,4 @@
-// 本文件接通已有跨节点WS Broker的两个内部中继，仅对显式归属路由及同服务可信身份开放。
+// 本文件校验同服务WS中继边界；普通路由回到已注册处理器，归属路由保留内建中继。
 package router
 
 import (
@@ -9,7 +9,7 @@ import (
 )
 
 func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload *types.PayLoad) (bool, []byte, error) {
-	if payload == nil || (payload.TargetPath != "/api/servermanage/ws/notice" && payload.TargetPath != "/api/servermanage/ws/subscription") {
+	if payload == nil || !isWebSocketRelayPath(payload.TargetPath) {
 		return false, nil, nil
 	}
 	caller, trusted := types.TrustedInternalCallerFromContext(ctx)
@@ -36,9 +36,6 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 	if info == nil {
 		return true, nil, ownership.ErrUnknown
 	}
-	if _, ok := info.GetInstance().(types.IWebSocketOwnedReference); !ok {
-		return true, nil, ownership.ErrUnsupported
-	}
 	if payload.TargetPath == "/api/servermanage/ws/subscription" {
 		if sc.CrossNodeBroker == nil || sc.ClusterProvider == nil {
 			return true, nil, ownership.ErrNotReady
@@ -50,6 +47,12 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 		if node == nil || node.ServiceName != caller {
 			return true, nil, types.ErrInternalCallerForbidden
 		}
+	}
+	// 归属引用是可选能力；通过相同信任与节点校验后，普通WS继续正式路由分发。
+	if _, ok := info.GetInstance().(types.IWebSocketOwnedReference); !ok {
+		return false, nil, nil
+	}
+	if payload.TargetPath == "/api/servermanage/ws/subscription" {
 		sc.CrossNodeBroker.UpdatePeerSubscription(data.RoutePath, data.Hash, data.NodeID, data.Active)
 	} else {
 		var message interface{}
@@ -59,4 +62,8 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 		info.ExecuteLocalNotice(data.Hash, message)
 	}
 	return true, []byte(`{"success":true,"data":{"ok":true}}`), nil
+}
+
+func isWebSocketRelayPath(path string) bool {
+	return path == "/api/servermanage/ws/notice" || path == "/api/servermanage/ws/subscription"
 }

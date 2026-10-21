@@ -1,3 +1,4 @@
+// 本文件复用正式跨节点WS中继；只允许经框架验证的同服务调用方执行。
 package manage
 
 import (
@@ -9,32 +10,35 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
-// ---- ForwardNotice (relay endpoint) ----
-
-// ForwardNotice receives a WebSocket notice forwarded from a peer node and
-// dispatches it to local subscribers for the same routePath+hash.
+// ForwardNotice 将同服务对等节点的通知投递给本地相同routePath/hash的订阅者。
 type ForwardNotice struct {
 	RoutePath string          `json:"route_path"`
 	Hash      uint64          `json:"hash"`
 	Message   json.RawMessage `json:"message"`
 }
 
-func (f *ForwardNotice) Parse(req types.IRequest) error    { return req.Bind(f) }
-func (f *ForwardNotice) Validation(_ types.IRequest) error { return nil }
+// Parse 绑定既有中继JSON协议。
+func (f *ForwardNotice) Parse(req types.IRequest) error { return req.Bind(f) }
 
+// Validation 拒绝未经框架验证的同服务调用方。
+func (f *ForwardNotice) Validation(req types.IRequest) error {
+	return validateWebSocketRelayCaller(req)
+}
+
+// Do 通过现有服务作用域中继机制执行。
 func (f *ForwardNotice) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
 	if sc == nil {
 		return map[string]bool{"ok": true}, nil
 	}
 
-	// Find the RouterInfo for the given route path.
+	// 查找目标服务已经注册的通知路由。
 	ri := sc.Router.GetRouter(f.RoutePath)
 	if ri == nil {
 		return map[string]bool{"ok": true}, nil
 	}
 
-	// Decode the raw message into a generic value and dispatch locally.
+	// 还原跨节点JSON消息并经现有通知系统本地投递。
 	var msg interface{}
 	if err := json.Unmarshal(f.Message, &msg); err != nil {
 		return nil, err
@@ -43,17 +47,16 @@ func (f *ForwardNotice) Do(req types.IRequest) (interface{}, error) {
 	return map[string]bool{"ok": true}, nil
 }
 
+// RouterInfo 保留原精确路径，不用用户或管理Token替代内部身份。
 func (f *ForwardNotice) RouterInfo() *types.RouterInfo {
 	return router.DefaultRouterInfoWithOptions(f,
 		router.WithMethod(http.MethodPost),
 		router.WithPath("/api/servermanage/ws/notice"),
-		router.WithAuth(false), // peer-to-peer, authenticated by network ACL
+		router.WithAuth(false), // 内部服务身份由mTLS及Validation校验，不复用用户或管理Token。
 	)
 }
 
-// ---- SyncSubscription ----
-
-// SyncSubscription receives peer subscription change notifications.
+// SyncSubscription 更新同服务对等节点的真实订阅索引。
 type SyncSubscription struct {
 	RoutePath string `json:"route_path"`
 	Hash      uint64 `json:"hash"`
@@ -61,9 +64,15 @@ type SyncSubscription struct {
 	Active    bool   `json:"active"`
 }
 
-func (s *SyncSubscription) Parse(req types.IRequest) error    { return req.Bind(s) }
-func (s *SyncSubscription) Validation(_ types.IRequest) error { return nil }
+// Parse 绑定既有中继JSON协议。
+func (s *SyncSubscription) Parse(req types.IRequest) error { return req.Bind(s) }
 
+// Validation 拒绝未经框架验证的同服务调用方。
+func (s *SyncSubscription) Validation(req types.IRequest) error {
+	return validateWebSocketRelayCaller(req)
+}
+
+// Do 通过现有服务作用域中继机制执行。
 func (s *SyncSubscription) Do(req types.IRequest) (interface{}, error) {
 	sc := router.GetContext(req.ServiceName())
 	if sc == nil {
@@ -82,10 +91,23 @@ func (s *SyncSubscription) Do(req types.IRequest) (interface{}, error) {
 	return map[string]bool{"ok": true}, nil
 }
 
+// RouterInfo 保留原精确路径，不用用户或管理Token替代内部身份。
 func (s *SyncSubscription) RouterInfo() *types.RouterInfo {
 	return router.DefaultRouterInfoWithOptions(s,
 		router.WithMethod(http.MethodPost),
 		router.WithPath("/api/servermanage/ws/subscription"),
 		router.WithAuth(false),
 	)
+}
+
+// validateWebSocketRelayCaller 防止HTTP或用户Token绕过HandleInternalPayload的可信服务边界。
+func validateWebSocketRelayCaller(req types.IRequest) error {
+	if req != nil {
+		if source, ok := req.(types.IRequestInternalCaller); ok {
+			if caller, trusted := source.TrustedInternalCaller(); trusted && caller == req.ServiceName() {
+				return nil
+			}
+		}
+	}
+	return types.NewPublicError(types.ErrorKindForbidden, 0, "", types.ErrInternalCallerForbidden)
 }
