@@ -28,6 +28,16 @@
 
 - 无。
 
+## [v1.4.7] - 2026-10-22
+
+### Fixed
+
+- 修复v1.4.6普通Public/Private WS被可选归属处理器截断：同服务可信mTLS、SourceService及节点检查后回到已注册正式中继，实际更新对等索引和投递。归属WS保持Ready owner与引用恢复；新增真实双Gateway/mTLS/WS共存回归。详见[升级与验收](docs/codex/RELEASE_V1_4_7_2026-10-22.md)。
+
+### Security
+
+- 已注册两个WS中继的HTTP入口拒绝匿名及用户/管理Token，要求Core可信同服务身份；同服务mTLS不再能直接调用其它ServerManage路径，管理访问仍走原HTTP认证域。原先仅依赖网络ACL的HTTP中继需迁移至既有mTLS gRPC。升级compress v1.18.6至v1.18.7，修复GHSA-259r-337f-4rfw（CVE-2026-63209）S2字典整数溢出/越界风险，增加拒绝字典及最低安全版本门禁。
+
 ## [v1.4.6] - 2026-10-21
 
 ### Added
@@ -302,7 +312,7 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.5...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.7...HEAD
 [v1.4.5]: https://github.com/digitalwayhk/core/compare/v1.4.4...v1.4.5
 [v1.4.1]: https://github.com/digitalwayhk/core/compare/v1.4.0...v1.4.1
 [v1.4.0]: https://github.com/digitalwayhk/core/compare/v1.3.0...v1.4.0

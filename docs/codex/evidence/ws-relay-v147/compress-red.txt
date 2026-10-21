@@ -1,0 +1,17 @@
+--- FAIL: TestS2RejectsOverflowedDictionaryRepeat (0.00s)
+    compress_security_test.go:15: 
+        	Error Trace:	/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/internal/compat/compress_security_test.go:15
+        	Error:      	Expected nil, but got: &s2.Dict{dict:[]uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, repeat:-9223372036854775808, fast:sync.Once{_:sync.noCopy{}, done:atomic.Bool{_:atomic.noCopy{}, v:0x0}, m:sync.Mutex{_:sync.noCopy{}, mu:sync.Mutex{state:0, sema:0x0}}}, better:sync.Once{_:sync.noCopy{}, done:atomic.Bool{_:atomic.noCopy{}, v:0x0}, m:sync.Mutex{_:sync.noCopy{}, mu:sync.Mutex{state:0, sema:0x0}}}, best:sync.Once{_:sync.noCopy{}, done:atomic.Bool{_:atomic.noCopy{}, v:0x0}, m:sync.Mutex{_:sync.noCopy{}, mu:sync.Mutex{state:0, sema:0x0}}}, fastTable:(*[16384]uint16)(nil), betterTableShort:(*[16384]uint16)(nil), betterTableLong:(*[131072]uint16)(nil), bestTableShort:(*[65536]uint32)(nil), bestTableLong:(*[524288]uint32)(nil)}
+        	Test:       	TestS2RejectsOverflowedDictionaryRepeat
+        	Messages:   	溢出repeat必须在转换int和编码之前被拒绝
+--- FAIL: TestSecurityPatchedDependencyVersions (0.00s)
+    --- FAIL: TestSecurityPatchedDependencyVersions/github.com/klauspost/compress (0.00s)
+        dependency_security_test.go:32: 
+            	Error Trace:	/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/internal/compat/dependency_security_test.go:132
+            	            				/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/internal/compat/dependency_security_test.go:32
+            	Error:      	"1000018000006" is not greater than or equal to "1000018000007"
+            	Test:       	TestSecurityPatchedDependencyVersions/github.com/klauspost/compress
+            	Messages:   	dependency version v1.18.6 is below security minimum v1.18.7
+FAIL
+FAIL	github.com/digitalwayhk/core/internal/compat	0.843s
+FAIL

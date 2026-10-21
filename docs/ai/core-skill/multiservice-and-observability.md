@@ -121,6 +121,8 @@ private WebSocket 路由至少需要以下职责：
 
 跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；通知节点必须合并本地订阅 hash 与 `ICrossNodeSubscriptionIndex` 提供的对等节点订阅 hash，不能因本节点没有同 hash 订阅而丢弃远端用户通知。IPv6 地址通过 `net.JoinHostPort`；非 2xx 转发视为错误。
 
+普通 Public/Private WS 不需要 `IWebSocketOwnedReference`；该接口只声明持续归属引用。同一部署可共存两种路由。普通跨节点WS继续注册正式 `manage.SyncSubscription`、`manage.ForwardNotice` 到 `sc.Router.AddServerRouters(...)`，由原订阅摘要维护对等索引、原notice处理器投递；不能把普通路由改成伪归属接口来绕过框架错误。两个精确路径只接受同逻辑服务、可信mTLS且SAN与SourceService一致的调用；摘要NodeID须属于该服务。普通路由通过这些检查后交回原分发，归属路由继续内建分支。用户/管理Token、HTTP头、自报服务名均不能替代内部身份；HTTP中继请求返回403。未注册普通中继时明确失败，不伪造成功。同服务mTLS不授予其他ServerManage权限；内部gRPC入站仅为这两个精确中继提供例外，管理访问仍走原HTTP认证域。详见[v1.4.7升级和验收](../../codex/RELEASE_V1_4_7_2026-10-22.md)。
+
 worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
 
 ## 多服务运行图（Runtime API）

@@ -48,7 +48,7 @@ Core不能判断应用是否真的提交、不能强杀任意Go回调或已发�
 - 观测统计包含被顺序屏障阻挡的待办；有限窗口看不全时明确未知，不把全主题lag摊成单键lag，也不能认为pending=0就没有未读或到期任务。
 - WS路由可实现 `IWebSocketOwnedReference` 返回scope/key/语义名；声明在原认证、Parse、Validation后读取。会话身份仍由Core注入，客户端不提供owner凭据。Core从现有会话生成有界全量快照，应用Restore接收收敛结果，不另建会话账。
 - 两个Gateway各自引用同一键时，一个退订不关闭另一个。迟到revision拒绝；租约失效后Gateway自动从仍活跃会话重建，不要求客户端重订。Restore必须按当前凭据建立/替换视图，不能把旧归属缓存当全局事实。订阅ACK只证明恢复引用写入成功，不证明业务SQL完成或owner已Ready。
-- 对声明归属引用的WS路由，既有跨节点中继的两个精确gRPC路径仅接收同逻辑服务的可信mTLS身份；不注册匿名HTTP中继，也不授予其他Manage/ServerManage权限。
+- 归属WS与普通Public/Private WS可共存；`IWebSocketOwnedReference`仍为可选接口。两个精确中继gRPC路径共同校验同服务可信mTLS、SourceService及摘要节点；普通路由交回已注册SyncSubscription/ForwardNotice，归属路由保留内建处理。不能因未声明可选接口截断普通中继。HTTP及用户Token中继拒绝，不授予其他Manage/ServerManage权限。
 
 ## 硬边界
 

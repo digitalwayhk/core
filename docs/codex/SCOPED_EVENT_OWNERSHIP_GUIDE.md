@@ -1,6 +1,6 @@
 # 跨主题持续归属、批次与恢复指南
 
-适用版本：v1.4.6。权威接入示例与时限见 [skill分片](../ai/core-skill/scoped-ownership.md)。本指南登记通用层/Provider职责、保全迁移、运维边界及验收入口。
+适用版本：v1.4.6及以后；普通WS与归属WS共存应使用[v1.4.7补丁](RELEASE_V1_4_7_2026-10-22.md)。权威接入示例与时限见 [skill分片](../ai/core-skill/scoped-ownership.md)。本指南登记通用层/Provider职责、保全迁移、运维边界及验收入口。
 
 ## 根因与实际调用链
 

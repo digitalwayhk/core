@@ -183,3 +183,7 @@ stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新�
 ## v1.4.6持续归属兼容边界
 
 公开API均为加性，原IRequest和Provider必选接口不变；PayLoad.TargetInstanceID仅本机选址，JSON忽略、原protobuf不变。新OwnedReliableMQProvider单独声明；NATS拒绝。静态manifest、有限次DLQ拒绝、保全绑定/解除、显式RecoverOwnership及SQL权威下界要求见[指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。显式归属WS的两个内部gRPC中继仅同服务可信mTLS可达，不开放管理域或匿名HTTP。
+
+## v1.4.7普通WS中继兼容修复
+
+`IWebSocketOwnedReference`可选，不改变普通Public/Private WS、EventBridge、MQ组/PEL/游标或业务payload。两个精确WS中继共同校验同服务可信mTLS/SourceService、有效摘要节点及目标路由，普通路由回到已注册的正式中继，归属路由保留既有Ready owner/引用恢复。两个旧中继的HTTP入口收紧为403，用户/管理Token和自报头不能替代内部服务身份；依赖匿名HTTP/仅网络ACL转发的消费方须改用已支持的可信mTLS gRPC。内部gRPC对其它ServerManage路径明确拒绝，同服务证书不替代管理域认证；管理HTTP入口和认证域不变。Go签名、路由路径和JSON字段不变。参见[v1.4.7](RELEASE_V1_4_7_2026-10-22.md)。

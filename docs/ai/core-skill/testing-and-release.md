@@ -209,3 +209,9 @@ go get github.com/digitalwayhk/core@<commit>
 ## 持续归属验证
 
 参照 [示例11](../../../examples/11-scoped-event-ownership/README.md) 与 [v1.4.6验收](../../codex/RELEASE_V1_4_6_2026-10-21.md)。必须独立PID、真实Broker/SQL/WS，区分原生租约、加速注入和NOT_RUN；ACK成功、SQL持久化、Gateway引用确认及消费方UAT分别取证，不以静态能力声明替代。
+
+## 普通与归属WS共存回归（v1.4.7）
+
+`CORE_TEST_REDIS_ADDR=<独占地址> go test -race ./examples/integration/ws-relay -count=1 -timeout=3m` 必须用两个真实Gateway进程、同服务mTLS、真实外部WS帧，分别验证两个中继路径的索引和实际投递、普通Public/Private与归属共存、双向通知、用户隔离、退订和关闭，以及匿名HTTP/无客户端证书/伪造SourceService/异服务/非法节点/未知路由拒绝。同步注入可信context只算单元测试。示例11的真实MySQL/四进程Ready查询及免重订恢复须同时回归。保留原始RED及夹具错误，不能只凭ACK或RPC成功判断完成。
+
+依赖安全回归包含 `TestS2RejectsOverflowedDictionaryRepeat` 和 `TestSecurityPatchedDependencyVersions`；compress最低v1.18.7，拒绝溢出字典但不调用危险Encode。S2拒绝测试通过不代替消费方自定义压缩路径验收。

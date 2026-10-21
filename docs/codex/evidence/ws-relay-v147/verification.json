@@ -1,0 +1,146 @@
+[
+  {
+    "name": "final-integration-race",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "1",
+      "-race",
+      "-v",
+      "./examples/integration/ws-relay",
+      "./examples/integration/11-scoped-event-ownership",
+      "-count=1",
+      "-timeout=6m"
+    ],
+    "exit": 0,
+    "seconds": 110.461
+  },
+  {
+    "name": "final-ws-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "-v",
+      "./examples/integration/ws-relay",
+      "-count=1",
+      "-timeout=3m"
+    ],
+    "exit": 0,
+    "seconds": 30.808
+  },
+  {
+    "name": "final-related-race",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "1",
+      "-race",
+      "./pkg/server/router",
+      "./pkg/server/cluster",
+      "./pkg/server/transport/...",
+      "./pkg/server/trans/rest",
+      "./pkg/server/trans/websocket/...",
+      "./pkg/server/types",
+      "./pkg/server/api/manage",
+      "./pkg/server/ownership",
+      "./internal/compat",
+      "-count=1",
+      "-timeout=6m"
+    ],
+    "exit": 0,
+    "seconds": 104.009
+  },
+  {
+    "name": "final-router-normal",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "./pkg/server/router",
+      "./pkg/server/run",
+      "./pkg/server/api/...",
+      "./pkg/server/transport/...",
+      "./internal/compat",
+      "-count=1",
+      "-timeout=6m"
+    ],
+    "exit": 0,
+    "seconds": 21.449
+  },
+  {
+    "name": "storage-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=4m"
+    ],
+    "exit": 0,
+    "seconds": 17.713
+  },
+  {
+    "name": "release-candidate",
+    "command": [
+      "bash",
+      "scripts/test.sh",
+      "release-contract"
+    ],
+    "exit": 0,
+    "seconds": 43.239
+  },
+  {
+    "name": "logging-webdist",
+    "command": [
+      "bash",
+      "-c",
+      "scripts/check-logging.sh && scripts/test.sh web-dist-sync"
+    ],
+    "exit": 0,
+    "seconds": 5.266
+  },
+  {
+    "name": "final-quality",
+    "command": [
+      "go",
+      "vet",
+      "./pkg/server/...",
+      "./examples/integration/ws-relay/...",
+      "./internal/compat"
+    ],
+    "exit": 0,
+    "seconds": 2.113
+  },
+  {
+    "name": "dependency-selection",
+    "command": [
+      "go",
+      "list",
+      "-m",
+      "-json",
+      "github.com/klauspost/compress"
+    ],
+    "exit": 0,
+    "seconds": 0.023
+  },
+  {
+    "name": "final-server-normal",
+    "command": [
+      "go",
+      "test",
+      "-p",
+      "2",
+      "./pkg/server/...",
+      "./internal/compat",
+      "-count=1",
+      "-timeout=6m"
+    ],
+    "exit": 0,
+    "seconds": 43.762
+  }
+]

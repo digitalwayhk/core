@@ -1,0 +1,14 @@
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-private
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-public
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/owned
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界
+=== NAME  TestWebSocketRelayCoexistenceRealMTLSGateways
+    relay_test.go:227: Gateway PID=57601/58083；双向摘要与真实WS帧、用户隔离、退订/关闭、真实mTLS拒绝边界
+--- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways (27.80s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-private (0.35s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-public (0.29s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/owned (0.34s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界 (0.02s)
+PASS
+ok  	github.com/digitalwayhk/core/examples/integration/ws-relay	29.399s

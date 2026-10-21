@@ -34,6 +34,7 @@ type relayState struct {
 	Nodes []*cluster.NodeInfo `json:"nodes"`
 }
 
+// TestWebSocketRelayCoexistenceRealMTLSGateways 验证真实双Gateway的普通/归属WS投递、会话生命周期与信任边界。
 func TestWebSocketRelayCoexistenceRealMTLSGateways(t *testing.T) {
 	addr := os.Getenv("CORE_TEST_REDIS_ADDR")
 	if addr == "" {
