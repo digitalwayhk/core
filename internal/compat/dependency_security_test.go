@@ -13,10 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSecurityPatchedDependencyVersions 锁定 CVE-2026-81870 与 CVE-2026-84445 的最低修复版本。
+// TestSecurityPatchedDependencyVersions 锁定已修复安全公告的最低依赖版本。
 func TestSecurityPatchedDependencyVersions(t *testing.T) {
 	versions := goModVersions(t)
 	required := map[string]string{
+		"github.com/klauspost/compress":                                   "v1.18.7",
 		"go.opentelemetry.io/otel/exporters/otlp/otlptrace":               "v1.45.0",
 		"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc": "v1.45.0",
 		"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp": "v1.45.0",
