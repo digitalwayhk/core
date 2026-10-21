@@ -86,6 +86,9 @@ func sharedRedisWindow(options ReliableSubscribeOptions) int64 {
 	return window
 }
 func redisSharedMarker(options ReliableSubscribeOptions) string {
+	if options.scopeMarker != "" {
+		return options.scopeMarker
+	}
 	return fmt.Sprintf("%s%d", redisSharedModePrefix, sharedRedisWindow(options))
 }
 

@@ -30,6 +30,10 @@ func (r *RedisStreamProvider) claimReliableKeyed(ctx context.Context, key, subje
 	if options.SharedKeys {
 		script = redisSharedPendingScript
 		args = []interface{}{options.Group, cursor, count, redisSharedMarker(options)}
+		if options.scopeMarker != "" {
+			script = redisOwnedSizeBoundScript(script, true)
+			args = append(args, options.scopeMessageLimit)
+		}
 	}
 	command := []interface{}{"eval", script, 2, key, r.ownerLockKey(subject, options.Group)}
 	cmd := redis.NewXAutoClaimCmd(ctx, append(command, args...)...)
@@ -43,6 +47,10 @@ func (r *RedisStreamProvider) readReliableKeyed(ctx context.Context, key, subjec
 	if options.SharedKeys {
 		script = redisSharedReadScript
 		args = append(args, redisSharedMarker(options), sharedRedisWindow(options))
+		if options.scopeMarker != "" {
+			script = redisOwnedSizeBoundScript(script, false)
+			args = append(args, options.scopeMessageLimit)
+		}
 	}
 	command := []interface{}{"eval", script, 2, key, r.ownerLockKey(subject, options.Group)}
 	cmd := redis.NewXStreamSliceCmd(ctx, append(command, args...)...)

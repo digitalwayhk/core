@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ type SessionSubscriptions struct {
 	hmacExpiryMu         sync.Mutex
 	sessionContext       context.Context
 	cancelSession        context.CancelFunc
+	ownershipSessionID   string
 	hookSlots            chan struct{}
 	notificationMu       sync.Mutex
 	notificationGen      atomic.Uint64
@@ -52,16 +54,17 @@ type SessionSubscriptions struct {
 func NewSessionSubscriptions(manage *MelodyManager, client *MelodyClient, sr *router.ServiceRouter) *SessionSubscriptions {
 	sessionContext, cancelSession := context.WithCancel(context.Background())
 	return &SessionSubscriptions{
-		subscriptions:  make(map[string]map[uint64]types.IRouter),
-		client:         client,
-		manage:         manage,
-		sr:             sr,
-		metadata:       make(map[string]interface{}),
-		createdAt:      time.Now(),
-		lastActivity:   time.Now(),
-		sessionContext: sessionContext,
-		cancelSession:  cancelSession,
-		hookSlots:      make(chan struct{}, 1),
+		subscriptions:      make(map[string]map[uint64]types.IRouter),
+		client:             client,
+		manage:             manage,
+		sr:                 sr,
+		metadata:           make(map[string]interface{}),
+		createdAt:          time.Now(),
+		lastActivity:       time.Now(),
+		sessionContext:     sessionContext,
+		ownershipSessionID: uuid.Must(uuid.NewV4()).String(),
+		cancelSession:      cancelSession,
+		hookSlots:          make(chan struct{}, 1),
 	}
 }
 func (s *SessionSubscriptions) GetClient() types.IWebSocket {
@@ -144,9 +147,15 @@ func (s *SessionSubscriptions) isLogonChannel(msg *Message) bool {
 	}
 	return false
 }
-func (s *SessionSubscriptions) HandleSubscribe(msg *Message) bool {
+func (s *SessionSubscriptions) HandleSubscribe(msg *Message) (subscribed bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var afterUnlock func()
+	defer func() {
+		s.mu.Unlock()
+		if afterUnlock != nil {
+			afterUnlock()
+		}
+	}()
 	if s.isLogonChannel(msg) {
 		return false
 	}
@@ -164,14 +173,58 @@ func (s *SessionSubscriptions) HandleSubscribe(msg *Message) bool {
 		s.client.SendError(channel, "订阅错误: "+webSocketPublicMessage(err))
 		return false
 	}
+	ref, owned, err := ownedWebSocketReference(api)
+	if err != nil {
+		info.ReleaseSubscription(api)
+		s.client.SendError(channel, "订阅归属声明无效")
+		return false
+	}
+	if owned {
+		ctx, stop := context.WithTimeout(s.sessionContext, 3*time.Second)
+		err = s.manage.ensureOwnershipReferences(ctx, ref)
+		stop()
+		if err != nil {
+			info.ReleaseSubscription(api)
+			s.client.SendError(channel, "订阅归属恢复通道不可用")
+			return false
+		}
+	}
 
 	hash := info.RegisterWebSocketClient(api, s.client, req)
 	if hash == 0 {
 		s.client.SendError(channel, "订阅注册失败")
 		return false
 	}
+	previous := s.subscriptions[channel][hash]
 	s.subscriptions[channel][hash] = api
-	s.client.Send("sub", channel, s.subscriptions[channel])
+	if owned {
+		s.markOwnershipChange()
+		snapshot := make(map[uint64]types.IRouter, len(s.subscriptions[channel]))
+		for hash, api := range s.subscriptions[channel] {
+			snapshot[hash] = api
+		}
+		afterUnlock = func() {
+			if err := s.manage.flushOwnershipReferences(); err != nil {
+				s.mu.Lock()
+				if current := s.subscriptions[channel][hash]; current != nil && reflect.ValueOf(current) == reflect.ValueOf(api) {
+					if previous == nil {
+						info.UnRegisterWebSocketHash(hash, s.client)
+						delete(s.subscriptions[channel], hash)
+					} else {
+						s.subscriptions[channel][hash] = previous
+					}
+					s.markOwnershipChange()
+				}
+				s.mu.Unlock()
+				s.client.SendError(channel, "订阅恢复引用尚未确认")
+				subscribed = false
+				return
+			}
+			s.client.Send("sub", channel, snapshot)
+		}
+	} else {
+		s.client.Send("sub", channel, s.subscriptions[channel])
+	}
 	s.lastActivity = time.Now() // 更新最后活动时间
 	return true
 }
@@ -198,6 +251,9 @@ func (s *SessionSubscriptions) HandleUnsubscribe(msg *Message) {
 		info.UnRegisterWebSocketHash(hash, s.client)
 	}
 	if _, exists := s.subscriptions[channel]; exists {
+		if _, owned := s.subscriptions[channel][hash].(types.IWebSocketOwnedReference); owned {
+			s.markOwnershipChange()
+		}
 		delete(s.subscriptions[channel], hash)
 		if len(s.subscriptions[channel]) == 0 {
 			delete(s.subscriptions, channel)
@@ -224,6 +280,9 @@ func (s *SessionSubscriptions) UnsubscribeAll() {
 			continue
 		}
 		for hash := range subs {
+			if _, owned := subs[hash].(types.IWebSocketOwnedReference); owned {
+				s.markOwnershipChange()
+			}
 			info.UnRegisterWebSocketHash(hash, s.client)
 			delete(s.subscriptions[channel], hash)
 		}
@@ -254,6 +313,9 @@ func (s *SessionSubscriptions) unsubscribeUserLocked() {
 		}
 		if routeRequiresWebSocketAuth(info) {
 			for hash := range subs {
+				if _, owned := subs[hash].(types.IWebSocketOwnedReference); owned {
+					s.markOwnershipChange()
+				}
 				info.UnRegisterWebSocketHash(hash, s.client)
 				delete(s.subscriptions[channel], hash)
 			}

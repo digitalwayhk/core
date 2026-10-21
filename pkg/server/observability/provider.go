@@ -18,6 +18,7 @@ type RuntimeMetricProvider interface {
 
 // allowedGaugeNames 组件 gauge 名白名单（低基数）。
 var allowedGaugeNames = map[string]struct{}{
+	"ownership_active": {}, "ownership_ready": {}, "ownership_inflight": {},
 	"local_queue_wait_seconds_total": {}, "admission_seconds_total": {}, "admission_attempts_total": {},
 	"admission_rejected_concurrency_total": {},
 	"admission_rejected_pending_total":     {},
@@ -75,6 +76,7 @@ var allowedGaugeNames = map[string]struct{}{
 }
 
 var allowedCounterNames = map[string]struct{}{
+	"ownership_acquired_total": {}, "ownership_revoked_total": {}, "ownership_unknown_total": {},
 	"redis_command_pool_wait_total": {}, "redis_command_pool_wait_seconds_total": {}, "redis_command_pool_timeouts_total": {},
 	"redis_blocking_pool_wait_total": {}, "redis_blocking_pool_wait_seconds_total": {}, "redis_blocking_pool_timeouts_total": {},
 	"shared_key_acquired_total": {}, "shared_key_contended_total": {}, "shared_key_owner_lost_total": {},

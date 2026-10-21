@@ -102,6 +102,9 @@ type ReliableSubscribeOptions struct {
 	// 以下只由 Redis provider 为一次执行注入，不属于应用可设置的合同。
 	ownerKey   string
 	ownerToken string
+	// scopeMarker只由持续归属入口注入，原SharedKeys合同保持不变。
+	scopeMarker       string
+	scopeMessageLimit int64
 	// lifecycle 仅由 MQManager 从已冻结的 Subject manifest 注入。
 	// 应用必须通过 RequireMessageLifecycle 声明策略，不能绕过 Manager 设置。
 	lifecycle *LifecyclePolicy

@@ -86,6 +86,33 @@ func (r *ServiceResolver) ResolveWithKey(ctx context.Context, serviceName, hashK
 	return r.resolve(ctx, serviceName, hashKey)
 }
 
+// ResolveInstance 只解析归属权威指定的实例，禁止退到其他健康哈希候选。
+func (r *ServiceResolver) ResolveInstance(ctx context.Context, serviceName, instanceID string) (*ResolvedService, error) {
+	serviceName = strings.ToLower(strings.TrimSpace(serviceName))
+	instanceID = strings.TrimSpace(instanceID)
+	if serviceName == "" || instanceID == "" {
+		return nil, ErrTargetServiceUnavailable
+	}
+	if local := r.local(serviceName); local != nil && local.Config != nil && local.ServiceInstanceID == instanceID {
+		address := local.RuntimeAddress()
+		return &ResolvedService{Local: local, ServiceInstanceID: instanceID, Info: &types.TargetInfo{TargetAddress: address, TargetService: serviceName, TargetPort: local.Config.Port, TargetGRPCPort: local.Config.Transport.GRPC.Port}, Endpoints: serviceTransportEndpoints(address, local.Config.Port, local.Config.Transport.GRPC.Port)}, nil
+	}
+	entry, err := r.ensureEntry(ctx, serviceName)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	nodes := cloneResolverNodes(entry.nodes)
+	protocols := cloneProtocolSet(r.protocols)
+	r.mu.RUnlock()
+	for _, node := range nodes {
+		if node != nil && node.ServiceInstanceID == instanceID && node.Status == cluster.NodeStatusRunning && node.Address != "" && nodeSupportsProtocols(node, protocols) {
+			return &ResolvedService{NodeID: node.ID, ServiceInstanceID: node.ServiceInstanceID, Info: &types.TargetInfo{TargetAddress: node.Address, TargetService: serviceName, TargetPort: node.Port, TargetGRPCPort: node.GRPCPort}, Endpoints: serviceTransportEndpoints(node.Address, node.Port, node.GRPCPort)}, nil
+		}
+	}
+	return nil, ErrTargetServiceUnavailable
+}
+
 func (r *ServiceResolver) resolve(ctx context.Context, serviceName, hashKey string) (*ResolvedService, error) {
 	serviceName = strings.ToLower(strings.TrimSpace(serviceName))
 	if serviceName == "" {

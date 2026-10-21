@@ -28,6 +28,8 @@ type PayLoad struct {
 	HttpMethod     string
 	Token          string `json:"-"`
 	ServiceHashKey string `json:"-"`
+	// TargetInstanceID只在调用方精确选址使用，不进入业务payload或远端协议。
+	TargetInstanceID string `json:"-"`
 }
 
 func (own *PayLoad) InstanceRouter(api IRouter) error {
