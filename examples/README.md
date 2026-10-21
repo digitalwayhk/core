@@ -1,6 +1,6 @@
 # 示例
 
-十个示例构成能力阶梯，每个都是可独立运行、独立测试的完整应用，而不是片段演示：
+十一个示例构成能力阶梯，每个都是可独立运行、独立测试的完整应用，而不是片段演示：
 
 1. [01-simple-shop](./01-simple-shop)：模型、Manage CRUD、Public/Private API、JWT 鉴权、SQLite 持久化和订单 WebSocket 的最小闭环。
 2. [02-shop-payment](./02-shop-payment)：API、business、models 分层，跨模型事务，支付结果滞后的状态机，Manage 自定义命令。
@@ -14,7 +14,9 @@
 9. [09-admin-manage-rbac](./09-admin-manage-rbac)：复用 08 业务，演示 Core 管理员、角色绑定和命令权限，真实 HTTP 403。
 10. [10-reliable-multi-instance](./10-reliable-multi-instance)：一个发布服务、两个同逻辑组消费副本，验证可靠事件跨实例分键消费、同 key 顺序/失败屏障及真实 HTTP 用户隔离。
 
-01–07 递进覆盖商城业务域；08–09 集中演示管理能力；10 集中演示消息调度，不包含业务数据库或持久 Inbox。按当前能力选择模板。
+11. [11-scoped-event-ownership](./11-scoped-event-ownership)：两个处理副本与两个Gateway，多主题持续归属、真实MySQL fence、Ready查询及WS原会话免重订恢复。
+
+01–07 递进覆盖商城业务域；08–09 集中演示管理能力；10 集中演示单主题消息调度（无业务数据库或持久Inbox）；11增加应用事务fence与恢复。 按当前能力选择模板。
 
 集成测试通用能力位于 `integration` 根目录。每个示例在 `integration/<示例名>` 下保留 Manage、Public、Private/WebSocket 的真实进程测试。
 

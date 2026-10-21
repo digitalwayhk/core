@@ -27,6 +27,7 @@
 | `persistence/types.SearchItem.Context` | 加性 | persistence/types、database/oltp | 可选MySQL/SQLite查询执行上下文，覆盖COUNT、免COUNT读取和统计；nil保持旧行为，JSON忽略；不增加`IDataAction`必选方法，不承诺其他适配器或初始建连可中断 | `TestSQLQueryContext`、07真实MySQL锁等待取消、关闭池恢复及分页/确认回归 |
 | `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；SharedKeys=false 时 Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
 | `event.Subscription.SharedKeys/Prefetch`、`ReliableSubscribeOptions.SharedKeys`、`SharedKeyReliableMQProvider`、`MQManager.RequireSharedKeyReliable`、`MQBridge.EnsureSharedKeyReliable` | Stable（v1.4.4 加性） | server/event、mq | 显式跨实例分键；N=每实例并发、W=组级预取；作用域 subject/group/key；旧零值行为保留；共享模式持久冻结，不支持在线 Provider 切换或原地回退 | 真 Redis 双进程、崩溃/断网/旧 ACK fence、例10三进程与 race；[升级边界](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md) |
+| `ownership.Credential/Manifest/Runtime/FenceTransaction`、`event.OwnedSubscription`、`OwnedReliableMQProvider`、`ServiceContext.SubscribeOwnedEvents`、`IRequestOwnedServiceCaller`、`IWebSocketOwnedReference` | Stable（v1.4.6加性，显式启用） | server/event、mq、router、ownership、melody | 跨主题持续scope/key、有界批次、SQL fence、Ready精确调用、现有WS引用恢复；原组和零值保留，不支持者拒绝 | 真实独立PID/Redis/MySQL/mTLS/WS及race；[边界和迁移](SCOPED_EVENT_OWNERSHIP_GUIDE.md) |
 | `mq.VerifySharedKeyReliableDistribution` | Stable（测试辅助） | server/mq | 双连接通用 conformance；不能替代独立 PID 与真实故障验收 | Redis helper + event 双进程测试分别登记 |
 | `mq.LifecyclePolicy`、`LifecycleMQProvider`、`MQManager.RequireMessageLifecycle`、`ServiceContext.RequireMessageLifecycle` | Stable（加性） | server/mq、router | 应用声明必需组、发布确认、保留、重试/DLQ、容量和有界回收；Provider 能力不足或状态不确定时 fail closed | 共享 lifecycle conformance + Redis/NATS 真 Broker 测试 |
 | `mq.LifecyclePolicy.NoRequiredGroups`、`LifecycleCapabilities.NoRequiredGroups` | Stable（加性） | server/mq | 显式纯保留主题；正数保留期、零重试、禁止组订阅；零值保持旧策略指纹和空组拒绝语义 | 无组单元/共享 conformance、Redis/NATS 真 Broker 验证；边界见 MQ_MESSAGE_LIFECYCLE_GUIDE |
@@ -178,3 +179,7 @@ stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新�
 `/api/health` 保持存活语义；`/api/ready` 只检查本进程自身服务，未就绪为安全 HTTP 503，不输出内部身份或连接信息。完整迁移和证据边界见 [稳定实例身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
 
 实现复审补充：`CheckProcessAdmission()` 保留已清理 stable 服务的终态故障，只有同名服务成功重建才清除；`OutboxOptions.Admission` 为可选 `OutboxAdmission` 接口，保持结构可比较，零值保持旧行为，ServiceContext 仅为 stable 自动注入。stable 的 SubscribeEvent 在业务 Handler 前检查准入，可靠订阅失败不 ACK；它不新增无 MQ 时的启动依赖。
+
+## v1.4.6持续归属兼容边界
+
+公开API均为加性，原IRequest和Provider必选接口不变；PayLoad.TargetInstanceID仅本机选址，JSON忽略、原protobuf不变。新OwnedReliableMQProvider单独声明；NATS拒绝。静态manifest、有限次DLQ拒绝、保全绑定/解除、显式RecoverOwnership及SQL权威下界要求见[指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。显式归属WS的两个内部gRPC中继仅同服务可信mTLS可达，不开放管理域或匿名HTTP。

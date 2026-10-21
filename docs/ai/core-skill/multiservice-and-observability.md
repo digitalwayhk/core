@@ -210,3 +210,7 @@ Redis Provider 将阻塞 XREADGROUP 与命令分为两个有限连接池；旧�
 - 第10例不含数据库模型，只演示 Broker 调度与有界本地进度，不建立空壳 EnsureStorage；它的直接 Broker 接收接口不承诺业务数据库原子提交。持久业务仍按前述 Outbox/Inbox 业务确认执行，不能复制演示进度当生产幂等。
 - 验收必须真实 Broker + 两个独立 PID，包含加入/退出/硬杀/重启、旧 owner 迟到 ACK、网络中断、旧 pending 与新消息顺序及有限预取。双连接 helper 不能替代跨进程证据；明确 NOT_RUN。见[完整边界与命令](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
 - capacity reached 是 retained 数/字节的独立安全背压；不要因某个组 pending=0 就清数据/提阈值/改 observe。先关联冻结 manifest、全部组 lag/pending、保留期、快照新鲜度与回收进度，见[独立调查](../../codex/MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)。
+
+## v1.4.6跨主题持续归属
+
+SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期归属、应用SQL fence、同owner批次、Ready精确调用或现有WS会话恢复时，先读 [scoped-ownership.md](scoped-ownership.md)，使用正式SubscribeOwnedEvents；不要自建worker、Redis锁或会话账。NATS/无MQ明确拒绝；原零值、生命周期与Outbox/Inbox业务确认要求保留。

@@ -28,6 +28,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | RouterInfo 缓存、本地可靠写、write-behind、水平扩展 | [write-path-and-performance.md](write-path-and-performance.md) |
 | Badger参数、官方/项目默认值、内存预算、GC与升级验证 | [badger-configuration.md](badger-configuration.md) |
 | 多服务调用、EventBridge、Outbox/Inbox 业务确认、WebSocket、MQ 生命周期与安全回收、Runtime 观测、日志 | [multiservice-and-observability.md](multiservice-and-observability.md) |
+| 跨主题持续归属、SQL fence、Ready owner查询、WS引用恢复 | [scoped-ownership.md](scoped-ownership.md) |
 | 业务统计、经营分析、服务报表 | [stats-and-reports.md](stats-and-reports.md) |
 | Casdoor/JWT 双域、Manage RoleCode RBAC、可选 HMAC Provider、WebSocket 认证、Web Admin bootstrap | [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md) |
 | 命名规范与设计流程 | [naming-and-workflow.md](naming-and-workflow.md) |
@@ -53,6 +54,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 管理界面全能力 | `examples/08-admin-manage-ui` | Manage View 字段/命令/子表配置、外键与子查询、导入导出、自定义 `editshow` 命令，对照 `web/admin` 的 `manage-ui` |
 | Manage 角色权限 | `examples/09-admin-manage-rbac` | 复用 08 的分类/条目业务 Manage API、Core 管理员与 RoleCode 绑定、`path + command` 权限、首个 Casdoor 管理员、TestToken、真实 HTTP 403 |
 | 可靠事件跨实例分担 | `examples/10-reliable-multi-instance` | 三个独立进程、逻辑服务共享组、稳定 ShardKey、SharedKeys/Prefetch、真实 HTTP 用户隔离；演示调度，不替代事务 Outbox/Inbox |
+| 跨主题持续归属与恢复 | `examples/11-scoped-event-ownership` | SQL fence、Ready精确调用、多主题批次、双Gateway WS免重订恢复 |
 | 业务统计、经营分析与服务报表 | `examples/07-shop-order-scale/order-service` | `stats.StatSpec`、OLTP/ClickHouse 引擎、快照 `Store`、`stats.Dashboard`、`stats.ReportDef`、Manage API 与服务子菜单 |
 | 多服务运行图（框架） | Admin `MonitorSystem` + ServerManage Runtime API | `POST /api/servermanage/runtimetopology`、`runtimeservice`；ClusterProvider + Prometheus；指标 `null+state` |
 
@@ -96,7 +98,7 @@ entity.Model
 5. Model 必须先按生命周期归入基础资料或业务事实两条平行支路，不能按"谁是继承上层"判断。模型嵌入指针必须在 `NewModel()` 初始化；`GetHash` 表达真实业务唯一性；引用后的基础资料通常只能禁用，不能删除。
 6. **每个服务在启动阶段、接受请求前调用 models 组合根的 `EnsureStorage()`，由框架自动完成建库、建表和补列。** 请求、Provider、Hook 和业务事务不得承担建表。禁止 `CREATE TABLE`/`init.sql`、migration 目录、版本化迁移框架或业务代码直接调用 GORM `AutoMigrate`。破坏性变更（删列、改类型、加约束）不自动执行，需走发布流程。机制与边界见 [models.md](models.md)。
 7. public/private 返回独立 DTO 并实现 `GetResponse()`，不直接序列化深度继承的持久化模型。
-8. WebSocket 只面向最终外部用户；内部同步调用默认 gRPC，HTTP 仅显式发送前备用，内部异步事件用 EventBridge。发布只在 `Start()` 声明 `sc.UseOutbox(...)`，订阅只用 `sc.SubscribeEvent(event.Subscription{...})`；业务不手写 Outbox worker 或双套订阅。
+8. WebSocket 只面向最终外部用户；内部同步调用默认 gRPC，HTTP 仅显式发送前备用，内部异步事件用 EventBridge。发布只在 `Start()` 声明 `sc.UseOutbox(...)`，普通订阅用 `sc.SubscribeEvent(event.Subscription{...})`；明确跨主题持续归属时使用正式 `sc.SubscribeOwnedEvents(event.OwnedSubscription{...})` 并遵守 [持续归属规范](scoped-ownership.md)。业务不手写 Outbox worker 或双套订阅。
 9. `UseCache` 是 API 级唯一启用声明；默认 local L1，L2/shared 才需显式配置；控制事件通过 EventBridge 主动失效。多服务缓存只放在面向外部流量的入口服务 facade。
 10. Badger pending 是未同步业务事实，不是可丢弃缓存；高 TPS 写路径只能在本地持久成功后确认。
 11. Casdoor Auth/Manage 是可同时启用的两个独立认证域，Secret 必须隔离；Auth Token 只进 Private/用户 WebSocket，Manage Token 只进 Manage。`/api/web/bootstrap` 只属于启用 `ViewPort` 的 HTMLServer 开发/测试视图。详见 [auth-casdoor-and-admin.md](auth-casdoor-and-admin.md)。

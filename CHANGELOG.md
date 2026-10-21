@@ -28,6 +28,24 @@
 
 - 无。
 
+## [v1.4.6] - 2026-10-21
+
+### Added
+
+- 显式跨主题持续归属：OwnedSubscription、正epoch/实例会话凭据、应用SQL事务fence、真实多输入批次、有限待办与确认进度、Ready owner精确查询/控制及现有WS会话引用恢复。增加示例11的两处理进程、两Gateway、MySQL/mTLS/真实WS验收，更新权威skill和能力矩阵。详见[发布验收](docs/codex/RELEASE_V1_4_6_2026-10-21.md)。
+
+### Changed
+
+- 新入口须显式维护Provision/Bind，保全原shared/W=8、Stream/group/PEL/游标及事件身份；回退Unbind，未知序列不自动补0，正SQL下界维护恢复须停稳实际回调/事务。原订阅零值和Provider必选接口不变；NATS/无MQ、有限次批次DLQ及在线Provider切换明确拒绝。
+
+### Fixed
+
+- 新持续归属按原OrderingKey取最早连续前缀，新读取后重扫PEL，避免并发读取跳过前序；不可执行后序仍计待办。多scope指标有限汇总、handler/ACK独立时钟和旧凭据ACK/Release隔离，保留v1.4.2跨窗口与v1.4.5连接池隔离。
+
+### Security
+
+- 显式归属WS的两个内部gRPC中继只接受同逻辑服务可信mTLS，拒绝匿名HTTP及其他管理域访问；不把业务身份、秘密token或消息正文放入指标/新增trace。
+
 ## [v1.4.5] - 2026-10-20
 
 ### Added

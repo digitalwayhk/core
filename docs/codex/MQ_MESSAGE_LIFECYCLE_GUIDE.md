@@ -273,3 +273,13 @@ go test -race ./pkg/server/mq -count=1
 W 与模式持久冻结。启用前必须停旧订阅、确认实际 handler 已退出并等待旧租约释放；禁止旧新模式混跑。原地回退、在线调预算和跨 Broker 热切换不在本轮能力内；不得删组、标记或历史消息绕过。租约过期不证明旧业务调用终止，旧 owner 不能有效 ACK，但业务仍需跨副本事务幂等。具体资源预算、公平性及真实故障证据见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)和[示例10](../../examples/10-reliable-multi-instance)。
 
 `message lifecycle capacity reached` 根据 retained 数/字节触发，与单 owner 问题分开诊断。某组 pending=0 时，其他必需组或正常保留期仍可阻止物理回收。真实两组验收和现场缺失证据见[独立容量调查](MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)，不应提容量或改 observe 掩盖。
+
+## v1.4.6持续归属可选能力
+
+| Provider | 跨主题持续scope/key | 应用凭据/事务fence | 原组多输入批次/Ready查询/WS引用恢复 |
+| --- | --- | --- | --- |
+| Redis Streams | 支持，显式OwnedReliableMQProvider | 正epoch+token；应用自己在SQL事务CheckFence | 支持；原组/W有界，保全维护绑定 |
+| NATS JetStream | 不支持，启动拒绝 | 不声明 | 不声明，不能以普通ACK替代 |
+| 无MQ/其它Provider | 未声明即拒绝 | 不模拟 | 不降级本地或哈希 |
+
+详见[持续归属指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。保留required groups、发布确认、容量、保留与安全回收。新入口不支持有限次整批DLQ，MaxDeliveries>0明确拒绝；不能为接入而擅自删改原策略。ACK响应未知先重查原PEL；新读取后重新扫描最早PEL，保留原OrderingKey失败屏障，不承诺跨subject总序。

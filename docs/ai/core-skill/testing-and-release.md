@@ -205,3 +205,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## 跨实例可靠消费验收
 
 `VerifyKeyedReliableConcurrency` 仅验证单订阅内的 key 并发；`VerifySharedKeyReliableDistribution` 验证两个连接，也不能替代独立进程。涉及 SharedKeys 时必须以独占 Redis 串行执行 mq/event 普通与 race、真实独立进程故障测试，以及 `examples/integration/10-reliable-multi-instance` 的三服务 HTTP 验收。原生默认租约崩溃恢复需显式 `CORE_TEST_SHARED_FULL_LEASE=1`，不能将加速 TTL 的网络故障注入当作原生接管时延。保留原 RED、夹具失败和最终源码哈希，未配置 NATS/MySQL/etcd 或生产迁移登记 NOT_RUN。详见[共享消费验收](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+
+## 持续归属验证
+
+参照 [示例11](../../../examples/11-scoped-event-ownership/README.md) 与 [v1.4.6验收](../../codex/RELEASE_V1_4_6_2026-10-21.md)。必须独立PID、真实Broker/SQL/WS，区分原生租约、加速注入和NOT_RUN；ACK成功、SQL持久化、Gateway引用确认及消费方UAT分别取证，不以静态能力声明替代。

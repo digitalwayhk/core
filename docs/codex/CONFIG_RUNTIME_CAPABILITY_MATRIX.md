@@ -301,3 +301,7 @@
 | Shared 模式在线 Provider 切换 | 拒绝 | 拒绝 | 建立要求后 SetCurrent/BeginSwitch 拒绝；新上下文维护迁移 |
 
 存量 PEL、旧新版本及回退边界见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+
+## v1.4.6持续归属是显式Go能力合同
+
+本轮不新增ServerConfig JSON开关。通过 [ownership.Manifest/OwnedSubscription](SCOPED_EVENT_OWNERSHIP_GUIDE.md) 声明scope、原subject/group、有限键目录/预算和时限，经ServiceEventBridge→MQManager→Provider校验；正常启动不自动Provision/Bind/Recover。Redis支持，NATS/无MQ拒绝。复用命令8/阻塞16池预算，不按每scope创建client，不改变生命周期容量/回收配置。
