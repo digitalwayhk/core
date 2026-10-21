@@ -131,6 +131,7 @@ func ownershipCredentialArgs(c ownership.Credential) []any {
 	return []any{"key:" + ownershipDigest(c.Key), c.Key, c.Token, strconv.FormatInt(c.Epoch, 10), c.InstanceID, c.SessionID, c.Service}
 }
 
+// Acquire 原子取得声明键并生成正序列凭据，不自动恢复未知序列。
 func (s *redisOwnershipStore) Acquire(ctx context.Context, c ownership.Credential, ttl time.Duration) (ownership.Credential, error) {
 	if c.Epoch != 0 || c.Token != "" {
 		return ownership.Credential{}, ownership.ErrUnknown
@@ -163,6 +164,8 @@ redis.call("PEXPIRE",KEYS[3],ARGV[4]);return epoch`).Run(ctx, s.provider.client,
 	}
 	return c, nil
 }
+
+// Renew 只为完整匹配的当前凭据续租。
 func (s *redisOwnershipStore) Renew(ctx context.Context, c ownership.Credential, ttl time.Duration) error {
 	if c.Validate() != nil {
 		return ownership.ErrUnknown
@@ -172,12 +175,16 @@ func (s *redisOwnershipStore) Renew(ctx context.Context, c ownership.Credential,
 if redis.call("HGET",KEYS[1],"lease")~=ARGV[8] then return redis.error_reply("OWNER_UNKNOWN") end
 return redis.call("PEXPIRE",KEYS[3],ARGV[8])`).Run(ctx, s.provider.client, s.keys(c), args...).Err())
 }
+
+// Ready 在恢复完成后公布当前凭据。
 func (s *redisOwnershipStore) Ready(ctx context.Context, c ownership.Credential) error {
 	if c.Validate() != nil {
 		return ownership.ErrUnknown
 	}
 	return ownershipRedisError(redis.NewScript(redisOwnershipCredentialGuard+`return redis.call("HSET",KEYS[3],"ready","1")`).Run(ctx, s.provider.client, s.keys(c), ownershipCredentialArgs(c)...).Err())
 }
+
+// Validate 校验当前凭据，按调用方要求同时校验Ready。
 func (s *redisOwnershipStore) Validate(ctx context.Context, c ownership.Credential, ready bool) error {
 	if c.Validate() != nil {
 		return ownership.ErrUnknown
@@ -191,12 +198,16 @@ func (s *redisOwnershipStore) Validate(ctx context.Context, c ownership.Credenti
 if ARGV[8]=="1" and redis.call("HGET",KEYS[3],"ready")~="1" then return redis.error_reply("OWNER_NOT_READY") end
 return 1`).Run(ctx, s.provider.client, s.keys(c), args...).Err())
 }
+
+// Release 只删除当前完整凭据匹配的租约。
 func (s *redisOwnershipStore) Release(ctx context.Context, c ownership.Credential) error {
 	if c.Validate() != nil {
 		return ownership.ErrUnknown
 	}
 	return ownershipRedisError(redis.NewScript(redisOwnershipCredentialGuard+`return redis.call("DEL",KEYS[3])`).Run(ctx, s.provider.client, s.keys(c), ownershipCredentialArgs(c)...).Err())
 }
+
+// Resolve 解析并复核Ready凭据，未知状态明确失败。
 func (s *redisOwnershipStore) Resolve(ctx context.Context, scope, key string) (ownership.Credential, error) {
 	c := ownership.Credential{Scope: scope, Key: key}
 	values, err := redis.NewScript(redisOwnershipMetadataGuard+`

@@ -13,6 +13,7 @@ type ownedRuntimeMetrics struct {
 	runtimes []*ownership.Runtime
 }
 
+// ComponentName 使用固定组件名，不引入scope或用户指标标签。
 func (*ownedRuntimeMetrics) ComponentName() string { return "ownership" }
 func (m *ownedRuntimeMetrics) size() int           { m.mu.RLock(); defer m.mu.RUnlock(); return len(m.runtimes) }
 func (m *ownedRuntimeMetrics) add(r *ownership.Runtime) {
@@ -20,6 +21,8 @@ func (m *ownedRuntimeMetrics) add(r *ownership.Runtime) {
 	defer m.mu.Unlock()
 	m.runtimes = append(m.runtimes, r)
 }
+
+// RuntimeMetricSnapshot 汇总本实例有限运行时，保留累计计数与实际在途数。
 func (m *ownedRuntimeMetrics) RuntimeMetricSnapshot(ctx context.Context) observability.RuntimeComponentSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

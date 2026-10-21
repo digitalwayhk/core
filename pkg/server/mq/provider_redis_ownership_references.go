@@ -23,6 +23,7 @@ type redisOwnershipReference struct {
 	Reference  ownership.Reference
 }
 
+// OpenGateway 开启有界Gateway会话，不为每个订阅新建连接。
 func (s *redisOwnershipStore) OpenGateway(ctx context.Context, id string, ttl time.Duration) error {
 	if id == "" || len(id) > 256 || ttl <= 0 || ttl > time.Hour {
 		return ownership.ErrUnknown
@@ -36,6 +37,7 @@ redis.call("HSET",KEYS[1],"revision","0","digest","")
 redis.call("PEXPIRE",KEYS[1],ARGV[1]);redis.call("ZADD",KEYS[2],ms+tonumber(ARGV[1]),KEYS[1]);return 1`).Run(ctx, s.provider.client, []string{s.provider.ownershipGateway(id), s.provider.prefix + ":ownership-gateways"}, ttl.Milliseconds()).Err())
 }
 
+// ReplaceGateway 按版本原子替换一个Gateway的全量语义引用。
 func (s *redisOwnershipStore) ReplaceGateway(ctx context.Context, snapshot ownership.GatewaySnapshot) error {
 	if snapshot.GatewayID == "" || len(snapshot.GatewayID) > 256 || snapshot.Revision <= 0 || snapshot.Lease <= 0 || snapshot.Lease > time.Hour || len(snapshot.References) > 1024 {
 		return ownership.ErrCapacity
@@ -96,12 +98,15 @@ redis.call("HSET",KEYS[1],"revision",ARGV[1],"digest",ARGV[2]);redis.call("PEXPI
 redis.call("ZADD",KEYS[3],ms+tonumber(ARGV[3]),KEYS[1]);return 1`).Run(ctx, s.provider.client, []string{key, key + ":index", s.provider.prefix + ":ownership-gateways"}, strconv.FormatInt(snapshot.Revision, 10), ownershipDigest(string(raw)), snapshot.Lease.Milliseconds(), string(raw)).Err())
 }
 
+// CloseGateway 使本Gateway引用失效，其他Gateway引用继续有效。
 func (s *redisOwnershipStore) CloseGateway(ctx context.Context, id string) error {
 	if id == "" {
 		return ownership.ErrUnknown
 	}
 	return s.provider.client.Del(ctx, s.provider.ownershipGateway(id)).Err()
 }
+
+// References 过滤失效会话并返回有界、带正版本的引用快照。
 func (s *redisOwnershipStore) References(ctx context.Context, scope, key string) (ownership.ReferenceSnapshot, error) {
 	base := s.provider.ownershipBase(scope)
 	values, err := redis.NewScript(redisOwnershipMetadataGuard+`

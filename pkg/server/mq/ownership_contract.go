@@ -23,11 +23,18 @@ type OwnedReliableOptions struct {
 // OwnedReliableMQProvider 显式支持持续归属、业务批次及应用事务凭据。
 type OwnedReliableMQProvider interface {
 	SharedKeyReliableMQProvider
+	// SupportsScopedOwnership 明确声明持续归属能力，不能从普通可靠ACK推导。
 	SupportsScopedOwnership() bool
+	// OwnershipStore 取得Provider中立的凭据及框架会话引用访问面。
 	OwnershipStore(context.Context) (ownership.Store, error)
+	// ProvisionOwnership 显式维护初始化，不在正常启动中自动重建元数据。
 	ProvisionOwnership(context.Context, ownership.Manifest, int64) error
+	// RecoverOwnership 仅在停稳全部owner后按应用SQL正下界维护恢复。
 	RecoverOwnership(context.Context, ownership.Manifest, int64) error
+	// BindOwnership 保全原Stream、逻辑组、PEL及游标绑定新合同。
 	BindOwnership(context.Context, ownership.Manifest) error
+	// UnbindOwnership 无活动归属且实际回调退出后恢复原shared模式。
 	UnbindOwnership(context.Context, ownership.Manifest) error
+	// SubscribeOwnedBatch 按原组有限读取同归属批次，持久成功后才fenced ACK。
 	SubscribeOwnedBatch(context.Context, OwnedReliableOptions, func(context.Context, ownership.Credential, []*Message) error) (*ownership.Runtime, error)
 }
