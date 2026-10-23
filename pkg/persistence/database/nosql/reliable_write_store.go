@@ -110,6 +110,42 @@ func (store *ReliableWriteStore[T]) UseWriteBehind(target WriteBehindTarget[T]) 
 	return nil
 }
 
+// UseWriteBehindWithFailureHandler 显式绑定有限预算及应用失败处置入口，保持原写入/生命周期门面。
+func (store *ReliableWriteStore[T]) UseWriteBehindWithFailureHandler(target WriteBehindTarget[T], handler WriteBehindFailureHandler[T]) error {
+	if store == nil || store.db == nil || store.closing.Load() {
+		return ErrWriteStoreClosed
+	}
+	if err := store.db.UseWriteBehindWithFailureHandler(target, handler); err != nil {
+		return err
+	}
+	store.bound.Store(true)
+	return nil
+}
+
+// ListWriteBehindFailures 分页读取受应用权限保护的原失败记录，不提供管理页面或匿名API。
+func (store *ReliableWriteStore[T]) ListWriteBehindFailures(after string, limit int) ([]WriteBehindFailureRecord[T], string, error) {
+	if store == nil || store.db == nil {
+		return nil, "", ErrWriteStoreClosed
+	}
+	return store.db.ListWriteBehindFailures(after, limit)
+}
+
+// ApplyWriteBehindDecision 按原身份和版本委托应用恢复决策，绝不重置预算。
+func (store *ReliableWriteStore[T]) ApplyWriteBehindDecision(ctx context.Context, d WriteBehindDecision) error {
+	if store == nil || store.db == nil {
+		return ErrWriteStoreClosed
+	}
+	return store.db.ApplyWriteBehindDecision(ctx, d)
+}
+
+// WriteBehindDispositionMetrics 返回失败处置状态，不将交接计入业务成功。
+func (store *ReliableWriteStore[T]) WriteBehindDispositionMetrics() (WriteBehindDispositionMetrics, error) {
+	if store == nil || store.db == nil {
+		return WriteBehindDispositionMetrics{}, ErrWriteStoreClosed
+	}
+	return store.db.GetWriteBehindDispositionMetrics()
+}
+
 // ForceSyncBatch 最多同步 limit 条 pending，实际单轮数量不会超过 Badger.SyncBatchSize。
 func (store *ReliableWriteStore[T]) ForceSyncBatch(ctx context.Context, limit int) (ForceSyncResult, error) {
 	if err := store.checkSyncable(ctx); err != nil {

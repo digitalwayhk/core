@@ -619,6 +619,8 @@ func TestAdaptivePartialProgressCloseAndRestart(t *testing.T) {
 	require.Equal(t, 8, exact)
 	require.Equal(t, 8, reopened.GetCachedPendingSyncCount())
 	require.NoError(t, reopened.UseWriteBehind(&boundedFundTarget{confirm: 128}))
-	require.Eventually(t, func() bool { return reopened.GetCachedPendingSyncCount() == 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		return reopened.GetCachedPendingSyncCount() == 0 && reopened.GetSyncMetrics().SyncedItems == 8
+	}, time.Second, time.Millisecond)
 	require.Equal(t, uint64(8), reopened.GetSyncMetrics().SyncedItems)
 }

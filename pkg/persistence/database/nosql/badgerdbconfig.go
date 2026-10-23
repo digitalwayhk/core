@@ -35,17 +35,18 @@ type BadgerDBConfig struct {
 	EnableLogger       bool  `json:"enable_logger" yaml:"enable_logger"`                 // 启用日志（默认 true）
 
 	// 同步配置
-	AutoSync                   bool          `json:"auto_sync" yaml:"auto_sync"`                                         // 是否自动同步到其他DB（默认 false）
-	SyncInterval               time.Duration `json:"sync_interval" yaml:"sync_interval"`                                 // 同步间隔（默认 1s）
-	SyncBatchSize              int           `json:"sync_batch_size" yaml:"sync_batch_size"`                             // 单轮同步批次及 ForceSyncBatch 硬上限（默认 1000）
-	SyncMinInterval            time.Duration `json:"sync_min_interval" yaml:"sync_min_interval"`                         // 最小同步间隔（默认 1s）
-	SyncMaxInterval            time.Duration `json:"sync_max_interval" yaml:"sync_max_interval"`                         // 最大同步间隔（默认 10s）
-	SyncBatchDelay             time.Duration `json:"sync_batch_delay" yaml:"sync_batch_delay"`                           // 旧模式每轮收集等待；共享默认 100ms，生产/快速默认零
-	SyncFlushThreshold         int           `json:"sync_flush_threshold" yaml:"sync_flush_threshold"`                   // 自适应提前提交的不同 pending 条数；新增三字段全零保持旧模式
-	SyncMaxCollectDelay        time.Duration `json:"sync_max_collect_delay" yaml:"sync_max_collect_delay"`               // 自适应空闲后首条 pending 的最长主动收集等待
-	SyncBacklogDrainDelay      time.Duration `json:"sync_backlog_drain_delay" yaml:"sync_backlog_drain_delay"`           // 自适应成功积压批次间隔；零表示立即继续，错误仍退避
-	SyncMaxConcurrency         int           `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                   // 预留字段：共享模式当前未接线；当前并发度由 adapter 的 GetMaxOpenConns 推导
-	DeferredDeletePollInterval time.Duration `json:"deferred_delete_poll_interval" yaml:"deferred_delete_poll_interval"` // 本地延迟删除轮询间隔（默认 5s）
+	AutoSync                   bool                      `json:"auto_sync" yaml:"auto_sync"`                                           // 是否自动同步到其他DB（默认 false）
+	WriteBehindFailure         *WriteBehindFailurePolicy `json:"write_behind_failure,omitempty" yaml:"write_behind_failure,omitempty"` // 显式有界失败处置；nil保留旧模式，必须绑定应用handler
+	SyncInterval               time.Duration             `json:"sync_interval" yaml:"sync_interval"`                                   // 同步间隔（默认 1s）
+	SyncBatchSize              int                       `json:"sync_batch_size" yaml:"sync_batch_size"`                               // 单轮同步批次及 ForceSyncBatch 硬上限（默认 1000）
+	SyncMinInterval            time.Duration             `json:"sync_min_interval" yaml:"sync_min_interval"`                           // 最小同步间隔（默认 1s）
+	SyncMaxInterval            time.Duration             `json:"sync_max_interval" yaml:"sync_max_interval"`                           // 最大同步间隔（默认 10s）
+	SyncBatchDelay             time.Duration             `json:"sync_batch_delay" yaml:"sync_batch_delay"`                             // 旧模式每轮收集等待；共享默认 100ms，生产/快速默认零
+	SyncFlushThreshold         int                       `json:"sync_flush_threshold" yaml:"sync_flush_threshold"`                     // 自适应提前提交的不同 pending 条数；新增三字段全零保持旧模式
+	SyncMaxCollectDelay        time.Duration             `json:"sync_max_collect_delay" yaml:"sync_max_collect_delay"`                 // 自适应空闲后首条 pending 的最长主动收集等待
+	SyncBacklogDrainDelay      time.Duration             `json:"sync_backlog_drain_delay" yaml:"sync_backlog_drain_delay"`             // 自适应有确认进展的积压间隔；零表示立即继续，零确认仍退避
+	SyncMaxConcurrency         int                       `json:"sync_max_concurrency" yaml:"sync_max_concurrency"`                     // 预留字段：共享模式当前未接线；当前并发度由 adapter 的 GetMaxOpenConns 推导
+	DeferredDeletePollInterval time.Duration             `json:"deferred_delete_poll_interval" yaml:"deferred_delete_poll_interval"`   // 本地延迟删除轮询间隔（默认 5s）
 
 	// 清理配置
 	AutoCleanup     bool          `json:"auto_cleanup" yaml:"auto_cleanup"`         // 预留字段：共享模式当前未按该开关/阈值执行自动清理
@@ -150,6 +151,11 @@ func DefaultFastConfig(path string) BadgerDBConfig {
 
 // Validate 验证配置
 func (c *BadgerDBConfig) Validate() error {
+	if c.WriteBehindFailure != nil {
+		if err := c.WriteBehindFailure.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.Path == "" {
 		return fmt.Errorf("path 不能为空")
 	}

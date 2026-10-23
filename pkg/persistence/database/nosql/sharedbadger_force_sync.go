@@ -115,6 +115,9 @@ func (p *PrefixedBadgerDB[T]) processSyncQueueContext(ctx context.Context, limit
 	if limit <= 0 {
 		return 0, ErrInvalidSyncLimit
 	}
+	if p.disposition != nil {
+		return p.processDispositionRound(ctx, limit)
+	}
 	// 同一实例的 worker、手动同步和关闭同步必须串行，避免重复 target 事务。
 	p.syncExecMu.Lock()
 	defer p.syncExecMu.Unlock()

@@ -105,7 +105,7 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 	needSync bool,
 ) (int, error) {
 	newQueueCount := 0
-	err := p.manager.db.Update(func(txn *badger.Txn) error {
+	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		wrappers := make(map[string]*SyncQueueItem[T], len(operations))
 		loaded := make(map[string]struct{}, len(operations))
 		queued := make(map[string]struct{}, len(operations))
@@ -145,6 +145,9 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 				continue
 			}
 			if _, exists := queued[key]; exists {
+				if err := p.ensureDispositionEntry(txn, key); err != nil {
+					return err
+				}
 				continue
 			}
 			created, err := p.ensureSyncQueueEntry(txn, key)
@@ -204,6 +207,7 @@ func applySaveOperation[T types.IModel](key string, wrapper *SyncQueueItem[T], i
 		wrapper.Item = item
 		wrapper.UpdatedAt = now
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 		if rowDate, ok := any(item).(types.IRowDate); ok {
 			rowDate.SetUpdatedAt(now)
 			if rowDate.GetCreatedAt() == nil {
@@ -238,6 +242,7 @@ func applyDeleteOperation[T types.IModel](wrapper *SyncQueueItem[T]) (*SyncQueue
 	wrapper.DeletedAt = now
 	wrapper.UpdatedAt = now
 	wrapper.IsSynced = false
+	wrapper.HandedOff = false
 	return wrapper, true, nil
 }
 
