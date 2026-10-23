@@ -2,6 +2,7 @@
 package nosql
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -322,6 +323,16 @@ func TestSyncMetricsRecordConvergence(t *testing.T) {
 	require.Zero(t, metrics.Failures)
 	require.GreaterOrEqual(t, metrics.TotalDuration, time.Duration(0))
 	require.False(t, metrics.LastSuccessAt.IsZero())
+	previousSuccess := metrics.LastSuccessAt
+	db.recordSyncMetrics(120, errors.New("测试部分失败"), 2*time.Millisecond)
+	partial := db.GetSyncMetrics()
+	require.Equal(t, uint64(2), partial.Attempts)
+	require.Equal(t, uint64(1), partial.Failures)
+	require.Equal(t, uint64(121), partial.SyncedItems, "error不能抹去本轮120条真实确认")
+	require.Equal(t, previousSuccess, partial.LastSuccessAt)
+	db.recordSyncMetrics(0, nil, time.Millisecond)
+	require.Equal(t, partial.SyncedItems, db.GetSyncMetrics().SyncedItems)
+	require.Equal(t, previousSuccess, db.GetSyncMetrics().LastSuccessAt)
 }
 
 func TestForceDeleteLocalDecrementsPendingWhenValueIsCorrupt(t *testing.T) {

@@ -61,7 +61,8 @@ pending 缓存计数与持久同步索引必须分开核对；幂等 ACK 成功�
 
 Badger参数选择先读[配置与调参](badger-configuration.md)：区分官方默认、工厂默认和实际Options；可靠性参数不可降级，候选性能值不等于最优。当前16MiB memtable/1MiB vlog不代表全部内存预算，block/index缓存等仍可能继承依赖默认。
 
-- 自适应 write-behind 只在组合根显式配置：复用 `SyncBatchSize`，设置 `SyncFlushThreshold=32`、`SyncMaxCollectDelay=20*time.Millisecond`、`SyncBacklogDrainDelay=0` 可按数量/期限收集并连续排空。新三字段全零保持旧模式；不能只改 `SyncBatchDelay` 就宣称解决积压等待。错误/零进展仍退避，业务不自建同步循环；20 ms 不包含远端执行时间，也不保证低流量 fsync 下降。完整配置与升级边界见 [同步指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md)。
+- 自适应 write-behind 只在组合根显式配置：复用 `SyncBatchSize`，设置 `SyncFlushThreshold=32`、`SyncMaxCollectDelay=20*time.Millisecond`、`SyncBacklogDrainDelay=0` 可按数量/期限收集并连续排空。新三字段全零保持旧模式；不能只改 `SyncBatchDelay` 就宣称解决积压等待。有真实本地确认进展（含部分确认并返回错误）时重置退避、按既有 drain 间隔继续，原错误仍返回并记录；零确认（包括无错误、本地确认失败或并发更新使旧快照失效）指数退避，新通知不能绕过。`Attempts`、`Failures`、`SyncedItems` 分别累计，部分成功可同时增加失败次数和确认数；`LastSuccessAt` 仅在无错误且有确认时更新。自动 worker 轮次日志提供 confirmed、has_error、next_wait_ms 和 progress/no_progress 原因，不新增采样线程或业务标识标签。
+- write-behind 进展必须来自原本地确认事务，不能用 target 自报列表长度替代；重复确认不重复计数，版本校验、未确认 pending 和 ForceSync 错误契约不变。取批仍是索引前缀窗口，失败项占满 `SyncBatchSize` 时后方健康项仍会被挡住，本修复不提供公平 lane 或业务 chunk 排序。业务不自建同步循环；20 ms 不包含远端执行时间，也不保证低流量 fsync 下降。完整配置与升级边界见 [同步指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md)。
 
 - 纯缓存默认损坏策略为 `CorruptionPolicyFail`；只有确认数据可从远端完整重建时才显式使用 `CorruptionPolicyResetCache`。
 - **新业务默认**：`ReliableWriteStore` / `PrefixedBadgerDB.UseWriteBehind(WriteBehindTarget)` 绑定远端汇合目标；配置必须满足可靠写要求（含 `SyncWrites=true`、冲突检测与 fail 策略，以 `EnableWriteBehind`/`UseWriteBehind` 校验为准）。

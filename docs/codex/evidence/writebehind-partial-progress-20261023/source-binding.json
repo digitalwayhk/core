@@ -1,0 +1,12 @@
+{
+  "base_commit": "81c472c2f8a1d1bea93684f8f83435c8779e2a0e",
+  "sha256": {
+    "pkg/persistence/database/nosql/adaptive_sync_schedule.go": "9eaf97de804c33a4d362000fabde57c1d63c5a966a45c15fc29704571de082a6",
+    "pkg/persistence/database/nosql/sharedbadger_adaptive.go": "4d670ee9786b039774de5904ca49d0cead1bc44ff4d6e6c2ced87bb0173cc573",
+    "pkg/persistence/database/nosql/sharedbadger.go": "bcace915bc5c0597d0ab014caa119004b6aac6ae999780b38661d80382aefca5",
+    "pkg/persistence/database/nosql/sharedbadger_adaptive_test.go": "e77da42c80cdff5d49d21155e2d826343f84570a98e52e3cf8d402c98a721fd8",
+    "pkg/persistence/database/nosql/sharedbadger_writebehind_target_test.go": "d1a08786ffb4f657feedb4a05d3f077915fa4430cf6d80b7447ee3592163a3ee",
+    "pkg/persistence/database/nosql/sharedbadger_syncqueue_test.go": "ccae16877f0e8444875fa04e1454bdb6d2679b7f1b9408df854edc2ed1cc624b"
+  },
+  "note": "最终源码；定向RED/GREEN之后仅测试import分组发生机械调整，普通/race均已实际运行。"
+}

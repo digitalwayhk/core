@@ -1600,11 +1600,12 @@ func (p *PrefixedBadgerDB[T]) recordSyncMetrics(synced int, err error, duration 
 	p.syncMetrics.TotalDuration += duration
 	if err != nil {
 		p.syncMetrics.Failures++
-		return
 	}
 	if synced > 0 {
 		p.syncMetrics.SyncedItems += uint64(synced)
-		p.syncMetrics.LastSuccessAt = time.Now().UTC()
+		if err == nil {
+			p.syncMetrics.LastSuccessAt = time.Now().UTC()
+		}
 	}
 }
 

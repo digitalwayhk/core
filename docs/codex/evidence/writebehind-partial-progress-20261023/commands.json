@@ -1,0 +1,160 @@
+[
+  {
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestAdaptive(Schedule|PartialProgress.*|FailedPrefixWindowBoundary)$|TestSyncMetricsRecordConvergence",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 8.829,
+    "name": "red",
+    "raw_sha256": "f82e9708d3b98dbfe3bc4719cbf36a0ac7acbe0b1fb024472bc5cf93269b6210",
+    "raw_bytes": 16950
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestAdaptive(Schedule|PartialProgress.*|FailedPrefixWindowBoundary)$|TestWriteBehind(PartialRoundCountsAndErrors|ProgressUsesLocalConfirmation)$|TestSyncMetricsRecordConvergence",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 8.065,
+    "name": "red-extended",
+    "raw_sha256": "8c6d17a5d20956f8be39f5b77b7d77653ace130b24c9cf576c59259f78e51ef8",
+    "raw_bytes": 42569
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestAdaptive(Schedule|PartialProgress.*|FailedPrefixWindowBoundary)$|TestWriteBehind(PartialRoundCountsAndErrors|ProgressUsesLocalConfirmation)$|TestSyncMetricsRecordConvergence",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 8.1,
+    "name": "red-final",
+    "raw_sha256": "3fe7e4a75ad345ec0aa0b6ac0b7310560da3306abeebbe802ba9ebd0ed194ede",
+    "raw_bytes": 43745
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestAdaptive(Schedule|PartialProgress.*|FailedPrefixWindowBoundary)$|TestWriteBehind(PartialRoundCountsAndErrors|ProgressUsesLocalConfirmation)$|TestSyncMetricsRecordConvergence",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 9.779,
+    "name": "green",
+    "raw_sha256": "aacda2d7a96179fa5952c9463506560a1e5431cef0d832344d9d5324fca83dd9",
+    "raw_bytes": 46797
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout",
+      "300s"
+    ],
+    "exit": 0,
+    "seconds": 16.683,
+    "name": "nosql",
+    "raw_sha256": "b33914a3c1077e586ec5a10f0d02d4089121302002ba3e23e0a9e962312cd6d7",
+    "raw_bytes": 73
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout",
+      "300s"
+    ],
+    "exit": 0,
+    "seconds": 26.206,
+    "name": "nosql-race",
+    "raw_sha256": "5ed2770aa43ec7b04fa07061dd9f4c6b3c6c88b53a9b936220ce92ffdb057574",
+    "raw_bytes": 73
+  },
+  {
+    "command": [
+      "./scripts/test.sh",
+      "persistence-unit"
+    ],
+    "exit": 0,
+    "seconds": 18.091,
+    "name": "persistence-unit",
+    "raw_sha256": "787dc4cad1ddec3eb9b8d13ead1c873332e5a6780173676e373d0d5ea2bf9860",
+    "raw_bytes": 1215
+  },
+  {
+    "command": [
+      "./scripts/test.sh",
+      "config-contract"
+    ],
+    "exit": 0,
+    "seconds": 10.455,
+    "name": "config-contract",
+    "raw_sha256": "8521da786aeed4ae6a62c98c9014658fe9eb7ca5308ea8b27d7623b3c7028238",
+    "raw_bytes": 353
+  },
+  {
+    "command": [
+      "./scripts/test.sh",
+      "performance-contract"
+    ],
+    "exit": 0,
+    "seconds": 7.073,
+    "name": "performance-contract",
+    "raw_sha256": "10ca97ef85c8a6466171849efa8285dabdd058af7d8a89cafd66c6ecc62722c4",
+    "raw_bytes": 326
+  },
+  {
+    "command": [
+      "./scripts/test.sh",
+      "release-contract"
+    ],
+    "exit": 0,
+    "seconds": 51.248,
+    "name": "release-contract",
+    "raw_sha256": "cbd85433208d1e007cb0bcca945f571af1ee2ff50fd18ae400a0295c7a86d299",
+    "raw_bytes": 3630
+  },
+  {
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "./pkg/persistence/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 18.065,
+    "name": "persistence-inventory",
+    "raw_sha256": "7aac2ad271275b8acb1a53aa4f8c8805f8f224b43c3a8fac91b231031c84a405",
+    "raw_bytes": 1286057
+  }
+]

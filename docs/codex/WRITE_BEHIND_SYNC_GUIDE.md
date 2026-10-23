@@ -26,7 +26,7 @@ cfg.SyncBacklogDrainDelay = 0
 | 新增三字段全零 | 保持旧模式，包括原来的 `SyncBatchDelay`，升级不会自动启用 |
 | `SyncFlushThreshold` | 启用时必须为正且不超过规范化后的 `SyncBatchSize`；统计不同 pending，不是写入次数 |
 | `SyncMaxCollectDelay` | 启用时必须为正；空闲后首条 pending 成功入队时开始计时，后续写入不重置 |
-| `SyncBacklogDrainDelay` | 必须非负；零表示成功、有进展的积压批次之间不主动等待 |
+| `SyncBacklogDrainDelay` | 必须非负；零表示有本地确认进展的积压批次之间不主动等待，包括部分确认同时有错误 |
 | `SyncBatchSize` | 继续作为单轮和手动 `ForceSyncBatch` 的硬上限；不是达到阈值就只取阈值条数 |
 | `SyncBatchDelay` | 自适应启用时不叠加；旧模式共享默认 100 ms，生产/快速构造器默认零 |
 | `AutoSync=false` | 不启动 worker；手动同步仍可执行，且不等待收集窗口 |
@@ -36,17 +36,29 @@ cfg.SyncBacklogDrainDelay = 0
 ## 调度和可靠性
 
 - 空闲后收集，达到数量阈值或首条期限即提交；不为每个信号重新启动完整窗口。
-- 成功且仍在同一 pending 周期时按积压间隔继续。队列清空再出现新数据，重新收集。
-- 目标出错或没有确认进展时，从 `SyncMinInterval` 开始指数退避，上限为 `max(SyncMinInterval, SyncMaxInterval)`；新写入和阈值不能绕过退避。部分确认同时返回错误也退避；成功有进展后复位。
+- 有本地确认进展且仍在同一 pending 周期时，重置失败退避，按 `SyncBacklogDrainDelay` 继续；部分确认同时返回错误也适用。队列清空再出现新数据，重新收集。
+- 零确认时，从 `SyncMinInterval` 开始指数退避，上限为 `max(SyncMinInterval, SyncMaxInterval)`；包括返回错误、无错误但零确认、本地确认失败或快照已被并发更新的轮次。新写入和阈值不能绕过退避。部分成功后只剩失败项的下一轮若零确认，重新从最小间隔退避，避免忙循环。
+- 进展取自原本地确认事务的实际结果，不按 target 返回列表长度计算。重复 key 不重复累计，旧快照不能确认新版本；本地事务失败不构成进展。原始 target/确认错误仍合并返回并记录，未确认项保持 pending；手动 `ForceSyncBatch` / `ForceSyncAllContext` 不吞错。
 - 显式启用自适应模式时，构造 store 在返回前重建兼容同步索引并初始化 pending 计数，避免后台恢复扫描覆盖并发写入。已有积压绑定目标后直接排空，无需清目录或改变存储格式；启动扫描成本仍取决于历史本地数据量。
 - worker、手动同步、关闭同步继续复用执行互斥与条件确认。旧快照不能清除并发更新后的 pending；未确认数据没有 TTL。
 - 收集与退避等待可由关闭信号中断。`Close` 返回 `PendingSyncError` 时本地仍有业务事实，不能删除目录；远端驱动的既有执行/取消边界不因调度变化而消失。
+
+**选批窗口边界：** `getUnsyncedBatch` 仍按持久索引前缀取最多 `SyncBatchSize` 条。本修复让同一批中可确认的健康项继续排空；若失败项占满整个窗口，后面的健康项仍不能被选中，整轮零确认仍退避。没有新增 lane、轮转或每业务 key 公平隔离，也不保证业务 chunk 的先后顺序；后者由应用 target 维护。
 
 **20 ms 是主动收集上限，不是端到端完成 SLO。** 本地提交、Go 调度、锁等待、远端事务和失败退避另计。缩短低流量窗口必然可能增加小事务；阈值策略不能保证任意负载下 commit、redo、fsync 都下降。
 
 ## 验证和观测
 
-使用已有 `GetSyncMetrics()` 的 Attempts、Failures、SyncedItems、耗时和 `GetCachedPendingSyncCount()`；必要时用 `GetPendingSyncCount()` 对账。没有采集的队列等待分位数不能填零。
+使用已有 `GetSyncMetrics()` 和 `GetCachedPendingSyncCount()`；必要时用 `GetPendingSyncCount()` 对账。指标按同一轮分别累计：
+
+- `Attempts`：进入同步轮次的次数；`Failures`：该轮返回错误的次数。
+- `SyncedItems`：本地实际确认数，部分成功带错误也累计。例如一轮确认 120 条并返回错误，三项分别增加 1、1、120。
+- `LastSuccessAt`：最近一次无错误且有确认的轮次时间。部分成功带错误、零确认都不更新，也不清除以前的成功时间。
+- 耗时沿用现有轮次累计和最近值。没有采集的队列等待分位数不能填零。
+
+自动 worker 在同一轮次边界记录 `confirmed`、`has_error`、`next_wait_ms`、`reason=progress|no_progress`，复用已有低基数 store `prefix`。有错误沿用 `write_behind_adaptive_sync_failed` Error 日志，无错误使用 `write_behind_adaptive_sync_completed` Debug 日志；默认级别未采集 Debug 时不能把缺失当零。`next_wait_ms` 是轮次结束时的调度快照，空队列时为既有空闲唤醒间隔，不是端到端延迟或下一次实际执行承诺；新写入、关闭、锁等待可能改变实际时间。不增加采样线程，不记录消息正文、SQL、凭据或业务标识。
+
+修复不增加配置、改变零值模式或存储格式。消费方只需升级 Core 并继续通过原 `UseWriteBehind` 入口接入；只有已显式开启自适应调度的 store 改变部分成功后的等待策略。指标修复也覆盖手动和旧模式的同步轮次。不得清理存量 pending 或重建业务数据来升级，消费方自己的业务排序、故障恢复、UAT 和容量仍需单独验证。
 
 真实测试需隔离 MySQL、框架自动建表及预热在计量窗口外；固定数据和批次上限，对照旧 100 ms、固定 10 ms、自适应配置，记录每批数量、远端行数、pending 收敛、事务和可支持的资源指标。数据库全局计数可能包含后台刷盘，不能当作每次业务 commit 的严格归因。
 

@@ -1,0 +1,167 @@
+[
+  {
+    "@timestamp": "2026-10-23T15:57:12.593+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 120,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 0,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:12.595+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 120,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 0,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:12.595+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 0,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 2000,
+    "prefix": "testFund:",
+    "reason": "no_progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:14.596+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:94",
+    "confirmed": 8,
+    "content": "write_behind_adaptive_sync_completed",
+    "has_error": false,
+    "level": "debug",
+    "next_wait_ms": 1000,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:14.687+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 120,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 25,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:14.716+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 120,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 25,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:14.742+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 0,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 2000,
+    "prefix": "testFund:",
+    "reason": "no_progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:16.743+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:94",
+    "confirmed": 8,
+    "content": "write_behind_adaptive_sync_completed",
+    "has_error": false,
+    "level": "debug",
+    "next_wait_ms": 1000,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:16.786+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 0,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 100,
+    "prefix": "testFund:",
+    "reason": "no_progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:16.887+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 0,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 200,
+    "prefix": "testFund:",
+    "reason": "no_progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:17.088+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:94",
+    "confirmed": 8,
+    "content": "write_behind_adaptive_sync_completed",
+    "has_error": false,
+    "level": "debug",
+    "next_wait_ms": 0,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:17.088+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:94",
+    "confirmed": 1,
+    "content": "write_behind_adaptive_sync_completed",
+    "has_error": false,
+    "level": "debug",
+    "next_wait_ms": 1000,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:17.172+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 120,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 0,
+    "prefix": "testFund:",
+    "reason": "progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:17.172+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:92",
+    "confirmed": 0,
+    "content": "write_behind_adaptive_sync_failed",
+    "has_error": true,
+    "level": "error",
+    "next_wait_ms": 1000,
+    "prefix": "testFund:",
+    "reason": "no_progress"
+  },
+  {
+    "@timestamp": "2026-10-23T15:57:17.218+08:00",
+    "caller": "nosql/sharedbadger_adaptive.go:94",
+    "confirmed": 8,
+    "content": "write_behind_adaptive_sync_completed",
+    "has_error": false,
+    "level": "debug",
+    "next_wait_ms": 1000,
+    "prefix": "testFund:",
+    "reason": "progress"
+  }
+]

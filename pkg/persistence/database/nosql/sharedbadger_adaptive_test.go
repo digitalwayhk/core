@@ -4,12 +4,16 @@ package nosql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestAdaptiveConfigInvalid 验证新增配置不能被忽略或静默补齐。
@@ -327,7 +331,8 @@ func TestAdaptiveSchedule(t *testing.T) {
 	s.completed(now.Add(100*time.Millisecond), now, 0, nil)
 	require.Equal(t, 200*time.Millisecond, s.delay(now.Add(100*time.Millisecond), 1000, now))
 	s.completed(now, now, 1, fmt.Errorf("部分失败"))
-	require.Equal(t, 200*time.Millisecond, s.delay(now, 1000, now))
+	require.Zero(t, s.delay(now, 1000, now))
+	require.Zero(t, s.retryDelay)
 	s.completed(now, now, 1, nil)
 	require.Zero(t, s.delay(now, 1, now))
 	require.Zero(t, s.retryDelay)
@@ -359,4 +364,261 @@ func TestAdaptiveRecoveredBacklogDrains(t *testing.T) {
 	require.Eventually(t, func() bool { return db.GetCachedPendingSyncCount() == 0 }, 300*time.Millisecond, time.Millisecond)
 	_, batches := target.snapshot()
 	require.Equal(t, []int{2, 2, 2}, batches)
+}
+
+// TestAdaptivePartialProgressDoesNotBackoffHealthyWork 验证达到10秒退避上限后真实确认120条仍按原drain间隔排空。
+func TestAdaptivePartialProgressDoesNotBackoffHealthyWork(t *testing.T) {
+	for _, drain := range []time.Duration{0, 25 * time.Millisecond} {
+		t.Run(drain.String(), func(t *testing.T) {
+			cfg := DefaultProductionConfig("unused")
+			cfg.SyncFlushThreshold = 8
+			cfg.SyncMaxCollectDelay = 20 * time.Millisecond
+			cfg.SyncBacklogDrainDelay = drain
+			cfg.SyncMinInterval = time.Second
+			cfg.SyncMaxInterval = 10 * time.Second
+			s := adaptiveSyncSchedule{config: cfg}
+			now := time.Unix(100, 0)
+			for range 5 {
+				s.completed(now, now, 0, errors.New("测试零确认"))
+			}
+			require.Equal(t, 10*time.Second, s.delay(now, 128, now))
+			s.completed(now, now, 120, errors.New("测试剩余8条失败"))
+			require.Equal(t, drain, s.delay(now, 128, now))
+			require.Zero(t, s.retryDelay)
+			// 新通知不能跳过非零drain，部分成功转为零进展后重新从最小退避开始。
+			require.Equal(t, drain, s.delay(now, 1000, now))
+			s.completed(now, now, 0, nil)
+			require.Equal(t, time.Second, s.delay(now, 1000, now))
+			require.Equal(t, time.Second, s.retryDelay)
+		})
+	}
+}
+
+// TestAdaptivePartialProgressAutomaticWorker 验证真实Badger与UseWriteBehind自动排空两批健康数据，失败尾部退避后恢复原key。
+func TestAdaptivePartialProgressAutomaticWorker(t *testing.T) {
+	for _, drain := range []time.Duration{0, 25 * time.Millisecond} {
+		t.Run(drain.String(), func(t *testing.T) {
+			path := t.TempDir()
+			cfg := DefaultProductionConfig(path)
+			cfg.AutoSync = true
+			cfg.SyncBatchSize = 128
+			cfg.SyncFlushThreshold = 128
+			cfg.SyncMaxCollectDelay = time.Hour
+			cfg.SyncBacklogDrainDelay = drain
+			cfg.SyncMinInterval = 2 * time.Second
+			cfg.SyncMaxInterval = 4 * time.Second
+			db, err := NewSharedBadgerDB[testFund](path, cfg)
+			require.NoError(t, err)
+			gate := make(chan struct{})
+			var release sync.Once
+			var first sync.Once
+			var recovered atomic.Bool
+			type round struct {
+				at              time.Time
+				healthy, failed int
+			}
+			calls := make(chan round, 16)
+			target := fundTargetFunc(func(_ context.Context, items []*SyncQueueItem[testFund]) (*WriteBehindResult, error) {
+				value := round{at: time.Now()}
+				keys := []string{}
+				all := recovered.Load()
+				for _, item := range items {
+					if !all && strings.HasPrefix(item.Item.UserID, "00-failed-") {
+						value.failed++
+					} else {
+						value.healthy++
+						keys = append(keys, item.Key)
+					}
+				}
+				calls <- value
+				first.Do(func() { <-gate })
+				result := &WriteBehindResult{ConfirmedKeys: keys}
+				if value.failed > 0 {
+					return result, errors.New("测试部分失败")
+				}
+				return result, nil
+			})
+			t.Cleanup(func() { release.Do(func() { close(gate) }); _ = db.Close(); _ = CloseSharedManager(path) })
+			require.NoError(t, db.UseWriteBehind(target))
+			for i := range 8 {
+				require.NoError(t, db.Set(newFund(fmt.Sprintf("00-failed-%02d", i), "spot", 1), 0))
+			}
+			for i := range 240 {
+				require.NoError(t, db.Set(newFund(fmt.Sprintf("10-healthy-%03d", i), "spot", 1), 0))
+			}
+			require.Equal(t, 248, db.GetCachedPendingSyncCount())
+			persistent, err := db.GetPendingSyncCount()
+			require.NoError(t, err)
+			require.Equal(t, 248, persistent)
+			next := func(timeout time.Duration) round {
+				t.Helper()
+				select {
+				case c := <-calls:
+					return c
+				case <-time.After(timeout):
+					t.Fatal("自动worker未按drain推进，不能用ForceSync代替")
+					return round{}
+				}
+			}
+			a := next(time.Second)
+			require.Equal(t, 120, a.healthy)
+			require.Equal(t, 8, a.failed)
+			releasedAt := time.Now()
+			release.Do(func() { close(gate) })
+			b := next(time.Second)
+			require.Equal(t, 120, b.healthy)
+			require.Equal(t, 8, b.failed)
+			require.GreaterOrEqual(t, b.at.Sub(releasedAt), drain)
+			tail := next(time.Second)
+			require.Zero(t, tail.healthy)
+			require.Equal(t, 8, tail.failed)
+			require.Eventually(t, func() bool { return db.GetSyncMetrics().Attempts >= 3 }, time.Second, time.Millisecond)
+			metrics := db.GetSyncMetrics()
+			require.Equal(t, uint64(240), metrics.SyncedItems)
+			require.Equal(t, uint64(3), metrics.Failures)
+			require.True(t, metrics.LastSuccessAt.IsZero())
+			persistent, err = db.GetPendingSyncCount()
+			require.NoError(t, err)
+			require.Equal(t, 8, persistent)
+			require.Equal(t, 8, db.GetCachedPendingSyncCount())
+			for i := range 8 {
+				w, e := db.getWrapper(db.generateKey(newFund(fmt.Sprintf("00-failed-%02d", i), "spot", 1)))
+				require.NoError(t, e)
+				require.False(t, w.IsSynced)
+			}
+			// 真实新写入和通知风暴均不能让全失败尾部绕过已建立的零进展退避。
+			require.NoError(t, db.Set(newFund("00-failed-00", "spot", 2), 0))
+			for range 100 {
+				db.triggerSync()
+			}
+			select {
+			case <-calls:
+				t.Fatal("新通知绕过了零进展退避")
+			case <-time.After(time.Second):
+			}
+			recovered.Store(true)
+			retry := next(3 * time.Second)
+			require.GreaterOrEqual(t, retry.at.Sub(tail.at), cfg.SyncMinInterval)
+			require.Equal(t, 8, retry.healthy)
+			require.Eventually(t, func() bool { return db.GetCachedPendingSyncCount() == 0 && db.GetSyncMetrics().SyncedItems == 248 }, time.Second, time.Millisecond)
+			persistent, err = db.GetPendingSyncCount()
+			require.NoError(t, err)
+			require.Zero(t, persistent)
+			final := db.GetSyncMetrics()
+			require.Equal(t, uint64(4), final.Attempts)
+			require.Equal(t, uint64(3), final.Failures)
+			require.False(t, final.LastSuccessAt.IsZero())
+			t.Logf("自动worker: 两批120确认/8失败；尾部0确认后退避%s；恢复8个原key；drain=%s", cfg.SyncMinInterval, drain)
+		})
+	}
+}
+
+// TestAdaptiveFailedPrefixWindowBoundary 单列当前队头范围：失败占满前缀窗口时，后方健康项仍不会被选中。
+func TestAdaptiveFailedPrefixWindowBoundary(t *testing.T) {
+	path := t.TempDir()
+	cfg := DefaultProductionConfig(path)
+	cfg.AutoSync = false
+	cfg.SyncBatchSize = 8
+	cfg.SyncFlushThreshold = 8
+	cfg.SyncMaxCollectDelay = time.Hour
+	cfg.SyncMinInterval = 100 * time.Millisecond
+	cfg.SyncMaxInterval = 200 * time.Millisecond
+	db, err := NewSharedBadgerDB[testFund](path, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close(); _ = CloseSharedManager(path) })
+	var healthySelected atomic.Int32
+	calls := make(chan time.Time, 16)
+	var recoverAll atomic.Bool
+	require.NoError(t, db.UseWriteBehind(fundTargetFunc(func(_ context.Context, items []*SyncQueueItem[testFund]) (*WriteBehindResult, error) {
+		calls <- time.Now()
+		keys := []string{}
+		for _, item := range items {
+			if strings.HasPrefix(item.Item.UserID, "10-") {
+				healthySelected.Add(1)
+			}
+			if recoverAll.Load() {
+				keys = append(keys, item.Key)
+			}
+		}
+		if len(keys) == 0 {
+			return nil, errors.New("测试前缀全失败")
+		}
+		return &WriteBehindResult{ConfirmedKeys: keys}, nil
+	})))
+	for i := range 8 {
+		require.NoError(t, db.Set(newFund(fmt.Sprintf("00-failed-%02d", i), "spot", 1), 0))
+	}
+	require.NoError(t, db.Set(newFund("10-healthy", "spot", 1), 0))
+	cfg.AutoSync = true
+	db.manager.config.AutoSync = true
+	db.startWriteBehindWorker()
+	var first, time2 time.Time
+	select {
+	case first = <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("未开始自动同步")
+	}
+	select {
+	case time2 = <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("未进行有界重试")
+	}
+	require.GreaterOrEqual(t, time2.Sub(first), cfg.SyncMinInterval)
+	require.Zero(t, healthySelected.Load(), "本次未引入公平lane或跳过失败前缀")
+	exact, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 9, exact)
+	require.Equal(t, 9, db.GetCachedPendingSyncCount())
+	recoverAll.Store(true)
+	require.Eventually(t, func() bool { return db.GetCachedPendingSyncCount() == 0 }, time.Second, time.Millisecond)
+	require.Positive(t, healthySelected.Load())
+	t.Log("边界已复现：前8条失败使窗口后健康项保持pending；解除前缀故障后自动收敛")
+}
+
+// TestAdaptivePartialProgressCloseAndRestart 验证部分成功后的失败pending在关闭返回错误后仍可原地重启自动恢复。
+func TestAdaptivePartialProgressCloseAndRestart(t *testing.T) {
+	path := t.TempDir()
+	cfg := DefaultProductionConfig(path)
+	cfg.AutoSync = false
+	cfg.SyncBatchSize = 128
+	cfg.SyncFlushThreshold = 128
+	cfg.SyncMaxCollectDelay = time.Hour
+	cfg.SyncMinInterval = time.Second
+	cfg.SyncMaxInterval = 2 * time.Second
+	db, err := NewSharedBadgerDB[testFund](path, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close(); _ = CloseSharedManager(path) })
+	require.NoError(t, db.UseWriteBehind(fundTargetFunc(func(_ context.Context, items []*SyncQueueItem[testFund]) (*WriteBehindResult, error) {
+		keys := []string{}
+		for _, item := range items {
+			if !strings.HasPrefix(item.Item.UserID, "00-") {
+				keys = append(keys, item.Key)
+			}
+		}
+		return &WriteBehindResult{ConfirmedKeys: keys}, errors.New("测试保留失败pending")
+	})))
+	for i := range 8 {
+		require.NoError(t, db.Set(newFund(fmt.Sprintf("00-failed-%02d", i), "spot", 1), 0))
+	}
+	for i := range 120 {
+		require.NoError(t, db.Set(newFund(fmt.Sprintf("10-healthy-%03d", i), "spot", 1), 0))
+	}
+	cfg.AutoSync = true
+	db.manager.config.AutoSync = true
+	db.startWriteBehindWorker()
+	require.Eventually(t, func() bool { return db.GetCachedPendingSyncCount() == 8 }, time.Second, time.Millisecond)
+	var pending *PendingSyncError
+	require.ErrorAs(t, db.Close(), &pending)
+	require.Equal(t, 8, pending.Count)
+	require.NoError(t, CloseSharedManager(path))
+	reopened, err := NewSharedBadgerDB[testFund](path, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reopened.Close(); _ = CloseSharedManager(path) })
+	exact, err := reopened.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 8, exact)
+	require.Equal(t, 8, reopened.GetCachedPendingSyncCount())
+	require.NoError(t, reopened.UseWriteBehind(&boundedFundTarget{confirm: 128}))
+	require.Eventually(t, func() bool { return reopened.GetCachedPendingSyncCount() == 0 }, time.Second, time.Millisecond)
+	require.Equal(t, uint64(8), reopened.GetSyncMetrics().SyncedItems)
 }

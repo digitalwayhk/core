@@ -28,6 +28,12 @@
 
 - 无。
 
+## [v1.4.8] - 2026-10-23
+
+### Fixed
+
+- 修复自适应 write-behind 部分成功仍触发全 store 失败退避：按真实本地确认进展继续 drain，零确认仍指数退避；保留原错误与失败 pending。同轮 `Failures` 与 `SyncedItems` 可同时增长，`LastSuccessAt` 保持无错误且有确认的语义；轮次日志区分进展和零进展。未更改配置、确认事务或存储格式，失败占满索引前缀窗口的队头边界仍保留。详见[修复与验收](docs/codex/WRITE_BEHIND_PARTIAL_PROGRESS_2026-10-23.md)。
+
 ## [v1.4.7] - 2026-10-22
 
 ### Fixed
