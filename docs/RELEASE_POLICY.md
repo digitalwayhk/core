@@ -30,6 +30,8 @@ git push origin v1.0.0
 
 ## 回滚
 
+启用了版本专属持久状态时，不能直接用旧二进制打开原卷。例如 v1.5.0 显式 write-behind 失败处置冻结 policy、预算和交接状态，旧版本不识别；应先停止实际在途工作并保持原卷，使用兼容新状态的修复版本恢复，或制定经验证的显式迁移。禁止删 mode/pending 或清业务数据绕过。以下普通代码回滚步骤仅适用于未引入此类状态、或已完成状态兼容验证的部署。
+
 - 代码回滚到上一稳定 tag，并重新运行 `release-contract`。
 - 下游将 `go.mod` 锁回上一 tag/精确 commit，执行各自 smoke 后再部署。
 - 涉及内部传输切换时，按 `docs/codex/GRPC_TRANSPORT_MIGRATION.md` 同时回滚 Core、配置和启动参数，禁止新旧节点混跑。

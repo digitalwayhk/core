@@ -31,9 +31,12 @@ import (
 
 // Service 是可水平扩展的订单权威服务。
 type Service struct {
-	syncEnabled atomic.Bool
-	runtimeOnce sync.Once
-	runtime     *transaction.OrderWriteRuntime
+	// FailurePolicy/FailureHandler 仅在应用显式声明有界失败处置时设置；零值继续原示例行为。
+	FailurePolicy  *nosql.WriteBehindFailurePolicy
+	FailureHandler nosql.WriteBehindFailureHandler[transaction.Order]
+	syncEnabled    atomic.Bool
+	runtimeOnce    sync.Once
+	runtime        *transaction.OrderWriteRuntime
 }
 
 // ServiceName 返回订单服务稳定逻辑名，多个副本共享该名称。
@@ -117,6 +120,7 @@ func (s *Service) newOrderWriteStore(sc *router.ServiceContext) (*transaction.Or
 	badgerConfig.SyncFlushThreshold = 32
 	badgerConfig.SyncMaxCollectDelay = 20 * time.Millisecond
 	badgerConfig.SyncBacklogDrainDelay = 0
+	badgerConfig.WriteBehindFailure = s.FailurePolicy
 
 	return transaction.NewOrderWriteStore(
 		// ServiceIdentity 使本地目录与已领取的副本身份绑定；MachineID 变化时不会隐式接管旧 pending。
@@ -158,6 +162,17 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 		_ = store.Close(context.Background())
 		return err
 	}
+	// 应用接管库先登记，逆序关闭时先停Core回调，再关闭应用存储。
+	if s.FailurePolicy != nil {
+		if resource, ok := s.FailureHandler.(router.ManagedResource); ok {
+			if err := sc.UseResource("order-failure-handler", resource); err != nil {
+				runtime.Unbind()
+				_ = store.Close(context.Background())
+				_ = resource.Close(context.Background())
+				return err
+			}
+		}
+	}
 	// 只有 UseResource 成功后，store 才拥有明确的关闭 owner，Service.Stop 不再自己重复 Close。
 	if err := sc.UseResource("order-write-store", store); err != nil {
 		// 先断开业务引用，再关闭本地 store，避免并发请求拿到已关闭资源。
@@ -167,7 +182,7 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 	}
 	// UseWriteBehind 会立即启动 worker，因此必须晚于 runtime 与资源托管成功。
 	s.syncEnabled.Store(true)
-	if err := store.UseWriteBehind(business.OrderWriteBehindTarget{
+	target := business.OrderWriteBehindTarget{
 		BeforeSync: func() error {
 			if !s.syncEnabled.Load() {
 				return transaction.ErrOrderWriteStoreUnavailable
@@ -175,11 +190,18 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 			return sc.CheckServiceAdmission()
 		},
 		AfterSync: sc.NotifyOutbox,
-	}); err != nil {
+	}
+	var bindErr error
+	if s.FailurePolicy != nil {
+		bindErr = store.UseWriteBehindWithFailureHandler(target, s.FailureHandler)
+	} else {
+		bindErr = store.UseWriteBehind(target)
+	}
+	if bindErr != nil {
 		s.syncEnabled.Store(false)
 		runtime.Unbind()
 		_ = store.Close(context.Background())
-		return err
+		return bindErr
 	}
 	// Pending 组件指标：本进程 Collector → Prometheus；Admin 只查询 Aggregator。
 	if err := sc.RegisterRuntimeMetricProviders(observability.ReliableWriteProvider{

@@ -13,6 +13,10 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.5.0 可选有界失败处置（2026-10-23）
+
+[正式合同](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)与[验收](RELEASE_V1_5_0_2026-10-23.md)。原WriteBehindTarget/UseWriteBehind/零配置兼容；只有显式WriteBehindFailure和应用handler才提供有限预算、未知确认、暂停/接管与有界组隔离，不能宣称所有旧消费者已变成有界。policy和StoreID冻结，新状态禁止旧二进制回退、混跑或删标记；旧pending先交应用确认，不盲目重放。接管不是IsSynced/APPLIED，组屏障保留到应用Release。Core真实存储、独立PID硬杀、07资源链及race单独取证；消费方升级/真实MySQL/HTTP/UAT/容量均NOT_RUN，不改变上表历史锁定。
+
 ## v1.4.8 write-behind 部分进展修复（2026-10-23）
 
 [修复与验收](WRITE_BEHIND_PARTIAL_PROGRESS_2026-10-23.md)。已有自适应 write-behind 在真实本地部分确认且有错误时按原 drain 配置继续，零确认仍指数退避；错误不吞、失败 pending 保留，同轮确认数与失败次数分别累计。配置零值模式、存储格式、版本确认和手动 ForceSync 错误契约不变，无需清数据或更换接入 API。失败占满索引前缀窗口的队头问题仍存在。Core 真实临时 Badger 自动 worker、关闭恢复、普通/race及契约单独取证；真实 MySQL 外部集成、Bitzoom 升级/UAT/容量均 NOT_RUN，不改变上表历史锁定。
@@ -47,7 +51,7 @@ Core 已在独占 Redis 7.4.11 验证新读取、PEL 分页/恢复、同 key 顺
 
 ## v1.4.0 升级边界（2026-10-20）
 
-v1.4.1 补齐了内嵌编译 JSON；当前推荐 [v1.4.8](WRITE_BEHIND_PARTIAL_PROGRESS_2026-10-23.md)，另含 Redis 可靠订阅、普通 WS 中继及依赖安全修复。以下仍是 v1.4.0 的历史功能与源码验收边界，不替代新版验证。
+v1.4.1 补齐了内嵌编译 JSON；当前推荐 [v1.5.0](RELEASE_V1_5_0_2026-10-23.md)，另含 Redis 可靠订阅、普通 WS 中继及依赖安全修复。以下仍是 v1.4.0 的历史功能与源码验收边界，不替代新版验证。
 
 上版基线为 `v1.3.0` / `7cdf8d998d9ac54a9e880736284536d27380838b`，本轮功能审查起点为 `5df05bbb2bc31a53e0e3691baa59cea64d844558`；源码验证固定为 `7b5795b`，最终版本与回归范围见[发布记录](RELEASE_V1_4_0_2026-10-20.md)。上述历史表不代表当前生产锁定或本版消费方 smoke，禁止把旧通过结果覆盖成本轮通过。
 

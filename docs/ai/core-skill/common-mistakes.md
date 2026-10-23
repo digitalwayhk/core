@@ -1,5 +1,14 @@
 # 高频错误快速自检
 
+## write-behind 失败处置
+
+- 不把 `RetryKeys / DeadKeys` 当成可靠重试或删除授权；旧零配置仍可能无限重试，需要显式有限 policy 和应用 handler，不能让 Core 猜业务预算。
+- 不以超时、一次 not found 或回调返回 nil 推导原事务未提交；未知结果先确认。回调超时不等于原代码实际退出。
+- 接管不是 APPLIED、`IsSynced` 或顺序放行；回执先在应用独立事务持久保存并绑定原版本，同组屏障须应用明确 Release。
+- 不用旧版本打开已启用新模式的卷，不删 mode/pending、不重置次数；失败快照与后来新版本是不同恢复责任。见[正式合同](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
+
+
+## 通用路由与模型自检
 
 - URL 加入 `/public`、`/private`。
 - private API 使用客户端提交的 UserID。

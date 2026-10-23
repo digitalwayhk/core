@@ -1,0 +1,24 @@
+{
+  "base_commit": "c253fc9bcfa17a4d2d77be09d718f888bf8e1dd5",
+  "sha256": {
+    "examples/07-shop-order-scale/order-service/business/order_failure_receipts.go": "c87c0189309d164bc34b9cdf331d825ed819c531f4f398a86831b3fe96c0dddb",
+    "examples/07-shop-order-scale/order-service/business/order_failure_receipts_test.go": "51fea239c0845066b0ae41c2dc40ec53f43da3664c3fcb3c47dfac210a7216ba",
+    "examples/07-shop-order-scale/order-service/models/transaction/order_write_store.go": "4d1c196df4d6a50f89cce34ee54888fbcb2cf51bf5fcfa504fb4be265e441d4c",
+    "examples/07-shop-order-scale/order-service/service.go": "40546f4baf90dc61d7cfa25430e7825ede62e35b6cb146ba6734a4ccf49a2fae",
+    "examples/07-shop-order-scale/order-service/service_order_failure_test.go": "07c00373488462c2926964fee956032ed179b65b67bd977ebb87505b21fd96d1",
+    "pkg/persistence/database/nosql/badgerdbconfig.go": "b99e6a3106f8e1f7c0e96eca51218248273a34fd62351ddba10fcf1595cfc433",
+    "pkg/persistence/database/nosql/reliable_write_store.go": "9b75a9c11b39eaedcb0bc433665c2a855fd1ae86198412ee2e5fb814f3dc3c27",
+    "pkg/persistence/database/nosql/sharedbadger.go": "663fd823f5874998bebbac77d10d538b0b188c94943a908aa03d08fd1957bfb9",
+    "pkg/persistence/database/nosql/sharedbadger_adaptive_test.go": "7d868d1d12b0590c66c491c6c0fcd6dbadc6cf0be06f10d20e740eca2ed2bbe8",
+    "pkg/persistence/database/nosql/sharedbadger_force_sync.go": "7c335e86e2e6cac26c1152838835b7313e78fbc4e6e7c1758df55414a51c966e",
+    "pkg/persistence/database/nosql/sharedbadger_operations.go": "f618ccff2383f80dd2dcc6d7526f9881a1b64015c9da746e7da6c77dea52ec3b",
+    "pkg/persistence/database/nosql/writebehind_disposition_decision.go": "6f3aa781bfa710cdd8ea62e32bb3aefdfc2c1df5b01518a01a40ecdcdfaaecce",
+    "pkg/persistence/database/nosql/writebehind_disposition_process_test.go": "a22a20e5a6132e65c7eab3ceade436f9e706a3771a5c534a59c8838124f8cc46",
+    "pkg/persistence/database/nosql/writebehind_disposition_runtime.go": "dd5dc34af43d1b653bb959f45d3167d0b955f3b3d8fd7e2e8d3ceafb21c4cd7b",
+    "pkg/persistence/database/nosql/writebehind_disposition_schedule.go": "ed12bd36f3ae334961c94d5b5178a5748deeaa1dcc3ca7ba79fed08ec68f61e1",
+    "pkg/persistence/database/nosql/writebehind_disposition_store.go": "3208eca11a061627a50864fbe4fdc5ee48d84da94eb4f81e35d7436f8ac4941b",
+    "pkg/persistence/database/nosql/writebehind_disposition_test.go": "bbdbb9251c23d5eb749cdbe5354bf75421eee05f64f4b7e3e3723fe78c7e6a51",
+    "pkg/persistence/database/nosql/writebehind_failure.go": "1df65cf3bfb22f149511b8d0e729c7026039eb919b6dcfd340295658e0befbaf",
+    "pkg/persistence/database/nosql/writebehind_target.go": "9eef8c6261c3a0ebf6f492430fe77db518e25eef6c7547f330e93e37914e5ace"
+  }
+}

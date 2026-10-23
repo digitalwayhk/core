@@ -2,6 +2,12 @@
 
 ## 写路径分段观测
 
+需要 write-behind 有界重试、未知结果确认或失败满窗口隔离时，显式配置 `BadgerDBConfig.WriteBehindFailure` 并使用 `UseWriteBehindWithFailureHandler`；正式 API 见[有界失败处置](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。旧 target/零配置继续旧模式，不得宣称全框架已经有界。应用提供稳定 StoreID、顺序组、有限 target/handler 预算并决定分类，Core 不按 SQL 错误或 UserID 猜业务。
+
+未知结果先确认；重试须应用明确确认原事务未提交，超时/一次 not found 不构成证明。接管须应用先幂等持久保存完整原件或独立引用，Core 后绑定原版本回执；`HandedOff` 不是 `IsSynced` 或 APPLIED，不自动解除组屏障。恢复/Release 核对原 ID、版本、指纹，不重置预算；旧决定不能 ACK 新版本。失败历史不设 TTL、不自动删除，禁止 DeadKeys、清目录或吞错制造收敛。
+
+同组只执行本 store 最早未解决版本，无关组有界轮转；不承诺跨副本/主题业务全局顺序。固定回调 worker 在原执行互斥之外，超时不等于实际退出，同组重试仍等待旧回调退出，不另开替代 goroutine。前缀冻结 policy，禁止旧二进制回退打开或删 mode 标记；消费方独立验收未知事务、业务顺序、接管及存量卷迁移。
+
 本地准入、排队和提交必须分开：`WriteAdmissionMetrics.Attempts/TotalDuration`是准入调用累计值；`BatchCommitMetrics.TotalQueueWaitDuration`按本地操作累计进入提交队列前至开始提交的等待，包含排队发送等待；`TotalCommitDuration`按批累计实际提交耗时。这些累计和SQL池`WaitDuration`都不是壁钟耗时，比较时按同一窗口取增量并检查进程/连接池重置。
 
 07通过现有Runtime提供者暴露`write_path`低基数指标，包含上述阶段和已有MySQL池的WaitCount/WaitDuration、InUse/Idle、关闭原因计数。Outbox组件增加取批、发布、确认的`*_seconds_total`与`*_attempts_total`；分key发布累计时间允许大于壁钟。不得使用订单ID、requestID或EventID作指标标签，也不得为了取指标触发建连、DDL或强制GC。

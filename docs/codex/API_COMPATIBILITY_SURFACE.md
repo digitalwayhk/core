@@ -187,3 +187,12 @@ stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新�
 ## v1.4.7普通WS中继兼容修复
 
 `IWebSocketOwnedReference`可选，不改变普通Public/Private WS、EventBridge、MQ组/PEL/游标或业务payload。两个精确WS中继共同校验同服务可信mTLS/SourceService、有效摘要节点及目标路由，普通路由回到已注册的正式中继，归属路由保留既有Ready owner/引用恢复。两个旧中继的HTTP入口收紧为403，用户/管理Token和自报头不能替代内部服务身份；依赖匿名HTTP/仅网络ACL转发的消费方须改用已支持的可信mTLS gRPC。内部gRPC对其它ServerManage路径明确拒绝，同服务证书不替代管理域认证；管理HTTP入口和认证域不变。Go签名、路由路径和JSON字段不变。参见[v1.4.7](RELEASE_V1_4_7_2026-10-22.md)。
+
+
+## v1.5.0 可选write-behind失败处置
+
+加性公开表面：`BadgerDBConfig.WriteBehindFailure`、`WriteBehindFailurePolicy.Validate`、`WriteBehindFailureHandler[T]`、`WriteBehindFailure[T]`、`WriteBehindFailureRecord[T]`、`WriteBehindDecision`、相关Action/Scope/Outcome/State常量、`WriteBehindHandoffReceipt`、`WriteBehindDispositionMetrics`、`ErrWriteBehindDisposition`和`ErrWriteBehindDispositionCloseTimeout`。`SyncQueueItem.HandedOff`是可省略的独立技术交接标志，不表示IsSynced或业务APPLIED。
+
+PrefixedBadgerDB和ReliableWriteStore增加`UseWriteBehindWithFailureHandler`、`ApplyWriteBehindDecision`、`ListWriteBehindFailures`；原始store的`GetWriteBehindDispositionMetrics`由可靠门面`WriteBehindDispositionMetrics`委托。原`WriteBehindTarget.SyncBatch`、`UseWriteBehind`、ForceSync及零配置签名不变。RetryKeys/DeadKeys不自动重试或删除，新模式交应用处理实际未确认项。
+
+只有显式配置有限预算并绑定handler才启用。新状态使用原Badger可靠事务，policy持久冻结；禁止旧二进制回退打开新模式卷或在线删除标记。签名兼容不等于状态迁移已完成，消费方须分别验收原pending、未知结果、幂等接管及顺序屏障。完整接口、资源预算与信任边界见[正式指南](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。

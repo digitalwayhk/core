@@ -1,0 +1,834 @@
+[
+  {
+    "name": "active-handler-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestResumeWaitsForActualHandlerExit$|^TestFailureSnapshotIncludesBatchScope$|^TestCrashBeforeAndAfterHandoffConfirmation$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 3.932,
+    "raw_sha256": "43e74cb9acb46a62043b5dc744530c65bc3d2b82c97f8dd20b12dd171b2b351f",
+    "raw_bytes": 16587
+  },
+  {
+    "name": "active-handler-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestResumeWaitsForActualHandlerExit$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 3.411,
+    "raw_sha256": "c5af22bc51a7476f5523ce534f78e401b6ae54e3030f30927e30911e082f496c",
+    "raw_bytes": 5053
+  },
+  {
+    "name": "api-red-final",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestFailurePolicyRequiresFiniteBudget|TestPausedWindowDoesNotStarveHealthyGroups|TestRetryBudgetSurvivesRestart",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 0.934,
+    "raw_sha256": "a43e3df102f3fc72d90e22a4711e48aca35f8d50fd62fdf503de438ec6fa3bd4",
+    "raw_bytes": 1320
+  },
+  {
+    "name": "api-red",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestFailurePolicyRequiresFiniteBudget|TestPausedWindowDoesNotStarveHealthyGroups|TestRetryBudgetSurvivesRestart",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 0.675,
+    "raw_sha256": "0242e2cb7cbd0c3b657ff4b4c0268396cbb624f2d7723e76d9334bf3904efb2d",
+    "raw_bytes": 1376
+  },
+  {
+    "name": "baseline",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestAdaptivePartialProgress|TestWriteBehindProgressUsesLocalConfirmation",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 9.096,
+    "raw_sha256": "52c0bae840fbb951658430e52075baef09847fc9e703151080c5308ef4f7551d",
+    "raw_bytes": 72
+  },
+  {
+    "name": "batch-snapshot-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestFailureSnapshotIncludesBatchScope$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 3.463,
+    "raw_sha256": "e91ba32c34222a65db181959c80cb2b15674660534df1b5ec728b8eab3cf80e6",
+    "raw_bytes": 3372
+  },
+  {
+    "name": "batch-snapshot-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestFailureSnapshotIncludesBatchScope$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 5.619,
+    "raw_sha256": "3b14c2c400a4e6b5de078bbcbf661f42fed47cb9ad29e4fcbe65c3e4ed60aa43",
+    "raw_bytes": 3737
+  },
+  {
+    "name": "boundary-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestRepeatedHandoff|TestDispositionMode|TestDispositionImported",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 32.328,
+    "raw_sha256": "49eae0e2c64016f6d1549f1174687866b9c1bd7602e658332b13d45ec388749e",
+    "raw_bytes": 13640
+  },
+  {
+    "name": "boundary-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestRepeatedHandoff|TestDispositionMode|TestDispositionImported",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 5.145,
+    "raw_sha256": "2cf8b2a9b26360ee928a17da0e6651205c2f7500d67ec6f3433c89b93940d99b",
+    "raw_bytes": 18144
+  },
+  {
+    "name": "close-timeout-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestDispositionCloseTimeoutIsNotSuccessful$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 8.683,
+    "raw_sha256": "9826b3ae57629fedec10f69d327b7be80edc704281302414616e292d4e394435",
+    "raw_bytes": 4410
+  },
+  {
+    "name": "close-timeout-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestDispositionCloseTimeoutIsNotSuccessful$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 3.823,
+    "raw_sha256": "4959dbdef7268d15d10ac88978c7a2689597252728b88328a444b436f156ade1",
+    "raw_bytes": 4812
+  },
+  {
+    "name": "concurrency-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestDispositionConcurrentAdmissions$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 12.353,
+    "raw_sha256": "d872d025ed9a46b977a89002c22593057bf19e0082e0d2bed58ac57b3bb543c3",
+    "raw_bytes": 17174
+  },
+  {
+    "name": "concurrency-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestDispositionConcurrentAdmissions$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 5.173,
+    "raw_sha256": "92acaac40c3720c8e116c006b202b9c401cedd011769d3effdbbdd5e071de937",
+    "raw_bytes": 4843
+  },
+  {
+    "name": "config-contract",
+    "command": [
+      "./scripts/test.sh",
+      "config-contract"
+    ],
+    "exit": 0,
+    "seconds": 22.61,
+    "raw_sha256": "79a7fb2b57d86b39ab626f5fcff9bb4d50b83ae4616e702d753ac78d0e15e7d7",
+    "raw_bytes": 353
+  },
+  {
+    "name": "contract-expanded",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestFailurePolicy|TestPausedWindow|TestRetryBudget|TestUnknownOutcome|TestInvalidFailure|TestHandoffReply|TestStaleDisposition|TestSlowFailure",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 6.478,
+    "raw_sha256": "2141f3e6e94a684c6d4ae4150107427e8b3c26ad227672505bad4c17cd291351",
+    "raw_bytes": 70124
+  },
+  {
+    "name": "crash-budget-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestCrashBeforeAndAfterHandoffConfirmation$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 7.215,
+    "raw_sha256": "fac814a01a890e765d653c11a0553dcc9782d4c74f9092c27291ab593e10b414",
+    "raw_bytes": 7874
+  },
+  {
+    "name": "crash-process",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestCrashBeforeAndAfterHandoffConfirmation$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 3.524,
+    "raw_sha256": "519b3e321445806c0f693193bc394ac1b5bf9ade3222d389efcff75d71619470",
+    "raw_bytes": 7874
+  },
+  {
+    "name": "example-api-red",
+    "command": [
+      "go",
+      "test",
+      "./examples/07-shop-order-scale/order-service/business",
+      "-run",
+      "^TestOrderDurableFailureHandoff$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 1.277,
+    "raw_sha256": "655119535de688e0658a7f7bcf6447d8b397715beed0aae43c681c1666ab9549",
+    "raw_bytes": 1196
+  },
+  {
+    "name": "example-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./examples/07-shop-order-scale/order-service/business",
+      "-run",
+      "^TestOrderDurableFailureHandoff$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 5.2,
+    "raw_sha256": "f5d77768131799ff7b599abda2186df608cfdfdd8e84fb57673b770c23584efe",
+    "raw_bytes": 4031
+  },
+  {
+    "name": "example-lifecycle",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./examples/07-shop-order-scale/order-service",
+      "-run",
+      "^TestOrderFailureServiceContextLifecycle$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 8.231,
+    "raw_sha256": "f6529f1a78bb2188a460a86af3409da5479a15beb5c71c3fe706c82e1ccaf046",
+    "raw_bytes": 3281
+  },
+  {
+    "name": "example07-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 14.307,
+    "raw_sha256": "a85094b447717988bb51db1a27454d2c6c8520ed1581f95fb8951f3faad6f862",
+    "raw_bytes": 1765
+  },
+  {
+    "name": "example07",
+    "command": [
+      "go",
+      "test",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 8.962,
+    "raw_sha256": "98dd5cb2596303f7c5c417b3a5e1f13766c42a4a414479f36ef9209a07c0b0eb",
+    "raw_bytes": 1765
+  },
+  {
+    "name": "extra-contract",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestApplicationTargetScopeBlocksAdmission$|^TestCanceledTargetResultIsUnknown$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 5.115,
+    "raw_sha256": "fb2b6b045ed1c9009daf23f62b79cf62850a71202152dc5d6fd950b2bb6b6781",
+    "raw_bytes": 7078
+  },
+  {
+    "name": "final-config-contract",
+    "command": [
+      "./scripts/test.sh",
+      "config-contract"
+    ],
+    "exit": 0,
+    "seconds": 8.374,
+    "raw_sha256": "5bf323ceca4cc55d3b6f3505f6d1c5159f3d4aa4a0a5891af276133a2baf9c65",
+    "raw_bytes": 353
+  },
+  {
+    "name": "final-example-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 26.149,
+    "raw_sha256": "c0cf65b6c389f765d83f77356d94ccc4d1ea85bc15e178892f7966551d9f78f0",
+    "raw_bytes": 1765
+  },
+  {
+    "name": "final-inventory",
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "./pkg/persistence/...",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 32.996,
+    "raw_sha256": "23b1a42af5a827f22df70105758257486a5391f40e857559439a0e6f21e41422",
+    "raw_bytes": 1689508
+  },
+  {
+    "name": "final-logging-contract",
+    "command": [
+      "./scripts/check-logging.sh"
+    ],
+    "exit": 0,
+    "seconds": 0.168,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw_bytes": 0
+  },
+  {
+    "name": "final-nosql",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 35.47,
+    "raw_sha256": "3a108a7e17fa983b5a491191ef99072eee88b2399286873d4f4bec15665d2108",
+    "raw_bytes": 73
+  },
+  {
+    "name": "final-performance-contract",
+    "command": [
+      "./scripts/test.sh",
+      "performance-contract"
+    ],
+    "exit": 0,
+    "seconds": 7.961,
+    "raw_sha256": "eaad828e732b678b55f73b0dd6fdcbf617197360da197bd6917ea4887768df27",
+    "raw_bytes": 326
+  },
+  {
+    "name": "final-persistence-unit",
+    "command": [
+      "./scripts/test.sh",
+      "persistence-unit"
+    ],
+    "exit": 0,
+    "seconds": 20.446,
+    "raw_sha256": "1f2f7f689a467ef75c04cade92c06279a500209ee4f1aff7670bf3b2aae37ca6",
+    "raw_bytes": 1215
+  },
+  {
+    "name": "final-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 43.623,
+    "raw_sha256": "39cd8b90563ced625131527b8cca7d090a93771625841a4389403bc1f9227dae",
+    "raw_bytes": 73
+  },
+  {
+    "name": "final-release-contract",
+    "command": [
+      "./scripts/test.sh",
+      "release-contract"
+    ],
+    "exit": 0,
+    "seconds": 46.787,
+    "raw_sha256": "7c3b007bacf7f30e8138f75fe091f72e58a7771951bae43a67b602651880f9e1",
+    "raw_bytes": 3630
+  },
+  {
+    "name": "first-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestFailurePolicyRequiresFiniteBudget|TestPausedWindowDoesNotStarveHealthyGroups|TestRetryBudgetSurvivesRestart",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 1,
+    "seconds": 0.694,
+    "raw_sha256": "c8487d1db5e2059424239ccafc0e1c04cc844824e8b5689516b65367565be846",
+    "raw_bytes": 1113
+  },
+  {
+    "name": "full-snapshot-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestFailureSnapshotIncludesBatchScope$|^TestCrashBeforeAndAfterHandoffConfirmation$|^TestResumeWaitsForActualHandlerExit$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 4.245,
+    "raw_sha256": "4dbb5d6d448ca975ee15d4f239f5aaa2c36cf303a88a05fe45532b19a7a969e5",
+    "raw_bytes": 16843
+  },
+  {
+    "name": "full-snapshot-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestFailureSnapshotIncludesBatchScope$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 4.288,
+    "raw_sha256": "2e4e7ea7d90e1a5d09568dc6837c3721a9502cdd17a6fba5e5f770dae03834ee",
+    "raw_bytes": 4169
+  },
+  {
+    "name": "green-initial",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "TestFailurePolicyRequiresFiniteBudget|TestPausedWindowDoesNotStarveHealthyGroups|TestRetryBudgetSurvivesRestart",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 5.411,
+    "raw_sha256": "5f05540ba3eec25da815004f8bf15433c68bff0446e506ba3a2f507492dd0215",
+    "raw_bytes": 16284
+  },
+  {
+    "name": "handoff-fact-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestRepeatedHandoffDecisionIsIdempotent$|^TestHandoffReplyLostReusesOriginalReceipt$|^TestCrashBeforeAndAfterHandoffConfirmation$|^TestStaleDispositionCannotAcknowledgeNewVersion$",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 4.198,
+    "raw_sha256": "ecc8885b0793aecdf5c55eb14fd3a2b9a3617c408d6b1e99cb728dfcdc4c9cb3",
+    "raw_bytes": 28373
+  },
+  {
+    "name": "handoff-fact-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestRepeatedHandoffDecisionIsIdempotent$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 4.091,
+    "raw_sha256": "0a587bc870c857fe479932e7985fb18e7f18b96a41b0116b86ae21e43c98a350",
+    "raw_bytes": 4154
+  },
+  {
+    "name": "logging-contract",
+    "command": [
+      "./scripts/check-logging.sh"
+    ],
+    "exit": 0,
+    "seconds": 0.329,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw_bytes": 0
+  },
+  {
+    "name": "nil-compat-green",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestLegacyNilTargetValidationPrecedesDispositionLookup$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 3.361,
+    "raw_sha256": "6037f8ad90ae04b85f834fd845c46a932d65259075d9afb21ed8a3dd1a6a21d0",
+    "raw_bytes": 215
+  },
+  {
+    "name": "nil-compat-red",
+    "command": [
+      "go",
+      "test",
+      "-v",
+      "./pkg/persistence/database/nosql",
+      "-run",
+      "^TestLegacyNilTargetValidationPrecedesDispositionLookup$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 3.544,
+    "raw_sha256": "bf93c9e4b69081531a4751191d4f2310983b96cb8217bbabda31b818db4278df",
+    "raw_bytes": 3626
+  },
+  {
+    "name": "nosql-final",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 26.652,
+    "raw_sha256": "0392b18867dda0cf201d1692e5bab27a1055244a88c0d39a149d67dffa226780",
+    "raw_bytes": 73
+  },
+  {
+    "name": "nosql-first",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 18.473,
+    "raw_sha256": "4537ba327747901447f2066c21525e73cc3bfda4477ea5d01a9b650f120f16a1",
+    "raw_bytes": 73
+  },
+  {
+    "name": "nosql-race-final",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 34.572,
+    "raw_sha256": "0d1f20e60d1b6f480dd013ad769a4855c4a2636b89f826c5ef8512675fa6b5e4",
+    "raw_bytes": 73
+  },
+  {
+    "name": "nosql-race-first",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 1,
+    "seconds": 26.777,
+    "raw_sha256": "3d07614c6eea0d3c9236b3e9b90fdd5964c08c4a655a2fd1c8a9bf04179c78e8",
+    "raw_bytes": 483796
+  },
+  {
+    "name": "performance-contract",
+    "command": [
+      "./scripts/test.sh",
+      "performance-contract"
+    ],
+    "exit": 0,
+    "seconds": 16.599,
+    "raw_sha256": "247cf941867b8b257453fe139492c660a88d13f2dad0af3724cc00d7d72efc0c",
+    "raw_bytes": 326
+  },
+  {
+    "name": "persistence-unit",
+    "command": [
+      "./scripts/test.sh",
+      "persistence-unit"
+    ],
+    "exit": 0,
+    "seconds": 30.52,
+    "raw_sha256": "a54fe69f091bf99b590c693b3fb657fcefcd9a6695902d69e303baea9600cd0d",
+    "raw_bytes": 1215
+  },
+  {
+    "name": "race-second",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 26.955,
+    "raw_sha256": "ff1d124dee7c36e7c925f13feca6332fdb8ded4c92866cbe0f5a8bd230efa266",
+    "raw_bytes": 73
+  },
+  {
+    "name": "release-contract",
+    "command": [
+      "./scripts/test.sh",
+      "release-contract"
+    ],
+    "exit": 0,
+    "seconds": 55.528,
+    "raw_sha256": "9d36bca3e3b2fdbc413f1f7a2e4a62481723966b7dba56c7d6cefe45398dc3bc",
+    "raw_bytes": 3630
+  },
+  {
+    "name": "release-inventory",
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "./pkg/persistence/...",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 20.7,
+    "raw_sha256": "296691411473290c6686cbac3b2c64477112f100300995e85395660c99bd11c7",
+    "raw_bytes": 1690780
+  },
+  {
+    "name": "sealed-nosql",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 19.789,
+    "raw_sha256": "95d472770aad685c22021e2cc1f40a7786f54d565d00dcbdc0e1e58ce267c9f2",
+    "raw_bytes": 73
+  },
+  {
+    "name": "sealed-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 28.028,
+    "raw_sha256": "657d1f0ff6e92ea8ec9e384a96b3c089716e818f190188da64e74a1027c7ac73",
+    "raw_bytes": 73
+  },
+  {
+    "name": "verified-example-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./examples/07-shop-order-scale/order-service/...",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 13.497,
+    "raw_sha256": "ea4c70447f6cb6757160803efc0771dcc761d078a6f9fc2304b71434afc72f66",
+    "raw_bytes": 1765
+  },
+  {
+    "name": "verified-nosql",
+    "command": [
+      "go",
+      "test",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 22.178,
+    "raw_sha256": "7fd3a568b1198fb111ee4a2cfa080f78b82561afc6604653bd9ba1db98c8746f",
+    "raw_bytes": 73
+  },
+  {
+    "name": "verified-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/persistence/database/nosql",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 29.825,
+    "raw_sha256": "ccc14ee0a6b646476b386356702a603144d240c43d29baa28fc33799877ed457",
+    "raw_bytes": 73
+  }
+]

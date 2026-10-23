@@ -28,6 +28,20 @@
 
 - 无。
 
+## [v1.5.0] - 2026-10-23
+
+### Added
+
+- 显式write-behind有界失败处置：有限target/handler预算、稳定原版本快照与批次范围、应用结果确认/暂停/独立持久接管、组首有界轮转和原身份Release。原UseWriteBehind/零配置不变；新增07应用接管示例与真实ServiceContext资源链、独立进程硬杀/回执丢失/race验收。详见[正式合同](docs/codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)和[发布验收](docs/codex/RELEASE_V1_5_0_2026-10-23.md)。
+
+### Changed
+
+- 新模式须应用显式配置稳定StoreID及有限预算并绑定handler；policy持久冻结，旧pending先确认未知结果。禁止旧二进制回退打开新模式卷、混跑、删标记或清pending迁移。应用接管只结束技术投递，HandedOff与IsSynced/APPLIED分开，顺序屏障需应用明确解除；未知结果、幂等与业务补偿由应用负责。
+
+### Fixed
+
+- 保留v1.4.8部分确认继续drain和真实计数；新模式失败占满窗口时允许无关组继续，同组未解决前序仍阻断。固定回调worker隔离慢处理，旧回调实际退出前不重做同组target；技术pending为零也不隐藏worker关闭超时。确认仍按原版本与指纹核验，旧决定不ACK新值，不自动删除DeadKeys。
+
 ## [v1.4.8] - 2026-10-23
 
 ### Fixed

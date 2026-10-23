@@ -243,3 +243,19 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 2026-10-19规则正确性修复后，已配置规则也每次从权威库读取；此前正向缓存参与的成绩只属于其原源码。性能工作已按用户要求停止，不据旧成绩评价新实现。Outbox取批将EventBridge上下文传入实际SQL，可取消锁等待；旧`PendingOutbox(limit)`调用面保留，仍只取未发布项、按ID升序并保持原分页上限。修复与验证见[专项记录](../../docs/codex/ORDER_RULE_AND_OUTBOX_FIXES_2026-10-19.md)。
 
 `OutboxRuntimeOptions.BatchSize` 非正值保持历史100；07的512试验未通过长窗，当前恢复默认100/并发4。100ms是空闲扫描间隔，有积压时继续drain，不能按100条/100ms推断固定上限。候选只改变每批扫描/确认数量，不降低刷盘、同key顺序或失败屏障；长窗结果见[长尾专项](../../docs/codex/ORDER_TAIL_ROOTCAUSE_2026-10-19.md)。
+
+
+## 可选的有界失败处置（v1.5.0）
+
+默认示例保持原UseWriteBehind。需要有界重试与异常接管时，在组合根显式给`orderservice.Service`注入`FailurePolicy`和`FailureHandler`：前者为正式`nosql.WriteBehindFailurePolicy`，后者可使用`business.NewOrderFailureReceipts(应用自己的独立目录)`演示立即持久接管。服务先登记应用资源，再登记Core store，逆序关闭先停止Core回调。
+
+应用库保存完整原订单、同批未确认快照、稳定回执及`owned_unresolved`状态；不是APPLIED，不做补偿，不自动解除用户组屏障。StoreID及有限预算由应用明确配置，禁止和Core pending共用目录或只保存指向Core的引用。处理器的应用选择不代表Core默认认为所有SQL错误可重试/可丢弃。
+
+运行真实本地存储及资源链验收：
+
+```bash
+rtk proxy go test -race ./examples/07-shop-order-scale/order-service/business -run TestOrderDurableFailureHandoff -count=1
+rtk proxy go test -race ./examples/07-shop-order-scale/order-service -run TestOrderFailureServiceContextLifecycle -count=1
+```
+
+两项均不依赖MySQL：第一项验证真实订单store→自动worker→应用独立持久回执及重开；第二项通过真实ServiceContext和正式订单target注入准入失败、验证资源逆序，不启动HTTP。真实MySQL/完整业务路由/UAT/容量仍需单独运行，不得从这些测试推导通过。完整API、冻结配置、未知结果和迁移边界见[正式指南](../../docs/codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。

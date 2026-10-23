@@ -215,3 +215,8 @@ go get github.com/digitalwayhk/core@<commit>
 `CORE_TEST_REDIS_ADDR=<独占地址> go test -race ./examples/integration/ws-relay -count=1 -timeout=3m` 必须用两个真实Gateway进程、同服务mTLS、真实外部WS帧，分别验证两个中继路径的索引和实际投递、普通Public/Private与归属共存、双向通知、用户隔离、退订和关闭，以及匿名HTTP/无客户端证书/伪造SourceService/异服务/非法节点/未知路由拒绝。同步注入可信context只算单元测试。示例11的真实MySQL/四进程Ready查询及免重订恢复须同时回归。保留原始RED及夹具错误，不能只凭ACK或RPC成功判断完成。
 
 依赖安全回归包含 `TestS2RejectsOverflowedDictionaryRepeat` 和 `TestSecurityPatchedDependencyVersions`；compress最低v1.18.7，拒绝溢出字典但不调用危险Encode。S2拒绝测试通过不代替消费方自定义压缩路径验收。
+
+
+## write-behind有界失败处置验收
+
+显式新模式须覆盖完整失败选批窗口及健康组继续、同组最早未解决屏障、预算跨重启保留、未知结果不盲重放、非法决策、旧版本不能确认新值、应用先持久接管、回执丢失复用，以及Core保存回执前后的独立进程硬杀恢复。真实临时Badger与应用独立存储不能换成纯mock；handler超时后实际未退出、人工Retry、关闭pending为零仍超时必须分别验证。普通与race运行`pkg/persistence/database/nosql`及07订单服务变更范围，并执行persistence-unit、config-contract、performance-contract、release-contract及日志检查。外部MySQL、HTTP/UAT/容量和消费方接入分别登记NOT_RUN，不以配置/编译契约替代。

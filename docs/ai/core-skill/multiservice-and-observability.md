@@ -216,3 +216,8 @@ Redis Provider 将阻塞 XREADGROUP 与命令分为两个有限连接池；旧�
 ## v1.4.6跨主题持续归属
 
 SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期归属、应用SQL fence、同owner批次、Ready精确调用或现有WS会话恢复时，先读 [scoped-ownership.md](scoped-ownership.md)，使用正式SubscribeOwnedEvents；不要自建worker、Redis锁或会话账。NATS/无MQ明确拒绝；原零值、生命周期与Outbox/Inbox业务确认要求保留。
+
+
+## write-behind处置状态观测
+
+显式新模式的技术pending、真实同步确认、retrying、unknown、paused和handed_off是不同事实，不能相加成业务成功。`GetWriteBehindDispositionMetrics`及可靠门面提供原持久状态、预算耗尽、最老失败时间和handler实际/排队/上限；未启用返回错误，不把未采集填0。该显式查询扫描未解决索引，不用于高频业务请求；Core只在原worker轮次记录低基数状态，不另建采样线程。完整失败记录含原件和错误，仅供应用有权限的恢复流程，不日志dump key/用户/payload/SQL/回执。接管和Release不等于APPLIED，详见[有界失败处置](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。

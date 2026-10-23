@@ -2,6 +2,8 @@
 
 ## 能力和使用边界
 
+v1.5.0 新增显式[有界重试与应用失败处置](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。下文仍说明零配置兼容和自适应收集；只有新模式提供应用声明的持久隔离与有限预算。旧模式满失败窗口的限制不代表新模式无法隔离，新模式的组内未解决前序仍必须阻断后序。
+
 `PrefixedBadgerDB` / `ReliableWriteStore` 先可靠写入本地 pending，通过 `UseWriteBehind(target)` 绑定远端权威库；框架 worker 调度批次，远端确认后才处理 pending。它不是 MQ，也不是 MySQL 原生 group commit 参数。相同 key 合并状态的既有语义不变，不用于不可合并的资金流水事件。
 
 业务仅在实例级组合根配置 store 和 target，不重新实现 Trades 等服务级同步循环。Manage 的 models 数据源工厂不参与此调度。

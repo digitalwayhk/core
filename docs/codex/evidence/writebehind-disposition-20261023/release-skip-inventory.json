@@ -1,0 +1,290 @@
+{
+  "pass_records": 455,
+  "skip_records": 47,
+  "external_not_run": 46,
+  "fixture_entries": 1,
+  "skipped": [
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/message",
+      "test": "TestMySQLConcurrentInboxCommitThenReplay",
+      "reason": "=== RUN   TestMySQLConcurrentInboxCommitThenReplay\n    mysql_test.go:25: 需要显式专用 CORE_MESSAGE_MYSQL_ADDR\n--- SKIP: TestMySQLConcurrentInboxCommitThenReplay (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestAdaptiveMySQLComparison",
+      "reason": "=== RUN   TestAdaptiveMySQLComparison\n    sharedbadger_adaptive_mysql_test.go:63: NOT RUN: 需要专用 CORE_ADAPTIVE_MYSQL_ADDR，禁止指向应用数据库\n--- SKIP: TestAdaptiveMySQLComparison (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLInterpolationRealParametersAndRollback",
+      "reason": "=== RUN   TestMySQLInterpolationRealParametersAndRollback\n    mysql_interpolation_test.go:57: 需要显式专用 CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLInterpolationRealParametersAndRollback (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLPoolIdentityDefaultConfigCreatesDatabase",
+      "reason": "=== RUN   TestMySQLPoolIdentityDefaultConfigCreatesDatabase\n    mysql_pool_identity_race_test.go:41: 需要显式专用 CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLPoolIdentityDefaultConfigCreatesDatabase (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLPoolIdentityRejectsWrongCredentials",
+      "reason": "=== RUN   TestMySQLPoolIdentityRejectsWrongCredentials\n    mysql_pool_identity_test.go:46: 需要本轮独占CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLPoolIdentityRejectsWrongCredentials (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLPhysicalFailureKeepsOtherTransaction",
+      "reason": "=== RUN   TestMySQLPhysicalFailureKeepsOtherTransaction\n    mysql_pool_recovery_test.go:26: 需要显式专用 CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLPhysicalFailureKeepsOtherTransaction (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLStaleCloneStartsOnReplacementPool",
+      "reason": "=== RUN   TestMySQLStaleCloneStartsOnReplacementPool\n    mysql_pool_recovery_test.go:80: 需要显式专用 CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLStaleCloneStartsOnReplacementPool (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "test": "TestMySQLClosedPoolBeginFailureIsEvicted",
+      "reason": "=== RUN   TestMySQLClosedPoolBeginFailureIsEvicted\n    mysql_pool_recovery_test.go:91: 需要显式专用 CORE_POOL_MYSQL_ADDR\n--- SKIP: TestMySQLClosedPoolBeginFailureIsEvicted (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/basedata",
+      "test": "TestOrderRuleStoredInRemoteAuthority",
+      "reason": "=== RUN   TestOrderRuleStoredInRemoteAuthority\n    order_rule_test.go:16: 设置 CORE_TEST_MYSQL=1 后运行订单规则 MySQL 集成测试\n--- SKIP: TestOrderRuleStoredInRemoteAuthority (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/business",
+      "test": "TestOrderRuleCacheInvalidatesRemoteAuthorityRule",
+      "reason": "=== RUN   TestOrderRuleCacheInvalidatesRemoteAuthorityRule\n    order_rule_cache_test.go:17: 设置 CORE_TEST_MYSQL=1 后运行规则缓存 MySQL 集成测试\n--- SKIP: TestOrderRuleCacheInvalidatesRemoteAuthorityRule (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction",
+      "test": "TestOutboxBatchMySQLAtomicity",
+      "reason": "=== RUN   TestOutboxBatchMySQLAtomicity\n    outbox_batch_mysql_test.go:36: NOT RUN: 需要专用 CORE_OUTBOX_MYSQL_ADDR，禁止指向应用数据库\n--- SKIP: TestOutboxBatchMySQLAtomicity (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction",
+      "test": "TestOutboxLoadPendingCancellation",
+      "reason": "=== RUN   TestOutboxLoadPendingCancellation\n    outbox_cancel_mysql_test.go:20: 需要本轮独占临时MySQL\n--- SKIP: TestOutboxLoadPendingCancellation (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction",
+      "test": "TestOutboxPendingReadContract",
+      "reason": "=== RUN   TestOutboxPendingReadContract\n    outbox_cancel_mysql_test.go:59: 需要本轮独占临时MySQL\n--- SKIP: TestOutboxPendingReadContract (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction",
+      "test": "TestOutboxLoadPendingRecoversClosedPool",
+      "reason": "=== RUN   TestOutboxLoadPendingRecoversClosedPool\n    outbox_cancel_mysql_test.go:104: 需要本轮独占临时MySQL\n--- SKIP: TestOutboxLoadPendingRecoversClosedPool (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction",
+      "test": "TestRemoteOrderIdempotency",
+      "reason": "=== RUN   TestRemoteOrderIdempotency\n    order_idempotency_test.go:17: 设置 CORE_TEST_MYSQL=1 后运行远程幂等 MySQL 集成测试\n--- SKIP: TestRemoteOrderIdempotency (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestIssue_ConcurrentSetDuringSync_DataNeverSynced",
+      "reason": "=== RUN   TestIssue_ConcurrentSetDuringSync_DataNeverSynced\n    sharedbadger_issues_test.go:132: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestIssue_ConcurrentSetDuringSync_DataNeverSynced (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestIssue_SyncBatchSemaphoreLeakOnPanic",
+      "reason": "=== RUN   TestIssue_SyncBatchSemaphoreLeakOnPanic\n    sharedbadger_issues_test.go:504: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestIssue_SyncBatchSemaphoreLeakOnPanic (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestIssue_ConnectionManagerOverridesPoolConfig",
+      "reason": "=== RUN   TestIssue_ConnectionManagerOverridesPoolConfig\n    sharedbadger_issues_test.go:566: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestIssue_ConnectionManagerOverridesPoolConfig (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestIssue_BatchUpdateInsertDuplicateNotHandled",
+      "reason": "=== RUN   TestIssue_BatchUpdateInsertDuplicateNotHandled\n    sharedbadger_issues_test.go:670: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestIssue_BatchUpdateInsertDuplicateNotHandled (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestIssue_ConcurrentSetAndSync_EventualConsistency",
+      "reason": "=== RUN   TestIssue_ConcurrentSetAndSync_EventualConsistency\n    sharedbadger_issues_test.go:746: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestIssue_ConcurrentSetAndSync_EventualConsistency (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestLocal_PendingCount_IncreasesWithSet",
+      "reason": "=== RUN   TestLocal_PendingCount_IncreasesWithSet\n    sharedbadger_test.go:797: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestLocal_PendingCount_IncreasesWithSet (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_Insert_WritesToMySQL",
+      "reason": "=== RUN   TestSync_Insert_WritesToMySQL\n    sharedbadger_test.go:874: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_Insert_WritesToMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_Update_UpdatesMySQL",
+      "reason": "=== RUN   TestSync_Update_UpdatesMySQL\n    sharedbadger_test.go:916: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_Update_UpdatesMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_SoftDelete_RemovesFromMySQL",
+      "reason": "=== RUN   TestSync_SoftDelete_RemovesFromMySQL\n    sharedbadger_test.go:952: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_SoftDelete_RemovesFromMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally",
+      "reason": "=== RUN   TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally\n    sharedbadger_test.go:997: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_InsertConflict_FallsBackToUpdate",
+      "reason": "=== RUN   TestSync_InsertConflict_FallsBackToUpdate\n    sharedbadger_test.go:1170: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_InsertConflict_FallsBackToUpdate (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_BatchInsert_AllSyncToMySQL",
+      "reason": "=== RUN   TestSync_BatchInsert_AllSyncToMySQL\n    sharedbadger_test.go:1205: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_BatchInsert_AllSyncToMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_BatchInsert_LargeBatch_NoTxnTooBig",
+      "reason": "=== RUN   TestSync_BatchInsert_LargeBatch_NoTxnTooBig\n    sharedbadger_test.go:1240: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_BatchInsert_LargeBatch_NoTxnTooBig (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_BatchLoad_NotWrittenToMySQL",
+      "reason": "=== RUN   TestSync_BatchLoad_NotWrittenToMySQL\n    sharedbadger_test.go:1267: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_BatchLoad_NotWrittenToMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_BatchLoad_ThenSet_SyncsChange",
+      "reason": "=== RUN   TestSync_BatchLoad_ThenSet_SyncsChange\n    sharedbadger_test.go:1305: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_BatchLoad_ThenSet_SyncsChange (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_DeleteBySubPrefix_AfterSync_CleansBadger",
+      "reason": "=== RUN   TestSync_DeleteBySubPrefix_AfterSync_CleansBadger\n    sharedbadger_test.go:1340: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_DeleteBySubPrefix_AfterSync_CleansBadger (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_DeleteBySubPrefix_PendingKeptThenSync",
+      "reason": "=== RUN   TestSync_DeleteBySubPrefix_PendingKeptThenSync\n    sharedbadger_test.go:1375: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_DeleteBySubPrefix_PendingKeptThenSync (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_DeleteBySubPrefix_MultiUserIsolation",
+      "reason": "=== RUN   TestSync_DeleteBySubPrefix_MultiUserIsolation\n    sharedbadger_test.go:1422: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_DeleteBySubPrefix_MultiUserIsolation (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete",
+      "reason": "=== RUN   TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete\n    sharedbadger_test.go:1457: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix",
+      "reason": "=== RUN   TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix\n    sharedbadger_test.go:1513: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_Insert_AllSyncToMySQL",
+      "reason": "=== RUN   TestConcurrent_Insert_AllSyncToMySQL\n    sharedbadger_test.go:1639: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_Insert_AllSyncToMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_Update_AllSyncToMySQL",
+      "reason": "=== RUN   TestConcurrent_Update_AllSyncToMySQL\n    sharedbadger_test.go:1704: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_Update_AllSyncToMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_Delete_AllRemovedFromMySQL",
+      "reason": "=== RUN   TestConcurrent_Delete_AllRemovedFromMySQL\n    sharedbadger_test.go:1764: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_Delete_AllRemovedFromMySQL (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_Mixed_InsertUpdateDelete",
+      "reason": "=== RUN   TestConcurrent_Mixed_InsertUpdateDelete\n    sharedbadger_test.go:1833: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_Mixed_InsertUpdateDelete (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_MultiUser_DataIsolation",
+      "reason": "=== RUN   TestConcurrent_MultiUser_DataIsolation\n    sharedbadger_test.go:1959: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_MultiUser_DataIsolation (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB",
+      "reason": "=== RUN   TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB\n    sharedbadger_test.go:2012: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs",
+      "reason": "=== RUN   TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs\n    sharedbadger_test.go:2100: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_MultiDB_RoutingByStatus",
+      "reason": "=== RUN   TestSync_MultiDB_RoutingByStatus\n    sharedbadger_test.go:2765: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_MultiDB_RoutingByStatus (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSync_MultiDB_Routing_Stress",
+      "reason": "=== RUN   TestSync_MultiDB_Routing_Stress\n    sharedbadger_test.go:3023: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSync_MultiDB_Routing_Stress (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSyncBatchDelay_MergesRapidWrites",
+      "reason": "=== RUN   TestSyncBatchDelay_MergesRapidWrites\n    sharedbadger_test.go:3084: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSyncBatchDelay_MergesRapidWrites (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestSyncBatchDelay_PendingCountConsistency",
+      "reason": "=== RUN   TestSyncBatchDelay_PendingCountConsistency\n    sharedbadger_test.go:3129: MySQL 集成测试需要 -tags=integration 且 CORE_TEST_MYSQL=1\n--- SKIP: TestSyncBatchDelay_PendingCountConsistency (0.00s)",
+      "fixture_entry": false
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "test": "TestDispositionCrashProcess",
+      "reason": "=== RUN   TestDispositionCrashProcess\n    writebehind_disposition_process_test.go:37: 仅由Core独立进程崩溃验收启动\n--- SKIP: TestDispositionCrashProcess (0.00s)",
+      "fixture_entry": true
+    }
+  ]
+}
