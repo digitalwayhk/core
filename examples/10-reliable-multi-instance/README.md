@@ -1,6 +1,25 @@
 # 10：可靠事件的多实例分键消费
 
-本例用正式 `ServiceContext.SubscribeEvent` 验证 v1.4.4 的跨实例分担。一个 `event-submit` 发布服务与两个同名 `event-worker` 消费服务运行在三个独立进程；消费者共享同一 subject 和逻辑服务 group，使用 `user:<UserID>` 作为 `ShardKey`。不用应用自建 worker、Redis 锁、独立业务组或 Broadcast。
+本例用正式 `ServiceContext.SubscribeEvent` 验证跨实例分担（原合同始于 v1.4.4）；当前仅Broker接线需使用本修复提交或后续包含它的正式版本。一个 `event-submit` 发布服务与两个同名 `event-worker` 消费服务运行在三个独立进程；消费者共享同一 subject 和逻辑服务 group，使用 `user:<UserID>` 作为 `ShardKey`。不用应用自建 worker、Redis 锁、独立业务组或 Broadcast。
+
+## 仅经Broker可靠消费（本轮新增）
+
+本例消费端通过原 `ServiceContext.SubscribeEvent` 显式设置 `BrokerOnly:true`：
+
+```go
+stop, err := sc.SubscribeEvent(event.Subscription{
+    Subject: contract.Subject, EventType: contract.EventType,
+    Reliable: true, BrokerOnly: true,
+    SharedKeys: true, KeyConcurrency: 1, Prefetch: 8,
+    Handler: business.Current.Handle,
+})
+```
+
+该handler只在外部可靠MQ入站执行，本进程发布阶段不会同步执行；Source等于本服务也照常消费。其他旧订阅的 `BrokerOnly:false` 零值仍保留本地控制交付及外部可靠消费，不需要改动。此选项不提高并发、不改变SharedKeys或生命周期，也不提供跨主题全局顺序。
+
+仅Broker模式要求可靠订阅、有效Subject、逻辑服务组以及接回同一Stream的可靠外部适配器；缺失时Initialize直接返回错误，不能在MQ关闭时悄悄成为本地订阅。同主题新旧模式共用一个实际组订阅，匹配handler全部成功后才允许ACK。取消/关闭时在途handler须实际退出；超时不等于业务已停止。
+
+有持久业务事实的应用仍须在handler内完成原Inbox/业务事务后成功返回。Outbox发布标记只表示Broker接受，不等于投影完成；Broker已接受而Outbox确认前崩溃可能以原身份重发。本例内存进度仍不是持久Inbox。完整边界及Core真实独立进程证据见[接入与验收](../../docs/codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。本轮未替任何消费方接入或验证业务容量。
 
 ## 运行
 

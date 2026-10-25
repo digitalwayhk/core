@@ -1,0 +1,9 @@
+{
+  "redis": "8.0.3",
+  "addr": "127.0.0.1:53737",
+  "isolated": true,
+  "provider_source_unchanged": true,
+  "outbox_source_unchanged": true,
+  "go_version": "go version go1.26.6 darwin/arm64",
+  "baseline": "d73f9af45d21740ae48514d969cd01b31321ee0a"
+}

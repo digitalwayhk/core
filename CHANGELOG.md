@@ -6,7 +6,7 @@
 
 ### Added
 
-- 无。
+- EventBridge显式可选`Subscription.BrokerOnly`：仅经正式外部可靠MQ入站消费，包括同服务Source；默认false保留旧本地与外部交付。新增可靠入站/同Stream接线校验，更新skill、示例10及[接入与验收](docs/codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
 
 ### Changed
 
@@ -22,7 +22,7 @@
 
 ### Fixed
 
-- 无。
+- 显式仅Broker handler不再进入本地Outbox同步外发；外部同组复用、聚合确认、订阅取消身份和在途关闭等待补齐。保留Broker失败不确认、消费完成后ACK及原有顺序/生命周期；不修改Outbox批次调度或Redis Provider，不声称解释全部现场延迟。
 
 ### Security
 

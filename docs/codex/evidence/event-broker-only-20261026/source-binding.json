@@ -1,0 +1,14 @@
+{
+  "base_commit": "d73f9af45d21740ae48514d969cd01b31321ee0a",
+  "sha256": {
+    "pkg/server/event/subscription.go": "831d599a389007fdca75c0323b486d441146800ba42c3c3e0b225937784fd320",
+    "pkg/server/event/servicebridge.go": "c2b726287105aefb9c1225883332b11c2a8a57c9a0088a8db28d8d90a2cd0e49",
+    "pkg/server/event/mqbridge.go": "323fab3e026d76a0c781e165de817d9686e59dc216f63eb111025a0ae9b151fc",
+    "pkg/server/event/stream.go": "96054d6d84f59a8da45347a6922f50ab124ab7358a03799831f857f00cb4807b",
+    "pkg/server/event/broker_only_test.go": "e3bbac772a008a2495f911c0fa1f14224846e0db1523b393330ae2ef04e19244",
+    "pkg/server/event/broker_only_redis_test.go": "8935d0cc29dc347e1b30dd11f94a387bc814158125c335614c50b8903596c6c0",
+    "pkg/server/event/broker_only_process_test.go": "031bb31e06c8f421bf8bc2c26f8ec053b1ce5c8cf8be001da9600ec16d48a523",
+    "examples/10-reliable-multi-instance/service.go": "209c1796b957270857290198ea4acc46bed00cef7359c89ee0902b3620c1f329"
+  },
+  "implementation_commit": "897c66c1ab2b78b2abab156350aa8de271907af7"
+}
