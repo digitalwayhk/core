@@ -46,7 +46,7 @@ func (s *Service) Initialize() error {
 	if !s.Worker {
 		return nil
 	}
-	stop, err := sc.SubscribeEvent(event.Subscription{Subject: contract.Subject, EventType: contract.EventType, Reliable: true, SharedKeys: true, Prefetch: 8, KeyConcurrency: 1, Handler: business.Current.Handle})
+	stop, err := sc.SubscribeEvent(event.Subscription{Subject: contract.Subject, EventType: contract.EventType, Reliable: true, BrokerOnly: true, SharedKeys: true, Prefetch: 8, KeyConcurrency: 1, Handler: business.Current.Handle})
 	if err != nil {
 		return err
 	}

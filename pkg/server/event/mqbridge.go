@@ -52,6 +52,17 @@ func (b *MQBridge) EnsureSharedKeyReliable() error {
 	return nil
 }
 
+// EnsureBrokerOnlyReliable 验证正式可靠入站能力与当前连接；实际订阅仍由MQManager校验组和Provider能力。
+func (b *MQBridge) EnsureBrokerOnlyReliable(ctx context.Context, stream *Stream) error {
+	if b == nil || b.manager == nil || b.stream == nil || b.stream != stream {
+		return ErrExternalProviderUnavailable
+	}
+	if _, ok := b.manager.Current().(mq.ReliableMQProvider); !ok {
+		return mq.ErrReliableSubscribeUnsupported
+	}
+	return b.manager.Health(ctx)
+}
+
 // RequiresOrderedReliable 报告是否已开启 ordered-reliable 发布门禁。
 func (b *MQBridge) RequiresOrderedReliable() bool {
 	return b != nil && b.requireOrderedReliable.Load()
@@ -117,6 +128,6 @@ func (b *MQBridge) SubscribeReliableWithOptions(
 		if err := json.Unmarshal(msg.Data, env); err != nil {
 			return err
 		}
-		return b.stream.PublishControl(ctx, env)
+		return b.stream.publishBrokerControl(ctx, env, subject, subscriberID)
 	})
 }

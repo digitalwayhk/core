@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 )
 
@@ -12,6 +13,8 @@ type Subscription struct {
 	Subject   string
 	EventType string
 	Reliable  bool
+	// BrokerOnly 仅允许外部可靠MQ入站执行；零值保留发布阶段的本地同步交付。
+	BrokerOnly bool
 	// Broadcast 让可靠控制事件的每个服务副本各自消费一次。
 	// 只适用于低频、幂等的副本收敛事件，不得用于价格/成交数据面。
 	Broadcast      bool
@@ -71,6 +74,10 @@ func (b *ServiceEventBridge) subscribeExternalRef(
 		prefetch = normalizeSharedPrefetch(prefetch, keyConcurrency)
 	}
 	b.externalSubMu.Lock()
+	if b.closed.Load() {
+		b.externalSubMu.Unlock()
+		return nil, ErrServiceEventBridgeClosed
+	}
 	if b.externalSubscriptions == nil {
 		b.externalSubscriptions = make(map[string]*externalSubscriptionRef)
 	}
@@ -86,7 +93,6 @@ func (b *ServiceEventBridge) subscribeExternalRef(
 			b.releaseExternalRef(key)
 		}, nil
 	}
-	b.externalSubMu.Unlock()
 
 	var cancel func()
 	var err error
@@ -95,6 +101,7 @@ func (b *ServiceEventBridge) subscribeExternalRef(
 		if broadcast {
 			subscriberID = b.instanceSubscriberID
 			if subscriberID == "" {
+				b.externalSubMu.Unlock()
 				return nil, errors.New("event reliable broadcast requires stable instance subscriber id")
 			}
 		}
@@ -105,20 +112,12 @@ func (b *ServiceEventBridge) subscribeExternalRef(
 		cancel, err = b.SubscribeExternal(ctx, subject)
 	}
 	if err != nil {
+		b.externalSubMu.Unlock()
 		return nil, err
 	}
-
-	b.externalSubMu.Lock()
-	if ref := b.externalSubscriptions[key]; ref != nil {
-		if ref.keyConcurrency != keyConcurrency || ref.sharedKeys != sharedKeys || ref.prefetch != prefetch {
-			b.externalSubMu.Unlock()
-			cancel()
-			return nil, errors.New("event subscription key concurrency conflicts for subject")
-		}
-		ref.count++
+	if cancel == nil {
 		b.externalSubMu.Unlock()
-		cancel()
-		return func() { b.releaseExternalRef(key) }, nil
+		return nil, ErrExternalProviderUnavailable
 	}
 	b.externalSubscriptions[key] = &externalSubscriptionRef{
 		cancel: cancel, count: 1, keyConcurrency: keyConcurrency, sharedKeys: sharedKeys, prefetch: prefetch,
@@ -162,6 +161,9 @@ func (b *ServiceEventBridge) closeExternalSubscriptions() {
 }
 
 func validateSubscription(sub Subscription) error {
+	if sub.BrokerOnly && (!sub.Reliable || strings.TrimSpace(sub.Subject) == "" || sub.Subject != strings.TrimSpace(sub.Subject)) {
+		return errors.New("event broker-only requires reliable delivery and a valid subject")
+	}
 	if sub.Subject == "" && sub.EventType == "" {
 		return errors.New("event subscription subject and event type cannot both be empty")
 	}

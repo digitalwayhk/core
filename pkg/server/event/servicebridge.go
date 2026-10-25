@@ -16,6 +16,7 @@ var (
 	ErrControlQueueTimeout               = errors.New("service event bridge control queue timeout")
 	ErrOrderedReliableUnsupported        = errors.New("event ordered reliable unsupported")
 	ErrKeyedReliableSubscribeUnsupported = errors.New("event keyed reliable subscribe unsupported")
+	ErrBrokerOnlyReliableUnsupported     = errors.New("event broker-only reliable ingress unsupported")
 	ErrSharedKeyReliableUnsupported      = errors.New("event shared key reliable subscribe unsupported")
 )
 
@@ -54,6 +55,12 @@ type ExternalSubscriber interface {
 // subscriberID 是稳定的逻辑服务名，同服务的多个实例共享一个消费组。
 type ReliableExternalSubscriber interface {
 	SubscribeReliable(ctx context.Context, subject, subscriberID string) (func(), error)
+}
+
+// BrokerOnlyReliableExternalSubscriber 显式声明可靠入站使用Core独立分发入口；旧适配器不能静默接受BrokerOnly。
+type BrokerOnlyReliableExternalSubscriber interface {
+	ReliableExternalSubscriber
+	EnsureBrokerOnlyReliable(context.Context, *Stream) error
 }
 
 // ReliableExternalSubscribeOptions 是可靠订阅的加性运行时选项。
@@ -111,8 +118,10 @@ type ServiceEventBridge struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	closed atomic.Bool
-	once   sync.Once
+	// handlerMu 保护入站工作准入与Close的Wait，不在应用执行期间持有。
+	handlerMu sync.Mutex
+	closed    atomic.Bool
+	once      sync.Once
 
 	externalMu              sync.RWMutex
 	external                ExternalPublisher
@@ -321,6 +330,20 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	if err := validateSubscription(sub); err != nil {
 		return nil, err
 	}
+	if sub.BrokerOnly {
+		b.externalMu.RLock()
+		adapter, ok := b.external.(BrokerOnlyReliableExternalSubscriber)
+		b.externalMu.RUnlock()
+		if !ok {
+			return nil, ErrBrokerOnlyReliableUnsupported
+		}
+		if !b.canSubscribeExternal(true) {
+			return nil, ErrExternalProviderUnavailable
+		}
+		if err := adapter.EnsureBrokerOnlyReliable(b.ctx, b.stream); err != nil {
+			return nil, err
+		}
+	}
 	if sub.SharedKeys && !b.canSubscribeExternal(true) {
 		return nil, ErrSharedKeyReliableUnsupported
 	}
@@ -338,18 +361,41 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 	}
 	var localCancel func()
 	var err error
+	subCtx, stopContext := context.WithCancel(b.ctx)
 	if sub.Reliable {
-		handler := func(env *Envelope) error {
+		handler := func(ctx context.Context, env *Envelope) error {
 			if !match(env) {
 				return nil
 			}
-			return sub.Handler(context.Background(), env)
+			b.handlerMu.Lock()
+			if b.closed.Load() {
+				b.handlerMu.Unlock()
+				return ErrServiceEventBridgeClosed
+			}
+			b.wg.Add(1)
+			b.handlerMu.Unlock()
+			defer b.wg.Done()
+			work, cancel := context.WithCancel(ctx)
+			defer cancel()
+			stop := context.AfterFunc(subCtx, cancel)
+			defer stop()
+			if subCtx.Err() != nil {
+				return subCtx.Err()
+			}
+			if err := work.Err(); err != nil {
+				return err
+			}
+			err := sub.Handler(work, env)
+			if subCtx.Err() != nil {
+				return errors.Join(err, subCtx.Err())
+			}
+			return errors.Join(err, work.Err())
 		}
-		if sub.EventType == "" {
-			localCancel, err = b.stream.SubscribeAnyControl(handler)
-		} else {
-			localCancel, err = b.stream.SubscribeControl(sub.EventType, handler)
+		group := b.subscriberID
+		if sub.Broadcast {
+			group = b.instanceSubscriberID
 		}
+		localCancel, err = b.stream.subscribeControl(sub.EventType, sub.EventType == "", sub.BrokerOnly, sub.Subject, group, handler)
 	} else {
 		handler := func(env *Envelope) {
 			if match(env) {
@@ -363,21 +409,28 @@ func (b *ServiceEventBridge) SubscribeEvent(sub Subscription) (func(), error) {
 		}
 	}
 	if err != nil {
+		stopContext()
 		return nil, err
 	}
 	var externalCancel func()
 	if sub.Subject != "" && b.canSubscribeExternal(sub.Reliable) {
 		externalCancel, err = b.subscribeExternalRef(
-			context.Background(), sub.Reliable, sub.Broadcast, sub.Subject, sub.KeyConcurrency, sub.SharedKeys, sub.Prefetch,
+			b.ctx, sub.Reliable, sub.Broadcast, sub.Subject, sub.KeyConcurrency, sub.SharedKeys, sub.Prefetch,
 		)
 		if err != nil {
+			stopContext()
 			if localCancel != nil {
 				localCancel()
 			}
 			return nil, err
 		}
 	}
-	return combineCancels(externalCancel, localCancel), nil
+	if b.closed.Load() {
+		stopContext()
+		combineCancels(externalCancel, localCancel)()
+		return nil, ErrServiceEventBridgeClosed
+	}
+	return combineCancels(externalCancel, localCancel, stopContext), nil
 }
 
 func (b *ServiceEventBridge) canSubscribeExternal(reliable bool) bool {
@@ -567,7 +620,9 @@ func (b *ServiceEventBridge) Close(ctx context.Context) error {
 		return nil
 	}
 	b.once.Do(func() {
+		b.handlerMu.Lock()
 		b.closed.Store(true)
+		b.handlerMu.Unlock()
 		b.outboxMu.Lock()
 		outbox := b.outbox
 		b.outbox = nil
@@ -575,8 +630,8 @@ func (b *ServiceEventBridge) Close(ctx context.Context) error {
 		if outbox != nil {
 			outbox.close()
 		}
-		b.closeExternalSubscriptions()
 		b.cancel()
+		b.closeExternalSubscriptions()
 	})
 	done := make(chan struct{})
 	go func() {
