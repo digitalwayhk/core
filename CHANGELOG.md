@@ -6,7 +6,7 @@
 
 ### Added
 
-- EventBridge显式可选`Subscription.BrokerOnly`：仅经正式外部可靠MQ入站消费，包括同服务Source；默认false保留旧本地与外部交付。新增可靠入站/同Stream接线校验，更新skill、示例10及[接入与验收](docs/codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
+- 无。
 
 ### Changed
 
@@ -22,11 +22,25 @@
 
 ### Fixed
 
-- 显式仅Broker handler不再进入本地Outbox同步外发；外部同组复用、聚合确认、订阅取消身份和在途关闭等待补齐。保留Broker失败不确认、消费完成后ACK及原有顺序/生命周期；不修改Outbox批次调度或Redis Provider，不声称解释全部现场延迟。
+- 无。
 
 ### Security
 
 - 无。
+
+## [v1.6.0] - 2026-10-26
+
+### Added
+
+- EventBridge显式可选`Subscription.BrokerOnly`：仅经正式外部可靠MQ入站消费，包括同服务Source；默认false保留旧本地与外部交付。新增可靠入站/同Stream接线校验，更新skill、示例10及[接入与验收](docs/codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
+
+### Fixed
+
+- 显式仅Broker handler不再进入本地Outbox同步外发；外部同组复用、聚合确认、订阅取消身份和在途关闭等待补齐。保留Broker失败不确认、消费完成后ACK及原有顺序/生命周期；不修改Outbox批次调度或Redis Provider，不声称解释全部现场延迟。
+
+### Changed
+
+- BrokerOnly须显式启用并验证可靠外部接线；零值及旧订阅保持原交付。取消后迟到成功不ACK，Close等待在途可靠handler；迁移及NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_0_2026-10-26.md)。
 
 ## [v1.5.0] - 2026-10-23
 

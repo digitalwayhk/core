@@ -13,6 +13,10 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.6.0 显式仅Broker可靠消费（2026-10-26）
+
+[发布说明](RELEASE_V1_6_0_2026-10-26.md)与[接入/原件](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。Subscription.BrokerOnly零值false保留旧交付；显式true须可靠Subject、逻辑组及同Stream可靠入站能力，不降级。只解除选中handler的发布前同步依赖，同服务Source仍经Broker消费；不改Outbox批次屏障、Provider、组、游标、pending和幂等身份。Core真实Redis/SQLite/Badger、双消费者/示例10三进程、硬崩溃原生租约和普通/race分别取证。NATS新模式、消费方接入/部署/UAT/容量均NOT_RUN；不更新上表历史锁定。
+
 ## v1.5.0 可选有界失败处置（2026-10-23）
 
 [正式合同](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)与[验收](RELEASE_V1_5_0_2026-10-23.md)。原WriteBehindTarget/UseWriteBehind/零配置兼容；只有显式WriteBehindFailure和应用handler才提供有限预算、未知确认、暂停/接管与有界组隔离，不能宣称所有旧消费者已变成有界。policy和StoreID冻结，新状态禁止旧二进制回退、混跑或删标记；旧pending先交应用确认，不盲目重放。接管不是IsSynced/APPLIED，组屏障保留到应用Release。Core真实存储、独立PID硬杀、07资源链及race单独取证；消费方升级/真实MySQL/HTTP/UAT/容量均NOT_RUN，不改变上表历史锁定。
@@ -51,7 +55,7 @@ Core 已在独占 Redis 7.4.11 验证新读取、PEL 分页/恢复、同 key 顺
 
 ## v1.4.0 升级边界（2026-10-20）
 
-v1.4.1 补齐了内嵌编译 JSON；当前推荐 [v1.5.0](RELEASE_V1_5_0_2026-10-23.md)，另含 Redis 可靠订阅、普通 WS 中继及依赖安全修复。以下仍是 v1.4.0 的历史功能与源码验收边界，不替代新版验证。
+v1.4.1 补齐了内嵌编译 JSON；当前推荐 [v1.6.0](RELEASE_V1_6_0_2026-10-26.md)，另含 Redis 可靠订阅、普通 WS 中继及依赖安全修复。以下仍是 v1.4.0 的历史功能与源码验收边界，不替代新版验证。
 
 上版基线为 `v1.3.0` / `7cdf8d998d9ac54a9e880736284536d27380838b`，本轮功能审查起点为 `5df05bbb2bc31a53e0e3691baa59cea64d844558`；源码验证固定为 `7b5795b`，最终版本与回归范围见[发布记录](RELEASE_V1_4_0_2026-10-20.md)。上述历史表不代表当前生产锁定或本版消费方 smoke，禁止把旧通过结果覆盖成本轮通过。
 

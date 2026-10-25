@@ -26,7 +26,7 @@
 | `types.ITransactionDB`、`message.Run` / `ConsumeInboxWith` / `ConfirmPublishedWith` | Experimental（加性） | persistence/types、database/oltp、persistence/message | 不增加 `IDataAction` 必选方法，不改变 `GetRunDB`；显式当前 SQL 事务，应用提供记录及字段，不自动建表/推断业务状态；批量确认仅支持不可变事件行 | message SQLite/MySQL 事务、并发幂等、业务行复用及 outbox 回滚测试 |
 | `persistence/types.SearchItem.Context` | 加性 | persistence/types、database/oltp | 可选MySQL/SQLite查询执行上下文，覆盖COUNT、免COUNT读取和统计；nil保持旧行为，JSON忽略；不增加`IDataAction`必选方法，不承诺其他适配器或初始建连可中断 | `TestSQLQueryContext`、07真实MySQL锁等待取消、关闭池恢复及分页/确认回归 |
 | `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；SharedKeys=false 时 Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
-| `event.Subscription.BrokerOnly`、`BrokerOnlyReliableExternalSubscriber`、`MQBridge.EnsureBrokerOnlyReliable(ctx, stream)`、`ErrBrokerOnlyReliableUnsupported` | 加性（待发布） | server/event | 显式仅外部可靠入站；零值保留旧路径，可靠/有效Subject/逻辑组/同Stream能力校验失败不降级；不新增Provider必选方法或业务来源字段 | 默认兼容、混合handler/类型/组过滤、真实Redis/ServiceContext/独立进程恢复与race；[接入与验收](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md) |
+| `event.Subscription.BrokerOnly`、`BrokerOnlyReliableExternalSubscriber`、`MQBridge.EnsureBrokerOnlyReliable(ctx, stream)`、`ErrBrokerOnlyReliableUnsupported` | Stable（v1.6.0加性） | server/event | 显式仅外部可靠入站；零值保留旧路径，可靠/有效Subject/逻辑组/同Stream能力校验失败不降级；不新增Provider必选方法或业务来源字段 | 默认兼容、混合handler/类型/组过滤、真实Redis/ServiceContext/独立进程恢复与race；[接入与验收](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md) |
 | `event.Subscription.SharedKeys/Prefetch`、`ReliableSubscribeOptions.SharedKeys`、`SharedKeyReliableMQProvider`、`MQManager.RequireSharedKeyReliable`、`MQBridge.EnsureSharedKeyReliable` | Stable（v1.4.4 加性） | server/event、mq | 显式跨实例分键；N=每实例并发、W=组级预取；作用域 subject/group/key；旧零值行为保留；共享模式持久冻结，不支持在线 Provider 切换或原地回退 | 真 Redis 双进程、崩溃/断网/旧 ACK fence、例10三进程与 race；[升级边界](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md) |
 | `ownership.Credential/Manifest/Runtime/FenceTransaction`、`event.OwnedSubscription`、`OwnedReliableMQProvider`、`ServiceContext.SubscribeOwnedEvents`、`IRequestOwnedServiceCaller`、`IWebSocketOwnedReference` | Stable（v1.4.6加性，显式启用） | server/event、mq、router、ownership、melody | 跨主题持续scope/key、有界批次、SQL fence、Ready精确调用、现有WS引用恢复；原组和零值保留，不支持者拒绝 | 真实独立PID/Redis/MySQL/mTLS/WS及race；[边界和迁移](SCOPED_EVENT_OWNERSHIP_GUIDE.md) |
 | `mq.VerifySharedKeyReliableDistribution` | Stable（测试辅助） | server/mq | 双连接通用 conformance；不能替代独立 PID 与真实故障验收 | Redis helper + event 双进程测试分别登记 |
@@ -198,7 +198,7 @@ PrefixedBadgerDB和ReliableWriteStore增加`UseWriteBehindWithFailureHandler`、
 
 只有显式配置有限预算并绑定handler才启用。新状态使用原Badger可靠事务，policy持久冻结；禁止旧二进制回退打开新模式卷或在线删除标记。签名兼容不等于状态迁移已完成，消费方须分别验收原pending、未知结果、幂等接管及顺序屏障。完整接口、资源预算与信任边界见[正式指南](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
 
-## 显式仅Broker消费兼容边界（待发布）
+## v1.6.0 显式仅Broker消费兼容边界
 
 `Subscription.BrokerOnly`为加性布尔选项，false不要求旧消费者修改。true必须同时Reliable、有效Subject和实际可靠外部订阅；正式MQBridge验证入站Stream与注册Stream相同，旧自定义适配器未声明新入站能力时返回`ErrBrokerOnlyReliableUnsupported`。新增可选接口签名为`EnsureBrokerOnlyReliable(context.Context, *Stream) error`，没有增加任何MQProvider必选方法。Broker入站仍须全部匹配handler成功，Source相同不跳过。原Envelope/ID/ShardKey/幂等、组名、SharedKeys、Prefetch、Broadcast互斥、持久pending与生命周期算法均不变。
 

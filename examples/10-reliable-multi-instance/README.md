@@ -1,6 +1,6 @@
 # 10：可靠事件的多实例分键消费
 
-本例用正式 `ServiceContext.SubscribeEvent` 验证跨实例分担（原合同始于 v1.4.4）；当前仅Broker接线需使用本修复提交或后续包含它的正式版本。一个 `event-submit` 发布服务与两个同名 `event-worker` 消费服务运行在三个独立进程；消费者共享同一 subject 和逻辑服务 group，使用 `user:<UserID>` 作为 `ShardKey`。不用应用自建 worker、Redis 锁、独立业务组或 Broadcast。
+本例用正式 `ServiceContext.SubscribeEvent` 验证跨实例分担（原合同始于 v1.4.4）；当前仅Broker接线需使用 v1.6.0 或之后的正式版本。一个 `event-submit` 发布服务与两个同名 `event-worker` 消费服务运行在三个独立进程；消费者共享同一 subject 和逻辑服务 group，使用 `user:<UserID>` 作为 `ShardKey`。不用应用自建 worker、Redis 锁、独立业务组或 Broadcast。
 
 ## 仅经Broker可靠消费（本轮新增）
 
