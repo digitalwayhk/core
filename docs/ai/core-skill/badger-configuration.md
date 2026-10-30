@@ -72,3 +72,11 @@ Core目前未暴露NumMemtables、BlockCacheSize、IndexCacheSize等字段，不
 Badger官方SyncWrites默认false，Core可靠pending为true；比较吞吐时必须同时列出可靠性、实际载荷、合批和并发。NumGoroutines作用于Badger Stream，不是前台Save worker数，不能用它直接解决本地写延迟。ValueThreshold决定值分流，不能仅因vlog配置为1MiB就断言轮转是根因；需观察实际vlog字节。memtable、compactor、L0预算与Core CollectWindow属于不同成本层，应分开实测。
 
 显式性能夹具TestConfirmationPerformanceComparison支持CORE_CONFIRM_PERF_VARIANT白名单core、mem64、vlog64、collect250us、compactors4；只在CORE_CONFIRM_PERF=1下使用，输出实际DB.Opts的安全字段，保持SyncWrites/DetectConflicts=true。未实测或收益不稳定不改生产默认；一次实验不能认证长期容量。测试卷仅用独立合成目录，封存结果后及时回收，避免测试数据占满磁盘。
+
+### SSD、CPU与合批的组合使用
+
+先核对实际持久路径所在介质、CPU硬配额/亲和性与Go实际并行度；GOMAXPROCS=1的实验不能当多核结论，GOMAXPROCS=2也不等于拥有2个专用核。Core不在构造store或库初始化时改进程全局并行度。有实际2CPU预算时，先以2P和原配置对照，再单独验证CollectWindow；更多P数、更多compactor不保证更低P99。
+
+服务实例复用一个ReliableWriteStore，前台并发Save由既有BatchCommitter合批；应用已有多项可用SaveBatch，按Committed前缀处理部分结果。不能每请求开库，也不能每笔Save后调用ForceSync等待远端来冒充异步写。MaxBatch是上限，不强等满批；CollectBacklog1/1ms窗口与250µs候选须分别实测，QueueCapacity属于有界背压预算。保留SyncWrites/DetectConflicts与成功提交后响应，禁止用WriteBatch盲写替换原件读改写核验。
+
+CPU/窗口测量须同时核对前台Save、确认批次、队列、排空、实际target调用与状态合并量；最终2000个状态key收敛不等于40000个中间版本逐一远端投递。夹具在计量外逐件核验本地模型/同步标记和持久pending索引，不能把缓存pending=0当事实完成。用法及实际结果见[SSD与并行度验证](../../codex/WRITE_BEHIND_TWO_PROCS_2026-10-31.md)；Core组件通过不代表消费方接入或容量通过。

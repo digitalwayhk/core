@@ -263,14 +263,28 @@ rtk proxy go test -race ./examples/07-shop-order-scale/order-service -run TestOr
 
 ## 有界确认的组件回归与观测
 
-显式启用FailurePolicy/FailureHandler后，框架按有界块可靠保存target结果，并复用原BatchCommitter的有限本地提交面；SQL/应用回调在外，业务不加ticker、worker或提交队列。无需新增配置，不改变当前512同步批上限或应用重试/接管政策；本地确认块上限32与远端同步批上限是不同预算。
+显式启用FailurePolicy/FailureHandler后，框架按有界块可靠保存target结果，并复用原BatchCommitter的有限本地提交面；SQL/应用回调在外，业务不加ticker、worker或提交队列。无需新增配置，不改变当前512同步批上限或应用重试/接管政策；ReliableWriteStore本地确认块固定最多8项，直接PrefixedBadgerDB无facade时最多32项，与远端同步批上限是不同预算。
 
 运行Core自包含对照（合成Gob、临时Badger，无业务SQL；普通测试默认明确SKIP）：
 
 ```bash
-rtk proxy env CORE_CONFIRM_PERF=1 CORE_CONFIRM_PERF_OUTPUT=/tmp/core-confirm-comparison-v1.6.2-example GOMAXPROCS=1 GOMEMLIMIT=1GiB go test ./pkg/persistence/database/nosql -run '^TestConfirmationPerformanceComparison$' -v -count=1 -timeout 240s
+rtk proxy go test -c ./pkg/persistence/database/nosql -o /tmp/core-confirm-comparison-example.test
+rtk proxy env CORE_CONFIRM_PERF=1 CORE_CONFIRM_PERF_VARIANT=core CORE_CONFIRM_PERF_OUTPUT=/tmp/core-confirm-comparison-1p-example GOMAXPROCS=1 GOMEMLIMIT=1GiB /tmp/core-confirm-comparison-example.test -test.run '^TestConfirmationPerformanceComparison$/^3$/^bounded_fast_sync$' -test.v -test.timeout=90s
+rtk proxy env CORE_CONFIRM_PERF=1 CORE_CONFIRM_PERF_VARIANT=core CORE_CONFIRM_PERF_OUTPUT=/tmp/core-confirm-comparison-2p-example GOMAXPROCS=2 GOMEMLIMIT=1GiB /tmp/core-confirm-comparison-example.test -test.run '^TestConfirmationPerformanceComparison$/^3$/^bounded_fast_sync$' -test.v -test.timeout=90s
 ```
 
-目录须为本轮独立路径，保留result.json和原始日志；运行期间不并行编译或测试。三轮2000笔与每模式40000笔、名义20秒持续波次分开，长期窗口复用2000个可合并状态key，不能据此推断不可合并订单流水的容量。GOMEMLIMIT是Go软预算，不是容器硬限；本机结果不能冒充Full-E4同档结果。
+先构建同一个二进制，再串行运行；每次使用本轮独立输出目录，交错顺序并复测，不以一次结果定默认值。上述命令只运行有后台持续窗口；去掉子测试筛选可运行三模式和三轮2000笔短窗，须相应增加超时。每模式40000笔、名义20秒持续波次复用2000个可合并状态key，不能据此推断不可合并订单流水的容量。结果包含实际Go并行度、逐件原件/同步标记和持久pending索引核验。保留result.json、命令、原始日志及文件摘要后，及时清理本轮专用合成数据和二进制；不要删除其他项目或真实pending卷。
+
+部署时先确认实际可用CPU：有至少2CPU预算时，可显式使用GOMAXPROCS=2作为对照；1CPU硬配额下仅改环境变量不会获得第二个核。Core不在库初始化时强改全局CPU数。当前示例已有MaxBatch128/CollectBacklog1/CollectWindow1ms/QueueCapacity1024，服务复用一个store，并发Save自动合批，应用已有一批原件可使用SaveBatch；仍须等本地真实提交成功才回复，不能把chan接收当成功。GOMEMLIMIT是Go软预算，不是容器硬限，需另留Badger mmap和业务内存。
+
+本轮2P与250µs窗口组合的实际取舍见[SSD与Go并行度验证](../../docs/codex/WRITE_BEHIND_TWO_PROCS_2026-10-31.md)。250µs仅是试验候选，不因单P试验略好就改为全局默认；不增加前后台第二套队列，不取消事务、版本或顺序保护。本机结果不能冒充Full-E4同档结果。
+
+需要显式验证2P部署时，可叠加`deploy/docker-compose.write-2p.yml`：为订单副本声明2CPU配额上限、GOMAXPROCS=2和Go软内存1GiB，原持久卷、认证和业务配置继续来自主Compose。只读检查合成配置：
+
+```bash
+rtk proxy docker compose -f examples/07-shop-order-scale/deploy/docker-compose.yml -f examples/07-shop-order-scale/deploy/docker-compose.write-2p.yml config
+```
+
+这是可选资源候选，不预留专用CPU；两个默认订单副本的CPU上限合计4，另需给用户/供应商/MySQL等服务留预算。GOMEMLIMIT不覆盖所有mmap/RSS；没有追加未经验证的容器硬内存限额。真正启用还需按本示例原部署步骤准备证书和持久SSD卷，不能将静态Compose检查或本机Go并行度结果当容器/UAT/容量通过。本轮不启动或重建Docker服务。
 
 从实例store.Metrics()同时读取Batch/Admission/Sync及pending。Sync新增本地前台/确认/其余事务的排队、锁等待、提交累计与批次信息，TargetDuration与轮次时间嵌套，不能相加。固定成功确认仍以SyncedItems和原版本对账为准；pending=0不是物理清理完成。详细边界见[同步指南](../../docs/codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。

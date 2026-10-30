@@ -1,0 +1,21 @@
+# 显式叠加的写路径资源候选；不修改默认部署，不自动启动容器。
+# cpus是配额上限而非专用核预留；宿主/虚拟机须有足够总预算。
+# GOMEMLIMIT是Go软预算，不是容器RSS硬限。
+services:
+  shop-order-a:
+    cpus: 2.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 1GiB
+
+  shop-order-b:
+    cpus: 2.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 1GiB
+
+  shop-order:
+    cpus: 2.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 1GiB

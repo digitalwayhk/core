@@ -214,6 +214,30 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 				}
 				pct := func(p float64) float64 { return all[int(math.Ceil(p*float64(len(all))))-1] }
 				result := map[string]any{"variant": variant, "effective_options": effectiveOptions, "levels_after_drain": store.db.manager.db.Levels(), "mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
+				// 在测量窗口外核对持久原件和索引，不能仅凭缓存pending=0宣称同步成功。
+				persistentPending, err := store.db.GetPendingSyncCount()
+				require.NoError(t, err)
+				require.Equal(t, endMetrics.Pending, persistentPending)
+				verifiedSynced := 0
+				for key := range 2000 {
+					wrapper, err := store.db.getWrapper(store.db.prefix + fmt.Sprint(key))
+					require.NoError(t, err)
+					require.NotNil(t, wrapper.Item)
+					require.Equal(t, fmt.Sprint(key), wrapper.Item.Key)
+					require.Equal(t, key%50, wrapper.Item.Group)
+					require.True(t, bytes.Equal(payload, wrapper.Item.Payload), "合成载荷须逐件匹配")
+					require.False(t, wrapper.IsDeleted)
+					require.Equal(t, cfg.AutoSync, wrapper.IsSynced)
+					if wrapper.IsSynced {
+						verifiedSynced++
+					}
+				}
+				result["verified_local_keys"] = 2000
+				result["verified_synced_keys"] = verifiedSynced
+				result["persistent_pending"] = persistentPending
+				result["visible_logical_cpus"] = runtime.NumCPU()
+				result["gomaxprocs_env"] = os.Getenv("GOMAXPROCS")
+				result["gomemlimit_env"] = os.Getenv("GOMEMLIMIT")
 				closeErr := store.Close(context.Background())
 				if cfg.AutoSync {
 					require.NoError(t, closeErr)

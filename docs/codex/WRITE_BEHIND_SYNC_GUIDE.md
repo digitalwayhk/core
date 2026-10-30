@@ -104,3 +104,5 @@ Close先停止前台准入，唤醒满队列中尚未被接收的保存请求并
 ## 合批等待与官方参数实验
 
 Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端收集窗口、1ms本地合批窗口当成整体Save上限。Badger官方建议摊销逐key事务，但Core原件核验是读改写事务，不能直接替换为盲写WriteBatch或在Commit前确认成功。调度让出也可能帮助尚未入队的请求合批；删Gosched/队列暂空即提交须同时验证事务数、批大小和尾部，不能只看一次P99。具体官方参数差异、实际Options及本轮未采纳候选见[合批与参数对照](WRITE_BEHIND_BATCH_PARAMETERS_2026-10-31.md)。生产默认值和可靠性合同保持不变。
+
+实际使用先核对持久SSD路径和可用CPU预算；同一二进制串行对照1P/2P，不能从单P结果推定多核表现。2P仍共享本地提交器和Badger，不承诺完全隔离。复用实例store，并发Save或已有数据的SaveBatch在有限窗口内摊销事务；不得每笔Save后再ForceSync远端。07提供显式2P资源Compose候选及配对命令，默认仍为原1ms窗口；具体结果和硬配额NOT_RUN边界见[SSD与Go并行度验证](WRITE_BEHIND_TWO_PROCS_2026-10-31.md)。
