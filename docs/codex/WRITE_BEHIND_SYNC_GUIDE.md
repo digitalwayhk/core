@@ -89,7 +89,7 @@ CORE_ADAPTIVE_MYSQL_ADDR=127.0.0.1:<专用端口> \
 
 ## 有界后台本地确认的提交预算
 
-有界 `ReliableWriteStore` 的 target 结果按最多32项（有尚未返回的前台提交调用时最多8项）和约1MiB的编码写集预算分块落地；Badger还会检查实际事务硬限，遇 `ErrTxnTooBig` 有界二分，不重新调用target。单个不可拆分原件超过软字节预算时隔离为单项事务，仍受Badger硬限；失败保留原件/未知结果，不扩大整批或删数据。不能把 SyncBatchSize=128 理解成128次本地确认提交，也不能把Badger实际事务数等同于OS fsync/msync次数。
+有界 `ReliableWriteStore` 的 target 结果按固定最多8项和约1MiB的编码写集预算（直接PrefixedBadgerDB无facade时最多32项）分块落地；Badger还会检查实际事务硬限，遇 `ErrTxnTooBig` 有界二分，不重新调用target。单个不可拆分原件超过软字节预算时隔离为单项事务，仍受Badger硬限；失败保留原件/未知结果，不扩大整批或删数据。不能把 SyncBatchSize=128 理解成128次本地确认提交，也不能把Badger实际事务数等同于OS fsync/msync次数。
 
 本地确认及其他处置元数据复用现有 `BatchCommitter` 的同一个有界FIFO。前台保存仍可合批；内部事务是明确边界，处理前先完成之前接收的前台批次，再执行内部有界块。没有第二套队列或提交worker；target、网络、重试计时、OrderingGroup以外的应用回调均不在提交器中执行。`storageMu`仍保护同prefix的sequence/cursor/组索引和原件原子性，不能因“统一队列”删锁或按业务用户分锁。
 

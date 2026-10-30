@@ -107,7 +107,7 @@ Core 真实存储、独立进程硬杀和示例资源链通过，不代表消费
 
 ## 本地确认批提交与公平性
 
-target返回后不再逐条可靠提交。本轮结果按最多32项、约1MiB编码软预算分块；有尚未返回的前台提交调用时每块最多8项。Badger实际过大则二分；仅真实提交块更新pending、确认和hook。原版本、指纹、attempt及组首核验不变，失效项隔离，未提交块恢复unknown而不盲重放target。
+target返回后不再逐条可靠提交。本轮结果在ReliableWriteStore中按固定最多8项、约1MiB编码软预算分块；直接PrefixedBadgerDB无facade时最多32项，瞬时空闲不放大facade块。Badger实际过大则二分；仅真实提交块更新pending、确认和hook。原版本、指纹、attempt及组首核验不变，失效项隔离，未提交块恢复unknown而不盲重放target。
 
 有界ReliableWriteStore复用原BatchCommitter FIFO提交本地元数据；SQL/target/应用回调在外，Close先排空已接受前台，再等待原生命周期，最后关闭提交器。legacy无新接线，无配置/持久格式变化；失败/完成历史与异步清理恢复边界不变。
 
