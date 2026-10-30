@@ -21,9 +21,10 @@ var (
 )
 
 type batchCommitRequest[T types.IModel] struct {
-	operations []WriteOperation[T]
-	queuedAt   time.Time
-	result     chan batchCommitResponse
+	localCommit func() error // 仅Core本地事务，不允许target/网络/应用回调。
+	operations  []WriteOperation[T]
+	queuedAt    time.Time
+	result      chan batchCommitResponse
 }
 
 type batchCommitResponse struct {
@@ -58,18 +59,22 @@ type batchCommitMetricState struct {
 
 // BatchCommitter 把短窗口内的并发 Save/Delete 请求合并为有序本地事务。
 type BatchCommitter[T types.IModel] struct {
-	config     BatchCommitConfig
-	commit     func([]WriteOperation[T]) (BatchWriteResult, error)
-	requests   chan batchCommitRequest[T]
-	closing    chan struct{}
-	done       chan struct{}
-	stateMu    sync.RWMutex
-	closed     bool
-	submitters sync.WaitGroup
-	closeOnce  sync.Once
-	errMu      sync.Mutex
-	firstErr   error
-	metrics    batchCommitMetricState
+	pendingWrites atomic.Int64 // 已进入前台提交调用且尚未取得真实结果，仅作公平量子选择。
+
+	config          BatchCommitConfig
+	commit          func([]WriteOperation[T]) (BatchWriteResult, error)
+	requests        chan batchCommitRequest[T]
+	closing         chan struct{}
+	done            chan struct{}
+	stateMu         sync.RWMutex
+	closed          bool
+	localClosed     bool
+	localSubmitters sync.WaitGroup
+	submitters      sync.WaitGroup
+	closeOnce       sync.Once
+	errMu           sync.Mutex
+	firstErr        error
+	metrics         batchCommitMetricState
 }
 
 func newBatchCommitter[T types.IModel](
@@ -125,6 +130,8 @@ func (b *BatchCommitter[T]) SubmitBatch(
 	if len(operations) == 0 {
 		return BatchWriteResult{}, nil
 	}
+	b.pendingWrites.Add(1)
+	defer b.pendingWrites.Add(-1)
 	request := batchCommitRequest[T]{
 		queuedAt:   time.Now(),
 		operations: append([]WriteOperation[T](nil), operations...),
@@ -165,9 +172,11 @@ func (b *BatchCommitter[T]) Close(ctx context.Context) error {
 	b.closeOnce.Do(func() {
 		b.stateMu.Lock()
 		b.closed = true
+		b.localClosed = true
 		close(b.closing)
 		b.stateMu.Unlock()
 		b.submitters.Wait()
+		b.localSubmitters.Wait()
 		close(b.requests)
 	})
 	select {
@@ -207,7 +216,12 @@ func (b *BatchCommitter[T]) Metrics() BatchCommitMetrics {
 func (b *BatchCommitter[T]) run() {
 	defer close(b.done)
 	for first := range b.requests {
+		if first.localCommit != nil {
+			b.finishLocalCommit(first)
+			continue
+		}
 		batch := []batchCommitRequest[T]{first}
+		var local *batchCommitRequest[T]
 		channelClosed := false
 		if b.config.MaxBatch > 1 {
 			runtime.Gosched()
@@ -224,6 +238,10 @@ func (b *BatchCommitter[T]) run() {
 						channelClosed = true
 						break collect
 					}
+					if request.localCommit != nil {
+						local = &request
+						break collect
+					}
 					batch = append(batch, request)
 				case <-timer.C:
 					break collect
@@ -237,6 +255,9 @@ func (b *BatchCommitter[T]) run() {
 			}
 		}
 		b.finishBatch(batch)
+		if local != nil {
+			b.finishLocalCommit(*local)
+		}
 		if channelClosed {
 			return
 		}

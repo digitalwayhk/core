@@ -49,6 +49,15 @@ func NewReliableWriteStore[T types.IModel](
 		startedAt: time.Now().UTC(),
 	}
 	store.batcher = newBatchCommitter(normalized.Batch, db.ApplyWriteOperations)
+	if normalized.Badger.WriteBehindFailure != nil {
+		db.localSubmit = store.batcher.submitLocalCommit
+		db.localConfirmationLimit = func() int {
+			if store.batcher.pendingWrites.Load() > 0 {
+				return 8
+			}
+			return dispositionConfirmationMaxItems
+		}
+	}
 	return store, &ReliableWriteStoreAdmin[T]{db: db}, nil
 }
 
@@ -168,14 +177,18 @@ func (store *ReliableWriteStore[T]) Metrics() ReliableWriteMetrics {
 		return ReliableWriteMetrics{}
 	}
 	size := store.db.StorageSize()
+	batch := store.batcher.Metrics()
+	syncMetrics := store.db.GetSyncMetrics()
+	// 前台排队直接复用已采集的逐操作累计，不把未采集字段伪装为零。
+	syncMetrics.ForegroundLocal.QueueWait = batch.TotalQueueWaitDuration
 	return ReliableWriteMetrics{
 		StartedAt:       store.startedAt,
 		Pending:         store.db.GetCachedPendingSyncCount(),
 		BadgerLSMBytes:  size.LSMBytes,
 		BadgerVLogBytes: size.VLogBytes,
-		Batch:           store.batcher.Metrics(),
+		Batch:           batch,
 		Admission:       store.admission.Metrics(),
-		Sync:            store.db.GetSyncMetrics(),
+		Sync:            syncMetrics,
 	}
 }
 
@@ -189,13 +202,28 @@ func (store *ReliableWriteStore[T]) Close(ctx context.Context) error {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		batchErr := store.batcher.Close(ctx)
+		var batchErr error
+		if store.db.localSubmit != nil {
+			batchErr = store.batcher.drainAcceptedWrites(ctx)
+		} else {
+			batchErr = store.batcher.Close(ctx)
+		}
 		timeout := store.closeTimeout(ctx)
 		if batchErr != nil && ctx.Err() != nil {
-			store.closeErr = batchErr
+			if store.db.localSubmit != nil {
+				// 超时仍终止后台与提交面准入，已接受结果由原worker完成；不新增遗留队列。
+				dbErr := store.db.CloseWithTimeout(time.Nanosecond, time.Nanosecond)
+				store.closeErr = errors.Join(batchErr, dbErr, store.batcher.Close(ctx))
+			} else {
+				store.closeErr = batchErr
+			}
 			return
 		}
-		store.closeErr = errors.Join(batchErr, store.db.CloseWithTimeout(timeout, timeout))
+		dbErr := store.db.CloseWithTimeout(timeout, timeout)
+		if store.db.localSubmit != nil {
+			batchErr = errors.Join(batchErr, store.batcher.Close(ctx))
+		}
+		store.closeErr = errors.Join(batchErr, dbErr)
 	})
 	return store.closeErr
 }

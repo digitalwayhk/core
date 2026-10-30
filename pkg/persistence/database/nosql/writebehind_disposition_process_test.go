@@ -30,6 +30,123 @@ func processAppCount(app *badger.DB, key string, increment bool) (int, error) {
 	return value, err
 }
 
+// TestConfirmationCrashProcess 仅供父测试以独立PID启动；断点通过文件通知后由父进程SIGKILL。
+func TestConfirmationCrashProcess(t *testing.T) {
+	mode := os.Getenv("CORE_CONFIRM_CRASH_MODE")
+	if mode == "" {
+		t.Skip("仅供Core确认硬崩溃父测试启动")
+	}
+	stage := os.Getenv("CORE_CONFIRM_CRASH_STAGE")
+	path := os.Getenv("CORE_CONFIRM_CRASH_ROOT")
+	ready := func() {
+		require.NoError(t, os.WriteFile(filepath.Join(path, mode+".ready"), []byte(stage), 0600))
+		select {}
+	}
+	app, err := badger.Open(badger.DefaultOptions(filepath.Join(path, "app")).WithLogger(nil).WithSyncWrites(true))
+	require.NoError(t, err)
+	defer app.Close()
+	target := &cleanupTestTarget{}
+	target.sync = func(_ context.Context, items []*SyncQueueItem[cleanupTestRecord]) (*WriteBehindResult, error) {
+		_, e := processAppCount(app, "effect", true)
+		require.NoError(t, e)
+		if mode == "crash" && stage == "before_confirmation" {
+			ready()
+		}
+		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
+	}
+	target.handle = func(_ context.Context, f WriteBehindFailure[cleanupTestRecord]) (WriteBehindDecision, error) {
+		count, e := processAppCount(app, "effect", false)
+		require.NoError(t, e)
+		require.Equal(t, 1, count, "未知结果须查询应用持久事实，不能盲重做")
+		d := cleanupTestDecision(f.Record, WriteBehindConfirm)
+		d.Outcome = WriteBehindCommitted
+		return d, nil
+	}
+	// unknown_result固定前台可靠提交已返回到提交器、尚未回复Save的窗口；恢复时无新Save。
+	store := openCleanupTestStore(t, filepath.Join(path, "core"), mode == "recover", true, target)
+	if mode == "crash" {
+		probe := &cleanupTestProbe{}
+		if stage == "after_confirmation" {
+			probe.hook = func(*cleanupTestRecord) { ready() }
+		}
+		if stage == "unknown_result" {
+			original := store.batcher.commit
+			store.batcher.commit = func(ops []WriteOperation[cleanupTestRecord]) (BatchWriteResult, error) {
+				r, e := original(ops)
+				require.NoError(t, e)
+				require.Equal(t, 1, r.Committed)
+				ready()
+				return r, e
+			}
+		}
+		require.NoError(t, store.Save(context.Background(), newCleanupTestRecord(t, "original", 1, true, probe)))
+		_, e := store.ForceSyncBatch(context.Background(), 16)
+		require.NoError(t, e)
+		select {}
+	}
+	if stage == "after_confirmation" {
+		require.Zero(t, store.Metrics().Pending)
+		v, e := store.GetLocal(context.Background(), "original")
+		require.NoError(t, e)
+		require.True(t, v.DeleteAfter, "确认后尚未完成物理清理，重启不伪造自动补删")
+	} else {
+		require.Eventually(t, func() bool { return store.Metrics().Pending == 0 }, 5*time.Second, time.Millisecond)
+	}
+	count, err := processAppCount(app, "effect", false)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	records, _, err := store.ListWriteBehindFailures("", 16)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, WriteBehindCompleted, records[0].State)
+	require.True(t, records[0].LocalConfirmed)
+	require.Equal(t, 1, records[0].Attempts)
+	require.NoError(t, store.Close(context.Background()))
+	require.NoError(t, CloseSharedManager(store.config.BasePath))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "recover.ready"), []byte("reopened-original-directory-without-new-save"), 0600))
+}
+
+// TestConfirmationHardCrashRecovery 固定target成功/确认成功/Save结果未知三个窗口，必须由新进程打开原目录。
+func TestConfirmationHardCrashRecovery(t *testing.T) {
+	for _, stage := range []string{"before_confirmation", "after_confirmation", "unknown_result"} {
+		t.Run(stage, func(t *testing.T) {
+			path := t.TempDir()
+			exe, err := os.Executable()
+			require.NoError(t, err)
+			start := func(mode string) (*exec.Cmd, *os.File) {
+				log, err := os.Create(filepath.Join(path, mode+".log"))
+				require.NoError(t, err)
+				cmd := exec.Command(exe, "-test.run=^TestConfirmationCrashProcess$", "-test.timeout=20s")
+				cmd.Env = append(os.Environ(), "CORE_CONFIRM_CRASH_MODE="+mode, "CORE_CONFIRM_CRASH_STAGE="+stage, "CORE_CONFIRM_CRASH_ROOT="+path)
+				cmd.Stdout = log
+				cmd.Stderr = log
+				require.NoError(t, cmd.Start())
+				t.Cleanup(func() {
+					_ = cmd.Process.Kill()
+					_ = log.Close()
+					if t.Failed() {
+						b, _ := os.ReadFile(log.Name())
+						t.Logf("%s PID=%d: %s", mode, cmd.Process.Pid, b)
+					}
+				})
+				return cmd, log
+			}
+			crash, log := start("crash")
+			require.Eventually(t, func() bool { _, e := os.Stat(filepath.Join(path, "crash.ready")); return e == nil }, 10*time.Second, time.Millisecond)
+			require.NoError(t, crash.Process.Kill())
+			require.Error(t, crash.Wait())
+			require.NoError(t, log.Close())
+			recover, log := start("recover")
+			require.NotEqual(t, crash.Process.Pid, recover.Process.Pid)
+			require.NoError(t, recover.Wait())
+			require.NoError(t, log.Close())
+			_, err = os.Stat(filepath.Join(path, "recover.ready"))
+			require.NoError(t, err)
+			t.Logf("真实SIGKILL PID=%d，新PID=%d，原目录恢复，无新前台请求", crash.Process.Pid, recover.Process.Pid)
+		})
+	}
+}
+
 // TestDispositionCrashProcess 是受显式环境变量保护的子进程夹具，普通测试不启动服务或访问外部存储。
 func TestDispositionCrashProcess(t *testing.T) {
 	stage := os.Getenv("CORE_DISPOSITION_HELPER")

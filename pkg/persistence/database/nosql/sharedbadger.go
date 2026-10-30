@@ -193,6 +193,10 @@ const (
 
 // PrefixedBadgerDB 带前缀的共享 BadgerDB
 type PrefixedBadgerDB[T types.IModel] struct {
+	localConfirmationLimit func() int // 本地前台存在时缩小确认量子，不按业务身份分锁。
+
+	localSubmit func(func() error) error // 显式有界store复用现有BatchCommitter，绑定前设置，之后不变。
+
 	manager *SharedBadgerManager
 	prefix  string // "user:", "order:", "product:"
 
@@ -239,13 +243,19 @@ type PrefixedBadgerDB[T types.IModel] struct {
 
 // SyncMetrics 记录写后同步的真实收敛情况，与本地 Badger 提交 TPS 分开观察。
 type SyncMetrics struct {
-	Attempts      uint64
-	Failures      uint64
-	SyncedItems   uint64
-	MaxPending    int
-	TotalDuration time.Duration
-	LastDuration  time.Duration
-	LastSuccessAt time.Time
+	// ForegroundLocal、ConfirmationLocal、MetadataLocal只统计本地事务，不含target/应用回调。
+	ForegroundLocal   LocalTransactionMetrics
+	ConfirmationLocal LocalTransactionMetrics
+	MetadataLocal     LocalTransactionMetrics
+	// TargetDuration为target累计耗时；不可与包含它的TotalDuration相加。
+	TargetDuration time.Duration
+	Attempts       uint64
+	Failures       uint64
+	SyncedItems    uint64
+	MaxPending     int
+	TotalDuration  time.Duration
+	LastDuration   time.Duration
+	LastSuccessAt  time.Time
 }
 
 // NewSharedBadgerDB 创建共享 BadgerDB 实例

@@ -132,7 +132,7 @@ func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string
 	return nil
 }
 
-func (p *PrefixedBadgerDB[T]) saveDisposition(txn *badger.Txn, r *WriteBehindFailureRecord[T]) error {
+func (p *PrefixedBadgerDB[T]) saveDisposition(txn *badger.Txn, r *WriteBehindFailureRecord[T], deferredGroups ...map[string]struct{}) error {
 	base := p.dispositionPrefix()
 	group := dispositionGroup(r)
 	if err := dispositionWrite(txn, base+"r:"+r.ID, r); err != nil {
@@ -142,13 +142,11 @@ func (p *PrefixedBadgerDB[T]) saveDisposition(txn *badger.Txn, r *WriteBehindFai
 		if err := txn.Delete([]byte(p.dispositionQueueKey(r))); err != nil {
 			return err
 		}
-		// 只有未解决组才保留轮转标记；归档不会占满调度扫描预算。
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		prefix := []byte(base + "q:" + group + ":")
-		it.Seek(prefix)
-		if !it.ValidForPrefix(prefix) {
-			if err := txn.Delete([]byte(base + "g:" + group)); err != nil {
+		// 批量确认统一在写集完成后清理组标记，避免每个成员重建整个pending-write迭代器。
+		if len(deferredGroups) > 0 {
+			deferredGroups[0][group] = struct{}{}
+		} else {
+			if err := p.deleteEmptyDispositionGroups(txn, map[string]struct{}{group: {}}); err != nil {
 				return err
 			}
 		}
@@ -252,7 +250,7 @@ func (p *PrefixedBadgerDB[T]) GetWriteBehindDispositionMetrics() (WriteBehindDis
 	return m, err
 }
 
-func (p *PrefixedBadgerDB[T]) completeDisposition(txn *badger.Txn, r *WriteBehindFailureRecord[T], state WriteBehindFailureState) (bool, error) {
+func (p *PrefixedBadgerDB[T]) completeDisposition(txn *badger.Txn, r *WriteBehindFailureRecord[T], state WriteBehindFailureState, deferredGroups ...map[string]struct{}) (bool, error) {
 	var current SyncQueueItem[T]
 	removed := false
 	err := dispositionRead(txn, r.Snapshot.Key, &current)
@@ -287,7 +285,7 @@ func (p *PrefixedBadgerDB[T]) completeDisposition(txn *badger.Txn, r *WriteBehin
 	r.LocalConfirmed = removed && state == WriteBehindCompleted
 	r.HandlerDeadline = time.Time{}
 	r.NextAttemptAt = time.Time{}
-	return removed, p.saveDisposition(txn, r)
+	return removed, p.saveDisposition(txn, r, deferredGroups...)
 }
 
 // ApplyWriteBehindDecision 由受信任应用恢复/处置原生命周期，不重置任何预算；Release仅解除已交接的顺序屏障。
@@ -310,11 +308,7 @@ func (p *PrefixedBadgerDB[T]) ApplyWriteBehindDecision(ctx context.Context, d Wr
 // updateWriteBehindTransaction 只在显式处置模式串行本prefix的本地事务，防止组索引/序号读改写冲突。
 // 不自动重放含外部副作用的闭包，不在target调用或应用失败回调期间持锁；旧模式原样委托Badger。
 func (p *PrefixedBadgerDB[T]) updateWriteBehindTransaction(fn func(*badger.Txn) error) error {
-	if p.disposition != nil {
-		p.disposition.storageMu.Lock()
-		defer p.disposition.storageMu.Unlock()
-	}
-	return p.manager.db.Update(fn)
+	return p.updateWriteBehindTransactionKind(localCommitMetadata, 0, fn)
 }
 
 // rebuildDispositionSyncQueue 分页修复原索引并在提交时复核当前版本，不复活已交接项，也不收集全部历史key到内存。
@@ -375,4 +369,26 @@ func (p *PrefixedBadgerDB[T]) rebuildDispositionSyncQueue() (int, error) {
 		total += added
 		cursor = keys[len(keys)-1][len(p.prefix):]
 	}
+}
+
+// deleteEmptyDispositionGroups 在同一事务最终写集上复用一个迭代器，组首索引与原件仍原子提交。
+func (p *PrefixedBadgerDB[T]) deleteEmptyDispositionGroups(txn *badger.Txn, groups map[string]struct{}) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	it := txn.NewIterator(opts)
+	defer it.Close()
+	base := p.dispositionPrefix()
+	for group := range groups {
+		prefix := []byte(base + "q:" + group + ":")
+		it.Seek(prefix)
+		if !it.ValidForPrefix(prefix) {
+			if e := txn.Delete([]byte(base + "g:" + group)); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
 }

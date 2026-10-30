@@ -105,7 +105,7 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 	needSync bool,
 ) (int, error) {
 	newQueueCount := 0
-	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
+	err := p.updateWriteBehindTransactionKind(localCommitForeground, len(operations), func(txn *badger.Txn) error {
 		wrappers := make(map[string]*SyncQueueItem[T], len(operations))
 		loaded := make(map[string]struct{}, len(operations))
 		queued := make(map[string]struct{}, len(operations))

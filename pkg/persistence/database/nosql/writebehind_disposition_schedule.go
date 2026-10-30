@@ -216,6 +216,7 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	unlock := p.lockSyncKeys(keys)
 	defer unlock()
 	var result *WriteBehindResult
+	targetStarted := time.Now()
 	func() {
 		defer func() {
 			if recover() != nil {
@@ -224,6 +225,9 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 		}()
 		result, err = p.syncTarget.SyncBatch(ctx, items)
 	}()
+	p.syncMetricsMu.Lock()
+	p.syncMetrics.TargetDuration += time.Since(targetStarted)
+	p.syncMetricsMu.Unlock()
 	if ctx.Err() != nil {
 		err = errors.Join(err, ctx.Err())
 		result = nil
@@ -248,46 +252,9 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 			err = errors.Join(err, ErrWriteBehindDisposition)
 		}
 	}
-	for _, original := range selected {
-		r := original
-		removed := false
-		e := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
-			if e := dispositionRead(txn, p.dispositionPrefix()+"r:"+r.ID, &r); e != nil {
-				return e
-			}
-			if r.State != WriteBehindInFlight || r.Attempts != original.Attempts {
-				return ErrWriteBehindDisposition
-			}
-			if success[r.Snapshot.Key] {
-				var e error
-				removed, e = p.completeDisposition(txn, &r, WriteBehindCompleted)
-				return e
-			}
-			r.State = WriteBehindUnknown
-			r.Reason = "target_outcome_unknown"
-			if r.FirstFailureAt.IsZero() {
-				r.FirstFailureAt = time.Now().UTC()
-			}
-			if err != nil {
-				r.ErrorMessage = err.Error()
-			} else {
-				r.ErrorMessage = ErrWriteBehindNoProgress.Error()
-			}
-			return p.saveDisposition(txn, &r)
-		})
-		if e != nil {
-			err = errors.Join(err, e)
-			continue
-		}
-		if removed {
-			p.incrementPendingCount(-1)
-			confirmed++
-			// 只有原版本的本地确认事务提交后，才交给已有异步 hook 和版本保护处理。
-			p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates([]*SyncQueueItem[T]{r.Snapshot}, []string{r.Snapshot.Key}))
-		}
-		if r.State == WriteBehindUnknown {
-			notify = append(notify, r)
-		}
-	}
+	n, notices, confirmationErr := p.commitDispositionResults(selected, success, err)
+	confirmed += n
+	notify = append(notify, notices...)
+	err = errors.Join(err, confirmationErr)
 	return
 }
