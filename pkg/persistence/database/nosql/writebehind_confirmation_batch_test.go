@@ -40,6 +40,24 @@ func TestDispositionConfirmationUsesBoundedTransactions(t *testing.T) {
 	require.LessOrEqual(t, commits, uint64(5), "选批一次+有界确认块，不得逐条可靠提交")
 }
 
+// TestReliableConfirmationKeepsSmallBudgetBetweenRequests 没有在途Save也保持小块，不能用瞬时空隙放大提交阻塞下一波。
+func TestReliableConfirmationKeepsSmallBudgetBetweenRequests(t *testing.T) {
+	store := openCleanupTestStore(t, t.TempDir(), false, true, &cleanupTestTarget{})
+	store.db.manager.config.SyncBatchSize = 128
+	store.db.disposition.policy.ScanLimit = 128
+	for i := range 128 {
+		require.NoError(t, store.Save(context.Background(), newCleanupTestRecord(t, fmt.Sprint(i), 1, false, &cleanupTestProbe{})))
+	}
+	before := store.db.manager.db.MaxVersion()
+	r, err := store.ForceSyncBatch(context.Background(), 128)
+	require.NoError(t, err)
+	require.Equal(t, 128, r.Confirmed)
+	commits := store.db.manager.db.MaxVersion() - before
+	require.LessOrEqual(t, commits, uint64(17))
+	t.Logf("正式ReliableWriteStore：128确认，实际事务=%d", commits)
+	require.LessOrEqual(t, store.Metrics().Sync.ConfirmationLocal.MaxItems, 8, "瞬时没有Save不能放大facade确认块")
+}
+
 // TestConfirmationYieldsSmallQuantumToForeground 已接收前台存在时首个确认块最多8项，清理入队屏障固定真实块大小。
 func TestConfirmationYieldsSmallQuantumToForeground(t *testing.T) {
 	store := openCleanupTestStore(t, t.TempDir(), false, true, &cleanupTestTarget{})
@@ -252,7 +270,7 @@ func TestDispositionConfirmationSplitsActualTransactionSize(t *testing.T) {
 	t.Logf("实际过大=%d，拆分后提交=%d，items=%d，Badger硬限=%d", m.TooBig, m.Committed, m.Items, db.manager.db.MaxBatchSize())
 }
 
-// TestDispositionConfirmationPartialBlocks 本地第二块写集失败时，首块确认及hook保持，未提交块不能提前扣数或回收。
+// TestDispositionConfirmationPartialBlocks 本地后半四块写集失败时，首半确认及hook保持，未提交块不能提前扣数或回收。
 func TestDispositionConfirmationPartialBlocks(t *testing.T) {
 	store := openCleanupTestStore(t, t.TempDir(), false, true, &cleanupTestTarget{})
 	db := store.db
@@ -265,18 +283,24 @@ func TestDispositionConfirmationPartialBlocks(t *testing.T) {
 	selected, _, err := db.selectDispositionRound(64)
 	require.NoError(t, err)
 	require.Len(t, selected, 64)
-	bad := db.dispositionPrefix() + "r:" + selected[63].ID
-	var saved []byte
+	saved := map[string][]byte{}
 	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
-		item, e := txn.Get([]byte(bad))
-		if e != nil {
-			return e
+		// 四个8项块各损坏最后一项，保持原来的32成功/32失败断言，不放宽成56。
+		for _, index := range []int{39, 47, 55, 63} {
+			key := db.dispositionPrefix() + "r:" + selected[index].ID
+			item, e := txn.Get([]byte(key))
+			if e != nil {
+				return e
+			}
+			saved[key], e = item.ValueCopy(nil)
+			if e != nil {
+				return e
+			}
+			if e = txn.Set([]byte(key), []byte("broken-json")); e != nil {
+				return e
+			}
 		}
-		saved, e = item.ValueCopy(nil)
-		if e != nil {
-			return e
-		}
-		return txn.Set([]byte(bad), []byte("broken-json"))
+		return nil
 	}))
 	success := map[string]bool{}
 	for _, r := range selected {
@@ -294,7 +318,14 @@ func TestDispositionConfirmationPartialBlocks(t *testing.T) {
 		require.False(t, v.IsSynced)
 	}
 	// 恢复损坏注入的原始字节后，仍按原版本/次数确认剩余块，不重调target。
-	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error { return txn.Set([]byte(bad), saved) }))
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error {
+		for key, b := range saved {
+			if e := txn.Set([]byte(key), b); e != nil {
+				return e
+			}
+		}
+		return nil
+	}))
 	n, _, err = db.commitDispositionResults(selected[32:], success, nil)
 	require.NoError(t, err)
 	require.Equal(t, 32, n)

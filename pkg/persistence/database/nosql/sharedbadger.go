@@ -193,7 +193,7 @@ const (
 
 // PrefixedBadgerDB 带前缀的共享 BadgerDB
 type PrefixedBadgerDB[T types.IModel] struct {
-	localConfirmationLimit func() int // 本地前台存在时缩小确认量子，不按业务身份分锁。
+	localConfirmationLimit int // facade确认固定小块，避免波次空隙放大；不按业务身份分锁。
 
 	localSubmit func(func() error) error // 显式有界store复用现有BatchCommitter，绑定前设置，之后不变。
 

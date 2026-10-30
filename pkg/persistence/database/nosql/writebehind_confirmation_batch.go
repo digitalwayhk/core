@@ -21,8 +21,8 @@ func (p *PrefixedBadgerDB[T]) commitDispositionResults(selected []WriteBehindFai
 	for start := 0; start < len(selected); {
 		end, size := start, 0
 		maxItems := dispositionConfirmationMaxItems
-		if p.localConfirmationLimit != nil {
-			maxItems = p.localConfirmationLimit()
+		if p.localConfirmationLimit > 0 && p.localConfirmationLimit < maxItems {
+			maxItems = p.localConfirmationLimit
 		}
 		for end < len(selected) && end-start < maxItems {
 			b, err := json.Marshal(&selected[end])

@@ -59,8 +59,6 @@ type batchCommitMetricState struct {
 
 // BatchCommitter 把短窗口内的并发 Save/Delete 请求合并为有序本地事务。
 type BatchCommitter[T types.IModel] struct {
-	pendingWrites atomic.Int64 // 已进入前台提交调用且尚未取得真实结果，仅作公平量子选择。
-
 	config          BatchCommitConfig
 	commit          func([]WriteOperation[T]) (BatchWriteResult, error)
 	requests        chan batchCommitRequest[T]
@@ -130,8 +128,6 @@ func (b *BatchCommitter[T]) SubmitBatch(
 	if len(operations) == 0 {
 		return BatchWriteResult{}, nil
 	}
-	b.pendingWrites.Add(1)
-	defer b.pendingWrites.Add(-1)
 	request := batchCommitRequest[T]{
 		queuedAt:   time.Now(),
 		operations: append([]WriteOperation[T](nil), operations...),
