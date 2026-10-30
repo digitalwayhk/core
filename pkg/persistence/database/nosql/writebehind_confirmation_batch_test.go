@@ -385,3 +385,59 @@ func TestDispositionForegroundAndBackgroundProgress(t *testing.T) {
 	require.Greater(t, m.ConfirmationLocal.Committed, uint64(0))
 	require.LessOrEqual(t, m.ConfirmationLocal.MaxItems, 32)
 }
+
+// confirmationQueueContext 以Done求值确定请求已经进入满队列select，不依赖睡眠猜测提交状态。
+type confirmationQueueContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *confirmationQueueContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
+// TestLocalCommitDrainCancelsUnacceptedForeground 满队列关闭只取消未接收请求，已接受请求仍等待真实提交。
+func TestLocalCommitDrainCancelsUnacceptedForeground(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	b := newBatchCommitter[testFund](BatchCommitConfig{MaxBatch: 1, QueueCapacity: 1}, func(ops []WriteOperation[testFund]) (BatchWriteResult, error) {
+		once.Do(func() { close(entered); <-release })
+		return BatchWriteResult{Committed: len(ops)}, nil
+	})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }); _ = b.Close(context.Background()) })
+	first, second, third := make(chan error, 1), make(chan error, 1), make(chan error, 1)
+	go func() { first <- b.Submit(context.Background(), WriteOperation[testFund]{}) }()
+	<-entered
+	go func() { second <- b.Submit(context.Background(), WriteOperation[testFund]{}) }()
+	require.Eventually(t, func() bool { return len(b.requests) == 1 }, time.Second, time.Millisecond)
+	q := &confirmationQueueContext{Context: context.Background(), entered: make(chan struct{})}
+	go func() { third <- b.Submit(q, WriteOperation[testFund]{}) }()
+	<-q.entered
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	drained := make(chan error, 1)
+	go func() { drained <- b.drainAcceptedWrites(ctx) }()
+	select {
+	case e := <-drained:
+		require.ErrorIs(t, e, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("关闭卡在未接收前台，超时失效")
+	}
+	require.ErrorIs(t, <-third, ErrWriteStoreClosed)
+	select {
+	case <-first:
+		t.Fatal("已接受提交提前返回")
+	default:
+	}
+	select {
+	case <-second:
+		t.Fatal("已接受排队提交提前返回")
+	default:
+	}
+	releaseOnce.Do(func() { close(release) })
+	require.NoError(t, <-first)
+	require.NoError(t, <-second)
+}

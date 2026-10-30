@@ -38,7 +38,10 @@ func (b *BatchCommitter[T]) submitLocalCommit(commit func() error) error {
 // drainAcceptedWrites 停止前台准入并以同FIFO屏障等待已接收保存；内部确认仍可入队，防止Close自锁。
 func (b *BatchCommitter[T]) drainAcceptedWrites(ctx context.Context) error {
 	b.stateMu.Lock()
-	b.closed = true
+	if !b.closed {
+		b.closed = true
+		close(b.foregroundClosing)
+	}
 	b.stateMu.Unlock()
 	b.submitters.Wait()
 	result, err := b.queueLocalCommit(ctx, func() error { return nil })

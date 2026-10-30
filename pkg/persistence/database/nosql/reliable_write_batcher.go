@@ -59,20 +59,21 @@ type batchCommitMetricState struct {
 
 // BatchCommitter 把短窗口内的并发 Save/Delete 请求合并为有序本地事务。
 type BatchCommitter[T types.IModel] struct {
-	config          BatchCommitConfig
-	commit          func([]WriteOperation[T]) (BatchWriteResult, error)
-	requests        chan batchCommitRequest[T]
-	closing         chan struct{}
-	done            chan struct{}
-	stateMu         sync.RWMutex
-	closed          bool
-	localClosed     bool
-	localSubmitters sync.WaitGroup
-	submitters      sync.WaitGroup
-	closeOnce       sync.Once
-	errMu           sync.Mutex
-	firstErr        error
-	metrics         batchCommitMetricState
+	config            BatchCommitConfig
+	commit            func([]WriteOperation[T]) (BatchWriteResult, error)
+	requests          chan batchCommitRequest[T]
+	closing           chan struct{}
+	foregroundClosing chan struct{}
+	done              chan struct{}
+	stateMu           sync.RWMutex
+	closed            bool
+	localClosed       bool
+	localSubmitters   sync.WaitGroup
+	submitters        sync.WaitGroup
+	closeOnce         sync.Once
+	errMu             sync.Mutex
+	firstErr          error
+	metrics           batchCommitMetricState
 }
 
 func newBatchCommitter[T types.IModel](
@@ -95,11 +96,12 @@ func newBatchCommitter[T types.IModel](
 		config.QueueCapacity = config.MaxBatch
 	}
 	batcher := &BatchCommitter[T]{
-		config:   config,
-		commit:   commit,
-		requests: make(chan batchCommitRequest[T], config.QueueCapacity),
-		closing:  make(chan struct{}),
-		done:     make(chan struct{}),
+		config:            config,
+		commit:            commit,
+		requests:          make(chan batchCommitRequest[T], config.QueueCapacity),
+		closing:           make(chan struct{}),
+		foregroundClosing: make(chan struct{}),
+		done:              make(chan struct{}),
 	}
 	go batcher.run()
 	return batcher
@@ -148,7 +150,7 @@ func (b *BatchCommitter[T]) SubmitBatch(
 	case <-ctx.Done():
 		b.submitters.Done()
 		return BatchWriteResult{}, ctx.Err()
-	case <-b.closing:
+	case <-b.foregroundClosing:
 		b.submitters.Done()
 		return BatchWriteResult{}, ErrWriteStoreClosed
 	}
@@ -167,7 +169,10 @@ func (b *BatchCommitter[T]) Close(ctx context.Context) error {
 	}
 	b.closeOnce.Do(func() {
 		b.stateMu.Lock()
-		b.closed = true
+		if !b.closed {
+			b.closed = true
+			close(b.foregroundClosing)
+		}
 		b.localClosed = true
 		close(b.closing)
 		b.stateMu.Unlock()
