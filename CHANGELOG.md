@@ -32,11 +32,11 @@
 
 ### Fixed
 
-- 修复有界write-behind后台逐条确认放大可靠本地提交并争用前台的路径：按条数/编码预算分块、实际过大二分，真实提交后才计数/清理；有界ReliableWriteStore复用既有FIFO，确认量子固定8项（直接PrefixedBadgerDB最多32项），瞬时空闲不放大块，组索引维护复用无value预取迭代器。保留原版本/指纹、未知结果、有限预算、组屏障、回收及原卷恢复。详见[实施与证据](docs/codex/WRITE_BEHIND_BATCH_CONFIRMATION_2026-10-31.md)。
+- 修复有界write-behind后台逐条确认放大可靠本地提交并争用前台的路径：按条数/编码预算分块、实际过大二分，真实提交后才计数/清理；有界ReliableWriteStore复用既有FIFO，确认量子固定8项（直接PrefixedBadgerDB最多32项），瞬时空闲不放大块，组索引维护复用无value预取迭代器；满队列Close唤醒未接收前台，已接受请求继续等待真实提交。保留原版本/指纹、未知结果、有限预算、组屏障、回收及原卷恢复。详见[实施与证据](docs/codex/WRITE_BEHIND_BATCH_CONFIRMATION_2026-10-31.md)。
 
 ### Changed
 
-- 有界store自动复用既有FIFO本地提交面，并增加只读事务/等待观测；无需新增配置，不改持久格式。持续P99仍60–85ms，性能未完全验收；升级、回退及NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_2_2026-10-31.md)。
+- 有界store自动复用既有FIFO本地提交面，并增加只读事务/等待观测；无需新增配置，不改持久格式。持续P99仍72–76ms，性能未完全验收；升级、回退及NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_2_2026-10-31.md)。
 
 ## [v1.6.1] - 2026-10-30
 

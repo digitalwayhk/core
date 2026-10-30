@@ -95,8 +95,8 @@ CORE_ADAPTIVE_MYSQL_ADDR=127.0.0.1:<专用端口> \
 
 真实提交成功后才扣pending、累加确认并安排IsSyncAfterDelete；失败块全部保留，已提交块不因后块error被遗忘。旧状态/版本/指纹隔离，不回滚无关有效项；target成功和本地确认成功仍是两阶段。组标记清理在同一确认块最终写集上复用一个不预取value的迭代器，避免逐项重建/预取无关原件；索引格式和组首屏障不变。
 
-Close先停止前台准入并等待已接受保存的FIFO屏障，保留内部提交通道直到原后台/清理生命周期退出，再关闭提交器。接受后等待真实结果；超时不代表外部target/handler实际停止，也不授权回收仍被持有的卷。启动恢复、通知及到期重试继续走原worker，无新请求也能推进。直接使用 `PrefixedBadgerDB` 没有facade提交器时仍使用同prefix互斥和有界块；legacy/零配置不启用内部FIFO接线。
+Close先停止前台准入，唤醒满队列中尚未被接收的保存请求并返回ErrWriteStoreClosed，再等待已接受保存的FIFO屏障，保留内部提交通道直到原后台/清理生命周期退出，再关闭提交器。接受后等待真实结果；超时不代表外部target/handler实际停止，也不授权回收仍被持有的卷。启动恢复、通知及到期重试继续走原worker，无新请求也能推进。直接使用 `PrefixedBadgerDB` 没有facade提交器时仍使用同prefix互斥和有界块；legacy/零配置不启用内部FIFO接线。
 
-`GetSyncMetrics()` / `store.Metrics().Sync` 增加 `ForegroundLocal`、`ConfirmationLocal`、`MetadataLocal` 和 `TargetDuration`。三个本地快照包含Attempts/Committed/Failures、Items/MaxItems、TooBig、QueueWait、LockWait、CommitDuration及最大事务时长：Committed表示无错的Update调用（可含空写集），Items为成功块输入项数，不是业务确认数；实际确认仍看SyncedItems。MetadataLocal统计其余本地Update，含选批、恢复、决定和物理清理。facade的ForegroundLocal.QueueWait复用Batch.TotalQueueWaitDuration逐操作累计；前台排队也可继续看Batch.TotalQueueWaitDuration，准入看Admission.TotalDuration；这些是累计值，不是分位数。CommitDuration含编码及Badger可靠提交，不是纯fsync；TargetDuration已包含在同步轮次TotalDuration中，不能相加。无采集的OS同步次数、CPU限流及I/O字段必须为null/NOT_RUN。
+`GetSyncMetrics()` / `store.Metrics().Sync` 增加 `ForegroundLocal`、`ConfirmationLocal`、`MetadataLocal` 和 `TargetDuration`。三个本地快照包含Attempts/Committed/Failures、Items/MaxItems、TooBig、QueueWait、LockWait、CommitDuration及最大事务时长：Committed表示无错的Update调用（可含空写集），Items为成功块输入项数，不是业务确认数；实际确认仍看SyncedItems。MetadataLocal统计其余本地Update，含选批、恢复、决定和物理清理。facade的ForegroundLocal.QueueWait复用Batch.TotalQueueWaitDuration逐操作累计；前台排队也可继续看Batch.TotalQueueWaitDuration，准入看Admission.TotalDuration；这些是累计值，不是分位数。CommitDuration含编码及Badger可靠提交，不是纯fsync；TargetDuration仅在有界target调用边界采集（legacy不能用未采集值作性能对比），已包含在同步轮次TotalDuration中，不能相加。无采集的OS同步次数、CPU限流及I/O字段必须为null/NOT_RUN。
 
 本修复不更改配置、policy指纹、持久格式或刷盘参数；升级自动生效，无需关闭有限处置。存量原卷仍须相同StoreID/policy；保持既有旧二进制回退限制，禁止删mode/pending/history迁移。异步清理仍仅内存队列，不提供跨重启补删。
