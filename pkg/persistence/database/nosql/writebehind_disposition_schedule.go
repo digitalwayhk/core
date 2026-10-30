@@ -282,6 +282,8 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 		if removed {
 			p.incrementPendingCount(-1)
 			confirmed++
+			// 只有原版本的本地确认事务提交后，才交给已有异步 hook 和版本保护处理。
+			p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates([]*SyncQueueItem[T]{r.Snapshot}, []string{r.Snapshot.Key}))
 		}
 		if r.State == WriteBehindUnknown {
 			notify = append(notify, r)

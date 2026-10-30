@@ -73,6 +73,8 @@ target/handler 预算耗尽分别记为 `target_budget_exhausted / handler_budge
 
 原快照、失败历史和交接事实无 TTL、不自动删除。成功版本也保留生命周期记录；本轮未提供历史回收协议，长期运行必须按实例磁盘预算监控占用，另行制定有证据的归档/回收流程，不能清 pending 制造排空。
 
+本地模型副本与上述历史分开：target 的成功 `ConfirmedKeys` 或应用 `WriteBehindConfirm + WriteBehindCommitted` 只有在原版本的本地确认事务真正提交后，才会调度已有 `IsSyncAfterDelete` 异步回收。hook=false 保留副本，后续 true 新版本需重新确认；清理执行时仍复核版本，不清并发更新。接管、暂停、Release 或失效回调不会触发成功清理。清理队列仅在内存中，关闭/重启不承诺补删，旧版成功残留不会自动回收；具体边界见[同步后本地回收](WRITE_BEHIND_SYNC_GUIDE.md#同步后本地回收)。
+
 ## 资源、关闭与观测
 
 复用原同步 worker，target 仍在原同步互斥下串行批次执行。失败回调使用固定 HandlerWorkers 及等容量队列，不逐条起 goroutine，不补充卡住的 worker。handler 次数在准入时预占，HandlerTimeout 包含有限队列等待；过期或容量不足会保留原件并暂停，预占次数不等同函数实际开始次数。短本地事务按 prefix 串行保护元数据，不跨 target/回调持锁，不自动重放带应用副作用的闭包。

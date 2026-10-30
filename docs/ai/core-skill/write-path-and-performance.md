@@ -76,6 +76,8 @@ Badger参数选择先读[配置与调参](badger-configuration.md)：区分官�
 - `DefaultSharedConfig` 默认 `SyncWrites=false`，面向共享缓存；write-behind 必须显式启用持久写。
 - `SetSyncDB`、`EnableWriteBehind(ModelList)` 是仍可编译的 Deprecated 兼容路径，不得作为新热路径设计中心。
 - 待同步记录禁止 TTL。`Close` 返回 `PendingSyncError` 表示本地仍是临时事实源，不能把目录当缓存删除。
+- `IsSyncAfterDelete` 在原版本的本地成功确认事务提交后异步执行：普通 target、有界 target 的 `ConfirmedKeys` 及应用 `WriteBehindConfirm + WriteBehindCommitted` 均遵守此规则。返回 false 保留已同步本地记录；同 key 后续返回 true 的新版本仍须先完成自己的同步确认。清理只删除版本未变且已同步的本地模型，不写远端 tombstone，不删除失败/完成历史；暂停、接管、Release、Superseded 和失效回调不触发成功清理。
+- 同步完成、清理完成、历史回收是三个边界。现有异步清理队列仅在内存中，`pending=0` 或 `Close` 成功不证明本地清理已完成；确认提交后到清理完成前退出，重启不自动补删，也不因清理遗漏重发已确认项。此次修复不会自动回收旧版已确认但残留的记录，不得用 `PurgeLocal`、`Delete` 或清目录绕过业务删除条件。详见[同步后本地回收](../../codex/WRITE_BEHIND_SYNC_GUIDE.md#同步后本地回收)。
 - 语义为 at-least-once，远端操作必须幂等。同 key 写入会合并状态，不适用于资金流水或审计事件；不可合并事件使用唯一事件 ID 的 JetStream/outbox。
 
 ### 排空观测与结果文件处理

@@ -11,6 +11,7 @@ import (
 
 func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d WriteBehindDecision, generation int, callback bool) error {
 	removed, applied := false, false
+	var confirmedSnapshot *SyncQueueItem[T]
 	var finalState WriteBehindFailureState
 	var finalReason string
 	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
@@ -99,6 +100,7 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 			var e error
 			removed, e = p.completeDisposition(txn, &r, WriteBehindCompleted)
 			applied = removed
+			confirmedSnapshot = r.Snapshot
 			return e
 		case WriteBehindRelease:
 			if r.State != WriteBehindHandedOff || d.Outcome != WriteBehindOrderingReleased {
@@ -127,6 +129,8 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 			p.syncMetricsMu.Lock()
 			p.syncMetrics.SyncedItems++
 			p.syncMetricsMu.Unlock()
+			// 接管、暂停及重复/旧版本决定没有实际成功确认，不能触发本地回收。
+			p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates([]*SyncQueueItem[T]{confirmedSnapshot}, []string{confirmedSnapshot.Key}))
 		}
 		p.triggerSync()
 	}
