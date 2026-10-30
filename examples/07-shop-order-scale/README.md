@@ -259,3 +259,18 @@ rtk proxy go test -race ./examples/07-shop-order-scale/order-service -run TestOr
 ```
 
 两项均不依赖MySQL：第一项验证真实订单store→自动worker→应用独立持久回执及重开；第二项通过真实ServiceContext和正式订单target注入准入失败、验证资源逆序，不启动HTTP。真实MySQL/完整业务路由/UAT/容量仍需单独运行，不得从这些测试推导通过。完整API、冻结配置、未知结果和迁移边界见[正式指南](../../docs/codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
+
+
+## 有界确认的组件回归与观测
+
+显式启用FailurePolicy/FailureHandler后，框架按有界块可靠保存target结果，并复用原BatchCommitter的有限本地提交面；SQL/应用回调在外，业务不加ticker、worker或提交队列。无需新增配置，不改变当前512同步批上限或应用重试/接管政策；本地确认块上限32与远端同步批上限是不同预算。
+
+运行Core自包含对照（合成Gob、临时Badger，无业务SQL；普通测试默认明确SKIP）：
+
+```bash
+rtk proxy env CORE_CONFIRM_PERF=1 CORE_CONFIRM_PERF_OUTPUT=/tmp/core-confirm-comparison-v1.6.2-example GOMAXPROCS=1 GOMEMLIMIT=1GiB go test ./pkg/persistence/database/nosql -run '^TestConfirmationPerformanceComparison$' -v -count=1 -timeout 240s
+```
+
+目录须为本轮独立路径，保留result.json和原始日志；运行期间不并行编译或测试。三轮2000笔与每模式40000笔、名义20秒持续波次分开，长期窗口复用2000个可合并状态key，不能据此推断不可合并订单流水的容量。GOMEMLIMIT是Go软预算，不是容器硬限；本机结果不能冒充Full-E4同档结果。
+
+从实例store.Metrics()同时读取Batch/Admission/Sync及pending。Sync新增本地前台/确认/其余事务的排队、锁等待、提交累计与批次信息，TargetDuration与轮次时间嵌套，不能相加。固定成功确认仍以SyncedItems和原版本对账为准；pending=0不是物理清理完成。详细边界见[同步指南](../../docs/codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。

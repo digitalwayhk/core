@@ -85,3 +85,18 @@ CORE_ADAPTIVE_MYSQL_ADDR=127.0.0.1:<专用端口> \
 ```
 
 比较测试使用专用、空密码 root MySQL，创建唯一的 `core_adaptive_*` 测试库并保留数据。不得指向应用数据库。不提供地址时明确跳过，不能算真实 MySQL 验收。结果见 [自适应同步验证记录](WRITE_BEHIND_ADAPTIVE_VERIFICATION.md)；Bitzoom R60 同负载验收独立执行。
+
+
+## 有界后台本地确认的提交预算
+
+有界 `ReliableWriteStore` 的 target 结果按最多32项（有尚未返回的前台提交调用时最多8项）和约1MiB的编码写集预算分块落地；Badger还会检查实际事务硬限，遇 `ErrTxnTooBig` 有界二分，不重新调用target。单个不可拆分原件超过软字节预算时隔离为单项事务，仍受Badger硬限；失败保留原件/未知结果，不扩大整批或删数据。不能把 SyncBatchSize=128 理解成128次本地确认提交，也不能把Badger实际事务数等同于OS fsync/msync次数。
+
+本地确认及其他处置元数据复用现有 `BatchCommitter` 的同一个有界FIFO。前台保存仍可合批；内部事务是明确边界，处理前先完成之前接收的前台批次，再执行内部有界块。没有第二套队列或提交worker；target、网络、重试计时、OrderingGroup以外的应用回调均不在提交器中执行。`storageMu`仍保护同prefix的sequence/cursor/组索引和原件原子性，不能因“统一队列”删锁或按业务用户分锁。
+
+真实提交成功后才扣pending、累加确认并安排IsSyncAfterDelete；失败块全部保留，已提交块不因后块error被遗忘。旧状态/版本/指纹隔离，不回滚无关有效项；target成功和本地确认成功仍是两阶段。组标记清理在同一确认块最终写集上复用一个不预取value的迭代器，避免逐项重建/预取无关原件；索引格式和组首屏障不变。
+
+Close先停止前台准入并等待已接受保存的FIFO屏障，保留内部提交通道直到原后台/清理生命周期退出，再关闭提交器。接受后等待真实结果；超时不代表外部target/handler实际停止，也不授权回收仍被持有的卷。启动恢复、通知及到期重试继续走原worker，无新请求也能推进。直接使用 `PrefixedBadgerDB` 没有facade提交器时仍使用同prefix互斥和有界块；legacy/零配置不启用内部FIFO接线。
+
+`GetSyncMetrics()` / `store.Metrics().Sync` 增加 `ForegroundLocal`、`ConfirmationLocal`、`MetadataLocal` 和 `TargetDuration`。三个本地快照包含Attempts/Committed/Failures、Items/MaxItems、TooBig、QueueWait、LockWait、CommitDuration及最大事务时长：Committed表示无错的Update调用（可含空写集），Items为成功块输入项数，不是业务确认数；实际确认仍看SyncedItems。MetadataLocal统计其余本地Update，含选批、恢复、决定和物理清理。facade的ForegroundLocal.QueueWait复用Batch.TotalQueueWaitDuration逐操作累计；前台排队也可继续看Batch.TotalQueueWaitDuration，准入看Admission.TotalDuration；这些是累计值，不是分位数。CommitDuration含编码及Badger可靠提交，不是纯fsync；TargetDuration已包含在同步轮次TotalDuration中，不能相加。无采集的OS同步次数、CPU限流及I/O字段必须为null/NOT_RUN。
+
+本修复不更改配置、policy指纹、持久格式或刷盘参数；升级自动生效，无需关闭有限处置。存量原卷仍须相同StoreID/policy；保持既有旧二进制回退限制，禁止删mode/pending/history迁移。异步清理仍仅内存队列，不提供跨重启补删。

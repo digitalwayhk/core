@@ -102,3 +102,13 @@ rtk proxy go test -race ./examples/07-shop-order-scale/order-service/... -count=
 ```
 
 Core 真实存储、独立进程硬杀和示例资源链通过，不代表消费方真实 MySQL、业务路由、UAT 或容量通过；发布证据及 NOT_RUN 单列。
+
+
+
+## 本地确认批提交与公平性
+
+target返回后不再逐条可靠提交。本轮结果按最多32项、约1MiB编码软预算分块；有尚未返回的前台提交调用时每块最多8项。Badger实际过大则二分；仅真实提交块更新pending、确认和hook。原版本、指纹、attempt及组首核验不变，失效项隔离，未提交块恢复unknown而不盲重放target。
+
+有界ReliableWriteStore复用原BatchCommitter FIFO提交本地元数据；SQL/target/应用回调在外，Close先排空已接受前台，再等待原生命周期，最后关闭提交器。legacy无新接线，无配置/持久格式变化；失败/完成历史与异步清理恢复边界不变。
+
+Sync新增前台/确认/其余本地事务、排队/锁等待/提交累计及TargetDuration，指标含义和不能相加的边界见[统一预算及观测说明](WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。消费者不加worker、不关可靠刷盘、不清历史；仍用原StoreID/policy开原卷，保留原旧二进制回退限制。

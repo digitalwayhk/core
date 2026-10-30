@@ -203,3 +203,8 @@ PrefixedBadgerDB和ReliableWriteStore增加`UseWriteBehindWithFailureHandler`、
 `Subscription.BrokerOnly`为加性布尔选项，false不要求旧消费者修改。true必须同时Reliable、有效Subject和实际可靠外部订阅；正式MQBridge验证入站Stream与注册Stream相同，旧自定义适配器未声明新入站能力时返回`ErrBrokerOnlyReliableUnsupported`。新增可选接口签名为`EnsureBrokerOnlyReliable(context.Context, *Stream) error`，没有增加任何MQProvider必选方法。Broker入站仍须全部匹配handler成功，Source相同不跳过。原Envelope/ID/ShardKey/幂等、组名、SharedKeys、Prefetch、Broadcast互斥、持久pending与生命周期算法均不变。
 
 本轮同时将可靠控制订阅的取消身份从函数代码地址改为独立注册对象，防止同一闭包代码的多个handler被一次取消误删；外部订阅创建串行化，防止并发注册临时创建重复同组消费者。SubscribeEvent在途可靠handler纳入Bridge关闭等待，取消后迟到成功返回错误，不能ACK；Close超时仍不证明在途代码停止。旧公开SubscribeControl/PublishControl签名保持，只在Core内部引入可靠Broker分发入口，不从业务Source或payload识别来源。完整调用链及升级说明见[验收](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
+
+
+## v1.6.2 本地提交诊断
+
+SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（LocalTransactionMetrics）与TargetDuration，facade仍通过原Metrics/Sync读取；无新HTTP路由或业务协议。原字段含义保持。新增计数描述本地Update调用/块输入，并非业务成功证明；SyncedItems仍是实际本地确认。QueueWait与CommitDuration的采集边界、累计不能相加等详见WRITE_BEHIND_SYNC_GUIDE.md。绑定入口、配置、policy指纹、原卷格式、失败预算及应用决定语义不变。

@@ -95,3 +95,10 @@ Badger参数选择先读[配置与调参](badger-configuration.md)：区分官�
 07负载入口可显式设置`CORE_TEST_LOAD_DIAGNOSTICS=1`，仅向证据目录输出本轮进程的二进制、metrics端口与诊断目录，不输出凭证。需要故障前运行时trace时，另加`GOFLAGS=-tags=core_benchmark_profile`和`CORE_TEST_LOAD_FLIGHT=1`；仅Core三进程在loopback开放`/debug/pprof/flight`，原生对照尚不支持此开关。默认构建不接入该端口，未显式开启flight时端点不存在。
 
 FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载大小，并用`go tool trace`验证快照；HTTP 200、trace前缀或无错误trailer均不能单独证明快照完整。`WriteTo`会推动trace刷新，诊断活动也会影响调度，必须与无flight对照分开，不能将诊断轮当容量认证。Go 1.26 syscall/STW的[上游问题](https://github.com/golang/go/issues/81759)及[候选修复](https://github.com/golang/go/pull/81835)在2026-10-19查询时仍开放；`schedtrace`可能掩盖该问题的复现，不得用开关后的未复现宣称修复，也不得据此认定所有业务长尾同因。使用进程外时钟、Redis探针和系统采样区分Go进程停顿与依赖延迟，不关闭GC、刷盘或stable准入来换取成绩。
+
+
+## 有界本地确认与前台争用
+
+可靠写前台和后台不是资源隔离：同prefix本地元数据互斥只跨本地事务，不能说Core持锁等待MySQL。当前有界ReliableWriteStore把target结果按最多32项/约1MiB软预算落地；有前台提交时量子缩至8项，实际过大二分；内部元数据复用既有BatchCommitter FIFO，SQL/target/HandleFailure仍在外。禁止重新引入逐条确认提交、另写业务提交器、关SyncWrites或清历史制造性能收益。原件、attempt、组索引、cursor及sequence仍原子核验；仅提交成功的块更新pending/计数/hook，旧结果不确认新版本。
+
+诊断必须同时看Save、Admission、Batch队列、Sync.ForegroundLocal/ConfirmationLocal/MetadataLocal的QueueWait/LockWait/CommitDuration、TargetDuration和排空。锁等待下降不能单独当修复，必须比较chan排队和Save长尾。累计时间不可相加冒充壁钟，确认数用SyncedItems；本地Update成功次数不等于物理fsync，未测指标不填零。以固定版本、同机同文件系统/可靠性/载荷/并发三模式、多轮和持续输入取证，禁止并行编译/测试污染计量。具体预算、单项大原件、Close与原卷恢复边界见[正式指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。组件通过不代表消费方Full-E4同档复测或业务容量通过。
