@@ -22,11 +22,21 @@
 
 ### Fixed
 
-- 修复有界 write-behind 的 target 成功及应用显式 Confirm 在本地确认提交后遗漏 `IsSyncAfterDelete` 异步清理；复用原版本保护，保留 false、新版本 pending、非成功处置及完整失败历史。内存清理队列的关闭/重启边界不变，旧版已确认残留不会因升级自动回收。详见[修复与验收](docs/codex/WRITE_BEHIND_LOCAL_CLEANUP_2026-10-30.md)。
+- 无。
 
 ### Security
 
 - 无。
+
+## [v1.6.1] - 2026-10-30
+
+### Fixed
+
+- 修复有界 write-behind 的 target 成功及应用显式 Confirm 在本地确认提交后遗漏 `IsSyncAfterDelete` 异步清理；复用原版本保护，保留 false、新版本 pending、非成功处置及完整失败历史。内存清理队列的关闭/重启边界不变，旧版已确认残留不会因升级自动回收。详见[修复与验收](docs/codex/WRITE_BEHIND_LOCAL_CLEANUP_2026-10-30.md)。
+
+### Changed
+
+- 有界模式现在与普通模式一致，在真实本地成功确认后调用既有删除 hook；返回 true 才回收原版本。无需新 API 或配置，存量残留与关闭/重启边界见[发布说明](docs/codex/RELEASE_V1_6_1_2026-10-30.md)。
 
 ## [v1.6.0] - 2026-10-26
 

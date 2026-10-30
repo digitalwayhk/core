@@ -4,7 +4,7 @@
 
 修复 Core v1.6.0 在启用 `WriteBehindFailurePolicy` 后成功确认遗漏 `IsSyncAfterDelete` 的问题。基线为 `827a9f840f57f5b68c6481a380c8973f6c8d1467`，独立分支 `fix/writebehind-disposition-local-cleanup`。本报告与修复同一提交；精确提交可用 `git log -1 --format=%H -- pkg/persistence/database/nosql/writebehind_disposition_schedule.go` 查询。
 
-只改 Core，不修改消费方、不部署、不发压、不发布版本。原有前端及文档 WIP 的 189 个文件以 SHA256 核对保留，未暂存进本修复。测试只使用本轮临时 Badger、现有隔离 SQLite 和 Core 测试进程；未改模块缓存中的依赖源码，禁用依赖下载和 go.mod 自动修改。
+开发验证阶段只改 Core，不修改消费方、不部署、不发压；后续经用户授权合并发布，版本安排见 [v1.6.1 发布说明](RELEASE_V1_6_1_2026-10-30.md)。原有前端及文档 WIP 的 189 个文件以 SHA256 核对保留，未暂存进本修复。测试只使用本轮临时 Badger、现有隔离 SQLite 和 Core 测试进程；未改模块缓存中的依赖源码，禁用依赖下载和 go.mod 自动修改。
 
 ## 根因与最小改动
 
@@ -109,7 +109,7 @@ rtk proxy bash scripts/check-logging.sh
 
 ## 兼容、升级与剩余边界
 
-- 消费方继续使用原绑定入口与 `IsSyncAfterDelete`，无需新 API 或额外 worker。本修复未发布 tag，不把分支可用冒称消费方已经升级。
+- 消费方继续使用原绑定入口与 `IsSyncAfterDelete`，无需新 API 或额外 worker。修复提交为 `b66056a56b8ddf976eca808a64b692813bb97074`；正式版本及发布证据见 [v1.6.1 发布说明](RELEASE_V1_6_1_2026-10-30.md)，不把 Core 发布冒称消费方已经升级。
 - 有界模式修复后开始实际执行 hook；消费方必须核对返回 true 的业务条件，不能依赖旧漏洞保留副本。false 继续保留；新版本只有自己的成功确认才可清理。
 - 清理对象是本地模型副本，不是远端事实、tombstone、失败快照或完成历史。所有失败/完成历史的保留政策不变；不声称解决历史长期增长。
 - **现有清理队列不持久化。** 确认提交后、清理入队或执行完成前退出，重启不自动补删，也不为此重发已经确认的 target。`pending=0`、关闭成功和物理清理完成不是同一事实。普通/有界真实原卷重开测试固定并保留这一边界；本次没有扩大为新的持久回收机制。
@@ -117,7 +117,7 @@ rtk proxy bash scripts/check-logging.sh
 
 ## NOT_RUN 与审查
 
-- 外部 MySQL/MongoDB/Redis、真实业务环境、Bitzoom/Full-E4、UAT、容量、部署与发布均 NOT_RUN。
+- 外部 MySQL/MongoDB/Redis、真实业务环境、Bitzoom/Full-E4、UAT、容量及部署均 NOT_RUN；Core 正式发布检查另见上述发布说明。
 - nosql 的 33 个 SKIP 中，32 个需要外部 MySQL，另一个是仅供父测试启动的 `TestDispositionCrashProcess` 入口；父测试的真实子进程故障场景已执行。
 - 04/07 的 14 个 SKIP 是原生对照外部数据库/崩溃入口与 MySQL 规则/幂等/Outbox 测试；完整跳过名称保留在普通及 race 日志中。没有用 mock 结果替代真实外部依赖验收。
 - 本次已运行的包与门禁之外，没有执行全仓库 `go test ./...` 或全仓库 race。新增关闭窗口测试为受控关闭并重开真实存储，不宣称已穷举此窗口的所有 OS 硬崩溃时序。
