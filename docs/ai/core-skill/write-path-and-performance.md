@@ -102,3 +102,5 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 可靠写前台和后台不是资源隔离：同prefix本地元数据互斥只跨本地事务，不能说Core持锁等待MySQL。当前有界ReliableWriteStore把target结果按固定最多8项/约1MiB软预算落地（直接PrefixedBadgerDB无facade时最多32项）；瞬时没有前台请求也不放大块，实际过大二分；内部元数据复用既有BatchCommitter FIFO，SQL/target/HandleFailure仍在外。禁止重新引入逐条确认提交、另写业务提交器、关SyncWrites或清历史制造性能收益。原件、attempt、组索引、cursor及sequence仍原子核验；仅提交成功的块更新pending/计数/hook，旧结果不确认新版本。
 
 诊断必须同时看Save、Admission、Batch队列、Sync.ForegroundLocal/ConfirmationLocal/MetadataLocal的QueueWait/LockWait/CommitDuration、TargetDuration和排空。锁等待下降不能单独当修复，必须比较chan排队和Save长尾。累计时间不可相加冒充壁钟，确认数用SyncedItems；本地Update成功次数不等于物理fsync，未测指标不填零。以固定版本、同机同文件系统/可靠性/载荷/并发三模式、多轮和持续输入取证，禁止并行编译/测试污染计量。具体预算、单项大原件、Close与原卷恢复边界见[正式指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。组件通过不代表消费方Full-E4同档复测或业务容量通过。
+
+本地合批优化不能只删除调度让出或缩短窗口：须同时核对前台批次、总事务、排队、实际Save分位数及排空。官方Badger调参和读改写/WriteBatch边界见[参数分片](badger-configuration.md#官方慢写排障与实验边界)，不以一次收益修改全局生产默认。

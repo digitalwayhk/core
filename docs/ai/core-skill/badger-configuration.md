@@ -64,3 +64,11 @@ Core目前未暴露NumMemtables、BlockCacheSize、IndexCacheSize等字段，不
 5. 短窗通过后再做长窗，检查积压增长、回收与恢复耗时。参数不证明根因，能编译不证明主版本数据兼容。v3→v4只对副本做直接打开及Backup/Load实验，实际目录不能自动降级或reset。
 
 已观察到删除复现相似症状时，检查[Badger #2278](https://github.com/dgraph-io/badger/pull/2278)、[#2310](https://github.com/dgraph-io/badger/pull/2310)与当前版本是否命中；不能仅凭上游修复就归因本项目，也不能以v4.0未改格式推导最新版本全兼容。最终参数只在有源码指纹、完整数据核对和稳定多轮证据后登记为已验证配置。
+
+## 官方慢写排障与实验边界
+
+先对照固定依赖版本的[官方慢写排障](https://github.com/dgraph-io/badger/blob/v4.9.6/docs/troubleshooting.md)与[Options源码](https://github.com/dgraph-io/badger/blob/v4.9.6/options.go)。官方明确指出，每个key单独创建事务并同步等待Commit会降低吞吐；纯盲写可用WriteBatch摊销事务成本，但读改写仍应使用Transaction。Core有界处置需要读取原件、核验版本/指纹及更新组索引，不能直接替换为不支持读取的WriteBatch，也不能在持久提交完成前回复Save成功。
+
+Badger官方SyncWrites默认false，Core可靠pending为true；比较吞吐时必须同时列出可靠性、实际载荷、合批和并发。NumGoroutines作用于Badger Stream，不是前台Save worker数，不能用它直接解决本地写延迟。ValueThreshold决定值分流，不能仅因vlog配置为1MiB就断言轮转是根因；需观察实际vlog字节。memtable、compactor、L0预算与Core CollectWindow属于不同成本层，应分开实测。
+
+显式性能夹具TestConfirmationPerformanceComparison支持CORE_CONFIRM_PERF_VARIANT白名单core、mem64、vlog64、collect250us、compactors4；只在CORE_CONFIRM_PERF=1下使用，输出实际DB.Opts的安全字段，保持SyncWrites/DetectConflicts=true。未实测或收益不稳定不改生产默认；一次实验不能认证长期容量。测试卷仅用独立合成目录，封存结果后及时回收，避免测试数据占满磁盘。

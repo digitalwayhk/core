@@ -100,3 +100,7 @@ Close先停止前台准入，唤醒满队列中尚未被接收的保存请求并
 `GetSyncMetrics()` / `store.Metrics().Sync` 增加 `ForegroundLocal`、`ConfirmationLocal`、`MetadataLocal` 和 `TargetDuration`。三个本地快照包含Attempts/Committed/Failures、Items/MaxItems、TooBig、QueueWait、LockWait、CommitDuration及最大事务时长：Committed表示无错的Update调用（可含空写集），Items为成功块输入项数，不是业务确认数；实际确认仍看SyncedItems。MetadataLocal统计其余本地Update，含选批、恢复、决定和物理清理。facade的ForegroundLocal.QueueWait复用Batch.TotalQueueWaitDuration逐操作累计；前台排队也可继续看Batch.TotalQueueWaitDuration，准入看Admission.TotalDuration；这些是累计值，不是分位数。CommitDuration含编码及Badger可靠提交，不是纯fsync；TargetDuration仅在有界target调用边界采集（legacy不能用未采集值作性能对比），已包含在同步轮次TotalDuration中，不能相加。无采集的OS同步次数、CPU限流及I/O字段必须为null/NOT_RUN。
 
 本修复不更改配置、policy指纹、持久格式或刷盘参数；升级自动生效，无需关闭有限处置。存量原卷仍须相同StoreID/policy；保持既有旧二进制回退限制，禁止删mode/pending/history迁移。异步清理仍仅内存队列，不提供跨重启补删。
+
+## 合批等待与官方参数实验
+
+Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端收集窗口、1ms本地合批窗口当成整体Save上限。Badger官方建议摊销逐key事务，但Core原件核验是读改写事务，不能直接替换为盲写WriteBatch或在Commit前确认成功。调度让出也可能帮助尚未入队的请求合批；删Gosched/队列暂空即提交须同时验证事务数、批大小和尾部，不能只看一次P99。具体官方参数差异、实际Options及本轮未采纳候选见[合批与参数对照](WRITE_BEHIND_BATCH_PARAMETERS_2026-10-31.md)。生产默认值和可靠性合同保持不变。

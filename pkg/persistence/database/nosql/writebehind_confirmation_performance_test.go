@@ -108,8 +108,36 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 				if mode != "plain_no_sync" {
 					cfg.WriteBehindFailure = &WriteBehindFailurePolicy{StoreID: "core-confirm-performance", MaxAttempts: 3, MaxElapsed: 5 * time.Minute, MinRetryInterval: time.Second, MaxRetryInterval: 10 * time.Second, HandlerMaxAttempts: 8, HandlerTimeout: 2 * time.Second, HandlerWorkers: 2, ScanLimit: 128}
 				}
-				store, _, err := NewReliableWriteStore[confirmationLoadRecord](ServiceIdentity{ServiceName: "core-confirm-performance"}, ReliableWriteStoreConfig{BasePath: path, Badger: cfg, Batch: BatchCommitConfig{MaxBatch: 128, CollectBacklog: 1, CollectWindow: time.Millisecond, QueueCapacity: 1024}, Admission: WriteAdmissionConfig{MaxConcurrent: 128, AcquireTimeout: 2 * time.Second, SoftPending: 5000, HardPending: 10000, MaxBacklogDuration: 5 * time.Minute, HardDiskBytes: 1 << 30}, CloseTimeout: time.Second})
+				// 参数实验只接受固定白名单，不改变生产默认值和可靠性。
+				variant := os.Getenv("CORE_CONFIRM_PERF_VARIANT")
+				batch := BatchCommitConfig{MaxBatch: 128, CollectBacklog: 1, CollectWindow: time.Millisecond, QueueCapacity: 1024}
+				switch variant {
+				case "", "core":
+				case "mem64":
+					cfg.MemTableSize = 64 << 20
+				case "vlog64":
+					cfg.ValueLogFileSize = 64 << 20
+				case "collect250us":
+					batch.CollectWindow = 250 * time.Microsecond
+				case "compactors4":
+					cfg.NumCompactors = 4
+				default:
+					t.Fatalf("未知参数实验: %q", variant)
+				}
+				store, _, err := NewReliableWriteStore[confirmationLoadRecord](ServiceIdentity{ServiceName: "core-confirm-performance"}, ReliableWriteStoreConfig{BasePath: path, Badger: cfg, Batch: batch, Admission: WriteAdmissionConfig{MaxConcurrent: 128, AcquireTimeout: 2 * time.Second, SoftPending: 5000, HardPending: 10000, MaxBacklogDuration: 5 * time.Minute, HardDiskBytes: 1 << 30}, CloseTimeout: time.Second})
 				require.NoError(t, err)
+				effective := store.db.manager.db.Opts()
+				require.True(t, effective.SyncWrites)
+				require.True(t, effective.DetectConflicts)
+				effectiveOptions := map[string]any{
+					"sync_writes": effective.SyncWrites, "detect_conflicts": effective.DetectConflicts,
+					"memtable_bytes": effective.MemTableSize, "num_memtables": effective.NumMemtables,
+					"compactors": effective.NumCompactors, "l0_tables": effective.NumLevelZeroTables,
+					"l0_stall": effective.NumLevelZeroTablesStall, "vlog_file_bytes": effective.ValueLogFileSize,
+					"value_threshold": effective.ValueThreshold, "block_cache_bytes": effective.BlockCacheSize,
+					"index_cache_bytes": effective.IndexCacheSize, "compression": effective.Compression,
+					"collect_window_ns": batch.CollectWindow.Nanoseconds(), "max_batch": batch.MaxBatch,
+				}
 				a := &confirmationLoadTarget{}
 				if mode == "plain_no_sync" {
 					err = store.UseWriteBehind(a)
@@ -185,7 +213,7 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 					sum += v
 				}
 				pct := func(p float64) float64 { return all[int(math.Ceil(p*float64(len(all))))-1] }
-				result := map[string]any{"mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
+				result := map[string]any{"variant": variant, "effective_options": effectiveOptions, "levels_after_drain": store.db.manager.db.Levels(), "mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
 				closeErr := store.Close(context.Background())
 				if cfg.AutoSync {
 					require.NoError(t, closeErr)
