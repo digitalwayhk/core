@@ -151,6 +151,19 @@ Mac旧选批算法通过Go overlay恢复旧schedule/runtime，仅增加同口径
 
 Admission、Batch队列、ForegroundLocal/MetadataLocal/ConfirmationLocal的QueueWait/LockWait/CommitDuration、前台批次均值、实际版本事务数、confirmed/target/pending趋势、CPU、heap/GC及Options已在metrics.json逐轮保留。累计phase为各调用之和，不等于进程壁钟。CommitDuration含本地事务框架/等待，不是纯fsync；Update成功含只读空写集，Committed调用数不等于物理同步次数。最大值类累计指标和RSS可能含C准备阶段，不能减出窗口最大值。没有采集物理fsync/msync调用数或独立纯fsync耗时，均为null/NOT_RUN。未额外建立观测线程。
 
+## 发布后补充CPU采样（不计正式性能成绩）
+
+在相同Core独占合成历史夹具上，以冻结旧算法和正式候选分别运行`-test.cpuprofile`，并用`go tool pprof -top -cum -focus=selectDispositionRound`解析。两轮均真实持久存储核验/独立PID重开通过。采样是父测试整个夹具，**包含数据准备、持续窗口及父进程核验，不包含子进程CPU**；不能除以仅窗口选批次数算每轮CPU，不用于解释没有采样的18秒异常。
+
+| 包含子调用的累计CPU样本 | 旧算法 | 候选 |
+|---|---:|---:|
+| profile总样本 | 25.20s | 24.61s |
+| 选批事务调用树 | 4.45s（17.66%） | 2.06s（8.37%） |
+| 选批内Iterator.Seek | 2.01s | 0.43s |
+| 选批内parseItem | 1.85s | 0.34s |
+
+Seek/parseItem是选批的内嵌包含量，不能相加。候选全局profile仍有Badger写入、mmap Sync及运行时madvise等栈；不能把累计样本当作单笔Save、纯fsync时间或历史异常的确定原因。带采样轮的Save P99为117.347/116.101ms，单独保留，不加入正式无采样多轮成绩，不据此宣布整体性能通过。原始`profile-{old,new}.pprof`、实际命令、聚焦和完整top输出在本地补充归档中。
+
 ## 命令与验证结果
 
 所有shell遵守RTK。代表命令（实际命令数组、退出码和时长以原件为准）：
@@ -208,3 +221,13 @@ rtk proxy env CORE_SELECTION_PERF=1 CORE_SELECTION_MODE=history CORE_SELECTION_O
 主Agent直接完成源码审查，遵守CLAUDE.md禁止子Agent规则；没有假称独立外审。检查了原子快照写入时序、跨组PreviousID、mode同事务失效/冲突、回滚缓存、cursor无写集、Close/重开、目标回调边界及FIFO。源码未涉及Redis/WS/MQ、业务数据库或依赖升级。
 
 NOT_RUN：Bitzoom/Full-E4接入、部署、业务UAT/容量/同档现场复测；真实业务SQL/Broker；物理断电与文件系统损坏；长期稳态容量；Mac异常轮的逐笔根因；物理fsync调用次数与纯fsync耗时。原报告manifest只读验证匹配，未重新采现场：46项15446283 bytes；其physical-manifest.json自身7471 bytes，SHA256 `5b46885937ab5ba16e5dd4d6a3de3fb9127c4d2cd45b21ae01de5bd77d5a964b`，不混淆清单自身与成员总大小。
+
+## 正式版本与补充证据
+
+已发布`v1.6.4`，tag解除引用/正式模块Origin均为`2408e035a8e459ddb00389bd84dca2a7282ab997`；独立修复仍是`5d1b4e1a03b50bf49ed69d7af038195052d90ee1`。[GitHub正式Release](https://github.com/digitalwayhk/core/releases/tag/v1.6.4)非draft、非prerelease，无原始证据附件。发布后这段仅补充文档，不移动版本tag或改变已发布生产源码。
+
+干净独立检出的`--release`实际退出0（59.26秒）；官方代理+sumdb下载退出0，sum为`h1:hwl1N8/opfWvOBFlrp8b5rkKgliipvqtF3rFC7UVSZU=`。源码/skill/说明/内嵌产物共69文件与tag内容一致，含15个权威skill文件、43个dist文件；官方模块存储与Web入口编译退出0（明确为`[no tests to run]`，不能替代先前回归）。普通消费方无需前端源码子模块。
+
+发布、CPU采样、官方模块验证与清理的本地补充归档：`.temp/selection-range-20261031/evidence-postpublish.tar.gz`，137667 bytes，SHA256 `e82440d070c03d55c89e5e3f2acc0d2f135ac13f3499bc1b0f53e93e3e25387a`；34个成员逐项恢复校验通过。原始主归档不覆盖。
+
+本轮15个临时测试二进制已按SHA清单回收，777161638 bytes；隔离模块下载和临时发布检出已回收。下载目录初次因只读权限清理未完成，随后只将本轮目录变为可写并回收，未清全局缓存。自己的Docker唯一标签下容器/卷均为0；其它项目容器、保留分支和原191项WIP未动。性能合成目录在每轮关闭及新PID核验后才回收，原始证据仍保留。
