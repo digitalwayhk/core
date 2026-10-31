@@ -201,52 +201,23 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 		return errors.New("sql is empty")
 	}
 	query, args := item.Where(db)
-	name := ""
-	swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		tx = tx.Model(item.Model)
-		tx = tx.Where(query, args...)
-		tx = tx.Find(result)
-		name = tx.Statement.Schema.Table
-		return tx
-	})
-	if name != "" {
-		name = "`" + name + "`"
-	}
-	sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
+	source := func() *gorm.DB { return db.Model(item.Model).Table("(?) AS a", db.Raw(sql)).Where(query, args...) }
+	item.Total = 0
 	if !item.SkipCount {
-		runsql := "select count(*) from (" + sqlwhere + ") a"
-		tx := db.Raw(runsql).Count(&item.Total)
-		if tx.Error != nil {
-			logx.Errorw("database_query_failed",
-				logx.Field("operation", "raw_count"),
-				logx.Field("error", tx.Error),
-			)
-			return tx.Error
+		if err := source().Count(&item.Total).Error; err != nil {
+			return err
 		}
 	}
 	if item.SkipCount || item.Total > 0 {
-		swhere := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-			tx = tx.Model(item.Model)
-			tx = tx.Where(query, args...)
-			//tx = tx.Order(item.Order())
-			if item.SkipCount || item.Total > int64(item.Size) {
-				tx = tx.Scopes(paginate(item.Page, item.Size))
-			}
-			tx = tx.Find(result)
-			return tx
-		})
-		sqlwhere := strings.Replace(swhere, name, "("+sql+") a", 1)
-		tx := db.Raw(sqlwhere).Find(result)
-		if tx.Error != nil {
-			logx.Errorw("database_query_failed",
-				logx.Field("operation", "raw_find"),
-				logx.Field("error", tx.Error),
-			)
-			return tx.Error
+		query := source().Scopes(paginate(item.Page, item.Size))
+		if len(item.SortList) > 0 {
+			query = query.Order(item.Order())
 		}
+		return query.Find(result).Error
 	}
 	return nil
 }
+
 func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 	if item.SkipCount {
 		item.Total = 0
@@ -346,16 +317,16 @@ func sum(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 	if item.Statistical != "" {
 		scal = item.Statistical
 	}
-	if group != "" {
-		scal = group + "," + scal
-		fdb = fdb.Group(group)
-	}
 	an := scal + item.StatField
-	pnll := scal + "(" + item.StatField + ") " + an
+	pnll := scal + "(" + item.GetColumnName(item.StatField) + ") " + fdb.Statement.Quote(an)
 	if strings.ToLower(scal) == "count" {
 		pnll = "count(1) as total"
 	}
-	tx := fdb.Where(query, args...).Select(pnll).First(result)
+	if group != "" {
+		pnll = group + "," + pnll
+		fdb = fdb.Group(group)
+	}
+	tx := fdb.Where(query, args...).Select(pnll).Scan(result)
 	return tx.Error
 }
 func paginate(page, size int) func(db *gorm.DB) *gorm.DB {

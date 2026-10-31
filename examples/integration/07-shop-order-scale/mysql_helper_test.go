@@ -12,8 +12,8 @@ import (
 // requireOrderMySQL 确保依赖 MySQL 远程权威库的测试只在真实权威库可用时运行。
 func requireOrderMySQL(t testing.TB) {
 	t.Helper()
-	if os.Getenv("CORE_TEST_MYSQL") != "1" {
-		t.Skip("设置 CORE_TEST_MYSQL=1 后运行 07 远程权威库 UAT")
+	if os.Getenv("CORE_TEST_MYSQL") != "1" && os.Getenv("CORE_TEST_POSTGRES") != "1" {
+		t.Skip("设置 CORE_TEST_MYSQL=1 或 CORE_TEST_POSTGRES=1 后运行07远程权威库UAT")
 	}
 	require.NoError(t, ordermodels.EnsureStorage())
 }

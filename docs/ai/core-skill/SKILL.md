@@ -48,7 +48,7 @@ Digitalway Core 是 go-zero 与成熟依赖之上的应用组装框架。代码�
 | 性能优化 | `examples/04-shop-performance` | RouterInfo L1/L2/L3、EventBridge 主动失效、SingleFlight、`OrderWriteRuntime` + `UseWriteBehind`、Group Commit、基准与分位数 |
 | Casdoor 身份生命周期 | `examples/05-shop-casdoor-rbac` | Auth/Manage 双域、三类 Hook、撤销世代、Webhook、幂等审计、领域分包与 facade |
 | Redis 多服务 | `examples/06-shop-microservices` | 统一 Manage Hook、受限 Public `WithInternalCallers`、买家 Private、数字业务 ID、`requestID` 幂等、永久 `SupplierOrder`、Redis 发现、mTLS、Outbox/Inbox |
-| 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、实例级 `OrderWriteRuntime`、共享 MySQL 远程权威库、`OrderRule` 配置同步、Prometheus scrape、Runtime 运行图验收 |
+| 订单水平扩展 | `examples/07-shop-order-scale` | Order 多副本、`AutoMachineID=true`、ServiceInstanceID、实例级 `OrderWriteRuntime`、共享 MySQL/PostgreSQL 远程权威库、`OrderRule` 配置同步、Prometheus scrape、Runtime 运行图验收 |
 | 管理界面全能力 | `examples/08-admin-manage-ui` | Manage View 字段/命令/子表配置、外键与子查询、导入导出、自定义 `editshow` 命令，对照 `web/admin` 的 `manage-ui` |
 | Manage 角色权限 | `examples/09-admin-manage-rbac` | 复用 08 的分类/条目业务 Manage API、Core 管理员与 RoleCode 绑定、`path + command` 权限、首个 Casdoor 管理员、TestToken、真实 HTTP 403 |
 | 业务统计、经营分析与服务报表 | `examples/07-shop-order-scale/order-service` | `stats.StatSpec`、OLTP/ClickHouse 引擎、快照 `Store`、`stats.Dashboard`、`stats.ReportDef`、Manage API 与服务子菜单 |
@@ -118,7 +118,7 @@ entity.Model
 29. 多服务运维观测使用 ServerManage Runtime API，窗口仅 `15s|5m|1h`。ClusterProvider 是实例与地址权威，Prometheus 是历史指标权威；指标缺失必须返回 `null` 并带 `state`，禁止把未采集伪装成零。不得恢复已废弃的 `RouterStats`/`/api/servermanage/statistics`。
 30. 高吞吐写路径必须使用实例级 `OrderWriteRuntime`（或等价注入访问面）+ `ServiceContext.UseResource` 管理生命周期；禁止包级全局 store registry。示例 04/07 的 `StartOrderWriteStore`/`StopOrderWriteStore` 已删除，不存在可调用版本；`SetSyncDB`、`EnableWriteBehind(ModelList)` 仍存在但仅为兼容层。
 31. 有序可靠投递等加性 MQ 契约以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时保持零值兼容，不得假装所有 Provider 都已支持有序语义。Outbox 批量确认是加性可选接口 `event.OutboxBatchMarker`，未实现时保持逐条 `MarkPublished`。
-32. **Manage 的存储选择集中在 models**：每个服务的公共模型/持久化组合根只向 Manage 暴露无参数泛型 `NewManageModelList[T]()`；其内部用私有 `manageDataAction()` 或 store 选择本地库、远程权威库或动态分库适配器。普通分库继续由模型的 `IDBName`/`SearchWhere` 路由；只有单个模型确实连接不同权威库时才增加语义明确的专用 ModelList 工厂。切换 SQLite→MySQL 不得修改 `api/manage`。
+32. **Manage 的存储选择集中在 models**：每个服务的公共模型/持久化组合根只向 Manage 暴露无参数泛型 `NewManageModelList[T]()`；其内部用私有 `manageDataAction()` 或 store 选择本地库、远程权威库或动态分库适配器。普通分库继续由模型的 `IDBName`/`SearchWhere` 路由；只有单个模型确实连接不同权威库时才增加语义明确的专用 ModelList 工厂。切换 SQLite→MySQL/PostgreSQL 不得修改 `api/manage`。
 33. **Manage 动态分库**走 `IDBName` + 空 `Database` MySQL + 标准 `LoadList`，不用 `OnSearchBefore`+`stop=true` 自研列表。缺分库键时的 fail-closed 必须同时约束 `GetRemoteDBName` 与 `GetLocalDBName`（实现会在前者为空时回退后者）。硬条件与易踩坑见 [manage.md](manage.md)。
 34. **业务统计、经营分析与服务报表不是零接线自动 CRUD**：必须声明并 `stats.Register` 全局唯一 `StatSpec.Code`，在任务层刷新服务自己的 `stats.Store`，API 只读快照。`ReportDef` 只描述展示，不会自动创建事实数据、Runner 或 API。详见 [stats-and-reports.md](stats-and-reports.md)。
 35. 新增或重排代码默认按 struct 拆文件：一个业务 struct 一个源文件。禁止把多个模型、多个 Manage、多个 Router 或多个 DTO 聚在一个大文件里。

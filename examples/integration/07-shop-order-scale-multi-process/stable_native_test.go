@@ -22,6 +22,9 @@ func TestStableNativeOrderReplicas(t *testing.T) {
 	a, ns, processes := startStableNativeProcesses(t, 2)
 	redisAddr := os.Getenv("CORE_TEST_REDIS_ADDR")
 	mysqlAddr := os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR")
+	if os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "postgres" {
+		mysqlAddr = os.Getenv("CORE_TEST_POSTGRES_ADDR")
+	}
 	registry, err := cluster.NewRedisProvider(redisAddr, 0, ns, 5*time.Second)
 	require.NoError(t, err)
 	defer registry.Close()
@@ -86,6 +89,9 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 	t.Helper()
 	redisAddr := os.Getenv("CORE_TEST_REDIS_ADDR")
 	mysqlAddr := os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR")
+	if os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "postgres" {
+		mysqlAddr = os.Getenv("CORE_TEST_POSTGRES_ADDR")
+	}
 	if redisAddr == "" || mysqlAddr == "" {
 		t.Skip("需要专用 Redis 和 CORE_TEST_STABLE_MYSQL_ADDR")
 	}
@@ -122,6 +128,19 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 			"SHOP_METRICS_HOST": "127.0.0.1", "SHOP_METRICS_PORT": strconv.Itoa(freeNativePort(t)),
 			"SHOP_LOCAL_PENDING_DIR":       filepath.Join(root, replica, "pending"),
 			"SHOP_ORDER_REMOTE_MYSQL_HOST": host, "SHOP_ORDER_REMOTE_MYSQL_PORT": port, "SHOP_ORDER_REMOTE_MYSQL_USER": "root", "SHOP_ORDER_REMOTE_MYSQL_PASSWORD": os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "SHOP_ORDER_REMOTE_MYSQL_DATABASE": "core_" + ns,
+		}
+		if os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "postgres" {
+			env["SHOP_ORDER_REMOTE_DRIVER"] = "postgres"
+			env["SHOP_ORDER_REMOTE_HOST"], env["SHOP_ORDER_REMOTE_PORT"] = host, port
+			env["SHOP_ORDER_REMOTE_USER"] = os.Getenv("SHOP_ORDER_REMOTE_USER")
+			env["SHOP_ORDER_REMOTE_PASSWORD"] = os.Getenv("SHOP_ORDER_REMOTE_PASSWORD")
+			env["SHOP_ORDER_REMOTE_DATABASE"] = "core_" + ns
+			env["SHOP_ORDER_REMOTE_SSL_MODE"] = os.Getenv("SHOP_ORDER_REMOTE_SSL_MODE")
+		}
+		for _, key := range []string{"SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", "SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", "SHOP_ORDER_REMOTE_MAX_OPEN", "SHOP_ORDER_REMOTE_MAX_IDLE"} {
+			if value := os.Getenv(key); value != "" {
+				env[key] = value
+			}
 		}
 		count := i + 2
 		if i >= 2 {

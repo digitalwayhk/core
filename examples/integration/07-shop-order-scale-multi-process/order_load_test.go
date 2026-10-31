@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,8 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/digitalwayhk/core/examples/07-shop-order-scale/contract"
 	orderdto "github.com/digitalwayhk/core/examples/07-shop-order-scale/dto/order"
 	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -70,14 +74,20 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	})
 	admin := prepareDockerAdminFixture(t, processes[1])
 	supplier := prepareDockerSupplierFixture(t, processes[1], admin)
+	if os.Getenv("CORE_TEST_LOAD_CONFIGURED_RULE") == "1" {
+		// 诊断对照只改变测试数据：通过真实 Manage 配置默认规则，避免缺规则回退每单查库。
+		orderProcess := processes[2]
+		adminToken := orderProcess.TokenFor(t, contract.PlatformAdminUserID, 1)
+		response := orderProcess.RequestJSON(t, http.MethodPost, "/api/manage/shop-order/orderrulemanage/add", adminToken, map[string]interface{}{
+			"ruleCode": "default", "ruleName": "诊断默认规则", "minQuantity": 1, "maxQuantity": 100, "maxOrderAmount": "99999", "enabled": true, "ruleRevision": 1,
+		})
+		require.True(t, response.Success, response.Body)
+	}
 	user := processes[0]
 	token := user.TokenFor(t, "720001", 0)
 	warmup := createDockerBuyerOrderWithRequest(t, user, token, supplier.ProductID, "load-warmup")
 	waitDockerOrderVisible(t, user, token, warmup.OrderID)
-	config := mysql.NewConfig()
-	config.User, config.Passwd, config.Net, config.Addr, config.DBName = "root", os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "tcp", os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR"), "core_"+ns
-	db, err := sql.Open("mysql", config.FormatDSN())
-	require.NoError(t, err)
+	db := openOrderLoadDB(t, "core_"+ns)
 	defer db.Close()
 	db.SetMaxOpenConns(3)
 	broker := redis.NewClient(&redis.Options{Addr: os.Getenv("CORE_TEST_REDIS_ADDR")})
@@ -104,7 +114,7 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	start := time.Now()
 	var results []orderLoadResult
 	var stages []map[string]interface{}
-	for _, stage := range []struct{ rate, seconds int }{{500, 10}, {2000, 30}} {
+	for _, stage := range []struct{ rate, seconds int }{{500, orderLoadSeconds(t, "CORE_TEST_LOAD_LOW_SECONDS", 10)}, {2000, orderLoadSeconds(t, "CORE_TEST_LOAD_HIGH_SECONDS", 30)}} {
 		batch, summary := runOrderLoadStage(client, user.BaseURL, token, supplier.ProductID, stage.rate, time.Duration(stage.seconds)*time.Second, start)
 		results = append(results, batch...)
 		stages = append(stages, summary)
@@ -133,9 +143,9 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	writeLoadJSON(t, filepath.Join(evidence, "requests.json"), results)
 	writeLoadJSON(t, filepath.Join(evidence, "samples.json"), samples)
 	output, _ := exec.Command("git", "rev-parse", "HEAD").Output()
-	summary := map[string]interface{}{"source_head": strings.TrimSpace(string(output)), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "logical_cpus": runtime.NumCPU(), "order_replicas": 1, "namespace": ns, "stages": stages, "drained": drained, "drain_seconds": time.Since(loadEnd).Seconds(), "store_drain_seconds": storeDrainSeconds, "final": final, "sample_count": len(samples)}
+	summary := map[string]interface{}{"source_head": strings.TrimSpace(string(output)), "storage_driver": orderLoadDriver(), "configured_rule": os.Getenv("CORE_TEST_LOAD_CONFIGURED_RULE") == "1", "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "logical_cpus": runtime.NumCPU(), "order_replicas": 1, "namespace": ns, "stages": stages, "drained": drained, "drain_seconds": time.Since(loadEnd).Seconds(), "store_drain_seconds": storeDrainSeconds, "final": final, "sample_count": len(samples)}
 	// 核对每个已确认的 requestID/OrderID；超时失败可能已落库，单独登记未知结果，不能当作已确认丢失。
-	rows, err := db.Query("SELECT id,request_id FROM `order`")
+	rows, err := db.Query("SELECT id,request_id FROM " + orderLoadTable())
 	require.NoError(t, err)
 	persisted := make(map[string]uint)
 	for rows.Next() {
@@ -168,6 +178,53 @@ func TestStableOrderWriteLoad(t *testing.T) {
 	require.True(t, drained, "停止发送后 360 秒持久化或消费 ACK 仍未排空")
 	require.Zero(t, missing, "已确认订单不得丢失或改变主键")
 	require.Zero(t, sampleErrors, "观测缺失必须标记为不完整，不能用零代替")
+}
+
+func orderLoadDriver() string {
+	if os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "postgres" {
+		return "postgres"
+	}
+	return "mysql"
+}
+
+func orderLoadTable() string {
+	if orderLoadDriver() == "postgres" {
+		return `"order"`
+	}
+	return "`order`"
+}
+
+func orderLoadSeconds(t *testing.T, key string, fallback int) int {
+	t.Helper()
+	if value := os.Getenv(key); value != "" {
+		seconds, err := strconv.Atoi(value)
+		require.NoError(t, err)
+		require.Greater(t, seconds, 0)
+		return seconds
+	}
+	return fallback
+}
+
+// openOrderLoadDB 仅用于真实负载结果观测，不替代models的持久化组合根。
+func openOrderLoadDB(t *testing.T, database string) *sql.DB {
+	t.Helper()
+	if orderLoadDriver() == "postgres" {
+		host, port, err := net.SplitHostPort(os.Getenv("CORE_TEST_POSTGRES_ADDR"))
+		require.NoError(t, err)
+		portNumber, err := strconv.Atoi(port)
+		require.NoError(t, err)
+		action := oltp.NewPostgres(persistencetypes.StorageConfig{Host: host, Port: portNumber, Username: os.Getenv("SHOP_ORDER_REMOTE_USER"), Password: os.Getenv("SHOP_ORDER_REMOTE_PASSWORD"), Database: database, SSLMode: os.Getenv("SHOP_ORDER_REMOTE_SSL_MODE")})
+		handle, err := action.GetDB()
+		require.NoError(t, err)
+		db, err := handle.DB()
+		require.NoError(t, err)
+		return db
+	}
+	config := mysql.NewConfig()
+	config.User, config.Passwd, config.Net, config.Addr, config.DBName = "root", os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "tcp", os.Getenv("CORE_TEST_STABLE_MYSQL_ADDR"), database
+	db, err := sql.Open("mysql", config.FormatDSN())
+	require.NoError(t, err)
+	return db
 }
 
 func runOrderLoadStage(client *http.Client, url, token string, product uint, rate int, duration time.Duration, origin time.Time) ([]orderLoadResult, map[string]interface{}) {
@@ -268,10 +325,10 @@ func takeOrderLoadSample(db *sql.DB, broker *redis.Client, processes []*integrat
 	sample := orderLoadSample{At: time.Now().UTC(), Metrics: map[string]float64{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `order`").Scan(&sample.Orders); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+orderLoadTable()).Scan(&sample.Orders); err != nil {
 		sample.Errors = append(sample.Errors, err.Error())
 	}
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(published),0) FROM outbox_record").Scan(&sample.Outbox, &sample.Published); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(CASE WHEN published THEN 1 ELSE 0 END),0) FROM outbox_record").Scan(&sample.Outbox, &sample.Published); err != nil {
 		sample.Errors = append(sample.Errors, err.Error())
 	}
 	groups, groupErr := broker.XInfoGroups(ctx, "core:event:07:shop.order.changed").Result()
@@ -313,6 +370,9 @@ func takeOrderLoadSample(db *sql.DB, broker *redis.Client, processes []*integrat
 				continue
 			}
 			key := fields[0]
+			if i >= 2 && strings.HasPrefix(key, "core_benchmark_sql_pool_") && strings.Contains(key, `driver="`+orderLoadDriver()+`"`) {
+				sample.Metrics[strings.SplitN(key, "{", 2)[0]] = value
+			}
 			if key == "process_resident_memory_bytes" || key == "process_cpu_seconds_total" || key == "go_goroutines" {
 				sample.Metrics[fmt.Sprintf("process_%d_%s", i, key)] = value
 			}
@@ -326,6 +386,9 @@ func takeOrderLoadSample(db *sql.DB, broker *redis.Client, processes []*integrat
 	}
 	if sample.Pending == nil {
 		sample.Errors = append(sample.Errors, "缺少真实 pending depth 指标")
+	}
+	if os.Getenv("CORE_TEST_LOAD_POOL_METRICS") == "1" && sample.Metrics["core_benchmark_sql_pool_known"] != 1 {
+		sample.Errors = append(sample.Errors, "缺少实际应用SQL连接池统计；需要corebench构建")
 	}
 	return sample
 }

@@ -47,3 +47,45 @@ type failingRemote struct{}
 func (failingRemote) UpsertBatch(_ context.Context, _ []*ordermodels.Order) ([]*ordermodels.Order, error) {
 	return nil, errors.New("远程库暂不可用")
 }
+
+type commitReplyLostRemote struct{ lost bool }
+
+func (r *commitReplyLostRemote) UpsertBatch(ctx context.Context, orders []*ordermodels.Order) ([]*ordermodels.Order, error) {
+	stored, err := (orderbusiness.ModelRemoteOrderStore{}).UpsertBatch(ctx, orders)
+	if err != nil {
+		return nil, err
+	}
+	if !r.lost {
+		r.lost = true
+		return nil, errors.New("测试注入：真实提交已完成，提交回执丢失")
+	}
+	return stored, nil
+}
+
+// TestUATPendingSurvivesCommitReplyLoss 在真实远程提交后注入回执丢失，验证保留pending并幂等汇合。
+func TestUATPendingSurvivesCommitReplyLoss(t *testing.T) {
+	requireOrderMySQL(t)
+	remote := &commitReplyLostRemote{}
+	runtime := newIntegrationOrderRuntime(t, remote)
+	ids := newBenchmarkIDFactory(25)
+	requestID := "commit-unknown-" + time.Now().Format("150405.000000000")
+	command := orderbusiness.CreateOrderCommand{OrderID: ids.NewID(), UserID: 180001, SupplierID: 280001, ProductID: 380001, RequestID: requestID, RequestFingerprint: requestID, UnitPrice: decimal.NewFromInt(8), Quantity: 2, TraceID: requestID, ServiceName: "shop-order", ServiceInstanceID: "order-a"}
+	_, err := (orderbusiness.LocalOrderWriter{Store: runtime}).Accept(context.Background(), command)
+	require.NoError(t, err)
+	syncer := orderbusiness.RemoteOrderSyncer{Store: runtime}
+	_, err = syncer.DrainOnce(context.Background(), 100)
+	require.Error(t, err)
+	pending, err := runtime.FindLocalByRequest(context.Background(), command.UserID, requestID)
+	require.NoError(t, err)
+	require.NotNil(t, pending)
+	orders, _, err := orderbusiness.ListOrders(runtime, ordermodels.OrderQueryFilter{UserID: command.UserID}, 1, 20)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	require.Equal(t, command.OrderID, orders[0].ID)
+	_, err = syncer.DrainOnce(context.Background(), 100)
+	require.NoError(t, err)
+	orders, _, err = orderbusiness.ListOrders(runtime, ordermodels.OrderQueryFilter{UserID: command.UserID}, 1, 20)
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	require.Equal(t, command.OrderID, orders[0].ID)
+}

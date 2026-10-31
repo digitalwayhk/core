@@ -36,3 +36,7 @@
 ## 稳定实例身份候选
 
 legacy 注册/自动编号暂保留为兼容默认，未安排删除版本；没有稳定身份与注册自愈保证。新稳定部署使用 IdentityMode=stable 和独立 IDGenerator，旧部署需先完成审计迁移。InitRequest 的无上下文包级 NewID fallback 不再用于真实主键；元数据枚举改为 DTO/类型声明，业务编号由已初始化 ServiceContext 生成。禁止混跑旧二进制与同身份 stable 副本。迁移见 [指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
+
+## 统计显式方言兼容入口
+
+ExecOptions.Dialect、stats.DialectName 与旧常量保留，正常调用不再需要填写。替代方式是模型绑定的存储能力；提示与实际存储不匹配时报错，未知驱动不再假冒 MySQL。本次不删除公开字段，不提供移除日期。

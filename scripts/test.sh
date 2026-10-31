@@ -120,6 +120,26 @@ case "${1:-quick}" in
     go test ./pkg/persistence/database/oltp -run TestSqliteMmapSize -count=1
     go test ./pkg/server/router ./pkg/server/cluster ./pkg/server/event ./pkg/server/types -run '^$' -bench '^$'
     ;;
+  integration-postgres)
+    CORE_TEST_POSTGRES=1 go test -tags=integration ./pkg/persistence/database/oltp ./pkg/persistence/entity/stats ./pkg/server/manageauth -run 'TestPostgresIntegration|TestStorageParityIntegration' -count=1 -timeout=5m
+    ;;
+  integration-postgres-e2e)
+    : "${CORE_TEST_REDIS_ADDR:?完整PostgreSQL验收需要专用CORE_TEST_REDIS_ADDR}"
+    export CORE_TEST_POSTGRES=1
+    export SHOP_REDIS_ADDR="$CORE_TEST_REDIS_ADDR"
+    export SHOP_ORDER_REMOTE_DRIVER=postgres
+    export SHOP_ORDER_REMOTE_HOST="${CORE_TEST_POSTGRES_HOST:-127.0.0.1}"
+    export SHOP_ORDER_REMOTE_PORT="${CORE_TEST_POSTGRES_PORT:-15432}"
+    export SHOP_ORDER_REMOTE_USER="${CORE_TEST_POSTGRES_USER:-core_test}"
+    export SHOP_ORDER_REMOTE_PASSWORD="${CORE_TEST_POSTGRES_PASSWORD:-core_pg_test}"
+    export SHOP_ORDER_REMOTE_SSL_MODE=disable
+    export SHOP_ORDER_REMOTE_DATABASE="core_pg_07_e2e_$(date +%s)_$$"
+    export CORE_TEST_POSTGRES_ADDR="${SHOP_ORDER_REMOTE_HOST}:${SHOP_ORDER_REMOTE_PORT}"
+    "$0" integration-postgres
+    go test ./examples/integration/07-shop-order-scale -run '^TestUAT' -count=1 -timeout=3m
+    go test ./examples/integration/07-shop-order-scale-multi-process -run '^TestStableNativeOrderReplicas$' -count=1 -timeout=5m
+    go test ./examples/integration/09-admin-manage-rbac -run '^TestDemoBusinessManage$' -count=1 -timeout=3m
+    ;;
   integration-persistence)
     compose_file="$ROOT/docker-compose.integration.yml"
     compose_project_name="${CORE_TEST_PERSISTENCE_PROJECT_NAME:-digitalway-core-persistence-$$}"
@@ -367,7 +387,7 @@ case "${1:-quick}" in
     (
       trap - INT TERM
       exec docker compose --project-name "$compose_project_name" -f "$compose_file" --profile persistence up -d --wait --wait-timeout 120 \
-        mysql mongodb clickhouse
+        mysql mongodb clickhouse postgres
     ) &
     compose_up_pid=$!
     compose_up_pgid=$compose_up_pid
@@ -417,21 +437,27 @@ case "${1:-quick}" in
     (
       trap - INT TERM
       exec env \
+        CORE_TEST_POSTGRES=1 \
+        CORE_TEST_POSTGRES_HOST=127.0.0.1 \
+        CORE_TEST_POSTGRES_USER=core_test \
+        CORE_TEST_POSTGRES_PASSWORD=core_pg_test \
+        CORE_TEST_POSTGRES_PORT="${CORE_TEST_POSTGRES_PORT:-15432}" \
+        CORE_TEST_POSTGRES_DATABASE=core_test \
         CORE_TEST_MYSQL=1 \
         CORE_TEST_MYSQL_HOST=127.0.0.1 \
-        CORE_TEST_MYSQL_PORT=13306 \
+        CORE_TEST_MYSQL_PORT="${CORE_TEST_MYSQL_PORT:-13306}" \
         CORE_TEST_MYSQL_USER=core_test \
         CORE_TEST_MYSQL_PASSWORD=core_test_password \
         CORE_TEST_MYSQL_DATABASE=core_test \
         CORE_TEST_MONGODB=1 \
         CORE_TEST_MONGODB_HOST=127.0.0.1 \
-        CORE_TEST_MONGODB_PORT=27018 \
+        CORE_TEST_MONGODB_PORT="${CORE_TEST_MONGODB_PORT:-27018}" \
         CORE_TEST_MONGODB_USER=core_test \
         CORE_TEST_MONGODB_PASSWORD=core_test_password \
         CORE_TEST_MONGODB_DATABASE=core_test \
         CORE_TEST_CLICKHOUSE=1 \
         CORE_TEST_CLICKHOUSE_HOST=127.0.0.1 \
-        CORE_TEST_CLICKHOUSE_PORT=19000 \
+        CORE_TEST_CLICKHOUSE_PORT="${CORE_TEST_CLICKHOUSE_PORT:-19000}" \
         CORE_TEST_CLICKHOUSE_USER=core_test \
         CORE_TEST_CLICKHOUSE_PASSWORD=core_test_password \
         CORE_TEST_CLICKHOUSE_DATABASE=core_test \
@@ -439,7 +465,9 @@ case "${1:-quick}" in
         ./pkg/persistence/database/oltp \
         ./pkg/persistence/database/nosql \
         ./pkg/persistence/database/olap \
-        -run 'Test(MySQL|Mongo|ClickHouse)Integration_DriverContract' \
+        ./pkg/persistence/entity/stats \
+        ./pkg/server/manageauth \
+        -run 'Test(MySQL|Mongo|ClickHouse)Integration_DriverContract|TestPostgresIntegration|TestStorageParityIntegration' \
         -count=1 -timeout=5m
     ) &
     test_pid=$!
@@ -499,7 +527,7 @@ case "${1:-quick}" in
     "$0" integration-external
     ;;
   *)
-    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|web-dist-sync|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|integration-casdoor-rbac|web-contract|all}" >&2
+    echo "usage: scripts/test.sh {quick|server|security|config-contract|api-compat|public-api|release-contract|release-check-contract|concurrency|concurrency-race|concurrency-stress|ci-contract|web-dist-sync|workflow-contract|scheduled-workflow-contract|consumer-contract|persistence-unit|integration-postgres|integration-postgres-e2e|integration|integration-local|integration-external|integration-external-docker|integration-persistence|integration-casdoor-auth|integration-casdoor-rbac|web-contract|all}" >&2
     exit 2
     ;;
 esac

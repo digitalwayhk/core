@@ -164,3 +164,7 @@ OLTP 数据库实现基于 GORM，包含 SQLite、MySQL、连接管理和通用 
 - 复杂查询优先用 `SearchItem`，必要时通过 `IScopes` 或 `IDBSQL` 扩展。
 - `SearchWhere` 默认适合小结果集；大列表使用 `SearchAll(page, size)`。
 - 更换存储实现时优先调整 `IDataAction`/adapter，不要修改业务路由。
+
+## PostgreSQL 与统一工厂
+
+models 使用 oltp.NewDataAction(types.StorageConfig{Driver: "postgres", ...}) 选择存储。业务统计通过可选中性聚合契约执行，SQL编译下沉到oltp。配置、初始化、事务/错误契约和验收入口见 [PostgreSQL 存储指南](../../docs/codex/POSTGRESQL_STORAGE_GUIDE.md)。

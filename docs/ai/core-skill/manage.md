@@ -476,3 +476,9 @@ func (own *OrderManage) GetLocaleTitle(locale string) string {
 自定义命令不在表内，`Title` 保持类型名。需要在 Manage 之外按指定语言生成命令时用 `manage.RouterToLocaleCommand(info, current)`；`manage.RouterToCommand(info)` 等价于默认语言。
 
 ---
+
+## 存储类型透明
+
+Manage 仍只使用 models 的无参数 NewManageModelList。选择 sqlite/mysql/postgres、连接池及 TLS 配置集中在 models 或 Core 控制面内部组合根。ManageStore 配置委托统一持久化工厂，不能在 Manage Hook 中增加驱动分支。动态数据库仍由 IDBName 路由；PostgreSQL 每个目标数据库使用独立池，事务不跨库。
+
+PostgreSQL 控制面需在内置 server 的 `server.json` 中显式设置 `ManageStore.Driver = "postgres"` 并提供连接字段。新安装默认仍为 SQLite `core_manage`；旧 `server.json` 未声明 `ManageStore` 时继续使用 SQLite `models.db`，不会自动改为 PostgreSQL。当前统一工厂使 MySQL ManageStore 的连接最大生命周期由原先不限变为 30 分钟；这不改变数据库选择，但属于未启用 PostgreSQL 也生效的行为变化，升级时需纳入连接回收验证。

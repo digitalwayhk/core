@@ -30,22 +30,7 @@ func NewControlPlaneAction(value config.ManageStoreConfig) (persistencetype.IDat
 	if err := value.Validate(); err != nil {
 		return nil, err
 	}
-	switch value.Driver {
-	case config.ManageStoreDriverSQLite:
-		return oltp.NewFixedSqlite(value.Database), nil
-	case config.ManageStoreDriverMySQL:
-		return oltp.NewMySQL(&oltp.Config{
-			Host:         value.Host,
-			Port:         value.Port,
-			Username:     value.Username,
-			Password:     value.Password,
-			Database:     value.Database,
-			MaxIdleConns: value.MaxIdleConns,
-			MaxOpenConns: value.MaxOpenConns,
-		}), nil
-	default:
-		return nil, errors.New("unsupported manage store driver")
-	}
+	return oltp.NewDataAction(value.StorageConfig())
 }
 
 // NewControlPlaneRuntime 在返回前完成全部表与内置角目录初始化。

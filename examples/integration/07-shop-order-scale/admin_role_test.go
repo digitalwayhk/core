@@ -2,6 +2,7 @@
 package shoporderscale
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ func TestUATAdminOrderRuleSharedAuthority(t *testing.T) {
 	requireOrderMySQL(t)
 	rule := ordermodels.NewOrderRule()
 	rule.ID = uint(820000 + time.Now().UnixNano()%1000000)
-	rule.RuleCode = "default"
+	rule.RuleCode = fmt.Sprintf("uat_shared_%d", rule.ID)
 	rule.RuleName = "默认规则"
 	rule.MinQuantity = 4
 	rule.MaxQuantity = 100
@@ -26,7 +27,7 @@ func TestUATAdminOrderRuleSharedAuthority(t *testing.T) {
 	_, err := orderbusiness.SaveOrderRule(rule)
 	require.NoError(t, err)
 
-	cache := orderbusiness.NewOrderRuleCache("default")
+	cache := orderbusiness.NewOrderRuleCache(rule.RuleCode)
 	require.Error(t, cache.ValidateQuantityAndAmount(3, decimal.NewFromInt(36)))
 	require.NoError(t, cache.ValidateQuantityAndAmount(4, decimal.NewFromInt(48)))
 }

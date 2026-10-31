@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	integration "github.com/digitalwayhk/core/examples/integration"
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/safe"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
@@ -23,8 +25,9 @@ func TestDemoBusinessManage(t *testing.T) {
 	viewPort := listener.Addr().(*net.TCPAddr).Port
 	require.NoError(t, listener.Close())
 	suite, err := integration.StartProcess(integration.ProcessOptions{
-		BuildPackage: "./examples/09-admin-manage-rbac/main",
-		BinaryName:   "admin-manage-rbac", TempPrefix: "core-admin-rbac-",
+		BuildPackage:   "./examples/09-admin-manage-rbac/main",
+		Configurations: postgresControlPlaneConfigurations(t),
+		BinaryName:     "admin-manage-rbac", TempPrefix: "core-admin-rbac-",
 		ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2,
 		Arguments: []string{"-view", fmt.Sprint(viewPort)},
 	})
@@ -173,4 +176,27 @@ func TestDemoBusinessManage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(logData), "mq_degraded")
 	require.NotContains(t, string(logData), "redis: connection pool")
+}
+
+// postgresControlPlaneConfigurations 只在真实数据库验收时通过标准配置选择控制面存储。
+func postgresControlPlaneConfigurations(t *testing.T) map[string]interface{} {
+	t.Helper()
+	if os.Getenv("CORE_TEST_POSTGRES") != "1" {
+		return nil
+	}
+	cfg := config.NewServiceDefaultConfig("server", 18080)
+	cfg.ManageStore = &config.ManageStoreConfig{Driver: "postgres", Host: "127.0.0.1", Port: 15432, Username: "core_test", Password: "core_pg_test", Database: fmt.Sprintf("core_pg_09_%d", time.Now().UnixNano()), SSLMode: "disable"}
+	for key, target := range map[string]*string{"HOST": &cfg.ManageStore.Host, "USER": &cfg.ManageStore.Username, "PASSWORD": &cfg.ManageStore.Password} {
+		if value := os.Getenv("CORE_TEST_POSTGRES_" + key); value != "" {
+			*target = value
+		}
+	}
+	if value := os.Getenv("CORE_TEST_POSTGRES_PORT"); value != "" {
+		port, err := strconv.Atoi(value)
+		require.NoError(t, err)
+		cfg.ManageStore.Port = port
+	}
+	cfg.DataCenterID = 1
+	cfg.ApplyDefaults()
+	return map[string]interface{}{"server": cfg}
 }

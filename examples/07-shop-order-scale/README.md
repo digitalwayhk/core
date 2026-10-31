@@ -215,3 +215,7 @@ GOCACHE=/private/tmp/core-codex-gocache rtk proxy go test ./examples/integration
 bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERATOR_NAMESPACE、SHOP_GENERATOR_EPOCH 显式启用 stable；每个副本使用独立持久 root 和实例 ID，并保留原 SHOP_LOCAL_PENDING_DIR。SHOP_REDIS_DISCOVERY_PREFIX 可用于隔离演示。初始化及历史编号/时间上界迁移见 [指南](../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不能复制身份卷扩容，或通过 TTL 回收编号。
 
 `TestStableNativeOrderReplicas` 使用专用 Redis/MySQL 启动真实四进程，验证双 order 独立编号、下单幂等、共享权威订单查询和原卷重启。现有 Compose 默认保留 legacy，不能把此原生进程测试称为 Compose stable 部署验收。
+
+## PostgreSQL 权威库
+
+models 组合根支持 SHOP_ORDER_REMOTE_DRIVER=postgres，配合 SHOP_ORDER_REMOTE_HOST/PORT/USER/PASSWORD/DATABASE/SSL_MODE；不设置 Driver 时保留旧 SHOP_ORDER_REMOTE_MYSQL_*。业务、Manage、Outbox 和统计定义无需改动。详见 [统一存储指南](../../docs/codex/POSTGRESQL_STORAGE_GUIDE.md)。此切换不搬迁历史数据。

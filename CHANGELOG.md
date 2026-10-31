@@ -1,5 +1,12 @@
 # 变更日志
 
+## 未发布：PostgreSQL 与存储边界
+
+- 新增 PostgreSQL OLTP、统一配置/工厂与中性聚合能力；Manage 和统计定义不选择数据库类型。
+- 修正原生查询包装、跨身份连接缓存、SQLite ISO 周年及 PostgreSQL 未标注金额的 numeric 映射。
+- 增加真实数据库、双副本 pending 恢复、控制面 HTTP/RBAC 与三库统计验收。
+- 保留旧 IDataAction/构造器；显式统计方言不匹配时拒绝。消费方切库不自动搬迁历史数据。
+
 本文记录 `github.com/digitalwayhk/core` 的重要变更，格式遵循 Keep a Changelog，版本遵循 SemVer。
 
 ## [Unreleased]

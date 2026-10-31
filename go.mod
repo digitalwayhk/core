@@ -27,6 +27,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.14
 	github.com/hashicorp/consul/api v1.34.3
 	github.com/hashicorp/golang-lru v0.5.4
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/json-iterator/go v1.1.12
 	github.com/lucas-clemente/quic-go v0.29.1
 	github.com/nats-io/nats.go v1.40.1
@@ -44,6 +45,7 @@ require (
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/clickhouse v0.7.0
+	gorm.io/driver/postgres v1.6.0
 )
 
 require (
@@ -88,6 +90,9 @@ require (
 	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/hashicorp/serf v0.10.1 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/marten-seemann/qpack v0.2.1 // indirect
 	github.com/marten-seemann/qtls-go1-18 v0.1.2 // indirect

@@ -77,6 +77,10 @@ EOF
 cat >"$TMP/bin/go" <<'EOF'
 #!/usr/bin/env bash
 echo "go-start $$" >>"$TEST_TRACE"
+if [[ "${CORE_TEST_POSTGRES_HOST:-}" != "127.0.0.1" || "${CORE_TEST_POSTGRES_USER:-}" != "core_test" || "${CORE_TEST_POSTGRES_PASSWORD:-}" != "core_pg_test" ]]; then
+  echo "隔离门禁继承了外部 PostgreSQL 地址或凭据" >&2
+  exit 11
+fi
 go_pgid="$(perl -e 'print getpgrp(0)')"
 echo "go-pgid $go_pgid" >>"$TEST_TRACE"
 grandchild_pid=""
@@ -172,9 +176,9 @@ assert_order() {
   fi
 }
 
-run_case persistence_services_only
-if ! grep -q ' up .* mysql mongodb clickhouse' "$TMP/persistence_services_only.log"; then
-  echo "持久化门禁应只显式启动 mysql、mongodb、clickhouse" >&2
+run_case persistence_services_only CORE_TEST_POSTGRES_HOST=unrelated.invalid CORE_TEST_POSTGRES_USER=unrelated CORE_TEST_POSTGRES_PASSWORD=unrelated
+if ! grep -q ' up .* mysql mongodb clickhouse postgres' "$TMP/persistence_services_only.log"; then
+  echo "持久化门禁应只显式启动 mysql、mongodb、clickhouse、postgres" >&2
   exit 1
 fi
 if grep -q ' up .* redis' "$TMP/persistence_services_only.log"; then

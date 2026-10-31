@@ -10,6 +10,8 @@ import (
 	userservice "github.com/digitalwayhk/core/examples/07-shop-order-scale/user-service"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/run"
+	"os"
+	"strings"
 )
 
 // main 启动 user、supplier 和 order 服务；WebSocket 只在 user 开启。
@@ -21,6 +23,15 @@ func main() {
 	// 让内置服务和三个业务服务都基于该基准 + DataCenterID 顺延，避免和默认 8080/18080 冲突。
 	server.Port = 48180
 	server.GRPCPort = 58180
+	// 显式命令行端口优先，供真实进程隔离验收；未指定时保留示例原默认端口。
+	for _, argument := range os.Args[1:] {
+		if argument == "-p" || strings.HasPrefix(argument, "-p=") {
+			server.Port = 0
+		}
+		if argument == "-grpc" || strings.HasPrefix(argument, "-grpc=") {
+			server.GRPCPort = 0
+		}
+	}
 	// all-in-one 同时启动多个业务 Manage 服务，必须显式选择统一的 Manage Auth
 	// 权威服务。框架会在校验和创建 Server 前，将权威服务的完整 ManageAuth
 	// 继承给其他业务服务，因此不需要示例代码手工同步随机生成的密钥。

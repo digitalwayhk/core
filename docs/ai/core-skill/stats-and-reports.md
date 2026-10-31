@@ -155,3 +155,9 @@ func init() {
 - 菜单：一份 `ReportDef` 只生成一行，旧 reports API 伪菜单会被清理。
 - 消费仓先确认 `go.mod` 所用 Core 版本确实包含 `pkg/persistence/entity/stats` 和匹配 Admin；若稳定 tag 尚未发布，不得把仅分支可用描述成已发布能力，也不要用复制框架代码或 `replace` 伪装升级。
 
+
+## 聚合存储边界
+
+相同 StatSpec 在 SQLite/MySQL/PostgreSQL 上由持久化层编译执行；统计任务和报表 API 不指定方言。可选 types.IAggregateAction 支持不暴露 GORM 的存储，原 IDataAction 不增必选方法。ExecOptions.Dialect 仅兼容旧调用，留空即可；与实际连接不匹配时报错，未知驱动不再回退 MySQL。周桶按 ISO 周年，SQLite 旧 %W 结果已修正。
+
+上述统计行为变化在未启用 PostgreSQL 时也生效。例如 SQLite 的 `2021-01-01` 原先归入 `2021-W00`，现在归入 ISO 周桶 `2020-W53`。依赖旧周桶键的历史快照、报表或跨年对比需检查刷新范围与消费方预期，不能将本次升级描述为旧统计结果完全不变。

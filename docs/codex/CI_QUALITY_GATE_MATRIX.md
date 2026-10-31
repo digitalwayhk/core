@@ -44,3 +44,7 @@
 - 每次执行输出 gate、commit、Go 版本、耗时和退出码，不输出环境变量或凭据。
 - 未知 gate 返回 2；测试子命令失败时保留原退出码，不吞错。
 - `required/quick` 与 `required/server-manage` 有意重叠少量 manage 快速测试：前者提供开发反馈，后者验证完整 server/manage 边界；当前耗时预算允许该重叠。
+
+## PostgreSQL 与三库透明验收
+
+持久化门禁增加 PostgreSQL integration 构建标记测试、跨进程结构初始化和三库统一 StatSpec。integration-persistence 必须实际启动 postgres，测试依赖缺失不能算通过。发布仍要求 config-contract、api-compat、public-api、release-contract 和相关 race；07 多进程及09 HTTP结果另附验收证据。

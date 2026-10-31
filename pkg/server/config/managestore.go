@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"strings"
 )
 
@@ -11,6 +12,8 @@ const (
 	ManageStoreDriverSQLite = "sqlite"
 	// ManageStoreDriverMySQL 使用多进程共享的 MySQL 控制面库。
 	ManageStoreDriverMySQL = "mysql"
+	// ManageStoreDriverPostgres 使用 PostgreSQL 控制面存储。
+	ManageStoreDriverPostgres = "postgres"
 )
 
 // ManageStoreConfig 配置目录、菜单、按钮、角色、权限、管理员主体和主体角色关系的唯一存储。
@@ -24,6 +27,11 @@ type ManageStoreConfig struct {
 	Password     string
 	MaxIdleConns int
 	MaxOpenConns int
+	SSLMode      string
+	SSLRootCert  string
+	SSLCert      string
+	SSLKey       string
+	TimeZone     string
 }
 
 // DefaultManageStoreConfig 返回新安装使用的 SQLite 默认配置。
@@ -58,7 +66,7 @@ func (c *ManageStoreConfig) ApplyDefaults() {
 		c.Database = "core_manage"
 	}
 	if c.Port == 0 {
-		c.Port = 3306
+		c.Port = c.StorageConfig().Port
 	}
 	if c.MaxIdleConns == 0 {
 		c.MaxIdleConns = 10
@@ -70,35 +78,15 @@ func (c *ManageStoreConfig) ApplyDefaults() {
 
 // Validate 拒绝未支持驱动、不完整 MySQL 配置和无效连接池。
 func (c ManageStoreConfig) Validate() error {
-	switch c.Driver {
-	case ManageStoreDriverSQLite:
-		if strings.TrimSpace(c.Database) == "" {
-			return fmt.Errorf("ManageStore.Database is required")
-		}
-	case ManageStoreDriverMySQL:
-		if strings.TrimSpace(c.Host) == "" {
-			return fmt.Errorf("ManageStore.Host is required for mysql")
-		}
-		if c.Port <= 0 || c.Port > 65535 {
-			return fmt.Errorf("ManageStore.Port must be between 1 and 65535")
-		}
-		if strings.TrimSpace(c.Username) == "" {
-			return fmt.Errorf("ManageStore.Username is required for mysql")
-		}
-		if strings.TrimSpace(c.Database) == "" {
-			return fmt.Errorf("ManageStore.Database is required for mysql")
-		}
-	default:
-		return fmt.Errorf("ManageStore.Driver must be sqlite or mysql")
-	}
-	if c.MaxIdleConns < 0 {
-		return fmt.Errorf("ManageStore.MaxIdleConns must not be negative")
-	}
-	if c.MaxOpenConns <= 0 {
-		return fmt.Errorf("ManageStore.MaxOpenConns must be positive")
-	}
-	if c.MaxIdleConns > c.MaxOpenConns {
-		return fmt.Errorf("ManageStore.MaxIdleConns must not exceed MaxOpenConns")
+	if err := c.StorageConfig().Validate(true); err != nil {
+		return fmt.Errorf("ManageStore.%w", err)
 	}
 	return nil
+}
+
+// StorageConfig 转换为通用存储配置，控制面不维护驱动选择分支。
+func (c ManageStoreConfig) StorageConfig() types.StorageConfig {
+	value := types.StorageConfig{Driver: c.Driver, Database: c.Database, Host: c.Host, Port: c.Port, Username: c.Username, Password: c.Password, MaxIdleConns: c.MaxIdleConns, MaxOpenConns: c.MaxOpenConns, SSLMode: c.SSLMode, SSLRootCert: c.SSLRootCert, SSLCert: c.SSLCert, SSLKey: c.SSLKey, TimeZone: c.TimeZone}
+	value.ApplyDefaults()
+	return value
 }

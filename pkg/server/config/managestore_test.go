@@ -50,7 +50,7 @@ func TestManageStoreMySQLRequiresConnectionFields(t *testing.T) {
 // TestManageStoreRejectsUnknownDriverAndInvalidPool 验证驱动与连接池参数不得被默认容错。
 func TestManageStoreRejectsUnknownDriverAndInvalidPool(t *testing.T) {
 	cfg := DefaultManageStoreConfig()
-	cfg.Driver = "postgres"
+	cfg.Driver = "unsupported"
 	require.ErrorContains(t, cfg.Validate(), "Driver")
 
 	cfg = DefaultManageStoreConfig()

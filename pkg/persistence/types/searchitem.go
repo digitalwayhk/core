@@ -72,7 +72,14 @@ func (own *SearchItem) getcol(col string) string {
 	} else {
 		namer = &schema.NamingStrategy{}
 	}
-	return namer.ColumnName("", col)
+	column := namer.ColumnName("", col)
+	stmt := &gorm.Statement{DB: own.db}
+	if own.Model != nil && stmt.Parse(own.Model) == nil && stmt.Schema != nil {
+		if field := stmt.Schema.LookUpField(col); field != nil && field.DBName != "" {
+			column = field.DBName
+		}
+	}
+	return stmt.Quote(column)
 }
 
 func (own *SearchItem) Where(db *gorm.DB) (string, []interface{}) {

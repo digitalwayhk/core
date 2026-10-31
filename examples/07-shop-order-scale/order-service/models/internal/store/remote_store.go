@@ -20,7 +20,13 @@ var (
 
 // GetRemote 返回所有 order 实例共享远程权威库的数据访问器。
 func GetRemote() persistencetypes.IDataAction {
-	remoteActionOnce.Do(func() { remoteAction = oltp.NewMySQL(remoteMySQLConfig()) })
+	remoteActionOnce.Do(func() {
+		var err error
+		remoteAction, err = oltp.NewDataAction(remoteStorageConfig())
+		if err != nil {
+			panic(err)
+		}
+	})
 	return remoteAction
 }
 
@@ -67,7 +73,22 @@ func EnsureRemoteModel(model interface{}) error {
 	return ensureModelWith(GetRemote(), &remoteEnsureMu, model)
 }
 
-// RunRemoteTransaction 在共享远程权威库中执行独立 MySQL 事务。
+// RunRemoteTransaction 在共享远程权威库中执行独立远程事务。
 func RunRemoteTransaction(ensureStorage func() error, operation func(persistencetypes.IDataAction) error) error {
 	return runTransaction(nil, &remoteEnsureMu, GetRemote, ensureStorage, operation)
+}
+
+// remoteStorageConfig 仅在模型组合根选择驱动，旧 MySQL 环境变量保持兼容。
+func remoteStorageConfig() persistencetypes.StorageConfig {
+	driver := os.Getenv("SHOP_ORDER_REMOTE_DRIVER")
+	if driver == "" {
+		old := remoteMySQLConfig()
+		return persistencetypes.StorageConfig{Driver: "mysql", Host: old.Host, Port: old.Port, Username: old.Username, Password: old.Password, Database: old.Database, MaxIdleConns: old.MaxIdleConns, MaxOpenConns: old.MaxOpenConns, MaxLifetime: old.MaxLifetime, IsLog: old.IsLog}
+	}
+	value := persistencetypes.StorageConfig{Driver: driver, Host: envString("SHOP_ORDER_REMOTE_HOST", "127.0.0.1"), Username: os.Getenv("SHOP_ORDER_REMOTE_USER"), Password: os.Getenv("SHOP_ORDER_REMOTE_PASSWORD"), Database: envString("SHOP_ORDER_REMOTE_DATABASE", common.RemoteDatabaseName), SSLMode: os.Getenv("SHOP_ORDER_REMOTE_SSL_MODE"), SSLRootCert: os.Getenv("SHOP_ORDER_REMOTE_SSL_ROOT_CERT"), MaxIdleConns: envInt("SHOP_ORDER_REMOTE_MAX_IDLE", 5), MaxOpenConns: envInt("SHOP_ORDER_REMOTE_MAX_OPEN", 20)}
+	if port, err := strconv.Atoi(os.Getenv("SHOP_ORDER_REMOTE_PORT")); err == nil {
+		value.Port = port
+	}
+	value.ApplyDefaults()
+	return value
 }

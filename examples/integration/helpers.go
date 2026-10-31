@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -40,11 +41,13 @@ type Suite struct {
 
 // ProcessOptions 描述一个与具体业务无关的示例进程启动方式。
 type ProcessOptions struct {
-	BuildPackage string
-	BinaryName   string
-	TempPrefix   string
-	ServiceCount int
-	ServiceIndex int
+	// Configurations 在进程启动前写入标准 etc/{service}.json，不增加生产故障注入入口。
+	Configurations map[string]interface{}
+	BuildPackage   string
+	BinaryName     string
+	TempPrefix     string
+	ServiceCount   int
+	ServiceIndex   int
 	// HTTPServiceOffsets 指定稀疏的实际监听偏移；空值保持原来连续端口契约。
 	HTTPServiceOffsets []int
 	GRPCServiceCount   int
@@ -247,6 +250,27 @@ func StartProcess(options ProcessOptions) (*Suite, error) {
 		WebSocketURL: "ws://127.0.0.1:" + strconv.Itoa(basePort+options.ServiceIndex) + "/ws",
 		Binary:       binary, Arguments: arguments, Environment: cloneEnvironment(options.Environment),
 		HTTPServiceOffsets: append([]int(nil), options.HTTPServiceOffsets...),
+	}
+	if len(options.Configurations) > 0 {
+		if err := os.MkdirAll(filepath.Join(rootDir, "etc"), 0700); err != nil {
+			cleanup()
+			return nil, err
+		}
+		for name, value := range options.Configurations {
+			if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+				cleanup()
+				return nil, fmt.Errorf("invalid config name")
+			}
+			data, err := marshalProcessConfiguration(value)
+			if err != nil {
+				cleanup()
+				return nil, err
+			}
+			if err := os.WriteFile(filepath.Join(rootDir, "etc", name+".json"), data, 0600); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
 	}
 	if err := suite.Restart(); err != nil {
 		cleanup()
@@ -610,4 +634,56 @@ func (s *Suite) StreamWebSocket(t testing.TB, connection *websocket.Conn) <-chan
 		}
 	}()
 	return messages
+}
+
+// marshalProcessConfiguration 使用 go-zero 可读取的字符串编码时长，而非 JSON 纳秒数。
+func marshalProcessConfiguration(value interface{}) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var document map[string]interface{}
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	normalizeProcessDurations(reflect.ValueOf(value), document)
+	return json.Marshal(document)
+}
+func normalizeProcessDurations(value reflect.Value, document map[string]interface{}) {
+	for value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			return
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Type().Field(i)
+		member := value.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		if field.Type == reflect.TypeOf(time.Duration(0)) {
+			document[name] = time.Duration(member.Int()).String()
+			continue
+		}
+		nested := document
+		if !field.Anonymous {
+			var ok bool
+			nested, ok = document[name].(map[string]interface{})
+			if !ok {
+				continue
+			}
+		}
+		normalizeProcessDurations(member, nested)
+	}
 }

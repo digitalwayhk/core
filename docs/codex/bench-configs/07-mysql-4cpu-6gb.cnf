@@ -1,0 +1,13 @@
+[mysqld]
+# 本机Docker 4 CPU / 6GiB预算的07对照配置，保持提交持久性。
+innodb_buffer_pool_size=2G
+innodb_buffer_pool_instances=4
+innodb_redo_log_capacity=2G
+innodb_log_buffer_size=64M
+innodb_flush_method=O_DIRECT
+innodb_flush_log_at_trx_commit=1
+sync_binlog=1
+innodb_io_capacity=1000
+innodb_io_capacity_max=2000
+max_connections=200
+table_open_cache=4000

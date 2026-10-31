@@ -150,3 +150,7 @@ stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新�
 `/api/health` 保持存活语义；`/api/ready` 只检查本进程自身服务，未就绪为安全 HTTP 503，不输出内部身份或连接信息。完整迁移和证据边界见 [稳定实例身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
 
 实现复审补充：`CheckProcessAdmission()` 保留已清理 stable 服务的终态故障，只有同名服务成功重建才清除；`OutboxOptions.Admission` 为可选 `OutboxAdmission` 接口，保持结构可比较，零值保持旧行为，ServiceContext 仅为 stable 自动注入。stable 的 SubscribeEvent 在业务 Handler 前检查准入，可靠订阅失败不 ACK；它不新增无 MQ 时的启动依赖。
+
+## PostgreSQL 加性存储扩展
+
+新增 types.StorageConfig、IAggregateAction 和 oltp.NewDataAction/NewPostgres；IDataAction 必选方法及既有构造器不变。ManageStore 加性接受 postgres 和 TLS/TimeZone 配置；默认 SQLite 及旧库名不变。唯一冲突包含 PostgreSQL SQLSTATE 23505，继续返回409并保留cause。GetSyncPoolKey 文本改为不透明存储身份，不作为业务键持久化。统计旧 Dialect 提示不匹配时明确拒绝；SQLite 周桶修正为 ISO 周年。消费方真实升级仍需自身 smoke。

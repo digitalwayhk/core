@@ -221,7 +221,7 @@ func (m *MySQL) GetSyncPoolKey(data interface{}) string {
 	if dbName == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d/%s", m.config.Host, m.config.Port, dbName)
+	return m.storageKey(dbName)
 }
 
 // ==================== 核心方法（与 SQLite 保持一致）====================
@@ -522,44 +522,46 @@ func (m *MySQL) newDB() (*gorm.DB, error) {
 
 // buildDSN 构建不带数据库名的 DSN（用于管理操作或创建数据库）
 func (m *MySQL) buildDSN() string {
-	if m.config.Charset == "" {
-		m.config.Charset = "utf8mb4"
+	cfg := *m.config
+	if cfg.Charset == "" {
+		cfg.Charset = "utf8mb4"
 	}
-	if m.config.ParseTime == false {
-		m.config.ParseTime = true
+	if cfg.ParseTime == false {
+		cfg.ParseTime = true
 	}
-	if m.config.Loc == "" {
-		m.config.Loc = "Local"
+	if cfg.Loc == "" {
+		cfg.Loc = "Local"
 	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=%s&parseTime=true&loc=%s",
-		m.config.Username,
-		m.config.Password,
-		m.config.Host,
-		m.config.Port,
-		m.config.Charset,
-		m.config.Loc,
+		cfg.Username,
+		cfg.Password,
+		cfg.Host,
+		cfg.Port,
+		cfg.Charset,
+		cfg.Loc,
 	)
 }
 
 // buildDSNWithDB 构建带数据库名的 DSN（直接连接到指定数据库）
 func (m *MySQL) buildDSNWithDB(dbName string) string {
-	if m.config.Charset == "" {
-		m.config.Charset = "utf8mb4"
+	cfg := *m.config
+	if cfg.Charset == "" {
+		cfg.Charset = "utf8mb4"
 	}
-	if m.config.ParseTime == false {
-		m.config.ParseTime = true
+	if cfg.ParseTime == false {
+		cfg.ParseTime = true
 	}
-	if m.config.Loc == "" {
-		m.config.Loc = "Local"
+	if cfg.Loc == "" {
+		cfg.Loc = "Local"
 	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s",
-		m.config.Username,
-		m.config.Password,
-		m.config.Host,
-		m.config.Port,
+		cfg.Username,
+		cfg.Password,
+		cfg.Host,
+		cfg.Port,
 		dbName,
-		m.config.Charset,
-		m.config.Loc,
+		cfg.Charset,
+		cfg.Loc,
 	)
 }
 
@@ -622,7 +624,7 @@ func (m *MySQL) configureConnectionPool(db *gorm.DB) error {
 // getConnectionKey 获取连接键
 func (m *MySQL) getConnectionKey() string {
 	// 使用 Name 而不是 config.Database，因为 Name 是最终确定的数据库名
-	return fmt.Sprintf("%s:%d/%s", m.config.Host, m.config.Port, m.Name)
+	return m.storageKey(m.Name)
 }
 
 // ensureDatabase 确保数据库存在
@@ -703,7 +705,7 @@ func (m *MySQL) HasTable(model interface{}) error {
 
 	tableName := modelTableName(m.db.NamingStrategy, finalType)
 	cacheKey := TableCacheKey{
-		DBPath:    m.Name,
+		DBPath:    m.getConnectionKey(),
 		TableName: tableName,
 	}
 
@@ -943,7 +945,7 @@ func (m *MySQL) Load(item *types.SearchItem, result interface{}) error {
 		// 清除缓存强制重建，然后重试一次
 		logx.Infof(" Load 检测到表不存在，尝试重建: %v", loadErr)
 		tableName := modelTableName(m.db.NamingStrategy, reflect.TypeOf(item.Model))
-		tableCache.Delete(TableCacheKey{DBPath: m.Name, TableName: tableName})
+		tableCache.Delete(TableCacheKey{DBPath: m.getConnectionKey(), TableName: tableName})
 		if rebuildErr := m.ensureTable(item.Model); rebuildErr != nil {
 			return loadErr
 		}
@@ -1032,7 +1034,7 @@ func (m *MySQL) errorHandler(err error, data interface{}, fn func(db *gorm.DB, d
 			}
 			tableName := modelTableName(m.db.NamingStrategy, modelType)
 			cacheKey := TableCacheKey{
-				DBPath:    m.Name,
+				DBPath:    m.getConnectionKey(),
 				TableName: tableName,
 			}
 			tableCache.Delete(cacheKey)
@@ -1344,7 +1346,7 @@ func (m *MySQL) closeAllConnections() error {
 func (m *MySQL) clearTableCache() {
 	tableCache.Range(func(key, value interface{}) bool {
 		if cacheKey, ok := key.(TableCacheKey); ok {
-			if cacheKey.DBPath == m.Name {
+			if cacheKey.DBPath == m.getConnectionKey() {
 				tableCache.Delete(key)
 			}
 		}
@@ -1474,4 +1476,17 @@ func (m *MySQL) ExistsByID(model interface{}, id int64) (bool, error) {
 		return readErr
 	})
 	return exists, readErr
+}
+
+func (m *MySQL) storageKey(name string) string {
+	cfg := *m.config
+	if cfg.Charset == "" {
+		cfg.Charset = "utf8mb4"
+	}
+	cfg.ParseTime = true
+	if cfg.Loc == "" {
+		cfg.Loc = "Local"
+	}
+	cfg.Database = name
+	return opaqueStorageIdentity("mysql", cfg)
 }

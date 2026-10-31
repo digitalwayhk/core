@@ -123,14 +123,19 @@
 | `ServerConfig.RemoteAccessManageAPI` | supported | manage access control | 远程管理 API 访问控制消费 |
 | `ServerConfig.MelodyConfigPath` | supported | Melody global config | 非空时 ReloadExternalConfigs 加载 |
 | `ServerConfig.ManageStore` | supported | WebServer Manage 控制面 runtime | 只允许出现在 `server.json`；旧配置缺失时补 SQLite 默认值，业务服务配置出现该字段时拒绝启动 |
-| `ServerConfig.ManageStore.Driver` | supported | Manage 控制面 action factory | 仅支持 `sqlite`、`mysql`；未知值拒绝启动 |
-| `ServerConfig.ManageStore.Database` | supported | SQLite/MySQL adapter | 新配置 SQLite 默认 `core_manage`；旧 `server.json` 缺字段时兼容历史 `models`；MySQL 必填；同一进程的目录、菜单、按钮、角色、权限、管理员主体与主体角色关系共用，重复绑定不同库时启动失败 |
-| `ServerConfig.ManageStore.Host` | supported | MySQL adapter | `Driver=mysql` 时必填；SQLite 模式忽略 |
-| `ServerConfig.ManageStore.Port` | supported | MySQL adapter | 默认 3306；MySQL 模式校验 1..65535 |
-| `ServerConfig.ManageStore.Username` | supported | MySQL adapter | MySQL 模式必填 |
-| `ServerConfig.ManageStore.Password` | supported | MySQL adapter | AdminView 脱敏，配置合并保留原密码，不得写入日志 |
-| `ServerConfig.ManageStore.MaxIdleConns` | supported | MySQL connection pool | 默认 10；不得为负数或超过 MaxOpenConns |
-| `ServerConfig.ManageStore.MaxOpenConns` | supported | MySQL connection pool | 默认 50；必须为正数 |
+| `ServerConfig.ManageStore.Driver` | supported | Manage 控制面 action factory | 支持 `sqlite`、`mysql`、`postgres`；未知值拒绝启动 |
+| `ServerConfig.ManageStore.Database` | supported | 统一 persistence factory | 新配置 SQLite 默认 `core_manage`；旧 `server.json` 缺字段时兼容历史 `models`；固定网络数据库必填；同一进程的目录、菜单、按钮、角色、权限、管理员主体与主体角色关系共用，重复绑定不同库时启动失败 |
+| `ServerConfig.ManageStore.Host` | supported | OLTP adapter | 网络数据库时必填；SQLite 模式忽略 |
+| `ServerConfig.ManageStore.Port` | supported | OLTP adapter | MySQL 默认3306，PostgreSQL 默认5432；网络数据库校验 1..65535 |
+| `ServerConfig.ManageStore.Username` | supported | OLTP adapter | 网络数据库模式必填 |
+| `ServerConfig.ManageStore.Password` | supported | OLTP adapter | AdminView 脱敏，配置合并保留原密码，不得写入日志 |
+| `ServerConfig.ManageStore.MaxIdleConns` | supported | OLTP connection pool | 默认 10；不得为负数或超过 MaxOpenConns |
+| `ServerConfig.ManageStore.MaxOpenConns` | supported | OLTP connection pool | 默认 50；必须为正数 |
+| `ServerConfig.ManageStore.SSLMode` | supported | persistence factory | PostgreSQL TLS 模式，默认 require；本机测试可显式 disable |
+| `ServerConfig.ManageStore.SSLRootCert` | supported | PostgreSQL driver | CA 文件路径 |
+| `ServerConfig.ManageStore.SSLCert` | supported | PostgreSQL driver | 客户端证书路径，与 SSLKey 同时设置 |
+| `ServerConfig.ManageStore.SSLKey` | supported | PostgreSQL driver | 客户端私钥文件路径，不包含私钥正文 |
+| `ServerConfig.ManageStore.TimeZone` | supported | PostgreSQL driver | 默认 UTC |
 | `ServerConfig.Cluster` | supported | ServiceContext | ApplyDefaults/Validate 并构造 cluster runtime |
 | `ServerConfig.Cluster.Mode` | supported | ServiceContext | 决定不创建、自动或强制 cluster runtime |
 | `ServerConfig.Cluster.Provider` | supported | cluster factory | 选择 local/etcd/consul/redis provider，未知值拒绝 |

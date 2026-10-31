@@ -263,3 +263,14 @@ type IDBName interface {
 `entity.Model` 的默认实现让两者都返回 `"models"`，因此未重写时所有模型共用同一个 `models` 库。服务公共模型基座应重写这两个方法给出本服务库名，而不是在每个具体模型上重复声明。
 
 MySQL 解析库名的顺序是：`config.Database` 非空则固定库；否则取 `GetRemoteDBName()`，**为空时回退 `GetLocalDBName()`**；两者都空才用缓存的 `m.Name` 兜底。这个回退行为对动态分库的 fail-closed 设计影响很大，详见 [manage.md](manage.md)。
+
+## PostgreSQL 与统一存储装配
+
+SQLite/MySQL/PostgreSQL 统一由 models 组合根使用 `oltp.NewDataAction(types.StorageConfig{...})` 选择。Manage 与业务方法不选择驱动。PostgreSQL 必须在启动阶段、接受请求前调用 `EnsureStorage()`；只自动建库、建表、补列/索引，事务内未初始化模型直接拒绝，不自动改类型。未标注类型的 decimal 在新建列时映射 numeric；旧文本列需独立发布处理。详见 [PostgreSQL 存储指南](../../codex/POSTGRESQL_STORAGE_GUIDE.md)。
+
+### 显式启用与升级兼容边界
+
+- PostgreSQL 必须显式选择 `StorageConfig.Driver = "postgres"`，或显式调用 `oltp.NewPostgres`。通用工厂的空 Driver 默认 `sqlite`；原有 MySQL/SQLite 构造器仍可使用。升级 Core 不会自动切库，也不会搬迁原库数据。
+- 07 示例未声明 `SHOP_ORDER_REMOTE_DRIVER` 时仍选择 MySQL 并读取 `SHOP_ORDER_REMOTE_MYSQL_*`；选择 PostgreSQL 时使用 `SHOP_ORDER_REMOTE_DRIVER=postgres` 和 `SHOP_ORDER_REMOTE_*` 配置。业务库与 Core `ManageStore` 分别配置，修改其中一个不会切换另一个。
+- 当前 07 旧 MySQL DSN 转换到 `StorageConfig` 时没有保留 `Charset`、`Loc`，通用工厂会使用 `utf8mb4`、`Local`。依赖自定义字符集或时区的消费方不能按“旧 DSN 参数全部原样保留”升级，需先核对适配；这是当前兼容缺口。
+- 未启用 PostgreSQL 不代表共享代码没有变化：查询、聚合和 MySQL 连接池身份也有调整；SQLite 周桶变化见 [统计分片](stats-and-reports.md)，控制面连接寿命变化见 [Manage 分片](manage.md)。相关测试通过不能替代所有消费方业务回归。

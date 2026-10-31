@@ -2,6 +2,7 @@ package oltp
 
 import (
 	"errors"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	servertypes "github.com/digitalwayhk/core/pkg/server/types"
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -29,6 +30,10 @@ func normalizePersistenceError(err error) error {
 		return newPersistenceConflict(err)
 	}
 
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return newPersistenceConflict(err)
+	}
 	var mysqlErr *mysqlDriver.MySQLError
 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
 		return newPersistenceConflict(err)

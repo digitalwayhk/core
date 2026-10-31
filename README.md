@@ -381,3 +381,7 @@ Digitalway Core 使用 [Apache License 2.0](./LICENSE) 开源。
 <div align="center">
 <sub>技术栈：go-zero · GORM · gRPC · Badger · Redis / NATS · Casdoor · Umi + Ant Design Pro</sub>
 </div>
+
+## PostgreSQL 存储
+
+SQLite/MySQL/PostgreSQL 由模型持久化组合根统一选择，Manage 与统计定义对驱动透明。详见 [配置、初始化与验收指南](docs/codex/POSTGRESQL_STORAGE_GUIDE.md)。

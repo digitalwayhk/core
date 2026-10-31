@@ -105,3 +105,7 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 本轮只修改 Core 及其 06/07 示例，没有升级、重启或迁移 Bitzoom/futures 等消费方。消费方实测状态为 NOT_RUN；既有表中的锁定不能当成本候选的兼容证据。
 
 升级前先盘点实际 WorkerID 编码、容量/别名、原身份、可信完整历史时间上界及 pending 路径；旧值冲突或无法证明时停止 stable 迁移。为每个副本准备独占持久卷、显式独立编号权威和运维恢复流程。不得把既有事件消费组按新 InstanceID 自动改名，不回填历史实例字段。先在隔离部署验证断网超过 TTL 的真实调用恢复、原卷重启、硬崩溃拒绝抢占、授权 recover 和退出不复活，再固定精确 Core commit。具体步骤见 [指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
+
+## PostgreSQL 存储扩展消费方边界
+
+当前候选保留 IDataAction 与旧数据库构造器。切库只在消费方 models 组合根配置统一工厂；Manage 和 StatSpec 不分支。原生 SQL 正文不是自动可移植契约。Core 本地验收不等于 Bitzoom 或其他消费方已升级；本次未修改消费方，消费方 PostgreSQL smoke 为 NOT_RUN。

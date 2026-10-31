@@ -88,7 +88,7 @@ services:
       MYSQL_PASSWORD: core_test_password
       MYSQL_ROOT_PASSWORD: core_test_root_password
     ports:
-      - "127.0.0.1:13306:3306"
+      - "127.0.0.1:${CORE_TEST_MYSQL_PORT:-13306}:3306"
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u core_test -pcore_test_password --silent"]
       interval: 3s
@@ -103,7 +103,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: core_test_admin
       MONGO_INITDB_ROOT_PASSWORD: core_test_root_password
     ports:
-      - "127.0.0.1:27018:27017"
+      - "127.0.0.1:${CORE_TEST_MONGODB_PORT:-27018}:27017"
     healthcheck:
       test:
         - CMD-SHELL
@@ -126,11 +126,26 @@ services:
       CLICKHOUSE_PASSWORD: core_test_password
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
-      - "127.0.0.1:18123:8123"
-      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:${CORE_TEST_CLICKHOUSE_HTTP_PORT:-18123}:8123"
+      - "127.0.0.1:${CORE_TEST_CLICKHOUSE_PORT:-19000}:9000"
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --user core_test --password core_test_password --query 'SELECT 1' | grep 1"]
       interval: 3s
       timeout: 5s
       retries: 30
       start_period: 10s
+
+  postgres:
+    image: postgres:16.6-alpine
+    profiles: ["persistence"]
+    environment:
+      POSTGRES_DB: core_test
+      POSTGRES_USER: core_test
+      POSTGRES_PASSWORD: core_pg_test
+    ports:
+      - "127.0.0.1:${CORE_TEST_POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "core_test", "-d", "core_test"]
+      interval: 3s
+      timeout: 5s
+      retries: 30

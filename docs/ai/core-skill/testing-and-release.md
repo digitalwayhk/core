@@ -189,3 +189,7 @@ go get github.com/digitalwayhk/core@<commit>
 ```
 
 分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
+
+## PostgreSQL 验收
+
+`bash scripts/test.sh integration-postgres` 运行显式 PostgreSQL 外部契约；`integration-persistence` 启动隔离 Compose，同时验证 PostgreSQL/MySQL/MongoDB/ClickHouse 与三库统计。07 必须覆盖真实多进程 pending 硬崩溃恢复，09 必须通过标准 server.json 将 ManageStore 切至 PostgreSQL 后跑真实 HTTP/RBAC。单元、跳过用例和连接健康不能替代这些结果。

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,27 +16,64 @@ import (
 	"github.com/digitalwayhk/core/examples/07-shop-order-scale/order-service/models/transaction"
 	integration "github.com/digitalwayhk/core/examples/integration"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
+	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
+	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/identity"
 	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
+	"strconv"
+	"strings"
 )
 
 func verifyStablePendingCrashRecovery(t *testing.T, authority *identity.Authority, addr, database string, user *integration.Suite, token string, productID uint, replicas []*integration.Suite) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	config := mysql.NewConfig()
-	config.User, config.Passwd, config.Net, config.Addr, config.DBName = "root", os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "tcp", addr, database
-	db, err := sql.Open("mysql", config.FormatDSN())
+	var db *sql.DB
+	var err error
+	pg := os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "postgres"
+	if pg {
+		host, port, _ := net.SplitHostPort(addr)
+		portNumber, _ := strconv.Atoi(port)
+		action := oltp.NewPostgres(persistencetypes.StorageConfig{Host: host, Port: portNumber, Username: os.Getenv("SHOP_ORDER_REMOTE_USER"), Password: os.Getenv("SHOP_ORDER_REMOTE_PASSWORD"), Database: database, SSLMode: os.Getenv("SHOP_ORDER_REMOTE_SSL_MODE")})
+		handle, openErr := action.GetDB()
+		require.NoError(t, openErr)
+		db, err = handle.DB()
+	} else {
+		config := mysql.NewConfig()
+		config.User, config.Passwd, config.Net, config.Addr, config.DBName = "root", os.Getenv("CORE_TEST_STABLE_MYSQL_PASSWORD"), "tcp", addr, database
+		db, err = sql.Open("mysql", config.FormatDSN())
+	}
 	require.NoError(t, err)
 	defer db.Close()
+	query := func(value string) string {
+		if pg {
+			return strings.ReplaceAll(strings.ReplaceAll(value, "`", "\""), "published = 1", "published = true")
+		}
+		return value
+	}
+
 	lock, err := db.Conn(ctx)
 	require.NoError(t, err)
 	defer lock.Close()
 	// 只阻塞订单写入；幂等查询可继续，应用和框架均不增加故障注入后门。
-	_, err = lock.ExecContext(ctx, "LOCK TABLES `order` READ")
+	if pg {
+		_, err = lock.ExecContext(ctx, "BEGIN")
+		require.NoError(t, err)
+		_, err = lock.ExecContext(ctx, "LOCK TABLE \"order\" IN SHARE MODE")
+	} else {
+		_, err = lock.ExecContext(ctx, "LOCK TABLES `order` READ")
+	}
 	require.NoError(t, err)
-	defer lock.ExecContext(context.Background(), "UNLOCK TABLES")
+	unlock := func() error {
+		statement := "UNLOCK TABLES"
+		if pg {
+			statement = "COMMIT"
+		}
+		_, err := lock.ExecContext(context.Background(), statement)
+		return err
+	}
+	defer unlock()
 	const count = 8
 	ids := make(map[uint]bool, count)
 	requests := make(map[string]uint, count)
@@ -47,7 +85,7 @@ func verifyStablePendingCrashRecovery(t *testing.T, authority *identity.Authorit
 		requests[requestID] = order.OrderID
 	}
 	var remote int
-	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'").Scan(&remote))
+	require.NoError(t, db.QueryRowContext(ctx, query("SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'")).Scan(&remote))
 	require.Zero(t, remote, "硬杀前订单必须尚未进入远端，不能用正常重启替代积压恢复")
 	for _, replica := range replicas {
 		replica.KillProcess()
@@ -101,7 +139,7 @@ func verifyStablePendingCrashRecovery(t *testing.T, authority *identity.Authorit
 	}
 	require.Equal(t, count, pending, "必须从原 Badger 卷读回每个已确认但未汇合订单")
 	t.Logf("硬杀后：远端积压订单=%d，原卷读取 pending=%d；普通启动拒绝未释放 Boot", remote, pending)
-	_, err = lock.ExecContext(ctx, "UNLOCK TABLES")
+	err = unlock()
 	require.NoError(t, err)
 	for i, replica := range replicas {
 		b := oldBindings[i]
@@ -120,12 +158,12 @@ func verifyStablePendingCrashRecovery(t *testing.T, authority *identity.Authorit
 		require.GreaterOrEqual(t, after.ReservedUntil, b.ReservedUntil)
 	}
 	require.Eventually(t, func() bool {
-		err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'").Scan(&remote)
+		err := db.QueryRowContext(ctx, query("SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'")).Scan(&remote)
 		return err == nil && remote == count
 	}, 30*time.Second, 100*time.Millisecond)
 	var outboxes int
 	require.Eventually(t, func() bool {
-		err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM outbox_record WHERE published = 1").Scan(&outboxes)
+		err := db.QueryRowContext(ctx, query("SELECT COUNT(*) FROM outbox_record WHERE published = 1")).Scan(&outboxes)
 		return err == nil && outboxes == count+1
 	}, 30*time.Second, 100*time.Millisecond)
 	for i := 0; i < count; i++ {
@@ -144,7 +182,7 @@ func verifyStablePendingCrashRecovery(t *testing.T, authority *identity.Authorit
 		require.NoError(t, store.Close(ctx))
 		closeManager()
 	}
-	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'").Scan(&remote))
+	require.NoError(t, db.QueryRowContext(ctx, query("SELECT COUNT(*) FROM `order` WHERE request_id LIKE 'crash-pending-%'")).Scan(&remote))
 	require.Equal(t, count, remote)
 	t.Logf("恢复后：%d 条远端订单、%d 条已发布 Outbox（含原用例1条），幂等 ID 保持，原卷 pending=0", remote, outboxes)
 }
