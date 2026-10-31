@@ -12,13 +12,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/stretchr/testify/require"
 )
@@ -41,6 +44,9 @@ func (r *confirmationLoadRecord) NewModel() {
 func (r *confirmationLoadRecord) GetLocalKey() string { return r.Key }
 
 type confirmationLoadTarget struct{ calls, items, nanos atomic.Int64 }
+
+// 下列计数仅由显式性能诊断的Go覆盖文件写入，正常构建未采集时必须输出null。
+var confirmationPerfBodyNS, confirmationPerfTransactionNS, confirmationPerfTransactionCount atomic.Int64
 
 // SyncBatch 立即确认全部原身份，不进行SQL或网络调用。
 func (a *confirmationLoadTarget) SyncBatch(_ context.Context, items []*SyncQueueItem[confirmationLoadRecord]) (*WriteBehindResult, error) {
@@ -93,6 +99,8 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 	require.NotEmpty(t, root)
 	require.NoError(t, os.MkdirAll(root, 0700))
 	payload := confirmationPayload(t)
+	scenario := os.Getenv("CORE_CONFIRM_PERF_GROUP_SCENARIO")
+	require.Contains(t, []string{"", "same_group", "cross_group", "history_tombstones"}, scenario)
 	for round := 0; round < 4; round++ {
 		for _, mode := range []string{"plain_no_sync", "bounded_no_sync", "bounded_fast_sync"} {
 			t.Run(fmt.Sprintf("%d/%s", round, mode), func(t *testing.T) {
@@ -145,6 +153,42 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 					err = store.UseWriteBehindWithFailureHandler(a, a)
 				}
 				require.NoError(t, err)
+				var groupChecks, unboundedChecks atomic.Int64
+				if store.db.disposition != nil {
+					store.db.disposition.groupCheckObserver = func(_ *badger.Txn, options badger.IteratorOptions) {
+						groupChecks.Add(1)
+						if len(options.Prefix) == 0 {
+							unboundedChecks.Add(1)
+						}
+					}
+				}
+				// 只在合成fixture中保留相邻高位组的历史与删除标记；不清历史制造收益。
+				if scenario == "history_tombstones" {
+					for revision := range 4 {
+						require.NoError(t, store.db.manager.db.Update(func(txn *badger.Txn) error {
+							for i := range 4096 {
+								key := []byte(fmt.Sprintf("%sq:%s:%020d:history", store.db.dispositionPrefix(), strings.Repeat("f", 64), i))
+								if revision == 3 {
+									if e := txn.Delete(key); e != nil {
+										return e
+									}
+								} else if e := txn.Set(key, []byte{byte(revision)}); e != nil {
+									return e
+								}
+							}
+							return nil
+						}))
+					}
+				}
+				confirmationPerfBodyNS.Store(0)
+				confirmationPerfTransactionNS.Store(0)
+				confirmationPerfTransactionCount.Store(0)
+				if profile := os.Getenv("CORE_CONFIRM_PERF_CPU_PROFILE"); profile != "" {
+					f, e := os.Create(profile)
+					require.NoError(t, e)
+					require.NoError(t, pprof.StartCPUProfile(f))
+					defer func() { pprof.StopCPUProfile(); require.NoError(t, f.Close()) }()
+				}
 				var before, after syscall.Rusage
 				require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &before))
 				var memBefore, memAfter runtime.MemStats
@@ -175,7 +219,14 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 							if round == 3 {
 								key = i % 2000
 							} // 持续窗口重复工作集；无后台组不因10000硬限产生伪性能错误。
-							item := &confirmationLoadRecord{Model: entity.NewModel(), Key: fmt.Sprint(key), Group: int(key % 50), Payload: payload}
+							group := int(key % 50)
+							if scenario == "cross_group" {
+								group += int(i/2000%2) * 50
+							}
+							if scenario == "history_tombstones" {
+								group = int(i / 2000 % 2)
+							}
+							item := &confirmationLoadRecord{Model: entity.NewModel(), Key: fmt.Sprint(key), Group: group, Payload: payload}
 							began := time.Now()
 							e := store.Save(context.Background(), item)
 							latencies[worker] = append(latencies[worker], float64(time.Since(began))/float64(time.Millisecond))
@@ -214,6 +265,15 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 				}
 				pct := func(p float64) float64 { return all[int(math.Ceil(p*float64(len(all))))-1] }
 				result := map[string]any{"variant": variant, "effective_options": effectiveOptions, "levels_after_drain": store.db.manager.db.Levels(), "mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
+				result["group_scenario"] = scenario
+				result["empty_group_checks"] = groupChecks.Load()
+				result["unbounded_group_checks"] = unboundedChecks.Load()
+				result["transaction_body_ns"] = nil
+				result["transaction_commit_and_framework_ns"] = nil
+				if confirmationPerfTransactionCount.Load() > 0 {
+					result["transaction_body_ns"] = confirmationPerfBodyNS.Load()
+					result["transaction_commit_and_framework_ns"] = confirmationPerfTransactionNS.Load() - confirmationPerfBodyNS.Load()
+				}
 				// 在测量窗口外核对持久原件和索引，不能仅凭缓存pending=0宣称同步成功。
 				persistentPending, err := store.db.GetPendingSyncCount()
 				require.NoError(t, err)
@@ -224,7 +284,17 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 					require.NoError(t, err)
 					require.NotNil(t, wrapper.Item)
 					require.Equal(t, fmt.Sprint(key), wrapper.Item.Key)
-					require.Equal(t, key%50, wrapper.Item.Group)
+					expectedGroup := key % 50
+					if scenario == "cross_group" && round == 3 {
+						expectedGroup += 50
+					}
+					if scenario == "history_tombstones" {
+						expectedGroup = 0
+						if round == 3 {
+							expectedGroup = 1
+						}
+					}
+					require.Equal(t, expectedGroup, wrapper.Item.Group)
 					require.True(t, bytes.Equal(payload, wrapper.Item.Payload), "合成载荷须逐件匹配")
 					require.False(t, wrapper.IsDeleted)
 					require.Equal(t, cfg.AutoSync, wrapper.IsSynced)

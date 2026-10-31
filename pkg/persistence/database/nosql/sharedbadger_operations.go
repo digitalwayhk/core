@@ -106,6 +106,11 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 ) (int, error) {
 	newQueueCount := 0
 	err := p.updateWriteBehindTransactionKind(localCommitForeground, len(operations), func(txn *badger.Txn) error {
+		// 每次实际事务（含TooBig二分重试）独立收集，不跨回滚/已提交前缀复用。
+		var groups map[string]struct{}
+		if p.disposition != nil {
+			groups = make(map[string]struct{})
+		}
 		wrappers := make(map[string]*SyncQueueItem[T], len(operations))
 		loaded := make(map[string]struct{}, len(operations))
 		queued := make(map[string]struct{}, len(operations))
@@ -145,12 +150,12 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 				continue
 			}
 			if _, exists := queued[key]; exists {
-				if err := p.ensureDispositionEntry(txn, key); err != nil {
+				if err := p.ensureDispositionEntry(txn, key, groups); err != nil {
 					return err
 				}
 				continue
 			}
-			created, err := p.ensureSyncQueueEntry(txn, key)
+			created, err := p.ensureSyncQueueEntry(txn, key, groups)
 			if err != nil {
 				return err
 			}
@@ -159,7 +164,7 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 				newQueueCount++
 			}
 		}
-		return nil
+		return p.deleteEmptyDispositionGroups(txn, groups)
 	})
 	if err != nil {
 		return 0, err

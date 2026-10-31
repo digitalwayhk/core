@@ -3,6 +3,7 @@ package nosql
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,4 +74,64 @@ func TestConfirmationVolumeCompatibility(t *testing.T) {
 	require.NoError(t, store.Close(context.Background()))
 	require.NoError(t, CloseSharedManager(store.config.BasePath))
 	t.Logf("跨版本独立进程原卷副本：auto=%t，2000原件/完成历史逐项核对，无新Save", auto)
+}
+
+// TestDispositionGroupVolumeCompatibility 用三个独立进程验证旧算法建卷、新算法改组排空、旧算法读取完成历史。
+func TestDispositionGroupVolumeCompatibility(t *testing.T) {
+	base := os.Getenv("CORE_GROUP_COMPAT_COPY")
+	if base == "" {
+		t.Skip("仅显式Core空组核验合成副本兼容验收")
+	}
+	marker, err := os.ReadFile(filepath.Join(base, ".core-group-synthetic-copy"))
+	require.NoError(t, err)
+	require.Equal(t, "core-group-synthetic-copy", string(marker))
+	role := os.Getenv("CORE_GROUP_COMPAT_ROLE")
+	require.Contains(t, []string{"seed", "update", "verify"}, role)
+	store := groupOperationsStore(t, base, false)
+	if role == "seed" {
+		items := make([]*confirmationLoadRecord, 32)
+		for i := range items {
+			items[i] = groupOperationRecord(fmt.Sprint(i), 1, 2028)
+		}
+		_, err := store.SaveBatch(context.Background(), items)
+		require.NoError(t, err)
+		for i := range 16 {
+			items[i] = groupOperationRecord(fmt.Sprint(i), 2, 2029)
+		}
+		_, err = store.SaveBatch(context.Background(), items[:16])
+		require.NoError(t, err)
+		require.Equal(t, 32, store.Metrics().Pending)
+	} else if role == "update" {
+		require.Equal(t, 32, store.Metrics().Pending, "无新请求前已经恢复原pending")
+		requireDispositionGroup(t, store.db, 1, true)
+		requireDispositionGroup(t, store.db, 2, true)
+		items := make([]*confirmationLoadRecord, 32)
+		for i := range items {
+			items[i] = groupOperationRecord(fmt.Sprint(i), 3, 2030)
+		}
+		_, err := store.SaveBatch(context.Background(), items)
+		require.NoError(t, err)
+		requireDispositionGroup(t, store.db, 1, false)
+		requireDispositionGroup(t, store.db, 2, false)
+		_, err = store.ForceSyncAll(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, store.Metrics().Pending)
+		requireDispositionGroup(t, store.db, 3, false)
+	} else {
+		require.Zero(t, store.Metrics().Pending)
+		result, err := store.ForceSyncAll(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, result.Confirmed, "已完成记录不重投")
+		for i := range 32 {
+			r := currentGroupRecord(t, store, fmt.Sprint(i))
+			require.Equal(t, WriteBehindCompleted, r.State)
+			require.True(t, r.LocalConfirmed)
+			require.Equal(t, "3", r.Group)
+			require.Len(t, r.Snapshot.Item.Payload, 2030)
+		}
+		records, next, err := store.ListWriteBehindFailures("", 100)
+		require.NoError(t, err)
+		require.Empty(t, next)
+		require.Len(t, records, 80, "原始、Superseded和完成历史都保留")
+	}
 }

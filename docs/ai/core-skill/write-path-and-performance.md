@@ -104,3 +104,5 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 诊断必须同时看Save、Admission、Batch队列、Sync.ForegroundLocal/ConfirmationLocal/MetadataLocal的QueueWait/LockWait/CommitDuration、TargetDuration和排空。锁等待下降不能单独当修复，必须比较chan排队和Save长尾。累计时间不可相加冒充壁钟，确认数用SyncedItems；本地Update成功次数不等于物理fsync，未测指标不填零。以固定版本、同机同文件系统/可靠性/载荷/并发三模式、多轮和持续输入取证，禁止并行编译/测试污染计量。具体预算、单项大原件、Close与原卷恢复边界见[正式指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。组件通过不代表消费方Full-E4同档复测或业务容量通过。
 
 本地合批优化不能只删除调度让出或缩短窗口：须同时核对前台批次、总事务、排队、实际Save分位数及排空。官方Badger调参和读改写/WriteBatch边界见[参数分片](badger-configuration.md#官方慢写排障与实验边界)，不以一次收益修改全局生产默认。
+
+前台空组核验必须限定事务和组范围：替换未投递`Ready/Attempts=0`版本时比较旧新实际组身份，同组补新不做会被抵消的空组核验；跨组等可能变空的组在实际Badger事务内收集deferredGroups，最终写集上逐组去重核验。集合不能跨回滚或TooBig二分子事务。每组迭代器必须设置目标组`IteratorOptions.Prefix`，仅PrefetchValues=false加Seek后ValidForPrefix不能限制内部查找；迭代器不复用到创建之后的新pendingWrites。保持原件、历史、组标记及队列原子提交，不异步清理组标记，不清历史/关闭刷盘/调整FIFO换取性能。当前修复无需消费方新增开关或迁移存量卷。实测收益、分散跨组负载的取舍和既有恢复失败见[修复验证](../../codex/WRITE_BEHIND_DISPOSITION_GROUP_FIX_2026-10-31.md)。

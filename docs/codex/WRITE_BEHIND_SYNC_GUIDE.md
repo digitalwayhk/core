@@ -93,7 +93,9 @@ CORE_ADAPTIVE_MYSQL_ADDR=127.0.0.1:<专用端口> \
 
 本地确认及其他处置元数据复用现有 `BatchCommitter` 的同一个有界FIFO。前台保存仍可合批；内部事务是明确边界，处理前先完成之前接收的前台批次，再执行内部有界块。没有第二套队列或提交worker；target、网络、重试计时、OrderingGroup以外的应用回调均不在提交器中执行。`storageMu`仍保护同prefix的sequence/cursor/组索引和原件原子性，不能因“统一队列”删锁或按业务用户分锁。
 
-真实提交成功后才扣pending、累加确认并安排IsSyncAfterDelete；失败块全部保留，已提交块不因后块error被遗忘。旧状态/版本/指纹隔离，不回滚无关有效项；target成功和本地确认成功仍是两阶段。组标记清理在同一确认块最终写集上复用一个不预取value的迭代器，避免逐项重建/预取无关原件；索引格式和组首屏障不变。
+真实提交成功后才扣pending、累加确认并安排IsSyncAfterDelete；失败块全部保留，已提交块不因后块error被遗忘。旧状态/版本/指纹隔离，不回滚无关有效项；target成功和本地确认成功仍是两阶段。可能变空的组在同一实际事务最终写集上去重核验，各组使用设置了目标组`IteratorOptions.Prefix`且不预取value的新迭代器。仅在Seek返回后检查ValidForPrefix不足以限制Seek内部查找；也不能跨后续写集复用迭代器。索引格式和组首屏障不变。
+
+前台替换`Ready && Attempts==0`旧版本时仍持久保存Superseded历史并删除旧队列项。旧新实际组身份相同时，新队列项会在同一事务补入，因此跳过这次空组核验；同key改组必须核验旧组，不能按key推断组不变。ApplyWriteOperations/SaveBatch与BatchInsert复用事务内deferredGroups，集合在每次实际事务闭包中建立；回滚、ErrTxnTooBig二分和子批重试不复用失败事务的集合。清理仍在提交前与原件/索引原子完成，不是异步组回收。该修复不改变API、配置、StoreID/policy、指纹、sequence、卷格式或接入方式；无需应用开关或迁移。性能收益按负载验证，不能宣称所有跨组负载均提速，见[具体修复和边界](WRITE_BEHIND_DISPOSITION_GROUP_FIX_2026-10-31.md)。
 
 Close先停止前台准入，唤醒满队列中尚未被接收的保存请求并返回ErrWriteStoreClosed，再等待已接受保存的FIFO屏障，保留内部提交通道直到原后台/清理生命周期退出，再关闭提交器。接受后等待真实结果；超时不代表外部target/handler实际停止，也不授权回收仍被持有的卷。启动恢复、通知及到期重试继续走原worker，无新请求也能推进。直接使用 `PrefixedBadgerDB` 没有facade提交器时仍使用同prefix互斥和有界块；legacy/零配置不启用内部FIFO接线。
 

@@ -28,6 +28,8 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	jobs         chan writeBehindDispositionJob[T]
+	// groupCheckObserver 仅供包内诊断同步观察实际核验；准备阶段设置，不改变写集或记录业务身份。
+	groupCheckObserver func(*badger.Txn, badger.IteratorOptions)
 }
 
 // UseWriteBehindWithFailureHandler 显式启用有限处置；必须在接受写入前绑定，需与持久policy指纹一致。

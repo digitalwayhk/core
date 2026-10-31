@@ -506,6 +506,10 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 
 		newQueueKeys := make(map[string]struct{}, len(batch))
 		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
+			var groups map[string]struct{}
+			if p.disposition != nil {
+				groups = make(map[string]struct{})
+			}
 			for _, item := range batch {
 				key := p.generateKey(item)
 				if key == "" {
@@ -523,12 +527,12 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 				}
 				if needSync {
 					if _, seen := newQueueKeys[key]; seen {
-						if err := p.ensureDispositionEntry(txn, key); err != nil {
+						if err := p.ensureDispositionEntry(txn, key, groups); err != nil {
 							return err
 						}
 						continue
 					}
-					created, err := p.ensureSyncQueueEntry(txn, key)
+					created, err := p.ensureSyncQueueEntry(txn, key, groups)
 					if err != nil {
 						return err
 					}
@@ -537,7 +541,7 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 					}
 				}
 			}
-			return nil
+			return p.deleteEmptyDispositionGroups(txn, groups)
 		})
 
 		if err != nil {
@@ -555,8 +559,8 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 	return nil
 }
 
-func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string) (bool, error) {
-	if err := p.ensureDispositionEntry(txn, dataKey); err != nil {
+func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string, deferredGroups ...map[string]struct{}) (bool, error) {
+	if err := p.ensureDispositionEntry(txn, dataKey, deferredGroups...); err != nil {
 		return false, err
 	}
 	queueKey := []byte(p.syncQueueKey(dataKey))
