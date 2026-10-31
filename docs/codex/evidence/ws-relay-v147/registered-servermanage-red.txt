@@ -1,0 +1,65 @@
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界
+    relay_test.go:215: 
+        	Error Trace:	/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/examples/integration/ws-relay/relay_test.go:215
+        	Error:      	An error is expected but got nil.
+        	Test:       	TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界
+        	Messages:   	已注册的ServerManage也不能因同服务mTLS获得管理权限
+=== NAME  TestWebSocketRelayCoexistenceRealMTLSGateways
+    relay_test.go:223: Gateway PID=45365/45794；双向摘要与真实WS帧、用户隔离、退订/关闭、真实mTLS拒绝边界
+
+--- 集成测试服务日志 ---
+{"@timestamp":"2026-10-22T00:35:38.265+08:00","caller":"routecache/manager.go:91","content":"route_cache_l1_resolved","level":"info","max_bytes":268435456,"max_bytes_source":"auto","max_entries":10000,"max_entries_source":"auto","max_value_bytes":1048576,"service":"server"}
+{"@timestamp":"2026-10-22T00:35:38.268+08:00","caller":"oltp/sqlite.go:264","content":" WAL 模式已启用","level":"info"}
+
+2026/10/22 00:35:38 [32m/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/pkg/server/manageauth/controlplane.go:149
+[0m[33m[0.160ms] [34;1m[rows:4][0m SELECT * FROM PRAGMA_index_list("manage_principal_model")
+{"@timestamp":"2026-10-22T00:35:38.283+08:00","caller":"routecache/manager.go:91","content":"route_cache_l1_resolved","level":"info","max_bytes":268435456,"max_bytes_source":"auto","max_entries":10000,"max_entries_source":"auto","max_value_bytes":1048576,"service":"owned-demo"}
+{"@timestamp":"2026-10-22T00:35:38.290+08:00","caller":"rest/server.go:133","content":"service_starting","host":"127.0.0.1","level":"info","port":43519,"service":"owned-demo","websocket":true}
+{"@timestamp":"2026-10-22T00:35:38.290+08:00","caller":"rest/server.go:133","content":"service_starting","host":"0.0.0.0","level":"info","port":43518,"service":"server","websocket":false}
+{"@timestamp":"2026-10-22T00:35:38.313+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"GET","response_bytes":687,"route":"/api/servermanage/testtoken","service":"owned-demo","span":"f3838e96fb1e8fc1","status":200,"trace":"9829b3ec76d31642d89e31c8bbb8081a"}
+{"@timestamp":"2026-10-22T00:35:38.316+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.317+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":1,"level":"info","method":"POST","response_bytes":1167,"route":"/api/owned-demo/control","service":"owned-demo","span":"ef10cca2405eb447","status":200,"trace":"a1e583cb21a3b26be42219748ecc3dac"}
+{"@timestamp":"2026-10-22T00:35:38.319+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.319+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"89b8f996a82c43b6","status":200,"trace":"eab70c6978f4be1252649fe2fabe099c"}
+{"@timestamp":"2026-10-22T00:35:38.320+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.321+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"468bc7a9bed9f5ae","status":200,"trace":"48c32bc3b09c55459f6b1304b07f607a"}
+{"@timestamp":"2026-10-22T00:35:38.321+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.322+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":1,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"a7cd01e0eabd9c00","status":200,"trace":"6d19f83e396495e09688eb4d298e9015"}
+{"@timestamp":"2026-10-22T00:35:38.323+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.324+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"f3ab836ee2369fb4","status":200,"trace":"863a90b0f727d8fa35e3acf47b097555"}
+{"@timestamp":"2026-10-22T00:35:38.324+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":177,"route":"/api/servermanage/ws/subscription","service":"owned-demo","span":"f1f36cf6ea3955c2","status":403,"trace":"74bbe56db8fa658539480fe408a0ea64"}
+{"@timestamp":"2026-10-22T00:35:38.325+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":176,"route":"/api/servermanage/ws/subscription","service":"owned-demo","span":"35f337fe7c837b35","status":403,"trace":"2e66c52602a5b947082cae2d325b9fd5"}
+{"@timestamp":"2026-10-22T00:35:38.336+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":177,"route":"/api/servermanage/ws/notice","service":"owned-demo","span":"b5d3379628003de3","status":403,"trace":"31eb1948a020bdc35789f8a26574e66e"}
+{"@timestamp":"2026-10-22T00:35:38.336+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":176,"route":"/api/servermanage/ws/notice","service":"owned-demo","span":"6f011712a310f734","status":403,"trace":"a038ee7871ac4be630da6616e727eb7e"}
+{"@timestamp":"2026-10-22T00:35:38.342+08:00","caller":"melody/manager.go:339","content":"WebSocket客户端连接: 127.0.0.1:52934, 当前活跃连接: 1","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.343+08:00","caller":"router/request.go:136","content":"Auth required but no user info found for api: /api/owned-demo/ordinary-private","level":"error"}
+{"@timestamp":"2026-10-22T00:35:38.343+08:00","caller":"melody/manager.go:273","content":"WebSocket异常错误: websocket: close 1006 (abnormal closure): unexpected EOF, RemoteAddr: 127.0.0.1:52934","level":"error"}
+{"@timestamp":"2026-10-22T00:35:38.343+08:00","caller":"melody/manager.go:357","content":"WebSocket客户端断开: 127.0.0.1:52934, 当前活跃连接: 0, 当前连接数: 0","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.344+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":1,"level":"info","method":"GET","response_bytes":0,"route":"/ws","service":"owned-demo","span":"0bdad2552d3d3e9d","status":101,"trace":"5a14aabcad828c6ce938873105434e8b"}
+{"@timestamp":"2026-10-22T00:35:38.345+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.345+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"a2406901dc69b773","status":200,"trace":"34969d8866742e1cc702db5291485c64"}
+
+
+--- 集成测试服务日志 ---
+{"@timestamp":"2026-10-22T00:35:27.552+08:00","caller":"routecache/manager.go:91","content":"route_cache_l1_resolved","level":"info","max_bytes":268435456,"max_bytes_source":"auto","max_entries":10000,"max_entries_source":"auto","max_value_bytes":1048576,"service":"server"}
+{"@timestamp":"2026-10-22T00:35:27.554+08:00","caller":"oltp/sqlite.go:264","content":" WAL 模式已启用","level":"info"}
+
+2026/10/22 00:35:27 [32m/Users/vincent/Documents/存档文稿/MyCode/digitalway.hk/core-codex/pkg/server/manageauth/controlplane.go:149
+[0m[33m[0.162ms] [34;1m[rows:4][0m SELECT * FROM PRAGMA_index_list("manage_principal_model")
+{"@timestamp":"2026-10-22T00:35:27.570+08:00","caller":"routecache/manager.go:91","content":"route_cache_l1_resolved","level":"info","max_bytes":268435456,"max_bytes_source":"auto","max_entries":10000,"max_entries_source":"auto","max_value_bytes":1048576,"service":"owned-demo"}
+{"@timestamp":"2026-10-22T00:35:27.577+08:00","caller":"rest/server.go:133","content":"service_starting","host":"127.0.0.1","level":"info","port":27681,"service":"owned-demo","websocket":true}
+{"@timestamp":"2026-10-22T00:35:27.577+08:00","caller":"rest/server.go:133","content":"service_starting","host":"0.0.0.0","level":"info","port":27680,"service":"server","websocket":false}
+{"@timestamp":"2026-10-22T00:35:38.312+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"GET","response_bytes":687,"route":"/api/servermanage/testtoken","service":"owned-demo","span":"ce680124704ed8cc","status":200,"trace":"1835834475d3837cb9c4597b0ca0e8a2"}
+{"@timestamp":"2026-10-22T00:35:38.314+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.315+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":1,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"f5ccd5f252a00848","status":200,"trace":"0b913b419aa7d06da783ec01ac51a5d4"}
+{"@timestamp":"2026-10-22T00:35:38.317+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.318+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"0f1e6fa0d6887995","status":200,"trace":"11422722da72435bd0e0e53347fe4f90"}
+{"@timestamp":"2026-10-22T00:35:38.343+08:00","caller":"router/request.go:139","content":"Auth required for api: /api/owned-demo/control","level":"info"}
+{"@timestamp":"2026-10-22T00:35:38.344+08:00","caller":"rest/accesslog.go:46","content":"http_request_completed","duration_ms":0,"level":"info","method":"POST","response_bytes":1166,"route":"/api/owned-demo/control","service":"owned-demo","span":"70b6e4a660dedf03","status":200,"trace":"b65e400bf92995c0321d76c1a4825d59"}
+
+--- FAIL: TestWebSocketRelayCoexistenceRealMTLSGateways (25.91s)
+    --- FAIL: TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界 (0.02s)
+FAIL
+FAIL	github.com/digitalwayhk/core/examples/integration/ws-relay	26.455s
+FAIL

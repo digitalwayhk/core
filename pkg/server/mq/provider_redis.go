@@ -2,8 +2,8 @@ package mq
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,29 +12,64 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/observability"
 	"github.com/redis/go-redis/v9"
 	"github.com/zeromicro/go-zero/core/logx"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // RedisStreamProvider implements MQProvider using Redis Streams.
 // It is the default development-friendly provider requiring only Redis.
 type RedisStreamProvider struct {
-	addr             string
-	db               int
-	prefix           string
-	client           *redis.Client
-	mu               sync.Mutex
-	subs             map[string]context.CancelFunc
-	reliableMetrics  map[string]*redisReliableSubscriptionMetrics
-	lifecycleMetrics lifecycleProviderMetrics
-	wg               sync.WaitGroup
+	addr                 string
+	db                   int
+	prefix               string
+	client               *redis.Client
+	blockingClient       *redis.Client
+	commandPoolSize      int
+	blockingReadPoolSize int
+	closed               bool
+	closeOnce            sync.Once
+	closeErr             error
+	mu                   sync.Mutex
+	subs                 map[string]context.CancelFunc
+	reliableMetrics      map[string]*redisReliableSubscriptionMetrics
+	lifecycleMetrics     lifecycleProviderMetrics
+	deliveryMetrics      redisReliableDeliveryMetrics
+	wg                   sync.WaitGroup
 }
 
 type redisReliableSubscriptionMetrics struct {
-	configured  int64
-	inflight    atomic.Int64
-	peak        atomic.Int64
-	activeKeys  atomic.Int64
-	blockedKeys atomic.Int64
-	pendingKeys atomic.Int64
+	*redisReliableDeliveryMetrics
+	configured       int64
+	blockingReads    bool
+	inflight         atomic.Int64
+	peak             atomic.Int64
+	activeKeys       atomic.Int64
+	blockedKeys      atomic.Int64
+	pendingKeys      atomic.Int64
+	prefetchCapacity atomic.Int64
+	prefetched       atomic.Int64
+	queuedWork       atomic.Int64
+}
+
+// 累计计数属于 provider，取消订阅只删除有界 gauge，不使其他订阅的 counter 回退。
+type redisReliableDeliveryMetrics struct {
+	newRead            atomic.Int64
+	reclaimRead        atomic.Int64
+	publishToReadNanos atomic.Int64
+	scheduleWaitNanos  atomic.Int64
+	handlerNanos       atomic.Int64
+	pelWaitNanos       atomic.Int64
+	pelWaitSamples     atomic.Int64
+	scheduled          atomic.Int64
+	handlerCalls       atomic.Int64
+	sharedLeases       atomic.Int64
+	sharedAcquired     atomic.Int64
+	sharedContended    atomic.Int64
+	sharedOwnerLost    atomic.Int64
+	ackSucceeded       atomic.Int64
+	ackFailed          atomic.Int64
+	ackNanos           atomic.Int64
 }
 
 // NewRedisStreamProvider creates a provider targeting the given Redis address.
@@ -55,36 +90,13 @@ func NewRedisStreamProvider(addr, prefix string, db int) *RedisStreamProvider {
 func (r *RedisStreamProvider) Name() string { return "redis-stream" }
 
 // Connect initialises the Redis client. A PING is issued to verify connectivity.
-func (r *RedisStreamProvider) Connect(ctx context.Context) error {
-	r.client = redis.NewClient(&redis.Options{
-		Addr:                  r.addr,
-		DB:                    r.db,
-		ContextTimeoutEnabled: true,
-	})
-	if err := r.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("redis-stream: connect to %s: %w", r.addr, err)
-	}
-	return nil
-}
+func (r *RedisStreamProvider) Connect(ctx context.Context) error { return r.connectRedisPools(ctx) }
 
-// Close unsubscribes all consumers and closes the Redis connection.
-func (r *RedisStreamProvider) Close() error {
-	r.mu.Lock()
-	for _, cancel := range r.subs {
-		cancel()
-	}
-	r.subs = make(map[string]context.CancelFunc)
-	r.mu.Unlock()
-	r.wg.Wait()
-	if r.client != nil {
-		return r.client.Close()
-	}
-	return nil
-}
+// Close 取消订阅、打断阻塞读取，再等待原有工作者与owner释放，最后关闭命令池。
+func (r *RedisStreamProvider) Close() error { return r.closeRedisPools() }
 
 // OrderedReliableInfo 声明 Redis Streams 在单 active owner 下的 ordered-reliable 能力。
-// 当前实现以整条 stream 串行 + 失败阻断满足契约（比“仅同 key 阻断”更严）；
-// 不同 OrderingKey 的并行优化可后续用 shard stream 加强，不削弱本声明。
+// 零值保持整 stream 串行；显式 KeyConcurrency 在单 owner 内按 key 并行。
 func (r *RedisStreamProvider) OrderedReliableInfo() OrderedReliableCapability {
 	return DefaultOrderedReliableCapability()
 }
@@ -109,7 +121,16 @@ func (r *RedisStreamProvider) Publish(ctx context.Context, subject string, data 
 		Values: values,
 		MaxLen: 0,
 	}
-	return r.client.XAdd(ctx, args).Err()
+	ctx, span := otel.Tracer("github.com/digitalwayhk/core/mq").Start(ctx, "redis.publish")
+	span.SetAttributes(attribute.String("messaging.redis.stream_hash", redisLifecycleSubjectHash(key)))
+	defer span.End()
+	id, err := r.client.XAdd(ctx, args).Result()
+	if err != nil {
+		span.SetStatus(codes.Error, "publish_failed")
+	} else {
+		span.SetAttributes(attribute.String("messaging.message.id", id))
+	}
+	return err
 }
 
 // Subscribe starts a consumer goroutine that reads from the Redis Stream.
@@ -127,20 +148,20 @@ func (r *RedisStreamProvider) Subscribe(ctx context.Context, subject string, han
 
 	cctx, cancel := context.WithCancel(ctx)
 
-	r.mu.Lock()
-	r.subs[subject] = cancel
-	r.mu.Unlock()
-
-	r.wg.Add(1)
+	stop, err := r.registerRedisSubscription(subject+"|observer|"+consumer, cancel, nil)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		defer r.wg.Done()
+		defer stop()
 		for {
 			select {
 			case <-cctx.Done():
 				return
 			default:
 			}
-			entries, err := r.client.XReadGroup(cctx, &redis.XReadGroupArgs{
+			entries, err := r.blockingClient.XReadGroup(cctx, &redis.XReadGroupArgs{
 				Group:    group,
 				Consumer: consumer,
 				Streams:  []string{key, ">"},
@@ -169,7 +190,7 @@ func (r *RedisStreamProvider) Subscribe(ctx context.Context, subject string, han
 			}
 		}
 	}()
-	return cancel, nil
+	return stop, nil
 }
 
 // SubscribeReliable 使用调用方提供的逻辑服务组消费。处理失败的消息保持 pending，
@@ -221,9 +242,17 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	// 零值/1 保持历史整 subject 串行。只有显式 opt-in 才进入 owner 内分键调度。
 	if options.KeyConcurrency <= 1 {
 		options.KeyConcurrency = 1
+	}
+	if options.KeyConcurrency == 1 && !options.SharedKeys {
 		options.Count = 1
 	} else if options.Count <= 0 {
 		options.Count = int64(options.KeyConcurrency * 4)
+	}
+	if options.Count < int64(options.KeyConcurrency) {
+		options.Count = int64(options.KeyConcurrency)
+	}
+	if err := r.ensureReliableGroupMode(ctx, subject, options); err != nil {
+		return nil, err
 	}
 	key := r.streamKey(subject)
 	err := r.client.XGroupCreateMkStream(ctx, key, options.Group, "0").Err()
@@ -232,8 +261,16 @@ func (r *RedisStreamProvider) SubscribeReliable(
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	subscriptionKey := subject + "|" + options.Group + "|" + options.Consumer
-	metrics := &redisReliableSubscriptionMetrics{configured: int64(options.KeyConcurrency)}
+	metrics := &redisReliableSubscriptionMetrics{configured: int64(options.KeyConcurrency), blockingReads: options.KeyConcurrency == 1 && !options.SharedKeys, redisReliableDeliveryMetrics: &r.deliveryMetrics}
 	observedHandler := func(message *Message) error {
+		metrics.handlerCalls.Add(1)
+		started := time.Now()
+		_, span := otel.Tracer("github.com/digitalwayhk/core/mq").Start(cctx, "redis.reliable.handler")
+		span.SetAttributes(attribute.String("messaging.message.id", message.ID),
+			attribute.String("messaging.redis.stream_hash", redisLifecycleSubjectHash(key)),
+			attribute.String("messaging.redis.group_hash", redisLifecycleGroupHash(options.Group)))
+		defer span.End()
+		defer func() { metrics.handlerNanos.Add(time.Since(started).Nanoseconds()) }()
 		current := metrics.inflight.Add(1)
 		for {
 			peak := metrics.peak.Load()
@@ -244,26 +281,20 @@ func (r *RedisStreamProvider) SubscribeReliable(
 		defer metrics.inflight.Add(-1)
 		return handler(message)
 	}
-	r.mu.Lock()
-	r.subs[subscriptionKey] = cancel
-	r.reliableMetrics[subscriptionKey] = metrics
-	r.mu.Unlock()
-	r.wg.Add(1)
+	stop, err := r.registerRedisSubscription(subscriptionKey, cancel, metrics)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		defer r.wg.Done()
-		if options.KeyConcurrency > 1 {
+		defer stop()
+		if options.KeyConcurrency > 1 || options.SharedKeys {
 			r.runReliableKeyedSubscriber(cctx, key, subject, options, observedHandler, metrics)
 			return
 		}
 		r.runReliableSubscriber(cctx, key, subject, options, observedHandler)
 	}()
-	return func() {
-		cancel()
-		r.mu.Lock()
-		delete(r.subs, subscriptionKey)
-		delete(r.reliableMetrics, subscriptionKey)
-		r.mu.Unlock()
-	}, nil
+	return stop, nil
 }
 
 // SupportsKeyedReliableConcurrency 声明 Redis provider 实现 owner 内分键调度。
@@ -304,6 +335,18 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 end
 return 0
 `)
+
+var redisOwnerRenewScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+func (r *RedisStreamProvider) renewOwner(ctx context.Context, subject string, options ReliableSubscribeOptions) bool {
+	n, err := redisOwnerRenewScript.Run(ctx, r.client, []string{r.reliableOwnerKey(subject, options)}, reliableOwnerToken(options), ownerLeaseTTL(options).Milliseconds()).Int()
+	return err == nil && n == 1
+}
 
 // 只读 fencing：不续约、不抢占，仅判断当前锁是否仍为本 consumer。
 var redisOwnerCheckScript = redis.NewScript(`
@@ -419,7 +462,8 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
-		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+		readStarted := time.Now()
+		entries, err := r.blockingClient.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group: options.Group, Consumer: options.Consumer,
 			Streams: []string{key, ">"}, Count: readCount, Block: 200 * time.Millisecond,
 		}).Result()
@@ -429,7 +473,13 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 			}
 			continue
 		}
+		readAt := time.Now()
 		for _, stream := range entries {
+			observeRedisKeyedRead(ctx, readStarted, readAt, "new", key, options.Group, stream.Messages)
+			for _, item := range stream.Messages {
+				r.deliveryMetrics.newRead.Add(1)
+				r.deliveryMetrics.publishToReadNanos.Add(redisMessageAge(item.ID, readAt).Nanoseconds())
+			}
 			if delay := r.handleReliableMessages(ctx, key, subject, options, stream.Messages, handler); delay > 0 {
 				select {
 				case <-ctx.Done():
@@ -441,176 +491,35 @@ func (r *RedisStreamProvider) runReliableSubscriber(
 	}
 }
 
-// runReliableKeyedSubscriber 保持单 active owner，只在 owner 内并行不同 ordering key。
-// pendingKeys 来自最近一轮完整 PEL 扫描：仍有旧 pending 的 key 不读取后到消息，
-// 但其他新 key 不必等待 poison key 排空。
-func (r *RedisStreamProvider) runReliableKeyedSubscriber(
-	ctx context.Context,
-	key, subject string,
-	options ReliableSubscribeOptions,
-	handler func(*Message) error,
-	metrics *redisReliableSubscriptionMetrics,
-) {
-	defer r.releaseOwner(context.Background(), subject, options)
-	blocked := make(map[string]reliableKeyedWork)
-	pendingKeys := make(map[string]struct{})
-	seenPendingKeys := make(map[string]struct{})
-	claimCursor := "0-0"
-	initialPendingScanComplete := false
-	nextBlockedRetry := time.Time{}
-	window := options.Count
-	if window < int64(options.KeyConcurrency) {
-		window = int64(options.KeyConcurrency)
-	}
-	if window <= 0 {
-		window = 1
-	}
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if !r.refreshOwner(ctx, subject, options) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
-			continue
-		}
-
-		// 每轮先重试各 blocked key 的最早失败消息；成功后该 key 才可能继续。
-		if len(blocked) > 0 && !time.Now().Before(nextBlockedRetry) {
-			retries := make([]reliableKeyedWork, 0, len(blocked))
-			for _, work := range blocked {
-				retries = append(retries, work)
-			}
-			sort.Slice(retries, func(i, j int) bool { return retries[i].id < retries[j].id })
-			failures := runReliableKeyedBatch(ctx, options.KeyConcurrency, retries)
-			blocked = make(map[string]reliableKeyedWork, len(failures))
-			for _, failure := range failures {
-				blocked[failure.work.key] = failure.work
-				r.logReliableKeyedFailure(subject, failure)
-			}
-			if len(blocked) > 0 {
-				nextBlockedRetry = nextRedisReliableRetry(time.Now(), failures)
-			}
-			metrics.blockedKeys.Store(int64(len(blocked)))
-		}
-
-		// PEL 用 XAUTOCLAIM cursor 做有界分页；不要求先 ACK/排空整个 PEL。
-		pending, next, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-			Stream: key, Group: options.Group, Consumer: options.Consumer,
-			MinIdle: 0, Start: claimCursor, Count: window,
-		}).Result()
-		if err != nil && ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			works := r.reliableKeyedWorks(ctx, key, subject, options, pending, handler)
-			for _, work := range works {
-				seenPendingKeys[work.key] = struct{}{}
-			}
-			admitted := admitReliableKeyedWork(works, blocked, 1)
-			metrics.activeKeys.Store(int64(len(admitted)))
-			failures := runReliableKeyedBatch(ctx, options.KeyConcurrency, admitted)
-			metrics.activeKeys.Store(0)
-			for _, failure := range failures {
-				blocked[failure.work.key] = failure.work
-				r.logReliableKeyedFailure(subject, failure)
-			}
-			if len(failures) > 0 {
-				nextBlockedRetry = nextRedisReliableRetry(time.Now(), failures)
-			}
-			claimCursor = next
-			if next == "" || next == "0-0" {
-				pendingKeys = seenPendingKeys
-				seenPendingKeys = make(map[string]struct{})
-				for blockedKey := range blocked {
-					pendingKeys[blockedKey] = struct{}{}
-				}
-				claimCursor = "0-0"
-				initialPendingScanComplete = true
-				metrics.pendingKeys.Store(int64(len(pendingKeys)))
-			}
-		}
-
-		if !initialPendingScanComplete || !r.stillOwner(ctx, subject, options) {
-			continue
-		}
-
-		readCount, allowed := r.redisReliableReadCount(ctx, key, options, window)
-		if !allowed {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(options.ClaimInterval):
-			}
-			continue
-		}
-		entries, err := r.client.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group: options.Group, Consumer: options.Consumer,
-			Streams: []string{key, ">"}, Count: readCount, Block: 100 * time.Millisecond,
-		}).Result()
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			continue
-		}
-		for _, stream := range entries {
-			works := r.reliableKeyedWorks(ctx, key, subject, options, stream.Messages, handler)
-			eligible := make([]reliableKeyedWork, 0, len(works))
-			counts := make(map[string]int)
-			for _, work := range works {
-				counts[work.key]++
-				if _, pending := pendingKeys[work.key]; pending {
-					continue
-				}
-				if _, failed := blocked[work.key]; failed {
-					continue
-				}
-				eligible = append(eligible, work)
-			}
-			admitted := admitReliableKeyedWork(eligible, blocked, 1)
-			metrics.activeKeys.Store(int64(len(admitted)))
-			for workKey, count := range counts {
-				if count > 1 || len(admitted) == 0 {
-					pendingKeys[workKey] = struct{}{}
-				}
-			}
-			failures := runReliableKeyedBatch(ctx, options.KeyConcurrency, admitted)
-			metrics.activeKeys.Store(0)
-			for _, failure := range failures {
-				blocked[failure.work.key] = failure.work
-				pendingKeys[failure.work.key] = struct{}{}
-				r.logReliableKeyedFailure(subject, failure)
-			}
-			if len(failures) > 0 {
-				nextBlockedRetry = nextRedisReliableRetry(time.Now(), failures)
-			}
-			metrics.blockedKeys.Store(int64(len(blocked)))
-			metrics.pendingKeys.Store(int64(len(pendingKeys)))
-		}
-	}
-}
-
 func (*RedisStreamProvider) ComponentName() string { return "mq" }
 
 func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observability.RuntimeComponentSnapshot {
-	if r == nil || r.client == nil {
+	if r == nil {
 		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
 	}
 	r.mu.Lock()
+	if r.closed || r.client == nil {
+		r.mu.Unlock()
+		return observability.RuntimeComponentSnapshot{Component: "mq", State: "unavailable"}
+	}
+	blockingSubscriptions := len(r.subs) - len(r.reliableMetrics)
 	metrics := make([]*redisReliableSubscriptionMetrics, 0, len(r.reliableMetrics))
 	for _, item := range r.reliableMetrics {
 		metrics = append(metrics, item)
+		if item.blockingReads {
+			blockingSubscriptions++
+		}
 	}
 	r.mu.Unlock()
 	gauges := map[string]float64{
 		"key_concurrency": 0, "handler_inflight": 0, "handler_peak": 0,
-		"active_keys": 0, "blocked_keys": 0, "pending_keys": 0,
+		"redis_blocking_subscriptions": float64(blockingSubscriptions),
+		"active_keys":                  0, "blocked_keys": 0, "pending_keys": 0,
+		"prefetch_capacity": 0, "prefetched_messages": 0, "queued_work": 0,
 	}
+	counters := r.lifecycleMetrics.snapshot()
+	redisPoolMetrics("command", r.client, gauges, counters)
+	redisPoolMetrics("blocking", r.blockingClient, gauges, counters)
 	for _, item := range metrics {
 		gauges["key_concurrency"] += float64(item.configured)
 		gauges["handler_inflight"] += float64(item.inflight.Load())
@@ -618,9 +527,28 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		gauges["active_keys"] += float64(item.activeKeys.Load())
 		gauges["blocked_keys"] += float64(item.blockedKeys.Load())
 		gauges["pending_keys"] += float64(item.pendingKeys.Load())
+		gauges["prefetch_capacity"] += float64(item.prefetchCapacity.Load())
+		gauges["prefetched_messages"] += float64(item.prefetched.Load())
+		gauges["queued_work"] += float64(item.queuedWork.Load())
 	}
+	counters["reliable_new_read_total"] = float64(r.deliveryMetrics.newRead.Load())
+	counters["reliable_reclaim_read_total"] = float64(r.deliveryMetrics.reclaimRead.Load())
+	counters["reliable_publish_to_read_seconds_total"] = float64(r.deliveryMetrics.publishToReadNanos.Load()) / float64(time.Second)
+	counters["reliable_schedule_wait_seconds_total"] = float64(r.deliveryMetrics.scheduleWaitNanos.Load()) / float64(time.Second)
+	counters["reliable_handler_seconds_total"] = float64(r.deliveryMetrics.handlerNanos.Load()) / float64(time.Second)
+	counters["reliable_pel_wait_seconds_total"] = float64(r.deliveryMetrics.pelWaitNanos.Load()) / float64(time.Second)
+	counters["reliable_pel_wait_samples_total"] = float64(r.deliveryMetrics.pelWaitSamples.Load())
+	counters["reliable_scheduled_total"] = float64(r.deliveryMetrics.scheduled.Load())
+	counters["reliable_handler_calls_total"] = float64(r.deliveryMetrics.handlerCalls.Load())
+	gauges["shared_key_leases"] = float64(r.deliveryMetrics.sharedLeases.Load())
+	counters["shared_key_acquired_total"] = float64(r.deliveryMetrics.sharedAcquired.Load())
+	counters["shared_key_contended_total"] = float64(r.deliveryMetrics.sharedContended.Load())
+	counters["shared_key_owner_lost_total"] = float64(r.deliveryMetrics.sharedOwnerLost.Load())
+	counters["reliable_ack_total"] = float64(r.deliveryMetrics.ackSucceeded.Load())
+	counters["reliable_ack_fail_total"] = float64(r.deliveryMetrics.ackFailed.Load())
+	counters["reliable_ack_seconds_total"] = float64(r.deliveryMetrics.ackNanos.Load()) / float64(time.Second)
 	return observability.RuntimeComponentSnapshot{
-		Component: "mq", State: "ok", Gauges: gauges, Counters: r.lifecycleMetrics.snapshot(),
+		Component: "mq", State: "ok", Gauges: gauges, Counters: counters,
 	}
 }
 
@@ -646,6 +574,9 @@ func (r *RedisStreamProvider) reliableKeyedWorks(
 				if orderingKey == "" {
 					return ErrOrderingKeyRequired
 				}
+				if options.SharedKeys {
+					return r.processSharedReliableMessage(ctx, streamKey, subject, options, item, handler)
+				}
 				return r.processReliableMessage(ctx, streamKey, subject, options, item, handler)
 			},
 		})
@@ -654,6 +585,9 @@ func (r *RedisStreamProvider) reliableKeyedWorks(
 }
 
 func (r *RedisStreamProvider) logReliableKeyedFailure(subject string, failure reliableKeyedFailure) {
+	if errors.Is(failure.err, errSharedKeyBusy) {
+		return
+	}
 	logx.Errorw("mq_redis_reliable_keyed_handler_failed",
 		logx.Field("subject", subject),
 		logx.Field("failure_class", "handler_or_delivery_failed"),

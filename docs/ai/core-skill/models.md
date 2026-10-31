@@ -132,9 +132,15 @@ Internal / HTTP 500。不得用字符串包含判断新增数据库分类；扩�
 
 所以切换到 MySQL 不需要 DBA 预建库，也不需要迁移脚本；连上去就会自己建。
 
+`oltp.Config.InterpolateParams` 默认false。显式true时，Core建池仅接受空值（按默认utf8mb4）或utf8mb4，其他字符集在连接前拒绝；不手工拼SQL、不同时开启GORM语句缓存。`MysqlDSN`、`SetMysqlDSN`及内部建库/业务DSN均透传该选项。它只减少驱动参数语句的协议往返，不改变事务、fsync、幂等或确认语义；参数安全和事务仍须在实际使用的数据库验证。
+
+内部DSN构造只读配置，默认字符集/时区在局部解析，不回写调用方Config；调用方仍不得在连接使用期间并发修改配置。
+
+MySQL共享连接池按地址、实际数据库、认证和驱动语义隔离。不同用户名/密码不得借用已认证池；原始字节无损编码，不用会替换非法UTF8的JSON作为认证身份。同配置继续复用。连接池及同步限流键是进程内不透明身份，不能解析或持久保存，也不能记录原始凭据。池容量和日志仍沿用同身份首次创建者配置。新增驱动选项时必须同步纳入共享池身份，并验证不同设置不能混池。
+
 MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额外 `Ping`。连接有效性由真实 SQL 结果判定：
 
-- 同一个 `host:port/database` 的首次建池和故障恢复按连接键合并，只发布一套池；并发调用不得各自创建池后互相替换。
+- 同地址、数据库、认证与驱动语义的首次建池和故障恢复按连接键合并，只发布一套池；并发调用不得各自创建池后互相替换。
 - Clone 报告连接错误时只能驱逐自己仍引用的那套底层池；若其他 goroutine 已发布新池，旧 Clone 不得删除新池。
 - 长期服务池不按 ConnectionManager 的查询时间主动关闭；物理空闲连接由 `database/sql` 的 `MaxIdleConns`、`ConnMaxIdleTime` 和 `ConnMaxLifetime` 管理。
 
@@ -149,6 +155,8 @@ MySQL 运行期复用 `database/sql` 连接池句柄，每次 CRUD 前不再额�
 底层建表仍由一次真实数据访问触发，而不是构造 `ModelList` 时触发；服务必须把这次访问集中放进 models 组合根的 `EnsureStorage()`，并在创建/启动 Server、接受请求前执行。`entity.NewModelList[T](nil)` 只是创建列表对象。不要把 `EnsureStorage()` 放进异步 `IStartService.Start()`：该 Hook 在 Server 已运行后异步调用，不能作为建表屏障。
 
 因此"新增字段后重启即自动补列"是指启动入口先执行 `EnsureStorage()`，成功后才启动 Server；初始化失败应终止启动，不能等请求触发或静默降级。
+
+标准 WebServer 支持可选的 `types.IInitializeService.Initialize() error`。服务可在 `service.go` 的此方法中调用 `models.EnsureStorage()` 并绑定必要存储，无需 main 处理具体模型。全部此类钩子成功前不会构造监听器；原有异步 `Start()` 行为不变。失败回滚和生命周期边界见 [服务组合根](project-layout.md)。不要只定义同名 `EnsureStorage()` 方法并假定框架会自动调用。
 
 ### 边界：不会自动做的事
 
@@ -272,5 +280,5 @@ SQLite/MySQL/PostgreSQL 统一由 models 组合根使用 `oltp.NewDataAction(typ
 
 - PostgreSQL 必须显式选择 `StorageConfig.Driver = "postgres"`，或显式调用 `oltp.NewPostgres`。通用工厂的空 Driver 默认 `sqlite`；原有 MySQL/SQLite 构造器仍可使用。升级 Core 不会自动切库，也不会搬迁原库数据。
 - 07 示例未声明 `SHOP_ORDER_REMOTE_DRIVER` 时仍选择 MySQL 并读取 `SHOP_ORDER_REMOTE_MYSQL_*`；选择 PostgreSQL 时使用 `SHOP_ORDER_REMOTE_DRIVER=postgres` 和 `SHOP_ORDER_REMOTE_*` 配置。业务库与 Core `ManageStore` 分别配置，修改其中一个不会切换另一个。
-- 当前 07 旧 MySQL DSN 转换到 `StorageConfig` 时没有保留 `Charset`、`Loc`，通用工厂会使用 `utf8mb4`、`Local`。依赖自定义字符集或时区的消费方不能按“旧 DSN 参数全部原样保留”升级，需先核对适配；这是当前兼容缺口。
+- 07 未声明驱动时继续用原 `remoteMySQLConfig()` 和 `NewMySQL` 装配实际访问器，保留旧 DSN 支持的 `Charset`、`Loc`、连接池及 `InterpolateParams` 选择；不能把旧配置先转换为缺少这些字段的 `StorageConfig`。显式通用配置路径使用工厂自己的默认值，不是任意 MySQL DSN 参数直通。
 - 未启用 PostgreSQL 不代表共享代码没有变化：查询、聚合和 MySQL 连接池身份也有调整；SQLite 周桶变化见 [统计分片](stats-and-reports.md)，控制面连接寿命变化见 [Manage 分片](manage.md)。相关测试通过不能替代所有消费方业务回归。

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/json"
 	"github.com/digitalwayhk/core/pkg/persistence/database/oltp"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"

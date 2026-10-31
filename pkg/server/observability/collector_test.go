@@ -82,3 +82,68 @@ func TestCollectorExportsProviderGauges(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, 3.0, depth)
 }
+
+// TestCollectorExportsAdmissionRejections 验证三类背压事实可观测，同时继续过滤高基数名称。
+func TestCollectorExportsAdmissionRejections(t *testing.T) {
+	expected := map[string]float64{
+		"admission_rejected_concurrency_total": 2,
+		"admission_rejected_pending_total":     3,
+		"admission_rejected_disk_total":        4,
+	}
+	values := map[string]float64{"request_id_123": 99}
+	for name, value := range expected {
+		values[name] = value
+	}
+	registry := prometheus.NewRegistry()
+	require.NoError(t, registry.Register(observability.NewComponentCollector("shop-order", []observability.RuntimeMetricProvider{
+		&fakeProvider{name: "write_path", gauges: values},
+	})))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	actual := map[string]float64{}
+	for _, family := range families {
+		if family.GetName() != "core_component_gauge" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "name" {
+					actual[label.GetValue()] = metric.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	require.Equal(t, expected, actual)
+}
+
+func TestCollectorExportsReliableQueueAndClocks(t *testing.T) {
+	gauges := map[string]float64{"prefetch_capacity": 8, "prefetched_messages": 3, "queued_work": 1}
+	counters := map[string]float64{
+		"reliable_new_read_total": 2, "reliable_reclaim_read_total": 3,
+		"reliable_publish_to_read_seconds_total": 0.2, "reliable_schedule_wait_seconds_total": 0.1,
+		"reliable_handler_seconds_total": 0.01, "reliable_pel_wait_seconds_total": 0.03,
+		"reliable_pel_wait_samples_total": 2, "reliable_scheduled_total": 2, "reliable_handler_calls_total": 2,
+	}
+	registry := prometheus.NewRegistry()
+	require.NoError(t, registry.Register(observability.NewComponentCollector("service", []observability.RuntimeMetricProvider{
+		&fakeProvider{name: "mq", gauges: gauges, counters: counters},
+	})))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	actualGauges, actualCounters := map[string]float64{}, map[string]float64{}
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "name" {
+					if metric.Counter != nil {
+						actualCounters[label.GetValue()] = metric.GetCounter().GetValue()
+					} else if metric.Gauge != nil {
+						actualGauges[label.GetValue()] = metric.GetGauge().GetValue()
+					}
+				}
+			}
+		}
+	}
+	require.Equal(t, gauges, actualGauges)
+	require.Equal(t, counters, actualCounters)
+}

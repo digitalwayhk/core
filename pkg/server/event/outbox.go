@@ -69,25 +69,31 @@ type OutboxOptions struct {
 }
 
 type outboxPublisher struct {
-	admission      func() error
-	source         string
-	store          OutboxStore
-	interval       time.Duration
-	batch          int
-	keyConcurrency int
-	external       bool
-	bridge         *ServiceEventBridge
-	notify         chan struct{}
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	depth          atomic.Int64
-	failures       atomic.Uint64
-	loadFailed     atomic.Bool
-	lastBatch      atomic.Int64
-	activeLanes    atomic.Int64
-	blockedKeys    atomic.Int64
-	workerInflight atomic.Int64
-	workerPeak     atomic.Int64
+	admission       func() error
+	source          string
+	store           OutboxStore
+	interval        time.Duration
+	batch           int
+	keyConcurrency  int
+	external        bool
+	bridge          *ServiceEventBridge
+	notify          chan struct{}
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	depth           atomic.Int64
+	failures        atomic.Uint64
+	loadFailed      atomic.Bool
+	loadNanos       atomic.Uint64
+	publishNanos    atomic.Uint64
+	markNanos       atomic.Uint64
+	loadAttempts    atomic.Uint64
+	publishAttempts atomic.Uint64
+	markAttempts    atomic.Uint64
+	lastBatch       atomic.Int64
+	activeLanes     atomic.Int64
+	blockedKeys     atomic.Int64
+	workerInflight  atomic.Int64
+	workerPeak      atomic.Int64
 }
 
 func newOutboxPublisher(bridge *ServiceEventBridge, options OutboxOptions) (*outboxPublisher, error) {
@@ -234,7 +240,7 @@ func (p *outboxPublisher) publishSerialAndMarkEach(
 			blocked[key] = struct{}{}
 			continue
 		}
-		if err := p.store.MarkPublished(ctx, item); err != nil {
+		if err := p.markPublished(ctx, item); err != nil {
 			p.endOutboxWorker()
 			p.failures.Add(1)
 			logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
@@ -378,7 +384,7 @@ func (p *outboxPublisher) runKeyedLanes(
 					break
 				}
 				if markEach {
-					if err := p.store.MarkPublished(ctx, item); err != nil {
+					if err := p.markPublished(ctx, item); err != nil {
 						p.failures.Add(1)
 						logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("event_type", item.EventType), logx.Field("event_id", item.EventID), logx.Field("ordering_key", key), logx.Field("error", err))
 						result.failed = true
@@ -409,7 +415,11 @@ func (p *outboxPublisher) confirmPublishedBatch(
 	if len(published) == 0 {
 		return false
 	}
-	if err := marker.MarkPublishedBatch(ctx, published); err != nil {
+	start := time.Now()
+	p.markAttempts.Add(1)
+	markErr := marker.MarkPublishedBatch(ctx, published)
+	p.markNanos.Add(uint64(time.Since(start)))
+	if err := markErr; err != nil {
 		p.failures.Add(1)
 		logx.Errorw("event_outbox_mark_failed", logx.Field("service", p.source), logx.Field("batch_size", len(published)), logx.Field("error", err))
 		for _, item := range published {
@@ -436,6 +446,9 @@ func (p *outboxPublisher) endOutboxWorker() {
 }
 
 func (p *outboxPublisher) loadPending(ctx context.Context, blocked map[string]struct{}) ([]OutboxMessage, error) {
+	start := time.Now()
+	p.loadAttempts.Add(1)
+	defer func() { p.loadNanos.Add(uint64(time.Since(start))) }()
 	if len(blocked) > 0 {
 		if skipper, ok := p.store.(OutboxStoreSkipBlocked); ok {
 			keys := make([]string, 0, len(blocked))
@@ -459,6 +472,9 @@ func outboxOrderingKey(item OutboxMessage) string {
 }
 
 func (p *outboxPublisher) publish(ctx context.Context, item OutboxMessage) error {
+	start := time.Now()
+	p.publishAttempts.Add(1)
+	defer func() { p.publishNanos.Add(uint64(time.Since(start))) }()
 	if p.admission != nil {
 		if err := p.admission(); err != nil {
 			return err
@@ -511,4 +527,12 @@ func (p *outboxPublisher) close() {
 	}
 	p.cancel()
 	p.wg.Wait()
+}
+
+// markPublished 为旧逐条确认路径记录真实调用，不改变错误和失败屏障。
+func (p *outboxPublisher) markPublished(ctx context.Context, item OutboxMessage) error {
+	start := time.Now()
+	p.markAttempts.Add(1)
+	defer func() { p.markNanos.Add(uint64(time.Since(start))) }()
+	return p.store.MarkPublished(ctx, item)
 }

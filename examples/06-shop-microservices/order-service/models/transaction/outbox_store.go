@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/order-service/models/internal/store"
+	messagestore "github.com/digitalwayhk/core/pkg/persistence/message"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/digitalwayhk/core/pkg/server/event"
 )
@@ -38,23 +39,12 @@ func (OutboxStore) LoadPending(context.Context, int) ([]event.OutboxMessage, err
 }
 
 // MarkPublished 实现本类型在当前服务边界中的行为。
-func (OutboxStore) MarkPublished(_ context.Context, message event.OutboxMessage) error {
-	return store.RunSerialized(func() error {
-		items, err := PendingOutbox()
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			if item.ID == message.ID {
-				return MarkOutboxPublished(item)
-			}
-		}
-		return nil
-	})
+func (outbox OutboxStore) MarkPublished(ctx context.Context, message event.OutboxMessage) error {
+	return outbox.MarkPublishedBatch(ctx, []event.OutboxMessage{message})
 }
 
 // MarkPublishedBatch 一次事务确认一批已发布事件。
-func (OutboxStore) MarkPublishedBatch(_ context.Context, messages []event.OutboxMessage) error {
+func (OutboxStore) MarkPublishedBatch(ctx context.Context, messages []event.OutboxMessage) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -62,9 +52,9 @@ func (OutboxStore) MarkPublishedBatch(_ context.Context, messages []event.Outbox
 	for _, message := range messages {
 		ids = append(ids, message.ID)
 	}
-	return store.RunInTransaction(func() error {
-		return store.EnsureModel(NewOutbox())
-	}, func(action persistencetypes.IDataAction) error {
-		return MarkOutboxPublishedByIDs(action, ids)
+	return store.RunSerialized(func() error {
+		return messagestore.Run(ctx, store.Get(), func(action persistencetypes.IDataAction) error {
+			return markOutboxPublishedByIDs(ctx, action, ids)
+		})
 	})
 }

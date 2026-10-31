@@ -16,11 +16,21 @@ type RemoteOrderStore interface {
 // OrderWriteBehindTarget 将当前 order 副本的 Badger pending 汇合到共享 MySQL 权威库。
 // 它只表达订单业务同步语义，pending ACK、重试保留和本地删除由 PrefixedBadgerDB 统一处理。
 type OrderWriteBehindTarget struct {
-	Remote RemoteOrderStore
+	Remote     RemoteOrderStore
+	BeforeSync func() error
+	AfterSync  func()
 }
 
 // SyncBatch 将一批本地订单同步到远程权威库，并返回可 ACK 的 Badger key。
 func (target OrderWriteBehindTarget) SyncBatch(ctx context.Context, items []*nosql.SyncQueueItem[models.Order]) (*nosql.WriteBehindResult, error) {
+	if err := ctx.Err(); err != nil {
+		return &nosql.WriteBehindResult{}, err
+	}
+	if target.BeforeSync != nil {
+		if err := target.BeforeSync(); err != nil {
+			return &nosql.WriteBehindResult{}, err
+		}
+	}
 	remote := target.Remote
 	if remote == nil {
 		remote = ModelRemoteOrderStore{}
@@ -39,6 +49,9 @@ func (target OrderWriteBehindTarget) SyncBatch(ctx context.Context, items []*nos
 	}
 	if _, err := remote.UpsertBatch(ctx, orders); err != nil {
 		return &nosql.WriteBehindResult{}, err
+	}
+	if target.AfterSync != nil {
+		target.AfterSync()
 	}
 	return &nosql.WriteBehindResult{ConfirmedKeys: confirmed}, nil
 }

@@ -1,5 +1,5 @@
 // Package transaction 提供 07 订单服务实例级 typed 可靠写入 runtime。
-// runtime 在路由构造期就作为稳定引用注入 API/business，Service.Start 稍后再绑定
+// runtime 在路由构造期就作为稳定引用注入 API/business，Service.Initialize 在监听前绑定
 // 当前副本 store，因此无需包级全局 registry，也不会让不同 Service 实例串用。
 package transaction
 

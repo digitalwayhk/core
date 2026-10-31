@@ -22,6 +22,12 @@ func (n *NATSJetStreamProvider) SubscribeReliable(
 	options ReliableSubscribeOptions,
 	handler func(*Message) error,
 ) (func(), error) {
+	if options.SharedKeys {
+		return nil, ErrSharedKeyReliableUnsupported
+	}
+	if options.KeyConcurrency > 1 {
+		return nil, ErrKeyedReliableSubscribeUnsupported
+	}
 	n.mu.Lock()
 	js := n.js
 	n.mu.Unlock()

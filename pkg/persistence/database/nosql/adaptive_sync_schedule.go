@@ -25,7 +25,8 @@ func (s *adaptiveSyncSchedule) delay(now time.Time, count int, first time.Time) 
 }
 
 func (s *adaptiveSyncSchedule) completed(now, epoch time.Time, confirmed int, err error) {
-	if err != nil || confirmed == 0 {
+	// 只依据本地确认进展调度；部分失败的错误仍由调用方保留并记录。
+	if confirmed == 0 {
 		ceiling := max(s.config.SyncMinInterval, s.config.SyncMaxInterval)
 		if s.retryDelay == 0 {
 			s.retryDelay = s.config.SyncMinInterval

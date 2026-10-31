@@ -1,21 +1,284 @@
 # 变更日志
 
-## 未发布：PostgreSQL 与存储边界
-
-- 新增 PostgreSQL OLTP、统一配置/工厂与中性聚合能力；Manage 和统计定义不选择数据库类型。
-- 修正原生查询包装、跨身份连接缓存、SQLite ISO 周年及 PostgreSQL 未标注金额的 numeric 映射。
-- 增加真实数据库、双副本 pending 恢复、控制面 HTTP/RBAC 与三库统计验收。
-- 保留旧 IDataAction/构造器；显式统计方言不匹配时拒绝。消费方切库不自动搬迁历史数据。
-
 本文记录 `github.com/digitalwayhk/core` 的重要变更，格式遵循 Keep a Changelog，版本遵循 SemVer。
 
 ## [Unreleased]
 
 ### Added
 
-- 显式 `Cluster.IdentityMode=stable`：服务名与持久 InstanceID 作为注册身份，MachineID/实际 WorkerID 通过独立 local/Redis/etcd 权威绑定；持久 Boot 世代、生成时间预留和 owner 原子检查保护重启与注册恢复。新增离线 `cmd/instance-identity` create/import/recover/retire/capacity、新就绪探针 `/api/ready`、后台准入入口，以及 06/07 稳定副本真实进程回归。默认 legacy 保持；Consul stable 不支持。迁移说明见 `docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md`。
+- 无。
 
-- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力建议作为 v1.3.0 MINOR 发布。
+### Changed
+
+- 无。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 无。
+
+### Security
+
+- 无。
+
+## [v1.7.0] - 2026-11-01
+
+
+### Added
+
+- 新增显式 PostgreSQL OLTP 支持、`StorageConfig`/统一工厂和可选中性聚合能力。驱动选择集中在模型组合根；业务、Manage 和统计定义不增加数据库分支。默认数据库选择保持，切库不自动搬迁数据；07 旧 MySQL DSN 与协议选项保留。详见 [存储指南](docs/codex/POSTGRESQL_STORAGE_GUIDE.md)。
+
+### Changed
+
+- 统计执行下沉到持久化层；未知驱动不再按 MySQL 执行，显式方言与实际连接不一致时报错。SQLite 周桶统一 ISO 周年，例如 2021-01-01 从 2021-W00 变为 2020-W53，需核对历史报表与快照。MySQL ManageStore 连接最大生命周期从不限变为30分钟；这些共享行为变化在未启用 PostgreSQL 时也生效。迁移说明见 [v1.7.0 发布说明](docs/codex/RELEASE_V1_7_0_2026-11-01.md)。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 修正跨方言原生查询包装、自定义列名引用和聚合执行；PostgreSQL 唯一冲突映射409、金额新列映射numeric，并在启动初始化表/关联及索引。保留主线 v1.6.4 及之前的连接池恢复和可靠写修复。
+
+### Security
+
+- 无。
+
+## [v1.6.4] - 2026-10-31
+
+### Fixed
+
+- 修正有界write-behind后台选批的target/group/具体queue底层范围；复用绑定既有mode提交版本的target范围结果，绑定前完成冷核验。同轮选中快照在BatchID就绪后只写一次，不变cursor不重复写；保留原FIFO、事务核验、有限预算、失败屏障及v1.6.3空组修复。详见[修复与证据](docs/codex/WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)。
+
+### Changed
+
+- 更新权威skill、正式指南和04/07说明；API/配置/格式/StoreID/policy不变，无新开关或卷迁移。选批工作下降，但整体Save P99没有一致改善；Mac异常轮及既有Badger恢复FAIL全部保留，不宣称全面性能验收。升级、回退与NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_4_2026-10-31.md)。
+
+## [v1.6.3] - 2026-10-31
+
+### Fixed
+
+- 修复有界 write-behind 前台 Ready 版本替换中的重复空组核验：比较旧新实际组身份，同组补新跳过临时空组核验；跨组在每个实际 Badger 事务最终写集上去重，并用底层 IteratorOptions.Prefix 限定目标组。回滚及过大事务拆分不共享收集集合，保留原件、历史、版本与顺序保护。详见[修复与证据](docs/codex/WRITE_BEHIND_DISPOSITION_GROUP_FIX_2026-10-31.md)。
+
+### Changed
+
+- 更新权威 skill、Badger 参数验证边界及07可选2P资源配置；不改变生产默认、公共API、policy或卷格式，无需应用新增配置。历史场景P99改善不代表所有负载提速；分散跨组负载的取舍、既有偶发恢复失败及消费方升级边界见[发布说明](docs/codex/RELEASE_V1_6_3_2026-10-31.md)。
+
+## [v1.6.2] - 2026-10-31
+
+### Fixed
+
+- 修复有界write-behind后台逐条确认放大可靠本地提交并争用前台的路径：按条数/编码预算分块、实际过大二分，真实提交后才计数/清理；有界ReliableWriteStore复用既有FIFO，确认量子固定8项（直接PrefixedBadgerDB最多32项），瞬时空闲不放大块，组索引维护复用无value预取迭代器；满队列Close唤醒未接收前台，已接受请求继续等待真实提交。保留原版本/指纹、未知结果、有限预算、组屏障、回收及原卷恢复。详见[实施与证据](docs/codex/WRITE_BEHIND_BATCH_CONFIRMATION_2026-10-31.md)。
+
+### Changed
+
+- 有界store自动复用既有FIFO本地提交面，并增加只读事务/等待观测；无需新增配置，不改持久格式。持续P99仍72–76ms，性能未完全验收；升级、回退及NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_2_2026-10-31.md)。
+
+## [v1.6.1] - 2026-10-30
+
+### Fixed
+
+- 修复有界 write-behind 的 target 成功及应用显式 Confirm 在本地确认提交后遗漏 `IsSyncAfterDelete` 异步清理；复用原版本保护，保留 false、新版本 pending、非成功处置及完整失败历史。内存清理队列的关闭/重启边界不变，旧版已确认残留不会因升级自动回收。详见[修复与验收](docs/codex/WRITE_BEHIND_LOCAL_CLEANUP_2026-10-30.md)。
+
+### Changed
+
+- 有界模式现在与普通模式一致，在真实本地成功确认后调用既有删除 hook；返回 true 才回收原版本。无需新 API 或配置，存量残留与关闭/重启边界见[发布说明](docs/codex/RELEASE_V1_6_1_2026-10-30.md)。
+
+## [v1.6.0] - 2026-10-26
+
+### Added
+
+- EventBridge显式可选`Subscription.BrokerOnly`：仅经正式外部可靠MQ入站消费，包括同服务Source；默认false保留旧本地与外部交付。新增可靠入站/同Stream接线校验，更新skill、示例10及[接入与验收](docs/codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
+
+### Fixed
+
+- 显式仅Broker handler不再进入本地Outbox同步外发；外部同组复用、聚合确认、订阅取消身份和在途关闭等待补齐。保留Broker失败不确认、消费完成后ACK及原有顺序/生命周期；不修改Outbox批次调度或Redis Provider，不声称解释全部现场延迟。
+
+### Changed
+
+- BrokerOnly须显式启用并验证可靠外部接线；零值及旧订阅保持原交付。取消后迟到成功不ACK，Close等待在途可靠handler；迁移及NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_0_2026-10-26.md)。
+
+## [v1.5.0] - 2026-10-23
+
+### Added
+
+- 显式write-behind有界失败处置：有限target/handler预算、稳定原版本快照与批次范围、应用结果确认/暂停/独立持久接管、组首有界轮转和原身份Release。原UseWriteBehind/零配置不变；新增07应用接管示例与真实ServiceContext资源链、独立进程硬杀/回执丢失/race验收。详见[正式合同](docs/codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)和[发布验收](docs/codex/RELEASE_V1_5_0_2026-10-23.md)。
+
+### Changed
+
+- 新模式须应用显式配置稳定StoreID及有限预算并绑定handler；policy持久冻结，旧pending先确认未知结果。禁止旧二进制回退打开新模式卷、混跑、删标记或清pending迁移。应用接管只结束技术投递，HandedOff与IsSynced/APPLIED分开，顺序屏障需应用明确解除；未知结果、幂等与业务补偿由应用负责。
+
+### Fixed
+
+- 保留v1.4.8部分确认继续drain和真实计数；新模式失败占满窗口时允许无关组继续，同组未解决前序仍阻断。固定回调worker隔离慢处理，旧回调实际退出前不重做同组target；技术pending为零也不隐藏worker关闭超时。确认仍按原版本与指纹核验，旧决定不ACK新值，不自动删除DeadKeys。
+
+## [v1.4.8] - 2026-10-23
+
+### Fixed
+
+- 修复自适应 write-behind 部分成功仍触发全 store 失败退避：按真实本地确认进展继续 drain，零确认仍指数退避；保留原错误与失败 pending。同轮 `Failures` 与 `SyncedItems` 可同时增长，`LastSuccessAt` 保持无错误且有确认的语义；轮次日志区分进展和零进展。未更改配置、确认事务或存储格式，失败占满索引前缀窗口的队头边界仍保留。详见[修复与验收](docs/codex/WRITE_BEHIND_PARTIAL_PROGRESS_2026-10-23.md)。
+
+## [v1.4.7] - 2026-10-22
+
+### Fixed
+
+- 修复v1.4.6普通Public/Private WS被可选归属处理器截断：同服务可信mTLS、SourceService及节点检查后回到已注册正式中继，实际更新对等索引和投递。归属WS保持Ready owner与引用恢复；新增真实双Gateway/mTLS/WS共存回归。详见[升级与验收](docs/codex/RELEASE_V1_4_7_2026-10-22.md)。
+
+### Security
+
+- 已注册两个WS中继的HTTP入口拒绝匿名及用户/管理Token，要求Core可信同服务身份；同服务mTLS不再能直接调用其它ServerManage路径，管理访问仍走原HTTP认证域。原先仅依赖网络ACL的HTTP中继需迁移至既有mTLS gRPC。升级compress v1.18.6至v1.18.7，修复GHSA-259r-337f-4rfw（CVE-2026-63209）S2字典整数溢出/越界风险，增加拒绝字典及最低安全版本门禁。
+
+## [v1.4.6] - 2026-10-21
+
+### Added
+
+- 显式跨主题持续归属：OwnedSubscription、正epoch/实例会话凭据、应用SQL事务fence、真实多输入批次、有限待办与确认进度、Ready owner精确查询/控制及现有WS会话引用恢复。增加示例11的两处理进程、两Gateway、MySQL/mTLS/真实WS验收，更新权威skill和能力矩阵。详见[发布验收](docs/codex/RELEASE_V1_4_6_2026-10-21.md)。
+
+### Changed
+
+- 新入口须显式维护Provision/Bind，保全原shared/W=8、Stream/group/PEL/游标及事件身份；回退Unbind，未知序列不自动补0，正SQL下界维护恢复须停稳实际回调/事务。原订阅零值和Provider必选接口不变；NATS/无MQ、有限次批次DLQ及在线Provider切换明确拒绝。
+
+### Fixed
+
+- 新持续归属按原OrderingKey取最早连续前缀，新读取后重扫PEL，避免并发读取跳过前序；不可执行后序仍计待办。多scope指标有限汇总、handler/ACK独立时钟和旧凭据ACK/Release隔离，保留v1.4.2跨窗口与v1.4.5连接池隔离。
+
+### Security
+
+- 显式归属WS的两个内部gRPC中继只接受同逻辑服务可信mTLS，拒绝匿名HTTP及其他管理域访问；不把业务身份、秘密token或消息正文放入指标/新增trace。
+
+## [v1.4.5] - 2026-10-20
+
+### Added
+
+- Redis Streams 加性连接预算 CommandPoolSize/BlockingReadPoolSize 与 WithConfig 构造器，默认command8/blocking16；真实双池低基数观测及CPU1/2、正式EventBridge链回归。详见[发布与验收](docs/codex/RELEASE_V1_4_5_2026-10-20.md)。
+
+### Changed
+
+- 每Provider隔离阻塞XREADGROUP与控制命令，连接数有界且不依赖CPU；读预算不足仍背压。关闭先打断阻塞I/O再等待handler并释放命令池，Close幂等且终态；重复consumer登记拒绝。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 多空闲主题阻塞读取不再占尽owner续租/校验、ACK、发布和生命周期的连接；取消清理订阅登记并消除登记与关闭的WaitGroup竞态。保留跨窗口持续调度、顺序、失败屏障和安全回收，不改跨实例owner。
+
+### Security
+
+- 无。
+
+## [v1.4.4] - 2026-10-20
+
+### Added
+
+- 显式共享可靠消费合同 `Subscription.SharedKeys/Prefetch`、`SharedKeyReliableMQProvider` 与启动校验。Redis 复用原 Stream/group，按 key 执行租约，多个独立进程可共同处理不同 key；保留有限 worker/PEL 预算、同 key 顺序、失败屏障、pending 恢复和成功后 fenced ACK。零值继续旧单 owner，NATS 不支持则拒绝。
+- `examples/10-reliable-multi-instance`：一个发布服务与两个消费副本的真实 HTTP 演示，覆盖独立 PID 分担、慢 key、失败重投与用户隔离；配套真实崩溃/断网/迟到 ACK/race 验收，以及 lease/ACK 低基数观测。
+
+### Changed
+
+- 显式共享模式和有效预取预算按组持久冻结；激活前需维护窗口停旧消费者并确认实际 handler 退出，禁止旧新混跑或在线 Provider 切换；不删历史、PEL、组或重置游标。迁移说明见 [v1.4.4 发布说明](docs/codex/RELEASE_V1_4_4_2026-10-20.md)。
+- 独立记录 capacity reached 的 retained 容量判定及真实两组回收验证；现场根因证据不足仍未确认，不扩大容量或削弱安全回收。同步能力矩阵及权威 skill。
+
+### Fixed
+
+- 可靠事件显式横向分担时不再被整主题 owner 限在一个副本；保留 v1.4.2 跨读取窗口修复，不重新引入整批等待。租约 fencing 仅保证 Broker ACK/DLQ，业务仍为 at-least-once，跨副本业务副作用须由应用事务幂等保护。
+
+## [v1.4.3] - 2026-10-20
+
+### Security
+
+- `kin-openapi v0.144.0 → v0.149.0`，间接依赖 `jsonschema/v6 v6.0.2 → v6.0.3`。覆盖响应头 content 空指针、OAS 3.1 非有限 YAML 数值、递归组合 schema、缺失 array items 和编码路径鉴权错配五项上游公告；新增实际 RED→GREEN 回归并纳入 `security` 门禁。Core 标准运行链不接入该依赖的请求/响应过滤中间件，本次不改变 Core 的认证域、公开 API 或 Redis 行为。升级及验证边界见 [v1.4.3 发布说明](docs/codex/RELEASE_V1_4_3_2026-10-20.md)。
+
+## [v1.4.2] - 2026-10-20
+
+### Fixed
+
+- Redis 可靠订阅移除跨读取批次的等待屏障，改为 owner 会话级固定 worker。同 key 保留最早失败屏障，独立 key 可跨窗口继续；ACK 响应丢失后先复核 PEL，避免调度器异常重放已 ACK 消息。补充发布、读取、PEL、调度与 handler 观测及真实 Redis/race 回归。
+
+### Changed
+
+- Redis 分 key 模式的 `Count` 同时约束分页和本 owner 的预取预算；默认 `KeyConcurrency*4`，有效下限为并发度，且受较小 `MaxAckPending` 限制。预算满时背压新读取，已有超限 PEL 只分页恢复，不重置消息或消费组。
+- Redis 分 key 超时/取消后等待原 handler 真正退出，再重试或结束会话；不合作的 handler 会延迟 `Close`。零值/1 仍使用串行入口，公开 API、消息编码和依赖不变。
+
+### Security
+
+- owner 校验与 Redis 分 key 读取/认领、可靠 ACK/DLQ 分别原子执行；旧 handler 不得重新抢占已丢失租约后 ACK。可靠 handler 必须返回成功后由 provider 确认，原来手动提前调用 `Message.Ack` 的代码需移除该调用。升级边界与未验证项见 [v1.4.2 发布说明](docs/codex/RELEASE_V1_4_2_2026-10-20.md)及[完整修复验收](docs/codex/REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
+
+## [v1.4.1] - 2026-10-20
+
+### Fixed
+
+- 补齐 v1.4.0 因全局 `*.json` 忽略规则漏提交的内嵌前端 mock 数据文件，使发布包内容与 `build-info.json` 的产物指纹一致；增加 dist JSON 的忽略例外。未修改前端源码、Go 源码、依赖或业务行为。推荐消费方使用 v1.4.1，说明见[补丁记录](docs/codex/RELEASE_V1_4_1_2026-10-20.md)。
+
+## [v1.4.0] - 2026-10-20
+
+本节仅列相对 `v1.3.0` 的改动。消费方必须先阅读[从 v1.3.0 升级](docs/codex/UPGRADE_FROM_V1_3.md)，尤其是 MQ 缺省、Badger 数据与错误身份、MySQL 池和可选 stable 迁移。
+
+07 启动窗口首单 500 已在 `7b5795b` 修复；固定源码全仓回归与变更范围 race 通过，结果和保留限制见[发布记录](docs/codex/RELEASE_V1_4_0_2026-10-20.md)。Core 使用已提交的内嵌前端产物，普通 Go 构建和运行无需获取前端子模块源码。
+
+### Added
+
+- 可选 `types.IInitializeService.Initialize() error`：标准 WebServer 在任何监听器构造前同步完成资源初始化，失败反向回滚；旧 `IService` 与异步 `IStartService` 契约保留。消费方接入及同签名方法检查见升级指导。
+- 显式 `Cluster.IdentityMode=stable`：持久服务实例身份、独立编号权威、Boot 隔离、注册恢复、`/api/ready` 与后台准入入口；新增离线 `cmd/instance-identity` 工具及 06/07 多进程故障恢复测试。默认仍为 legacy；Consul stable 不支持。
+- Experimental 可选事务消息工具 `pkg/persistence/message` 与 MySQL/SQLite `ITransactionDB`，供已确认的业务方案组合事务；不强制建 Outbox/Inbox 表，不改变 `IDataAction` 必选接口。
+- `SearchItem.Context` 可传递 MySQL/SQLite 查询取消，nil 兼容，JSON 忽略；不扩大为整个写事务取消契约。
+- `OutboxRuntimeOptions.BatchSize` 显式批量上限，非正值保持默认 100；新增固定低基数写路径、SQL 池及 Outbox 阶段指标。
+- `oltp.Config.InterpolateParams` 为显式、默认关闭的驱动选项，仅支持已验证的 utf8mb4。新增 07 独立原生 go-zero 对照与诊断工具，容量限制继续如实登记。
+
+### Changed
+
+- **MQ 缺省 Mode 从 auto 改为 off**，不再自动探测本机 Redis。已有显式 auto/on 保持；依赖旧缺省的服务须在自己的配置中明确启用。无 MQ 仍保留进程内事件中心和订阅/发布能力。
+- Badger 后端 `v3.2103.5 → v4.9.6`，go-zero `v1.10.2 → v1.10.3`。Badger 公开方法签名保持，但底层 sentinel 来自 v4；直接比较 v3 错误的消费方须调整。旧卷升级及保全新增事实的回退须先在副本验证，禁止清 pending/authstate。
+- MySQL 共享池按认证、最终库名与实际驱动语义隔离；池键为进程内不透明身份。配置默认化不再回写共享配置，身份编码无损保留原始字节，避免竞争和配置碰撞。
+- 无服务上下文的 `InitRequest.NewID()` 不再使用包级备用生成器；元数据枚举不得生成业务主键，真实编号来自已初始化的 `ServiceContext`。
+- 07 与原生对照逐次读取权威规则，不再保留永久正向快照；权威读取失败不使用旧值放行。07 的 SQL 插值及空闲连接 20 只属于示例覆盖，Core 全局默认不变；此前缓存版本的性能数据不代表当前实现。
+
+### Deprecated
+
+- 本轮未删除既有废弃入口；07 的 `OrderRuleCache`、构造器与 `Invalidate()` 保留调用兼容，后者已无需手工调用。
+
+### Removed
+
+- 无新增公共 API 删除；历史破坏性删除已包含在上版，不重复视为本轮变化。
+
+### Fixed
+
+- 修复 07 ready 成功但订单 runtime 尚未绑定导致的首单 500：订单建表/存储绑定和用户必要订阅移至监听前初始化，失败拒绝启动并释放资源。
+- 修复 09 业务 Manage 演示不完整、系统菜单遗漏角色/权限/管理员页面、`getmenu` 命令关联未加载及自定义角色未使用 explicit 策略。权限树支持回显、增减勾选和事务替换；内部读写接口继续鉴权，后台不生成按钮。
+- 修复权限树读取/替换使用默认 500 条查询而遗漏跨页授权：601 条权限取消全部勾选后不再残留 101 条；保存失败回滚全量删除，其他角色保持。
+- stable 同进程和 gRPC 内部分发在解析结构化载荷前检查目标准入，避免绕过 HTTP 的检查；内部身份授权仍优先，恢复后可继续调用。
+- MySQL 故障恢复区分坏物理连接和整池关闭，修复过期 Clone 引用，保持只读有界恢复、活动事务不换池及写入不重放；SQLite 活动事务不再额外借用池连接。
+- SharedBadger 按实际移除的同步队列项扣减 pending，防止幂等重复 ACK 再次扣减；原生对照负数计数拒绝准入，历史不可达 pending 仅在证明远端事实后恢复，原始产生根因仍为 NOT_REPRODUCED。
+- 06/07 使用统一事务消息入口；07 Outbox 查询传递实际 ctx，并保留 earliest-first、分页及只读连接恢复。批量确认和事件消费的既有事务、失败屏障及幂等边界保留。
+
+### Security
+
+- 不同 MySQL 凭据不再错误复用首个账号的已认证池；错误账号可能在升级后开始正确报错，须检查自己的权限和池容量。
+- stable 内部分发准入和跨页撤权修复已增加失败复现与回归，不以健康检查或界面成功响应代替业务拒绝验证。
+
+## [v1.3.0] - 2026-09-24
+
+以下保留该 tag 中的历史累计记录，包含更早版本已发布的功能；不能当作本次相对 v1.3.0 的新增清单。精确发布差异以 tag 比较为准。
+
+### Added
+
+- 增加标准 WebServer 自动启用的 Manage RoleCode RBAC：Core 在共享 `ManageStore` 保存管理员主体、主体角色、角色和结构化 `service + path + command` 权限；首个真实 Casdoor Manage 用户为 `core.system_admin`，后续用户为 `core.viewer`，TestToken 不占首用户槽位。首位管理员及其引导角色关系不可停用、删除或解绑；启动时严格验证数据库首管理员唯一仲裁约束。Access Token 只携带 RoleCode，所有标准/自定义命令在 Router 前鉴权；外部 IAM 可用 `IManageRoleProvider` 覆盖默认主体映射。新增管理员、角色绑定、角色/权限管理页与 `examples/09-admin-manage-rbac`；第一版保留菜单和按钮可见，无权限操作统一返回安全 403。新配置默认 SQLite `core_manage`，缺少 `ManageStore` 的旧配置继续使用历史 `models` 库；同一进程拒绝绑定不同控制面库。旧无角色 Manage Token 升级后需重新登录。该能力随 v1.3.0 发布。
 
 - 增加 `server.json.ManageStore`，统一选择 SQLite 或共享 MySQL 承载七类 Core Manage 控制面模型；`NewWebServer` 在监听前完成建库建表与内置角色初始化，失败时拒绝启动。业务服务配置不得重复声明，Core 不向消费方暴露控制面 `IDataAction`，SQLite 到 MySQL 的既有数据不自动迁移。
 
@@ -52,10 +315,6 @@
 - 默认内部 gRPC 传输：复用 go-zero zrpc Client、标准 gRPC health、独立 ServiceContext 生命周期、TLS/mTLS/mesh 和协议级三进程验证。
 
 ### Changed
-
-- stable 的路由、受管理事件订阅和 Outbox 在业务操作前检查自身准入；临时发现故障恢复后可继续，持久权威冲突/损坏停止服务。`OutboxOptions.Admission` 为可选接口，保留零值和结构可比较性。无服务上下文的 `InitRequest.NewID` 不再使用包级备用编号，元数据枚举不得生成真实业务主键；正式主键改由受保护 ServiceContext 获取，迁移说明同上。
-
-- MQ 缺省 `Mode` 从 `auto` 改为 `off`，未配置的服务不再自动探测本机 Redis。需要 MQ 的服务必须在自己的配置文件显式设置 `auto/on` 和 Broker 地址；已有 JSON 中明确保存的 `auto/on` 保持不变，旧版本自动生成的 `auto` 如不需要 MQ 应手动改为 `off`。迁移边界见 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
 
 - Runtime 业务监控聚合统一排除 `/api/manage/*` 与 `/api/servermanage/*` 控制面请求；这些请求仍保留访问日志与原始 Prometheus 指标，但不再污染服务 QPS、错误率、p50/p95/p99、路由排行和同步调用边。
 
@@ -98,9 +357,6 @@
 - WebSocket `call` 事件及其 `melody.Call` 常量、`handleCall` 实现和专用请求解析；该事件从未被文档、前端或示例使用，`/ws` 只保留 `sub`、`unsub`、`get`，未识别事件统一返回「不支持的事件类型」。需要调用业务接口的客户端使用 HTTP 路由，需要持续推送的使用 `sub`。
 
 ### Fixed
-
-- 修复 Core 内部系统菜单遗漏 v1.3 RBAC 页面入口：`getmenu` 现在提供角色管理、角色权限管理、管理员和管理员角色绑定；真实 09 进程测试验证菜单及各页面的 View/Search API。
-- 角色权限支持服务、菜单、命令勾选树、已有权限回显和事务替换保存；取消勾选可撤销授权。两个内部读写接口由后台排除页面按钮。修复 `getmenu` 未加载业务命令关联和真实请求中自定义角色新增未设置 `explicit` 策略的问题。
 
 - 修复未分类 `Do()`、数据库和程序错误被 `TypeError` 默认公开为 HTTP 422 / `business rule rejected` 的缺陷：未分类 Do 现在 fail closed 为 500，内层 PublicError 的 Kind、Code、HTTPStatus、Message 不再被 legacy 700/800 阶段码覆盖。标准 Manage 重复记录、缺少 Edit ID、Edit/Remove 不存在改为安全的 409/400/404；GORM、MySQL 1062 和 SQLite 唯一约束统一返回 409 并保留原始 cause，不向响应泄露 SQL、索引、DSN 或驱动原文。该兼容安全修复建议发布为 v1.2.2。
 
@@ -157,5 +413,9 @@
 - 同步更新权威 AI skill、兼容矩阵、设计与验证文档。未改业务 MQ 生命周期及后台产物。
 - 迁移和测试边界见 `docs/codex/OUTBOX_BATCH_CONFIRMATION_REVIEW.md`；低流量缩短等待可能增加事务数，不承诺 fsync 普遍下降。
 
-[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/digitalwayhk/core/compare/v1.4.7...HEAD
+[v1.4.5]: https://github.com/digitalwayhk/core/compare/v1.4.4...v1.4.5
+[v1.4.1]: https://github.com/digitalwayhk/core/compare/v1.4.0...v1.4.1
+[v1.4.0]: https://github.com/digitalwayhk/core/compare/v1.3.0...v1.4.0
+[v1.3.0]: https://github.com/digitalwayhk/core/compare/v1.2.3...v1.3.0
 [v1.2.0]: https://github.com/digitalwayhk/core/compare/v1.1.2...v1.2.0

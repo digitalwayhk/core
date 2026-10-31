@@ -1,0 +1,20 @@
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-private
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-public
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/owned
+=== RUN   TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界
+=== NAME  TestWebSocketRelayCoexistenceRealMTLSGateways
+    relay_test.go:223: Gateway PID=48721/49254；双向摘要与真实WS帧、用户隔离、退订/关闭、真实mTLS拒绝边界
+--- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways (31.46s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-private (0.35s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/ordinary-public (0.29s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways//api/owned-demo/owned (0.36s)
+    --- PASS: TestWebSocketRelayCoexistenceRealMTLSGateways/拒绝边界 (0.04s)
+PASS
+ok  	github.com/digitalwayhk/core/examples/integration/ws-relay	33.106s
+=== RUN   TestScopedOwnershipRealGatewaysSQLAndWebSockets
+{"@timestamp":"2026-10-22T00:37:57.364+08:00","caller":"stat/usage.go:82","content":"CPU: 0m, MEMORY: Alloc=2.7Mi, TotalAlloc=5.8Mi, Sys=13.7Mi, NumGC=2","level":"stat"}
+    ownership_test.go:176: 真实处理PID=49991/50475，两个Gateway、三个认证WS客户端；SQL提交计数=2；无需重订，旧epoch=2 新epoch=11
+--- PASS: TestScopedOwnershipRealGatewaysSQLAndWebSockets (73.60s)
+PASS
+ok  	github.com/digitalwayhk/core/examples/integration/11-scoped-event-ownership	75.165s

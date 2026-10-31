@@ -12,3 +12,4 @@ package=github.com/digitalwayhk/core/pkg/persistence/entity baseline=github.com_
 package=github.com/digitalwayhk/core/pkg/persistence/types baseline=github.com_digitalwayhk_core_pkg_persistence_types.apidiff
 package=github.com/digitalwayhk/core/service/manage baseline=github.com_digitalwayhk_core_service_manage.apidiff
 package=github.com/digitalwayhk/core/service/manage/view baseline=github.com_digitalwayhk_core_service_manage_view.apidiff
+package=github.com/digitalwayhk/core/pkg/server/ownership baseline=github.com_digitalwayhk_core_pkg_server_ownership.apidiff

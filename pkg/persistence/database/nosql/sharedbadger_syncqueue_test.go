@@ -1,10 +1,12 @@
+// 本文件验证持久同步索引与 pending 计数、重复确认和删除的边界。
 package nosql
 
 import (
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/json"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/stretchr/testify/require"
@@ -68,6 +70,51 @@ func TestPendingCountSetThenDeleteDoesNotDoubleCount(t *testing.T) {
 	cached = db.pendingCountCache
 	db.pendingCountMutex.RUnlock()
 	require.Zero(t, cached)
+}
+
+// TestRepeatedConfirmationDoesNotConsumeAnotherPending 验证旧 ACK 重放不能扣减其他事实的 pending。
+func TestRepeatedConfirmationDoesNotConsumeAnotherPending(t *testing.T) {
+	db := newTestDBLocalWithConfig(t, newTestConfig(t.TempDir()))
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+	first := newFund("confirmed", "spot", 1)
+	remaining := newFund("still-pending", "spot", 2)
+	require.NoError(t, db.Set(first, 0))
+	require.NoError(t, db.Set(remaining, 0))
+	key := db.generateKey(first)
+	wrapper, err := db.getWrapper(key)
+	require.NoError(t, err)
+	times := map[string]time.Time{key: wrapper.UpdatedAt}
+	_, err = db.confirmSyncSuccess([]string{key}, times, nil)
+	require.NoError(t, err)
+	_, err = db.physicalDeleteKeys([]string{key})
+	require.NoError(t, err)
+	_, err = db.confirmSyncSuccess([]string{key}, times, nil)
+	require.NoError(t, err)
+	exact, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, exact)
+	require.Equal(t, exact, db.GetCachedPendingSyncCount(), "旧 ACK 不得消耗另一个待同步事实的缓存计数")
+}
+
+// TestRemovedValueConfirmationConsumesItsQueue 验证远端删除已移除本地值时，仍正常确认并扣减其索引。
+func TestRemovedValueConfirmationConsumesItsQueue(t *testing.T) {
+	db := newTestDBLocalWithConfig(t, newTestConfig(t.TempDir()))
+	db.syncLock.Lock()
+	db.syncDB = true
+	db.syncLock.Unlock()
+	item := newFund("removed-value", "spot", 1)
+	require.NoError(t, db.Set(item, 0))
+	key := db.generateKey(item)
+	require.NoError(t, db.manager.db.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(key)) }))
+	confirmed, err := db.confirmSyncSuccess([]string{key, key}, nil, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, confirmed)
+	exact, err := db.GetPendingSyncCount()
+	require.NoError(t, err)
+	require.Zero(t, exact)
+	require.Zero(t, db.GetCachedPendingSyncCount())
 }
 
 func TestMalformedSyncItemStopsBatchWithoutDeletingEvidence(t *testing.T) {
@@ -276,6 +323,16 @@ func TestSyncMetricsRecordConvergence(t *testing.T) {
 	require.Zero(t, metrics.Failures)
 	require.GreaterOrEqual(t, metrics.TotalDuration, time.Duration(0))
 	require.False(t, metrics.LastSuccessAt.IsZero())
+	previousSuccess := metrics.LastSuccessAt
+	db.recordSyncMetrics(120, errors.New("测试部分失败"), 2*time.Millisecond)
+	partial := db.GetSyncMetrics()
+	require.Equal(t, uint64(2), partial.Attempts)
+	require.Equal(t, uint64(1), partial.Failures)
+	require.Equal(t, uint64(121), partial.SyncedItems, "error不能抹去本轮120条真实确认")
+	require.Equal(t, previousSuccess, partial.LastSuccessAt)
+	db.recordSyncMetrics(0, nil, time.Millisecond)
+	require.Equal(t, partial.SyncedItems, db.GetSyncMetrics().SyncedItems)
+	require.Equal(t, previousSuccess, db.GetSyncMetrics().LastSuccessAt)
 }
 
 func TestForceDeleteLocalDecrementsPendingWhenValueIsCorrupt(t *testing.T) {

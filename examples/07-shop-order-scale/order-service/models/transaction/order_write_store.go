@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/persistence/database/nosql"
 )
 
@@ -62,6 +62,26 @@ func (store *OrderWriteStore) UseWriteBehind(target nosql.WriteBehindTarget[Orde
 		return ErrOrderWriteStoreUnavailable
 	}
 	return store.reliable.UseWriteBehind(target)
+}
+
+// UseWriteBehindWithFailureHandler 将显式应用处置接入原订单可靠store，不另建调度循环。
+func (store *OrderWriteStore) UseWriteBehindWithFailureHandler(target nosql.WriteBehindTarget[Order], handler nosql.WriteBehindFailureHandler[Order]) error {
+	return store.reliable.UseWriteBehindWithFailureHandler(target, handler)
+}
+
+// ListWriteBehindFailures 分页向应用恢复流程提供原失败事实，不加入业务路由或管理页面。
+func (store *OrderWriteStore) ListWriteBehindFailures(after string, limit int) ([]nosql.WriteBehindFailureRecord[Order], string, error) {
+	return store.reliable.ListWriteBehindFailures(after, limit)
+}
+
+// ApplyWriteBehindDecision 由应用按原身份确认恢复或解除已交接顺序屏障，不重置预算。
+func (store *OrderWriteStore) ApplyWriteBehindDecision(ctx context.Context, d nosql.WriteBehindDecision) error {
+	return store.reliable.ApplyWriteBehindDecision(ctx, d)
+}
+
+// WriteBehindDispositionMetrics 区分技术pending、暂停和接管，接管不计业务成功。
+func (store *OrderWriteStore) WriteBehindDispositionMetrics() (nosql.WriteBehindDispositionMetrics, error) {
+	return store.reliable.WriteBehindDispositionMetrics()
 }
 
 // Save 校验并可靠保存订单；返回 nil 只表示订单已完成当前副本的 Badger SyncWrites。

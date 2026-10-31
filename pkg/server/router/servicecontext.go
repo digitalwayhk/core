@@ -116,6 +116,8 @@ type ServiceContext struct {
 	shutdownErrMu       sync.RWMutex
 	shutdownErr         error
 	resources           *resourceManager
+	ownedMetricsMu      sync.Mutex
+	ownedMetrics        *ownedRuntimeMetrics
 }
 
 const grpcLifecycleTimeout = 5 * time.Second
@@ -1175,6 +1177,8 @@ func (own *ServiceContext) NewID() uint {
 // KeyConcurrency 零值和 1 保持历史串行行为。
 type OutboxRuntimeOptions struct {
 	KeyConcurrency int
+	// BatchSize 是单次扫描和确认的消息上限；非正值保持底层默认100。
+	BatchSize int
 }
 
 // UseOutbox 启用当前服务的可靠 Outbox 发布器。事件来源服务名固定为当前 ServiceContext。
@@ -1198,6 +1202,7 @@ func (own *ServiceContext) UseOutboxWithOptions(
 		Admission:      admission,
 		SourceService:  own.Service.Name,
 		Store:          store,
+		BatchSize:      options.BatchSize,
 		KeyConcurrency: options.KeyConcurrency,
 		External:       own.ServiceEventBridge.HasExternalPublisher(),
 	}); err != nil {
@@ -2061,6 +2066,13 @@ func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *t
 	if payload != nil && (own.Service == nil || payload.TargetService != own.Service.Name) {
 		return nil, fmt.Errorf("%w: inbound target does not match listener service", ErrTargetServiceUnavailable)
 	}
+	// 可信业务服务身份不授予ServerManage权限，WS仅放行两个精确中继路径。
+	if payload != nil && (payload.TargetPath == "/api/servermanage" || strings.HasPrefix(payload.TargetPath, "/api/servermanage/")) && !isWebSocketRelayPath(payload.TargetPath) {
+		return nil, types.ErrInternalCallerForbidden
+	}
+	if handled, data, err := own.handleOwnedWebSocketRelay(ctx, payload); handled {
+		return data, err
+	}
 	// 入站路径不记录 call-edge；调用边仅在 CallService 出站记录。
 	data, _, err := own.invokePayload(ctx, payload)
 	return data, err
@@ -2256,10 +2268,13 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
 		return nil, "unknown", fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
+	if payload.TargetInstanceID != "" && own.ServiceResolver == nil {
+		return nil, "unknown", ErrTargetServiceUnavailable
+	}
 	// 普通调用保留历史同进程快路径。Keyed 调用必须先按完整集群成员解析；
 	// 否则偶然消费事件的副本会永远调用自己，与使用同一 consistent-hash key
 	// 的远程调用方产生不同的 owner。
-	if payload.ServiceHashKey == "" {
+	if payload.ServiceHashKey == "" && payload.TargetInstanceID == "" {
 		if local := GetContext(payload.TargetService); local != nil {
 			data, err := own.dispatchLocal(ctx, payload, local)
 			return data, "local", err
@@ -2269,7 +2284,9 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	if own.ServiceResolver != nil {
 		var resolved *ResolvedService
 		var err error
-		if payload.ServiceHashKey != "" {
+		if payload.TargetInstanceID != "" {
+			resolved, err = own.ServiceResolver.ResolveInstance(ctx, payload.TargetService, payload.TargetInstanceID)
+		} else if payload.ServiceHashKey != "" {
 			resolved, err = own.ServiceResolver.ResolveWithKey(ctx, payload.TargetService, payload.ServiceHashKey)
 		} else {
 			resolved, err = own.ServiceResolver.Resolve(ctx, payload.TargetService)
@@ -2277,7 +2294,7 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		if err != nil {
 			return nil, "grpc", err
 		}
-		if payload.ServiceHashKey != "" {
+		if payload.ServiceHashKey != "" || payload.TargetInstanceID != "" {
 			if local := GetContext(payload.TargetService); local != nil &&
 				resolved != nil && resolved.ServiceInstanceID != "" &&
 				resolved.ServiceInstanceID == local.ServiceInstanceID {
@@ -2329,6 +2346,13 @@ func (own *ServiceContext) dispatchLocal(ctx context.Context, payload *types.Pay
 	if err := info.AuthorizeInternalCaller(req); err != nil {
 		resultClass = observability.ClassifyError(err)
 		return nil, err
+	}
+	// 内部分发不经过 Exec；在解析结构化载荷前直接检查目标服务准入。
+	if info.GetPath() != "/api/health" && info.GetPath() != "/api/ready" {
+		if err := target.CheckServiceAdmission(); err != nil {
+			resultClass = observability.ResultUnavailable
+			return nil, types.NewPublicError(types.ErrorKindUnavailable, types.PublicCodeUnavailable, "service unavailable", err)
+		}
 	}
 	api, err := info.ParseNew(payload.Instance)
 	if err != nil {

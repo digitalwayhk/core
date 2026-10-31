@@ -1,9 +1,12 @@
+// 本文件管理共享 SQL 连接池与缓存，区分整池关闭和单个物理连接故障。
 package oltp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,12 +205,20 @@ func (cm *ConnectionManager) CleanupExpired() {
 }
 
 func sameConnectionPool(left, right *gorm.DB) bool {
+	if left == right {
+		return true
+	}
 	if left == nil || right == nil {
-		return left == right
+		return false
 	}
 	leftSQL, leftErr := left.DB()
 	rightSQL, rightErr := right.DB()
 	return leftErr == nil && rightErr == nil && leftSQL == rightSQL
+}
+
+// isConnectionPoolClosed 只识别整池不可用；database/sql 的池关闭错误未导出，物理连接由驱动 Validator 回收。
+func isConnectionPoolClosed(err error) bool {
+	return err != nil && (errors.Is(err, gorm.ErrInvalidDB) || strings.Contains(err.Error(), "sql: database is closed"))
 }
 
 func closeConnectionPool(db *gorm.DB) {
@@ -394,8 +405,11 @@ func checkConnectionHealth() {
 				select {
 				case err := <-done:
 					if err != nil {
-						logx.Errorf("数据库连接不健康，移除: %s, 错误: %v", k, err)
-						connManager.RemoveIfSame(k, info.DB)
+						logx.Errorw("database_pool_probe_failed", logx.Field("pool", k), logx.Field("error", err))
+						// 超时或单个物理连接失败不代表整池失效，不能中断其他在途事务。
+						if isConnectionPoolClosed(err) {
+							connManager.RemoveIfSame(k, info.DB)
+						}
 					}
 				case <-ctx.Done():
 					logx.Alert(fmt.Sprintf("数据库连接健康检查超时: %s", k))

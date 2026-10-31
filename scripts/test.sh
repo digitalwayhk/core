@@ -15,7 +15,9 @@ case "${1:-quick}" in
     go test ./pkg/server/... -count=1
     ;;
   security)
+    go test ./internal/compat -run 'TestSecurityPatchedDependencyVersions|TestS2RejectsOverflowedDictionaryRepeat' -count=1
     security_packages=(
+      ./pkg/server/internal/openapiutil
       ./pkg/server/config
       ./pkg/server/safe/casdoor
       ./pkg/server/authstate

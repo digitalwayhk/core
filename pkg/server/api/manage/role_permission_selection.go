@@ -43,7 +43,7 @@ func (own *PermissionSelection) Validation(st.IRequest) error {
 	return err
 }
 func (own *PermissionSelection) Do(st.IRequest) (interface{}, error) {
-	return smodels.NewManageModelList[smodels.ManageRolePermissionModel]().SearchWhere("RoleCode", strings.ToLower(strings.TrimSpace(own.input.RoleCode)))
+	return loadRolePermissions(smodels.NewManageModelList[smodels.ManageRolePermissionModel]().GetAction(), strings.ToLower(strings.TrimSpace(own.input.RoleCode)))
 }
 func (own *PermissionSelection) RouterInfo() *st.RouterInfo { return m.RouterInfo(own) }
 
@@ -159,8 +159,7 @@ func replaceRolePermissions(action pt.IDataAction, code string, rows []*smodels.
 			err = errors.Join(err, action.Rollback())
 		}
 	}()
-	list := entity.NewModelList[smodels.ManageRolePermissionModel](action)
-	old, err := list.SearchWhere("RoleCode", code)
+	old, err := loadRolePermissions(action, code)
 	if err != nil {
 		return err
 	}
@@ -180,6 +179,26 @@ func replaceRolePermissions(action pt.IDataAction, code string, rows []*smodels.
 	}
 	committed = true
 	return nil
+}
+
+// loadRolePermissions 完整读取后再替换，避免默认500条上限遗漏回显或撤权。
+func loadRolePermissions(action pt.IDataAction, code string) ([]*smodels.ManageRolePermissionModel, error) {
+	list := entity.NewModelList[smodels.ManageRolePermissionModel](action)
+	var rows []*smodels.ManageRolePermissionModel
+	for page := 1; ; page++ {
+		batch, _, err := list.SearchAll(page, 500, func(item *pt.SearchItem) {
+			item.AddWhereN("RoleCode", code)
+			item.AddSortN("ID", false)
+			item.SkipCount = true
+		})
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, batch...)
+		if len(batch) < 500 {
+			return rows, nil
+		}
+	}
 }
 
 // RolePermissions 是选中角色的页面入口，权限编辑器使用独立的读写 API。

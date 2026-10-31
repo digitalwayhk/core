@@ -1,0 +1,185 @@
+{
+  "counts": {
+    "run": 496,
+    "output": 1300,
+    "pass": 461,
+    "skip": 35
+  },
+  "skips": [
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/event",
+      "test": "TestBrokerOnlyConsumerProcessFixture",
+      "reason": "=== RUN   TestBrokerOnlyConsumerProcessFixture\n    broker_only_process_test.go:53: 父测试启动的独立进程夹具\n--- SKIP: TestBrokerOnlyConsumerProcessFixture (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/event",
+      "test": "TestBrokerOnlyHardCrashNativeLeaseRecovery",
+      "reason": "=== RUN   TestBrokerOnlyHardCrashNativeLeaseRecovery\n    broker_only_process_test.go:343: NOT_RUN: CORE_TEST_SHARED_FULL_LEASE=1，等待原生租约\n--- SKIP: TestBrokerOnlyHardCrashNativeLeaseRecovery (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/event",
+      "test": "TestOwnedConsumerProcessFixture",
+      "reason": "=== RUN   TestOwnedConsumerProcessFixture\n    owned_process_test.go:55: 仅由持续归属测试子进程运行\n--- SKIP: TestOwnedConsumerProcessFixture (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/event",
+      "test": "TestSharedKeyConsumerProcessFixture",
+      "reason": "=== RUN   TestSharedKeyConsumerProcessFixture\n    shared_key_process_test.go:36: 仅由真实消费者子进程执行\n--- SKIP: TestSharedKeyConsumerProcessFixture (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/event",
+      "test": "TestSharedKeyReliableHardCrashAndFullLeaseRecovery",
+      "reason": "=== RUN   TestSharedKeyReliableHardCrashAndFullLeaseRecovery\n    shared_key_process_test.go:297: NOT_RUN: CORE_TEST_SHARED_FULL_LEASE=1，实际等待原生租约\n--- SKIP: TestSharedKeyReliableHardCrashAndFullLeaseRecovery (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/router",
+      "test": "TestInternalNotificationBridgeBroadcastsWithoutLocalEcho/nats-jetstream",
+      "reason": "=== RUN   TestInternalNotificationBridgeBroadcastsWithoutLocalEcho/nats-jetstream\n    internal_notification_bridge_test.go:24: NOT RUN: real Broker not configured\n--- SKIP: TestInternalNotificationBridgeBroadcastsWithoutLocalEcho/nats-jetstream (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSMessageLifecycleConformance",
+      "reason": "=== RUN   TestNATSMessageLifecycleConformance\n    lifecycle_conformance_test.go:30: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSMessageLifecycleConformance (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSNoRequiredGroupsContinuousReclaim",
+      "reason": "=== RUN   TestNATSNoRequiredGroupsContinuousReclaim\n    lifecycle_conformance_test.go:53: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSNoRequiredGroupsContinuousReclaim (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestLifecycleWorkerThirteenByFortyFour/nats",
+      "reason": "=== RUN   TestLifecycleWorkerThirteenByFortyFour/nats\n    lifecycle_worker_broker_test.go:45: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestLifecycleWorkerThirteenByFortyFour/nats (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestLifecycleWorkerBrokerOwnership/nats",
+      "reason": "=== RUN   TestLifecycleWorkerBrokerOwnership/nats\n    lifecycle_worker_broker_test.go:143: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestLifecycleWorkerBrokerOwnership/nats (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestRedisLifecycleWorkerNetworkDeadline",
+      "reason": "=== RUN   TestRedisLifecycleWorkerNetworkDeadline\n    lifecycle_worker_broker_test.go:195: NOT RUN: requires dedicated Redis and CORE_TEST_LIFECYCLE_PAUSE_REDIS=1\n--- SKIP: TestRedisLifecycleWorkerNetworkDeadline (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestRedisLifecycleDirectReclaimDeadline",
+      "reason": "=== RUN   TestRedisLifecycleDirectReclaimDeadline\n    lifecycle_worker_broker_test.go:219: NOT RUN: requires dedicated Redis and CORE_TEST_LIFECYCLE_PAUSE_REDIS=1\n--- SKIP: TestRedisLifecycleDirectReclaimDeadline (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleReensurePreservesAdvancedFrontier/all-retained",
+      "reason": "=== RUN   TestNATSLifecycleReensurePreservesAdvancedFrontier/all-retained\n    provider_nats_lifecycle_test.go:25: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleReensurePreservesAdvancedFrontier/all-retained (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleReensurePreservesAdvancedFrontier/new-only",
+      "reason": "=== RUN   TestNATSLifecycleReensurePreservesAdvancedFrontier/new-only\n    provider_nats_lifecycle_test.go:25: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleReensurePreservesAdvancedFrontier/new-only (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleWorkerLargeBatchMakesProgress",
+      "reason": "=== RUN   TestNATSLifecycleWorkerLargeBatchMakesProgress\n    provider_nats_lifecycle_test.go:40: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleWorkerLargeBatchMakesProgress (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleNoRequiredGroups",
+      "reason": "=== RUN   TestNATSLifecycleNoRequiredGroups\n    provider_nats_lifecycle_test.go:62: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleNoRequiredGroups (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleNoRequiredGroupsRejectsBeforeEnrollment",
+      "reason": "=== RUN   TestNATSLifecycleNoRequiredGroupsRejectsBeforeEnrollment\n    provider_nats_lifecycle_test.go:95: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleNoRequiredGroupsRejectsBeforeEnrollment (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecyclePrecreatesOfflineRequiredDurables",
+      "reason": "=== RUN   TestNATSLifecyclePrecreatesOfflineRequiredDurables\n    provider_nats_lifecycle_test.go:115: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecyclePrecreatesOfflineRequiredDurables (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleOfflineRequiredDurableBlocksReclaim",
+      "reason": "=== RUN   TestNATSLifecycleOfflineRequiredDurableBlocksReclaim\n    provider_nats_lifecycle_test.go:129: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleOfflineRequiredDurableBlocksReclaim (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleAllDurablesPermitBoundedReclaim",
+      "reason": "=== RUN   TestNATSLifecycleAllDurablesPermitBoundedReclaim\n    provider_nats_lifecycle_test.go:160: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleAllDurablesPermitBoundedReclaim (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleStartFromNewSkipsExistingHistory",
+      "reason": "=== RUN   TestNATSLifecycleStartFromNewSkipsExistingHistory\n    provider_nats_lifecycle_test.go:196: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleStartFromNewSkipsExistingHistory (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleRejectsUnsafeExistingStreamLimits",
+      "reason": "=== RUN   TestNATSLifecycleRejectsUnsafeExistingStreamLimits\n    provider_nats_lifecycle_test.go:223: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleRejectsUnsafeExistingStreamLimits (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleMissingRequiredDurableFailsClosed",
+      "reason": "=== RUN   TestNATSLifecycleMissingRequiredDurableFailsClosed\n    provider_nats_lifecycle_test.go:237: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleMissingRequiredDurableFailsClosed (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleMinAgeKeepsCompletedMessage",
+      "reason": "=== RUN   TestNATSLifecycleMinAgeKeepsCompletedMessage\n    provider_nats_lifecycle_test.go:251: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleMinAgeKeepsCompletedMessage (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleRecreatedDurableCannotRegressCompletedFrontier",
+      "reason": "=== RUN   TestNATSLifecycleRecreatedDurableCannotRegressCompletedFrontier\n    provider_nats_lifecycle_test.go:281: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleRecreatedDurableCannotRegressCompletedFrontier (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleDeclaredHardCapacityRejectsNewPublish",
+      "reason": "=== RUN   TestNATSLifecycleDeclaredHardCapacityRejectsNewPublish\n    provider_nats_lifecycle_test.go:315: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleDeclaredHardCapacityRejectsNewPublish (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSLifecycleConcurrentPublishAckAndReclaimDoesNotLoseMessages",
+      "reason": "=== RUN   TestNATSLifecycleConcurrentPublishAckAndReclaimDoesNotLoseMessages\n    provider_nats_lifecycle_test.go:331: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSLifecycleConcurrentPublishAckAndReclaimDoesNotLoseMessages (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableSubscribersUseIndependentDurables",
+      "reason": "=== RUN   TestNATSReliableSubscribersUseIndependentDurables\n    provider_nats_reliable_test.go:47: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableSubscribersUseIndependentDurables (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableHandlerFailureRedeliversAfterBackoff",
+      "reason": "=== RUN   TestNATSReliableHandlerFailureRedeliversAfterBackoff\n    provider_nats_reliable_test.go:66: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableHandlerFailureRedeliversAfterBackoff (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableRestartContinuesFromDurableState",
+      "reason": "=== RUN   TestNATSReliableRestartContinuesFromDurableState\n    provider_nats_reliable_test.go:95: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableRestartContinuesFromDurableState (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableAtLimitPublishesDLQBeforeTerm",
+      "reason": "=== RUN   TestNATSReliableAtLimitPublishesDLQBeforeTerm\n    provider_nats_reliable_test.go:141: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableAtLimitPublishesDLQBeforeTerm (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableDLQPublishFailureDoesNotTerminateOriginal",
+      "reason": "=== RUN   TestNATSReliableDLQPublishFailureDoesNotTerminateOriginal\n    provider_nats_reliable_test.go:172: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableDLQPublishFailureDoesNotTerminateOriginal (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestNATSReliableMaxAckPendingAppliesBrokerBackpressure",
+      "reason": "=== RUN   TestNATSReliableMaxAckPendingAppliesBrokerBackpressure\n    provider_nats_reliable_test.go:193: NOT RUN: 设置 CORE_TEST_NATS_URL 后运行 NATS JetStream 可靠订阅真 Broker 测试\n--- SKIP: TestNATSReliableMaxAckPendingAppliesBrokerBackpressure (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestRedisReliableKeyedCrashFixture",
+      "reason": "=== RUN   TestRedisReliableKeyedCrashFixture\n    provider_redis_keyed_window_test.go:461: 子进程崩溃 fixture，仅由恢复测试启动\n--- SKIP: TestRedisReliableKeyedCrashFixture (0.00s)\n"
+    },
+    {
+      "package": "github.com/digitalwayhk/core/pkg/server/mq",
+      "test": "TestRedisPoolFixedWorkloadMeasurement",
+      "reason": "=== RUN   TestRedisPoolFixedWorkloadMeasurement\n    provider_redis_pool_measure_test.go:96: NOT_RUN: CORE_TEST_POOL_MEASURE=1\n--- SKIP: TestRedisPoolFixedWorkloadMeasurement (0.00s)\n"
+    }
+  ]
+}

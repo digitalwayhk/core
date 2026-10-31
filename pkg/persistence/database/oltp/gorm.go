@@ -219,6 +219,9 @@ func sqlload(dbsql types.IDBSQL, db *gorm.DB, item *types.SearchItem, result int
 }
 
 func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
+	if item.Context != nil {
+		db = db.WithContext(item.Context)
+	}
 	if item.SkipCount {
 		item.Total = 0
 	}
@@ -301,6 +304,9 @@ func load(db *gorm.DB, item *types.SearchItem, result interface{}) error {
 	return nil
 }
 func sum(db *gorm.DB, item *types.SearchItem, result interface{}) error {
+	if item.Context != nil {
+		db = db.WithContext(item.Context)
+	}
 	var fdb *gorm.DB
 	if ist, ok := item.Model.(types.IScopes); ok {
 		fdb = db.Scopes(func(d *gorm.DB) *gorm.DB {

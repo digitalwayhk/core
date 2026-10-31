@@ -1,0 +1,278 @@
+{
+  "pass_records": 393,
+  "skipped": [
+    {
+      "Time": "2026-10-23T16:00:33.714129+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLInterpolationRealParametersAndRollback",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.715606+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLPoolIdentityDefaultConfigCreatesDatabase",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.715711+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLPoolIdentityRejectsWrongCredentials",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.71574+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLPhysicalFailureKeepsOtherTransaction",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.71576+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLStaleCloneStartsOnReplacementPool",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.715841+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/oltp",
+      "Test": "TestMySQLClosedPoolBeginFailureIsEvicted",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:33.742194+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/message",
+      "Test": "TestMySQLConcurrentInboxCommitThenReplay",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:34.333879+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestAdaptiveMySQLComparison",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:41.838375+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestIssue_ConcurrentSetDuringSync_DataNeverSynced",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:42.646813+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestIssue_SyncBatchSemaphoreLeakOnPanic",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:42.646865+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestIssue_ConnectionManagerOverridesPoolConfig",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:42.646912+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestIssue_BatchUpdateInsertDuplicateNotHandled",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:42.647197+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestIssue_ConcurrentSetAndSync_EventualConsistency",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:44.20913+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestLocal_PendingCount_IncreasesWithSet",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:44.296188+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_Insert_WritesToMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:44.297034+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_Update_UpdatesMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:44.29781+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_SoftDelete_RemovesFromMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:44.29852+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_IsSyncAfterDelete_PhysicallyDeletedLocally",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.259527+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_InsertConflict_FallsBackToUpdate",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.261499+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_BatchInsert_AllSyncToMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.262709+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_BatchInsert_LargeBatch_NoTxnTooBig",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.263856+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_BatchLoad_NotWrittenToMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.265587+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_BatchLoad_ThenSet_SyncsChange",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.26731+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_DeleteBySubPrefix_AfterSync_CleansBadger",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.268903+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_DeleteBySubPrefix_PendingKeptThenSync",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.270295+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_DeleteBySubPrefix_MultiUserIsolation",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.271516+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_DeleteByItemWithSyncFalse_PendingSyncThenLocalDelete",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.272832+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_DeleteByItemWithSyncFalse_MultiRecordMatchesDeleteBySubPrefix",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.274237+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_Insert_AllSyncToMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.27552+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_Update_AllSyncToMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.276439+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_Delete_AllRemovedFromMySQL",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.277646+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_Mixed_InsertUpdateDelete",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.278737+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_MultiUser_DataIsolation",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.278798+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_SharedMySQLActionAcrossPrefixes_SameDB",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.27885+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestConcurrent_SharedMySQLActionAcrossPrefixes_DifferentDBs",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.733442+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_MultiDB_RoutingByStatus",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.733804+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSync_MultiDB_Routing_Stress",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.734334+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSyncBatchDelay_MergesRapidWrites",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-23T16:00:46.73473+08:00",
+      "Action": "skip",
+      "Package": "github.com/digitalwayhk/core/pkg/persistence/database/nosql",
+      "Test": "TestSyncBatchDelay_PendingCountConsistency",
+      "Elapsed": 0
+    }
+  ]
+}

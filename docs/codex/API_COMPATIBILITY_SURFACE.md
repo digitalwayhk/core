@@ -21,8 +21,15 @@
 | `mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable` | Stable（加性） | server/mq | 按 key 有序可靠投递的可选契约；未声明 requirement 时零值兼容 | `pkg/server/mq` unit/conformance；Redis 需 `CORE_TEST_REDIS_ADDR` |
 | `event.MQBridge` 透传 IdempotencyKey/OrderingKey、`EnsureOrderedReliable` | Stable（加性） | server/event | Envelope → provider 元数据；Require 后门禁空 ShardKey | mqbridge 与 ordered-reliable require 测试 |
 | `ServiceEventBridge`/`ServiceContext.RequireOrderedReliableByShardKey`、`OutboxStore` earliest-first 与可选 `OutboxStoreSkipBlocked`、可选 `OutboxBatchMarker` | Stable（加性） | server/event、router | 启动 fail-closed、Outbox 同 key barrier、hot-key 可选跳过；批量确认未实现时逐条 `MarkPublished` | outbox barrier / batch mark / require 测试 |
-| `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 零值/1 保持全局串行；显式 `>1` 才启用同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |
-| `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
+| `OutboxOptions.KeyConcurrency`、`ServiceContext.UseOutboxWithOptions`、`Subscription.KeyConcurrency` | Stable（加性） | server/event、router | 默认未启用 SharedKeys 时零值/1 保持串行；显式 `>1` 启用实例内同 key 串行、不同 key 并行；同 subject 配置冲突或 provider 不支持时 fail closed | event/router keyed concurrency + race |
+| `OutboxRuntimeOptions.BatchSize` | Stable（加性） | server/router | 服务组合根显式设置每次扫描上限；非正值沿用底层100，保持默认、同key顺序、失败屏障及批量确认语义 | `TestServiceContextOutboxBatchLimit` + Outbox/race；07的512试验未通过，示例维持默认100 |
+| `types.ITransactionDB`、`message.Run` / `ConsumeInboxWith` / `ConfirmPublishedWith` | Experimental（加性） | persistence/types、database/oltp、persistence/message | 不增加 `IDataAction` 必选方法，不改变 `GetRunDB`；显式当前 SQL 事务，应用提供记录及字段，不自动建表/推断业务状态；批量确认仅支持不可变事件行 | message SQLite/MySQL 事务、并发幂等、业务行复用及 outbox 回滚测试 |
+| `persistence/types.SearchItem.Context` | 加性 | persistence/types、database/oltp | 可选MySQL/SQLite查询执行上下文，覆盖COUNT、免COUNT读取和统计；nil保持旧行为，JSON忽略；不增加`IDataAction`必选方法，不承诺其他适配器或初始建连可中断 | `TestSQLQueryContext`、07真实MySQL锁等待取消、关闭池恢复及分页/确认回归 |
+| `mq.ReliableSubscribeOptions.KeyConcurrency`、`KeyedReliableMQProvider`、`VerifyKeyedReliableConcurrency` | Stable（加性） | server/mq | provider 必须显式声明能力；SharedKeys=false 时 Redis 保持单 owner，在 owner 内按 OrderingKey 调度 | provider-neutral + 真 Redis conformance |
+| `event.Subscription.BrokerOnly`、`BrokerOnlyReliableExternalSubscriber`、`MQBridge.EnsureBrokerOnlyReliable(ctx, stream)`、`ErrBrokerOnlyReliableUnsupported` | Stable（v1.6.0加性） | server/event | 显式仅外部可靠入站；零值保留旧路径，可靠/有效Subject/逻辑组/同Stream能力校验失败不降级；不新增Provider必选方法或业务来源字段 | 默认兼容、混合handler/类型/组过滤、真实Redis/ServiceContext/独立进程恢复与race；[接入与验收](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md) |
+| `event.Subscription.SharedKeys/Prefetch`、`ReliableSubscribeOptions.SharedKeys`、`SharedKeyReliableMQProvider`、`MQManager.RequireSharedKeyReliable`、`MQBridge.EnsureSharedKeyReliable` | Stable（v1.4.4 加性） | server/event、mq | 显式跨实例分键；N=每实例并发、W=组级预取；作用域 subject/group/key；旧零值行为保留；共享模式持久冻结，不支持在线 Provider 切换或原地回退 | 真 Redis 双进程、崩溃/断网/旧 ACK fence、例10三进程与 race；[升级边界](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md) |
+| `ownership.Credential/Manifest/Runtime/FenceTransaction`、`event.OwnedSubscription`、`OwnedReliableMQProvider`、`ServiceContext.SubscribeOwnedEvents`、`IRequestOwnedServiceCaller`、`IWebSocketOwnedReference` | Stable（v1.4.6加性，显式启用） | server/event、mq、router、ownership、melody | 跨主题持续scope/key、有界批次、SQL fence、Ready精确调用、现有WS引用恢复；原组和零值保留，不支持者拒绝 | 真实独立PID/Redis/MySQL/mTLS/WS及race；[边界和迁移](SCOPED_EVENT_OWNERSHIP_GUIDE.md) |
+| `mq.VerifySharedKeyReliableDistribution` | Stable（测试辅助） | server/mq | 双连接通用 conformance；不能替代独立 PID 与真实故障验收 | Redis helper + event 双进程测试分别登记 |
 | `mq.LifecyclePolicy`、`LifecycleMQProvider`、`MQManager.RequireMessageLifecycle`、`ServiceContext.RequireMessageLifecycle` | Stable（加性） | server/mq、router | 应用声明必需组、发布确认、保留、重试/DLQ、容量和有界回收；Provider 能力不足或状态不确定时 fail closed | 共享 lifecycle conformance + Redis/NATS 真 Broker 测试 |
 | `mq.LifecyclePolicy.NoRequiredGroups`、`LifecycleCapabilities.NoRequiredGroups` | Stable（加性） | server/mq | 显式纯保留主题；正数保留期、零重试、禁止组订阅；零值保持旧策略指纹和空组拒绝语义 | 无组单元/共享 conformance、Redis/NATS 真 Broker 验证；边界见 MQ_MESSAGE_LIFECYCLE_GUIDE |
 | `mq.VerifyMessageLifecycleConformance` | Stable（测试辅助） | server/mq | 自定义 Provider 在隔离 Subject 上验证失败 pending、离线组、多组完成与物理回收 | Redis/NATS 共用同一 conformance runner |
@@ -33,6 +40,7 @@
 | `Subscription.Broadcast`、`ServiceEventBridgeOptions.InstanceSubscriberID` | Stable（加性） | server/event、router | 可靠、幂等的低频控制事件可按稳定副本端点广播；默认 false 继续使用逻辑服务共享组 | broadcast 组身份、缺失稳定身份与非可靠订阅 fail-closed 测试 |
 | `pkg/server/router.NewServiceContext`、`NewServiceContextWithConfig` | Stable | server/router | 文件配置启动、程序化启动 | 任务 14 生产构造器与生命周期测试 |
 | `pkg/server/types.ServerOption`、`IService` 和服务生命周期接口 | Stable | server/run | 服务注册、CORS、WebSocket、Start/Stop | `pkg/server/types/server.go`、run 生命周期测试 |
+| `types.IInitializeService.Initialize() error` | Stable（v1.4 加性） | server/run | 标准 WebServer 配置校验后、监听器构造前同步调用；失败反向回滚 Stop 与托管资源。旧 IService 不增加必选方法，旧 Start 保持异步；已有同签名方法须核对升级行为 | `service_initialization_test.go` 的顺序/错误/panic/托管资源回滚，07 受控延迟首单与 WebSocket 回归 |
 | `pkg/persistence/entity.Model`、`BaseModel`、`ModelList` | Stable | persistence | SQLite/MySQL/Badger 模型与查询 | persistence 单元/外部集成测试、`examples/01-simple-shop` |
 | `pkg/persistence/types` 的模型与数据库接口 | Stable | persistence | entity、ModelList 和数据库实现扩展 | persistence 编译与契约测试 |
 | `oltp.NewFixedSqlite` | Stable（v1.3 加性） | persistence、server/manageauth | 为进程级控制面固定 SQLite 库名，不再接受模型 `IDBName` 改写路由 | OLTP、controlplane startup 测试 |
@@ -83,6 +91,8 @@
 
 ## 配置
 
+Redis连接池隔离新增 `mq.NewRedisStreamProviderWithConfig(config.RedisStreamMQConfig)`，旧三参构造器保留；零预算采用有限command8/blocking16。字段闭集在配置矩阵维护。Connect校验实际预算；Close幂等且终态，重启需新Provider；同consumer重复登记明确拒绝。消息/group/PEL/ACK与跨窗口调度不变，无需清历史；取消不保证已发socket读取立即返回，Close仍等待真实handler退出。详见[升级与验证](REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。
+
 - 项目自有 Server/Auth、Cluster、Transport、MQ 字段、默认值、owner、支持状态和运行时证据仅维护在 `docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md`。
 - `supported` 值属于兼容表面；`rejected` 值只承诺在启动前返回可操作错误；`upstream` 字段遵循 go-zero 对应版本的契约。
 - `Cluster.Mode=off` 和 `MQ.Mode=off` 的旧字段保留规则属于迁移兼容，不代表关闭字段已获得运行时支持。
@@ -104,7 +114,7 @@
 | MQ lifecycle manifest | Stable（加性） | 未声明时不启动回收；声明后策略在进程内冻结，observe/enforce 切换通过重启；旧配置升级不静默删除消息 | `pkg/server/mq` lifecycle/controller/真 Broker 测试与 `MQ_MESSAGE_LIFECYCLE_GUIDE.md` |
 | Casdoor 认证身份 | Stable security | Access/Refresh 携带 `auth_provider`、`provider_subject`、`auth_generation`；旧世代和 blocked 身份拒绝访问 | `pkg/server/safe/tokenissuer.go`、`pkg/server/authstate` |
 | 认证服务 Hook | Stable | `IAuthHookProvider` 在签名前运行；`IAuthRequestHookProvider` 在已验签、Router 前运行；`ICasdoorEventHookProvider` 在撤销事实提交后异步重试；`IHMACAuthProvider` 仅在 Auth 用户域无 Bearer 时可选运行。未实现第四接口时继续只认框架 Access Token；`GetHMACAuthRuntime`/`InvokePreparedHMACAuth` 在服务终止或未实现 Provider 时 fail closed | `pkg/server/types/auth.go`、`pkg/server/router/servicecontext.go`、REST/WebSocket 认证 Hook 测试 |
-| Manage 角色与权限生命周期 | Stable opt-in（v1.3 加性） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
+| Manage 角色与权限生命周期 | Stable（标准 WebServer 自 v1.3 默认启用） | `manage_roles` 仅出现在 Manage Access Token；TestToken 固定 system_admin 且不调 Provider，并以仅存在于 Refresh Token 的已签名内部标记保持刷新语义；启用 RBAC 后，普通无 Provider 的旧 Manage Refresh Token 必须重新登录。Casdoor callback/refresh 调 Provider。角色关系变更需新 token，权限明细变更下一请求生效；鉴权顺序为撤销权威→RBAC→业务请求 Hook | safe/public/rest/manageauth/09 测试 |
 
 ## Casdoor 迁移与运行约束
 
@@ -115,6 +125,26 @@
 - `AuthenticateHMAC` 位于身份建立前，不沿用 `OnAuthRequest` 的消息透出规则：凭证拒绝统一为 401，依赖不可用、限流与内部错误只返回固定脱敏契约。
 - `safe.ValidateHMACAuthClaims` 是消费方构造 `HMACAuthResult` 前的稳定保留键预检查入口，与 Core 最终身份构造使用同一规则。
 - 实现 `IHMACAuthProvider` 的服务会在 OpenAPI Private 操作上增加 Bearer OR HMAC 要求与 `x-core-hmac-auth`，并在文档顶层增加 `x-core-websocket-hmac-logon`；未实现时文档保持 Bearer-only。
+
+## MySQL显式驱动插值
+
+`oltp.Config.InterpolateParams bool` 为加性字段，零值false保持旧驱动协议。`MysqlDSN`、`SetMysqlDSN`及内部两条DSN路径透传；非法布尔配置报错，建池在插值启用时仅支持默认/显式utf8mb4，其他字符集连接前拒绝。不同协议的共享池隔离，GORM PrepareStmt仍false。07示例与原生对照显式启用，完整 `SHOP_ORDER_REMOTE_MYSQL_DSN` 未带此参数时保留false；现有解析器识别出的DSN格式/参数错误在启动组合根拒绝且不输出原DSN。该入口沿用Config字段映射，不是任意驱动参数的DSN直通；未知参数仍未接线。既有SQL事务、写入不重放和错误契约保持。
+
+## MySQL共享池身份隔离
+
+同地址/最终数据库下，不同认证或驱动语义现在建立独立连接池，错误凭据不再借用首个账号的已认证池。同配置仍复用；池容量和日志参数仍由首次拥有者决定。`GetSyncPoolKey` 与连接管理器键均为进程内不透明身份，不能依赖旧 `host:port/db` 完整字符串、跨进程比较或持久保存。新键使用随机进程密钥生成认证摘要，不暴露密码或固定的可离线猜解摘要。模型、HTTP及数据库事实不变。
+
+## 写路径观测加性字段
+
+写路径观测加性字段：`BatchCommitMetrics.TotalQueueWaitDuration`、`WriteAdmissionMetrics.Attempts/TotalDuration`；既有字段、写入返回值、准入和确认语义保持。Runtime白名单新增固定的本地阶段、SQL池及Outbox阶段累计指标；无业务ID标签，未采集字段不伪装为0。阶段计数与耗时仅供观测，不作为写重试、ACK或业务状态依据。
+
+## Badger v4.9.6 存储适配
+
+Core后端由v3.2103.5适配至v4.9.6，外部存储接口及配置默认值保持；Badger对象仍为内部实现，不新增面向业务的原生DB/Txn接口。固定版本的普通/加密人工夹具已验证物理副本直接打开、Backup/Load及升级后新增事实经备份回退，见[验证记录](BADGER_QUEUE_REPRO_2026-10-19.md)。此结果不扩大为任意旧目录和未来版本的双向兼容保证。
+
+公开方法签名保持不代表底层错误身份保持：直接比较 `badger/v3.ErrKeyNotFound` 等 sentinel 的消费方须调整到 v4 并回归。Go 官方 apidiff 不覆盖此运行时行为；存量卷、错误比较及完整升级检查见[从 v1.3.0 升级](UPGRADE_FROM_V1_3.md)。
+
+迁移说明：停准入并停止旧写入进程，保留完整原件，在副本验证值、版本、TTL、删除和重开后再切换。pending及authstate保持fail策略；禁止清库、truncate或把它们当可重建缓存。新版本接单后回退必须保全新增事实，停写后从新版本Backup并在新目录验证Load；不能直接切回旧快照，也不能未经验证让v3打开v4已写目录。Core不执行自动清库或备份还原。
 
 ## 快照规则
 
@@ -139,7 +169,7 @@
 ./scripts/test.sh config-contract
 ```
 
-废弃版本和消费方精确版本将在任务 15.4 完成；在对应小节完成前不提前声明发布门禁已生效。
+废弃窗口与消费方精确版本分别见当前废弃登记和消费方矩阵。上述门禁已由仓库脚本执行；它们不替代本候选的消费方 smoke、持久数据迁移或正式发布验收。
 
 ## 稳定实例身份与注册恢复候选
 
@@ -150,6 +180,34 @@ stable 模式下 ServiceInstanceID 跨重启稳定，BootID/BootEpoch 仅为新�
 `/api/health` 保持存活语义；`/api/ready` 只检查本进程自身服务，未就绪为安全 HTTP 503，不输出内部身份或连接信息。完整迁移和证据边界见 [稳定实例身份指南](STABLE_INSTANCE_IDENTITY_GUIDE.md)。
 
 实现复审补充：`CheckProcessAdmission()` 保留已清理 stable 服务的终态故障，只有同名服务成功重建才清除；`OutboxOptions.Admission` 为可选 `OutboxAdmission` 接口，保持结构可比较，零值保持旧行为，ServiceContext 仅为 stable 自动注入。stable 的 SubscribeEvent 在业务 Handler 前检查准入，可靠订阅失败不 ACK；它不新增无 MQ 时的启动依赖。
+
+## v1.4.6持续归属兼容边界
+
+公开API均为加性，原IRequest和Provider必选接口不变；PayLoad.TargetInstanceID仅本机选址，JSON忽略、原protobuf不变。新OwnedReliableMQProvider单独声明；NATS拒绝。静态manifest、有限次DLQ拒绝、保全绑定/解除、显式RecoverOwnership及SQL权威下界要求见[指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。显式归属WS的两个内部gRPC中继仅同服务可信mTLS可达，不开放管理域或匿名HTTP。
+
+## v1.4.7普通WS中继兼容修复
+
+`IWebSocketOwnedReference`可选，不改变普通Public/Private WS、EventBridge、MQ组/PEL/游标或业务payload。两个精确WS中继共同校验同服务可信mTLS/SourceService、有效摘要节点及目标路由，普通路由回到已注册的正式中继，归属路由保留既有Ready owner/引用恢复。两个旧中继的HTTP入口收紧为403，用户/管理Token和自报头不能替代内部服务身份；依赖匿名HTTP/仅网络ACL转发的消费方须改用已支持的可信mTLS gRPC。内部gRPC对其它ServerManage路径明确拒绝，同服务证书不替代管理域认证；管理HTTP入口和认证域不变。Go签名、路由路径和JSON字段不变。参见[v1.4.7](RELEASE_V1_4_7_2026-10-22.md)。
+
+
+## v1.5.0 可选write-behind失败处置
+
+加性公开表面：`BadgerDBConfig.WriteBehindFailure`、`WriteBehindFailurePolicy.Validate`、`WriteBehindFailureHandler[T]`、`WriteBehindFailure[T]`、`WriteBehindFailureRecord[T]`、`WriteBehindDecision`、相关Action/Scope/Outcome/State常量、`WriteBehindHandoffReceipt`、`WriteBehindDispositionMetrics`、`ErrWriteBehindDisposition`和`ErrWriteBehindDispositionCloseTimeout`。`SyncQueueItem.HandedOff`是可省略的独立技术交接标志，不表示IsSynced或业务APPLIED。
+
+PrefixedBadgerDB和ReliableWriteStore增加`UseWriteBehindWithFailureHandler`、`ApplyWriteBehindDecision`、`ListWriteBehindFailures`；原始store的`GetWriteBehindDispositionMetrics`由可靠门面`WriteBehindDispositionMetrics`委托。原`WriteBehindTarget.SyncBatch`、`UseWriteBehind`、ForceSync及零配置签名不变。RetryKeys/DeadKeys不自动重试或删除，新模式交应用处理实际未确认项。
+
+只有显式配置有限预算并绑定handler才启用。新状态使用原Badger可靠事务，policy持久冻结；禁止旧二进制回退打开新模式卷或在线删除标记。签名兼容不等于状态迁移已完成，消费方须分别验收原pending、未知结果、幂等接管及顺序屏障。完整接口、资源预算与信任边界见[正式指南](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
+
+## v1.6.0 显式仅Broker消费兼容边界
+
+`Subscription.BrokerOnly`为加性布尔选项，false不要求旧消费者修改。true必须同时Reliable、有效Subject和实际可靠外部订阅；正式MQBridge验证入站Stream与注册Stream相同，旧自定义适配器未声明新入站能力时返回`ErrBrokerOnlyReliableUnsupported`。新增可选接口签名为`EnsureBrokerOnlyReliable(context.Context, *Stream) error`，没有增加任何MQProvider必选方法。Broker入站仍须全部匹配handler成功，Source相同不跳过。原Envelope/ID/ShardKey/幂等、组名、SharedKeys、Prefetch、Broadcast互斥、持久pending与生命周期算法均不变。
+
+本轮同时将可靠控制订阅的取消身份从函数代码地址改为独立注册对象，防止同一闭包代码的多个handler被一次取消误删；外部订阅创建串行化，防止并发注册临时创建重复同组消费者。SubscribeEvent在途可靠handler纳入Bridge关闭等待，取消后迟到成功返回错误，不能ACK；Close超时仍不证明在途代码停止。旧公开SubscribeControl/PublishControl签名保持，只在Core内部引入可靠Broker分发入口，不从业务Source或payload识别来源。完整调用链及升级说明见[验收](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。
+
+
+## v1.6.2 本地提交诊断
+
+SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（LocalTransactionMetrics）与TargetDuration，facade仍通过原Metrics/Sync读取；无新HTTP路由或业务协议。原字段含义保持。新增计数描述本地Update调用/块输入，并非业务成功证明；SyncedItems仍是实际本地确认。QueueWait与CommitDuration的采集边界、累计不能相加等详见WRITE_BEHIND_SYNC_GUIDE.md。绑定入口、配置、policy指纹、原卷格式、失败预算及应用决定语义不变。
 
 ## PostgreSQL 加性存储扩展
 

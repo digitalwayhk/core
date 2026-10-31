@@ -1,3 +1,4 @@
+// 本文件验证 MySQL 热路径不额外 Ping，以及连接池故障隔离与恢复边界。
 package oltp
 
 import (
@@ -11,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 type pingCountingConnector struct {
-	pings atomic.Int32
+	pings     atomic.Int32
+	pingError error
 }
 
 func (connector *pingCountingConnector) Connect(context.Context) (driver.Conn, error) {
@@ -40,7 +43,7 @@ func (*pingCountingConn) Close() error                        { return nil }
 func (*pingCountingConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
 func (conn *pingCountingConn) Ping(context.Context) error {
 	conn.connector.pings.Add(1)
-	return nil
+	return conn.connector.pingError
 }
 
 func newPingCountingGorm(t *testing.T) (*gorm.DB, *pingCountingConnector) {
@@ -294,5 +297,88 @@ func TestWriteConnectionErrorInvalidatesWithoutReplay(t *testing.T) {
 	}
 	if adapter.db != nil {
 		t.Fatal("write connection error did not invalidate local reference")
+	}
+}
+
+// TestPhysicalConnectionFailureDoesNotCloseSharedPool 验证单物理连接失败不能关闭其他调用方共用的池，写入不重放。
+func TestPhysicalConnectionFailureDoesNotCloseSharedPool(t *testing.T) {
+	db, _ := newPingCountingGorm(t)
+	adapter := NewMySQL(&Config{Host: fmt.Sprintf("physical-failure-%d", time.Now().UnixNano()), Port: 3306, Database: "hot_path"})
+	adapter.Name, adapter.db = "hot_path", db
+	key := adapter.getConnectionKey()
+	connManager.SetConnection(key, db)
+	t.Cleanup(func() { connManager.Remove(key) })
+	replays := 0
+	err := adapter.errorHandler(mysqlDriver.ErrInvalidConn, struct{}{}, func(*gorm.DB, interface{}) error {
+		replays++
+		return nil
+	})
+	if !errors.Is(err, mysqlDriver.ErrInvalidConn) || replays != 0 {
+		t.Fatalf("写入错误必须原样返回且不重放: err=%v replays=%d", err, replays)
+	}
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.Ping(); err != nil {
+		t.Fatalf("单物理连接失败关闭了共享池: %v", err)
+	}
+	if got, ok := connManager.GetConnection(key); !ok || !sameConnectionPool(got, db) {
+		t.Fatal("共享池被单物理连接错误驱逐")
+	}
+}
+
+// TestPhysicalReadRecoveryReusesPool 验证物理连接错误只读重试使用原池，不制造整池重建。
+func TestPhysicalReadRecoveryReusesPool(t *testing.T) {
+	db, _ := newPingCountingGorm(t)
+	adapter := NewMySQL(&Config{Host: fmt.Sprintf("physical-read-%d", time.Now().UnixNano()), Port: 3306, Database: "hot_path"})
+	adapter.Name, adapter.db = "hot_path", db
+	key := adapter.getConnectionKey()
+	connManager.SetConnection(key, db)
+	t.Cleanup(func() { connManager.Remove(key) })
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = adapter.retryReadAfterConnectionError(mysqlDriver.ErrInvalidConn, false, pool.Ping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameConnectionPool(adapter.db, db) {
+		t.Fatal("只读恢复未复用健康共享池")
+	}
+}
+
+// TestCachedCloneRebindsCurrentPool 验证新操作不会继续使用被替换的旧池，且不额外 Ping。
+func TestCachedCloneRebindsCurrentPool(t *testing.T) {
+	stale, _ := newPingCountingGorm(t)
+	current, counter := newPingCountingGorm(t)
+	base := NewMySQL(&Config{Host: fmt.Sprintf("rebind-%d", time.Now().UnixNano()), Port: 3306, Database: "hot_path"})
+	base.Name, base.db = "hot_path", stale
+	key := base.getConnectionKey()
+	connManager.SetConnection(key, current)
+	t.Cleanup(func() { connManager.Remove(key) })
+	clone := base.Clone().(*MySQL)
+	if err := clone.ensureValidConnection(); err != nil {
+		t.Fatal(err)
+	}
+	if !sameConnectionPool(clone.db, current) {
+		t.Fatal("Clone 保留了过期连接池")
+	}
+	if counter.pings.Load() != 0 {
+		t.Fatal("重绑缓存池不应额外 Ping")
+	}
+}
+
+// TestHealthProbeTimeoutDoesNotEvictPool 验证探测超时不能被当作整池失效。
+func TestHealthProbeTimeoutDoesNotEvictPool(t *testing.T) {
+	db, counter := newPingCountingGorm(t)
+	counter.pingError = context.DeadlineExceeded
+	key := fmt.Sprintf("probe-timeout-%d", time.Now().UnixNano())
+	connManager.SetConnection(key, db)
+	t.Cleanup(func() { connManager.Remove(key) })
+	checkConnectionHealth()
+	if got, ok := connManager.GetConnection(key); !ok || !sameConnectionPool(got, db) {
+		t.Fatal("健康探测超时关闭了共享池")
 	}
 }

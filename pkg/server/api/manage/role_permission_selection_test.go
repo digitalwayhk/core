@@ -1,6 +1,7 @@
 package manage
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
@@ -8,6 +9,35 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReplaceRolePermissionsRevokesBeyondFirstPage(t *testing.T) {
+	action, _ := newMenuSQLiteAction(t)
+	var rows []*smodels.ManageRolePermissionModel
+	require.NoError(t, action.Load(&pt.SearchItem{Model: smodels.NewManageRolePermissionModel(), Page: 1, Size: 1}, &rows))
+	for i := 0; i < 601; i++ {
+		row := smodels.NewManageRolePermissionModel()
+		row.RoleCode, row.Service, row.Command = "demo.large", "catalog", "view"
+		row.Path = fmt.Sprintf("/api/manage/catalog/item%d/view", i)
+		rows = append(rows, row)
+	}
+	require.NoError(t, replaceRolePermissions(action, "demo.large", rows))
+	loaded, err := loadRolePermissions(action, "demo.large")
+	require.NoError(t, err)
+	require.Len(t, loaded, 601, "权限树必须回显第501条之后的既有授权")
+	require.Equal(t, rows[600].Path, loaded[600].Path)
+	action.failInsertAt = action.insertCalls + 1
+	require.Error(t, replaceRolePermissions(action, "demo.large", rows[:1]))
+	loaded, err = loadRolePermissions(action, "demo.large")
+	require.NoError(t, err)
+	require.Len(t, loaded, 601, "保存失败必须回滚所有页的删除")
+	action.failInsertAt = 0
+	require.NoError(t, replaceRolePermissions(action, "demo.large", nil))
+	_, total, err := entity.NewModelList[smodels.ManageRolePermissionModel](action).SearchAll(1, 1, func(item *pt.SearchItem) {
+		item.AddWhereN("RoleCode", "demo.large")
+	})
+	require.NoError(t, err)
+	require.Zero(t, total, "取消全部勾选必须删除该角色全部权限，不能遗留第501条之后的授权")
+}
 
 func TestReplaceRolePermissionsAddsRemovesAndKeepsOtherRoles(t *testing.T) {
 	action, _ := newMenuSQLiteAction(t)

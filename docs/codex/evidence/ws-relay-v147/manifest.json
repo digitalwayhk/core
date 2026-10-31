@@ -1,0 +1,38 @@
+{
+  "baseline": "797781f01bb618f70fbc8ca47afc164a2a1cbd49",
+  "red_source_sha256": {
+    "pkg/server/router/owned_websocket_relay.go": "08092c8fd432652c7f72af9cf9d0bf190b6aaa69ccdbbeb49c6b6e0256cc3f7c",
+    "pkg/server/api/manage/noticerelay.go": "22b621e00614e662aadbb4cc96a9bd576e5a243e7872cb8dacc48636a514c2e5",
+    "examples/integration/ws-relay/relay_test.go": "b7c9eddc1ae2c9b69f91e4e880cb54f0f7eb199a4d0fa94f61b6239e327a440b",
+    "examples/integration/ws-relay/testdata/gateway/public_view.go": "80fb0d44e8ec92321defec45a6b2b5830dbb10c3b314ca08f2cc4b8c7e0d05ad",
+    "examples/integration/ws-relay/testdata/gateway/control.go": "8ed349eebd3bb8d1534eab7e9e39f42c4b2a73a8e877beef97e3124e93f1c9ba",
+    "examples/integration/ws-relay/testdata/gateway/owned_view.go": "f5b2db3a9b9231b5f7d0e5b9ffd145108d748d3e477c25712c15f69530989ecb",
+    "examples/integration/ws-relay/testdata/gateway/main.go": "7eeed150886661339edf8f9eee35cab3c36df1a5f7cdf10dcd4b3e95ab0790b9",
+    "examples/integration/ws-relay/testdata/gateway/private_view.go": "a420edda8bfdf9a11fdf13acabe65ba8106bfb58aa365482dbe2dbb12c14ef72"
+  },
+  "artifacts": {
+    "final-integration-race.txt": "65548f9f799ca7c42936c8842278a819cc77a8a02d24857fc79cdaf6e71aaa37",
+    "registered-servermanage-red.txt": "7938415b61672bdfc23bda2d4d508eb3b5a5073523b34b9834990539d9426097",
+    "final-ws-race.txt": "3e42a22f285dd2798b7fc9903f67fc649dbb7fb79e7c891db4ba35604f102893",
+    "red-04.txt": "29da75dff0802396897ed4852e7edfa0b384e1c97e9c6cb87c20115e87eb9bd7",
+    "compress-red.txt": "5622b41788a0a503b0111841397b01b0e400cef3119c4732e0dae8278f606fe4"
+  },
+  "green_source_sha256": {
+    "examples/integration/ws-relay/relay_test.go": "a7f7a495db1d2b5fbdc21c9c285fa2e2749579c83e5c1806389aec6f3e1007d6",
+    "examples/integration/ws-relay/testdata/gateway/control.go": "a1b5f3136bd4e7c167c69ac70646dd7b907f05d0fad085abe7fee417158c1e5c",
+    "examples/integration/ws-relay/testdata/gateway/main.go": "4627cc2cb0bd5372f777b91c96ee3e5a9a446be1a5f27b697864bbd27b35c0aa",
+    "examples/integration/ws-relay/testdata/gateway/owned_view.go": "a0cfac36bb6141ddebda7aef5d1c0444880f183c0686f8cde5049223cefaf236",
+    "examples/integration/ws-relay/testdata/gateway/private_view.go": "c0fc2244e5f924a2871882a5de7a04cadfe10b33257fda28411d6bcb9ecf1ea0",
+    "examples/integration/ws-relay/testdata/gateway/public_view.go": "46cb38c5d6c6c33ac6a1649b6a5d741b78c33d58352d64f7f41c6b88d5c39a0f",
+    "go.mod": "84505811f622119a186cea8fbafada0433c31d9b900199a24a9efe1074cd4590",
+    "go.sum": "e389b90dab036bd3f0681f4c6e0a8add283ad855503470348472522c5c8bde65",
+    "internal/compat/compress_security_test.go": "268ca028710b93c044fb97111ba2c1b8794db3f02f10b731f83d1999706e5bfb",
+    "internal/compat/dependency_security_test.go": "054b79f1881dc09616ebfad8d2fa16d85772a83138711348d0a0769d9ed78a9d",
+    "pkg/server/api/manage/noticerelay.go": "3d59171044eafc70d5db776d583bf1bae91511b779979a0446d342fdfed00142",
+    "pkg/server/router/owned_websocket_relay.go": "52b0138872ade31ab3bad7223d4998252ab09cb43ac4fb0015bb1664babe7378",
+    "pkg/server/router/owned_websocket_relay_test.go": "d0552faee5269fb71697565e6ff5cbfbf22299b60a99c8a1c291dbd9e0c4b37f",
+    "pkg/server/router/servicecontext.go": "8a7831cce7e8c901fe85c9c185e811270372b67d7dc4ec590bcf07778e6c12a5",
+    "scripts/test.sh": "d28531366f8d571d4f565d684239fb7046e6072dbc16a96a92af5d6e0a4a2bab"
+  },
+  "note": "最终测试后仅增加测试函数中文注释；生产执行逻辑未再改变。"
+}

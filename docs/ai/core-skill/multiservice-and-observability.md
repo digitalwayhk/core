@@ -8,7 +8,7 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 
 完整配置、实际 WorkerID 别名/容量、时间预留、import/recover/retire、独占卷与回滚要求见 [稳定实例身份指南](../../codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。不得移动既有 pending、重写历史 ID、把复制卷当成新副本，或用无上下文 `InitRequest.NewID` 生成业务主键。
 
-`UseOutbox` 默认每 100ms 唤醒、单次取数 100 条；取满且有发布进展时立即继续下一批，不是每秒 1000 条限流。失败记录保留重试；发布成功标记不代表消费者已 ACK。Inbox 是否是待处理队列由应用定义，示例 06 的 Inbox 是与业务投影同事务提交的已处理事件去重记录，未成功消息由可靠 MQ 订阅重投/reclaim。纯内存事件中心可注册和订阅，但内存队列自身不跨进程崩溃保留消息。07 的本地 pending 调度不同：当前每 100ms 只做一次至多 100 条同步，存在约 1000 条/秒的调度上限，不能用 Outbox 连续 drain 推导其吞吐。
+`UseOutbox` 默认每 100ms 唤醒、单次取数 100 条；取满且有发布进展时立即继续下一批，不是每秒 1000 条限流。失败记录保留重试；发布成功标记不代表消费者已 ACK。Inbox 是否是待处理队列由应用定义，示例 06 的 Inbox 是与业务投影同事务提交的已处理事件去重记录，未成功消息由可靠 MQ 订阅重投/reclaim。纯内存事件中心可注册和订阅，但内存队列自身不跨进程崩溃保留消息。07 已接回框架自适应 write-behind worker，不再使用原 100ms/100 条业务 ticker；该调整不改变 Outbox 的全局默认调度。
 
 ## 多服务调用与事件
 
@@ -24,11 +24,14 @@ local/Redis/etcd 提供原子 owner 能力；Consul stable 拒绝。运行期节
 - 同进程模式只供调试；部署演示必须以独立进程、独立 SQLite 和 mTLS gRPC 再验收一次，并断言 HTTP 调用计数为零。
 - HTTP 仅可作为显式发送前 fallback；gRPC 开始发送后不得跨协议重试。内部异步事件使用 EventBridge，WebSocket 只面向最终用户。
 - Redis 发现和 EventBridge 使用不同 Prefix。业务服务只声明 `sc.UseOutbox(models.OutboxStore{})` 启用本服务可靠发布；`OutboxStore` 必选 `LoadPending(ctx, limit)` 和 `MarkPublished(ctx, message)`，不关心当前服务名、消费者或 MQ。当前服务名由 `ServiceContext` 写入事件 Source，Subject/EventType/Payload/TraceID 来自 Outbox 记录。高吞吐服务应再实现可选 `event.OutboxBatchMarker.MarkPublishedBatch`：框架先按现有规则逐条发布成功前缀，再一次事务确认这些 EventID；未实现时仍逐条 `MarkPublished`。空切片必须立即成功。崩溃发生在 MQ 发布后、批量确认提交前只形成 at-least-once 重复，消费者继续用 EventID/Inbox 幂等。不要为此自写 Outbox 发布循环。
-- `UseOutbox` 和 `Subscription` 的零值永远保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
+- `UseOutbox` 和 `Subscription` 的零值保持全 subject 串行。只有业务已提供稳定 `ShardKey/OrderingKey`、Store按 key公平返回且消费者具备 Inbox/业务幂等时，才可显式使用 `UseOutboxWithOptions(..., OutboxRuntimeOptions{KeyConcurrency:N})` 与 `Subscription.KeyConcurrency=N`。同 key仍严格串行；不同 key不承诺全局完成顺序；provider不支持或同一 subject配置冲突时启动失败，禁止静默退回伪并行。
 - 业务服务只用 `sc.SubscribeEvent(event.Subscription{Subject, EventType, Reliable, Handler})` 订阅内部事件，不直接注册 `SubscribeControl` 和 `SubscribeExternalControl` 两套订阅。`Subject` 决定外部通道，`EventType` 是可选过滤条件；`EventType` 为空表示订阅该 Subject 下全部事件类型。`Reliable=true` 时 Handler 返回 error 会阻止当前逻辑服务消费组 ACK。
+- v1.6.0起，派生投影等可靠handler若不应进入本服务Outbox的同步外发路径，可显式使用 `Subscription{Reliable:true, BrokerOnly:true, Subject:..., Handler:...}`。只通过原 `ServiceContext.SubscribeEvent` 注册，不能另写worker或两套订阅。零值false保持旧本地及外部交付；true仅在可靠MQ入站执行，包括Source就是本服务的事件，不能按Source跳过自己。
+- `BrokerOnly`要求可靠订阅、非空且无首尾空白的Subject、逻辑消费组，以及明确实现 `BrokerOnlyReliableExternalSubscriber` 的外部适配器。正式MQBridge核对同一Stream、可靠Provider及健康连接；注册失败须在Initialize传播，禁止MQ off/未接好时静默回退。同subject/group仍复用一个Broker订阅；全部匹配可靠handler成功才ACK。新模式在Broadcast与逻辑组混用时按入站组隔离；SharedKeys/Prefetch/KeyConcurrency、Broadcast与共享互斥等原约束继续生效。
+- 仅Broker模式只解除被选中handler在发布阶段的同步依赖：Outbox可在Broker按既有合同接受后确认，不等待该投影完成；其他默认控制/观察handler仍可能同步等待，Outbox跨批lane屏障未改变。消费事务/幂等、原有限重试/DLQ或应用暂停/接管策略都不由该布尔项替代；未声明有限生命周期的旧MQ消费者不会因此自动有界。取消后迟到成功不ACK，关闭等待实际handler退出；不能把租约到期或Close超时视作旧业务已停止。原ID/ShardKey/幂等及at-least-once保持，发布确认与消费ACK不同。示例10与[接入验收](../../codex/EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)提供正式用法和边界。
 - 低频、幂等的副本收敛控制事件（例如市场准备/激活）可显式设置 `Reliable:true, Broadcast:true`，每个稳定服务端点使用独立 consumer group 各消费一次。该选项不得用于价格、成交、结算等高频数据面；数据面仍使用逻辑服务共享组或按 key 分区。
 - 控制事件的 Handler 返回 error，成功后才 ACK；失败留 pending 并允许同组 reclaim。多个服务订阅同一 Subject 时按逻辑服务消费组独立 ACK；同一服务内多个可靠 Handler 全成功才 ACK。
-- 生产写路径必须同事务写业务事实和 Outbox；消费方以 EventID 写 Inbox 或等价幂等事实。发布方只负责发布事实，不知道也不等待消费者处理完成。
+- 生产写路径必须同事务保存业务事实和持久投递意图（独立 Outbox 或经确认的等价业务记录）；消费方的 Inbox 或等价幂等事实必须与对应业务更新同事务提交，成功后才 ACK。具体存储方式先按下节与使用者确认；发布方的 MQ 发布确认不表示消费者处理完成。
 - User 下单必须提供业务 `requestID`；事实服务用 `{UserID}:{requestID}` 唯一约束和请求指纹收敛并发重试。
 - Supplier 使用统一 Manage Hook 同时处理本人和管理员权限；Order 可靠事件按 `OrderID` 幂等写本地永久 `SupplierOrder`，删除 Hook 只查询该投影，禁止同步查询远端判断能否删除。
 - WebSocket 仅把本服务已消费的订单摘要推送给当前最终用户，不承担服务间传输和离线积压。
@@ -50,6 +53,35 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 验收必须同时运行 `examples/integration/06-shop-microservices` 和 `examples/integration/06-shop-microservices-three-process`。
 
 反向代理必须配置 `ServerConfig.TrustedProxies` 的 IP/CIDR。默认空表示忽略 XFF/X-Real-IP；本地/private peer 携带 forwarding header 且没有信任策略时 fail closed。
+
+### Outbox/Inbox 接入前的业务确认
+
+新增或改变业务可靠消息接入时，**以下属于应用业务决策，必须与使用者确认后再实施，Core 和 AI 不得根据模型字段、服务数量或示例自行猜测**。先核对已有需求、项目文档和当前会话中的明确决定；已有明确结论直接沿用，不重复询问。缺失项应列出具体选项、推荐及代价，等待使用者明确回复；未决项只记录为待确认，不据此新增表、字段、状态机、目标或清理策略。确认结论记录在具体项目的设计文档/README 中。
+
+| 确认项 | 必须明确的业务含义 |
+| --- | --- |
+| 事件语义与版本 | 每次业务变化是否都必须投递，还是只同步最新状态、允许合并中间版本；事件身份、版本及重试时使用的内容如何保存或从不可变事实重建 |
+| 投递目标 | 是一次发布 MQ 后由多个逻辑消费组订阅，还是生产方需执行多个独立目标的投递；必需目标及后续变更、历史补投如何定义 |
+| 完成状态 | 主状态和子状态分别表示 Broker 接管、接收方持久接收还是业务完成；是否需要业务回执，失败后如何重试/处置 |
+| 生产方记录复用 | 复用业务记录的投递状态/业务流水，还是独立 Outbox；单目标是否省去投递子表，多目标是否需要子状态及其完成度汇总 |
+| 消费方幂等 | 复用已有业务唯一键/流水，还是独立 Inbox；以什么稳定消费身份及 EventID/业务版本防重，是否跨副本有效 |
+| 事务与保留 | 业务事实、投递意图和消费幂等依据各由谁在什么事务内提交；消息正文、投递明细及去重依据何时可回收，需覆盖哪些重试/重放范围 |
+
+确认方案时保留以下技术边界，不把可选存储形式写成统一业务默认：
+
+- **事件数量与目标数量分开判断。** 一条不可变业务记录对应一个事件、一个发布目标时，可以直接保存投递状态；需要多个独立目标时，可按需增加目标子状态。同一订单若有创建、支付、取消等必须保留的多个事件，即使只有一个目标，也要保留各事件身份、内容与状态，可复用既有业务流水。只有使用者确认允许合并时，才可只保留最新状态。
+- **MQ 扇出不自动产生生产方子状态。** 一次发布到一个 Subject、多个消费组各自处理，通常仍只有一个发布目标；是否需要逐服务业务完成度由使用者定义。`published` 不能被解释为所有服务已处理，也不得据此删除 Broker 消息。发布确认等级须满足已声明的 Provider 能力要求。
+- **复用业务记录仍须守住事务与版本。** 投递意图随业务变化同事务提交；确认更新匹配具体事件/版本及目标，避免旧确认覆盖新 pending。Inbox 或复用的业务幂等事实随消费业务同事务提交，持久唯一约束等机制保证并发与跨副本防重。业务写 MySQL、消息标记单独写 Badger 不构成同一事务。
+- **复用存储不改变框架入口。** 已确认的业务记录可通过适配 `OutboxStore` 接入现有 `UseOutbox`，可靠消费仍走 `SubscribeEvent`；不得为省表另写发布轮询或重复订阅。现有接口不会自动识别业务状态，应用须实现对应存储适配；不能把本节建议描述为 Core 已自动完成。
+
+#### 可选事务消息工具
+
+`pkg/persistence/message` 提供加性工具，不持有数据库连接配置，不预设消息表；业务方案仍须按上表确认：
+
+- `message.Run(ctx, base, operation)`：从支持 `Clone` 的 `IDataAction` 创建独立事务；错误、取消及 panic 回滚，成功才提交，不自动重放提交结果未知的写入。建表必须在启动阶段完成，不在回调中 EnsureStorage。
+- `message.ConsumeInboxWith(ctx, action, receipt, identity, apply)`：加入调用方已经开启的 SQL 事务。应用提供消费依据模型、完整幂等查询条件及数据库唯一约束，工具查重后执行业务并插入依据。它也支持把依据保存为业务流水；提交成功后才 ACK。并发冲突必须回滚并返回，由可靠订阅重投；回调中的 HTTP/WebSocket 不在事务保证内。
+- `message.ConfirmPublishedWith(ctx, action, model, ids, fields)`：通过显式 `PublishedFields` 指定布尔发布字段及可选时间字段，锁定并核对完整主键集合后，分批执行状态更新；空批次不访问数据库。仅支持每行一个不可变事件且无逐行业务更新 Hook 的模型。可变业务行的版本条件、目标子状态和业务完成度仍由项目适配，不能省略版本比较后直接调用。
+- SQLite/MySQL action 提供可选 `types.ITransactionDB.GetTransactionDB()`，只返回已经开启的事务连接，未开启/未完成懒初始化则拒绝。不要用 `GetRunDB()` 作为事务连接；其原有基础连接语义保持不变。现有 `IDataAction` 实现无需新增必选方法，未支持显式 SQL 事务能力的适配器须保留原逐条路径或明确拒绝，不得悄悄使用基础连接。
 
 ### Outbox 批量确认边界
 
@@ -92,6 +124,8 @@ private WebSocket 路由至少需要以下职责：
 
 跨节点模式要求 ClusterProvider 和 CrossNodeNoticeBroker 已由 ServiceContext 启动。forwarder 按服务名隔离；通知节点必须合并本地订阅 hash 与 `ICrossNodeSubscriptionIndex` 提供的对等节点订阅 hash，不能因本节点没有同 hash 订阅而丢弃远端用户通知。IPv6 地址通过 `net.JoinHostPort`；非 2xx 转发视为错误。
 
+普通 Public/Private WS 不需要 `IWebSocketOwnedReference`；该接口只声明持续归属引用。同一部署可共存两种路由。普通跨节点WS继续注册正式 `manage.SyncSubscription`、`manage.ForwardNotice` 到 `sc.Router.AddServerRouters(...)`，由原订阅摘要维护对等索引、原notice处理器投递；不能把普通路由改成伪归属接口来绕过框架错误。两个精确路径只接受同逻辑服务、可信mTLS且SAN与SourceService一致的调用；摘要NodeID须属于该服务。普通路由通过这些检查后交回原分发，归属路由继续内建分支。用户/管理Token、HTTP头、自报服务名均不能替代内部身份；HTTP中继请求返回403。未注册普通中继时明确失败，不伪造成功。同服务mTLS不授予其他ServerManage权限；内部gRPC入站仅为这两个精确中继提供例外，管理访问仍走原HTTP认证域。详见[v1.4.7升级和验收](../../codex/RELEASE_V1_4_7_2026-10-22.md)。
+
 worker 生命周期由通知系统持有；队列满、filter timeout、panic 和 shutdown timeout 是 error，worker 启停是 debug。不得记录消息体。
 
 ## 多服务运行图（Runtime API）
@@ -132,7 +166,7 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - Local cluster：`Stable`。
 - etcd/Consul：`Conditional`，需要显式配置和外部依赖。
 - 内部同步传输默认 gRPC，HTTP 只作为显式备用；自定义 Socket 已删除，迁移见 `docs/codex/GRPC_TRANSPORT_MIGRATION.md`。
-- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.2 无法独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
+- gRPC Client 复用 zrpc，Server 因 go-zero v1.10.3 的 zrpc.RpcServer.Stop 仍只关闭日志、不能独立停止单 listener 而保留薄 grpc-go 生命周期适配；跨主机生产使用 mTLS，已有双向身份的服务网格使用 mesh。Client 侧可复用 zrpc 指标中间件；服务端与跨服务 call-edge、Pending/Outbox 等低基数指标经 Core Collector 进入 Prometheus，供 Runtime API 聚合。
 - QUIC 和 MQ transport：`Unsupported`，配置校验拒绝。
 - MQ/EventBridge：Redis Streams、NATS JetStream 为 `Conditional`。
 - 对需要可靠保留、重放或安全回收的 Subject，应用必须在组合根通过 `ServiceContext.RequireMessageLifecycle(ctx, policy)` 声明真实必需逻辑消费组、起点、保留、重试、DLQ、容量与回收预算。完整状态机、Provider 能力矩阵、迁移和扩展标准见 [MQ 消息生命周期与 Provider 扩展标准](../../codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md)。
@@ -144,10 +178,20 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - 内置 Redis/NATS 生命周期 worker 在完整 Inspect 前竞争跨周期 subject 租约；standby 只刷新轻量容量，不重复扫描全部组。`TimeBudget` 仍是整轮上限（观测最多 70%，回收使用独立 context），启动和周期有界抖动。不得通过延长业务 policy、清数据、改 observe 或忽略 deadline 掩盖 worker 故障；v1.1.1 的 fingerprint/metadata 原地兼容，混跑旧版期间不保证命令去重收益。诊断同时查看 `reclaim_fail_total` 和固定 `deadline|owner_lost|policy_fence|provider` 原因指标，不能只看某一实例；完整 pending/lag 未采集或过期不得冒充零。详见生命周期指南的多实例 worker 章节。
 - 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked`、可选 `OutboxBatchMarker` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。同 key 仍串行 Publish；批量确认只作用于已发布前缀。
 - Runtime 低基数指标公开 Outbox 的配置并发/实际峰值/active lanes/blocked keys/batch，以及 MQ可靠订阅的配置并发/handler in-flight/active/blocked/pending keys；缺少 provider指标时状态为 `not_collected`，禁止伪造零值。
+- Redis 显式 `KeyConcurrency>1` 使用 owner 会话级固定 worker，读取窗口不再等待整批 handler。每 key 只准入最早未完成消息；成功或复核已 ACK 后回扫 PEL，失败仅阻断本 key。`Count` 默认 `KeyConcurrency*4`、有效下限为并发度，同时限制分页和本 owner 新预取的 PEL；还受生命周期 `MaxAckPending` 限制。满预算时背压新读取，不能承诺穿过任意数量热 key 消息找到后方 key；接管超限旧 PEL 时只分页恢复，不清空或重置消费组。`pending_keys` 是本地跟踪 key 数，`prefetched_messages` 是组 PEL 消息数，两者不等价。
+- Redis 可靠订阅的 ACK 由 provider 在 handler 成功后执行，handler 不得调用 `Message.Ack` 提前确认。分 key 超时/取消后仍等待原 handler 实际退出，再结束会话或重试；Go 不能强杀不合作的 handler，它会占住有限 worker 并延迟 `Close`，业务 I/O 仍须有界。不要增加 goroutine 绕过失败屏障。发布/读取/调度/handler 的 OTel span 通过 Redis message ID 关联，该 ID 只作 span 属性，不作指标标签；PEL/reclaim 与新读取分开标记，接管前首次读取未知不得补造时钟。当前修复的命令、观测口径、背压和升级边界见[验收记录](../../codex/REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 - JetStream 可靠数据库写路径先阅读 `docs/codex/NATS_JETSTREAM_WRITE_PATH_GUIDE.md`；当前 Provider 已支持 lifecycle manifest、有界重试、DLQ、`MaxAckPending` 和安全前沿，但业务数据库幂等、事务 Outbox、容量值和 Broker 生产拓扑仍由应用负责。
 - Kafka/RabbitMQ/RocketMQ：无内建 Provider；应用可在 `MQProvider` 后注册自定义 `ProviderFactory`。
 
 go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
+
+## Redis Streams 单实例连接预算
+
+Redis Provider 将阻塞 XREADGROUP 与命令分为两个有限连接池；旧构造器和零配置分别采用 command8、blocking16，不再按 CPU 推导。MQ.RedisStream 的 CommandPoolSize/BlockingReadPoolSize 可显式配置，0用默认，负数拒绝；MQ缺省仍off。每池 PoolSize=MaxActiveConns，单Provider预算C+B，多Provider、发现和缓存另计，不为每个订阅新建池。
+
+按普通订阅和串行可靠订阅的潜在阻塞并发选择B；超过B只在读池背压，不再占尽续租/ACK/发布的命令连接。keyed无BLOCK调度仍使用命令池；C也可能因真实命令负载排队，8/16不是所有项目的最优配置。用固定command/blocking角色的pool limit/total/idle/in_use、wait_total/wait_seconds_total/timeouts_total及redis_blocking_subscriptions核对。后者是含standby的登记数，不是实际blocked数；未采集不能填0。go-redis9.21等待统计只含等待成功取连接路径，不能冒充全部取消等待。
+
+取消删除登记，但不承诺立即打断已发网络读；Close先关闭读池打断I/O、等待真实handler退出、再关命令池。Close终态且幂等，重启新建Provider；不合作handler仍可能延迟关闭。禁止通过提前ACK、延长PoolTimeout、调整GOMAXPROCS、扩大主题容量或清pending掩盖资源饥饿。具体预算、指标口径及真实RED/GREEN见[连接池专项](../../codex/REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。不改变owner、业务幂等与生命周期契约。
 
 ## 日志与错误
 
@@ -159,3 +203,24 @@ go-zero `core/queue` 只用于进程内队列，不能替代 Broker。
 请求/跨服务失败携带 `trace_id`、service、route/target、operation 和 error。错误由拥有重试、降级、响应或终止决策的边界记录一次。
 
 禁止记录凭据、token、cookie、TOTP、完整 payload/body/response、DSN、SQL、参数和对象 dump。
+
+## 可靠事件跨实例分键分担（v1.4.4）
+
+- 需要多个同逻辑服务副本分担一个主题时，使用正式 `sc.SubscribeEvent(Subscription{Reliable:true, SharedKeys:true, KeyConcurrency:N, Prefetch:W, ...})`。Group 仍是逻辑服务名；业务只提供稳定 ShardKey，不自建 Redis worker/锁、独立每实例业务组或第二套适配器。
+- `KeyConcurrency` 单独使用只代表单 active owner 内的并发。SharedKeys 是另一项显式 capability，Bridge/Manager/Provider 必须校验；不支持直接失败。Redis 支持，NATS 不声明有序/keyed/shared，显式要求拒绝。
+- N 是每个实例有限 worker，W 对应 MQ Count：零值4*N、至少N，再受更小MaxAckPending限制。有效 W 是同 subject/group 全实例共享 PEL 新预取预算，所有副本一致并持久冻结。扩容时设置一致显式 W，不能仅调大 N 冒充横向分担。
+- 保留同 subject/group/key 的 Broker 接收顺序、最早失败屏障和成功后 ACK，不承诺跨 subject 用户全局顺序或 exactly-once。租约过期不证明旧业务已退出；ACK/DLQ fencing 不替代业务数据库跨副本幂等、版本约束与调用超时。
+- 启用前停旧订阅，确认实际 handler 结束、旧 owner 租约释放；恢复原 PEL，不删历史/组/游标。Shared 模式与有效 W 冻结，在线 Provider 切换、调预算、Shared→legacy 原地回退未提供。旧版本不能直接混跑共享组，不能删除标记绕过。
+- 预算满可能阻塞后方未读取的独立 key，尤其窗口全是失败热点消息；只承诺可调度独立 key 不受整批完成屏障，不承诺无限越过热点。有限 N/W 与容量预算都要按应用选择。
+- 第10例不含数据库模型，只演示 Broker 调度与有界本地进度，不建立空壳 EnsureStorage；它的直接 Broker 接收接口不承诺业务数据库原子提交。持久业务仍按前述 Outbox/Inbox 业务确认执行，不能复制演示进度当生产幂等。
+- 验收必须真实 Broker + 两个独立 PID，包含加入/退出/硬杀/重启、旧 owner 迟到 ACK、网络中断、旧 pending 与新消息顺序及有限预取。双连接 helper 不能替代跨进程证据；明确 NOT_RUN。见[完整边界与命令](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+- capacity reached 是 retained 数/字节的独立安全背压；不要因某个组 pending=0 就清数据/提阈值/改 observe。先关联冻结 manifest、全部组 lag/pending、保留期、快照新鲜度与回收进度，见[独立调查](../../codex/MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)。
+
+## v1.4.6跨主题持续归属
+
+SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期归属、应用SQL fence、同owner批次、Ready精确调用或现有WS会话恢复时，先读 [scoped-ownership.md](scoped-ownership.md)，使用正式SubscribeOwnedEvents；不要自建worker、Redis锁或会话账。NATS/无MQ明确拒绝；原零值、生命周期与Outbox/Inbox业务确认要求保留。
+
+
+## write-behind处置状态观测
+
+显式新模式的技术pending、真实同步确认、retrying、unknown、paused和handed_off是不同事实，不能相加成业务成功。`GetWriteBehindDispositionMetrics`及可靠门面提供原持久状态、预算耗尽、最老失败时间和handler实际/排队/上限；未启用返回错误，不把未采集填0。该显式查询扫描未解决索引，不用于高频业务请求；Core只在原worker轮次记录低基数状态，不另建采样线程。完整失败记录含原件和错误，仅供应用有权限的恢复流程，不日志dump key/用户/payload/SQL/回执。接管和Release不等于APPLIED，详见[有界失败处置](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。

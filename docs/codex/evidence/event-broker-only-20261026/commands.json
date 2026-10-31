@@ -1,0 +1,331 @@
+[
+  {
+    "name": "broadcast-red",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyBroadcastGroupIsolation$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 7.653,
+    "environment": {},
+    "raw_sha256": "7455f49d15bdddb8a9446981b2954184187b3437c838350d99b29d6c36f543e5",
+    "raw_bytes": 395
+  },
+  {
+    "name": "broker-mode-green",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^Test(BrokerOnly|DefaultControlHandler)",
+      "-v",
+      "-count=1",
+      "-timeout=90s"
+    ],
+    "exit": 0,
+    "seconds": 13.241,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "95dd3b55a40af4ddfeded4b2a55fea9bf5cf1a7cf9a246c7958ae9990ca2e6af",
+    "raw_bytes": 4956
+  },
+  {
+    "name": "cancellation-final-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyRedisCancellationDoesNotAckInFlight$",
+      "-v",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 9.166,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "c502364e7c8a72ce31871a04ca4c4a81dc30bad2c9a5b75abd3d886343988ad9",
+    "raw_bytes": 687
+  },
+  {
+    "name": "detached-ingress-green",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyRejectsDetachedMQIngress$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 0,
+    "seconds": 8.045,
+    "environment": {},
+    "raw_sha256": "7e4baa8600de7062b1d839201dd92d93dc5bd9a48f118f83c541020a166a3c65",
+    "raw_bytes": 58
+  },
+  {
+    "name": "detached-ingress-red",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyRejectsDetachedMQIngress$",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 8.026,
+    "environment": {},
+    "raw_sha256": "0649fd05d6a1a86b7d9a39cf47040cc45b69179faf36a7c4ac9f6fb209191bed",
+    "raw_bytes": 483
+  },
+  {
+    "name": "extended-contract-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnly(ConcurrentRegistrationReusesOneGroup|ReliableWaitsForAllMatchingHandlers|RedisPublishFailureRetainsOutbox)$",
+      "-v",
+      "-count=1",
+      "-timeout=60s"
+    ],
+    "exit": 0,
+    "seconds": 11.721,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "fb0fcff718f26b8667753591c8e94e6845f76d92ffcb0a3973c2a790ccf441d2",
+    "raw_bytes": 1194
+  },
+  {
+    "name": "final-native-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyHardCrashNativeLeaseRecovery$",
+      "-v",
+      "-count=1",
+      "-timeout=240s"
+    ],
+    "exit": 0,
+    "seconds": 130.34,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737",
+      "CORE_TEST_SHARED_FULL_LEASE": "1"
+    },
+    "raw_sha256": "09f73bb0c05173ff1307aa66921c83bdeee25f4d0a1236130b8f716bf9f27fba",
+    "raw_bytes": 1047
+  },
+  {
+    "name": "green-initial",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "Test(DefaultControlHandlerBlocksExternalPublish|BrokerOnly)",
+      "-v",
+      "-count=1",
+      "-timeout=40s"
+    ],
+    "exit": 0,
+    "seconds": 4.716,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "3676a690587e73f924d8d308b17fec2f955f4b14f55767bd5c14dd0c22e845a8",
+    "raw_bytes": 2107
+  },
+  {
+    "name": "logging-contract",
+    "command": [
+      "./scripts/check-logging.sh"
+    ],
+    "exit": 0,
+    "seconds": 0.195,
+    "environment": {},
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw_bytes": 0
+  },
+  {
+    "name": "native-recovery-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyHardCrashNativeLeaseRecovery$",
+      "-v",
+      "-count=1",
+      "-timeout=240s"
+    ],
+    "exit": 0,
+    "seconds": 131.054,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737",
+      "CORE_TEST_SHARED_FULL_LEASE": "1"
+    },
+    "raw_sha256": "88ab63cffba5d7c963ea692dba1bedb714f2912a71de155e82d7a07eef4c0cac",
+    "raw_bytes": 1047
+  },
+  {
+    "name": "process-first",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnly(TwoProcessesOrderingAndFailure|PublisherCrashBeforeOutboxConfirmation)$",
+      "-v",
+      "-count=1",
+      "-timeout=90s"
+    ],
+    "exit": 0,
+    "seconds": 8.285,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "b0e89d78262d466738ceed54ed0a9ed32b8d8aba71d7361d04c51ef2ea31f5bd",
+    "raw_bytes": 1264
+  },
+  {
+    "name": "red-contract",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "Test(DefaultControlHandlerBlocksExternalPublish|BrokerOnly)",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 7.845,
+    "environment": {},
+    "raw_sha256": "cbfc16e661eb0ffcf3e931f219375415edc85b326081429e629ffeac5413a4c7",
+    "raw_bytes": 3590
+  },
+  {
+    "name": "red-redis",
+    "command": [
+      "go",
+      "test",
+      "./pkg/server/event",
+      "-run",
+      "^TestBrokerOnlyRedisOutboxProgressBeforeHandlerCompletion$",
+      "-v",
+      "-count=1",
+      "-timeout=30s"
+    ],
+    "exit": 1,
+    "seconds": 10.013,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "4eb176e1e577226e77d2429e1650d24737fd0afa086f40a98c3accf3bdbc0f65",
+    "raw_bytes": 2271
+  },
+  {
+    "name": "regression-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "-json",
+      "-p",
+      "1",
+      "./pkg/server/event",
+      "./pkg/server/router",
+      "./pkg/server/mq",
+      "./examples/10-reliable-multi-instance/...",
+      "./examples/integration/10-reliable-multi-instance",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 139.072,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "773652093c37ebd90b9e28e71544decfe1fb16edd03c2dbca85fcbc7ac1a2157",
+    "raw_bytes": 582380
+  },
+  {
+    "name": "regression",
+    "command": [
+      "go",
+      "test",
+      "-json",
+      "-p",
+      "1",
+      "./pkg/server/event",
+      "./pkg/server/router",
+      "./pkg/server/mq",
+      "./examples/10-reliable-multi-instance/...",
+      "./examples/integration/10-reliable-multi-instance",
+      "-count=1",
+      "-timeout=300s"
+    ],
+    "exit": 0,
+    "seconds": 122.35,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737"
+    },
+    "raw_sha256": "06300951be3ce91877d85f56de44ec27fff246739a8b8d783748e263a6c2b276",
+    "raw_bytes": 583964
+  },
+  {
+    "name": "release-contract",
+    "command": [
+      "./scripts/test.sh",
+      "release-contract"
+    ],
+    "exit": 0,
+    "seconds": 54.523,
+    "environment": {},
+    "raw_sha256": "234f0ad54154b86229d80d52ecef6cc34b1f09febffd623b2dab043c3dd2e766",
+    "raw_bytes": 3817
+  },
+  {
+    "name": "sealed-broker-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./pkg/server/event",
+      "-run",
+      "^Test(BrokerOnly|DefaultControlHandler)",
+      "-v",
+      "-count=1",
+      "-timeout=240s"
+    ],
+    "exit": 0,
+    "seconds": 128.465,
+    "environment": {
+      "CORE_TEST_REDIS_ADDR": "127.0.0.1:53737",
+      "CORE_TEST_SHARED_FULL_LEASE": "1"
+    },
+    "raw_sha256": "2ca5d650c029c35702eb07115e25db3fb7894cdfdfafb999a9ba2f738c74faee",
+    "raw_bytes": 6432
+  }
+]

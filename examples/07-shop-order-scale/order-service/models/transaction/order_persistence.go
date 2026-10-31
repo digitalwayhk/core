@@ -10,17 +10,21 @@ import (
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
+// ErrRemoteOrderNotFound 区分远端幂等键不存在与数据库读取失败。
+var ErrRemoteOrderNotFound = errors.New("远程订单不存在")
+
 // FindRemoteOrderByIdempotencyWith 按 UserID + requestID 查找远程权威订单。
 func FindRemoteOrderByIdempotencyWith(action persistencetypes.IDataAction, userID uint, requestID string) (*Order, error) {
 	var items []*Order
 	query := store.NewSearch(NewOrder(), 1)
+	query.SkipCount = true
 	query.AddWhereN("UserID", userID)
 	query.AddWhereN("RequestID", strings.TrimSpace(requestID))
 	if err := action.Load(query, &items); err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, errors.New("远程订单不存在")
+		return nil, ErrRemoteOrderNotFound
 	}
 	return items[0], nil
 }
@@ -89,6 +93,7 @@ func UpsertRemoteOrdersWith(action persistencetypes.IDataAction, orders []*Order
 
 	var existing []*Order
 	query := store.NewSearch(NewOrder(), len(hashes))
+	query.SkipCount = true
 	query.AddWhereNS("Hashcode", persistencetypes.SymbolIn, hashes)
 	if err := action.Load(query, &existing); err != nil {
 		return nil, err

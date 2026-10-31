@@ -22,6 +22,8 @@ Digitalway Core 不做通用技术框架，而是把商业服务的开发方式*
 go get github.com/digitalwayhk/core@latest
 ```
 
+推荐使用 `v1.4.7`（[普通WS中继兼容与compress安全补丁](./docs/codex/RELEASE_V1_4_7_2026-10-22.md)），保留 [v1.4.6跨主题持续归属与恢复](./docs/codex/RELEASE_V1_4_6_2026-10-21.md)，保留 [v1.4.5连接池隔离](./docs/codex/RELEASE_V1_4_5_2026-10-20.md)，另含 [v1.4.4 可靠事件能力](./docs/codex/RELEASE_V1_4_4_2026-10-20.md)、 [v1.4.2 的 Redis 可靠订阅跨窗口修复](./docs/codex/RELEASE_V1_4_2_2026-10-20.md)及 v1.4.1 的内嵌编译产物补齐；此前功能与 Go 源码验证见 [v1.4.0 记录](./docs/codex/RELEASE_V1_4_0_2026-10-20.md)。从 `v1.3.0` 升级前先阅读[消费方升级指南](./docs/codex/UPGRADE_FROM_V1_3.md)：本轮调整 MQ 缺省、升级 Badger，并增加可选稳定实例身份和监听前初始化钩子，数据卷及配置需要按使用场景验证。
+
 ## 目录
 
 **上手**　[快速开始](#快速开始)　·　[服务骨架](#服务骨架)　·　[能力地图](#能力地图)　·　[能力阶梯](#能力阶梯)
@@ -39,7 +41,7 @@ go get github.com/digitalwayhk/core@latest
 首次运行会在可执行文件目录自动生成 `etc/server.json` 和 `etc/shop.json`。
 
 > [!NOTE]
-> 不需要手工准备配置，也**不需要建库建表**。建库、建表和补列由框架在首次数据访问时自动完成。
+> 不需要手工执行建库建表脚本。业务服务应在接受请求前调用 models 组合根 `EnsureStorage()`，由框架完成建库、建表和补列；不要把初始化留在请求或业务事务中。01～05 的既有初始化接线差距见[升级指南](./docs/codex/UPGRADE_FROM_V1_3.md#管理端与示例)，不能直接当作启动阶段已验收的模板。
 
 ```bash
 cd examples/01-simple-shop/main
@@ -159,7 +161,9 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | 开放登录后接口 | `api/private` 包 + `req.GetUser()` | [01](./examples/01-simple-shop) | `go test ./examples/integration/01-simple-shop -run Private` |
 | 给模型配一套后台 CRUD | `manage.NewManageService[T](own)` | [01](./examples/01-simple-shop) | `go test ./service/manage` |
 | 给 Manage 加角色权限 | 复用 08 的分类/条目 Manage API，演示 Core 主体/角色与精确命令 RBAC；外部 IAM 才覆盖 `IManageRoleProvider` | [09](./examples/09-admin-manage-rbac) | `go test ./examples/09-admin-manage-rbac/... ./examples/integration/09-admin-manage-rbac` |
-| 建表、加字段 | **无需操作**，首次数据访问时自动完成 | [models 分片](./docs/ai/core-skill/models.md) | 启动后查看表结构 |
+| 可靠事件跨实例分担 | 同逻辑服务共享消费组，稳定 ShardKey，显式 SharedKeys、有限并发和组级预取；同 key 有序与失败屏障 | [10](./examples/10-reliable-multi-instance) | `CORE_TEST_REDIS_ADDR=<独占Redis> go test -p 1 -race ./examples/integration/10-reliable-multi-instance` |
+| 跨主题持续归属与恢复 | 同scope/key凭据、应用SQL fence、多主题批次、Ready查询和WS免重订恢复 | [11](./examples/11-scoped-event-ownership) | 需独占Redis/MySQL，见示例README与v1.4.6验收 |
+| 建表、加字段 | 服务启动前由 models 组合根 `EnsureStorage()` 触发框架自动完成 | [models 分片](./docs/ai/core-skill/models.md) | 接受请求前验证存储就绪 |
 | 实时推送给用户 | `RouterInfo.RegisterWebSocketClient` / `NoticeWebSocket` | [01](./examples/01-simple-shop) | `go test -race ./examples/integration/01-simple-shop -run WebSocket` |
 | 跨模型事务、状态机 | `IDataAction` 事务边界 + business 层 | [02](./examples/02-shop-payment) | `go test ./examples/integration/02-shop-payment` |
 | 模型与 Manage 建继承层 | `BaseDataModel` / `BusinessModel` 双支路 | [03](./examples/03-shop-inheritance) | `go test ./examples/integration/03-shop-inheritance` |
@@ -180,7 +184,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 
 ## 能力阶梯
 
-九个示例组成一条递进阶梯；01–07 覆盖同一个商城业务域，08–09 分别集中演示管理界面与 Manage 角色授权。
+十个示例组成能力阶梯；01–07 覆盖商城业务域，08–09 演示管理界面与角色授权，10 用三个独立服务进程验证可靠事件跨实例分键消费。
 
 | 示例 | 在前一级之上新增 | 业务代码 |
 | :--- | :--- | ---: |
@@ -193,6 +197,7 @@ func (own *Ping) RouterInfo() *types.RouterInfo { return router.DefaultRouterInf
 | [07-shop-order-scale](./examples/07-shop-order-scale) | 订单服务多副本水平扩展，AutoMachineID，共享权威库，Outbox，服务报表 | 6266 行 / 106 文件 |
 | [08-admin-manage-ui](./examples/08-admin-manage-ui) | Manage View schema、外键、子表、控件、导入导出和自定义命令 | 以示例源码为准 |
 | [09-admin-manage-rbac](./examples/09-admin-manage-rbac) | 复用 08 的分类/条目业务页面与 Manage API，演示管理员/RoleCode 绑定、只读与精确写权限、真实 HTTP 403 | 以示例源码为准 |
+| [10-reliable-multi-instance](./examples/10-reliable-multi-instance) | 一个发布服务、两个消费副本；真实 PID 分担、慢 key、同 key 顺序、失败重投与用户隔离 | 显式 Redis/实例参数，见示例 README |
 
 <sub>行数只统计业务代码，不含测试。</sub>
 
@@ -365,6 +370,7 @@ CI 门禁由 `scripts/ci.sh` 按名称执行：
 | 场景矩阵、成熟度、必需配置 | [FRAMEWORK_USAGE_GUIDE.md](./docs/codex/FRAMEWORK_USAGE_GUIDE.md) |
 | 配置字段到运行时能力的对应 | [CONFIG_RUNTIME_CAPABILITY_MATRIX.md](./docs/codex/CONFIG_RUNTIME_CAPABILITY_MATRIX.md) |
 | MQ 消息生命周期、安全回收与 Provider 扩展 | [MQ_MESSAGE_LIFECYCLE_GUIDE.md](./docs/codex/MQ_MESSAGE_LIFECYCLE_GUIDE.md) |
+| Redis 阻塞读取连接饥饿、池预算与验证 | [REDIS_STREAM_POOL_ISOLATION_2026-10-20.md](./docs/codex/REDIS_STREAM_POOL_ISOLATION_2026-10-20.md) |
 | 消费方安装 skill | [CONSUMER_AI_SKILL_SETUP.md](./docs/codex/CONSUMER_AI_SKILL_SETUP.md) |
 | 废弃 API 与迁移 | [DEPRECATION_REGISTER.md](./docs/codex/DEPRECATION_REGISTER.md) |
 | 日志规范 | [LOGGING_AUDIT_AND_STANDARD.md](./docs/codex/LOGGING_AUDIT_AND_STANDARD.md) |

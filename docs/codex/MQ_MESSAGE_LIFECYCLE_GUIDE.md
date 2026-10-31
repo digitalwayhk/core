@@ -138,6 +138,8 @@ NATS 使用 durable consumer 的 `AckFloor.Stream`、`NumAckPending`、`NumPendi
 
 ## Provider 能力矩阵
 
+Redis单实例阻塞读取与控制命令使用有限独立池，默认command8/blocking16；按部署潜在阻塞订阅数配置读预算并核对PoolStats，见[连接池预算与验证](REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。连接饥饿可拖慢消费和回收，但不等于已证明capacity reached的唯一根因。隔离连接不改变必需组、保留、安全前沿、主题硬限或回收门禁，不得以扩大容量、observe或清pending掩盖问题。
+
 ### 多实例 worker、预算与容量采集
 
 内置 Redis/NATS 的后台轮次在完整 Inspect 之前取得 subject 所有权。owner 跨周期续持有界租约，standby 不做全组或 pending 扫描；Redis standby 用 GET 排除竞争，只有 owner 原子续约，不能把检查放大转移成所有实例执行 Lua。租约有效期为 `max(1 秒, 3×Interval + 3×TimeBudget)`，复用既有 owner key / KV 锁编码。进程退出后停止续约，关闭时所有租约释放共享 1 秒预算，未成功释放的由 TTL/到期接管。旧 owner 不得释放新 owner 的锁。
@@ -175,7 +177,7 @@ Redis 在真实投递前持久增加 Subject+Group+Message attempt。Handler 成
 
 JetStream 使用 Broker delivery count；达到上限时以源 stream sequence、Subject 和 group 生成稳定 `Nats-Msg-Id`，同步发布 DLQ 并等待 ACK，之后才 `Term`。发布失败时 NAK 原消息。`MaxAckPending` 使用 Broker 原生背压。
 
-Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。超时后可能与迟迟不退出的旧调用短暂重叠，业务幂等仍是硬要求。
+Handler panic 被转为失败。配置 `HandlerTimeout` 后，Core 在到期时把本次投递判为失败；Go 无法强制终止忽略取消的业务 goroutine，因此 Handler 必须自身有界、线程安全，并对其数据库/HTTP 调用设置 context 超时。Redis 显式 `KeyConcurrency>1` 或 `SharedKeys=true` 的可靠订阅在超时/取消后继续占住原 worker，直到真实 handler 退出，防止旧调用与同 key 重试重叠；不合作的 handler 会延迟会话退出和 `Close`。Redis 串行分支及其他 Provider 的既有超时实现未在本次分 key 修复中变更，不能据此推断它们具备同样的退出等待保证。业务幂等仍是硬要求，见[跨窗口修复与验收](REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。
 
 ## 容量与故障窗口
 
@@ -263,3 +265,21 @@ go test -race ./pkg/server/mq -count=1
 ./scripts/test.sh api-compat
 ./scripts/check-logging.sh
 ```
+
+## v1.4.4：跨实例分键与容量的独立边界
+
+`Subscription{Reliable:true, SharedKeys:true, KeyConcurrency:N, Prefetch:W}` 显式启用跨实例分担；默认仍是单 owner。N 是每实例并发，W 是归一化并受 MaxAckPending 限制后的组级 PEL 预算。使用原 Stream/group 与历史 pending，按 key 执行租约和 fenced ACK，不将 Redis 实现暴露给业务。只有同 subject/group/key 有序，不保证不同 subject 全局用户顺序。NATS 未声明该能力且明确拒绝，不将共享 durable ACK 当有序。
+
+W 与模式持久冻结。启用前必须停旧订阅、确认实际 handler 已退出并等待旧租约释放；禁止旧新模式混跑。原地回退、在线调预算和跨 Broker 热切换不在本轮能力内；不得删组、标记或历史消息绕过。租约过期不证明旧业务调用终止，旧 owner 不能有效 ACK，但业务仍需跨副本事务幂等。具体资源预算、公平性及真实故障证据见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)和[示例10](../../examples/10-reliable-multi-instance)。
+
+`message lifecycle capacity reached` 根据 retained 数/字节触发，与单 owner 问题分开诊断。某组 pending=0 时，其他必需组或正常保留期仍可阻止物理回收。真实两组验收和现场缺失证据见[独立容量调查](MQ_LIFECYCLE_CAPACITY_DIAGNOSIS_2026-10-20.md)，不应提容量或改 observe 掩盖。
+
+## v1.4.6持续归属可选能力
+
+| Provider | 跨主题持续scope/key | 应用凭据/事务fence | 原组多输入批次/Ready查询/WS引用恢复 |
+| --- | --- | --- | --- |
+| Redis Streams | 支持，显式OwnedReliableMQProvider | 正epoch+token；应用自己在SQL事务CheckFence | 支持；原组/W有界，保全维护绑定 |
+| NATS JetStream | 不支持，启动拒绝 | 不声明 | 不声明，不能以普通ACK替代 |
+| 无MQ/其它Provider | 未声明即拒绝 | 不模拟 | 不降级本地或哈希 |
+
+详见[持续归属指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。保留required groups、发布确认、容量、保留与安全回收。新入口不支持有限次整批DLQ，MaxDeliveries>0明确拒绝；不能为接入而擅自删改原策略。ACK响应未知先重查原PEL；新读取后重新扫描最早PEL，保留原OrderingKey失败屏障，不承诺跨subject总序。

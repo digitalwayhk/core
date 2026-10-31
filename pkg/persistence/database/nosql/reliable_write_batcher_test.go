@@ -220,3 +220,51 @@ func TestBatchCommitterSubmitHonorsCanceledContextBeforeAcceptance(t *testing.T)
 	err := committer.Submit(ctx, WriteOperation[testFund]{Type: WriteOperationSave, Item: newFund("cancel", "HK", 1)})
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// TestBatchCommitterReadyBacklogPreservesLocalBoundary 就绪请求不得越过FIFO中的本地元数据命令合并。
+func TestBatchCommitterReadyBacklogPreservesLocalBoundary(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	var mu sync.Mutex
+	var order []string
+	var sizes []int
+	b := newBatchCommitter[testFund](BatchCommitConfig{MaxBatch: 8, QueueCapacity: 16, CollectBacklog: 1, CollectWindow: time.Hour}, func(ops []WriteOperation[testFund]) (BatchWriteResult, error) {
+		mu.Lock()
+		sizes = append(sizes, len(ops))
+		for _, op := range ops {
+			order = append(order, op.Item.UserID)
+		}
+		mu.Unlock()
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return BatchWriteResult{Committed: len(ops)}, nil
+	})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }); _ = b.Close(context.Background()) })
+	result := make(chan error, 3)
+	go func() {
+		result <- b.Submit(context.Background(), WriteOperation[testFund]{Item: newFund("warmup", "", 1)})
+	}()
+	<-entered
+	go func() {
+		result <- b.Submit(context.Background(), WriteOperation[testFund]{Item: newFund("before", "", 1)})
+	}()
+	require.Eventually(t, func() bool { return len(b.requests) == 1 }, time.Second, time.Millisecond)
+	local, err := b.queueLocalCommit(context.Background(), func() error { mu.Lock(); order = append(order, "metadata"); mu.Unlock(); return nil })
+	require.NoError(t, err)
+	go func() {
+		result <- b.Submit(context.Background(), WriteOperation[testFund]{Item: newFund("after", "", 1)})
+	}()
+	require.Eventually(t, func() bool { return len(b.requests) == 3 }, time.Second, time.Millisecond)
+	once.Do(func() { close(release) })
+	for range 3 {
+		require.NoError(t, <-result)
+	}
+	require.NoError(t, (<-local).err)
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"warmup", "before", "metadata", "after"}, order)
+	require.Equal(t, []int{1, 1, 1}, sizes)
+}

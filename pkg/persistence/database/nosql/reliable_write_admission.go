@@ -21,8 +21,10 @@ var (
 	ErrWriteRejectedDisk = errors.New("可靠写入磁盘已达上限")
 )
 
-// WriteAdmissionMetrics 描述三类背压拒绝的累计次数。
+// WriteAdmissionMetrics 描述准入尝试、累计耗时及三类背压拒绝次数。
 type WriteAdmissionMetrics struct {
+	Attempts            uint64
+	TotalDuration       time.Duration
 	RejectedConcurrency uint64
 	RejectedPending     uint64
 	RejectedDisk        uint64
@@ -30,6 +32,8 @@ type WriteAdmissionMetrics struct {
 
 // WriteAdmissionController 在进入 Group Commit 前执行可靠写入容量准入。
 type WriteAdmissionController struct {
+	attempts            atomic.Uint64
+	totalNanos          atomic.Int64
 	limit               syncx.TimeoutLimit
 	config              WriteAdmissionConfig
 	backlogMu           sync.Mutex
@@ -62,6 +66,9 @@ func (controller *WriteAdmissionController) Acquire(
 	if controller == nil {
 		return func() {}, nil
 	}
+	started := time.Now()
+	controller.attempts.Add(1)
+	defer func() { controller.totalNanos.Add(time.Since(started).Nanoseconds()) }()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -114,9 +121,9 @@ func (controller *WriteAdmissionController) Metrics() WriteAdmissionMetrics {
 		return WriteAdmissionMetrics{}
 	}
 	return WriteAdmissionMetrics{
-		RejectedConcurrency: controller.rejectedConcurrency.Load(),
-		RejectedPending:     controller.rejectedPending.Load(),
-		RejectedDisk:        controller.rejectedDisk.Load(),
+		Attempts: controller.attempts.Load(), TotalDuration: time.Duration(controller.totalNanos.Load()), RejectedConcurrency: controller.rejectedConcurrency.Load(),
+		RejectedPending: controller.rejectedPending.Load(),
+		RejectedDisk:    controller.rejectedDisk.Load(),
 	}
 }
 

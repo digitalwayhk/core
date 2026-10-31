@@ -8,6 +8,8 @@ MQ 命令计数测试读取 Redis 全局统计，不能与其他包的流量共�
 
 ## 标准集成测试模板
 
+Redis连接池变更必须以独占真实Redis运行CPU1/2、多空闲阻塞主题与活跃主题，受控确认长轮询未退出时renew/check/ACK/publish可取得命令资源；保留旧源码RED，不以加长阈值或mock代替。覆盖serial/keyed、慢handler取消、断连恢复、pending顺序、订阅启停资源、ServiceContext正式链，并运行mq/event/router/config/observability完整普通与race。固定负载对照需同订阅数/总预算/handler，显式CORE_TEST_POOL_MEASURE=1运行TestRedisPoolFixedWorkloadMeasurement；池累计等待不等于单协程等待比例，短窗积压排空不等于稳态吞吐。详见[连接池验收](../../codex/REDIS_STREAM_POOL_ISOLATION_2026-10-20.md)。
+
 集成测试是平台服务的标准能力，不是可选示例。为新服务创建集成测试时，必须优先复用以下两层模板。
 
 ### 公共测试能力
@@ -152,6 +154,8 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 ## 测试与发布
 
+服务接入 `IInitializeService` 时，至少验证：初始化先于任何监听器构造，初始化错误保留 cause 并阻止启动，后续构造失败会释放已初始化资源。必要资源绑定不能放在异步 `Start()` 或通过测试 sleep 弥补；07 首单回归使用受控延迟确认该边界。
+
 ```bash
 ./scripts/test.sh quick
 ./scripts/test.sh security
@@ -181,6 +185,12 @@ go test -race ./examples/integration/01-simple-shop -count=1
 
 它比对 `git ls-tree HEAD web/admin` 的**已提交**指针与 `build-info.json` 的 `frontend_commit`。不要改成读子模块工作区 HEAD——本地 checkout 会让它跟着漂移，从而放过已提交的不一致。
 
+产物内容指纹还须针对已提交树或实际下载的 Go 模块核对，不能只计算本地 dist：被忽略但未提交的 JSON 也会参与本地指纹，却不会进入发布包。dist 下的公开编译 JSON 已加入忽略例外；v1.4.1 补齐了这一实际遗漏。指针一致不等于全部产物已经提交。
+
+Core 的 Go 构建通过 `pkg/server/run/htmlserver.go` 的 `//go:embed dist` 嵌入上述已提交产物，不读取 `web/admin` 源码，也不执行前端构建。普通消费方不需要拉取子模块。可用无前端源码的检出验证构建边界；不得把子模块远端冷获取失败误列为使用既有内嵌产物的发布阻断。
+
+需要修改、重新构建前端或独立部署其源码时，才另行核对精确 gitlink SHA 的远端可获取性；空对象库 fetch 返回 `not our ref` 表示该源码获取路径不可用，不表示已提交的内嵌产物不可用。本地已有对象时 fetch 可能假通过；保留真实失败记录，不通过重写 gitlink、伪造 build-info 或删除子模块掩盖源码维护问题。
+
 发布前不得自动创建 tag。开发消费方可临时引用分支或精确 commit：
 
 ```bash
@@ -189,6 +199,34 @@ go get github.com/digitalwayhk/core@<commit>
 ```
 
 分支会移动并解析为伪版本；生产必须使用已发布 tag 或精确 commit。执行 `release-contract`，并遵循 `docs/RELEASE_POLICY.md` 与废弃登记。
+
+从 v1.3.0 升级时必须结合[消费方升级指南](../../codex/UPGRADE_FROM_V1_3.md)盘点 MQ 缺省 off、Badger 存量数据与原生错误比较、MySQL 账号池隔离、无上下文 InitRequest.NewID，以及可选 stable 的身份/编号迁移。公共签名检查通过不代表这些行为和数据边界已验收；Core 门禁与消费方精确提交 smoke 分别登记，禁止把旧版本的迁移记录重复算作本候选通过。
+
+## 跨实例可靠消费验收
+
+`VerifyKeyedReliableConcurrency` 仅验证单订阅内的 key 并发；`VerifySharedKeyReliableDistribution` 验证两个连接，也不能替代独立进程。涉及 SharedKeys 时必须以独占 Redis 串行执行 mq/event 普通与 race、真实独立进程故障测试，以及 `examples/integration/10-reliable-multi-instance` 的三服务 HTTP 验收。原生默认租约崩溃恢复需显式 `CORE_TEST_SHARED_FULL_LEASE=1`，不能将加速 TTL 的网络故障注入当作原生接管时延。保留原 RED、夹具失败和最终源码哈希，未配置 NATS/MySQL/etcd 或生产迁移登记 NOT_RUN。详见[共享消费验收](../../codex/SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+
+## 持续归属验证
+
+参照 [示例11](../../../examples/11-scoped-event-ownership/README.md) 与 [v1.4.6验收](../../codex/RELEASE_V1_4_6_2026-10-21.md)。必须独立PID、真实Broker/SQL/WS，区分原生租约、加速注入和NOT_RUN；ACK成功、SQL持久化、Gateway引用确认及消费方UAT分别取证，不以静态能力声明替代。
+
+## 普通与归属WS共存回归（v1.4.7）
+
+`CORE_TEST_REDIS_ADDR=<独占地址> go test -race ./examples/integration/ws-relay -count=1 -timeout=3m` 必须用两个真实Gateway进程、同服务mTLS、真实外部WS帧，分别验证两个中继路径的索引和实际投递、普通Public/Private与归属共存、双向通知、用户隔离、退订和关闭，以及匿名HTTP/无客户端证书/伪造SourceService/异服务/非法节点/未知路由拒绝。同步注入可信context只算单元测试。示例11的真实MySQL/四进程Ready查询及免重订恢复须同时回归。保留原始RED及夹具错误，不能只凭ACK或RPC成功判断完成。
+
+依赖安全回归包含 `TestS2RejectsOverflowedDictionaryRepeat` 和 `TestSecurityPatchedDependencyVersions`；compress最低v1.18.7，拒绝溢出字典但不调用危险Encode。S2拒绝测试通过不代替消费方自定义压缩路径验收。
+
+
+## write-behind有界失败处置验收
+
+显式新模式须覆盖完整失败选批窗口及健康组继续、同组最早未解决屏障、预算跨重启保留、未知结果不盲重放、非法决策、旧版本不能确认新值、应用先持久接管、回执丢失复用，以及Core保存回执前后的独立进程硬杀恢复。真实临时Badger与应用独立存储不能换成纯mock；handler超时后实际未退出、人工Retry、关闭pending为零仍超时必须分别验证。普通与race运行`pkg/persistence/database/nosql`及07订单服务变更范围，并执行persistence-unit、config-contract、performance-contract、release-contract及日志检查。外部MySQL、HTTP/UAT/容量和消费方接入分别登记NOT_RUN，不以配置/编译契约替代。
+
+
+## 有界选批与前台长尾回归
+
+先固定真实Badger范围RED、选批占提交器时已入队Save等待，再验证target/group/具体queue底层Prefix。Prefix不能免除前缀内部删除历史；范围复用必须覆盖mode原字节不变、跨wrapper/并发ScopeTarget变化的实际提交冲突、回滚和绑定前准备。固定真实TxnTooBig验证选中快照只写一次、InFlight/attempt/BatchID仍原子；空轮和暂停轮用实际Badger提交版本证明不变cursor不重复可靠写，推进/回绕不能省略。
+
+性能至少含仅前台、前后台及9000保留/多次更新/删除/暂停历史三个场景，保持可靠刷盘、CPU预算和1ms合批，多轮记录Save分位数、队列及本地阶段、实际确认/pending并用独立PID重开。诊断覆盖/CPU采样与正式窗口分开，不用helper/编译或单轮平均当验收；差轮及既有硬崩溃恢复FAIL原样保留。示例04/07及nosql普通/race、持久化/配置/性能/发布/前端和日志分别取证。消费方现场、真实业务库、物理断电、未采集I/O/限流及长期容量分别登记NOT_RUN。
 
 ## PostgreSQL 验收
 

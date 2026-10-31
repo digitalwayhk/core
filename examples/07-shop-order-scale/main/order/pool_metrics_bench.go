@@ -31,8 +31,8 @@ func (benchmarkPoolCollector) Collect(output chan<- prometheus.Metric) {
 	for _, driver := range []string{"mysql", "postgres"} {
 		var stats sql.DBStats
 		known := 0.0
-		for key, connection := range oltp.GetConnectionManager().GetAllConnections() {
-			if !strings.HasPrefix(key, driver+":") || connection == nil || connection.DB == nil {
+		for _, connection := range oltp.GetConnectionManager().GetAllConnections() {
+			if connection == nil || connection.DB == nil || connection.DB.Dialector.Name() != driver {
 				continue
 			}
 			db, err := connection.DB.DB()

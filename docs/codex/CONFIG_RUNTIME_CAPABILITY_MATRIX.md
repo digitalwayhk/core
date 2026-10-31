@@ -33,7 +33,7 @@
 
 ## MQ 与 Event
 
-`MQ.Mode` 在未配置或为空时默认 `off`：不创建 MQManager、Provider 或 EventBridge，也不探测 Redis。需要跨节点事件的服务必须在自己的 `etc/<service>.json` 中显式设置 `MQ.Mode=on`（连接失败终止启动）或 `auto`（连接失败降级）。系统管理服务的 `etc/server.json` 默认同样关闭，不随业务服务启用。Provider 和 Usage 的默认值只补全配置，不构成启用声明。
+`MQ.Mode` 在未配置或为空时默认 `off`：不创建 MQManager、外部 Provider 或 MQBridge，也不探测 Redis；进程内 EventStream 与 ServiceEventBridge 仍正常创建、注册、订阅和发布。需要跨节点事件的服务必须在自己的 `etc/<service>.json` 中显式设置 `MQ.Mode=on`（连接失败终止启动）或 `auto`（连接失败降级）。系统管理服务的 `etc/server.json` 默认同样关闭，不随业务服务启用。Provider 和 Usage 的默认值只补全配置，不构成启用声明。
 
 迁移说明（2026-09-30）：此前缺省 Mode 会补成 `auto`，现在改为 `off`。已有 JSON 中明确保存的 `Mode=auto/on` 保持原样；如果旧配置曾自动生成 `auto`、而服务不需要 MQ，应手动改为 `off`。依赖缺省自动探测的服务需在升级前显式配置模式和 Broker 地址。
 
@@ -252,6 +252,8 @@
 | `ServerConfig.MQ.RedisStream.Addr` | supported | RedisStream provider | Redis client 构造消费 |
 | `ServerConfig.MQ.RedisStream.DB` | supported | RedisStream provider | Redis DB 选择消费 |
 | `ServerConfig.MQ.RedisStream.Prefix` | supported | RedisStream provider | stream key/subject 构造消费 |
+| `ServerConfig.MQ.RedisStream.CommandPoolSize` | supported | Redis Provider 命令client | 零值8；owner/ACK/发布/生命周期和非阻塞Lua共用有限命令池；PoolSize=MaxActiveConns，负数/超int32拒绝 |
+| `ServerConfig.MQ.RedisStream.BlockingReadPoolSize` | supported | Redis Provider 阻塞读client | 零值16；仅现有阻塞XREADGROUP，超过预算排队；不按CPU或每订阅增池 |
 | `ServerConfig.MQ.NATSJetStream` | supported | NATS JetStream provider | factory 透传连接参数并由 MQManager 关闭 |
 | `ServerConfig.MQ.NATSJetStream.URL` | supported | NATS JetStream provider | NATS 连接构造消费 |
 | `ServerConfig.MQ.NATSJetStream.StreamPrefix` | supported | NATS JetStream provider | stream/subject 命名消费 |
@@ -290,3 +292,21 @@
 | `ServerConfig.IDGenerator.Providers.Redis.DB` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
 | `ServerConfig.IDGenerator.Providers.Redis.Prefix` | supported | stable identity runtime | 显式 stable 模式配置校验；identity 权威、持久锁和生成时间保护测试 |
 | `ServerConfig.IDGenerator.Providers.Redis.TTL` | rejected | IDGeneratorConfig.Validate | 非零值拒绝；编号绑定不能挂发现 TTL |
+
+## v1.4.4：可靠消费运行时选项
+
+这些是启动组合根的 Go 选项，不增加 MQ JSON 默认值；MQ 仍缺省 off。
+
+| 选项/能力 | Redis Streams | NATS JetStream | 校验及边界 |
+| --- | --- | --- | --- |
+| `Subscription.SharedKeys` / `ReliableSubscribeOptions.SharedKeys` | 显式支持 | 明确拒绝 | 零值保留单主题 owner；true 要求可靠、Subject、逻辑组，禁止 Broadcast |
+| `Subscription.KeyConcurrency` | 每实例有界 worker；默认1 | >1 拒绝 | SharedKeys=false 的 >1 仅 owner 内并发，不能推断跨实例 |
+| `Subscription.Prefetch` → `Count` | 共享组 PEL 预算 | SharedKeys 不支持 | 仅共享模式可非零，负值拒绝；零取4*N、至少N，再受更小MaxAckPending限制；有效W跨副本一致、持久冻结 |
+| `SharedKeyReliableMQProvider` | 有序、fenced ACK、有限预取声明 | 不声明 | Manager及Bridge启动校验，不能静默降级 |
+| Shared 模式在线 Provider 切换 | 拒绝 | 拒绝 | 建立要求后 SetCurrent/BeginSwitch 拒绝；新上下文维护迁移 |
+
+存量 PEL、旧新版本及回退边界见[共享消费指南](SHARED_KEY_RELIABLE_CONSUMPTION_2026-10-20.md)。
+
+## v1.4.6持续归属是显式Go能力合同
+
+本轮不新增ServerConfig JSON开关。通过 [ownership.Manifest/OwnedSubscription](SCOPED_EVENT_OWNERSHIP_GUIDE.md) 声明scope、原subject/group、有限键目录/预算和时限，经ServiceEventBridge→MQManager→Provider校验；正常启动不自动Provision/Bind/Recover。Redis支持，NATS/无MQ拒绝。复用命令8/阻塞16池预算，不按每scope创建client，不改变生命周期容量/回收配置。

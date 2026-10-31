@@ -16,6 +16,7 @@ var ErrOrderRuleNotFound = errors.New("订单规则不存在")
 func GetEnabledOrderRuleWith(action persistencetypes.IDataAction, ruleCode string) (*OrderRule, error) {
 	var items []*OrderRule
 	query := store.NewSearch(NewOrderRule(), 1)
+	query.SkipCount = true
 	query.AddWhereN("RuleCode", strings.TrimSpace(ruleCode))
 	query.AddWhereN("Enabled", true)
 	if err := action.Load(query, &items); err != nil {

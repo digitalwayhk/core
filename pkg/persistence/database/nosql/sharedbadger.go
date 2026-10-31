@@ -1,3 +1,4 @@
+// 本文件实现共享 Badger 持久队列、可靠确认与同步后本地回收。
 package nosql
 
 import (
@@ -13,7 +14,7 @@ import (
 
 	"github.com/digitalwayhk/core/pkg/json"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/persistence/entity"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -167,6 +168,7 @@ type SyncQueueItem[T types.IModel] struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	IsSynced  bool      `json:"is_synced"`
+	HandedOff bool      `json:"handed_off,omitempty"` // 仅表示应用持久接管，不等于远端同步或业务APPLIED
 	SyncedAt  time.Time `json:"synced_at,omitempty"`
 	IsDeleted bool      `json:"is_deleted"`
 	DeletedAt time.Time `json:"deleted_at,omitempty"`
@@ -191,12 +193,17 @@ const (
 
 // PrefixedBadgerDB 带前缀的共享 BadgerDB
 type PrefixedBadgerDB[T types.IModel] struct {
+	localConfirmationLimit int // facade确认固定小块，避免波次空隙放大；不按业务身份分锁。
+
+	localSubmit func(func() error) error // 显式有界store复用现有BatchCommitter，绑定前设置，之后不变。
+
 	manager *SharedBadgerManager
 	prefix  string // "user:", "order:", "product:"
 
 	syncDB         bool
 	syncList       *entity.ModelList[T]
 	syncTarget     WriteBehindTarget[T]
+	disposition    *writeBehindDispositionRuntime[T]
 	syncBindErr    error
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
@@ -236,13 +243,19 @@ type PrefixedBadgerDB[T types.IModel] struct {
 
 // SyncMetrics 记录写后同步的真实收敛情况，与本地 Badger 提交 TPS 分开观察。
 type SyncMetrics struct {
-	Attempts      uint64
-	Failures      uint64
-	SyncedItems   uint64
-	MaxPending    int
-	TotalDuration time.Duration
-	LastDuration  time.Duration
-	LastSuccessAt time.Time
+	// ForegroundLocal、ConfirmationLocal、MetadataLocal只统计本地事务，不含target/应用回调。
+	ForegroundLocal   LocalTransactionMetrics
+	ConfirmationLocal LocalTransactionMetrics
+	MetadataLocal     LocalTransactionMetrics
+	// TargetDuration为target累计耗时；不可与包含它的TotalDuration相加。
+	TargetDuration time.Duration
+	Attempts       uint64
+	Failures       uint64
+	SyncedItems    uint64
+	MaxPending     int
+	TotalDuration  time.Duration
+	LastDuration   time.Duration
+	LastSuccessAt  time.Time
 }
 
 // NewSharedBadgerDB 创建共享 BadgerDB 实例
@@ -261,7 +274,7 @@ func NewSharedBadgerDB[T types.IModel](basePath string, config ...BadgerDBConfig
 		sadTrigger:    make(chan struct{}, 1),
 		sadQueueItems: make(map[string]syncAfterDeleteCandidate[T]),
 	}
-	if manager.config.SyncFlushThreshold > 0 {
+	if manager.config.SyncFlushThreshold > 0 || manager.config.WriteBehindFailure != nil {
 		if err := db.initAdaptivePending(); err != nil {
 			return nil, fmt.Errorf("初始化自适应同步 pending 失败: %w", err)
 		}
@@ -293,6 +306,9 @@ func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error
 	if list == nil {
 		return fmt.Errorf("%w: sync list 不能为空", ErrUnsafeWriteBehindConfig)
 	}
+	if err := p.legacyDispositionCheck(); err != nil {
+		return err
+	}
 	if err := p.validateWriteBehindConfig(); err != nil {
 		return p.recordWriteBehindBindError(err)
 	}
@@ -322,6 +338,9 @@ func (p *PrefixedBadgerDB[T]) EnableWriteBehind(list *entity.ModelList[T]) error
 func (p *PrefixedBadgerDB[T]) UseWriteBehind(target WriteBehindTarget[T]) error {
 	if target == nil {
 		return fmt.Errorf("%w: write-behind target 不能为空", ErrUnsafeWriteBehindConfig)
+	}
+	if err := p.legacyDispositionCheck(); err != nil {
+		return err
 	}
 	if err := p.validateWriteBehindConfig(); err != nil {
 		return p.recordWriteBehindBindError(err)
@@ -391,6 +410,10 @@ func (p *PrefixedBadgerDB[T]) writeBehindBindError() error {
 // SetSyncDB 保留旧签名以兼容下游。
 // Deprecated: 使用 EnableWriteBehind 获取绑定错误。
 func (p *PrefixedBadgerDB[T]) SetSyncDB(list *entity.ModelList[T]) {
+	if p.disposition != nil {
+		logx.Errorw("write_behind_disposition_unbind_rejected")
+		return
+	}
 	if list == nil {
 		p.syncLock.Lock()
 		p.syncDB = false
@@ -430,7 +453,7 @@ func (p *PrefixedBadgerDB[T]) Set(item *T, ttl time.Duration, fn ...func(wrapper
 		return err
 	}
 	queueCreated := false
-	err = p.manager.db.Update(func(txn *badger.Txn) error {
+	err = p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		entry := badger.NewEntry([]byte(key), data)
 		if ttl > 0 {
 			entry = entry.WithTTL(ttl)
@@ -482,7 +505,11 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 		batch := items[start:end]
 
 		newQueueKeys := make(map[string]struct{}, len(batch))
-		err := p.manager.db.Update(func(txn *badger.Txn) error {
+		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
+			var groups map[string]struct{}
+			if p.disposition != nil {
+				groups = make(map[string]struct{})
+			}
 			for _, item := range batch {
 				key := p.generateKey(item)
 				if key == "" {
@@ -500,9 +527,12 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 				}
 				if needSync {
 					if _, seen := newQueueKeys[key]; seen {
+						if err := p.ensureDispositionEntry(txn, key, groups); err != nil {
+							return err
+						}
 						continue
 					}
-					created, err := p.ensureSyncQueueEntry(txn, key)
+					created, err := p.ensureSyncQueueEntry(txn, key, groups)
 					if err != nil {
 						return err
 					}
@@ -511,7 +541,7 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 					}
 				}
 			}
-			return nil
+			return p.deleteEmptyDispositionGroups(txn, groups)
 		})
 
 		if err != nil {
@@ -529,7 +559,10 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 	return nil
 }
 
-func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string) (bool, error) {
+func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string, deferredGroups ...map[string]struct{}) (bool, error) {
+	if err := p.ensureDispositionEntry(txn, dataKey, deferredGroups...); err != nil {
+		return false, err
+	}
 	queueKey := []byte(p.syncQueueKey(dataKey))
 	if _, err := txn.Get(queueKey); err == nil {
 		return false, nil
@@ -560,7 +593,7 @@ func (p *PrefixedBadgerDB[T]) BatchLoad(items ...*T) error {
 		}
 		batch := items[start:end]
 
-		err := p.manager.db.Update(func(txn *badger.Txn) error {
+		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			now := time.Now()
 			for _, item := range batch {
 				key := p.generateKey(item)
@@ -773,7 +806,7 @@ func (p *PrefixedBadgerDB[T]) physicalDeleteKeys(keys []string) (int, error) {
 			end = len(keys)
 		}
 		batch := keys[start:end]
-		err := p.manager.db.Update(func(txn *badger.Txn) error {
+		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			for _, k := range batch {
 				if err := txn.Delete([]byte(k)); err != nil && err != badger.ErrKeyNotFound {
 					return err
@@ -806,6 +839,7 @@ func (p *PrefixedBadgerDB[T]) setItem(key string, needSync bool, item *T, fn ...
 		wrapper.Item = item
 		wrapper.UpdatedAt = time.Now()
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 		if irde, ok := any(item).(types.IRowDate); ok {
 			irde.SetUpdatedAt(wrapper.UpdatedAt)
 			if irde.GetCreatedAt() == nil {
@@ -945,7 +979,7 @@ func (p *PrefixedBadgerDB[T]) ForceDeleteLocal(item *T) error {
 	unlock := p.lockSyncKeys([]string{key})
 	defer unlock()
 	wasPending := false
-	err := p.manager.db.Update(func(txn *badger.Txn) error {
+	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		// 同步队列索引是 pending 的权威事实。不依赖数据 value 反序列化，
 		// 否则损坏 value 被强制删除后会遗留错误的 pendingCountCache。
 		if _, getErr := txn.Get([]byte(p.syncQueueKey(key))); getErr == nil {
@@ -972,7 +1006,7 @@ func (p *PrefixedBadgerDB[T]) ForceDeleteLocal(item *T) error {
 
 func (p *PrefixedBadgerDB[T]) deleteLocalOnly(key string) error {
 	if !p.syncDB {
-		return p.manager.db.Update(func(txn *badger.Txn) error {
+		return p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			return txn.Delete([]byte(key))
 		})
 	}
@@ -984,7 +1018,7 @@ func (p *PrefixedBadgerDB[T]) batchDelete(keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	return p.manager.db.Update(func(txn *badger.Txn) error {
+	return p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		for _, key := range keys {
 			if err := txn.Delete([]byte(key)); err != nil {
 				return err
@@ -997,7 +1031,7 @@ func (p *PrefixedBadgerDB[T]) batchDelete(keys []string) error {
 // delete 内部方法
 func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 	if !needSync {
-		return p.manager.db.Update(func(txn *badger.Txn) error {
+		return p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			return txn.Delete([]byte(key))
 		})
 	}
@@ -1008,7 +1042,7 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 
 	softDeleted := false
 	queueCreated := false
-	err := p.manager.db.Update(func(txn *badger.Txn) error {
+	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
@@ -1035,6 +1069,7 @@ func (p *PrefixedBadgerDB[T]) delete(key string, needSync bool) error {
 		wrapper.DeletedAt = now
 		wrapper.UpdatedAt = now
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 
 		data, err := json.Marshal(&wrapper)
 		if err != nil {
@@ -1291,6 +1326,9 @@ func (p *PrefixedBadgerDB[T]) getDataAction(item *T) types.IDataAction {
 // rebuildSyncQueue 启动时一次性扫描，为已有的 IsSynced=false 条目补充同步队列索引。
 // 保证从旧版本升级后待同步数据不会丢失。
 func (p *PrefixedBadgerDB[T]) rebuildSyncQueue() (int, error) {
+	if p.manager.config.WriteBehindFailure != nil {
+		return p.rebuildDispositionSyncQueue()
+	}
 	// 第一步：收集所有 IsSynced=false 且缺少队列条目的 key
 	var missingKeys []string
 
@@ -1338,7 +1376,7 @@ func (p *PrefixedBadgerDB[T]) rebuildSyncQueue() (int, error) {
 		}
 		batch := missingKeys[start:end]
 
-		err := p.manager.db.Update(func(txn *badger.Txn) error {
+		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			for _, key := range batch {
 				if err := txn.Set([]byte(p.syncQueueKey(key)), nil); err != nil {
 					return err
@@ -1373,6 +1411,10 @@ func (p *PrefixedBadgerDB[T]) syncToOtherDB() {
 	}()
 
 	config := p.manager.config
+	if p.disposition != nil {
+		p.syncWithDisposition()
+		return
+	}
 	if config.SyncFlushThreshold > 0 {
 		p.syncAdaptive()
 		return
@@ -1599,11 +1641,12 @@ func (p *PrefixedBadgerDB[T]) recordSyncMetrics(synced int, err error, duration 
 	p.syncMetrics.TotalDuration += duration
 	if err != nil {
 		p.syncMetrics.Failures++
-		return
 	}
 	if synced > 0 {
 		p.syncMetrics.SyncedItems += uint64(synced)
-		p.syncMetrics.LastSuccessAt = time.Now().UTC()
+		if err == nil {
+			p.syncMetrics.LastSuccessAt = time.Now().UTC()
+		}
 	}
 }
 
@@ -1678,7 +1721,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 				}
 
 				// 防御性检查：数据已标记为已同步但队列条目残留
-				if wrapper.IsSynced {
+				if wrapper.IsSynced || wrapper.HandedOff {
 					orphanSQKeys = append(orphanSQKeys, sqKey)
 					return nil
 				}
@@ -1704,7 +1747,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 	// 异步清理孤儿队列条目
 	if len(orphanSQKeys) > 0 {
 		go func(keys []string) {
-			_ = p.manager.db.Update(func(txn *badger.Txn) error {
+			_ = p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 				for _, k := range keys {
 					_ = txn.Delete([]byte(k))
 				}
@@ -1977,7 +2020,7 @@ func (p *PrefixedBadgerDB[T]) currentSyncItems(items []*SyncQueueItem[T]) ([]*Sy
 			}); err != nil {
 				return fmt.Errorf("反序列化当前同步数据失败 [key=%s]: %w", snapshot.Key, err)
 			}
-			if wrapper.IsSynced || !wrapper.UpdatedAt.Equal(snapshot.UpdatedAt) {
+			if wrapper.IsSynced || wrapper.HandedOff || !wrapper.UpdatedAt.Equal(snapshot.UpdatedAt) {
 				continue
 			}
 			current = append(current, snapshot)
@@ -1991,12 +2034,12 @@ func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotT
 	if len(successKeys) == 0 {
 		return successKeys, nil
 	}
-	confirmedKeys, err := p.batchUpdateSyncedStatusKeys(successKeys, snapshotTimes)
+	confirmedKeys, removedPending, err := p.batchConfirmSyncedStatus(successKeys, snapshotTimes)
 	if err != nil {
 		logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
 		return nil, err
 	}
-	p.incrementPendingCount(-len(confirmedKeys))
+	p.incrementPendingCount(-removedPending)
 	p.scheduleSyncAfterDelete(p.collectConfirmedDeleteCandidates(candidates, confirmedKeys))
 	return confirmedKeys, nil
 }
@@ -2238,7 +2281,7 @@ func (p *PrefixedBadgerDB[T]) processSingleSyncAfterDeleteCandidate(candidate sy
 
 func (p *PrefixedBadgerDB[T]) deleteSyncedKeyIfUnchanged(candidate syncAfterDeleteCandidate[T]) (bool, error) {
 	deleted := false
-	err := p.manager.db.Update(func(txn *badger.Txn) error {
+	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(candidate.Key))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
@@ -2879,6 +2922,7 @@ insertOneByOneLoop:
 		}
 
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 		syncAction := fallbackAction
 		if syncAction == nil {
 			syncAction = p.getDataAction(wrapper.Item)
@@ -2969,6 +3013,7 @@ updateOneByOneLoop:
 			continue
 		}
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 		syncAction := fallbackAction
 		if syncAction == nil {
 			syncAction = p.getDataAction(wrapper.Item)
@@ -3078,6 +3123,7 @@ deleteOneByOneLoop:
 			}
 		}
 		wrapper.IsSynced = false
+		wrapper.HandedOff = false
 		err := syncAction.Delete(wrapper.Item)
 
 		if err != nil {
@@ -3133,8 +3179,24 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusCount(keys []string, snapsh
 }
 
 func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapshotTimes map[string]time.Time) ([]string, error) {
+	confirmed, _, err := p.batchConfirmSyncedStatus(keys, snapshotTimes)
+	return confirmed, err
+}
+
+// batchConfirmSyncedStatus 分开返回幂等确认和实际移除的 pending；旧 ACK 不得重复扣减计数。
+func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTimes map[string]time.Time) ([]string, int, error) {
 	if len(keys) == 0 {
-		return nil, nil
+		return nil, 0, nil
+	}
+	removeQueue := func(txn *badger.Txn, key string) (bool, error) {
+		queueKey := []byte(p.syncQueueKey(key))
+		if _, err := txn.Get(queueKey); err != nil {
+			if err == badger.ErrKeyNotFound {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, txn.Delete(queueKey)
 	}
 
 	now := time.Now()
@@ -3143,14 +3205,19 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 	const maxRetries = 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		confirmedKeys := make([]string, 0, len(keys))
-		err := p.manager.db.Update(func(txn *badger.Txn) error {
+		removedPending := 0
+		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 			for _, key := range keys {
 				item, err := txn.Get([]byte(key))
 				if err != nil {
 					if err == badger.ErrKeyNotFound {
 						// 远程删除成功后本地数据已物理移除，清理队列并计为确认。
-						if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
+						removed, err := removeQueue(txn, key)
+						if err != nil {
 							return err
+						}
+						if removed {
+							removedPending++
 						}
 						confirmedKeys = append(confirmedKeys, key)
 						continue
@@ -3168,7 +3235,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 				}
 
 				// 已同步，清理队列条目后跳过
-				if wrapper.IsSynced {
+				if wrapper.IsSynced || wrapper.HandedOff {
 					_ = txn.Delete([]byte(p.syncQueueKey(key)))
 					continue
 				}
@@ -3192,8 +3259,12 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 					return err // 把错误传播出去触发整体回滚
 				}
 				// 同步成功，删除同步队列索引条目
-				if err := txn.Delete([]byte(p.syncQueueKey(key))); err != nil {
+				removed, err := removeQueue(txn, key)
+				if err != nil {
 					return err
+				}
+				if removed {
+					removedPending++
 				}
 				confirmedKeys = append(confirmedKeys, key)
 			}
@@ -3201,7 +3272,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 		})
 
 		if err == nil {
-			return confirmedKeys, nil
+			return confirmedKeys, removedPending, nil
 		}
 
 		// 并发冲突：重试
@@ -3211,9 +3282,9 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 			continue
 		}
 
-		return nil, err
+		return nil, 0, err
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (p *PrefixedBadgerDB[T]) Count() (int, error) {
@@ -3287,6 +3358,9 @@ func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Dur
 
 		// 关闭 channel，通知 goroutine 退出
 		close(p.closeCh)
+		if p.disposition != nil {
+			p.disposition.cancel()
+		}
 
 		//  等待 goroutine 退出（带超时）
 		done := make(chan struct{})
@@ -3295,10 +3369,14 @@ func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Dur
 			close(done)
 		}()
 
+		var dispositionWaitErr error
 		select {
 		case <-done:
 			logx.Infof("后台同步 goroutine 已退出 [prefix=%s]", p.prefix)
 		case <-time.After(waitTimeout):
+			if p.disposition != nil {
+				dispositionWaitErr = ErrWriteBehindDispositionCloseTimeout
+			}
 			logx.Errorf("等待后台 goroutine 退出超时（%v），强制关闭 [prefix=%s]", waitTimeout, p.prefix)
 
 			//  检查是否还在同步中
@@ -3326,6 +3404,9 @@ func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Dur
 		}
 
 		var closeErrors []error
+		if dispositionWaitErr != nil {
+			closeErrors = append(closeErrors, dispositionWaitErr)
+		}
 		if bindErr := p.writeBehindBindError(); bindErr != nil {
 			closeErrors = append(closeErrors, bindErr)
 		}

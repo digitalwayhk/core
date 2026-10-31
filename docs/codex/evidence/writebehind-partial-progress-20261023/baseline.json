@@ -1,0 +1,11 @@
+{
+  "head": "81c472c2f8a1d1bea93684f8f83435c8779e2a0e",
+  "sha256": {
+    "pkg/persistence/database/nosql/adaptive_sync_schedule.go": "16aa0de3620a14c4f96701278e6d683cc48b7790d8bf443a91a80c75fb2b5464",
+    "pkg/persistence/database/nosql/sharedbadger_adaptive.go": "17d6eb03d507bfc4cfd2f4229264a9d3e7ea7c18246c43ad09dc67380fa58b11",
+    "pkg/persistence/database/nosql/sharedbadger.go": "a6560065d692d48b908e59ba71a1d07914d7d43f4a41bc65b76cf71ae7138c9e",
+    "pkg/persistence/database/nosql/sharedbadger_adaptive_test.go": "be2029cd944308c10cda0354cc2babf6817a5c929e88db2efb522c4ed8092ab4",
+    "pkg/persistence/database/nosql/sharedbadger_writebehind_target_test.go": "e828ea02b9f8ff41bc1422d5174a5ccca816ad9bd6b3d6968dd2a41e61b9e633",
+    "pkg/persistence/database/nosql/sharedbadger_syncqueue_test.go": "86eef9a72cc0fde66607dd52d16557c5052cd8ce2fea88f8da9dfddd90de6562"
+  }
+}

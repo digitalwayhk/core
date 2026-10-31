@@ -57,6 +57,8 @@ func start07AllInOne(t *testing.T) (*integration.Suite, *integration.Suite) {
 		ServiceIndex:     1,
 		GRPCServiceCount: 4,
 		Arguments:        []string{"-view", "0"},
+		// 独占业务库，避免管理员规则 UAT 的最小数量设置影响本场景。
+		Environment: map[string]string{"SHOP_ORDER_REMOTE_MYSQL_DATABASE": fmt.Sprintf("core_07_ws_uat_%d", time.Now().UnixNano())},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -72,11 +74,25 @@ func start07AllInOne(t *testing.T) (*integration.Suite, *integration.Suite) {
 	return base, &supplier
 }
 
-// wait07Ready 等待 user facade 可以通过真实服务链路查询商品列表。
+// wait07Ready 等待三个业务服务启动钩子就绪，且 facade 可以通过真实链路查询商品。
 func wait07Ready(t *testing.T, suite *integration.Suite) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
+		ready := true
+		for _, offset := range []int{1, 2, 3} {
+			probe := *suite
+			probe.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", suite.BasePort+offset)
+			response, err := probe.DoJSON(http.MethodGet, "/api/ready", "", nil)
+			if err != nil || !response.Success {
+				ready = false
+				break
+			}
+		}
+		if !ready {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 		response, err := suite.DoJSON(http.MethodPost, "/api/shop-user/getproducts", "", map[string]interface{}{})
 		if err == nil && response.Success {
 			return

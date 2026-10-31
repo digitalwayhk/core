@@ -425,6 +425,28 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 			return nil, fmt.Errorf("初始化服务配置失败，服务名称：%s，错误信息：%w", ctx.Config.Name, err)
 		}
 	}
+	// 必要资源在任何监听器构造前完成；不等待可能长期运行的旧 Start 回调。
+	initialized := make([]*router.ServiceContext, 0, len(ordered))
+	completed := false
+	defer func() {
+		if !completed {
+			for index := len(initialized) - 1; index >= 0; index-- {
+				ctx := initialized[index]
+				if stop, ok := ctx.Service.Instance.(types.IStopService); ok {
+					stop.Stop()
+				}
+				ctx.SetRunState(false)
+			}
+		}
+	}()
+	for _, ctx := range ordered {
+		if initializer, ok := ctx.Service.Instance.(types.IInitializeService); ok {
+			initialized = append(initialized, ctx)
+			if err := initializer.Initialize(); err != nil {
+				return nil, fmt.Errorf("初始化服务资源失败，服务名称：%s，错误信息：%w", ctx.Service.Name, err)
+			}
+		}
+	}
 	htmls := NewHTMLServer(own.ViewPort)
 	htmls.Parent = own
 	htmls.SetManageAuthAuthority(authority)
@@ -469,6 +491,7 @@ func (own *WebServer) initializeServers(contexts []*router.ServiceContext) ([]se
 			return nil, fmt.Errorf("准备 Web 路由失败：%w", err)
 		}
 	}
+	completed = true
 	return constructed, nil
 }
 

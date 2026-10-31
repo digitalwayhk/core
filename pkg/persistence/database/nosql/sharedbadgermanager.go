@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/zeromicro/go-zero/core/logx"
 )

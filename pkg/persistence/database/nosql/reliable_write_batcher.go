@@ -21,8 +21,10 @@ var (
 )
 
 type batchCommitRequest[T types.IModel] struct {
-	operations []WriteOperation[T]
-	result     chan batchCommitResponse
+	localCommit func() error // 仅Core本地事务，不允许target/网络/应用回调。
+	operations  []WriteOperation[T]
+	queuedAt    time.Time
+	result      chan batchCommitResponse
 }
 
 type batchCommitResponse struct {
@@ -40,32 +42,38 @@ type BatchCommitMetrics struct {
 	MaxQueueDepth         int
 	TotalCommitDuration   time.Duration
 	AverageCommitDuration time.Duration
+	// TotalQueueWaitDuration 按操作累计从排队前到开始提交的等待；不是壁钟耗时。
+	TotalQueueWaitDuration time.Duration
 }
 
 type batchCommitMetricState struct {
-	submitted     atomic.Uint64
-	committed     atomic.Uint64
-	batches       atomic.Uint64
-	failedBatches atomic.Uint64
-	maxBatchSize  atomic.Int64
-	maxQueueDepth atomic.Int64
-	totalNanos    atomic.Int64
+	submitted      atomic.Uint64
+	committed      atomic.Uint64
+	batches        atomic.Uint64
+	failedBatches  atomic.Uint64
+	maxBatchSize   atomic.Int64
+	maxQueueDepth  atomic.Int64
+	totalNanos     atomic.Int64
+	queueWaitNanos atomic.Int64
 }
 
 // BatchCommitter 把短窗口内的并发 Save/Delete 请求合并为有序本地事务。
 type BatchCommitter[T types.IModel] struct {
-	config     BatchCommitConfig
-	commit     func([]WriteOperation[T]) (BatchWriteResult, error)
-	requests   chan batchCommitRequest[T]
-	closing    chan struct{}
-	done       chan struct{}
-	stateMu    sync.RWMutex
-	closed     bool
-	submitters sync.WaitGroup
-	closeOnce  sync.Once
-	errMu      sync.Mutex
-	firstErr   error
-	metrics    batchCommitMetricState
+	config            BatchCommitConfig
+	commit            func([]WriteOperation[T]) (BatchWriteResult, error)
+	requests          chan batchCommitRequest[T]
+	closing           chan struct{}
+	foregroundClosing chan struct{}
+	done              chan struct{}
+	stateMu           sync.RWMutex
+	closed            bool
+	localClosed       bool
+	localSubmitters   sync.WaitGroup
+	submitters        sync.WaitGroup
+	closeOnce         sync.Once
+	errMu             sync.Mutex
+	firstErr          error
+	metrics           batchCommitMetricState
 }
 
 func newBatchCommitter[T types.IModel](
@@ -88,11 +96,12 @@ func newBatchCommitter[T types.IModel](
 		config.QueueCapacity = config.MaxBatch
 	}
 	batcher := &BatchCommitter[T]{
-		config:   config,
-		commit:   commit,
-		requests: make(chan batchCommitRequest[T], config.QueueCapacity),
-		closing:  make(chan struct{}),
-		done:     make(chan struct{}),
+		config:            config,
+		commit:            commit,
+		requests:          make(chan batchCommitRequest[T], config.QueueCapacity),
+		closing:           make(chan struct{}),
+		foregroundClosing: make(chan struct{}),
+		done:              make(chan struct{}),
 	}
 	go batcher.run()
 	return batcher
@@ -122,6 +131,7 @@ func (b *BatchCommitter[T]) SubmitBatch(
 		return BatchWriteResult{}, nil
 	}
 	request := batchCommitRequest[T]{
+		queuedAt:   time.Now(),
 		operations: append([]WriteOperation[T](nil), operations...),
 		result:     make(chan batchCommitResponse, 1),
 	}
@@ -140,7 +150,7 @@ func (b *BatchCommitter[T]) SubmitBatch(
 	case <-ctx.Done():
 		b.submitters.Done()
 		return BatchWriteResult{}, ctx.Err()
-	case <-b.closing:
+	case <-b.foregroundClosing:
 		b.submitters.Done()
 		return BatchWriteResult{}, ErrWriteStoreClosed
 	}
@@ -159,10 +169,15 @@ func (b *BatchCommitter[T]) Close(ctx context.Context) error {
 	}
 	b.closeOnce.Do(func() {
 		b.stateMu.Lock()
-		b.closed = true
+		if !b.closed {
+			b.closed = true
+			close(b.foregroundClosing)
+		}
+		b.localClosed = true
 		close(b.closing)
 		b.stateMu.Unlock()
 		b.submitters.Wait()
+		b.localSubmitters.Wait()
 		close(b.requests)
 	})
 	select {
@@ -187,21 +202,27 @@ func (b *BatchCommitter[T]) Metrics() BatchCommitMetrics {
 		average = total / time.Duration(batches)
 	}
 	return BatchCommitMetrics{
-		Submitted:             b.metrics.submitted.Load(),
-		Committed:             b.metrics.committed.Load(),
-		Batches:               batches,
-		FailedBatches:         b.metrics.failedBatches.Load(),
-		MaxBatchSize:          int(b.metrics.maxBatchSize.Load()),
-		MaxQueueDepth:         int(b.metrics.maxQueueDepth.Load()),
-		TotalCommitDuration:   total,
-		AverageCommitDuration: average,
+		Submitted:              b.metrics.submitted.Load(),
+		Committed:              b.metrics.committed.Load(),
+		Batches:                batches,
+		FailedBatches:          b.metrics.failedBatches.Load(),
+		MaxBatchSize:           int(b.metrics.maxBatchSize.Load()),
+		MaxQueueDepth:          int(b.metrics.maxQueueDepth.Load()),
+		TotalCommitDuration:    total,
+		AverageCommitDuration:  average,
+		TotalQueueWaitDuration: time.Duration(b.metrics.queueWaitNanos.Load()),
 	}
 }
 
 func (b *BatchCommitter[T]) run() {
 	defer close(b.done)
 	for first := range b.requests {
+		if first.localCommit != nil {
+			b.finishLocalCommit(first)
+			continue
+		}
 		batch := []batchCommitRequest[T]{first}
+		var local *batchCommitRequest[T]
 		channelClosed := false
 		if b.config.MaxBatch > 1 {
 			runtime.Gosched()
@@ -218,6 +239,10 @@ func (b *BatchCommitter[T]) run() {
 						channelClosed = true
 						break collect
 					}
+					if request.localCommit != nil {
+						local = &request
+						break collect
+					}
 					batch = append(batch, request)
 				case <-timer.C:
 					break collect
@@ -231,6 +256,9 @@ func (b *BatchCommitter[T]) run() {
 			}
 		}
 		b.finishBatch(batch)
+		if local != nil {
+			b.finishLocalCommit(*local)
+		}
 		if channelClosed {
 			return
 		}
@@ -239,6 +267,11 @@ func (b *BatchCommitter[T]) run() {
 
 func (b *BatchCommitter[T]) finishBatch(batch []batchCommitRequest[T]) {
 	started := time.Now()
+	for _, request := range batch {
+		if !request.queuedAt.IsZero() {
+			b.metrics.queueWaitNanos.Add(started.Sub(request.queuedAt).Nanoseconds() * int64(len(request.operations)))
+		}
+	}
 	result, err := b.commitSafely(batch)
 	duration := time.Since(started)
 	b.metrics.batches.Add(1)

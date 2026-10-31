@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
@@ -64,9 +65,12 @@ type MelodyManager struct {
 	admissions  sync.WaitGroup
 
 	// 客户端订阅管理
-	subscriptions   map[*melody.Session]*SessionSubscriptions
-	subscriptionsMu sync.RWMutex
-	connectionLimit *ConnectionRateLimiter
+	subscriptions       map[*melody.Session]*SessionSubscriptions
+	subscriptionsMu     sync.RWMutex
+	ownershipMu         sync.Mutex
+	ownershipReferences *gatewayReferenceRuntime
+	ownershipRevision   atomic.Int64
+	connectionLimit     *ConnectionRateLimiter
 
 	connCounter    *ConnectionCounter //
 	maxConnections int64              // 最大连接数限制
@@ -173,6 +177,7 @@ func (mm *MelodyManager) CloseContext(ctx context.Context) error {
 
 func (mm *MelodyManager) finishClose() {
 	mm.admissions.Wait()
+	mm.stopOwnershipReferences()
 	mm.connectionLimit.Close()
 	<-mm.monitorDone
 	err := mm.melody.Close()

@@ -52,11 +52,28 @@ type MQSwitchConfig struct {
 	RollbackOnFailure *bool `json:",optional"`
 }
 
+const (
+	DefaultRedisStreamCommandPoolSize      = 8
+	DefaultRedisStreamBlockingReadPoolSize = 16
+)
+
 // RedisStreamMQConfig Redis Streams 连接配置。
 type RedisStreamMQConfig struct {
-	Addr   string `json:",optional"`
-	DB     int    `json:",optional"`
-	Prefix string `json:",optional"`
+	Addr                 string `json:",optional"`
+	DB                   int    `json:",optional"`
+	Prefix               string `json:",optional"`
+	CommandPoolSize      int    `json:",optional"`
+	BlockingReadPoolSize int    `json:",optional"`
+}
+
+// Validate 校验显式池预算；零值由构造器默认化，拒绝客户端不能表达的范围。
+func (r RedisStreamMQConfig) Validate() error {
+	for name, value := range map[string]int{"commandPoolSize": r.CommandPoolSize, "blockingReadPoolSize": r.BlockingReadPoolSize} {
+		if value < 0 || int64(value) > int64(1<<31-1) {
+			return fmt.Errorf("mq.redisStream.%s must be 0 or a positive int32", name)
+		}
+	}
+	return nil
 }
 
 // NATSJetStreamMQConfig NATS JetStream 连接配置。
@@ -121,6 +138,12 @@ func (m *MQConfig) ApplyDefaults() {
 		t := true
 		m.Switch.RollbackOnFailure = &t
 	}
+	if m.RedisStream.CommandPoolSize == 0 {
+		m.RedisStream.CommandPoolSize = DefaultRedisStreamCommandPoolSize
+	}
+	if m.RedisStream.BlockingReadPoolSize == 0 {
+		m.RedisStream.BlockingReadPoolSize = DefaultRedisStreamBlockingReadPoolSize
+	}
 	if m.RedisStream.Prefix == "" {
 		m.RedisStream.Prefix = "digitalway-core"
 	}
@@ -141,6 +164,11 @@ func (m *MQConfig) Validate() error {
 	}
 	if m.Mode == "off" {
 		return nil
+	}
+	if m.Provider == "" || m.Provider == "redis-stream" {
+		if err := m.RedisStream.Validate(); err != nil {
+			return err
+		}
 	}
 	if m.Mode == "on" && len(m.Usage) == 0 {
 		return errors.New("mq.usage is required when mq.mode is on")

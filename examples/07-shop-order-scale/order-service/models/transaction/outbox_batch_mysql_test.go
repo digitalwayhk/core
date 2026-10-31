@@ -40,7 +40,7 @@ func TestOutboxBatchMySQLAtomicity(t *testing.T) {
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_HOST", host)
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PORT", port)
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_USER", "root")
-	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", "")
+	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", os.Getenv("CORE_OUTBOX_MYSQL_PASSWORD"))
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_DSN", "")
 	t.Setenv("SHOP_ORDER_REMOTE_MYSQL_DATABASE", fmt.Sprintf("core_outbox_%d", time.Now().UnixNano()))
 	require.NoError(t, store.EnsureRemoteModel(NewOutbox()))
@@ -71,6 +71,18 @@ func TestOutboxBatchMySQLAtomicity(t *testing.T) {
 	require.EqualError(t, err, "注入第二条确认失败")
 	for _, item := range readPending() {
 		require.False(t, item.Published)
+	}
+	// SQL 批量路径更新成功后再注入业务错误，证明更新使用当前事务而非基础连接。
+	err = store.RunRemoteTransaction(func() error { return nil }, func(action persistencetypes.IDataAction) error {
+		if err := MarkOutboxPublishedByIDs(action, ids); err != nil {
+			return err
+		}
+		return errors.New("批量确认后回滚")
+	})
+	require.EqualError(t, err, "批量确认后回滚")
+	for _, item := range readPending() {
+		require.False(t, item.Published)
+		require.Nil(t, item.PublishedAt)
 	}
 	adapter := OutboxStore{}
 	invalid := append(append([]event.OutboxMessage(nil), messages...), event.OutboxMessage{ID: ^uint(0) >> 1})

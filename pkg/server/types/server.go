@@ -59,6 +59,14 @@ type IService interface {
 	ServiceName() string //服务名称
 	Routers() []IRouter  //服务中的业务路由，用于发布api服务
 }
+
+// IInitializeService 是可选的监听前同步初始化钩子，用于建表、绑定资源和必要订阅。
+// 返回错误会阻止启动；部分资源应托管给 ServiceContext，并由可重复调用的 Stop 解除业务引用。
+// Initialize 不得等待本进程 HTTP/gRPC 就绪；原有 IStartService 仍在服务启动后异步调用。
+type IInitializeService interface {
+	Initialize() error
+}
+
 type IStartService interface {
 	Start() //启动服务完成时调用
 }

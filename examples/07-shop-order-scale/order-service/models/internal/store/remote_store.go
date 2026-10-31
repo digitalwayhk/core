@@ -2,6 +2,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"sync"
@@ -22,7 +23,7 @@ var (
 func GetRemote() persistencetypes.IDataAction {
 	remoteActionOnce.Do(func() {
 		var err error
-		remoteAction, err = oltp.NewDataAction(remoteStorageConfig())
+		remoteAction, err = newRemoteAction()
 		if err != nil {
 			panic(err)
 		}
@@ -30,24 +31,36 @@ func GetRemote() persistencetypes.IDataAction {
 	return remoteAction
 }
 
+// newRemoteAction 在模型组合根创建远端访问器，便于独立验证配置兼容性。
+func newRemoteAction() (persistencetypes.IDataAction, error) {
+	if os.Getenv("SHOP_ORDER_REMOTE_DRIVER") == "" {
+		return oltp.NewMySQL(remoteMySQLConfig()), nil
+	}
+	return oltp.NewDataAction(remoteStorageConfig())
+}
+
 // remoteMySQLConfig 从环境变量创建 07 订单共享权威库配置。
 func remoteMySQLConfig() *oltp.Config {
 	config := &oltp.Config{
-		Host:         envString("SHOP_ORDER_REMOTE_MYSQL_HOST", "127.0.0.1"),
-		Port:         envInt("SHOP_ORDER_REMOTE_MYSQL_PORT", 3306),
-		Username:     envString("SHOP_ORDER_REMOTE_MYSQL_USER", "root"),
-		Password:     envString("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", ""),
-		Database:     envString("SHOP_ORDER_REMOTE_MYSQL_DATABASE", common.RemoteDatabaseName),
-		Charset:      "utf8mb4",
-		ParseTime:    true,
-		Loc:          "Local",
-		MaxIdleConns: envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 5),
-		MaxOpenConns: envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20),
-		MaxLifetime:  30 * time.Minute,
-		IsLog:        envString("SHOP_ORDER_REMOTE_MYSQL_LOG", "") == "true",
+		Host:              envString("SHOP_ORDER_REMOTE_MYSQL_HOST", "127.0.0.1"),
+		Port:              envInt("SHOP_ORDER_REMOTE_MYSQL_PORT", 3306),
+		Username:          envString("SHOP_ORDER_REMOTE_MYSQL_USER", "root"),
+		Password:          envString("SHOP_ORDER_REMOTE_MYSQL_PASSWORD", ""),
+		Database:          envString("SHOP_ORDER_REMOTE_MYSQL_DATABASE", common.RemoteDatabaseName),
+		Charset:           "utf8mb4",
+		InterpolateParams: true,
+		ParseTime:         true,
+		Loc:               "Local",
+		MaxIdleConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_IDLE", 20),
+		MaxOpenConns:      envInt("SHOP_ORDER_REMOTE_MYSQL_MAX_OPEN", 20),
+		MaxLifetime:       30 * time.Minute,
+		IsLog:             envString("SHOP_ORDER_REMOTE_MYSQL_LOG", "") == "true",
 	}
 	if dsn := os.Getenv("SHOP_ORDER_REMOTE_MYSQL_DSN"); dsn != "" {
-		_ = config.SetMysqlDSN(dsn)
+		config.InterpolateParams = false // 完整DSN未声明时保持旧协议。
+		if err := config.SetMysqlDSN(dsn); err != nil {
+			panic("无效的 SHOP_ORDER_REMOTE_MYSQL_DSN 配置")
+		}
 	}
 	return config
 }
@@ -91,4 +104,19 @@ func remoteStorageConfig() persistencetypes.StorageConfig {
 	}
 	value.ApplyDefaults()
 	return value
+}
+
+// RunRemoteRead 为单条只读查询克隆独立 action，不开启事务；表须在启动时建好。
+func RunRemoteRead(operation func(persistencetypes.IDataAction) error) error {
+	remoteEnsureMu.Lock()
+	cloner, ok := GetRemote().(interface {
+		Clone() persistencetypes.IDataAction
+	})
+	if !ok {
+		remoteEnsureMu.Unlock()
+		return errors.New("数据操作器不支持独立读取")
+	}
+	action := cloner.Clone()
+	remoteEnsureMu.Unlock()
+	return operation(action)
 }

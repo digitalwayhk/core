@@ -13,6 +13,72 @@
 
 生产消费方必须使用 tag 或精确 commit。移动开发分支只用于临时验证，不得写入生产锁定列。
 
+## v1.6.4 后台选批范围与重复工作（2026-10-31）
+
+[发布说明](RELEASE_V1_6_4_2026-10-31.md)与[原件/指标](WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)。原FIFO/1ms/可靠刷盘及版本、预算、未知、接管与顺序边界保持；无新API、配置、磁盘key、格式或StoreID变化。既有mode原字节不变，ScopeTarget变更推进Badger提交版本；绑定前冷核验、重开重建缓存。已执行Core合成原卷旧→新、新→旧新PID核验，不能推断允许不识别有界状态的旧版回退或同卷混跑。权威skill已更新，消费方旧模块软链/复制须同步。选批成本下降但Save P99未一致改善，Mac异常与既有硬杀恢复FAIL保留；消费方接入/UAT/Full-E4容量NOT_RUN，不改上表历史锁定。
+
+## v1.6.3 前台空组核验（2026-10-31）
+
+[发布说明](RELEASE_V1_6_3_2026-10-31.md)。无需新配置，公共API、policy和卷格式不变；保留事务/版本/顺序与清理保护。权威skill已更新，消费方复制或旧模块链接需同步。独立进程旧算法→新算法→旧算法兼容验证不等于允许不识别有界状态的旧版本打开卷。分散跨组负载未见一致提速，既有Badger偶发恢复失败仍保留；消费方接入/UAT/容量NOT_RUN。
+
+## v1.6.2 有界本地确认与前台公平提交（2026-10-31）
+
+[发布说明](RELEASE_V1_6_2_2026-10-31.md)与[实施证据](WRITE_BEHIND_BATCH_CONFIRMATION_2026-10-31.md)。原ReliableWriteStore/UseWriteBehindWithFailureHandler入口及配置保持；有界结果按预算可靠分块，元数据复用原FIFO提交器，SQL/handler在外。成功块才更新计数及hook，失败块/旧版本/未知与组首合同不变。仅增加只读本地事务观测，不改持久格式和policy指纹；原卷同StoreID/policy重开，无需清数据。保留v1.5.0之后的旧二进制回退限制及内存回收队列不补删边界。Core普通/race、原卷独立进程恢复及同机性能单独取证；Full-E4同档、消费方接入/业务UAT/容量均NOT_RUN，不更改历史锁定表，也不保证任意机器Save低于10ms。
+
+## v1.6.1 有界 write-behind 本地回收（2026-10-30）
+
+[发布说明](RELEASE_V1_6_1_2026-10-30.md)与[修复验收](WRITE_BEHIND_LOCAL_CLEANUP_2026-10-30.md)。有界 target 成功和应用显式 Confirm 仅在真实本地确认提交后，复用 `IsSyncAfterDelete` 和原版本保护；false 保留、副本更新不误删、非成功处置不触发回收。无需新 API/配置，未改存储格式、依赖、重试、历史保留或顺序屏障。升级者须核对 hook=true 的业务条件；旧版已确认残留不自动回收，既有内存清理队列不提供跨重启补删。Core 临时 Badger、自动 worker、原卷恢复、普通/race及04/07回归分别取证；消费方接入、外部数据库/UAT/容量/部署均 NOT_RUN，不更新上表历史锁定。
+
+## v1.6.0 显式仅Broker可靠消费（2026-10-26）
+
+[发布说明](RELEASE_V1_6_0_2026-10-26.md)与[接入/原件](EVENT_BROKER_ONLY_DELIVERY_2026-10-26.md)。Subscription.BrokerOnly零值false保留旧交付；显式true须可靠Subject、逻辑组及同Stream可靠入站能力，不降级。只解除选中handler的发布前同步依赖，同服务Source仍经Broker消费；不改Outbox批次屏障、Provider、组、游标、pending和幂等身份。Core真实Redis/SQLite/Badger、双消费者/示例10三进程、硬崩溃原生租约和普通/race分别取证。NATS新模式、消费方接入/部署/UAT/容量均NOT_RUN；不更新上表历史锁定。
+
+## v1.5.0 可选有界失败处置（2026-10-23）
+
+[正式合同](WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)与[验收](RELEASE_V1_5_0_2026-10-23.md)。原WriteBehindTarget/UseWriteBehind/零配置兼容；只有显式WriteBehindFailure和应用handler才提供有限预算、未知确认、暂停/接管与有界组隔离，不能宣称所有旧消费者已变成有界。policy和StoreID冻结，新状态禁止旧二进制回退、混跑或删标记；旧pending先交应用确认，不盲目重放。接管不是IsSynced/APPLIED，组屏障保留到应用Release。Core真实存储、独立PID硬杀、07资源链及race单独取证；消费方升级/真实MySQL/HTTP/UAT/容量均NOT_RUN，不改变上表历史锁定。
+
+## v1.4.8 write-behind 部分进展修复（2026-10-23）
+
+[修复与验收](WRITE_BEHIND_PARTIAL_PROGRESS_2026-10-23.md)。已有自适应 write-behind 在真实本地部分确认且有错误时按原 drain 配置继续，零确认仍指数退避；错误不吞、失败 pending 保留，同轮确认数与失败次数分别累计。配置零值模式、存储格式、版本确认和手动 ForceSync 错误契约不变，无需清数据或更换接入 API。失败占满索引前缀窗口的队头问题仍存在。Core 真实临时 Badger 自动 worker、关闭恢复、普通/race及契约单独取证；真实 MySQL 外部集成、Bitzoom 升级/UAT/容量均 NOT_RUN，不改变上表历史锁定。
+
+## v1.4.7普通WS中继与依赖安全补丁（2026-10-22）
+
+[升级与验收](RELEASE_V1_4_7_2026-10-22.md)。普通Public/Private不声明归属接口，保持已注册两个中继及用户隔离；同服务可信mTLS通过后继续原处理器。归属路由Ready/引用恢复不变。HTTP/用户Token中继明确403，不支持匿名HTTP或仅网络ACL的旧调用；不删除任何Stream、组、PEL或游标。compress最低v1.18.7。Core独立双Gateway/真实mTLS/WS与示例11验证单独取证；消费方升级、UAT、部署和容量均NOT_RUN，不改上表历史锁定。
+
+## v1.4.6跨主题持续归属（2026-10-21）
+
+[发布验收](RELEASE_V1_4_6_2026-10-21.md)。旧默认订阅/SharedKeys零值兼容；新增正式OwnedSubscription、SQL fence凭据、Ready精确选址及WS原会话恢复。启用须维护绑定原shared/W=8组、验证应用事务fence/幂等和静态键目录；不删除原组/PEL/游标或改变payload。明确拒绝NATS/无MQ/有限次批次DLQ/在线Provider切换，不自动升级业务接线。Core独立PID、真实Redis/MySQL/mTLS/WS与race通过；Bitzoom消费版本签收、G1–G5、UAT/部署/容量均NOT_RUN，不改变历史锁定版本记录。
+
+## v1.4.5 Redis Streams连接池隔离（2026-10-20）
+
+[发布说明](RELEASE_V1_4_5_2026-10-20.md)。旧构造器及消息契约兼容，新增有限command8/blocking16默认预算与显式配置；需按订阅数核对配置和指标，读预算不足仍背压。消息/PEL/owner/生命周期策略不变，无需清数据；实际handler仍须有界，Close终态且幂等。现场消费方迁移NOT_RUN，不更改上表历史锁定版本。
+
+## v1.4.4 可靠事件跨实例分担（2026-10-20）
+
+旧 SharedKeys=false 保留单 owner 与 v1.4.2 持续调度；显式新合同需要维护窗口停旧订阅、确认实际 handler 结束及旧 lease 释放，使用同组原 pending，不删除或重置历史。模式与有效组级预取冻结，不支持在线 Provider 切换或直接回旧版本消费共享组。NATS 未支持且拒绝，业务跨副本幂等仍必需。真实 Core 双进程、原生租约硬杀恢复、TCP断网/迟到ACK与第10例三服务 HTTP 分别记录；Bitzoom/生产迁移 NOT_RUN。完整命令、结果和边界见[v1.4.4 发布说明](RELEASE_V1_4_4_2026-10-20.md)。
+
+## v1.4.3 OpenAPI 依赖安全补丁（2026-10-20）
+
+`kin-openapi` 升至 `v0.149.0`，`jsonschema/v6` 升至 `v6.0.3`；gRPC 保持已修复对应 xDS 告警的 `v1.83.2`。Core 的 OpenAPI 生成、HTTP 文档路由和兼容快照须通过本轮普通、race 与发布门禁；五组依赖级安全回归先用 v1.4.2 锁定文件复现失败，再用新依赖验证。详细命令、结果和公告映射见 [v1.4.3 发布说明](RELEASE_V1_4_3_2026-10-20.md)。
+
+公开 API、消息编码、认证域、MQ 默认配置及内嵌产物不变。消费方若自行使用 `openapi3filter.ValidationHandler`，须复测编码斜杠与路由分派；无 `items` 的 query 数组会返回解码错误，OAS 3.1 无约束表单数组可能被接受，不应一律期待 400。第三方库行为收紧不替代业务鉴权。未修改或部署 Bitzoom 等消费方，其升级、部署及自定义中间件验收为 `NOT_RUN`；上表的历史锁定保持原样。
+
+## v1.4.2 Redis 可靠订阅补丁（2026-10-20）
+
+本版修复 `v1.4.1/60791a7` 的 Redis 分 key 可靠订阅跨读取批次屏障，修复提交 `65806a2`；正式版本、发布门禁与升级命令见 [v1.4.2 发布说明](RELEASE_V1_4_2_2026-10-20.md)。公开签名和消息编码不变，零值/1 仍串行；`Count` 增加预取预算约束，满时背压；可靠 handler 不得手动提前 ACK；分 key 超时后等待真实 handler 退出，会影响不合作 handler 的关闭时长。不会清空 PEL、重置 group 或替消费方迁移业务数据。
+
+Core 已在独占 Redis 7.4.11 验证新读取、PEL 分页/恢复、同 key 顺序与失败隔离、并发/预取上限、owner/取消/关闭和正式 MQBridge 链；三包普通回归及 race 各 207 条 PASS 记录，十轮重复回归 200 条 PASS 记录。详细结果见[修复验收](REDIS_RELIABLE_CROSS_WINDOW_FIX_2026-10-20.md)。这些是 Core 证据；Bitzoom 等生产消费方的依赖升级、部署、现场 11.33 秒归因及容量复测仍为 `NOT_RUN`，不得覆盖上表的历史项目锁定或声称已完成消费方迁移。
+
+## v1.4.0 升级边界（2026-10-20）
+
+v1.4.1 补齐了内嵌编译 JSON；当前推荐 [v1.6.4](RELEASE_V1_6_4_2026-10-31.md)，另含 Redis 可靠订阅、普通 WS 中继及依赖安全修复。以下仍是 v1.4.0 的历史功能与源码验收边界，不替代新版验证。
+
+上版基线为 `v1.3.0` / `7cdf8d998d9ac54a9e880736284536d27380838b`，本轮功能审查起点为 `5df05bbb2bc31a53e0e3691baa59cea64d844558`；源码验证固定为 `7b5795b`，最终版本与回归范围见[发布记录](RELEASE_V1_4_0_2026-10-20.md)。上述历史表不代表当前生产锁定或本版消费方 smoke，禁止把旧通过结果覆盖成本轮通过。
+
+本轮未修改、升级、重启或部署 Bitzoom/futures 等消费方，消费方精确提交 smoke 与实际存量卷迁移均为 `NOT_RUN`。已完成的 Core 自测仅属于本仓库证据。升级者须按[从 v1.3.0 升级](UPGRADE_FROM_V1_3.md)核对 MQ 缺省、Badger 数据及 v3 原生错误比较、MySQL 认证池隔离、可选 stable 身份与编号迁移，再登记自己的项目/Core 精确提交和结果。依赖本地 Badger 的项目未通过旧卷副本恢复前不得直接切正式流量。
+
+本次变更已合入 main，07 首单启动窗口在 `7b5795b` 修复；固定源码全仓回归 133 包、2656 项测试及子测试通过，55 跳过，变更范围 race 184 项通过。Core 使用已提交的 `pkg/server/run/dist`，普通 Go 消费方不依赖前端子模块源码；该源码精确提交的远端冷获取失败另列为维护限制，不作为内嵌产物发布阻断。消费方升级仍为 NOT_RUN，不把 Core 自测或历史项目 smoke 等同于生产升级验收。
+
 ## v1.3.0 Manage RoleCode RBAC 候选
 
 本候选为标准 WebServer 增加默认启用的 Manage 授权。Core 保存管理员主体与稳定 RoleCode 的关系；消费方不得重复建立管理员/角色关系表，也不得把权限明细或权限哈希塞入 token。Core 内置 `core.system_admin` 与 `core.viewer`，自定义角色权限按精确 `service + path + command` 保存和判断。只有角色权威位于外部 IAM 时，消费方才覆盖 `IManageRoleProvider`。
@@ -109,3 +175,7 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 ## PostgreSQL 存储扩展消费方边界
 
 当前候选保留 IDataAction 与旧数据库构造器。切库只在消费方 models 组合根配置统一工厂；Manage 和 StatSpec 不分支。原生 SQL 正文不是自动可移植契约。Core 本地验收不等于 Bitzoom 或其他消费方已升级；本次未修改消费方，消费方 PostgreSQL smoke 为 NOT_RUN。
+
+## v1.7.0 PostgreSQL 发布验证
+
+本轮整合主线v1.6.4后，真实三库同模型对照、PostgreSQL完整07/09验收、相关普通/race及发布候选契约均通过。07旧MySQL构造保留DSN字段及主线协议选择。SQLite ISO周桶和MySQL ManageStore连接寿命变化、消费方skill刷新及回退步骤见[v1.7.0说明](RELEASE_V1_7_0_2026-11-01.md)。Core本机结果不等于消费方升级；Bitzoom等外部消费方smoke仍为NOT_RUN。

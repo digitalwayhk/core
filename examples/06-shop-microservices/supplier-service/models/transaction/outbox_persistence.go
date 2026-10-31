@@ -2,12 +2,14 @@
 package transaction
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/digitalwayhk/core/examples/06-shop-microservices/supplier-service/models/internal/store"
+	"github.com/digitalwayhk/core/pkg/persistence/message"
 	persistencetypes "github.com/digitalwayhk/core/pkg/persistence/types"
 )
 
@@ -31,8 +33,9 @@ func PendingOutbox() ([]*Outbox, error) {
 	}
 	var items []*Outbox
 	q := store.NewSearch(NewOutbox(), 100)
+	q.SkipCount = true
 	q.AddWhereN("Published", false)
-	q.AddSortN("ID", true)
+	q.AddSortN("ID", false)
 	err := store.Get().Load(q, &items)
 	return items, err
 }
@@ -51,6 +54,10 @@ func MarkOutboxPublishedWith(action persistencetypes.IDataAction, item *Outbox) 
 
 // MarkOutboxPublishedByIDs 在当前事务中按主键批量标记事件已发布。
 func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) error {
+	return markOutboxPublishedByIDs(context.Background(), action, ids)
+}
+
+func markOutboxPublishedByIDs(ctx context.Context, action persistencetypes.IDataAction, ids []uint) error {
 	if action == nil {
 		return errors.New("数据操作器不能为空")
 	}
@@ -62,6 +69,10 @@ func MarkOutboxPublishedByIDs(action persistencetypes.IDataAction, ids []uint) e
 	}
 	if len(unique) == 0 {
 		return nil
+	}
+	if _, ok := action.(persistencetypes.ITransactionDB); ok {
+		return message.ConfirmPublishedWith(ctx, action, NewOutbox(), unique,
+			message.PublishedFields{Published: "Published", UpdatedAt: "UpdatedAt"})
 	}
 	var items []*Outbox
 	query := store.NewSearch(NewOutbox(), len(unique))

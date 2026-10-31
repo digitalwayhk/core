@@ -53,10 +53,13 @@ func (writer LocalOrderWriter) Accept(ctx context.Context, command CreateOrderCo
 
 func findRemoteOrderByRequest(userID uint, requestID string) (*models.Order, error) {
 	var order *models.Order
-	err := models.RunRemoteTransaction(func(action models.DataAction) error {
+	err := models.RunRemoteRead(func(action models.DataAction) error {
 		found, err := models.FindRemoteOrderByIdempotencyWith(action, userID, requestID)
-		if err != nil {
+		if errors.Is(err, models.ErrRemoteOrderNotFound) {
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		order = found
 		return nil

@@ -70,9 +70,28 @@ func (p *PrefixedBadgerDB[T]) syncAdaptive() {
 		p.syncMutex.Lock()
 		p.syncInProgress = false
 		p.syncMutex.Unlock()
-		schedule.completed(time.Now(), first, confirmed, err)
+		now := time.Now()
+		schedule.completed(now, first, confirmed, err)
+		count, first = p.pendingSyncWindow()
+		nextWait := schedule.delay(now, count, first)
+		if nextWait < 0 {
+			nextWait = max(time.Second, schedule.config.SyncInterval)
+		}
+		reason := "no_progress"
+		if confirmed > 0 {
+			reason = "progress"
+		}
+		fields := []logx.LogField{
+			logx.Field("prefix", p.prefix),
+			logx.Field("confirmed", confirmed),
+			logx.Field("has_error", err != nil),
+			logx.Field("next_wait_ms", nextWait.Milliseconds()),
+			logx.Field("reason", reason),
+		}
 		if err != nil {
-			logx.Errorw("write_behind_adaptive_sync_failed", logx.Field("prefix", p.prefix), logx.Field("confirmed", confirmed))
+			logx.Errorw("write_behind_adaptive_sync_failed", fields...)
+		} else {
+			logx.Debugw("write_behind_adaptive_sync_completed", fields...)
 		}
 	}
 }

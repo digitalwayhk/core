@@ -1,4 +1,4 @@
-// 本文件验证 07 订单服务规则缓存从共享远程权威库读取并按事件失效。
+// 本文件验证 07 订单服务每次读取共享权威规则，无需测试手工失效。
 package business
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOrderRuleCacheInvalidatesRemoteAuthorityRule 验证规则变更后失效缓存可读取最新规则。
+// TestOrderRuleCacheInvalidatesRemoteAuthorityRule 验证两个既有读取器无需手工失效即可读取更新。
 func TestOrderRuleCacheInvalidatesRemoteAuthorityRule(t *testing.T) {
 	if os.Getenv("CORE_TEST_MYSQL") != "1" {
 		t.Skip("设置 CORE_TEST_MYSQL=1 后运行规则缓存 MySQL 集成测试")
@@ -20,19 +20,20 @@ func TestOrderRuleCacheInvalidatesRemoteAuthorityRule(t *testing.T) {
 	ruleID := uint(750000 + time.Now().UnixNano()%1000000)
 
 	cache := NewOrderRuleCache("default")
+	second := NewOrderRuleCache("default")
 	require.NoError(t, saveRule(ruleID, 3, 1))
 
 	first, err := cache.Get()
 	require.NoError(t, err)
 	require.Equal(t, 3, first.MinQuantity)
+	_, err = second.Get()
+	require.NoError(t, err)
 
 	require.NoError(t, saveRule(ruleID, 5, 2))
-	cached, err := cache.Get()
-	require.NoError(t, err)
-	require.Equal(t, 3, cached.MinQuantity)
-
-	cache.Invalidate()
 	latest, err := cache.Get()
+	require.NoError(t, err)
+	require.Equal(t, 5, latest.MinQuantity)
+	latest, err = second.Get()
 	require.NoError(t, err)
 	require.Equal(t, 5, latest.MinQuantity)
 

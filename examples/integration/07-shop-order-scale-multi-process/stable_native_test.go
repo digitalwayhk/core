@@ -98,7 +98,7 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 	host, port, err := net.SplitHostPort(mysqlAddr)
 	require.NoError(t, err)
 	ns := fmt.Sprintf("stable-07-%d", time.Now().UnixNano())
-	root := t.TempDir()
+	root := nativeFixtureStateRoot(t)
 	gc := &config.IDGeneratorConfig{Provider: "redis", Namespace: ns, Epoch: "epoch-a", Providers: config.ClusterProviderConfig{Redis: config.RedisProviderConfig{Addr: redisAddr}}}
 	a, _, err := identity.BuildAuthority(gc)
 	require.NoError(t, err)
@@ -142,6 +142,17 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 				env[key] = value
 			}
 		}
+		if os.Getenv("CORE_TEST_ORDER_LOAD") == "1" {
+			privateTemp := filepath.Join(root, replica, "diagnostics")
+			require.NoError(t, os.MkdirAll(privateTemp, 0700))
+			env["TMPDIR"] = privateTemp
+		}
+		if os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1" || i >= 2 && os.Getenv("CORE_TEST_LOAD_PROFILE") == "1" {
+			env["SHOP_PROFILE_PORT"] = strconv.Itoa(freeNativePort(t))
+			if os.Getenv("CORE_TEST_LOAD_FLIGHT") == "1" {
+				env["SHOP_FLIGHT_RECORDER"] = "1"
+			}
+		}
 		count := i + 2
 		if i >= 2 {
 			count = 4
@@ -152,4 +163,17 @@ func startStableNativeProcesses(t *testing.T, orderReplicas int) (*identity.Auth
 		require.Eventually(t, func() bool { return nativeProbe(p.BaseURL+"/api/ready") == http.StatusOK }, 30*time.Second, 100*time.Millisecond, p.BaseURL)
 	}
 	return a, ns, processes
+}
+
+func nativeFixtureStateRoot(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("CORE_TEST_ORDER_LOAD") != "1" {
+		return t.TempDir()
+	}
+	evidence := os.Getenv("CORE_TEST_LOAD_EVIDENCE_DIR")
+	require.True(t, filepath.IsAbs(evidence), "显式压测必须指定绝对证据目录")
+	directory, err := os.MkdirTemp(evidence, "state-")
+	require.NoError(t, err)
+	t.Logf("压测本地状态保留于 %s", directory)
+	return directory
 }
