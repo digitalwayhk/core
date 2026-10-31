@@ -28,6 +28,16 @@
 
 - 无。
 
+## [v1.6.3] - 2026-10-31
+
+### Fixed
+
+- 修复有界 write-behind 前台 Ready 版本替换中的重复空组核验：比较旧新实际组身份，同组补新跳过临时空组核验；跨组在每个实际 Badger 事务最终写集上去重，并用底层 IteratorOptions.Prefix 限定目标组。回滚及过大事务拆分不共享收集集合，保留原件、历史、版本与顺序保护。详见[修复与证据](docs/codex/WRITE_BEHIND_DISPOSITION_GROUP_FIX_2026-10-31.md)。
+
+### Changed
+
+- 更新权威 skill、Badger 参数验证边界及07可选2P资源配置；不改变生产默认、公共API、policy或卷格式，无需应用新增配置。历史场景P99改善不代表所有负载提速；分散跨组负载的取舍、既有偶发恢复失败及消费方升级边界见[发布说明](docs/codex/RELEASE_V1_6_3_2026-10-31.md)。
+
 ## [v1.6.2] - 2026-10-31
 
 ### Fixed
