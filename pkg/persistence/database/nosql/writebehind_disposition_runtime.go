@@ -30,6 +30,14 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 	jobs         chan writeBehindDispositionJob[T]
 	// groupCheckObserver 仅供包内诊断同步观察实际核验；准备阶段设置，不改变写集或记录业务身份。
 	groupCheckObserver func(*badger.Txn, badger.IteratorOptions)
+	// selectionObserver仅在准备期绑定，观察实际NewIterator/Seek；nil时不采集时钟。
+	// target_cached只计命中，两个零耗时表示没有创建/Seek，不表示已计量版本点读耗时。
+	selectionObserver      func(string, badger.IteratorOptions, time.Duration, time.Duration)
+	selectionRoundObserver func(time.Duration)
+	// target范围快照只在storageMu内使用；mode的提交版本与target成员变更同事务推进。
+	targetCacheValid   bool
+	targetCacheVersion uint64
+	targetCacheID      string
 }
 
 // UseWriteBehindWithFailureHandler 显式启用有限处置；必须在接受写入前绑定，需与持久policy指纹一致。
@@ -180,7 +188,11 @@ func (p *PrefixedBadgerDB[T]) bootstrapDispositions() error {
 			cursor = keys[len(keys)-1][len(prefix):]
 		}
 	}
-	return nil
+	// 绑定返回前完成首次范围核验，原卷冷扫描不借首笔Save占用前台提交器。
+	return p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
+		_, err := p.dispositionTargetID(txn)
+		return err
+	})
 }
 
 func (p *PrefixedBadgerDB[T]) dispositionBudgetExhausted(r *WriteBehindFailureRecord[T], now time.Time) bool {

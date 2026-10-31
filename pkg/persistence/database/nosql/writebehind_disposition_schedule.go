@@ -29,28 +29,27 @@ func (p *PrefixedBadgerDB[T]) dispositionIdentity(r WriteBehindFailureRecord[T])
 
 func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notify []WriteBehindFailureRecord[T], err error) {
 	base := p.dispositionPrefix()
+	if observer := p.disposition.selectionRoundObserver; observer != nil {
+		started := time.Now()
+		defer func() { observer(time.Since(started)) }()
+	}
 	now := time.Now().UTC()
 	err = p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
-		var targetID string
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		targets := txn.NewIterator(opts)
-		targets.Seek([]byte(base + "target:"))
-		if targets.ValidForPrefix([]byte(base + "target:")) {
-			if e := targets.Item().Value(func(b []byte) error { return json.Unmarshal(b, &targetID) }); e != nil {
-				targets.Close()
-				return e
-			}
-		}
-		targets.Close()
-		var cursor string
-		if e := dispositionRead(txn, base+"cursor", &cursor); e != nil && !errors.Is(e, badger.ErrKeyNotFound) {
+		targetID, e := p.dispositionTargetID(txn)
+		if e != nil {
 			return e
 		}
-		groups := txn.NewIterator(opts)
-		defer groups.Close()
+		var cursor string
+		cursorErr := dispositionRead(txn, base+"cursor", &cursor)
+		if cursorErr != nil && !errors.Is(cursorErr, badger.ErrKeyNotFound) {
+			return cursorErr
+		}
 		prefix := base + "g:"
-		groups.Seek([]byte(prefix + cursor))
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = []byte(prefix)
+		groups := p.seekDispositionIterator(txn, "group", opts, []byte(prefix+cursor))
+		defer groups.Close()
 		if cursor != "" && groups.Valid() && string(groups.Item().Key()) == prefix+cursor {
 			groups.Next()
 		}
@@ -60,9 +59,10 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 			scanned++
 			group := string(groups.Item().Key())[len(prefix):]
 			last = group
-			queue := txn.NewIterator(opts)
 			qprefix := base + "q:" + group + ":"
-			queue.Seek([]byte(qprefix))
+			queueOpts := opts
+			queueOpts.Prefix = []byte(qprefix)
+			queue := p.seekDispositionIterator(txn, "queue", queueOpts, queueOpts.Prefix)
 			if !queue.ValidForPrefix([]byte(qprefix)) {
 				queue.Close()
 				continue
@@ -134,9 +134,7 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 			if r.FirstAttemptAt.IsZero() {
 				r.FirstAttemptAt = now
 			}
-			if e = p.saveDisposition(txn, &r); e != nil {
-				return e
-			}
+			// 每组只取组首，Ready/InFlight均未解决；在BatchID就绪后统一原子写入一次。
 			selected = append(selected, r)
 		}
 		if !groups.ValidForPrefix([]byte(prefix)) {
@@ -161,6 +159,10 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 					return e
 				}
 			}
+		}
+		// 仍建立首次cursor；已有值未变时不重复Set。其它状态写集照常提交，推进/回绕不能省略。
+		if cursorErr == nil && last == cursor {
+			return nil
 		}
 		return dispositionWrite(txn, base+"cursor", last)
 	})
@@ -257,4 +259,55 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	notify = append(notify, notices...)
 	err = errors.Join(err, confirmationErr)
 	return
+}
+
+// seekDispositionIterator在原事务内创建和定位；可选包内观察不改变选取与写集，不记录业务身份。
+func (p *PrefixedBadgerDB[T]) seekDispositionIterator(txn *badger.Txn, kind string, opts badger.IteratorOptions, key []byte) *badger.Iterator {
+	observer := p.disposition.selectionObserver
+	if observer == nil {
+		it := txn.NewIterator(opts)
+		it.Seek(key)
+		return it
+	}
+	start := time.Now()
+	it := txn.NewIterator(opts)
+	seek := time.Now()
+	it.Seek(key)
+	observer(kind, opts, seek.Sub(start), time.Since(seek))
+	return it
+}
+
+// dispositionTargetID复用同一持久版本下的范围结果；缓存仅为加速，原marker仍是权威。
+// 同prefix其它wrapper改变target成员时也原子重写既有mode字节；本事务读取该key参与冲突检测。
+func (p *PrefixedBadgerDB[T]) dispositionTargetID(txn *badger.Txn) (string, error) {
+	base := p.dispositionPrefix()
+	mode, err := txn.Get([]byte(base + "mode"))
+	if err != nil {
+		return "", err
+	}
+	rt := p.disposition
+	if rt.targetCacheValid && rt.targetCacheVersion == mode.Version() {
+		if rt.selectionObserver != nil {
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+			opts.Prefix = []byte(base + "target:")
+			rt.selectionObserver("target_cached", opts, 0, 0)
+		}
+		return rt.targetCacheID, nil
+	}
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	opts.Prefix = []byte(base + "target:")
+	targets := p.seekDispositionIterator(txn, "target", opts, opts.Prefix)
+	defer targets.Close()
+	var id string
+	if targets.ValidForPrefix(opts.Prefix) {
+		if err = targets.Item().Value(func(b []byte) error { return json.Unmarshal(b, &id) }); err != nil {
+			return "", err
+		}
+	}
+	rt.targetCacheID = id
+	rt.targetCacheVersion = mode.Version()
+	rt.targetCacheValid = true
+	return id, nil
 }

@@ -53,6 +53,12 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 		if r.State == WriteBehindHandedOff && d.Action != WriteBehindRelease {
 			return ErrWriteBehindDisposition
 		}
+		if r.Scope == WriteBehindScopeTarget && d.Scope != WriteBehindScopeTarget {
+			// 离开全局target作用域时，原marker删除与范围失效仍在同一确认事务内。
+			if e := p.invalidateDispositionTargetRange(txn); e != nil {
+				return e
+			}
+		}
 		r.Scope = d.Scope
 		r.HandlerDeadline = time.Time{}
 		switch d.Action {

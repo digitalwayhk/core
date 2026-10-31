@@ -173,9 +173,15 @@ func (p *PrefixedBadgerDB[T]) saveDisposition(txn *badger.Txn, r *WriteBehindFai
 			return err
 		}
 	}
-	if r.Scope == WriteBehindScopeTarget && !dispositionTerminal(r.State) {
-		return dispositionWrite(txn, base+"target:"+r.ID, r.ID)
+	if r.Scope == WriteBehindScopeTarget {
+		if err := p.invalidateDispositionTargetRange(txn); err != nil {
+			return err
+		}
+		if !dispositionTerminal(r.State) {
+			return dispositionWrite(txn, base+"target:"+r.ID, r.ID)
+		}
 	}
+	// 普通ScopeKey不增加target存在性点查；保留原删除写集与历史。
 	return txn.Delete([]byte(base + "target:" + r.ID))
 }
 
@@ -412,4 +418,18 @@ func (p *PrefixedBadgerDB[T]) deleteEmptyDispositionGroups(txn *badger.Txn, grou
 		}
 	}
 	return nil
+}
+
+// invalidateDispositionTargetRange只重写既有mode原字节；提交版本作为范围代际，回滚不发布新版本。
+func (p *PrefixedBadgerDB[T]) invalidateDispositionTargetRange(txn *badger.Txn) error {
+	key := []byte(p.dispositionPrefix() + "mode")
+	mode, err := txn.Get(key)
+	if err != nil {
+		return err
+	}
+	value, err := mode.ValueCopy(nil)
+	if err != nil {
+		return err
+	}
+	return txn.Set(key, value)
 }
