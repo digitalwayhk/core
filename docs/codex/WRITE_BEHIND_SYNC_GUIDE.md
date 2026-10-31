@@ -108,3 +108,24 @@ Close先停止前台准入，唤醒满队列中尚未被接收的保存请求并
 Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端收集窗口、1ms本地合批窗口当成整体Save上限。Badger官方建议摊销逐key事务，但Core原件核验是读改写事务，不能直接替换为盲写WriteBatch或在Commit前确认成功。调度让出也可能帮助尚未入队的请求合批；删Gosched/队列暂空即提交须同时验证事务数、批大小和尾部，不能只看一次P99。具体官方参数差异、实际Options及本轮未采纳候选见[合批与参数对照](WRITE_BEHIND_BATCH_PARAMETERS_2026-10-31.md)。生产默认值和可靠性合同保持不变。
 
 实际使用先核对持久SSD路径和可用CPU预算；同一二进制串行对照1P/2P，不能从单P结果推定多核表现。2P仍共享本地提交器和Badger，不承诺完全隔离。复用实例store，并发Save或已有数据的SaveBatch在有限窗口内摊销事务；不得每笔Save后再ForceSync远端。07提供显式2P资源Compose候选及配对命令，默认仍为原1ms窗口；具体结果和硬配额NOT_RUN边界见[SSD与Go并行度验证](WRITE_BEHIND_TWO_PROCS_2026-10-31.md)。
+
+
+## 选批范围与前台提交等待
+
+后台`selectDispositionRound → updateWriteBehindTransactionKind → BatchCommitter FIFO → finishLocalCommit → updateLocalTransactionDirect → Badger.Update`与前台Save共享本地提交面。target/SQL/HandleFailure不在此事务中，但选批读状态、写InFlight/attempt/BatchID/cursor时仍可能阻挡已入队Save。不能用最终Txn.Commit很短推断整个队列等待很短，也不能将一个共享批次耗时除以请求数当各单独占耗时。
+
+选批三类迭代器使用精确底层范围：target为`base+target:`，组为`base+g:`，具体队列为`base+q:+groupHash+:`。组范围始终覆盖全部组，cursor仅决定Seek起点，末尾按原规则回绕；迭代器仍在原事务创建，不复用到看不到新pendingWrites的旧快照。外层ValidForPrefix和ScanLimit不能替代底层Prefix。
+
+范围内的删除历史仍可能让Seek昂贵，尤其普通记录过去也会留下target删除标记。现在保留原删除写集/历史，只复用经版本核验的target范围结果：每轮事务点读既有mode key，将其Badger Item.Version与上次范围结果比对；target成员增加/移除时，在同一事务重写mode的**原字节**。policy值与指纹不改变，不增加持久key、配置、格式或worker。同prefix的另一正式wrapper变更也会失效；与并发成员变更相交的选批事务通过该点读参与Badger冲突检测，不可用旧缓存越过新全局屏障。
+
+缓存只持有一个ID/空结果及版本，使用原storageMu保护，关闭后丢弃；原target marker仍为权威。首次/重开的查找在绑定返回前完成；ScopeTarget相关变化可保守失效，之后的查找仍可能随该范围历史增长，未承诺所有冷启动或target高频变更的长尾消失。禁止裸改内部marker、删除历史或把ScopeTarget失败当成功来换取空缓存。
+
+正常候选的InFlight/attempt和BatchID在同一最终事务写入一次，避免先编码/Set无BatchID快照再覆盖；之前的未知、超时、预算、PreviousID及active组核验仍执行。组首一次至多一个，Ready/InFlight都属于未解决，因此不能因减少事务内重复写入而跳过前序。本地事务失败仍整体回滚，不提前调用target或确认pending。
+
+这项修复不改变原FIFO、1ms窗口、固定8项确认量子、SyncWrites/DetectConflicts、policy/StoreID、原件/组/队列/cursor编码或成功后清理。已识别有界格式的v1.6.3卷可按原配置重开；缓存重建不等于重置重试预算。回退必须先停稳target/handler并备份副本，不并发打开同卷，不回到不识别有界状态的旧版。
+
+诊断沿用Admission、Batch、ForegroundLocal/MetadataLocal/ConfirmationLocal和TargetDuration，额外包内选批观察仅用于测试，nil时不采集时钟、不增加线程。NewIterator/Seek是嵌套阶段；round计时包含本次元数据队列等待，事务计时含编码/提交，不能相加冒充Save壁钟。target_cached命中没有新建/Seek迭代器；未测的版本点读、纯fsync、物理I/O和CPU限流不填0。Core组件实验与消费方Full-E4验收分开。
+
+已有cursor最终值未变时不重复Set，空轮/全暂停轮不再仅为相同cursor制造可靠写事务。首次cursor建立、推进和回绕保留；其它状态/批次写集即使cursor未变仍正常原子提交，不按pending缓存推断空轮。`LocalTransactionMetrics.Committed`沿用成功Update调用计数，包含只读/无写集成功，不能当物理刷盘数；测试以实际Badger提交版本及分段核验。普通ScopeKey保存不增加target存在性点查，离开ScopeTarget的应用决定与marker删除/失效同事务。
+
+选批范围与重复写集的修复不等于前后台资源隔离，也不保证Save P99全面改善。v1.6.4多轮持续数据、仍存尾部及既有硬杀恢复失败见[正式报告](WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)，升级无需配置/格式迁移，消费方旧skill链接或复制需同步。

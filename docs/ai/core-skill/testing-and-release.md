@@ -220,3 +220,10 @@ go get github.com/digitalwayhk/core@<commit>
 ## write-behind有界失败处置验收
 
 显式新模式须覆盖完整失败选批窗口及健康组继续、同组最早未解决屏障、预算跨重启保留、未知结果不盲重放、非法决策、旧版本不能确认新值、应用先持久接管、回执丢失复用，以及Core保存回执前后的独立进程硬杀恢复。真实临时Badger与应用独立存储不能换成纯mock；handler超时后实际未退出、人工Retry、关闭pending为零仍超时必须分别验证。普通与race运行`pkg/persistence/database/nosql`及07订单服务变更范围，并执行persistence-unit、config-contract、performance-contract、release-contract及日志检查。外部MySQL、HTTP/UAT/容量和消费方接入分别登记NOT_RUN，不以配置/编译契约替代。
+
+
+## 有界选批与前台长尾回归
+
+先固定真实Badger范围RED、选批占提交器时已入队Save等待，再验证target/group/具体queue底层Prefix。Prefix不能免除前缀内部删除历史；范围复用必须覆盖mode原字节不变、跨wrapper/并发ScopeTarget变化的实际提交冲突、回滚和绑定前准备。固定真实TxnTooBig验证选中快照只写一次、InFlight/attempt/BatchID仍原子；空轮和暂停轮用实际Badger提交版本证明不变cursor不重复可靠写，推进/回绕不能省略。
+
+性能至少含仅前台、前后台及9000保留/多次更新/删除/暂停历史三个场景，保持可靠刷盘、CPU预算和1ms合批，多轮记录Save分位数、队列及本地阶段、实际确认/pending并用独立PID重开。诊断覆盖/CPU采样与正式窗口分开，不用helper/编译或单轮平均当验收；差轮及既有硬崩溃恢复FAIL原样保留。示例04/07及nosql普通/race、持久化/配置/性能/发布/前端和日志分别取证。消费方现场、真实业务库、物理断电、未采集I/O/限流及长期容量分别登记NOT_RUN。

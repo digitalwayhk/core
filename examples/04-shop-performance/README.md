@@ -123,3 +123,7 @@ go tool pprof -http=:0 /tmp/shop04-mem.pprof
 ```
 
 benchmark 子进程会把服务日志级别临时调为 `error`，减少 info 访问日志 I/O 干扰；普通集成测试保持默认日志便于失败诊断。
+
+### 后台选批与Save等待（v1.6.4）
+
+有界write-behind保留原FIFO提交器、1ms合批及可靠刷盘。后台选批现在限定target/group/具体组queue的底层范围，并以既有持久mode版本复用target范围结果；启动绑定时完成冷核验，真实组屏障、attempt、cursor与批次身份仍在原事务中。无需改示例配置或新增应用开关。选批优化不等于前后台完全隔离，也不保证任意机器的Save P99；确认、前台事务、运行时及I/O仍可能造成长尾。详见[升级与验证](../../docs/codex/RELEASE_V1_6_4_2026-10-31.md)。

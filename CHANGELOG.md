@@ -28,6 +28,16 @@
 
 - 无。
 
+## [v1.6.4] - 2026-10-31
+
+### Fixed
+
+- 修正有界write-behind后台选批的target/group/具体queue底层范围；复用绑定既有mode提交版本的target范围结果，绑定前完成冷核验。同轮选中快照在BatchID就绪后只写一次，不变cursor不重复写；保留原FIFO、事务核验、有限预算、失败屏障及v1.6.3空组修复。详见[修复与证据](docs/codex/WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)。
+
+### Changed
+
+- 更新权威skill、正式指南和04/07说明；API/配置/格式/StoreID/policy不变，无新开关或卷迁移。选批工作下降，但整体Save P99没有一致改善；Mac异常轮及既有Badger恢复FAIL全部保留，不宣称全面性能验收。升级、回退与NOT_RUN见[发布说明](docs/codex/RELEASE_V1_6_4_2026-10-31.md)。
+
 ## [v1.6.3] - 2026-10-31
 
 ### Fixed

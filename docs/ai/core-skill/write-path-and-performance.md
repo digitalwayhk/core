@@ -106,3 +106,14 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 本地合批优化不能只删除调度让出或缩短窗口：须同时核对前台批次、总事务、排队、实际Save分位数及排空。官方Badger调参和读改写/WriteBatch边界见[参数分片](badger-configuration.md#官方慢写排障与实验边界)，不以一次收益修改全局生产默认。
 
 前台空组核验必须限定事务和组范围：替换未投递`Ready/Attempts=0`版本时比较旧新实际组身份，同组补新不做会被抵消的空组核验；跨组等可能变空的组在实际Badger事务内收集deferredGroups，最终写集上逐组去重核验。集合不能跨回滚或TooBig二分子事务。每组迭代器必须设置目标组`IteratorOptions.Prefix`，仅PrefetchValues=false加Seek后ValidForPrefix不能限制内部查找；迭代器不复用到创建之后的新pendingWrites。保持原件、历史、组标记及队列原子提交，不异步清理组标记，不清历史/关闭刷盘/调整FIFO换取性能。当前修复无需消费方新增开关或迁移存量卷。实测收益、分散跨组负载的取舍和既有恢复失败见[修复验证](../../codex/WRITE_BEHIND_DISPOSITION_GROUP_FIX_2026-10-31.md)。
+
+
+有界选批也经同一个BatchCommitter FIFO提交，不能把metadata事务内的等待误诊为持本地锁等SQL。`selectDispositionRound`的target、group及每个具体group的queue迭代器都须在底层设置精确Prefix，组Prefix不带cursor，Seek起点才带cursor；ScanLimit只限制外层已见组数，不限制单次Seek内部跳过的历史。
+
+精确Prefix仍可能遇到同前缀内大量删除历史。target范围结果仅在每轮事务点读既有mode key、Badger提交版本不变时复用；target成员增删与mode原字节重写同事务提交，policy内容/指纹、StoreID及卷格式不变。缓存仅存一个范围结果、不落盘、不增加队列，绑定返回前准备首次结果；ScopeTarget相关变化可保守失效，失效后仍查权威marker；冲突/回滚不公布新代际，同prefix另一正式入口也能失效。禁止裸改内部marker或绕过事务版本更新。不能按内存时间、pending为0或“本进程没看到失败”来跳过全局target屏障。
+
+选中的InFlight/attempt快照只在BatchID就绪后于同一事务写入一次；Ready与InFlight均为未解决，PreviousID/组首/预算核验不能省略。性能验证同时包含仅前台、前后台并行与9000保留/删除/暂停历史，多轮报告Save尾部和后台排空；包内诊断的target_cached只计命中，无NewIterator/Seek的零值不代表版本点读已计时。消费者沿用原绑定和可靠刷盘，无新增配置或卷迁移；完整边界见[同步指南](../../codex/WRITE_BEHIND_SYNC_GUIDE.md#选批范围与前台提交等待)。
+
+已有cursor在完整选批后未变化时，不重复Set相同值；首次建立、推进/回绕及其它原子写集仍保持。这是事务写集去重，不能改成凭pending缓存跳过查询。无写集Update成功不等于新增可靠刷盘，实际写事务数与Update调用指标分开核验。普通ScopeKey保存不增加target存在性点查。
+
+选批成本下降不能直接当作Save尾部全面通过：v1.6.4固定资源多轮中整体P99仍有回退，Mac异常及既有Badger硬杀恢复FAIL必须保留。必须按真实result channel/批次或累计指标边界区分选批、确认、前台事务与未拆出的调度间隙；不得把全部长尾归给Seek，也不承诺固定毫秒。当前实测、NOT_RUN及升级skill说明见[选批修复报告](../../codex/WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)。

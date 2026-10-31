@@ -288,3 +288,7 @@ rtk proxy docker compose -f examples/07-shop-order-scale/deploy/docker-compose.y
 这是可选资源候选，不预留专用CPU；两个默认订单副本的CPU上限合计4，另需给用户/供应商/MySQL等服务留预算。GOMEMLIMIT不覆盖所有mmap/RSS；没有追加未经验证的容器硬内存限额。真正启用还需按本示例原部署步骤准备证书和持久SSD卷，不能将静态Compose检查或本机Go并行度结果当容器/UAT/容量通过。本轮不启动或重建Docker服务。
 
 从实例store.Metrics()同时读取Batch/Admission/Sync及pending。Sync新增本地前台/确认/其余事务的排队、锁等待、提交累计与批次信息，TargetDuration与轮次时间嵌套，不能相加。固定成功确认仍以SyncedItems和原版本对账为准；pending=0不是物理清理完成。详细边界见[同步指南](../../docs/codex/WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。
+
+### 后台选批与Save等待（v1.6.4）
+
+有界write-behind保留原FIFO提交器、1ms合批及可靠刷盘。后台选批现在限定target/group/具体组queue的底层范围，并以既有持久mode版本复用target范围结果；启动绑定时完成冷核验，真实组屏障、attempt、cursor与批次身份仍在原事务中。无需改示例配置或新增应用开关。选批优化不等于前后台完全隔离，也不保证任意机器的Save P99；确认、前台事务、运行时及I/O仍可能造成长尾。详见[升级与验证](../../docs/codex/RELEASE_V1_6_4_2026-10-31.md)。
