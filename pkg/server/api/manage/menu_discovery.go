@@ -15,6 +15,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/persistence/entity/stats"
 	"github.com/digitalwayhk/core/pkg/server/api/public"
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/internal/menumetadata"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/smodels"
 	"github.com/digitalwayhk/core/pkg/server/types"
@@ -42,7 +43,7 @@ var menuPathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 //
 // SystemManage 所在的 server 上下文可以使用本地 Provider，因此发现必须由
 // 同进程的业务 ServiceContext 执行。远程服务必须返回自身进程内的
-// QueryRouters 快照；任一发现或校验失败时整体失败闭合。
+// 菜单元数据快照；任一发现或校验失败时整体失败闭合。
 func discoverMenuServiceSnapshots(req types.IRequest) ([]*smodels.MenuServiceSnapshot, error) {
 	local := router.GetContexts()
 	if source := menuRequestServiceContext(req); source != nil && source.Service != nil {
@@ -205,7 +206,7 @@ func menuRequestContext(req types.IRequest) context.Context {
 }
 
 // menuQueryRouters 固定远程菜单发现的路由元数据，避免同进程多个
-// QueryRouters 注册者导致 RouterInfo 归属不唯一。
+// QueryRouters 注册者导致 RouterInfo 归属不唯一；接收端仅处理只读快照协议。
 type menuQueryRouters struct {
 	public.QueryRouters
 	info *types.RouterInfo
@@ -214,7 +215,7 @@ type menuQueryRouters struct {
 func newMenuQueryRouters(serviceName string) *menuQueryRouters {
 	query := &menuQueryRouters{QueryRouters: public.QueryRouters{ApiType: 3, ForMenu: true}}
 	query.info = &types.RouterInfo{
-		Path: "/api/servermanage/queryrouters", ServiceName: serviceName,
+		Path: menumetadata.Path, ServiceName: serviceName,
 		PathType: types.ServerManagerType, Method: http.MethodPost,
 		StructName: "QueryRouters", InstanceName: "QueryRouters",
 	}

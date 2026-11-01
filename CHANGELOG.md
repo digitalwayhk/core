@@ -22,11 +22,21 @@
 
 ### Fixed
 
-- 无。
+- v1.7.1 菜单发现修复已完成候选验证；变更与迁移边界见下方版本段。
 
 ### Security
 
 - 无。
+
+## [v1.7.1] - 2026-11-02
+
+### Fixed
+
+- 修复跨进程菜单搜索空表初始化及 UpdateMenu 误用受禁止的 ServerManage RPC 导致500：改走仅内部传输识别的只读菜单快照协议，逐副本校验和失败不落库保持。无数据库格式或新配置；所有被发现节点均须升级，混合旧节点明确失败。
+
+### Security
+
+- 菜单快照仅接受认证服务身份且核对 SourceService/TargetService，不注册 HTTP 路由、不读取业务数据或配置；保留所有既有 ServerManage 拒绝与WS边界。真实双进程 mTLS、无证书/伪造来源拒绝及重启后菜单读取见 [修复记录](docs/codex/INTERNAL_MENU_SNAPSHOT_FIX_2026-11-02.md)。
 
 ## [v1.7.0] - 2026-11-01
 

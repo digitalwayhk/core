@@ -105,6 +105,8 @@ server.Start()
 
 Core `SystemManage` 提供角色、角色权限、管理员主体和主体角色绑定页。选中自定义角色点击“配置权限”，或从角色权限管理页点击“配置角色权限”并选择角色，打开读取 `getmenu` 的服务、菜单、命令勾选树。`permissionselection` 回显已绑定权限，`savepermissionselection` 在事务中用显式选择集替换该角色权限：取消勾选撤销，空数组清空，未传选择集拒绝保存，权限必须属于已注册的 Manage 命令，内置角色不可修改。这两个内部读写接口由后台从 ViewModel 的按钮列表排除。旧 `bindmenu` API 保留，为自定义角色幂等创建菜单的 `view`、`search` 两条权限。
 
+跨进程菜单发现由内部传输专用 `/internal/core/menu-snapshot` 读取目标服务自身的 Manage/报表菜单元数据；不注册 HTTP 路由。接收端要求 mTLS 验证后的可信服务身份与 SourceService 一致，且 TargetService 匹配当前监听服务。普通服务仍不能通过 gRPC 访问 `/api/servermanage/queryrouters` 或其他管理接口；不得通过放宽 ServerManage 修复菜单。所有被发现节点须使用支持快照协议的版本；缺失、拒绝或副本快照不一致仍整体失败，不能保存局部结果。无卷格式或配置迁移，详见 [菜单修复与验证](../../codex/INTERNAL_MENU_SNAPSHOT_FIX_2026-11-02.md)。
+
 当前版本不裁剪侧栏菜单或页面按钮；用户可以点击未授权 command 并看到 403，后端结果才是授权权威。完整启动、RoleCode 绑定与 HTTP 验证见 `examples/09-admin-manage-rbac`。
 
 ## 可选 HMAC 请求认证

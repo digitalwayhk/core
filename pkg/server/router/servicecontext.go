@@ -2070,6 +2070,9 @@ func (own *ServiceContext) HandleInternalPayload(ctx context.Context, payload *t
 	if payload != nil && (payload.TargetPath == "/api/servermanage" || strings.HasPrefix(payload.TargetPath, "/api/servermanage/")) && !isWebSocketRelayPath(payload.TargetPath) {
 		return nil, types.ErrInternalCallerForbidden
 	}
+	if handled, data, err := own.handleInternalMenuSnapshot(ctx, payload); handled {
+		return data, err
+	}
 	if handled, data, err := own.handleOwnedWebSocketRelay(ctx, payload); handled {
 		return data, err
 	}

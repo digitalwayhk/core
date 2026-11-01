@@ -197,7 +197,7 @@ func TestValidateMenuServiceSnapshotRejectsOversizedSnapshot(t *testing.T) {
 func TestMenuQueryRoutersUsesFixedTargetMetadata(t *testing.T) {
 	query := newMenuQueryRouters("users")
 	info := query.RouterInfo()
-	require.Equal(t, "/api/servermanage/queryrouters", info.GetPath())
+	require.Equal(t, "/internal/core/menu-snapshot", info.GetPath())
 	require.Equal(t, "users", info.GetServiceName())
 	require.Equal(t, types.ServerManagerType, info.GetPathType())
 	require.Equal(t, 3, query.ApiType)
