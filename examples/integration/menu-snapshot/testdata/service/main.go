@@ -45,6 +45,9 @@ func (r *itemSearch) RouterInfo() *types.RouterInfo {
 }
 
 func main() {
+	if err := os.WriteFile("menu-peer.pid", []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+		panic(err)
+	}
 	index, err := strconv.Atoi(os.Getenv("CORE_MENU_INDEX"))
 	if err != nil {
 		panic(err)

@@ -30,7 +30,8 @@ Full-E4 菜单搜索空表初始化和 UpdateMenu 都通过 gRPC 调用目标服
 - GREEN：入站、旧QueryRouters菜单兼容及调用元数据共8项定向测试通过。
 - PASS：`go test ./pkg/server/router ./pkg/server/api/public ./pkg/server/api/manage ./pkg/server/transport/grpc -count=1`，419项。
 - PASS：上述4包完整 `-race -count=1 -timeout=4m`。
-- PASS：独占临时Redis容器，`CORE_TEST_REDIS_ADDR=127.0.0.1:55002 go test -race ./examples/integration/menu-snapshot -count=1 -timeout=4m`，60.653秒。两个真实服务进程、mTLS、空表搜索自动初始化、UpdateMenu、gRPC出入站计数增长且HTTP/fallback为零、SQLite保存及重启读取；覆盖无证书、SAN/Source不一致、HTTP404和ServerManage拒绝。
+- 部分PASS（重启证明已撤回）：独占临时Redis容器，`CORE_TEST_REDIS_ADDR=127.0.0.1:55002 go test -race ./examples/integration/menu-snapshot -count=1 -timeout=4m`，60.653秒。两个真实服务进程、mTLS、空表搜索自动初始化、UpdateMenu、gRPC出入站计数增长且HTTP/fallback为零、SQLite保存及重启读取；覆盖无证书、SAN/Source不一致、HTTP404和ServerManage拒绝。
+- 保留夹具缺陷：首次成功轮直接Restart未停止原进程，恢复断言可能命中旧进程；该轮重启PASS已撤回。修正后先StopProcess并确认旧监听关闭，再Restart，等待监听及视图请求就绪，并核对两个原副本PID不同、重启后PID改变；同一命令重新运行 -race PASS（37.268秒），重启后SQLite菜单仍可读。独立复核确认该P1已解决。
 - 保留夹具失败：首次真实网络测试误把按服务名字典序分配的gRPC端口当作HTTP顺序，连接了另一个未启用TLS的listener。修正夹具端口后通过；该次失败不计为产品RED。
 - PASS：独立安全审查未发现阻断问题；已核查证书链、Source/Target、快照服务归属、HTTP不注册和WS隔离。
 - PASS：`scripts/test.sh release-contract`，含API兼容、公共Go API、配置和安全检查。

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -61,6 +62,13 @@ func TestMenuDiscoveryRealMTLSPeers(t *testing.T) {
 	}
 	a, viewA := start(1)
 	b, _ := start(2)
+	readPID := func(s *integration.Suite) string {
+		raw, err := os.ReadFile(filepath.Join(s.RootDir, "menu-peer.pid"))
+		require.NoError(t, err)
+		return string(raw)
+	}
+	originalPID := readPID(a)
+	require.NotEqual(t, originalPID, readPID(b), "两个副本必须是不同进程")
 	admin := viewA.TokenFor(t, "menu-admin", 1)
 	// 即便带管理令牌，HTTP也没有注册内部菜单协议。
 	for _, s := range []*integration.Suite{a, b} {
@@ -122,7 +130,29 @@ func TestMenuDiscoveryRealMTLSPeers(t *testing.T) {
 	menus := viewA.RequestJSON(t, http.MethodGet, "/api/servermanage/getmenu", "", nil)
 	require.True(t, menus.Success, menus.Body)
 	require.Contains(t, string(menus.Data), "/api/manage/menu-peer/itemmanage/search")
+	a.StopProcess()
+	portsReady := func() bool {
+		for _, port := range []int{a.BasePort, a.BasePort + 1, a.GRPCBasePort, a.GRPCBasePort + 1} {
+			c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
+			if err != nil {
+				return false
+			}
+			c.Close()
+		}
+		return true
+	}
+	require.False(t, portsReady(), "原进程停止后旧监听必须关闭")
 	require.NoError(t, a.Restart())
+	require.Eventually(t, portsReady, 10*time.Second, 25*time.Millisecond, "重启进程必须重新监听")
+	require.NotEqual(t, originalPID, readPID(a), "不能由原进程冒充重启恢复")
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(viewA.BaseURL + "/api/servermanage/getmenu")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 25*time.Millisecond)
 	recovered := viewA.RequestJSON(t, http.MethodGet, "/api/servermanage/getmenu", "", nil)
 	require.True(t, recovered.Success, recovered.Body)
 	require.Contains(t, string(recovered.Data), "跨进程菜单回归")
