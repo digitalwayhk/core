@@ -104,3 +104,17 @@ func TestConstrainedRouterRejectsWrongTrustedServiceBeforeParse(t *testing.T) {
 	require.Zero(t, internalCallerRouteCounters.validation.Load())
 	require.Zero(t, internalCallerRouteCounters.do.Load())
 }
+
+func TestInternalCallerDenialPreservesForbiddenPublicContract(t *testing.T) {
+	info := newInternalCallerTestRouterInfo(t)
+	for _, request := range []*internalCallerTestRequest{{}, {caller: "shop-user", trusted: false}, {caller: "other", trusted: true}} {
+		err := info.AuthorizeInternalCaller(request)
+		require.ErrorIs(t, err, ErrInternalCallerForbidden)
+		var public *PublicError
+		require.ErrorAs(t, err, &public)
+		contract := ResolvePublicError(err)
+		require.Equal(t, ErrorKindForbidden, contract.Kind)
+		require.Equal(t, 403, contract.HTTPStatus)
+		require.Equal(t, PublicCodeForbidden, contract.Code)
+	}
+}

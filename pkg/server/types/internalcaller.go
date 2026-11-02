@@ -7,7 +7,9 @@ import (
 )
 
 // ErrInternalCallerForbidden 表示路由拒绝了缺失、伪造或未列入白名单的内部调用方。
-var ErrInternalCallerForbidden = errors.New("可信内部调用方无权访问该路由")
+var ErrInternalCallerForbidden error = NewPublicError(
+	ErrorKindForbidden, PublicCodeForbidden, "permission denied", errors.New("可信内部调用方无权访问该路由"),
+)
 
 // IRequestInternalCaller 是 IRequest 的可选可信调用方读取契约。
 // 不把它并入稳定 IRequest，避免破坏已有 mock 和自定义请求实现。
