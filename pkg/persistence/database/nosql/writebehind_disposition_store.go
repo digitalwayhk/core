@@ -414,6 +414,12 @@ func (p *PrefixedBadgerDB[T]) deleteEmptyDispositionGroups(txn *badger.Txn, grou
 	}
 	base := p.dispositionPrefix()
 	for group := range groups {
+		// 已不存在的组标记无需再扫历史队列；点读属于当前事务最终写集，不能跨事务缓存。
+		if _, err := txn.Get([]byte(base + "g:" + group)); errors.Is(err, badger.ErrKeyNotFound) {
+			continue
+		} else if err != nil {
+			return err
+		}
 		prefix := []byte(base + "q:" + group + ":")
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false

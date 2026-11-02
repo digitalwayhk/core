@@ -198,3 +198,8 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 ## 终态历史回收消费方边界
 
 普通legacy卷不变；已有有界失败卷绑定时单向转换，新代码保留原policy/未解决原件并建立可恢复引用。终态Item可空、历史不再永久存在；旧v1.8.1在真实独立进程中拒绝新格式。消费方先停稳、保留原卷及权威事实，在副本演练后升级；回退须用支持新格式的修复版本，不能删mode/pending。Core真实Badger/独立进程及组件回归不等于消费方恢复；Bitzoom/Full-E4部署、功能、物理16GiB恢复和容量全部NOT_RUN。
+
+
+## v1.9.1空组迁移兼容补丁
+
+仅在当前Badger事务内点读组标记，已缺失时免除冗余历史Seek。API、配置、Group、StoreID/policy、terminal-history-v1格式及8条检查点边界不变。真实v1.9.0进程建卷后，候选硬杀/新PID续迁移，再由原v1.9.0进程复开验证同代卷兼容；更早有界格式迁入的单向限制不变。消费方业务、原卷维护完成、物理释放、Full-E4功能和容量仍由消费方独立验收，Core侧NOT_RUN。详见[专项记录](WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。

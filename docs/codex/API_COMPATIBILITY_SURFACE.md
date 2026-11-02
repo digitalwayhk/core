@@ -222,3 +222,6 @@ SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（Loc
 加性`BadgerDBConfig.WriteBehindTerminalRetention`、`WriteBehindTerminalRetention.Validate`、`WriteBehindHistoryCompaction`、`WriteBehindHistoryUsage`、`StorageReclaimResult`。PrefixedBadgerDB/ReliableWriteStore提供`CompactWriteBehindHistory`，逻辑分类分别为`GetWriteBehindHistoryUsage`/`WriteBehindHistoryUsage`；独立Admin新增`ReclaimStorage`。原Save/target/handler/policy签名保持，普通legacy默认不改。
 
 显式有界模式的成功历史泄漏修复改变终态保留语义：Snapshot.Item可空、历史在安全窗口后可不存在。StoreID/policy指纹保留；存量绑定单向转换`terminal-history-v1:`并建立引用索引，旧v1.8.1真实绑定拒绝。不能新旧混开或删标记回退，正式迁移见[指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。这是用户已授权的终态回收合同变更，不删除旧公开方法或削弱未解决恢复/顺序/版本保护。
+
+
+v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿用v1.9.0的mode及记录/批次检查点，原卷直接续跑。只省掉不存在组标记的冗余Seek和删除墓碑；有标记的队列可见性、冲突/回滚和顺序核验不变。v1.9.0同代格式复开与更早版本拒绝分别由真实进程验证，见[记录](WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。

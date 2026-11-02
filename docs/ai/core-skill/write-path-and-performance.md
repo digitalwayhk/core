@@ -123,3 +123,9 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 `WriteBehindTerminalRetention=nil`默认不额外保留完整成功/被替代/已释放快照；非空须MaxAge/MaxRecords/MaxBytes全部正。`Snapshot.Item`在终态可空，未解决原件和原版本提交后hook不变。引用安全解除及一分钟诊断宽限后，原worker分页回收终态记录/已结束批次/无用映射，不留下每版本永久墓碑；失败批次仍需要的轻量确认状态继续保留。旧回执超过历史窗口返回不存在，不能猜成新版本成功。
 
 存量卷在绑定时分页建立引用并写格式门禁，原StoreID/policy不变，禁止旧二进制回开。显式`CompactWriteBehindHistory(ctx,limit)`能在不接收新流量时推进；`WriteBehindHistoryUsage(ctx)`区分业务/未解决/终态载荷/轻量元数据/索引逻辑占用。独立Admin的`ReclaimStorage(ctx,maxRounds)`只做有限原生GC，不能把逻辑删除或重写次数当物理准入已恢复。未解决责任不得删除；不改Bitzoom配置、不关闭SyncWrites、不清卷。详细升级/回退和预算见[正式指南](../../codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
+
+### 首次迁移的空组重复核验
+
+终态导入的`initializeTerminalRecordBlock`每8条一个实际事务，只能在该块内去重；同一应用组的历史跨块分布时，组标记早已删除仍可能反复Seek其队列历史。`deleteEmptyDispositionGroups`须在当前事务最终写集内先点查`g:<group>`：仅`ErrKeyNotFound`免除无效扫描，其他错误继续返回；标记存在时仍新建精确Prefix迭代器，只有实际空组才删除。不能跨事务缓存不存在，也不能因无标记确认业务成功、清pending或省略版本/指纹/前序核验。
+
+`PrefetchValues=false`不等于不解析队列项；Badger仍为可见性跳过组内删除/MVCC历史。精确Prefix保留，但不保证同组历史查询为常数成本。点读会看本事务pendingWrites；缺失快照读保留冲突依赖，本事务已有删除命中的分支不额外登记读依赖，原storageMu/BatchCommitter仍不可绕过。v1.9.1沿用v1.9.0的`terminal-history-v1:`和原检查点，可续跑部分迁移卷，不新增配置/API或重置进度。更早卷的单向迁移限制不变。组件性能与现场时限不可互推，见[空组迁移修复记录](../../codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。

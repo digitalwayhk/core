@@ -6,11 +6,11 @@
 
 ### Added
 
-- 有界失败模式新增`WriteBehindTerminalRetention`有限额外审计预算，以及`CompactWriteBehindHistory`/`WriteBehindHistoryUsage`正式运维与分类占用入口；独立Admin可有限调用原生GC。
+- 无。
 
 ### Changed
 
-- 有界模式终态默认不保留完整Item载荷，轻量身份在诊断宽限及引用解除后回收；未解决原件和业务删除hook保持。存量绑定分页导入并单向转换格式门禁，原StoreID/policy不变，禁止旧二进制直接回开；迁移说明见[指南](docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
+- 无公开API、配置或存储格式变化；v1.9.0部分迁移卷沿用原检查点，原StoreID/policy及应用Group不变。
 
 ### Deprecated
 
@@ -22,11 +22,37 @@
 
 ### Fixed
 
-- 修复completed/superseded成功历史及历次批次永久保留，回收时保留前序、原版本/指纹、批次确认集合和实际回调引用；不跳过未解决责任，不删除业务副本或清pending。
+- 有界终态首次导入在组标记已经不存在时免除跨块重复空组Seek和删除墓碑；点读属于当前事务最终写集，有标记仍保留精确范围核验，不弱化顺序、未解决原件、冲突/回滚和恢复保护。详见[修复记录](docs/codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
 
 ### Security
 
-- 新格式在旧有界绑定入口明确拒绝，禁止删门禁或新旧混开；不新增HTTP入口、输出原件或改变可靠刷盘要求。
+- 未新增外部入口、依赖或日志字段；原可靠刷盘与新旧格式门禁保持。
+
+## [v1.9.1] - 2026-11-03
+
+### Added
+
+- 无。
+
+### Changed
+
+- 无公开API、配置或存储格式变化；v1.9.0部分迁移卷沿用原检查点，原StoreID/policy及应用Group不变。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 有界终态首次导入在组标记已经不存在时免除跨块重复空组Seek和删除墓碑；点读属于当前事务最终写集，有标记仍保留精确范围核验，不弱化顺序、未解决原件、冲突/回滚和恢复保护。详见[修复记录](docs/codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+
+### Security
+
+- 未新增外部入口、依赖或日志字段；原可靠刷盘与新旧格式门禁保持。
 
 ## [v1.9.0] - 2026-11-03
 
