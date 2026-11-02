@@ -129,3 +129,7 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 已有cursor最终值未变时不重复Set，空轮/全暂停轮不再仅为相同cursor制造可靠写事务。首次cursor建立、推进和回绕保留；其它状态/批次写集即使cursor未变仍正常原子提交，不按pending缓存推断空轮。`LocalTransactionMetrics.Committed`沿用成功Update调用计数，包含只读/无写集成功，不能当物理刷盘数；测试以实际Badger提交版本及分段核验。普通ScopeKey保存不增加target存在性点查，离开ScopeTarget的应用决定与marker删除/失效同事务。
 
 选批范围与重复写集的修复不等于前后台资源隔离，也不保证Save P99全面改善。v1.6.4多轮持续数据、仍存尾部及既有硬杀恢复失败见[正式报告](WRITE_BEHIND_SELECTION_CONTENTION_2026-10-31.md)，升级无需配置/格式迁移，消费方旧skill链接或复制需同步。
+
+## 终态技术历史与物理回收
+
+有界失败模式默认只保留轻量终态，显式`WriteBehindTerminalRetention`提供有限额外完整审计。原版本确认、pending、IsSyncAfterDelete、hook=false与重启不补删的业务副本合同不变。存量技术历史在单向格式门禁下分页建立引用并安全回收；不能用PurgeLocal/Delete或删除prefix替代。逻辑分类与物理LSM/VLog分别核验；Admin.ReclaimStorage只做有限原生GC。完整API、参数、旧程序拒绝及维护步骤见[终态保留指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。

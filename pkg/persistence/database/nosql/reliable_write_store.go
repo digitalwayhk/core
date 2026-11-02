@@ -142,6 +142,22 @@ func (store *ReliableWriteStore[T]) ApplyWriteBehindDecision(ctx context.Context
 	return store.db.ApplyWriteBehindDecision(ctx, d)
 }
 
+// WriteBehindHistoryUsage显式读取逻辑分类占用，不把pending=0等同于物理文件已经回收。
+func (store *ReliableWriteStore[T]) WriteBehindHistoryUsage(ctx context.Context) (WriteBehindHistoryUsage, error) {
+	if store == nil || store.db == nil {
+		return WriteBehindHistoryUsage{}, ErrWriteStoreClosed
+	}
+	return store.db.GetWriteBehindHistoryUsage(ctx)
+}
+
+// CompactWriteBehindHistory执行一页引用安全的终态历史回收；必须保留原卷并循环到一轮完成。
+func (store *ReliableWriteStore[T]) CompactWriteBehindHistory(ctx context.Context, limit int) (WriteBehindHistoryCompaction, error) {
+	if store == nil || store.db == nil || store.closing.Load() {
+		return WriteBehindHistoryCompaction{}, ErrWriteStoreClosed
+	}
+	return store.db.CompactWriteBehindHistory(ctx, limit)
+}
+
 // WriteBehindDispositionMetrics 返回失败处置状态，不将交接计入业务成功。
 func (store *ReliableWriteStore[T]) WriteBehindDispositionMetrics() (WriteBehindDispositionMetrics, error) {
 	if store == nil || store.db == nil {

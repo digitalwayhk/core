@@ -296,3 +296,7 @@ rtk proxy docker compose -f examples/07-shop-order-scale/deploy/docker-compose.y
 ## PostgreSQL 权威库
 
 models 组合根支持 SHOP_ORDER_REMOTE_DRIVER=postgres，配合 SHOP_ORDER_REMOTE_HOST/PORT/USER/PASSWORD/DATABASE/SSL_MODE；不设置 Driver 时保留旧 SHOP_ORDER_REMOTE_MYSQL_*。业务、Manage、Outbox 和统计定义无需改动。详见 [统一存储指南](../../docs/codex/POSTGRESQL_STORAGE_GUIDE.md)。此切换不搬迁历史数据。
+
+### 可选有界失败终态保留
+
+普通UseWriteBehind保持原行为。使用UseWriteBehindWithFailureHandler后，默认不额外保留每版本完整终态快照；未解决原件、原IsSyncAfterDelete和顺序屏障保持。07组合根可选设置Service.TerminalRetention（MaxAge/MaxRecords/MaxBytes均正），nil默认瘦身与有界回收，不增加业务worker。存量卷会建立格式门禁，不能让旧二进制回开；维护API及实际物理回收边界见[终态保留指南](../../docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。

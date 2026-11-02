@@ -1,4 +1,4 @@
-// 本文件持久保存失败生命周期、组首索引及版本确认，原始快照不设TTL、不自动删除。
+// 本文件持久保存失败生命周期、组首索引及版本确认；未解决原件不设TTL，终态按引用安全回收。
 package nosql
 
 import (
@@ -123,6 +123,7 @@ func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string
 		if err = dispositionRead(txn, base+"r:"+previous, &old); err != nil {
 			return err
 		}
+		_, previousActive := rt.activeIDs.Load(old.ID)
 		// 未投递版本仍按原合并语义替换；在途/失败版本永久保留其原始恢复责任。
 		if old.State == WriteBehindReady && old.Attempts == 0 {
 			old.State = WriteBehindSuperseded
@@ -133,6 +134,10 @@ func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string
 			if dispositionGroup(&old) == dispositionGroup(&r) {
 				delete(groups, dispositionGroup(&old))
 			}
+		}
+		// 已解除的直接前序可压缩，但必须继承其更老责任；在途回调实际退出前保留直接引用。
+		if dispositionTerminal(old.State) && !previousActive {
+			r.PreviousID = old.PreviousID
 		}
 	}
 	if err = p.saveDisposition(txn, &r); err != nil {
@@ -150,7 +155,16 @@ func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string
 func (p *PrefixedBadgerDB[T]) saveDisposition(txn *badger.Txn, r *WriteBehindFailureRecord[T], deferredGroups ...map[string]struct{}) error {
 	base := p.dispositionPrefix()
 	group := dispositionGroup(r)
-	if err := dispositionWrite(txn, base+"r:"+r.ID, r); err != nil {
+	stored, err := p.terminalDispositionForStorage(txn, r)
+	if err != nil {
+		return err
+	}
+	if r.PreviousID != "" {
+		if err := txn.Set([]byte(base+"ref:"+r.PreviousID+":"+r.ID), nil); err != nil {
+			return err
+		}
+	}
+	if err := dispositionWrite(txn, base+"r:"+r.ID, stored); err != nil {
 		return err
 	}
 	if dispositionTerminal(r.State) {
@@ -199,6 +213,7 @@ func (p *PrefixedBadgerDB[T]) ListWriteBehindFailures(after string, limit int) (
 	err := p.manager.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
+		opts.Prefix = []byte(base)
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		seek := base + after

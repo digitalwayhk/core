@@ -218,6 +218,7 @@ func TestStaleDispositionCannotAcknowledgeNewVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, records, 1)
 	old := records[0]
+	require.Equal(t, float64(1), old.Snapshot.Item.Balance, "未解决原版本必须仍含完整数据")
 	require.NoError(t, db.Set(newFund("same", "g", 2), 0))
 	d := WriteBehindDecision{ID: old.ID, Version: old.Snapshot.UpdatedAt, Fingerprint: old.Fingerprint, Action: WriteBehindConfirm, Scope: WriteBehindScopeGroup, Outcome: WriteBehindCommitted}
 	require.NoError(t, db.ApplyWriteBehindDecision(context.Background(), d))
@@ -232,7 +233,9 @@ func TestStaleDispositionCannotAcknowledgeNewVersion(t *testing.T) {
 	require.Len(t, records, 2)
 	for _, r := range records {
 		if r.ID == old.ID {
-			require.Equal(t, float64(1), r.Snapshot.Item.Balance)
+			require.Nil(t, r.Snapshot.Item, "原版本已解决，只保留版本和指纹")
+			require.Equal(t, old.Fingerprint, r.Fingerprint)
+			require.Equal(t, old.Snapshot.UpdatedAt, r.Snapshot.UpdatedAt)
 		}
 	}
 	d.Version = w.UpdatedAt

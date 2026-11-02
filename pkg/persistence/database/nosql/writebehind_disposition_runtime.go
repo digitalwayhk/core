@@ -30,6 +30,8 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 	jobs         chan writeBehindDispositionJob[T]
 	// groupCheckObserver 仅供包内诊断同步观察实际核验；准备阶段设置，不改变写集或记录业务身份。
 	groupCheckObserver func(*badger.Txn, badger.IteratorOptions)
+	// historyCommitObserver仅包内故障验收在事务提交前返回错误，不改变生产默认行为。
+	historyCommitObserver func(*badger.Txn) error
 	// selectionObserver仅在准备期绑定，观察实际NewIterator/Seek；nil时不采集时钟。
 	// target_cached只计命中，两个零耗时表示没有创建/Seek，不表示已计量版本点读耗时。
 	selectionObserver      func(string, badger.IteratorOptions, time.Duration, time.Duration)
@@ -92,14 +94,33 @@ func (p *PrefixedBadgerDB[T]) bootstrapDispositions() error {
 	if err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		var old string
 		e := dispositionRead(txn, base+"mode", &old)
-		if e == nil && old != fingerprint {
+		if e == nil && old != fingerprint && old != terminalDispositionFormat+fingerprint {
 			return ErrWriteBehindDisposition
 		}
 		if e != nil && !errors.Is(e, badger.ErrKeyNotFound) {
 			return e
 		}
-		return dispositionWrite(txn, base+"mode", fingerprint)
+		if e := dispositionWrite(txn, base+"mode", terminalDispositionFormat+fingerprint); e != nil {
+			return e
+		}
+		retentionJSON, _ := json.Marshal(p.manager.config.WriteBehindTerminalRetention)
+		retentionFingerprint := dispositionHash(string(retentionJSON))
+		var oldRetention string
+		e = dispositionRead(txn, base+"history-retention-config", &oldRetention)
+		if e != nil && !errors.Is(e, badger.ErrKeyNotFound) {
+			return e
+		}
+		if oldRetention != retentionFingerprint {
+			if e := dispositionWrite(txn, base+"history-init", ""); e != nil {
+				return e
+			}
+			return dispositionWrite(txn, base+"history-retention-config", retentionFingerprint)
+		}
+		return nil
 	}); err != nil {
+		return err
+	}
+	if err := p.initializeTerminalHistory(); err != nil {
 		return err
 	}
 	// 启动时分段补齐旧pending；每段有界，监听前完成，不在业务请求里扫描全部历史。
@@ -366,6 +387,7 @@ func (p *PrefixedBadgerDB[T]) dispositionHandlerWorker() {
 }
 
 func (p *PrefixedBadgerDB[T]) syncWithDisposition() {
+	var historyNextAt time.Time
 	rt := p.disposition
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
@@ -374,15 +396,28 @@ func (p *PrefixedBadgerDB[T]) syncWithDisposition() {
 			return
 		}
 		confirmed, err := p.processDispositionRound(rt.ctx, p.manager.config.SyncBatchSize)
+		historyLimit := rt.policy.ScanLimit
+		if historyLimit > 128 {
+			historyLimit = 128
+		}
+		var history WriteBehindHistoryCompaction
+		if !time.Now().Before(historyNextAt) {
+			var historyErr error
+			history, historyErr = p.CompactWriteBehindHistory(rt.ctx, historyLimit)
+			err = errors.Join(err, historyErr)
+			if historyErr != nil || (history.Removed == 0 && history.Stripped == 0) {
+				historyNextAt = time.Now().Add(time.Second)
+			}
+		}
 		delay := rt.policy.MinRetryInterval
-		if confirmed > 0 {
+		if confirmed > 0 || history.Removed > 0 || history.Stripped > 0 {
 			delay = p.manager.config.SyncBacklogDrainDelay
 		}
 		reason := "no_progress"
 		if confirmed > 0 {
 			reason = "progress"
 		}
-		logx.Debugw("write_behind_disposition_round", logx.Field("confirmed", confirmed), logx.Field("has_error", err != nil), logx.Field("scan_limit", rt.policy.ScanLimit), logx.Field("next_wait_ms", delay.Milliseconds()), logx.Field("reason", reason))
+		logx.Debugw("write_behind_disposition_round", logx.Field("confirmed", confirmed), logx.Field("has_error", err != nil), logx.Field("scan_limit", rt.policy.ScanLimit), logx.Field("history_scanned", history.Scanned), logx.Field("history_removed", history.Removed), logx.Field("history_stripped", history.Stripped), logx.Field("next_wait_ms", delay.Milliseconds()), logx.Field("reason", reason))
 		if delay == 0 {
 			continue
 		}

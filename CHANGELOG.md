@@ -6,11 +6,11 @@
 
 ### Added
 
-- 无。
+- 有界失败模式新增`WriteBehindTerminalRetention`有限额外审计预算，以及`CompactWriteBehindHistory`/`WriteBehindHistoryUsage`正式运维与分类占用入口；独立Admin可有限调用原生GC。
 
 ### Changed
 
-- 无。
+- 有界模式终态默认不保留完整Item载荷，轻量身份在诊断宽限及引用解除后回收；未解决原件和业务删除hook保持。存量绑定分页导入并单向转换格式门禁，原StoreID/policy不变，禁止旧二进制直接回开；迁移说明见[指南](docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
 
 ### Deprecated
 
@@ -22,12 +22,37 @@
 
 ### Fixed
 
-- 修复归属Gateway退出时心跳读取可清空的CrossNodeBroker/MQManager竞态，以及RegisterOwnedKey/CallServiceOwned/Resolver的同类已复现访问；取消并等待实际引用刷新退出。
-- 内部白名单预期拒绝保留errors.Is并使用既有Forbidden/HTTP403/40300公共契约，不变更白名单或可信身份规则。
+- 修复completed/superseded成功历史及历次批次永久保留，回收时保留前序、原版本/指纹、批次确认集合和实际回调引用；不跳过未解决责任，不删除业务副本或清pending。
 
 ### Security
 
+- 新格式在旧有界绑定入口明确拒绝，禁止删门禁或新旧混开；不新增HTTP入口、输出原件或改变可靠刷盘要求。
+
+## [v1.9.0] - 2026-11-03
+
+### Added
+
+- 有界失败模式新增`WriteBehindTerminalRetention`有限额外审计预算，以及`CompactWriteBehindHistory`/`WriteBehindHistoryUsage`正式运维与分类占用入口；独立Admin可有限调用原生GC。
+
+### Changed
+
+- 有界模式终态默认不保留完整Item载荷，轻量身份在诊断宽限及引用解除后回收；未解决原件和业务删除hook保持。存量绑定分页导入并单向转换格式门禁，原StoreID/policy不变，禁止旧二进制直接回开；迁移说明见[指南](docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
+
+### Deprecated
+
 - 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 修复completed/superseded成功历史及历次批次永久保留，回收时保留前序、原版本/指纹、批次确认集合和实际回调引用；不跳过未解决责任，不删除业务副本或清pending。
+
+### Security
+
+- 新格式在旧有界绑定入口明确拒绝，禁止删门禁或新旧混开；不新增HTTP入口、输出原件或改变可靠刷盘要求。
 
 ## [v1.8.1] - 2026-11-02
 

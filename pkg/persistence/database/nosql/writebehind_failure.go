@@ -129,6 +129,9 @@ type WriteBehindFailureRecord[T types.IModel] struct {
 	Reason          string
 	ErrorMessage    string
 	Receipt         *WriteBehindHandoffReceipt
+	TerminalAt      time.Time `json:",omitempty"` // 终态技术历史的诊断宽限起点，不是业务TTL
+	HistoryAt       time.Time `json:",omitempty"` // 终态回收索引下次核验时间，不是业务TTL
+	AuditBytes      int64     `json:",omitempty"` // 已占用的可选完整审计载荷预算
 }
 
 // WriteBehindFailure 是一次有界失败快照；当前进程可保留原Cause链，重启后Cause仅恢复持久错误说明。

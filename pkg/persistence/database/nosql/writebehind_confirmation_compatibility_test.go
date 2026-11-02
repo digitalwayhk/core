@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConfirmationVolumeCompatibility 由独立旧/新测试进程打开副本，核对同policy原卷及无新Save恢复。
+// TestConfirmationVolumeCompatibility 由独立进程读取同policy副本，核对业务原件及无新Save恢复；跨格式旧二进制回开须明确拒绝，见TerminalHistoryHardCrashMigration。
 func TestConfirmationVolumeCompatibility(t *testing.T) {
 	base := os.Getenv("CORE_CONFIRM_COMPAT_COPY")
 	if base == "" {
@@ -70,13 +70,17 @@ func TestConfirmationVolumeCompatibility(t *testing.T) {
 		}
 		after = next
 	}
-	require.Equal(t, 2000, count)
+	require.LessOrEqual(t, count, 2000, "技术终态允许在安全窗口后回收，不作为永久审计")
+	usage, e := store.WriteBehindHistoryUsage(context.Background())
+	require.NoError(t, e)
+	require.Equal(t, int64(2000), usage.BusinessRecords)
+	require.Zero(t, usage.TerminalPayloadBytes)
 	require.NoError(t, store.Close(context.Background()))
 	require.NoError(t, CloseSharedManager(store.config.BasePath))
 	t.Logf("跨版本独立进程原卷副本：auto=%t，2000原件/完成历史逐项核对，无新Save", auto)
 }
 
-// TestDispositionGroupVolumeCompatibility 用三个独立进程验证旧算法建卷、新算法改组排空、旧算法读取完成历史。
+// TestDispositionGroupVolumeCompatibility 用三个独立进程验证同代格式建卷、改组排空及读取轻量完成历史；不作为跨格式旧二进制回退许可。
 func TestDispositionGroupVolumeCompatibility(t *testing.T) {
 	base := os.Getenv("CORE_GROUP_COMPAT_COPY")
 	if base == "" {
@@ -127,7 +131,10 @@ func TestDispositionGroupVolumeCompatibility(t *testing.T) {
 			require.Equal(t, WriteBehindCompleted, r.State)
 			require.True(t, r.LocalConfirmed)
 			require.Equal(t, "3", r.Group)
-			require.Len(t, r.Snapshot.Item.Payload, 2030)
+			require.Nil(t, r.Snapshot.Item, "终态默认不保存完整审计载荷")
+			model, e := store.GetLocal(context.Background(), fmt.Sprint(i))
+			require.NoError(t, e)
+			require.Len(t, model.Payload, 2030, "业务副本仍由原hook决定，不能随历史瘦身删除")
 		}
 		records, next, err := store.ListWriteBehindFailures("", 100)
 		require.NoError(t, err)

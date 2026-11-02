@@ -127,3 +127,7 @@ benchmark 子进程会把服务日志级别临时调为 `error`，减少 info �
 ### 后台选批与Save等待（v1.6.4）
 
 有界write-behind保留原FIFO提交器、1ms合批及可靠刷盘。后台选批现在限定target/group/具体组queue的底层范围，并以既有持久mode版本复用target范围结果；启动绑定时完成冷核验，真实组屏障、attempt、cursor与批次身份仍在原事务中。无需改示例配置或新增应用开关。选批优化不等于前后台完全隔离，也不保证任意机器的Save P99；确认、前台事务、运行时及I/O仍可能造成长尾。详见[升级与验证](../../docs/codex/RELEASE_V1_6_4_2026-10-31.md)。
+
+### 可选有界失败终态保留
+
+普通UseWriteBehind保持原行为。使用UseWriteBehindWithFailureHandler后，默认不额外保留每版本完整终态快照；未解决原件、原IsSyncAfterDelete和顺序屏障保持。07组合根可选设置Service.TerminalRetention（MaxAge/MaxRecords/MaxBytes均正），nil默认瘦身与有界回收，不增加业务worker。存量卷会建立格式门禁，不能让旧二进制回开；维护API及实际物理回收边界见[终态保留指南](../../docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。

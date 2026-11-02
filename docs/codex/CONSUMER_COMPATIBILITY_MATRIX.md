@@ -194,3 +194,7 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 - 显式动态声明：受信应用运行期登记；仅支持声明完整动态能力的Provider。新持久目录不能让旧固定声明混跑或直接回退。
 - 固定scope迁移：停稳实际回调后，使用正式MigrateOwnershipKeys及SQL正下界，保留消息/PEL/游标/sequence/fence/WS会话。
 - Core真实Redis/MySQL/多进程/mTLS/WS验收与消费方功能、UAT、Full-E4容量分别交付；消费方未接入部分为NOT_RUN。
+
+## 终态历史回收消费方边界
+
+普通legacy卷不变；已有有界失败卷绑定时单向转换，新代码保留原policy/未解决原件并建立可恢复引用。终态Item可空、历史不再永久存在；旧v1.8.1在真实独立进程中拒绝新格式。消费方先停稳、保留原卷及权威事实，在副本演练后升级；回退须用支持新格式的修复版本，不能删mode/pending。Core真实Badger/独立进程及组件回归不等于消费方恢复；Bitzoom/Full-E4部署、功能、物理16GiB恢复和容量全部NOT_RUN。

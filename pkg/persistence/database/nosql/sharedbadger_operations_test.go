@@ -265,7 +265,7 @@ func TestDispositionSameGroupReplacementSkipsEmptyChecks(t *testing.T) {
 			require.Equal(t, count, result.Committed)
 			require.Zero(t, checks, "同事务新版本仍在相同实际组，不应核验临时空组")
 			next := currentGroupRecord(t, store, "0")
-			require.Equal(t, old.ID, next.PreviousID)
+			require.Equal(t, old.PreviousID, next.PreviousID, "压缩已合并前序但继承更老未解决责任")
 			require.NotEqual(t, old.ID, next.ID)
 			require.NoError(t, store.db.manager.db.View(func(txn *badger.Txn) error {
 				var archived WriteBehindFailureRecord[confirmationLoadRecord]
@@ -273,7 +273,9 @@ func TestDispositionSameGroupReplacementSkipsEmptyChecks(t *testing.T) {
 					return e
 				}
 				require.Equal(t, WriteBehindSuperseded, archived.State)
-				require.Len(t, archived.Snapshot.Item.Payload, 10)
+				require.Nil(t, archived.Snapshot.Item, "终态默认不保留载荷，原身份与版本仍受保护")
+				require.Equal(t, old.Fingerprint, archived.Fingerprint)
+				require.Equal(t, old.Snapshot.UpdatedAt, archived.Snapshot.UpdatedAt)
 				_, e := txn.Get([]byte(store.db.dispositionQueueKey(&next)))
 				return e
 			}))

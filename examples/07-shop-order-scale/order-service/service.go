@@ -32,11 +32,13 @@ import (
 // Service 是可水平扩展的订单权威服务。
 type Service struct {
 	// FailurePolicy/FailureHandler 仅在应用显式声明有界失败处置时设置；零值继续原示例行为。
-	FailurePolicy  *nosql.WriteBehindFailurePolicy
-	FailureHandler nosql.WriteBehindFailureHandler[transaction.Order]
-	syncEnabled    atomic.Bool
-	runtimeOnce    sync.Once
-	runtime        *transaction.OrderWriteRuntime
+	FailurePolicy *nosql.WriteBehindFailurePolicy
+	// TerminalRetention仅在需要额外完整终态审计时设置，nil默认按框架回收。
+	TerminalRetention *nosql.WriteBehindTerminalRetention
+	FailureHandler    nosql.WriteBehindFailureHandler[transaction.Order]
+	syncEnabled       atomic.Bool
+	runtimeOnce       sync.Once
+	runtime           *transaction.OrderWriteRuntime
 }
 
 // ServiceName 返回订单服务稳定逻辑名，多个副本共享该名称。
@@ -121,6 +123,7 @@ func (s *Service) newOrderWriteStore(sc *router.ServiceContext) (*transaction.Or
 	badgerConfig.SyncMaxCollectDelay = 20 * time.Millisecond
 	badgerConfig.SyncBacklogDrainDelay = 0
 	badgerConfig.WriteBehindFailure = s.FailurePolicy
+	badgerConfig.WriteBehindTerminalRetention = s.TerminalRetention
 
 	return transaction.NewOrderWriteStore(
 		// ServiceIdentity 使本地目录与已领取的副本身份绑定；MachineID 变化时不会隐式接管旧 pending。

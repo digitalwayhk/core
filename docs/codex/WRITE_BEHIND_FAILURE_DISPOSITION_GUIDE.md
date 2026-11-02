@@ -71,7 +71,7 @@ target/handler 预算耗尽分别记为 `target_budget_exhausted / handler_budge
 4. Core 保存回执前退出，恢复原身份确认；保存后退出，恢复 handed_off，不重做 target。
 5. `HandedOff=true` 与 `IsSynced=true` 分开：接管不标远端同步成功、不进入 ConfirmedKeys、不增加 SyncedItems；索引重建不复活已交接项。同组屏障持续到应用 Release。
 
-原快照、失败历史和交接事实无 TTL、不自动删除。成功版本也保留生命周期记录；本轮未提供历史回收协议，长期运行必须按实例磁盘预算监控占用，另行制定有证据的归档/回收流程，不能清 pending 制造排空。
+未解决原快照、失败历史和交接责任无TTL、不自动删除。已解除Core责任的终态默认不保留完整Item载荷；轻量依赖在诊断宽限及引用解除后有界回收，可显式配置有限额外审计。存量卷会单向转换格式，不能让旧二进制回开；完整合同、运维入口和升级步骤见[终态保留指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
 
 本地模型副本与上述历史分开：target 的成功 `ConfirmedKeys` 或应用 `WriteBehindConfirm + WriteBehindCommitted` 只有在原版本的本地确认事务真正提交后，才会调度已有 `IsSyncAfterDelete` 异步回收。hook=false 保留副本，后续 true 新版本需重新确认；清理执行时仍复核版本，不清并发更新。接管、暂停、Release 或失效回调不会触发成功清理。清理队列仅在内存中，关闭/重启不承诺补删，旧版成功残留不会自动回收；具体边界见[同步后本地回收](WRITE_BEHIND_SYNC_GUIDE.md#同步后本地回收)。
 
@@ -92,7 +92,7 @@ target/handler 预算耗尽分别记为 `target_budget_exhausted / handler_budge
 
 ## 升级与示例
 
-新模式持久冻结 policy；前缀须用相同 StoreID、配置和处置器重开。新代码的旧绑定入口拒绝绕过；未实现在线改预算、mode 回退或跨版本混跑。旧二进制不识别这些状态，**禁止用旧 Core 打开已启用新模式的卷**。调整 policy、分组定义或处置语义前须停稳实际回调/target 并制定状态迁移，不能删 mode 标记或 pending。
+新模式持久冻结 policy（额外终态审计配置独立于原policy）；前缀须用相同 StoreID、配置和处置器重开。新代码的旧绑定入口拒绝绕过；未实现在线改预算、mode 回退或跨版本混跑。旧二进制不识别这些状态，**禁止用旧 Core 打开已启用新模式的卷**。调整 policy、分组定义或处置语义前须停稳实际回调/target 并制定状态迁移，不能删 mode 标记或 pending。
 
 07 的 `Service.FailurePolicy / FailureHandler` 允许组合根显式注入，零值不启用。`business.OrderFailureReceipts` 演示应用独立 SyncWrites Badger 保存完整订单和 `owned_unresolved` 回执；资源逆序先停 Core 再关闭应用库。立即接管是示例应用明确选择的策略，不是 Core 对 SQL 异常的默认猜测；没有开发业务补偿或异常管理页面。
 
@@ -109,7 +109,7 @@ Core 真实存储、独立进程硬杀和示例资源链通过，不代表消费
 
 target返回后不再逐条可靠提交。本轮结果在ReliableWriteStore中按固定最多8项、约1MiB编码软预算分块；直接PrefixedBadgerDB无facade时最多32项，瞬时空闲不放大facade块。Badger实际过大则二分；仅真实提交块更新pending、确认和hook。原版本、指纹、attempt及组首核验不变，失效项隔离，未提交块恢复unknown而不盲重放target。
 
-有界ReliableWriteStore复用原BatchCommitter FIFO提交本地元数据；SQL/target/应用回调在外，Close先排空已接受前台，再等待原生命周期，最后关闭提交器。legacy无新接线，无配置/持久格式变化；失败/完成历史与异步清理恢复边界不变。
+有界ReliableWriteStore复用原BatchCommitter FIFO提交本地元数据；SQL/target/应用回调在外，Close先排空已接受前台，再等待原生命周期，最后关闭提交器。legacy无新接线，无配置/持久格式变化；未解决失败历史与异步业务清理恢复边界不变；终态回收遵守现行终态保留指南。
 
 前台替换尚未投递旧版本时，同一实际组内补新不核验临时空组；跨组等可能变空的组在实际事务末去重，并用底层Prefix限定到目标组。回滚/TooBig拆分不共享失败事务的集合，组标记仍与原件/队列原子提交。无需修改消费方开关、StoreID/policy或卷格式，详见[组核验与本地提交](WRITE_BEHIND_SYNC_GUIDE.md#有界后台本地确认的提交预算)。这里的旧新算法兼容对照均已支持有界处置，不放宽前文对更老、不识别处置状态二进制的回退限制。
 

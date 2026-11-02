@@ -232,6 +232,7 @@ func TestDispositionConfirmationSplitsActualTransactionSize(t *testing.T) {
 	cfg := DefaultProductionConfig(path)
 	cfg.EnableLogger = false
 	cfg.MemTableSize = 1 << 20
+	cfg.WriteBehindTerminalRetention = &WriteBehindTerminalRetention{MaxAge: time.Hour, MaxRecords: 100, MaxBytes: 1 << 20}
 	cfg.AutoSync = false
 	cfg.WriteBehindFailure = failureTestPolicy()
 	cfg.WriteBehindFailure.ScanLimit = 16

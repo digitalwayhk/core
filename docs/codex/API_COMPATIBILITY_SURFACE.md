@@ -216,3 +216,9 @@ SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（Loc
 ## v1.8.0动态持续归属（加性）
 
 新增`ownership.DynamicKeyPolicy`、`Manifest.DynamicKeys/PendingWindow`、`KeyPage/KeyRegistry`；新增`mq.DynamicOwnedReliableMQProvider`、Provider/Manager的`RegisterOwnershipKey/MigrateOwnershipKeys`及`ServiceContext.RegisterOwnedKey`。旧OwnedReliableMQProvider接口未扩方法，默认固定模式JSON/Fingerprint保持；仅固定能力Provider明确拒绝动态合同。Observation新增CapacityBlocked区分有效有限观察。CrossNodeNoticeBroker.ReplayLocalSubscriptions只由既有归属Gateway心跳复用，不改WS协议或认证。状态迁移与旧版本回退限制见[指南](OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。
+
+## 终态技术历史有界回收
+
+加性`BadgerDBConfig.WriteBehindTerminalRetention`、`WriteBehindTerminalRetention.Validate`、`WriteBehindHistoryCompaction`、`WriteBehindHistoryUsage`、`StorageReclaimResult`。PrefixedBadgerDB/ReliableWriteStore提供`CompactWriteBehindHistory`，逻辑分类分别为`GetWriteBehindHistoryUsage`/`WriteBehindHistoryUsage`；独立Admin新增`ReclaimStorage`。原Save/target/handler/policy签名保持，普通legacy默认不改。
+
+显式有界模式的成功历史泄漏修复改变终态保留语义：Snapshot.Item可空、历史在安全窗口后可不存在。StoreID/policy指纹保留；存量绑定单向转换`terminal-history-v1:`并建立引用索引，旧v1.8.1真实绑定拒绝。不能新旧混开或删标记回退，正式迁移见[指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。这是用户已授权的终态回收合同变更，不删除旧公开方法或削弱未解决恢复/顺序/版本保护。

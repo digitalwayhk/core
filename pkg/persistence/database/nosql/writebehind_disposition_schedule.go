@@ -19,8 +19,11 @@ type writeBehindFailureIdentity struct {
 	Group       string
 }
 type writeBehindFailureBatch struct {
-	ID       string
-	Selected []writeBehindFailureIdentity
+	ID           string
+	Selected     []writeBehindFailureIdentity
+	Retired      bool `json:",omitempty"`
+	Remaining    int  `json:",omitempty"`
+	RetireCursor int  `json:",omitempty"`
 }
 
 func (p *PrefixedBadgerDB[T]) dispositionIdentity(r WriteBehindFailureRecord[T]) writeBehindFailureIdentity {
@@ -108,17 +111,12 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 			if targetID != "" && targetID != r.ID {
 				continue
 			}
-			if r.PreviousID != "" {
-				if _, active := p.disposition.activeIDs.Load(r.PreviousID); active {
-					continue
-				}
-				var prev WriteBehindFailureRecord[T]
-				if e = dispositionRead(txn, base+"r:"+r.PreviousID, &prev); e != nil {
-					return e
-				}
-				if !dispositionTerminal(prev.State) {
-					continue
-				}
+			predecessorReady, predecessorErr := p.dispositionPredecessorsReady(txn, &r)
+			if predecessorErr != nil {
+				return predecessorErr
+			}
+			if !predecessorReady {
+				continue
 			}
 			if p.dispositionBudgetExhausted(&r, now) {
 				r.State = WriteBehindUnknown
@@ -154,6 +152,9 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 				return e
 			}
 			for i := range selected {
+				if e := txn.Set([]byte(base+"member:"+selected[i].ID+":"+batch.ID), nil); e != nil {
+					return e
+				}
 				selected[i].BatchID = batch.ID
 				if e = p.saveDisposition(txn, &selected[i]); e != nil {
 					return e
@@ -310,4 +311,31 @@ func (p *PrefixedBadgerDB[T]) dispositionTargetID(txn *badger.Txn) (string, erro
 	rt.targetCacheVersion = mode.Version()
 	rt.targetCacheValid = true
 	return id, nil
+}
+
+// dispositionPredecessorsReady有界核对终态链后方的未解决责任；不能只因直接前序被合并便越过更早版本。
+func (p *PrefixedBadgerDB[T]) dispositionPredecessorsReady(txn *badger.Txn, r *WriteBehindFailureRecord[T]) (bool, error) {
+	id := r.PreviousID
+	sequence := r.Sequence
+	for i := 0; id != ""; i++ {
+		if i == 128 {
+			return false, nil
+		} // 由有界历史维护压缩长链后继续，不无限预取。
+		if _, active := p.disposition.activeIDs.Load(id); active {
+			return false, nil
+		}
+		var prev WriteBehindFailureRecord[T]
+		if e := dispositionRead(txn, p.dispositionPrefix()+"r:"+id, &prev); e != nil {
+			return false, e
+		}
+		if prev.Sequence >= sequence {
+			return false, ErrWriteBehindDisposition
+		}
+		if !dispositionTerminal(prev.State) {
+			return false, nil
+		}
+		id = prev.PreviousID
+		sequence = prev.Sequence
+	}
+	return true, nil
 }
