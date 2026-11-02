@@ -42,8 +42,6 @@ type RedisStreamProvider struct {
 }
 
 type redisReliableSubscriptionMetrics struct {
-	unregistered        atomic.Int64
-	dynamicBackpressure atomic.Int64
 	*redisReliableDeliveryMetrics
 	configured       int64
 	blockingReads    bool
@@ -59,22 +57,24 @@ type redisReliableSubscriptionMetrics struct {
 
 // 累计计数属于 provider，取消订阅只删除有界 gauge，不使其他订阅的 counter 回退。
 type redisReliableDeliveryMetrics struct {
-	newRead            atomic.Int64
-	reclaimRead        atomic.Int64
-	publishToReadNanos atomic.Int64
-	scheduleWaitNanos  atomic.Int64
-	handlerNanos       atomic.Int64
-	pelWaitNanos       atomic.Int64
-	pelWaitSamples     atomic.Int64
-	scheduled          atomic.Int64
-	handlerCalls       atomic.Int64
-	sharedLeases       atomic.Int64
-	sharedAcquired     atomic.Int64
-	sharedContended    atomic.Int64
-	sharedOwnerLost    atomic.Int64
-	ackSucceeded       atomic.Int64
-	ackFailed          atomic.Int64
-	ackNanos           atomic.Int64
+	unregistered        atomic.Int64
+	dynamicBackpressure atomic.Int64
+	newRead             atomic.Int64
+	reclaimRead         atomic.Int64
+	publishToReadNanos  atomic.Int64
+	scheduleWaitNanos   atomic.Int64
+	handlerNanos        atomic.Int64
+	pelWaitNanos        atomic.Int64
+	pelWaitSamples      atomic.Int64
+	scheduled           atomic.Int64
+	handlerCalls        atomic.Int64
+	sharedLeases        atomic.Int64
+	sharedAcquired      atomic.Int64
+	sharedContended     atomic.Int64
+	sharedOwnerLost     atomic.Int64
+	ackSucceeded        atomic.Int64
+	ackFailed           atomic.Int64
+	ackNanos            atomic.Int64
 }
 
 // NewRedisStreamProvider creates a provider targeting the given Redis address.
@@ -523,6 +523,8 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		"prefetch_capacity": 0, "prefetched_messages": 0, "queued_work": 0,
 	}
 	counters := r.lifecycleMetrics.snapshot()
+	counters["ownership_unregistered_observations_total"] = float64(r.deliveryMetrics.unregistered.Load())
+	counters["ownership_directory_read_deferred_total"] = float64(r.deliveryMetrics.dynamicBackpressure.Load())
 	counters["ownership_registration_total"] = float64(r.ownershipRegistered.Load())
 	counters["ownership_registration_failures_total"] = float64(r.ownershipRegistrationFailures.Load())
 	counters["ownership_registration_capacity_total"] = float64(r.ownershipRegistrationCapacity.Load())
@@ -536,8 +538,6 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		gauges["blocked_keys"] += float64(item.blockedKeys.Load())
 		gauges["pending_keys"] += float64(item.pendingKeys.Load())
 		gauges["prefetch_capacity"] += float64(item.prefetchCapacity.Load())
-		counters["ownership_unregistered_observations_total"] += float64(item.unregistered.Load())
-		counters["ownership_directory_backpressure_total"] += float64(item.dynamicBackpressure.Load())
 		gauges["prefetched_messages"] += float64(item.prefetched.Load())
 		gauges["queued_work"] += float64(item.queuedWork.Load())
 	}

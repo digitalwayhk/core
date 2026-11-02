@@ -37,6 +37,7 @@
 
 ### Fixed
 
+- 动态目录观察累计计数归属Provider，订阅关闭不回退或丢失历史观测。
 - 合法未登记key不再污染无关key的观察；原W与未登记预留U在Redis原子读取中分别计费，动态总PEL有界W+U，耗尽仍明确背压，同OrderingKey不越过未完成前序。
 - 已有归属Gateway心跳有界重放当前会话订阅摘要，恢复新进程/同peer标识的正式WS中继索引，保留退订/关闭、同服务mTLS与用户隔离。SQL提交、owner Ready、中继恢复与Notice尽力交付保持不同边界。
 

@@ -1,7 +1,11 @@
 {
   "path": "docs/codex/evidence/ownership-dynamic-keys-20261102/raw-evidence.tar.gz",
-  "bytes": 67642,
-  "sha256": "6d67f7d1d2dbfa1cbf653ddf685e43aa70eeacb490ad6a48e2d1f936e0319a6e",
-  "raw_files": 45,
-  "raw_bytes": 303023
+  "bytes": 99919,
+  "sha256": "17a031b1692473fbbaaa8495b3545ee1f5b208af9369226fe292cff78340b9ef",
+  "raw_files": 52,
+  "raw_bytes": 407733,
+  "previous_archive": {
+    "commit": "e751070296fab8714beba2af31a032c4a32f8eb4",
+    "sha256": "6d67f7d1d2dbfa1cbf653ddf685e43aa70eeacb490ad6a48e2d1f936e0319a6e"
+  }
 }

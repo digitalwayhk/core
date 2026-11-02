@@ -84,7 +84,7 @@ owner在Ready前仍完成Activate/SQL fence/Restore。归属Gateway复用原3s�
 
 ## 可观测性
 
-现有Runtime组件增加目录key数/发现错误、Activate失败、Restore失败与累计耗时、renew失败以及execution/observation/stall撤销原因。Redis组件增加登记接受调用、登记失败/容量拒绝、未登记消息观察及读取推迟计数。重复幂等登记计为接受调用，不冒充新增key数量；未登记观察可重复采样，不是唯一消息总数。所有指标不以业务key/UserID/订单/Token作标签。
+现有Runtime组件增加目录key数/发现错误、Activate失败、Restore失败与累计耗时、renew失败以及execution/observation/stall撤销原因。Redis组件增加登记接受调用、登记失败/容量拒绝、未登记消息观察及读取推迟计数。重复幂等登记计为接受调用，不冒充新增key数量；未登记观察可重复采样，不是唯一消息总数。未登记观察与读取推迟累计值属于Provider，关闭订阅不回退；`ownership_directory_read_deferred_total`包含有限预算和竞争快照重查推迟，不冒充唯一消息数。所有指标不以业务key/UserID/订单/Token作标签。
 
 ## 证据与责任边界
 

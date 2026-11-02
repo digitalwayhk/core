@@ -347,3 +347,20 @@ func TestRedisOwnershipDynamicOversizedMessageRetainsOriginalWithoutReadOrACK(t 
 	require.Zero(t, p.client.XPending(ctx, p.streamKey("one"), m.Group).Val().Count)
 	require.EqualValues(t, 1, p.client.XLen(ctx, p.streamKey("one")).Val())
 }
+
+func TestRedisOwnershipUnregisteredCounterDoesNotDecreaseAfterClose(t *testing.T) {
+	p, _, m := dynamicFixture(t)
+	ctx := context.Background()
+	require.NoError(t, p.RegisterOwnershipKey(ctx, m, "A"))
+	r, err := p.SubscribeOwnedBatch(ctx, OwnedReliableOptions{Manifest: m, InstanceID: "metrics", SessionID: "boot", MaxOwned: 1, NoDueTasks: true, Key: func(msg *Message) (string, error) { return strings.Split(string(msg.Data), ":")[0], nil }, Activate: func(context.Context, ownership.Credential) error { return nil }}, func(context.Context, ownership.Credential, []*Message) error { return nil })
+	require.NoError(t, err)
+	defer r.Close(ctx)
+	require.NoError(t, p.Publish(ctx, "one", []byte("B:unregistered"), &PublishOptions{OrderingKey: "B"}))
+	require.Eventually(t, func() bool {
+		return p.RuntimeMetricSnapshot(ctx).Counters["ownership_unregistered_observations_total"] > 0
+	}, time.Second, time.Millisecond)
+	before := p.RuntimeMetricSnapshot(ctx).Counters["ownership_unregistered_observations_total"]
+	require.NoError(t, r.Close(ctx))
+	require.Eventually(t, func() bool { return p.RuntimeMetricSnapshot(ctx).Gauges["key_concurrency"] == 0 }, time.Second, time.Millisecond)
+	require.GreaterOrEqual(t, p.RuntimeMetricSnapshot(ctx).Counters["ownership_unregistered_observations_total"], before, "结束订阅不能令累计counter回退到0")
+}
