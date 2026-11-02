@@ -1,6 +1,6 @@
 # 可靠写终态快照回收验收记录
 
-发布候选：v1.9.0（加性API按MINOR）。生产实现、普通/race、真实旧卷独立进程恢复及候选门禁完成。正式tag、main提交和模块校验值以发布后回执及正式Release为准，不将候选测试当消费方已升级。
+发布版本：v1.9.0（加性API按MINOR）。独立修复提交：`42895fef467643946a77ca50783fd157c07af086`。生产实现、普通/race、真实旧卷独立进程恢复及候选门禁完成；main/tag与默认Go代理/SumDB的发布后精确回执由正式Release交付，不将Core通过当消费方已升级。
 
 基线为正式v1.8.1，提交eb9fc7912ecff69490f7e4919fe09ad5ef9534f1；独立修复分支fix/writebehind-terminal-retention，既有工作区起始clean，Pebble和其他工作区未改。
 
@@ -134,4 +134,4 @@ go vet ./pkg/persistence/database/nosql ./examples/04-shop-performance/... ./exa
 
 [原始证据归档](evidence/writebehind-terminal-retention-20261103/raw-evidence.tar.gz)：228,724 bytes，SHA256 `49c6a4f9d611c076f42c941e06c34442615c76d6a0ed89904f0fa247ea950dc5`。含67份原件、6,588,065原始字节及逐文件raw-manifest，保留RED/FAIL/SKIP/实际命令、源码/二进制绑定与性能JSON。未含消费方数据、密钥、二进制或测试大卷。
 
-源码修复提交、最终main/tag及默认Go代理/SumDB回执在正式交付时核验；原件工作目录为`.temp/writebehind-terminal-retention-20261103/`。升级/API/单向兼容边界以[正式指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)为准。
+源码修复提交为`42895fef467643946a77ca50783fd157c07af086`；最终main/tag及默认Go代理/SumDB回执在正式交付时核验；原件工作目录为`.temp/writebehind-terminal-retention-20261103/`。升级/API/单向兼容边界以[正式指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)为准。
