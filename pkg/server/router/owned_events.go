@@ -39,11 +39,20 @@ func (sc *ServiceContext) SubscribeOwnedEvents(sub event.OwnedSubscription) (*ow
 // RegisterOwnedKey 只供已受信应用控制生命周期调用，外部Gateway/消息正文无此权限。
 // 成功只表示技术登记；owner仍须Activate、应用SQLfence和Restore完成后Ready。
 func (sc *ServiceContext) RegisterOwnedKey(ctx context.Context, m ownership.Manifest, key string) error {
-	if sc == nil || sc.MQManager == nil || sc.Service == nil {
+	if sc == nil || sc.Service == nil {
+		return ownership.ErrUnsupported
+	}
+	sc.lifecycleMu.Lock()
+	manager, terminated := sc.MQManager, sc.terminated
+	sc.lifecycleMu.Unlock()
+	if terminated {
+		return ownership.ErrNotReady
+	}
+	if manager == nil {
 		return ownership.ErrUnsupported
 	}
 	if m.Service != sc.Service.Name || m.Group != m.Service {
 		return ownership.ErrUnknown
 	}
-	return sc.MQManager.RegisterOwnershipKey(ctx, m, key)
+	return manager.RegisterOwnershipKey(ctx, m, key)
 }

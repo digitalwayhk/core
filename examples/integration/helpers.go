@@ -458,23 +458,22 @@ func (s *Suite) Stop() {
 	_ = os.RemoveAll(s.RootDir)
 }
 
-// StopProcess 优雅停止子进程但保留配置、数据库和日志，供重启恢复测试使用。
-func (s *Suite) StopProcess() {
+// StopProcess 优雅停止子进程并返回实际退出错误；5秒未退出会强杀并明确报错。
+// 保留配置、数据库和日志供恢复测试核验，不能把race非零退出或强杀算成成功。
+func (s *Suite) StopProcess() error {
 	if s == nil {
-		return
+		return nil
 	}
+	var result error
 	if s.command != nil && s.command.Process != nil {
 		_ = s.command.Process.Signal(os.Interrupt)
-		done := make(chan struct{})
-		go func() {
-			_ = s.command.Wait()
-			close(done)
-		}()
+		done := make(chan error, 1)
+		go func() { done <- s.command.Wait() }()
 		select {
-		case <-done:
+		case result = <-done:
 		case <-time.After(5 * time.Second):
 			_ = s.command.Process.Kill()
-			<-done
+			result = fmt.Errorf("子进程未在5秒退出，已强杀: %w", <-done)
 		}
 	}
 	if s.outputFile != nil {
@@ -482,6 +481,7 @@ func (s *Suite) StopProcess() {
 	}
 	s.command = nil
 	s.outputFile = nil
+	return result
 }
 
 // KillProcess 强制终止子进程但保留运行目录，用于验证崩溃恢复。

@@ -19,6 +19,12 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 	if err := sc.CheckServiceAdmission(); err != nil {
 		return true, nil, err
 	}
+	sc.lifecycleMu.Lock()
+	broker, provider, terminated := sc.CrossNodeBroker, sc.ClusterProvider, sc.terminated
+	sc.lifecycleMu.Unlock()
+	if terminated {
+		return true, nil, ownership.ErrNotReady
+	}
 	if len(payload.Data) > 1<<20 {
 		return true, nil, ownership.ErrCapacity
 	}
@@ -37,10 +43,10 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 		return true, nil, ownership.ErrUnknown
 	}
 	if payload.TargetPath == "/api/servermanage/ws/subscription" {
-		if sc.CrossNodeBroker == nil || sc.ClusterProvider == nil {
+		if broker == nil || provider == nil {
 			return true, nil, ownership.ErrNotReady
 		}
-		node, err := sc.ClusterProvider.Get(ctx, data.NodeID)
+		node, err := provider.Get(ctx, data.NodeID)
 		if err != nil {
 			return true, nil, err
 		}
@@ -53,7 +59,7 @@ func (sc *ServiceContext) handleOwnedWebSocketRelay(ctx context.Context, payload
 		return false, nil, nil
 	}
 	if payload.TargetPath == "/api/servermanage/ws/subscription" {
-		sc.CrossNodeBroker.UpdatePeerSubscription(data.RoutePath, data.Hash, data.NodeID, data.Active)
+		broker.UpdatePeerSubscription(data.RoutePath, data.Hash, data.NodeID, data.Active)
 	} else {
 		var message interface{}
 		if json.Unmarshal(data.Message, &message) != nil {

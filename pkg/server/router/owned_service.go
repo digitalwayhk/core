@@ -11,10 +11,19 @@ import (
 
 // CallServiceOwned 跟随同scope/key的Ready owner，未知结果不自动重试。
 func (sc *ServiceContext) CallServiceOwned(ctx context.Context, payload *types.PayLoad, scope, key string) (types.IResponse, error) {
-	if sc == nil || sc.MQManager == nil || sc.Service == nil || payload == nil {
+	if sc == nil || sc.Service == nil || payload == nil {
 		return nil, ownership.ErrUnsupported
 	}
-	store, err := sc.MQManager.OwnershipStore(ctx)
+	sc.lifecycleMu.Lock()
+	manager, terminated := sc.MQManager, sc.terminated
+	sc.lifecycleMu.Unlock()
+	if terminated {
+		return nil, ownership.ErrNotReady
+	}
+	if manager == nil {
+		return nil, ownership.ErrUnsupported
+	}
+	store, err := manager.OwnershipStore(ctx)
 	if err != nil {
 		return nil, err
 	}

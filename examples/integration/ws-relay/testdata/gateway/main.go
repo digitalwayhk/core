@@ -20,7 +20,7 @@ func (*gateway) ServiceName() string { return contract.ServiceName }
 
 // Routers 只注册测试业务路由，中继另走标准ServerManage注册。
 func (*gateway) Routers() []types.IRouter {
-	return []types.IRouter{&privateView{}, &publicView{}, &ownedView{}, &control{}}
+	return []types.IRouter{&privateView{}, &publicView{}, &ownedView{}, &control{}, &internalProbe{}}
 }
 func main() {
 	index, err := strconv.Atoi(os.Getenv("CORE_RELAY_INDEX"))

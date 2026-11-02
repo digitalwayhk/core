@@ -152,3 +152,7 @@ Public API 无需身份，但仍执行参数解析、校验、类型化错误和
 ### 删除本人订单
 
 删除先以 `ID + UserID` 查询所有权，再物理删除。不存在与不属于当前用户返回同一公开错误，避免泄露其他用户订单是否存在。持久化成功后发布 `deleted` 通知。
+
+### 内部白名单的预期拒绝
+
+`WithInternalCallers`仍在Parse前检查经框架验证的调用方；自报SourceService头和损坏JSON都不能获得身份。`ErrInternalCallerForbidden`保留导出error类型及errors.Is，v1.8.1起沿既有PublicError合同返回Forbidden/HTTP403/40300，不再把正常授权拒绝误报Internal500。无新权限，不在应用Do/Validation复制白名单，也不向匿名OpenAPI暴露内部路由。

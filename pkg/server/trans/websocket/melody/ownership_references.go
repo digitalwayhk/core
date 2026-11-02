@@ -90,10 +90,10 @@ func (s *SessionSubscriptions) markOwnershipChange() {
 }
 
 func (mm *MelodyManager) ensureOwnershipReferences(ctx context.Context, ref ownership.ScopedReference) error {
-	if mm == nil || mm.serviceContext == nil || mm.serviceContext.MQManager == nil {
+	if mm == nil || mm.serviceContext == nil || mm.ownershipManager == nil {
 		return ownership.ErrUnsupported
 	}
-	store, err := mm.serviceContext.MQManager.OwnershipStore(ctx)
+	store, err := mm.ownershipManager.OwnershipStore(ctx)
 	if err != nil {
 		return err
 	}
@@ -136,6 +136,7 @@ func (mm *MelodyManager) stopOwnershipReferences() {
 	runtime := mm.ownershipReferences
 	mm.ownershipMu.Unlock()
 	if runtime != nil {
+		runtime.cancel()
 		<-runtime.done
 	}
 }

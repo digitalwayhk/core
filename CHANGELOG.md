@@ -6,7 +6,7 @@
 
 ### Added
 
-- v1.8.0显式动态持续归属key目录、受信注册及保全固定scope迁移，详见版本段。
+- 无。
 
 ### Changed
 
@@ -22,11 +22,22 @@
 
 ### Fixed
 
-- 有界隔离未登记消息、保留W/U分别计费与原OrderingKey屏障；归属Gateway恢复新进程订阅中继索引。
+- 修复归属Gateway退出时心跳读取可清空的CrossNodeBroker/MQManager竞态，以及RegisterOwnedKey/CallServiceOwned/Resolver的同类已复现访问；取消并等待实际引用刷新退出。
+- 内部白名单预期拒绝保留errors.Is并使用既有Forbidden/HTTP403/40300公共契约，不变更白名单或可信身份规则。
 
 ### Security
 
 - 无。
+
+## [v1.8.1] - 2026-11-02
+
+### Fixed
+
+- 内部白名单预期拒绝改为类型化Forbidden/HTTP403/40300，保留ErrInternalCallerForbidden的error静态类型及errors.Is；匿名损坏JSON在Parse前拒绝，可信mTLS调用继续可用。
+
+- Gateway引用心跳改用既有服务级同步转发器注册表，启动期取得MQ句柄；关闭取消并等待实际刷新及worker退出后才关闭引用租约，已关闭运行时不能复活引用。
+- RegisterOwnedKey/CallServiceOwned和内部Resolver读取使用原生命周期锁快照，停止后新调用明确失败，锁不跨外部操作；未知副作用不自动重试。
+- 真实进程验收核对实际退出错误及退出race日志，不再忽略业务断言完成后的清理失败。保留原mTLS、用户隔离、归属fence与WS恢复合同，无新生产API、配置或持久格式。详见[修复记录](docs/codex/OWNERSHIP_WS_SHUTDOWN_RACE_2026-11-02.md)。
 
 ## [v1.8.0] - 2026-11-02
 

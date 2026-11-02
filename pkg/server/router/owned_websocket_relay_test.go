@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/digitalwayhk/core/pkg/server/cluster"
+	"github.com/digitalwayhk/core/pkg/server/config"
 	"github.com/digitalwayhk/core/pkg/server/transport"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/stretchr/testify/require"
@@ -108,4 +109,28 @@ func TestOrdinaryWebSocketRelayFallsThroughAfterGuards(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 与真实Gateway相同的HandleInternalPayload入口，独立锁定在途摘要与停止置空竞争。
+// 可信身份在此只用于控制流回归；真实mTLS证明由双进程验收提供。
+func TestOwnedWebSocketRelayConcurrentServiceShutdown(t *testing.T) {
+	cfg := config.NewServiceDefaultConfig("relay-fixture", 0)
+	cfg.Cluster.Mode = "off"
+	cfg.MQ.Mode = "off"
+	sc := NewServiceContextWithConfig(&ownedRelayService{}, cfg)
+	sc.SetRunState(true)
+	ready, done := make(chan struct{}), make(chan struct{})
+	require.NoError(t, sc.UseResource("admitted-relay", resourceFunc(func(context.Context) error { <-done; return nil })))
+	payload := &types.PayLoad{SourceService: "relay-fixture", TargetService: "relay-fixture", TargetPath: "/api/servermanage/ws/subscription", Data: json.RawMessage(`{"route_path":"/api/relay-fixture/view","hash":88,"node_id":"peer","active":true}`)}
+	ctx := types.ContextWithTrustedInternalCaller(context.Background(), "relay-fixture")
+	go func() {
+		defer close(done)
+		close(ready)
+		for i := 0; i < 256; i++ {
+			_, _ = sc.HandleInternalPayload(ctx, payload)
+		}
+	}()
+	<-ready
+	sc.SetRunState(false)
+	require.NoError(t, sc.ShutdownError())
 }

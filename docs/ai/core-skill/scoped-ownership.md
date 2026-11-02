@@ -73,3 +73,9 @@ MaxKeys默认/上限256；PageSize默认min(32,MaxKeys)，每发现间隔至多�
 固定→动态必须停稳全部旧回调、核对正SQL最大fence下界，通过`MQManager.MigrateOwnershipKeys(ctx, from, to, floor)`原子保全迁移。不能改Manifest后调用Provision覆盖，不能新旧混跑，不提供自动降回固定目录；原pending、游标、sequence和SQLfence保留。Unbind/Recover会检查所有动态登记key的活动租约。NATS或只声明固定归属的Provider明确拒绝动态模式。
 
 归属Gateway在已有3s引用心跳中从当前会话索引有界重放正式订阅摘要，补新进程/同地址peer的中继索引；退订与关闭不复活会话，认证边界不变。owner Ready不等于异步中继索引已收敛，更不等于业务消息已持久完成。完整接入、预算/迁移与回退边界见[动态key指南](../../codex/OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。
+
+## v1.8.1：归属Gateway退出生命周期
+
+归属引用心跳从既有按服务同步转发器注册表取得当前中继，不在后台读取可被SetRunState清空的CrossNodeBroker。Melody在启动组合根取得MQManager引用；引用开启时使用该稳定句柄，不能从后台反复读ServiceContext公开字段。关闭取消在途刷新、等待实际返回与原worker退出，之后关闭Gateway lease；关闭后不能再刷新或重新开户。原单轮3秒、128摘要、mTLS、用户隔离、退订不复活和恢复合同不变。
+
+RegisterOwnedKey、CallServiceOwned及其Resolver使用原生命周期锁取得快照，锁不跨Redis、SQL或网络调用持有。停止后新调用返回NotReady/Unavailable；已经执行的控制调用若结果未知，不自动重试副作用。公开的MQManager/CrossNodeBroker/ServiceResolver字段不是无锁运行时取句柄接口；应用须通过正式API，或在自己启动生命周期取得既有Store并自行保证使用/退出次序。本补丁不修改API、配置、动态manifest、消息或卷格式，无需清PEL或重新迁移。

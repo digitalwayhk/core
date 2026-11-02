@@ -10,6 +10,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/ownership"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/digitalwayhk/core/pkg/utils"
 	"os"
 	"sync"
@@ -20,6 +21,7 @@ type Runtime struct {
 	Manifest   ownership.Manifest
 	Store      *models.Store
 	Context    *router.ServiceContext
+	Ownership  ownership.Store // Initialize阶段取得；后台不重读ServiceContext的可清空字段。
 	Owned      *ownership.Runtime
 	Notify     func(*dto.Snapshot)
 	mu         sync.RWMutex
@@ -71,8 +73,8 @@ func (r *Runtime) snapshot(key string, epoch int64, instance string, count int64
 	refs := r.references[key]
 	r.mu.RUnlock()
 	relayReady := false
-	if r.Context != nil && r.Context.CrossNodeBroker != nil {
-		for _, hash := range r.Context.CrossNodeBroker.PeerSubscribedHashes("/api/" + contract.ServiceName + "/view") {
+	if index, ok := types.GetCrossNodeForwarderForService(contract.ServiceName).(types.ICrossNodeSubscriptionIndex); ok {
+		for _, hash := range index.PeerSubscribedHashes("/api/" + contract.ServiceName + "/view") {
 			if hash == utils.HashCode64(key) {
 				relayReady = true
 			}
@@ -90,11 +92,10 @@ func (r *Runtime) Read(ctx context.Context, key string) (*dto.Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := r.Context.MQManager.OwnershipStore(ctx)
-	if err != nil {
-		return nil, err
+	if r.Ownership == nil {
+		return nil, ownership.ErrNotReady
 	}
-	c, err := store.Resolve(ctx, contract.Scope, key)
+	c, err := r.Ownership.Resolve(ctx, contract.Scope, key)
 	if err != nil {
 		return nil, err
 	}
@@ -110,11 +111,10 @@ func (r *Runtime) Read(ctx context.Context, key string) (*dto.Snapshot, error) {
 
 // IsCurrentNotice 拒绝旧owner迟到通知，不将本地存活视为归属证明。
 func (r *Runtime) IsCurrentNotice(ctx context.Context, s *dto.Snapshot) bool {
-	store, err := r.Context.MQManager.OwnershipStore(ctx)
-	if err != nil {
+	if r.Ownership == nil {
 		return false
 	}
-	c, err := store.Resolve(ctx, contract.Scope, s.Key)
+	c, err := r.Ownership.Resolve(ctx, contract.Scope, s.Key)
 	return err == nil && c.Epoch == s.Epoch && c.InstanceID == s.InstanceID
 }
 

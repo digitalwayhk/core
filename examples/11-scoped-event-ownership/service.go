@@ -42,6 +42,15 @@ func (s *Service) Initialize() error {
 	if err := sc.UseResource("demo11-sql", s.Runtime.Store); err != nil {
 		return err
 	}
+	if sc.MQManager == nil {
+		return fmt.Errorf("缺少归属MQ能力")
+	}
+	store, err := sc.MQManager.OwnershipStore(context.Background())
+	if err != nil {
+		return err
+	}
+	s.Runtime.Ownership = store
+
 	s.Runtime.Notify = func(value *dto.Snapshot) { privateapi.NewView(s.Runtime).RouterInfo().NoticeWebSocket(value) }
 	if !s.Worker {
 		return nil

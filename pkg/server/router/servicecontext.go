@@ -2271,7 +2271,13 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 	if payload == nil || payload.TargetService == "" || payload.TargetPath == "" {
 		return nil, "unknown", fmt.Errorf("%w: target service and path are required", ErrTargetServiceUnavailable)
 	}
-	if payload.TargetInstanceID != "" && own.ServiceResolver == nil {
+	own.lifecycleMu.Lock()
+	resolver, terminated := own.ServiceResolver, own.terminated
+	own.lifecycleMu.Unlock()
+	if terminated {
+		return nil, "unknown", ErrTargetServiceUnavailable
+	}
+	if payload.TargetInstanceID != "" && resolver == nil {
 		return nil, "unknown", ErrTargetServiceUnavailable
 	}
 	// 普通调用保留历史同进程快路径。Keyed 调用必须先按完整集群成员解析；
@@ -2284,15 +2290,15 @@ func (own *ServiceContext) invokePayload(ctx context.Context, payload *types.Pay
 		}
 	}
 	var endpoints transport.TransportEndpoints
-	if own.ServiceResolver != nil {
+	if resolver != nil {
 		var resolved *ResolvedService
 		var err error
 		if payload.TargetInstanceID != "" {
-			resolved, err = own.ServiceResolver.ResolveInstance(ctx, payload.TargetService, payload.TargetInstanceID)
+			resolved, err = resolver.ResolveInstance(ctx, payload.TargetService, payload.TargetInstanceID)
 		} else if payload.ServiceHashKey != "" {
-			resolved, err = own.ServiceResolver.ResolveWithKey(ctx, payload.TargetService, payload.ServiceHashKey)
+			resolved, err = resolver.ResolveWithKey(ctx, payload.TargetService, payload.ServiceHashKey)
 		} else {
-			resolved, err = own.ServiceResolver.Resolve(ctx, payload.TargetService)
+			resolved, err = resolver.Resolve(ctx, payload.TargetService)
 		}
 		if err != nil {
 			return nil, "grpc", err

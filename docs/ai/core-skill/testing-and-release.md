@@ -231,3 +231,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## PostgreSQL 验收
 
 `bash scripts/test.sh integration-postgres` 运行显式 PostgreSQL 外部契约；`integration-persistence` 启动隔离 Compose，同时验证 PostgreSQL/MySQL/MongoDB/ClickHouse 与三库统计。07 必须覆盖真实多进程 pending 硬崩溃恢复，09 必须通过标准 server.json 将 ManageStore 切至 PostgreSQL 后跑真实 HTTP/RBAC。单元、跳过用例和连接健康不能替代这些结果。
+
+### 归属WS退出race门禁
+
+多进程WS验收必须在真实子进程停止后检查退出状态与完整退出日志，不得在业务断言成功后忽略清理阶段DATA RACE。现有integration.Suite.StopProcess返回实际退出错误；race非零退出和5秒未退出后的强杀均为FAIL。示例11固定/动态/固定迁移及ws-relay同时覆盖退出，原消息、SQL fence和WS安全断言保留；只验证包race或同进程helper不能替代真实Gateway退出。

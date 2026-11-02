@@ -23,15 +23,18 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 type relayState struct {
-	PID   int                 `json:"pid"`
-	Local map[string][]uint64 `json:"local"`
-	Peer  map[string][]uint64 `json:"peer"`
-	Nodes []*cluster.NodeInfo `json:"nodes"`
+	InternalParses int32               `json:"internal_parses"`
+	PID            int                 `json:"pid"`
+	Local          map[string][]uint64 `json:"local"`
+	Peer           map[string][]uint64 `json:"peer"`
+	Nodes          []*cluster.NodeInfo `json:"nodes"`
 }
 
 // TestWebSocketRelayCoexistenceRealMTLSGateways 验证真实双Gateway的普通/归属WS投递、会话生命周期与信任边界。
@@ -53,6 +56,16 @@ func TestWebSocketRelayCoexistenceRealMTLSGateways(t *testing.T) {
 		s, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/integration/ws-relay/testdata/gateway", BinaryName: "relay-gateway", TempPrefix: "core-relay-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: map[string]string{"CORE_TEST_REDIS_ADDR": addr, "CORE_RELAY_PREFIX": prefix, "CORE_RELAY_INDEX": fmt.Sprint(index), "CORE_RELAY_CA": pki.CAFile, "CORE_RELAY_CERT": id.CertFile, "CORE_RELAY_KEY": id.KeyFile}})
 		require.NoError(t, err)
 		t.Cleanup(func() {
+			if err := s.StopProcess(); err != nil {
+				t.Errorf("真实子进程退出失败: %v", err)
+			}
+			output, err := os.ReadFile(filepath.Join(s.RootDir, "service.log"))
+			if err != nil {
+				t.Errorf("读取真实子进程退出日志失败: %v", err)
+			}
+			if strings.Contains(string(output), "WARNING: DATA RACE") {
+				t.Errorf("真实子进程退出出现DATA RACE: %s", output)
+			}
 			if t.Failed() {
 				s.PrintLog()
 			}
@@ -107,6 +120,24 @@ func TestWebSocketRelayCoexistenceRealMTLSGateways(t *testing.T) {
 		}
 		return nil
 	}
+	t.Run("内部白名单匿名HTTP403与真实mTLS可用", func(t *testing.T) {
+		for _, body := range []string{`{"value":"x"}`, `{broken`} {
+			request, err := http.NewRequest(http.MethodPost, g1.BaseURL+"/api/owned-demo/internal-probe", strings.NewReader(body))
+			require.NoError(t, err)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("SourceService", contract.ServiceName)
+			response, err := http.DefaultClient.Do(request)
+			require.NoError(t, err)
+			var envelope integration.ResponseEnvelope
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
+			response.Body.Close()
+			require.Equal(t, http.StatusForbidden, response.StatusCode)
+			require.Equal(t, 40300, envelope.ErrorCode)
+		}
+		require.Zero(t, state(g1).InternalParses, "损坏JSON必须在Parse前拒绝")
+		require.NoError(t, call(same, contract.ServiceName, "/api/owned-demo/internal-probe", map[string]string{"value": "trusted"}))
+		require.Error(t, call(other, "other-service", "/api/owned-demo/internal-probe", map[string]string{"value": "denied"}))
+	})
 	connect := func(s *integration.Suite, uid, path string) *websocket.Conn {
 		c, _, err := websocket.DefaultDialer.Dial(s.WebSocketURL, nil)
 		require.NoError(t, err)

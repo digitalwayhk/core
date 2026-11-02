@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,6 +77,16 @@ func testScopedGateways(t *testing.T, dynamic, migrate bool) {
 		s, err := integration.StartProcess(integration.ProcessOptions{BuildPackage: "./examples/11-scoped-event-ownership/main", BinaryName: fmt.Sprintf("demo11-%s-%d", role, index), TempPrefix: "core-demo11-", ServiceCount: 2, ServiceIndex: 1, GRPCServiceCount: 2, Arguments: []string{"-view", "0"}, Environment: map[string]string{"CORE_DEMO11_DYNAMIC_KEYS": mode, "CORE_DEMO11_FIXED_SINGLE_KEY": fixedSingle, "CORE_DEMO11_CA_FILE": pki.CAFile, "CORE_DEMO11_CERT_FILE": identity.CertFile, "CORE_DEMO11_KEY_FILE": identity.KeyFile, "CORE_DEMO11_ROLE": role, "CORE_DEMO11_INDEX": strconv.Itoa(index), "CORE_DEMO11_REDIS_ADDR": addr, "CORE_DEMO11_PREFIX": prefix, "CORE_DEMO11_MYSQL_CONFIG_FILE": file, "CORE_DEMO11_DATABASE": database, "CORE_DEMO11_MAX_OWNED": strconv.Itoa(capacity)}})
 		require.NoError(t, err)
 		t.Cleanup(func() {
+			if err := s.StopProcess(); err != nil {
+				t.Errorf("真实子进程退出失败: %v", err)
+			}
+			output, err := os.ReadFile(filepath.Join(s.RootDir, "service.log"))
+			if err != nil {
+				t.Errorf("读取真实子进程退出日志失败: %v", err)
+			}
+			if strings.Contains(string(output), "WARNING: DATA RACE") {
+				t.Errorf("真实子进程退出出现DATA RACE: %s", output)
+			}
 			if t.Failed() {
 				s.PrintLog()
 			}
@@ -89,7 +100,7 @@ func testScopedGateways(t *testing.T, dynamic, migrate bool) {
 	baselineCount := int64(0)
 	if migrate {
 		floor := original.Epoch
-		a.StopProcess()
+		require.NoError(t, a.StopProcess(), "固定迁移前必须确认旧进程实际正常退出")
 		require.Eventually(t, func() bool { _, e := store.Resolve(ctx, m.Scope, "A"); return e != nil }, 3*time.Second, 10*time.Millisecond)
 		env := event.NewEnvelope(contract.ServiceName, "input", []byte(`{"key":"A"}`))
 		env.Subject = m.Subjects[0]

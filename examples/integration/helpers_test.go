@@ -1,8 +1,13 @@
 package integration
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"os/signal"
 	"strconv"
 	"testing"
 
@@ -57,4 +62,49 @@ func TestAccessTokenFromData(t *testing.T) {
 		require.Error(t, err)
 		require.Empty(t, token)
 	})
+}
+
+func TestStopProcessReportsActualExitStatus(t *testing.T) {
+	for _, code := range []int{0, 66} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			command := exec.Command(executable, "-test.run=^TestStopProcessChild$")
+			command.Env = append(os.Environ(), fmt.Sprintf("CORE_STOP_PROCESS_CHILD=%d", code))
+			output, err := command.StdoutPipe()
+			require.NoError(t, err)
+			require.NoError(t, command.Start())
+			defer command.Process.Kill()
+			scanner := bufio.NewScanner(output)
+			require.True(t, scanner.Scan())
+			require.Equal(t, "READY", scanner.Text())
+			suite := &Suite{command: command}
+			err = suite.StopProcess()
+			if code == 0 {
+				require.NoError(t, err)
+			} else {
+				var exit *exec.ExitError
+				require.ErrorAs(t, err, &exit)
+				require.Equal(t, code, exit.ExitCode())
+			}
+			require.NoError(t, suite.StopProcess(), "已退出后的重复关闭保持幂等")
+		})
+	}
+}
+
+// 本子进程夹具只在上面测试显式设置环境变量后接收真实退出信号。
+func TestStopProcessChild(t *testing.T) {
+	raw := os.Getenv("CORE_STOP_PROCESS_CHILD")
+	if raw == "" {
+		return
+	}
+	code, err := strconv.Atoi(raw)
+	if err != nil {
+		os.Exit(2)
+	}
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	fmt.Println("READY")
+	<-stop
+	os.Exit(code)
 }

@@ -1,0 +1,8 @@
+{
+  "archive": "docs/codex/evidence/ownership-ws-shutdown-20261102/raw-evidence.tar.gz",
+  "bytes": 54600,
+  "sha256": "850bbc631a4a4d82f8f2e27633698edbf33e91a3ff3c1993049ba2507ef31b42",
+  "files": 60,
+  "raw_bytes": 368960,
+  "includes": "含原RED/FAIL/SETUP_FAIL、GREEN、真实进程、命令退出码、生产/测试源码SHA及逐项原件清单；不含配置凭据/证书/数据库"
+}

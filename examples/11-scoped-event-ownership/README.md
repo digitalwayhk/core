@@ -66,3 +66,7 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 真实回归：`CORE_TEST_REDIS_ADDR=... CORE_TEST_MYSQL_OWNERSHIP_CONFIG_FILE=... go test ./examples/integration/11-scoped-event-ownership -v -count=1 -timeout 600s`，含固定、动态、固定→动态保全迁移三组；动态组包含两个处理进程、两个Gateway、真实mTLS/WS/MySQL以及硬杀后原连接恢复。诊断DTO中的RelayReady只说明对等订阅索引已恢复，不代替Ready/SQL提交；异步Notice不承诺持久可靠投递。
 
 完整接入与回退见[动态目录指南](../../docs/codex/OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。不要把此组件测试当作消费方容量验收。
+
+### 退出验收（v1.8.1）
+
+引用心跳复用既有服务级中继索引和启动期MQ句柄，停止时取消并等待在途刷新，不要求应用自行停框架worker。集成测试在关闭真实子进程后同时核对实际退出状态和DATA RACE日志，业务断言通过不等于退出通过。无新配置；原固定/动态迁移、SQL fence、PEL及WS免重订断言保持。

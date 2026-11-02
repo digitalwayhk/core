@@ -4,12 +4,15 @@ package melody
 import (
 	"context"
 	"github.com/digitalwayhk/core/pkg/server/ownership"
+	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/gofrs/uuid"
 	"sync"
 	"time"
 )
 
 type gatewayReferenceRuntime struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
 	manager     *MelodyManager
 	store       ownership.Store
 	mu          sync.Mutex
@@ -20,10 +23,12 @@ type gatewayReferenceRuntime struct {
 }
 
 func newGatewayReferenceRuntime(manager *MelodyManager, store ownership.Store) (*gatewayReferenceRuntime, error) {
-	r := &gatewayReferenceRuntime{manager: manager, store: store, done: make(chan struct{}), wake: make(chan struct{}, 1)}
+	lifetime, cancel := context.WithCancel(context.Background())
+	r := &gatewayReferenceRuntime{ctx: lifetime, cancel: cancel, manager: manager, store: store, done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
 	if err := r.open(ctx); err != nil {
+		cancel()
 		return nil, err
 	}
 	go r.run()
@@ -47,7 +52,10 @@ func (r *gatewayReferenceRuntime) open(ctx context.Context) error {
 func (r *gatewayReferenceRuntime) flush() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := r.ctx.Err(); err != nil {
+		return err
+	}
+	ctx, stop := context.WithTimeout(r.ctx, 3*time.Second)
 	defer stop()
 	if time.Since(r.lastSuccess) >= 15*time.Second {
 		if err := r.open(ctx); err != nil {
@@ -62,8 +70,11 @@ func (r *gatewayReferenceRuntime) flush() error {
 		return err
 	}
 	r.lastSuccess = time.Now()
-	if sc := r.manager.serviceContext; sc != nil && sc.CrossNodeBroker != nil && len(refs) > 0 {
-		return sc.CrossNodeBroker.ReplayLocalSubscriptions(ctx)
+	if sc := r.manager.serviceContext; sc != nil && sc.Service != nil && len(refs) > 0 {
+		// 与ServiceContext启停/切换使用同一服务级同步注册表，不读取会被置空的公开指针。
+		if replay, ok := types.GetCrossNodeForwarderForService(sc.Service.Name).(interface{ ReplayLocalSubscriptions(context.Context) error }); ok {
+			return replay.ReplayLocalSubscriptions(ctx)
+		}
 	}
 	return nil
 }
@@ -71,6 +82,7 @@ func (r *gatewayReferenceRuntime) flush() error {
 func (r *gatewayReferenceRuntime) run() {
 	defer close(r.done)
 	defer func() {
+		r.cancel() // 先拒绝迟到刷新，再等待当前刷新退出和关闭lease。
 		r.mu.Lock()
 		id := r.gatewayID
 		r.mu.Unlock()

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/digitalwayhk/core/pkg/server/config"
+	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/router"
 	"github.com/digitalwayhk/core/pkg/server/types"
 	"github.com/olahol/melody"
@@ -52,8 +53,9 @@ func (a *websocketAdmission) release() {
 
 // MelodyManager 替换原有的Hub
 type MelodyManager struct {
-	melody         *melody.Melody
-	serviceContext *router.ServiceContext
+	melody           *melody.Melody
+	serviceContext   *router.ServiceContext
+	ownershipManager *mq.MQManager // 启动组合根快照；关闭时不重读ServiceContext的可清空字段。
 
 	// 添加关闭通道
 	closeChan   chan struct{}
@@ -113,6 +115,9 @@ func NewMelodyManager(serviceContext *router.ServiceContext, options ...config.M
 		maxConnections:  config.MaxConnections, // 默认最大连接数
 	}
 
+	if serviceContext != nil {
+		manager.ownershipManager = serviceContext.MQManager
+	}
 	manager.setupHandlers()
 	return manager
 }

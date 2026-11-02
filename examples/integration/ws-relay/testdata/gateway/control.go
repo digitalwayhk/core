@@ -44,7 +44,7 @@ func (v *control) Do(types.IRequest) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"pid": os.Getpid(), "local": local, "peer": peer, "nodes": nodes}, nil
+	return map[string]interface{}{"internal_parses": internalProbeParses.Load(), "pid": os.Getpid(), "local": local, "peer": peer, "nodes": nodes}, nil
 }
 
 // RouterInfo 通过正式RouterInfo注册稳定路径和认证域。

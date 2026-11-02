@@ -79,3 +79,7 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 ## v1.8.0动态目录补充
 
 已有固定scope默认不变。显式DynamicKeys、运行期受信RegisterOwnedKey、W/U分别计费、有效容量背压观察、保全固定→动态维护迁移和WS新进程恢复，按[动态key指南](OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)执行。旧文中的“完整固定目录”仅适用于固定模式；不得把scope元数据丢失视为一个未登记key。
+
+## v1.8.1退出竞态补丁
+
+Gateway引用刷新不再从后台读取ServiceContext会被停止流程清空的CrossNodeBroker/MQManager；复用既有按服务同步注册表及启动句柄，并取消/等待在途刷新后再关闭引用租约。RegisterOwnedKey、CallServiceOwned和内部Resolver查询采用生命周期锁快照，锁不跨外部操作。应用无需修改接线、配置、原组/PEL/sequence/SQL fence或卷格式；从v1.8.0直接升级补丁。停止中的新正式调用明确失败，不将结果未知的在途副作用自动重试。参见[修复验收](OWNERSHIP_WS_SHUTDOWN_RACE_2026-11-02.md)。
