@@ -54,3 +54,10 @@
 - 开发或测试时用 `-view 0` 启动服务。该参数默认 `80`（`0` 表示不启用视图服务，只用于正式部署），置 0 后没有管理后台，也没有 `/api/web/bootstrap`。默认端口属特权端口，本地应显式指定如 `-view 8888`。
 - 视图端口打不开就断定后台坏了。`HTMLServer.Start()` 阻塞等待 `Isstart`，而该信号只在所有 `ServiceContext.IsRun()` 为真后发出；只要有服务因 `port already in use`（server 默认 `8080`、gRPC 默认 `18080`）启动失败，视图端口就始终不监听。先查日志 `service_start_failed`，用 `-p`、`-grpc` 换端口。
 - 依赖 core 的业务仓库未安装 `.codex/skills/use-digitalway-core`，凭记忆编码（见 `docs/codex/CONSUMER_AI_SKILL_SETUP.md`）。
+
+## 动态持续归属目录（v1.8.0）
+
+- 把未来key继续塞进固定Manifest.Keys，或删除原Keys后重跑Provision，会触发指纹/模式冲突；使用显式DynamicKeys和正式MigrateOwnershipKeys，停稳回调并核验SQL正下界。
+- 注册成功不等于Ready或业务提交；不能用Gateway输入或每条消息自动登记，不能假设目录上限等于owner槽位。
+- U不是无限隔离：登记窗口W与未登记预留U分别计费，总PEL为W+U；预算耗尽仍背压，同ordering-key前序不越过。容量观察不能吞掉真正元数据损坏。
+- go get不会刷新消费方复制的skill；升级后重新运行link-consumer-skill.sh并阅读动态目录迁移边界。

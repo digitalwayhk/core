@@ -62,6 +62,9 @@ func (r *gatewayReferenceRuntime) flush() error {
 		return err
 	}
 	r.lastSuccess = time.Now()
+	if sc := r.manager.serviceContext; sc != nil && sc.CrossNodeBroker != nil && len(refs) > 0 {
+		return sc.CrossNodeBroker.ReplayLocalSubscriptions(ctx)
+	}
 	return nil
 }
 

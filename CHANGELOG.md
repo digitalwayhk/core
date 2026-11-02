@@ -6,7 +6,7 @@
 
 ### Added
 
-- 无。
+- v1.8.0显式动态持续归属key目录、受信注册及保全固定scope迁移，详见版本段。
 
 ### Changed
 
@@ -22,11 +22,23 @@
 
 ### Fixed
 
-- v1.7.1 菜单发现修复已完成候选验证；变更与迁移边界见下方版本段。
+- 有界隔离未登记消息、保留W/U分别计费与原OrderingKey屏障；归属Gateway恢复新进程订阅中继索引。
 
 ### Security
 
 - 无。
+
+## [v1.8.0] - 2026-11-02
+
+### Added
+
+- 显式`Manifest.DynamicKeys`与受信`ServiceContext.RegisterOwnedKey`，已有Runtime分页发现追加key；普通/有界可靠消息、SQL fence、恢复、Ready与原ACK链复用。Provider须声明完整动态能力；不支持者拒绝，不从消息或Gateway输入自动登记。
+- 正式`MigrateOwnershipKeys`维护入口保留原Stream/组/PEL/消息ID/游标/sequence/SQL下界，将固定scope迁入动态合同。固定默认JSON/指纹不变，新增持久模式不得新旧混跑或直接降回旧版，详见[动态key指南](docs/codex/OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。
+
+### Fixed
+
+- 合法未登记key不再污染无关key的观察；原W与未登记预留U在Redis原子读取中分别计费，动态总PEL有界W+U，耗尽仍明确背压，同OrderingKey不越过未完成前序。
+- 已有归属Gateway心跳有界重放当前会话订阅摘要，恢复新进程/同peer标识的正式WS中继索引，保留退订/关闭、同服务mTLS与用户隔离。SQL提交、owner Ready、中继恢复与Notice尽力交付保持不同边界。
 
 ## [v1.7.1] - 2026-11-02
 

@@ -15,7 +15,7 @@ for _,row in ipairs(rows) do
 end
 return rows`
 	m := r.options.Manifest
-	cmd := redis.NewXMessageSliceCmd(ctx, "eval", script, 1, r.provider.streamKey(subject), "("+last, m.Window+1, m.MaxMessageBytes)
+	cmd := redis.NewXMessageSliceCmd(ctx, "eval", script, 1, r.provider.streamKey(subject), "("+last, m.PendingWindow()+1, m.MaxMessageBytes)
 	_ = r.provider.client.Process(ctx, cmd)
 	rows, err := cmd.Result()
 	return rows, ownershipRedisError(err)

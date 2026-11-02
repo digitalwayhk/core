@@ -12,6 +12,8 @@ type Observation struct {
 	Due       int64
 	// WorkVisible表示有限扫描确认至少有工作；不把未知总数量伪装为准确计数。
 	WorkVisible bool
+	// CapacityBlocked表示元数据有效但有限窗口无法看全；不等于Broker/目录损坏。
+	CapacityBlocked bool
 }
 
 // Known 表示本次观测覆盖所有来源。
@@ -29,7 +31,7 @@ func (o Observation) Check(now, lastProgress, lastKnown time.Time, t Timing) err
 	if o.HasWork() && now.Sub(lastProgress) >= t.Stall {
 		return ErrStalled
 	}
-	if !o.Known() && !o.HasWork() && now.Sub(lastKnown) >= t.Observation {
+	if !o.Known() && !o.HasWork() && !o.CapacityBlocked && now.Sub(lastKnown) >= t.Observation {
 		return ErrUnknown
 	}
 	return nil

@@ -35,7 +35,17 @@ func (h *ownedAckLossHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook
 }
 
 func TestRedisOwnedAckResponseLostDoesNotReplayConfirmedWork(t *testing.T) {
+	testOwnedAckResponseLoss(t, false)
+}
+func TestRedisDynamicOwnedAckResponseLostDoesNotReplayConfirmedWork(t *testing.T) {
+	testOwnedAckResponseLoss(t, true)
+}
+func testOwnedAckResponseLoss(t *testing.T, dynamic bool) {
 	p, _, m := ownershipFixture(t)
+	if dynamic {
+		p, _, m = dynamicFixture(t)
+		require.NoError(t, p.RegisterOwnershipKey(context.Background(), m, "A"))
+	}
 	ctx := context.Background()
 	require.NoError(t, p.BindOwnership(ctx, m))
 	hook := &ownedAckLossHook{}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Manifest 是显式维护初始化的范围声明；Keys必须覆盖该范围全部稳定归属键。
@@ -22,6 +23,7 @@ type Manifest struct {
 	MaxReferences   int
 	MaxMessageBytes int64
 	Timing          Timing
+	DynamicKeys     *DynamicKeyPolicy `json:",omitempty"`
 }
 
 // Normalize 返回独立且排序后的声明；旧共享组迁移默认W=8，不改变原组游标。
@@ -42,6 +44,22 @@ func (m Manifest) Normalize() Manifest {
 	if m.MaxMessageBytes == 0 {
 		m.MaxMessageBytes = 1 << 20
 	}
+	if m.DynamicKeys != nil {
+		policy := *m.DynamicKeys
+		if policy.MaxKeys == 0 {
+			policy.MaxKeys = 256
+		}
+		if policy.PageSize == 0 {
+			policy.PageSize = min(32, policy.MaxKeys)
+		}
+		if policy.RefreshInterval == 0 {
+			policy.RefreshInterval = 250 * time.Millisecond
+		}
+		if policy.UnregisteredWindow == 0 {
+			policy.UnregisteredWindow = m.Window
+		}
+		m.DynamicKeys = &policy
+	}
 	m.Timing = m.Timing.Normalize()
 	return m
 }
@@ -53,8 +71,16 @@ func (m Manifest) Validate() error {
 			return ErrUnknown
 		}
 	}
-	if len(m.Subjects) == 0 || len(m.Subjects) > 16 || len(m.Keys) == 0 || len(m.Keys) > 256 || m.Window <= 0 || m.Window > 1024 || m.MaxBatch <= 0 || m.MaxBatch > 1024 || m.MaxReferences <= 0 || m.MaxReferences > 4096 || m.MaxMessageBytes <= 0 || m.MaxMessageBytes > 16<<20 {
+	if len(m.Subjects) == 0 || len(m.Subjects) > 16 || (m.DynamicKeys == nil && len(m.Keys) == 0) || len(m.Keys) > 256 || m.Window <= 0 || m.Window > 1024 || m.MaxBatch <= 0 || m.MaxBatch > 1024 || m.MaxReferences <= 0 || m.MaxReferences > 4096 || m.MaxMessageBytes <= 0 || m.MaxMessageBytes > 16<<20 {
 		return ErrCapacity
+	}
+	if m.DynamicKeys != nil {
+		if len(m.Keys) != 0 {
+			return ErrUnknown
+		}
+		if err := m.DynamicKeys.Validate(); err != nil {
+			return err
+		}
 	}
 	for _, list := range [][]string{m.Subjects, m.Keys} {
 		seen := map[string]bool{}

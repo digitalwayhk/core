@@ -2,6 +2,7 @@
 package scopedownership
 
 import (
+	"context"
 	"fmt"
 	"github.com/digitalwayhk/core/examples/11-scoped-event-ownership/api/dto"
 	privateapi "github.com/digitalwayhk/core/examples/11-scoped-event-ownership/api/private"
@@ -45,7 +46,13 @@ func (s *Service) Initialize() error {
 	if !s.Worker {
 		return nil
 	}
-	runtime, err := sc.SubscribeOwnedEvents(event.OwnedSubscription{Manifest: contract.Manifest(), MaxOwned: s.MaxOwned, NoDueTasks: true, Key: s.Runtime.Key, Activate: s.Runtime.Store.Activate, Restore: s.Runtime.Restore, Handler: s.Runtime.Handle})
+	if s.Runtime.Manifest.DynamicKeys != nil {
+		// 示例应用只登记自己已确认的启动key；后续key由受信控制生命周期调用同一API追加。
+		if err := sc.RegisterOwnedKey(context.Background(), s.Runtime.Manifest, "A"); err != nil {
+			return err
+		}
+	}
+	runtime, err := sc.SubscribeOwnedEvents(event.OwnedSubscription{Manifest: s.Runtime.Manifest, MaxOwned: s.MaxOwned, NoDueTasks: true, Key: s.Runtime.Key, Activate: s.Runtime.Store.Activate, Restore: s.Runtime.Restore, Handler: s.Runtime.Handle})
 	if err != nil {
 		return err
 	}

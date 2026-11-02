@@ -27,7 +27,7 @@ func (s *Snapshot) Parse(req types.IRequest) error { return req.Bind(s) }
 
 // Validation 只允许显式演示键。
 func (s *Snapshot) Validation(types.IRequest) error {
-	if s.Key != "A" && s.Key != "B" {
+	if !s.runtime.AllowsKey(s.Key) {
 		return types.NewPublicError(types.ErrorKindValidation, 0, "仅支持演示用户A/B", nil)
 	}
 	return nil

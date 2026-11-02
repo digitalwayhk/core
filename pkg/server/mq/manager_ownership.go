@@ -38,6 +38,9 @@ func (m *MQManager) ProvisionOwnership(ctx context.Context, manifest ownership.M
 	if err != nil {
 		return err
 	}
+	if err := validateDynamicOwnershipCapability(p, manifest); err != nil {
+		return err
+	}
 	return p.ProvisionOwnership(ctx, manifest, floor)
 }
 
@@ -47,6 +50,9 @@ func (m *MQManager) RecoverOwnership(ctx context.Context, manifest ownership.Man
 	if err != nil {
 		return err
 	}
+	if err := validateDynamicOwnershipCapability(p, manifest); err != nil {
+		return err
+	}
 	return p.RecoverOwnership(ctx, manifest, floor)
 }
 
@@ -54,6 +60,9 @@ func (m *MQManager) RecoverOwnership(ctx context.Context, manifest ownership.Man
 func (m *MQManager) BindOwnership(ctx context.Context, manifest ownership.Manifest) error {
 	p, err := m.ownedProvider()
 	if err != nil {
+		return err
+	}
+	if err := validateDynamicOwnershipCapability(p, manifest); err != nil {
 		return err
 	}
 	if err := m.validateOwnedLifecycle(manifest.Normalize()); err != nil {
@@ -66,6 +75,9 @@ func (m *MQManager) BindOwnership(ctx context.Context, manifest ownership.Manife
 func (m *MQManager) UnbindOwnership(ctx context.Context, manifest ownership.Manifest) error {
 	p, err := m.ownedProvider()
 	if err != nil {
+		return err
+	}
+	if err := validateDynamicOwnershipCapability(p, manifest); err != nil {
 		return err
 	}
 	return p.UnbindOwnership(ctx, manifest)
@@ -87,7 +99,7 @@ func (m *MQManager) validateOwnedLifecycle(manifest ownership.Manifest) error {
 		if policy.Retry.MaxDeliveries > 0 {
 			return ownership.ErrUnsupported
 		}
-		if policy.Retry.MaxAckPending > 0 && manifest.Window > int64(policy.Retry.MaxAckPending) {
+		if policy.Retry.MaxAckPending > 0 && manifest.PendingWindow() > int64(policy.Retry.MaxAckPending) {
 			return ErrLifecyclePolicyInvalid
 		}
 		if policy.Retry.HandlerTimeout > 0 && manifest.Timing.Execution > policy.Retry.HandlerTimeout {
@@ -103,9 +115,53 @@ func (m *MQManager) SubscribeOwnedBatch(ctx context.Context, options OwnedReliab
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDynamicOwnershipCapability(p, options.Manifest); err != nil {
+		return nil, err
+	}
 	options.Manifest = options.Manifest.Normalize()
 	if err := m.validateOwnedLifecycle(options.Manifest); err != nil {
 		return nil, err
 	}
 	return p.SubscribeOwnedBatch(ctx, options, handler)
+}
+
+// RegisterOwnershipKey 为受信应用追加key；不注册业务合法性、不表示Ready。
+func (m *MQManager) RegisterOwnershipKey(ctx context.Context, manifest ownership.Manifest, key string) error {
+	p, err := m.ownedProvider()
+	if err != nil {
+		return err
+	}
+	dynamic, ok := p.(DynamicOwnedReliableMQProvider)
+	if !ok {
+		return ownership.ErrUnsupported
+	}
+	if err := m.validateOwnedLifecycle(manifest.Normalize()); err != nil {
+		return err
+	}
+	return dynamic.RegisterOwnershipKey(ctx, manifest, key)
+}
+
+// MigrateOwnershipKeys 仅供停稳原Runtime后保全消息及SQL下界的显式维护。
+func (m *MQManager) MigrateOwnershipKeys(ctx context.Context, from, to ownership.Manifest, sqlFloor int64) error {
+	p, err := m.ownedProvider()
+	if err != nil {
+		return err
+	}
+	dynamic, ok := p.(DynamicOwnedReliableMQProvider)
+	if !ok {
+		return ownership.ErrUnsupported
+	}
+	if err := m.validateOwnedLifecycle(to.Normalize()); err != nil {
+		return err
+	}
+	return dynamic.MigrateOwnershipKeys(ctx, from, to, sqlFloor)
+}
+
+func validateDynamicOwnershipCapability(p OwnedReliableMQProvider, m ownership.Manifest) error {
+	if m.DynamicKeys != nil {
+		if _, ok := p.(DynamicOwnedReliableMQProvider); !ok {
+			return ownership.ErrUnsupported
+		}
+	}
+	return nil
 }

@@ -56,3 +56,13 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 覆盖SQL提交计数、非owner查询、两处理PID、真实用户WS/匿名拒绝/他人隔离、健康旧进程仍运行时换主、恢复快照与退订交错、Gateway恢复租约丢失后等待原生15秒重建引用；不发送客户端重订。硬崩溃、TCP断连/迟到ACK、多主题真实多输入批次、有限积压/取消等更底层证据在Core包测试；SQL锁跨原生租约到期在ownership包真实MySQL测试。
 
 完整合同、shared/W=8保全迁移、回退和NOT_RUN见 [指南](../../docs/codex/SCOPED_EVENT_OWNERSHIP_GUIDE.md)与 [1.4.6验收](../../docs/codex/RELEASE_V1_4_6_2026-10-21.md)。本演示不代替消费方UAT、容量压测或生产Redis HA验收。
+
+## 动态追加key（v1.8.0）
+
+默认仍为固定A/B。显式设置`CORE_DEMO11_DYNAMIC_KEYS=1`时使用`contract.DynamicManifest()`，W=8/U=8、MaxKeys=16、PageSize=2、每条正文上限64KiB；prepare和各进程必须使用同一声明。示例应用在Initialize通过`sc.RegisterOwnedKey(ctx, manifest, "A")`确认启动key；后续合法key由受信应用控制生命周期调用同一API追加，不公开给Gateway或消息正文自动注册。
+
+本示例的SQL行由应用DML在Activate前幂等初始化；DDL仍只在EnsureStorage启动组合根完成。Core不拥有这些演示用户语义。B/C可在处理进程启动后登记，原消息先于登记仍保留并恢复，单实例可持多个key。故障验收必须预留实际接管槽位，注册成功不代表有Ready owner。
+
+真实回归：`CORE_TEST_REDIS_ADDR=... CORE_TEST_MYSQL_OWNERSHIP_CONFIG_FILE=... go test ./examples/integration/11-scoped-event-ownership -v -count=1 -timeout 600s`，含固定、动态、固定→动态保全迁移三组；动态组包含两个处理进程、两个Gateway、真实mTLS/WS/MySQL以及硬杀后原连接恢复。诊断DTO中的RelayReady只说明对等订阅索引已恢复，不代替Ready/SQL提交；异步Notice不承诺持久可靠投递。
+
+完整接入与回退见[动态目录指南](../../docs/codex/OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。不要把此组件测试当作消费方容量验收。

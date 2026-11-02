@@ -10,12 +10,14 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/event"
 	"github.com/digitalwayhk/core/pkg/server/ownership"
 	"github.com/digitalwayhk/core/pkg/server/router"
+	"github.com/digitalwayhk/core/pkg/utils"
 	"os"
 	"sync"
 )
 
 // Runtime 是实例注入的应用回调状态，只保存恢复视图的计数，不另建会话账。
 type Runtime struct {
+	Manifest   ownership.Manifest
 	Store      *models.Store
 	Context    *router.ServiceContext
 	Owned      *ownership.Runtime
@@ -26,7 +28,7 @@ type Runtime struct {
 
 // New 创建有限演示键的实例状态。
 func New(store *models.Store) *Runtime {
-	return &Runtime{Store: store, references: map[string]ownership.ReferenceSnapshot{}}
+	return &Runtime{Manifest: contract.Manifest(), Store: store, references: map[string]ownership.ReferenceSnapshot{}}
 }
 
 // Key 从原事件数据读取应用稳定键，不修改OrderingKey、EventID或payload。
@@ -68,7 +70,15 @@ func (r *Runtime) snapshot(key string, epoch int64, instance string, count int64
 	r.mu.RLock()
 	refs := r.references[key]
 	r.mu.RUnlock()
-	return &dto.Snapshot{Key: key, Epoch: epoch, InstanceID: instance, Count: count, PID: os.Getpid(), References: len(refs.References), ReferenceRevision: refs.Revision}
+	relayReady := false
+	if r.Context != nil && r.Context.CrossNodeBroker != nil {
+		for _, hash := range r.Context.CrossNodeBroker.PeerSubscribedHashes("/api/" + contract.ServiceName + "/view") {
+			if hash == utils.HashCode64(key) {
+				relayReady = true
+			}
+		}
+	}
+	return &dto.Snapshot{RelayReady: relayReady, Key: key, Epoch: epoch, InstanceID: instance, Count: count, PID: os.Getpid(), References: len(refs.References), ReferenceRevision: refs.Revision}
 }
 
 // Read 拒绝本实例非owner或未恢复状态；调用方同时复核Ready租约。
@@ -106,4 +116,12 @@ func (r *Runtime) IsCurrentNotice(ctx context.Context, s *dto.Snapshot) bool {
 	}
 	c, err := store.Resolve(ctx, contract.Scope, s.Key)
 	return err == nil && c.Epoch == s.Epoch && c.InstanceID == s.InstanceID
+}
+
+// AllowsKey 仅决定演示用户身份格式；它不授予Core目录注册权限。
+func (r *Runtime) AllowsKey(key string) bool {
+	if r == nil || r.Manifest.DynamicKeys == nil {
+		return key == "A" || key == "B"
+	}
+	return len(key) > 0 && len(key) <= 512
 }

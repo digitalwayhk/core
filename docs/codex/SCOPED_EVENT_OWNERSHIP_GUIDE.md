@@ -75,3 +75,7 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 ```
 
 完整RED/GREEN、原生/加速区分和实际结果在发布验收文档。生产Redis HA/持久化回滚演练、外部业务系统fence、Bitzoom G1–G5/UAT/部署/容量均NOT_RUN；明确拒绝的NATS持续归属及在线目录变更不是“已支持但未测”。
+
+## v1.8.0动态目录补充
+
+已有固定scope默认不变。显式DynamicKeys、运行期受信RegisterOwnedKey、W/U分别计费、有效容量背压观察、保全固定→动态维护迁移和WS新进程恢复，按[动态key指南](OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)执行。旧文中的“完整固定目录”仅适用于固定模式；不得把scope元数据丢失视为一个未登记key。

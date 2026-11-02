@@ -55,7 +55,7 @@ for _,entry in ipairs(snapshot) do
 end
 for i=last+1,#KEYS do if redis.call("EXISTS",KEYS[i])~=0 then return redis.error_reply("OWNER_BUSY") end end
 for i=3,last do redis.call("SET",KEYS[i],ARGV[3]) end
-redis.call("HSET",KEYS[1],"enabled","1");return 1`).Run(ctx, r.client, keys, m.Fingerprint(), fmt.Sprintf("%s%d", redisSharedModePrefix, m.Window), ownedRedisMarker(m), len(m.Subjects), snapshot, m.Group, m.Window).Err())
+redis.call("HSET",KEYS[1],"enabled","1");return 1`).Run(ctx, r.client, keys, m.Fingerprint(), fmt.Sprintf("%s%d", redisSharedModePrefix, m.Window), ownedRedisMarker(m), len(m.Subjects), snapshot, m.Group, m.PendingWindow()).Err())
 }
 
 // UnbindOwnership 要求无持续归属租约，回到原shared-v1/W标记，不回退游标。
@@ -72,7 +72,7 @@ func (r *RedisStreamProvider) UnbindOwnership(ctx context.Context, m ownership.M
 	for _, key := range m.Keys {
 		keys = append(keys, r.ownershipLease(m.Scope, key))
 	}
-	return ownershipRedisError(redis.NewScript(`
+	return ownershipRedisError(redis.NewScript(redisOwnershipDynamicNoLeases+`
 if redis.call("HGET",KEYS[1],"fingerprint")~=ARGV[1] or redis.call("EXISTS",KEYS[2])~=1 then return redis.error_reply("OWNER_UNKNOWN") end
 local last=2+tonumber(ARGV[4])
 for i=3,last do if redis.call("GET",KEYS[i])~=ARGV[2] then return redis.error_reply("OWNER_MODE_CONFLICT") end end
@@ -117,7 +117,7 @@ func (r *RedisStreamProvider) SubscribeOwnedBatch(ctx context.Context, options O
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	metrics := &redisReliableSubscriptionMetrics{configured: int64(options.MaxOwned), redisReliableDeliveryMetrics: &r.deliveryMetrics}
-	metrics.prefetchCapacity.Store(int64(len(m.Subjects)) * m.Window)
+	metrics.prefetchCapacity.Store(int64(len(m.Subjects)) * m.PendingWindow())
 	stop, err := r.registerRedisSubscription("ownership|"+m.Scope+"|"+options.InstanceID+"|"+options.SessionID, cancel, metrics)
 	if err != nil {
 		return nil, err

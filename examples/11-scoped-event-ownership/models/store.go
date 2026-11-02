@@ -50,6 +50,10 @@ func (s *Store) EnsureStorage() error {
 
 // Activate 等待旧SQL真实退出后，在同一事务激活新epoch；Redis租约不能代替此锁。
 func (s *Store) Activate(ctx context.Context, c ownership.Credential) error {
+	// 已登记且取得技术凭据后由本示例初始化自己的SQL行，不在Core推断业务key。
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&ownerRecord{Scope: c.Scope, KeyName: c.Key}).Error; err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return ownership.ActivateFence(fenceTransaction{tx}, c) })
 }
 

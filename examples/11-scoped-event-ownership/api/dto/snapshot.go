@@ -3,6 +3,8 @@ package dto
 
 // Snapshot 是已提交计数与当前归属状态；Key是演示用户，不能作为指标标签。
 type Snapshot struct {
+	// RelayReady只用于演示验收中继索引已恢复；不是业务成功或owner Ready的替代。
+	RelayReady        bool   `json:"relayReady"`
 	Key               string `json:"key"`
 	Count             int64  `json:"count"`
 	Epoch             int64  `json:"epoch"`

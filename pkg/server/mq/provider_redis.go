@@ -20,25 +20,30 @@ import (
 // RedisStreamProvider implements MQProvider using Redis Streams.
 // It is the default development-friendly provider requiring only Redis.
 type RedisStreamProvider struct {
-	addr                 string
-	db                   int
-	prefix               string
-	client               *redis.Client
-	blockingClient       *redis.Client
-	commandPoolSize      int
-	blockingReadPoolSize int
-	closed               bool
-	closeOnce            sync.Once
-	closeErr             error
-	mu                   sync.Mutex
-	subs                 map[string]context.CancelFunc
-	reliableMetrics      map[string]*redisReliableSubscriptionMetrics
-	lifecycleMetrics     lifecycleProviderMetrics
-	deliveryMetrics      redisReliableDeliveryMetrics
-	wg                   sync.WaitGroup
+	ownershipRegistered           atomic.Int64
+	ownershipRegistrationFailures atomic.Int64
+	ownershipRegistrationCapacity atomic.Int64
+	addr                          string
+	db                            int
+	prefix                        string
+	client                        *redis.Client
+	blockingClient                *redis.Client
+	commandPoolSize               int
+	blockingReadPoolSize          int
+	closed                        bool
+	closeOnce                     sync.Once
+	closeErr                      error
+	mu                            sync.Mutex
+	subs                          map[string]context.CancelFunc
+	reliableMetrics               map[string]*redisReliableSubscriptionMetrics
+	lifecycleMetrics              lifecycleProviderMetrics
+	deliveryMetrics               redisReliableDeliveryMetrics
+	wg                            sync.WaitGroup
 }
 
 type redisReliableSubscriptionMetrics struct {
+	unregistered        atomic.Int64
+	dynamicBackpressure atomic.Int64
 	*redisReliableDeliveryMetrics
 	configured       int64
 	blockingReads    bool
@@ -518,6 +523,9 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		"prefetch_capacity": 0, "prefetched_messages": 0, "queued_work": 0,
 	}
 	counters := r.lifecycleMetrics.snapshot()
+	counters["ownership_registration_total"] = float64(r.ownershipRegistered.Load())
+	counters["ownership_registration_failures_total"] = float64(r.ownershipRegistrationFailures.Load())
+	counters["ownership_registration_capacity_total"] = float64(r.ownershipRegistrationCapacity.Load())
 	redisPoolMetrics("command", r.client, gauges, counters)
 	redisPoolMetrics("blocking", r.blockingClient, gauges, counters)
 	for _, item := range metrics {
@@ -528,6 +536,8 @@ func (r *RedisStreamProvider) RuntimeMetricSnapshot(context.Context) observabili
 		gauges["blocked_keys"] += float64(item.blockedKeys.Load())
 		gauges["pending_keys"] += float64(item.pendingKeys.Load())
 		gauges["prefetch_capacity"] += float64(item.prefetchCapacity.Load())
+		counters["ownership_unregistered_observations_total"] += float64(item.unregistered.Load())
+		counters["ownership_directory_backpressure_total"] += float64(item.dynamicBackpressure.Load())
 		gauges["prefetched_messages"] += float64(item.prefetched.Load())
 		gauges["queued_work"] += float64(item.queuedWork.Load())
 	}

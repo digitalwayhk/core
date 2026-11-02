@@ -81,6 +81,9 @@ func (r *RedisStreamProvider) ProvisionOwnership(ctx context.Context, manifest o
 	}
 	base := r.ownershipBase(manifest.Scope)
 	args := []any{manifest.Fingerprint(), string(data), strconv.FormatInt(epochFloor, 10), manifest.Service, manifest.Timing.Lease.Milliseconds(), manifest.MaxReferences}
+	if manifest.DynamicKeys != nil {
+		args = append(args, "directory_mode", "dynamic-v1", "directory_count", "0", "directory_capacity", strconv.Itoa(manifest.DynamicKeys.MaxKeys))
+	}
 	for _, key := range manifest.Keys {
 		args = append(args, "key:"+ownershipDigest(key), key)
 	}
@@ -114,6 +117,13 @@ func (s *redisOwnershipStore) manifest(ctx context.Context, scope string) (owner
 }
 
 const redisOwnershipMetadataGuard = `
+local raw=redis.call("HGET",KEYS[1],"manifest")
+local ok,manifest=pcall(cjson.decode,raw or "")
+if not ok or type(manifest)~="table" then return redis.error_reply("OWNER_UNKNOWN") end
+if manifest.DynamicKeys then
+ local base=string.sub(KEYS[1],1,-6);local count=redis.call("HGET",KEYS[1],"directory_count");local capacity=redis.call("HGET",KEYS[1],"directory_capacity")
+ if redis.call("HGET",KEYS[1],"directory_mode")~="dynamic-v1" or not count or not tonumber(count) or not capacity or tonumber(capacity)~=manifest.DynamicKeys.MaxKeys or tonumber(count)>tonumber(capacity) or redis.call("LLEN",base..":directory")~=tonumber(count) then return redis.error_reply("OWNER_UNKNOWN") end
+end
 local sequence=redis.call("GET",KEYS[2])
 if not sequence or not string.match(sequence,"^[1-9][0-9]*$") or redis.call("HGET",KEYS[1],ARGV[1])~=ARGV[2] then return redis.error_reply("OWNER_UNKNOWN") end
 `

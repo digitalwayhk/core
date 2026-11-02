@@ -183,3 +183,10 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 ## v1.7.0 PostgreSQL 发布验证
 
 本轮整合主线v1.6.4后，真实三库同模型对照、PostgreSQL完整07/09验收、相关普通/race及发布候选契约均通过。07旧MySQL构造保留DSN字段及主线协议选择。SQLite ISO周桶和MySQL ManageStore连接寿命变化、消费方skill刷新及回退步骤见[v1.7.0说明](RELEASE_V1_7_0_2026-11-01.md)。Core本机结果不等于消费方升级；Bitzoom等外部消费方smoke仍为NOT_RUN。
+
+## v1.8.0持续归属动态key
+
+- 默认固定声明、普通消息和普通WS：沿用旧配置；动态字段nil的JSON和Fingerprint有精确兼容回归。
+- 显式动态声明：受信应用运行期登记；仅支持声明完整动态能力的Provider。新持久目录不能让旧固定声明混跑或直接回退。
+- 固定scope迁移：停稳实际回调后，使用正式MigrateOwnershipKeys及SQL正下界，保留消息/PEL/游标/sequence/fence/WS会话。
+- Core真实Redis/MySQL/多进程/mTLS/WS验收与消费方功能、UAT、Full-E4容量分别交付；消费方未接入部分为NOT_RUN。

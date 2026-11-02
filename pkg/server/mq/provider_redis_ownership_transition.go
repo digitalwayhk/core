@@ -19,11 +19,11 @@ func (r *RedisStreamProvider) ownershipTransitionSnapshot(ctx context.Context, m
 	seen := map[string]bool{}
 	for _, subject := range m.Subjects {
 		key := r.streamKey(subject)
-		pending, err := r.client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: key, Group: m.Group, Start: "-", End: "+", Count: m.Window + 1}).Result()
+		pending, err := r.client.XPendingExt(ctx, &redis.XPendingExtArgs{Stream: key, Group: m.Group, Start: "-", End: "+", Count: m.PendingWindow() + 1}).Result()
 		if err != nil {
 			return "", nil, err
 		}
-		if int64(len(pending)) > m.Window {
+		if int64(len(pending)) > m.PendingWindow() {
 			return "", nil, ownership.ErrBusy
 		}
 		row := redisOwnershipTransitionPending{Stream: key, IDs: []string{}}

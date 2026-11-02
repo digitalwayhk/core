@@ -29,7 +29,7 @@ func (r *RedisStreamProvider) RecoverOwnership(ctx context.Context, m ownership.
 	for _, key := range m.Keys {
 		keys = append(keys, r.ownershipLease(m.Scope, key))
 	}
-	return ownershipRedisError(redis.NewScript(`
+	return ownershipRedisError(redis.NewScript(redisOwnershipDynamicNoLeases+`
 if redis.call("HGET",KEYS[1],"fingerprint")~=ARGV[1] or redis.call("HGET",KEYS[1],"enabled")~="1" then return redis.error_reply("OWNER_UNKNOWN") end
 local last=2+tonumber(ARGV[4])
 for i=3,last do if redis.call("GET",KEYS[i])~=ARGV[2] then return redis.error_reply("OWNER_MODE_CONFLICT") end end

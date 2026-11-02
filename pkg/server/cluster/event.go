@@ -59,8 +59,10 @@ type CrossNodeNoticeBroker struct {
 	stopMu  sync.Mutex
 
 	// localSubs tracks this node's own subscriptions (for drain).
-	localSubsMu sync.RWMutex
-	localSubs   map[string]map[uint64]bool // routePath -> hash set
+	localSubsMu  sync.RWMutex
+	localSubs    map[string]map[uint64]bool // routePath -> hash set
+	replayMu     sync.Mutex
+	replayCursor int
 }
 
 // NewCrossNodeNoticeBroker creates a broker backed by the given provider.

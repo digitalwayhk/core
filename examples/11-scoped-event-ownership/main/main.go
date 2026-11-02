@@ -28,6 +28,14 @@ func main() {
 	if addr == "" || prefix == "" {
 		panic("必须显式提供演示Redis地址及隔离前缀")
 	}
+	manifest := contract.Manifest()
+	if os.Getenv("CORE_DEMO11_DYNAMIC_KEYS") == "1" {
+		manifest = contract.DynamicManifest()
+	}
+	if os.Getenv("CORE_DEMO11_FIXED_SINGLE_KEY") == "1" {
+		manifest.Keys = []string{"A"}
+		manifest.MaxMessageBytes = 64 << 10
+	}
 	if role == "prepare" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -36,10 +44,10 @@ func main() {
 			panic("无法连接显式演示Redis")
 		}
 		defer p.Close()
-		if err := p.ProvisionOwnership(ctx, contract.Manifest(), 0); err != nil {
+		if err := p.ProvisionOwnership(ctx, manifest, 0); err != nil {
 			panic(err)
 		}
-		if err := p.BindOwnership(ctx, contract.Manifest()); err != nil {
+		if err := p.BindOwnership(ctx, manifest); err != nil {
 			panic(err)
 		}
 		return
@@ -68,6 +76,7 @@ func main() {
 		}
 	}
 	s := &demo.Service{Runtime: business.New(models.NewStore(&sql)), Worker: role == "worker", MaxOwned: maxOwned}
+	s.Runtime.Manifest = manifest
 	cfg := config.NewServiceDefaultConfig(contract.ServiceName, 50111)
 	cfg.Host = "127.0.0.1"
 	cfg.DataCenterID = 2

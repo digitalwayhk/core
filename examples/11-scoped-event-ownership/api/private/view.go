@@ -35,7 +35,7 @@ func (v *View) Validation(req types.IRequest) error {
 	if uid, _ := req.GetUser(); uid != "" {
 		v.userID = uid
 	}
-	if v.userID != "A" && v.userID != "B" {
+	if !v.runtime.AllowsKey(v.userID) {
 		return types.NewPublicError(types.ErrorKindValidation, 0, "请用演示用户A或B登录", nil)
 	}
 	return nil

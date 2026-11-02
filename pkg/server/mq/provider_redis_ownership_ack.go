@@ -9,6 +9,7 @@ import (
 )
 
 const redisOwnedBatchGuard = redisOwnershipCredentialGuard + `
+if redis.call("HGET",KEYS[1],"fingerprint")~=ARGV[12] then return redis.error_reply("OWNER_UNKNOWN") end
 if redis.call("HGET",KEYS[3],"ready")~="1" then return redis.error_reply("OWNER_NOT_READY") end
 for i=4,#KEYS,2 do
  if redis.call("GET",KEYS[i])~=ARGV[8] then return redis.error_reply("OWNER_MODE_CONFLICT") end
@@ -44,7 +45,7 @@ func (r *redisOwnedReader) batchArguments(c ownership.Credential, messages []*Me
 	if err != nil {
 		return nil, nil, err
 	}
-	args := append(ownershipCredentialArgs(c), ownedRedisMarker(r.options.Manifest), r.options.Manifest.Group, r.subscribeOptions().Consumer, string(data))
+	args := append(ownershipCredentialArgs(c), ownedRedisMarker(r.options.Manifest), r.options.Manifest.Group, r.subscribeOptions().Consumer, string(data), r.options.Manifest.Fingerprint())
 	return keys, args, nil
 }
 

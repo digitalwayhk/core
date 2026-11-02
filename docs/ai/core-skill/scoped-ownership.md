@@ -54,7 +54,7 @@ Core不能判断应用是否真的提交、不能强杀任意Go回调或已发�
 
 默认 lease15s、renew3s、poll250ms、execution30s、stall45s、observation15s。执行超时撤销单key，仍等实际回调退出；有工作而停滞、观测持续未知或续租失败可撤销；真实空闲不换主。单key失败后本实例冷却Stall时长，让其他有空余容量的实例接管。无副本有空余容量时不能承诺接管时延。
 
-默认 MaxOwned4、每subject原组W=8、MaxBatch8、每条编码后MQ data 1MiB。上限：64个owner worker/Runtime、16个subject、256个显式key、W/Batch各1024、每条16MiB、每key引用4096；ServiceContext最多64个scope（终态资源名不重复注册）。Gateway最多1024条语义引用，Provider命名空间最多1024个活跃Gateway。声明目录和预算冻结，不支持在线增删key、改Selector或原地改W；不提供自动均匀再平衡，部署必须让总归属槽位覆盖键目录。
+默认 MaxOwned4、每subject原组W=8、MaxBatch8、每条编码后MQ data 1MiB。上限：64个owner worker/Runtime、16个subject、256个显式key、W/Batch各1024、每条16MiB、每key引用4096；ServiceContext最多64个scope（终态资源名不重复注册）。Gateway最多1024条语义引用，Provider命名空间最多1024个活跃Gateway。固定模式声明目录和预算冻结；v1.8.0可显式使用DynamicKeys追加目录实例，但仍不支持删除key、改Selector或原地改W；不提供自动均匀再平衡，部署必须让总归属槽位覆盖键目录。
 
 每subject整个group共享W；某key占满W时窗口后方其他key会背压，不能用无限预取越过它。批次取原OrderingKey最早可执行前缀；同OrderingKey即使跨scope key也不能越序。各subject之间**没有全局用户顺序**。资源预算必须同时考虑MaxOwned、批次、窗口、消息字节及JSON解码开销，不能只看CPU或只调大并发。
 
@@ -63,3 +63,13 @@ Core不能判断应用是否真的提交、不能强杀任意Go回调或已发�
 Redis缺失/损坏元数据fail closed，不补0。显式 `RecoverOwnership(ctx,m,positiveSQLFloor)` 只在停止并重建全部owner运行时、确认旧SQL/远端调用退出后使用；要求原声明、原scope模式、所有租约缺失，保留大于floor的现有序列。floor须核对该范围所有SQL fence的最大epoch，后续新epoch严格更高。它只恢复缺失或提升有效序列，不修复损坏值/丢失manifest，也不构成Redis HA共识或防止所有持久副本同时回退。应用SQL仍负责拒绝回退epoch。
 
 回退先停稳新消费者及真实回调，再 `UnbindOwnership`，恢复原shared/W标记后启动旧版；不删除标记、组、PEL或跳游标。不能让不同版本混跑同一组。迁移必须由消费方签收，Core本地验收不代替Bitzoom UAT或生产容量结果。
+
+## v1.8.0：显式动态key目录
+
+固定`DynamicKeys=nil`保留旧JSON/Fingerprint与W。非nil开启追加模式，Keys必须空；`DynamicKeyPolicy`与scope/service/group/subject/selector/预算冻结在指纹中，运行期用`ServiceContext.RegisterOwnedKey(ctx, manifest, key)`受信幂等登记。应用先核验合法不透明key；普通消息、Gateway和WS输入不得隐式注册。成功不是Ready，仍需原Activate→应用SQLfence→Restore→Ready，槽位不足可持续未Ready。
+
+MaxKeys默认/上限256；PageSize默认min(32,MaxKeys)，每发现间隔至多一页；RefreshInterval默认250ms且受Runtime Poll约束。未登记预留U默认原W、上限1024，动态总PEL硬限W+U，登记处理仍只用W。原子读取核对PEL/原游标/权威目录后分别计费；原消息/ID/组/OrderingKey/业务幂等不变，未知前序不ACK、不复制，不让后续同ordering key越过。无关key只在有限预算内前进，U或总预算用尽仍背压。CapacityBlocked区分有效但看不全的窗口和真正元数据未知，不能把-1改成0；真正sequence/目录损坏仍fail closed。
+
+固定→动态必须停稳全部旧回调、核对正SQL最大fence下界，通过`MQManager.MigrateOwnershipKeys(ctx, from, to, floor)`原子保全迁移。不能改Manifest后调用Provision覆盖，不能新旧混跑，不提供自动降回固定目录；原pending、游标、sequence和SQLfence保留。Unbind/Recover会检查所有动态登记key的活动租约。NATS或只声明固定归属的Provider明确拒绝动态模式。
+
+归属Gateway在已有3s引用心跳中从当前会话索引有界重放正式订阅摘要，补新进程/同地址peer的中继索引；退订与关闭不复活会话，认证边界不变。owner Ready不等于异步中继索引已收敛，更不等于业务消息已持久完成。完整接入、预算/迁移与回退边界见[动态key指南](../../codex/OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。

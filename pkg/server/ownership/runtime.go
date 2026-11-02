@@ -3,6 +3,7 @@ package ownership
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -11,19 +12,28 @@ import (
 
 // Runtime 管理固定上限的归属worker；不是应用侧调度器。
 type Runtime struct {
-	store    Store
-	options  Options
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
-	active   atomic.Int64
-	ready    atomic.Int64
-	inflight atomic.Int64
-	acquired atomic.Uint64
-	revoked  atomic.Uint64
-	unknown  atomic.Uint64
-	statusMu sync.RWMutex
-	status   map[string]*runtimeKeyProgress
+	store                  Store
+	options                Options
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	active                 atomic.Int64
+	ready                  atomic.Int64
+	inflight               atomic.Int64
+	acquired               atomic.Uint64
+	revoked                atomic.Uint64
+	unknown                atomic.Uint64
+	directoryErrors        atomic.Uint64
+	directoryKeys          atomic.Int64
+	renewFailures          atomic.Uint64
+	executionRevocations   atomic.Uint64
+	observationRevocations atomic.Uint64
+	stalledRevocations     atomic.Uint64
+	activationFailures     atomic.Uint64
+	restoreFailures        atomic.Uint64
+	restoreNanos           atomic.Uint64
+	statusMu               sync.RWMutex
+	status                 map[string]*runtimeKeyProgress
 }
 
 // StartRuntime 校验合同并启动有限归属工作者。
@@ -34,6 +44,11 @@ func StartRuntime(ctx context.Context, store Store, options Options) (*Runtime, 
 	}
 	if store == nil || options.InstanceID == "" || options.SessionID == "" || options.MaxOwned <= 0 || options.MaxOwned > 64 || options.Activate == nil || options.Step == nil || options.Observe == nil {
 		return nil, ErrUnknown
+	}
+	if options.Manifest.DynamicKeys != nil {
+		if _, ok := store.(KeyRegistry); !ok {
+			return nil, ErrUnsupported
+		}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	r := &Runtime{store: store, options: options, ctx: ctx, cancel: cancel, done: make(chan struct{}), status: map[string]*runtimeKeyProgress{}}
@@ -71,9 +86,27 @@ func (r *Runtime) run() {
 	running := map[string]bool{}
 	cooldown := map[string]time.Time{}
 	cursor := 0
+	keys := append([]string(nil), r.options.Manifest.Keys...)
+	directoryNext := 0
+	var refreshAt time.Time
 	ticker := time.NewTicker(r.options.Manifest.Timing.Poll)
 	defer ticker.Stop()
 	for r.ctx.Err() == nil {
+		if policy := r.options.Manifest.DynamicKeys; policy != nil && !time.Now().Before(refreshAt) {
+			probe, stop := context.WithTimeout(r.ctx, r.options.Manifest.Timing.Renew)
+			page, err := r.store.(KeyRegistry).ListKeys(probe, r.options.Manifest, directoryNext, policy.PageSize)
+			stop()
+			refreshAt = time.Now().Add(policy.RefreshInterval)
+			if err != nil {
+				r.directoryErrors.Add(1)
+			} else if page.Next != directoryNext+len(page.Keys) || page.Total > policy.MaxKeys || page.Next > page.Total {
+				r.directoryErrors.Add(1)
+			} else {
+				keys = append(keys, page.Keys...)
+				directoryNext = page.Next
+				r.directoryKeys.Store(int64(len(keys)))
+			}
+		}
 		for draining := true; draining; {
 			select {
 			case result := <-results:
@@ -85,8 +118,8 @@ func (r *Runtime) run() {
 				draining = false
 			}
 		}
-		for checked := 0; checked < len(r.options.Manifest.Keys) && len(running) < r.options.MaxOwned && r.ctx.Err() == nil; checked++ {
-			key := r.options.Manifest.Keys[cursor%len(r.options.Manifest.Keys)]
+		for checked := 0; checked < len(keys) && len(running) < r.options.MaxOwned && r.ctx.Err() == nil; checked++ {
+			key := keys[cursor%len(keys)]
 			cursor++
 			if running[key] || time.Now().Before(cooldown[key]) {
 				continue
@@ -156,7 +189,7 @@ func (r *Runtime) runKey(c Credential) (result error) {
 		defer stageSince.Store(0)
 		workCtx, stop := context.WithTimeout(ctx, r.options.Manifest.Timing.Execution)
 		defer stop()
-		timeout := time.AfterFunc(r.options.Manifest.Timing.Execution, func() { r.revoked.Add(1); cancel() })
+		timeout := time.AfterFunc(r.options.Manifest.Timing.Execution, func() { r.executionRevocations.Add(1); r.revoked.Add(1); cancel() })
 		defer timeout.Stop()
 		defer func() {
 			if recover() != nil {
@@ -170,6 +203,7 @@ func (r *Runtime) runKey(c Credential) (result error) {
 		return err
 	}
 	if err := stage(func(ctx context.Context) error { return r.options.Activate(ctx, c) }); err != nil {
+		r.activationFailures.Add(1)
 		return err
 	}
 	var revision int64
@@ -187,9 +221,13 @@ func (r *Runtime) runKey(c Credential) (result error) {
 			return nil
 		}
 		if r.options.Restore != nil {
+			started := time.Now()
 			if err := stage(func(ctx context.Context) error { return r.options.Restore(ctx, c, snapshot) }); err != nil {
+				r.restoreFailures.Add(1)
+				r.restoreNanos.Add(uint64(time.Since(started)))
 				return err
 			}
+			r.restoreNanos.Add(uint64(time.Since(started)))
 		}
 		revision = snapshot.Revision
 		return nil
@@ -258,6 +296,7 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		since := stageSince.Load()
 		if since > 0 && now.Sub(time.Unix(0, since)) >= timing.Execution {
 			r.revoked.Add(1)
+			r.executionRevocations.Add(1)
 			cancel()
 			return
 		}
@@ -270,7 +309,7 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		if since > 0 && observation.Delivered == 0 {
 			observation.Delivered = 1
 		}
-		if observation.Known() {
+		if observation.Known() || observation.CapacityBlocked {
 			lastKnown = time.Now()
 			if !observation.HasWork() {
 				lastProgress.Store(time.Now().UnixNano())
@@ -279,6 +318,11 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 			r.unknown.Add(1)
 		}
 		if err := observation.Check(time.Now(), time.Unix(0, lastProgress.Load()), lastKnown, timing); err != nil {
+			if errors.Is(err, ErrStalled) {
+				r.stalledRevocations.Add(1)
+			} else {
+				r.observationRevocations.Add(1)
+			}
 			r.revoked.Add(1)
 			cancel()
 			return
@@ -287,6 +331,7 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		err = r.store.Renew(renew, c, timing.Lease)
 		stop()
 		if err != nil {
+			r.renewFailures.Add(1)
 			r.revoked.Add(1)
 			cancel()
 			return

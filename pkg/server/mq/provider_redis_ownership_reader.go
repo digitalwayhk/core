@@ -12,29 +12,44 @@ import (
 )
 
 type redisOwnedReader struct {
-	provider *RedisStreamProvider
-	options  OwnedReliableOptions
-	handler  func(context.Context, ownership.Credential, []*Message) error
-	metrics  *redisReliableSubscriptionMetrics
-	mu       sync.Mutex
-	cursors  map[string]int
-	inflight map[string]int64
+	provider      *RedisStreamProvider
+	options       OwnedReliableOptions
+	handler       func(context.Context, ownership.Credential, []*Message) error
+	metrics       *redisReliableSubscriptionMetrics
+	mu            sync.Mutex
+	cursors       map[string]int
+	inflight      map[string]int64
+	directoryMu   sync.Mutex
+	directory     map[string]bool
+	directoryNext int
+	directoryAt   time.Time
 }
 
 func newRedisOwnedReader(p *RedisStreamProvider, o OwnedReliableOptions, h func(context.Context, ownership.Credential, []*Message) error, m *redisReliableSubscriptionMetrics) *redisOwnedReader {
-	return &redisOwnedReader{provider: p, options: o, handler: h, metrics: m, cursors: map[string]int{}, inflight: map[string]int64{}}
+	known := map[string]bool{}
+	for _, key := range o.Manifest.Keys {
+		known[key] = true
+	}
+	return &redisOwnedReader{directory: known, provider: p, options: o, handler: h, metrics: m, cursors: map[string]int{}, inflight: map[string]int64{}}
 }
 func (r *redisOwnedReader) subscribeOptions() ReliableSubscribeOptions {
-	return ReliableSubscribeOptions{Group: r.options.Manifest.Group, Consumer: r.options.InstanceID + ":" + r.options.SessionID, SharedKeys: true, KeyConcurrency: 1, Count: r.options.Manifest.Window, scopeMarker: ownedRedisMarker(r.options.Manifest), scopeMessageLimit: r.options.Manifest.MaxMessageBytes}
+	return ReliableSubscribeOptions{Group: r.options.Manifest.Group, Consumer: r.options.InstanceID + ":" + r.options.SessionID, SharedKeys: true, KeyConcurrency: 1, Count: r.options.Manifest.PendingWindow(), scopeMarker: ownedRedisMarker(r.options.Manifest), scopeMessageLimit: r.options.Manifest.MaxMessageBytes}
 }
 
 func (r *redisOwnedReader) subjectMessages(ctx context.Context, subject string, read bool) ([]redis.XMessage, error) {
 	p := r.provider
 	m := r.options.Manifest
 	options := r.subscribeOptions()
+	if err := r.refreshDirectory(ctx); err != nil {
+		return nil, err
+	}
+	budget := m.PendingWindow()
 	key := p.streamKey(subject)
+	if m.DynamicKeys != nil {
+		return r.dynamicSubjectMessages(ctx, subject, read)
+	}
 	scanStarted := time.Now()
-	rows, _, err := p.claimReliableKeyed(ctx, key, subject, options, "0-0", m.Window)
+	rows, _, err := p.claimReliableKeyed(ctx, key, subject, options, "0-0", budget)
 	if err != nil {
 		return nil, ownershipRedisError(err)
 	}
@@ -47,9 +62,9 @@ func (r *redisOwnedReader) subjectMessages(ctx context.Context, subject string, 
 		if err != nil {
 			return nil, err
 		}
-		if pending.Count < m.Window {
+		if pending.Count < budget {
 			readStarted := time.Now()
-			entries, err := p.readReliableKeyed(ctx, key, subject, options, m.Window-pending.Count)
+			entries, err := p.readReliableKeyed(ctx, key, subject, options, min(m.Window, budget-pending.Count))
 			if err != nil && !errors.Is(err, redis.Nil) {
 				return nil, ownershipRedisError(err)
 			}
@@ -64,7 +79,7 @@ func (r *redisOwnedReader) subjectMessages(ctx context.Context, subject string, 
 				}
 				// 其他实例可能在首次PEL扫描与新读取之间推进游标；新读取只预取，
 				// 必须重新扫描最早PEL，不能直接准入本次返回的后序消息。
-				rows, _, err = p.claimReliableKeyed(ctx, key, subject, options, "0-0", m.Window)
+				rows, _, err = p.claimReliableKeyed(ctx, key, subject, options, "0-0", budget)
 				if err != nil {
 					return nil, ownershipRedisError(err)
 				}
@@ -81,13 +96,16 @@ func (r *redisOwnedReader) selectMessages(subject, key string, rows []redis.XMes
 
 // 调度只准入最早前缀；观测必须连同被前序阻挡的工作一起计数。
 func (r *redisOwnedReader) mapMessages(subject, key string, rows []redis.XMessage, ordered bool) ([]*Message, error) {
-	known := map[string]bool{}
-	for _, key := range r.options.Manifest.Keys {
-		known[key] = true
+	r.directoryMu.Lock()
+	known := make(map[string]bool, len(r.directory))
+	for k, v := range r.directory {
+		known[k] = v
 	}
+	r.directoryMu.Unlock()
 	orderingScopes := map[string]string{}
 	blocked := map[string]bool{}
 	result := make([]*Message, 0, len(rows))
+	registered := int64(0)
 	for _, row := range rows {
 		ordering := string(redisMessageData(row.Values["ordering_key"]))
 		if ordering == "" {
@@ -95,13 +113,24 @@ func (r *redisOwnedReader) mapMessages(subject, key string, rows []redis.XMessag
 		}
 		msg := &Message{ID: row.ID, Subject: subject, Data: redisMessageData(row.Values["data"]), Ack: func() error { return errors.New("ownership: ack only after batch success") }}
 		scopeKey, err := r.options.Key(msg)
-		if err != nil || !known[scopeKey] {
+		if err != nil || scopeKey == "" {
 			return nil, ownership.ErrUnknown
+		}
+		if !known[scopeKey] {
+			r.metrics.unregistered.Add(1)
+			if ordered {
+				blocked[ordering] = true
+			}
+			continue
+		}
+		registered++
+		if ordered && registered > r.options.Manifest.Window {
+			continue
 		}
 		if previous, ok := orderingScopes[ordering]; ordered && ok && previous != scopeKey {
 			blocked[ordering] = true
 		}
-		if blocked[ordering] {
+		if ordered && blocked[ordering] {
 			continue
 		}
 		orderingScopes[ordering] = scopeKey
@@ -184,6 +213,9 @@ func (r *redisOwnedReader) observe(ctx context.Context, c ownership.Credential) 
 		}
 		if pending.Count > int64(len(rows)) {
 			o.Delivered = -1
+			if m.DynamicKeys != nil {
+				o.CapacityBlocked = true
+			}
 		} else if o.Delivered >= 0 {
 			o.Delivered += int64(len(selected))
 		}
@@ -204,8 +236,8 @@ func (r *redisOwnedReader) observe(ctx context.Context, c ownership.Credential) 
 		if err != nil {
 			return o, err
 		}
-		if int64(len(unread)) > m.Window {
-			visible, err := r.mapMessages(subject, c.Key, unread[:m.Window], false)
+		if int64(len(unread)) > m.PendingWindow() {
+			visible, err := r.mapMessages(subject, c.Key, unread[:m.PendingWindow()], false)
 			if err != nil {
 				return o, err
 			}
@@ -213,6 +245,9 @@ func (r *redisOwnedReader) observe(ctx context.Context, c ownership.Credential) 
 				o.WorkVisible = true
 			}
 			o.Unread = -1
+			if m.DynamicKeys != nil {
+				o.CapacityBlocked = true
+			}
 		} else {
 			selected, err := r.mapMessages(subject, c.Key, unread, false)
 			if err != nil {
@@ -242,4 +277,38 @@ func (r *redisOwnedReader) observe(ctx context.Context, c ownership.Credential) 
 		o.Due = due
 	}
 	return o, nil
+}
+
+// refreshDirectory 每个发现间隔至多读一页；消息分类不逐条轮询整份目录。
+func (r *redisOwnedReader) refreshDirectory(ctx context.Context) error {
+	policy := r.options.Manifest.DynamicKeys
+	if policy == nil {
+		return nil
+	}
+	r.directoryMu.Lock()
+	defer r.directoryMu.Unlock()
+	if time.Now().Before(r.directoryAt) {
+		return nil
+	}
+	store, err := r.provider.OwnershipStore(ctx)
+	if err != nil {
+		return err
+	}
+	registry, ok := store.(ownership.KeyRegistry)
+	if !ok {
+		return ownership.ErrUnsupported
+	}
+	page, err := registry.ListKeys(ctx, r.options.Manifest, r.directoryNext, policy.PageSize)
+	if err != nil {
+		return err
+	}
+	if page.Next != r.directoryNext+len(page.Keys) || page.Next > page.Total || page.Total > policy.MaxKeys {
+		return ownership.ErrUnknown
+	}
+	for _, key := range page.Keys {
+		r.directory[key] = true
+	}
+	r.directoryNext = page.Next
+	r.directoryAt = time.Now().Add(policy.RefreshInterval)
+	return nil
 }

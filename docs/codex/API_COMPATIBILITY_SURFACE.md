@@ -212,3 +212,7 @@ SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（Loc
 ## PostgreSQL 加性存储扩展
 
 新增 types.StorageConfig、IAggregateAction 和 oltp.NewDataAction/NewPostgres；IDataAction 必选方法及既有构造器不变。ManageStore 加性接受 postgres 和 TLS/TimeZone 配置；默认 SQLite 及旧库名不变。唯一冲突包含 PostgreSQL SQLSTATE 23505，继续返回409并保留cause。GetSyncPoolKey 文本改为不透明存储身份，不作为业务键持久化。统计旧 Dialect 提示不匹配时明确拒绝；SQLite 周桶修正为 ISO 周年。消费方真实升级仍需自身 smoke。
+
+## v1.8.0动态持续归属（加性）
+
+新增`ownership.DynamicKeyPolicy`、`Manifest.DynamicKeys/PendingWindow`、`KeyPage/KeyRegistry`；新增`mq.DynamicOwnedReliableMQProvider`、Provider/Manager的`RegisterOwnershipKey/MigrateOwnershipKeys`及`ServiceContext.RegisterOwnedKey`。旧OwnedReliableMQProvider接口未扩方法，默认固定模式JSON/Fingerprint保持；仅固定能力Provider明确拒绝动态合同。Observation新增CapacityBlocked区分有效有限观察。CrossNodeNoticeBroker.ReplayLocalSubscriptions只由既有归属Gateway心跳复用，不改WS协议或认证。状态迁移与旧版本回退限制见[指南](OWNERSHIP_DYNAMIC_KEYS_GUIDE.md)。

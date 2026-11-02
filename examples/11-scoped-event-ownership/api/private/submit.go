@@ -30,7 +30,7 @@ func (s *Submit) Parse(req types.IRequest) error { return req.Bind(s) }
 // Validation 仅支持两演示主题和用户。
 func (s *Submit) Validation(req types.IRequest) error {
 	uid, _ := req.GetUser()
-	if (uid != "A" && uid != "B") || s.Subject < 0 || s.Subject > 1 {
+	if !s.runtime.AllowsKey(uid) || s.Subject < 0 || s.Subject > 1 {
 		return types.NewPublicError(types.ErrorKindValidation, 0, "需要演示用户A/B和主题0/1", nil)
 	}
 	return nil
