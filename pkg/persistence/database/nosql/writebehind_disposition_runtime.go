@@ -22,6 +22,7 @@ type writeBehindDispositionJob[T types.IModel] struct {
 type writeBehindDispositionRuntime[T types.IModel] struct {
 	activeIDs    sync.Map // 仅固定worker持有，至多HandlerWorkers项
 	activeGroups sync.Map
+	causes       writeBehindCauseRetention
 	storageMu    sync.Mutex // 仅串行本prefix本地元数据提交，不跨target/处置回调持锁
 	policy       WriteBehindFailurePolicy
 	handler      WriteBehindFailureHandler[T]
@@ -65,7 +66,7 @@ func (p *PrefixedBadgerDB[T]) UseWriteBehindWithFailureHandler(target WriteBehin
 		return ErrWriteBehindAlreadyBound
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	rt := &writeBehindDispositionRuntime[T]{policy: *policy, handler: handler, ctx: ctx, cancel: cancel, jobs: make(chan writeBehindDispositionJob[T], policy.HandlerWorkers)}
+	rt := &writeBehindDispositionRuntime[T]{policy: *policy, handler: handler, ctx: ctx, cancel: cancel, jobs: make(chan writeBehindDispositionJob[T], policy.HandlerWorkers), causes: writeBehindCauseRetention{limit: policy.ScanLimit}}
 	p.disposition = rt
 	err := p.bootstrapDispositions()
 	if err != nil {
@@ -221,7 +222,7 @@ func (p *PrefixedBadgerDB[T]) dispositionBudgetExhausted(r *WriteBehindFailureRe
 	return (policy.MaxAttempts > 0 && r.Attempts >= policy.MaxAttempts) || (policy.MaxElapsed > 0 && !r.FirstAttemptAt.IsZero() && now.Sub(r.FirstAttemptAt) >= policy.MaxElapsed)
 }
 
-func (p *PrefixedBadgerDB[T]) dispatchDisposition(r WriteBehindFailureRecord[T], cause error) {
+func (p *PrefixedBadgerDB[T]) dispatchDisposition(r WriteBehindFailureRecord[T]) {
 	rt := p.disposition
 	if p.IsClosed() {
 		return
@@ -254,9 +255,15 @@ func (p *PrefixedBadgerDB[T]) dispatchDisposition(r WriteBehindFailureRecord[T],
 		r.HandlerDeadline = now.Add(rt.policy.HandlerTimeout)
 		return p.saveDisposition(txn, &r)
 	})
-	if err != nil || r.State != WriteBehindHandling {
+	if err != nil {
 		return
 	}
+	if r.State != WriteBehindHandling {
+		rt.causes.forget(dispositionCauseIdentity(r))
+		return
+	}
+	// 以事务实际读回的身份取原链，旧通知不能把旧尝试证明套在新Unknown上。
+	cause := rt.causes.take(dispositionCauseIdentity(r))
 	select {
 	case rt.jobs <- writeBehindDispositionJob[T]{r, cause}:
 	case <-rt.ctx.Done():

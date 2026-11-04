@@ -14,6 +14,7 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 	var confirmedSnapshot *SyncQueueItem[T]
 	var finalState WriteBehindFailureState
 	var finalReason string
+	var finalCauseIdentity writeBehindCauseIdentity
 	err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
 		if e := ctx.Err(); e != nil {
 			return e
@@ -22,7 +23,7 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 		if e := dispositionRead(txn, p.dispositionPrefix()+"r:"+d.ID, &r); e != nil {
 			return e
 		}
-		defer func() { finalState = r.State; finalReason = r.Reason }()
+		defer func() { finalState = r.State; finalReason = r.Reason; finalCauseIdentity = dispositionCauseIdentity(r) }()
 		if d.ID == "" || d.Fingerprint != r.Fingerprint || !d.Version.Equal(r.Snapshot.UpdatedAt) {
 			return ErrWriteBehindDisposition
 		}
@@ -120,6 +121,7 @@ func (p *PrefixedBadgerDB[T]) applyDispositionDecision(ctx context.Context, d Wr
 		return p.saveDisposition(txn, &r)
 	})
 	if err == nil {
+		p.disposition.causes.forget(finalCauseIdentity)
 		switch finalState {
 		case WriteBehindPaused:
 			logx.Errorw("write_behind_disposition_paused", logx.Field("reason", finalReason))

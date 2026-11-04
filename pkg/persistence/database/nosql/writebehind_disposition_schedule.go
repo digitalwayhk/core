@@ -191,9 +191,12 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 		p.syncExecMu.Unlock()
 		p.recordSyncMetrics(confirmed, err, time.Since(started))
 		for _, r := range notify {
-			p.dispatchDisposition(r, err)
+			p.dispatchDisposition(r)
 		}
 	}()
+	if err = p.pruneDispositionCauses(); err != nil {
+		return
+	}
 	selected, notify, err = p.selectDispositionRound(limit)
 	if err != nil || len(selected) == 0 {
 		return
@@ -257,6 +260,18 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	}
 	n, notices, confirmationErr := p.commitDispositionResults(selected, success, err)
 	confirmed += n
+	// notices仅来自已提交的Unknown结果；仍须与原选批含BatchID的完整身份吻合。
+	if err != nil {
+		originals := make(map[string]writeBehindCauseIdentity, len(selected))
+		for _, r := range selected {
+			originals[r.ID] = dispositionCauseIdentity(r)
+		}
+		for _, r := range notices {
+			if original, ok := originals[r.ID]; ok && r.State == WriteBehindUnknown && original.matches(dispositionCauseIdentity(r)) {
+				p.disposition.causes.remember(original, err)
+			}
+		}
+	}
 	notify = append(notify, notices...)
 	err = errors.Join(err, confirmationErr)
 	return

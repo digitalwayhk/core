@@ -203,3 +203,8 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 ## v1.9.1空组迁移兼容补丁
 
 仅在当前Badger事务内点读组标记，已缺失时免除冗余历史Seek。API、配置、Group、StoreID/policy、terminal-history-v1格式及8条检查点边界不变。真实v1.9.0进程建卷后，候选硬杀/新PID续迁移，再由原v1.9.0进程复开验证同代卷兼容；更早有界格式迁入的单向限制不变。消费方业务、原卷维护完成、物理释放、Full-E4功能和容量仍由消费方独立验收，Core侧NOT_RUN。详见[专项记录](WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+
+
+## v1.10.0 有界同进程错误链（2026-11-04）
+
+Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Unknown/本地失败与新PID硬杀恢复单独取证。原UseWriteBehind/零配置不变；显式有界模式无需新增参数，cause引用按ScanLimit保留，新增三个低基数观测字段。格式/policy不变，可停稳后用v1.9.1重开同代卷，但原保留缺口仍存在；早于v1.9.0的格式迁移/回退门禁保持。增强不会自动解除旧paused或补造跨进程回滚证明。消费方接入、真实业务SQL、Full-E4恢复/UAT/容量均NOT_RUN；交付正式模块不代表消费方已升级。详见[范围与验收](WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。

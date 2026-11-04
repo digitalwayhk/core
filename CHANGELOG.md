@@ -6,11 +6,11 @@
 
 ### Added
 
-- 无。
+- 有界 write-behind 在固定回调背压时，按既有 ScanLimit 有限保留同进程当前尝试的原错误链；现有 disposition metrics 新增 CauseRetained/CauseCapacity/CauseOverflow。
 
 ### Changed
 
-- 无公开API、配置或存储格式变化；v1.9.0部分迁移卷沿用原检查点，原StoreID/policy及应用Group不变。
+- 无需新增配置，policy指纹、StoreID、持久格式、worker/queue、预算及顺序保护保持；溢出或重启缺证明仍保留原件并由应用保守处置，不自动恢复旧paused。v1.9.1同代卷兼容，v1.7.1旧卷的既有迁移边界不变。
 
 ### Deprecated
 
@@ -22,11 +22,37 @@
 
 ### Fixed
 
-- 有界终态首次导入在组标记已经不存在时免除跨块重复空组Seek和删除墓碑；点读属于当前事务最终写集，有标记仍保留精确范围核验，不弱化顺序、未解决原件、冲突/回滚和恢复保护。详见[修复记录](docs/codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+- 隔离一轮旧Unknown与新target错误，按ID/版本/指纹/target attempt/BatchID核验原错误归属；仅已提交Unknown可保留，旧证明不能用于新attempt或新版本。详见[验收与升级](docs/codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
 
 ### Security
 
-- 未新增外部入口、依赖或日志字段；原可靠刷盘与新旧格式门禁保持。
+- 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.10.0] - 2026-11-04
+
+### Added
+
+- 有界 write-behind 在固定回调背压时，按既有 ScanLimit 有限保留同进程当前尝试的原错误链；现有 disposition metrics 新增 CauseRetained/CauseCapacity/CauseOverflow。
+
+### Changed
+
+- 无需新增配置，policy指纹、StoreID、持久格式、worker/queue、预算及顺序保护保持；溢出或重启缺证明仍保留原件并由应用保守处置，不自动恢复旧paused。v1.9.1同代卷兼容，v1.7.1旧卷的既有迁移边界不变。
+
+### Deprecated
+
+- 无。
+
+### Removed
+
+- 无。
+
+### Fixed
+
+- 隔离一轮旧Unknown与新target错误，按ID/版本/指纹/target attempt/BatchID核验原错误归属；仅已提交Unknown可保留，旧证明不能用于新attempt或新版本。详见[验收与升级](docs/codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
+
+### Security
+
+- 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
 
 ## [v1.9.1] - 2026-11-03
 

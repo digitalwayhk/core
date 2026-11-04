@@ -242,3 +242,8 @@ go get github.com/digitalwayhk/core@<commit>
 
 
 空组迁移回归须覆盖同一非空应用Group的终态跨多个8条块：无标记与首块清标记用现有observer证明免除后续Seek；有标记+活跃/暂停/未知仍保留组及原件。真实事务验证删除后重加、快照缺失后并发新增标记的ErrConflict、读取错误、rollback/TooBig与检查点重开。v1.9.0精确源码进程建卷、候选在提交后SIGKILL、新PID续进度，再由v1.9.0新PID验证同代格式兼容。旧于v1.9.0的格式拒绝测试不能删除。性能使用固定可靠配置和真实组内删除/MVCC历史，准备期与迁移计时分离，Seek次数、CPU累计与墙钟分开；禁止把组件结果当现场两百万记录时限。详见[专项记录](../../codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+
+
+## 同进程延后错误链验收
+
+有界失败模式须以真实 ReliableWriteStore/Badger、32 不同组、2 worker/容量2队列的受控屏障先固定4份原类型/28份说明的RED，再确认手动与自动均32份原链。健康组在屏障期间确认，失败项pending/attempt保持；普通与race分别保留。覆盖同轮旧Unknown与新target错误隔离、每个绑定维度、旧attempt不能证明后次未知、未提交Unknown结果不保留证明、容量溢出失败关闭、处置与Close释放，以及真实硬杀/新PID原目录恢复无原链且不盲重调target。`CauseOverflow`计保留拒绝，不是丢原件；子进程入口SKIP不能替代实际父测试运行证明。旧RED的race无DATA RACE但断言失败必须记FAIL，不能改成PASS。详见[验收记录](../../codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。

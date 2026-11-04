@@ -251,6 +251,8 @@ bootstrap 可通过 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERA
 
 应用库保存完整原订单、同批未确认快照、稳定回执及`owned_unresolved`状态；不是APPLIED，不做补偿，不自动解除用户组屏障。StoreID及有限预算由应用明确配置，禁止和Core pending共用目录或只保存指向Core的引用。处理器的应用选择不代表Core默认认为所有SQL错误可重试/可丢弃。
 
+v1.10.0 无需改上述绑定方式：当前进程的 target 失败原链在固定队列背压时按 ScanLimit 条引用保留，绑定原记录/版本/指纹/target attempt/批次。查询 `runtimeStore.WriteBehindDispositionMetrics()` 的 CauseRetained/CauseCapacity/CauseOverflow 可核对保留及溢出；它们不是 payload bytes 或业务已提交数。应用只在真实证据充分时 Retry+NotCommitted，溢出或重启缺证明继续 Resolve/Pause；本例的独立持久接管仍不等于业务成功，不因拿到 error 类型就改变订单规则。无需加 worker 或应用缓存，不能以升级自动解除旧暂停。完整边界见[正式指南](../../docs/codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
+
 运行真实本地存储及资源链验收：
 
 ```bash

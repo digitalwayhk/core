@@ -6,6 +6,8 @@
 
 未知结果先确认；重试须应用明确确认原事务未提交，超时/一次 not found 不构成证明。接管须应用先幂等持久保存完整原件或独立引用，Core 后绑定原版本回执；`HandedOff` 不是 `IsSynced` 或 APPLIED，不自动解除组屏障。恢复/Release 核对原 ID、版本、指纹，不重置预算；旧决定不能 ACK 新版本。未解决失败历史不设TTL、不自动删除，禁止DeadKeys、清目录或吞错制造收敛；成功终态按[终态保留指南](../../codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)默认瘦身、有界回收，不能当永久审计。
 
+v1.10.0 对显式有界模式的当前进程原错误链按 `ScanLimit` 条引用保留，绑定原 ID/版本/指纹/target Attempts/BatchID；队满延后后仍交给同次尝试。保留成功只提供原 error，应用仍须验证业务证据。溢出不扩队列、不阻塞健康组；重启、无原 error 或 Unknown 本地提交失败不伪造类型。使用现有 disposition metrics 的 `CauseRetained/CauseCapacity/CauseOverflow` 核对引用预算，不能当精确 bytes。不要从 ErrorMessage 或旧 attempt 缓存推断 NotCommitted；详见[正式合同](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。无需新增参数，旧格式/预算不变，不会自动恢复旧 paused。
+
 同组只执行本 store 最早未解决版本，无关组有界轮转；不承诺跨副本/主题业务全局顺序。固定回调 worker 在原执行互斥之外，超时不等于实际退出，同组重试仍等待旧回调退出，不另开替代 goroutine。前缀冻结 policy，禁止旧二进制回退打开或删 mode 标记；消费方独立验收未知事务、业务顺序、接管及存量卷迁移。
 
 本地准入、排队和提交必须分开：`WriteAdmissionMetrics.Attempts/TotalDuration`是准入调用累计值；`BatchCommitMetrics.TotalQueueWaitDuration`按本地操作累计进入提交队列前至开始提交的等待，包含排队发送等待；`TotalCommitDuration`按批累计实际提交耗时。这些累计和SQL池`WaitDuration`都不是壁钟耗时，比较时按同一窗口取增量并检查进程/连接池重置。

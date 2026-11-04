@@ -134,7 +134,7 @@ type WriteBehindFailureRecord[T types.IModel] struct {
 	AuditBytes      int64     `json:",omitempty"` // 已占用的可选完整审计载荷预算
 }
 
-// WriteBehindFailure 是一次有界失败快照；当前进程可保留原Cause链，重启后Cause仅恢复持久错误说明。
+// WriteBehindFailure 是一次有界失败快照；本进程当前尝试的Cause按ScanLimit有限保留，溢出或重启只恢复说明。
 // 同一原子事务的未确认项可共同声明target范围，不要求应用编造逐条坏数据分类。
 type WriteBehindFailure[T types.IModel] struct {
 	Record          WriteBehindFailureRecord[T]
@@ -160,4 +160,7 @@ type WriteBehindDispositionMetrics struct {
 	BudgetExhausted                             int
 	HandlerActive, HandlerQueued, HandlerLimit  int
 	OldestWaitingAt                             time.Time
+	// CauseRetained/Capacity仅计未准入原错误引用；CauseOverflow为本进程拒绝新增保留的累计次数。
+	CauseRetained, CauseCapacity int
+	CauseOverflow                uint64
 }

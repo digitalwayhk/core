@@ -3359,6 +3359,7 @@ func (p *PrefixedBadgerDB[T]) CloseWithTimeout(waitTimeout, syncTimeout time.Dur
 		// 关闭 channel，通知 goroutine 退出
 		close(p.closeCh)
 		if p.disposition != nil {
+			p.disposition.causes.close()
 			p.disposition.cancel()
 		}
 

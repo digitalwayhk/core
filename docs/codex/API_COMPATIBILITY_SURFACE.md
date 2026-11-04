@@ -225,3 +225,10 @@ SyncMetrics加性增加ForegroundLocal、ConfirmationLocal、MetadataLocal（Loc
 
 
 v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿用v1.9.0的mode及记录/批次检查点，原卷直接续跑。只省掉不存在组标记的冗余Seek和删除墓碑；有标记的队列可见性、冲突/回滚和顺序核验不变。v1.9.0同代格式复开与更早版本拒绝分别由真实进程验证，见[记录](WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+
+
+## v1.10.0 同进程延后处置原错误链
+
+加性扩展现有 `WriteBehindDispositionMetrics`：`CauseRetained int`、`CauseCapacity int`、`CauseOverflow uint64`。查询入口和未启用错误契约不变，不新增 HTTP/方法/配置。`Cause` 在本进程成功保留时按 ID/Version/Fingerprint/Attempts/BatchID 精确交付；保留引用上限复用 ScanLimit，固定 worker/队列和全部持久预算保持。满容量、重启、无原 error 或本地 Unknown 提交失败只保留原件和说明，不假装有 typed 证明。
+
+无 policy 指纹、StoreID、卷格式、业务状态或 MQ 变化，v1.9.1 同代卷可停稳后回开，但旧版仍可能在队满时丢原链。v1.7.1 旧卷的 v1.9.0 单向格式升级边界不变。公开 API/配置/发布门禁与真实原件恢复分别验收，见[专项记录](WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。

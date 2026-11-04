@@ -40,7 +40,11 @@ JSON/YAML 为 `write_behind_failure` 下的 `store_id/max_attempts/max_elapsed/m
 
 尝试次数在调用 target **之前**持久预占；预占后崩溃可能消耗一次预算，但绝不多授予执行次数。进程在 target 返回或本地确认前退出，恢复 unknown，先交应用确认，不能盲调 target。旧 pending 首次启用时，历史次数/事务结果不可恢复，先标记 `legacy_outcome_unknown`；应用确认后才能重试，新预算从启用后计，不声称约束旧版本已经发生的次数。
 
-当前进程及时准入的回调可保留原错误链；排队恢复或跨进程后只能恢复持久错误说明，不能重建任意第三方错误的 Go 类型。应用不得只按错误字符串猜业务结论；原错误仍由同步调用返回，不能吞 error 换取排空。
+从 v1.10.0 起，当前进程中 target 已返回、且原记录 Unknown 结果已可靠提交的原错误链，可在固定回调队列背压时有界保留；只绑定该记录 ID、版本、指纹、target Attempts 和 BatchID，不能传给另一批旧 Unknown 或后次尝试。未准入引用上限复用既有 `ScanLimit`（1–65536），准入后移交原 job 并释放；固定 HandlerWorkers 和等容量队列保持，最多另有 2×HandlerWorkers 个在途/排队 job 引用。该上限计引用条数，不是任意 error 对象的精确内存字节预算。没有新增配置或 policy 指纹字段。
+
+超出保留上限时拒绝新增引用，不驱逐已有有效证明、不阻止健康组 target、不丢原件或补次数。后续回调仍能收到持久说明，但不能假装保留了原类型。`WriteBehindDispositionMetrics.CauseRetained/CauseCapacity/CauseOverflow` 分别表示未准入引用数/上限/本进程溢出累计次数，不等于错误消息数、失败 pending 或业务结果。每轮在既有 worker 内有界点读核对失效引用；成功处置、新 attempt 或批次失配、终态回收和 Close 不会把旧证明套给新身份，Close 清空引用并拒绝再保留。进程重启、保留溢出、本地 Unknown 事务未提交、target 没有原 error 时，只能恢复说明，不能重建任意第三方错误的 Go 类型。
+
+`Cause` 只是应用可核验的原错误链，不是 Core 对 SQL 回滚的认证。应用必须核对本次真实尝试和完整身份，缺证明时继续 Resolve/Pause；超时、一次 not found、错误文字或以前一次回滚不能证明后次没有提交。现有 `WriteBehindResult.RetryKeys/DeadKeys` 不携带未提交证明，`WriteBehindNotCommitted` 是应用输出的结论。原错误仍由同步调用返回，不能吞 error 换取排空。v1.9.1 及更早只保证及时准入，排队恢复可能丢原链；详见[增强验收与升级](WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
 
 ## 决策与恢复
 
