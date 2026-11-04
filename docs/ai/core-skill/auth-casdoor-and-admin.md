@@ -41,6 +41,22 @@ HTMLServer 为多服务同源开发视图在认证 URL 上追加 `service=<服�
 
 ## Casdoor 认证生命周期
 
+### 普通用户 Token 的展示 UID
+
+签名前 Hook 可将 `args.Claims` 断言为可选 `types.ITokenUIDMutator`，调用
+`SetTokenUID(publicID)` 设置 JWT `uid` 的展示值。编号必须来自服务端业务权威，不能相信请求自报编号。
+`IClaimsMutator` 原接口不变，`AddData("uid",...)` 仍被拒绝；Manage/ServerManage 禁止此设置。
+
+显式展示值与原始 UID 不同时，Core 在 Access/Refresh Token 中增加保留字段
+`auth_identity_uid` 保存原始认证 UID；`ValidateAccessToken`、`ValidateRefreshToken` 的 `UID` 与
+`Identity.UID`、`req.GetUser()`、秘密 Claim 加密、Casdoor 在线校验、撤销和 WS 继续使用原始 UID。
+原始 JWT Claims 中的 `uid` 才是展示值。刷新时仍执行 Hook，由业务权威重新确认展示编号。
+未调用该能力时 Token 格式和行为不变，既有无 `auth_identity_uid` 的 Token 继续验证。
+
+启用前必须先升级所有 Token 验证端，再部署调用此接口的签发端；旧 Core 不识别新身份字段，不能混用。
+回滚前停用展示签发并处理新格式会话，不允许仅回滚验证端。服务本地用户主键、Casdoor 原件和撤销存储无需迁移。
+测试与边界见 [展示 UID 验收](../../codex/TOKEN_DISPLAY_UID_2026-11-04.md)。
+
 - 前端先调用 `/api/casdoor?type=auth|manage` 获取对应 Casdoor 域配置和 `background_callback_url`；回调固定为 `/api/casdoor/callback`，不要再调用已删除的 `/api/callback`。
 - Auth 与 Manage 分别配置 Casdoor YAML、Client、Access/Refresh Secret 和 Webhook Secret，任何 Secret 都不得复用。框架通过 ServiceContext 持有 DomainClient，不使用 Casdoor 全局 SDK。
 - `casdoor.NewAuthHandler` 仅为公共 API 兼容保留并固定 fail closed，不得自行挂载。`TokenParseWithClient` 仅能解析原始 Casdoor JWT，解析成功不等于授权成功；生产请求必须经过 ServiceContext 注册的 Access Token、认证域、撤销世代和业务 Hook 完整链路。

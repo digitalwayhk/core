@@ -10,6 +10,12 @@ type IClaimsMutator interface {
 	AddData(key, value string)
 }
 
+// ITokenUIDMutator 允许签名前钩子设置普通用户 JWT 的展示 uid。
+// 可从 AuthHookArgs.Claims 断言获得；不改变原始认证身份、刷新或撤销键。
+type ITokenUIDMutator interface {
+	SetTokenUID(uid string) error
+}
+
 // ISecretClaimsMutator 允许认证钩子注入只能在服务端验签后读取的秘密 Claim。
 // 独立于 IClaimsMutator 以保持既有消费方实现的源码兼容。
 type ISecretClaimsMutator interface {

@@ -178,7 +178,7 @@ func fakeDomainForOrganization(organization string) fakeDomain {
 	return fakeDomain{}
 }
 
-func startLifecycleApp(t *testing.T) *lifecycleApp {
+func startLifecycleApp(t *testing.T, hooks ...types.IAuthHookProvider) *lifecycleApp {
 	t.Helper()
 	fake := newFakeCasdoor(t)
 	port := reservePort(t)
@@ -202,6 +202,9 @@ func startLifecycleApp(t *testing.T) *lifecycleApp {
 	require.NoError(t, cfg.Validate())
 
 	service := &lifecycleService{name: name}
+	if len(hooks) > 0 {
+		service.hook = hooks[0]
+	}
 	sc := router.NewServiceContextWithConfig(service, cfg)
 	sc.Router.AddServerRouters(release.Routers()...)
 	server, err := rest.NewServer(sc, true, false)
@@ -338,13 +341,21 @@ func (a *lifecycleApp) webhook(t *testing.T, authType, action, subject string, b
 	return envelope
 }
 
-type lifecycleService struct{ name string }
+type lifecycleService struct {
+	name string
+	hook types.IAuthHookProvider
+}
 
 func (s *lifecycleService) ServiceName() string { return s.name }
 func (s *lifecycleService) Routers() []types.IRouter {
 	return []types.IRouter{&publicProbe{service: s.name}, &privateProbe{service: s.name}, &manageProbe{service: s.name}}
 }
-func (*lifecycleService) OnAuth(context.Context, *types.AuthHookArgs) error        { return nil }
+func (s *lifecycleService) OnAuth(ctx context.Context, args *types.AuthHookArgs) error {
+	if s.hook != nil {
+		return s.hook.OnAuth(ctx, args)
+	}
+	return nil
+}
 func (*lifecycleService) OnCasdoorEvent(context.Context, types.CasdoorEvent) error { return nil }
 func (*lifecycleService) OnAuthRequest(_ context.Context, args types.AuthRequestArgs) error {
 	switch args.Identity.ProviderSubject {

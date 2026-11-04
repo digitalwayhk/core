@@ -6,6 +6,8 @@
 
 ### Added
 
+- 普通用户签名前 Hook 可通过可选 `ITokenUIDMutator.SetTokenUID` 设置展示用 JWT `uid`；原始认证身份由保留字段 `auth_identity_uid` 携带，既有接口不变。
+
 - 有界 write-behind 在固定回调背压时，按既有 ScanLimit 有限保留同进程当前尝试的原错误链；现有 disposition metrics 新增 CauseRetained/CauseCapacity/CauseOverflow。
 
 ### Changed
@@ -25,6 +27,8 @@
 - 隔离一轮旧Unknown与新target错误，按ID/版本/指纹/target attempt/BatchID核验原错误归属；仅已提交Unknown可保留，旧证明不能用于新attempt或新版本。详见[验收与升级](docs/codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
 
 ### Security
+
+- 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
 

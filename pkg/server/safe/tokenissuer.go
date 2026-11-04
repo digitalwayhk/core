@@ -71,6 +71,7 @@ var reservedTokenClaims = map[string]struct{}{
 	"auth_provider": {}, "provider_subject": {}, "auth_generation": {},
 	authAuthorityServiceClaim: {}, "args": {}, "secret_args": {},
 	manageTestIdentityClaim: {},
+	authIdentityUIDClaim:    {},
 	types.ManageRolesClaim:  {},
 }
 
@@ -80,7 +81,8 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 		return TokenPairResponse{}, err
 	}
 
-	accessClaims := baseTokenClaims(req.Claims.Uid, req.Claims.Uname, req.AuthType, "access", req.IssuedAt, req.AccessExpireSeconds)
+	accessClaims := baseTokenClaims(req.Claims.wireUID(), req.Claims.Uname, req.AuthType, "access", req.IssuedAt, req.AccessExpireSeconds)
+	addTokenIdentityUID(accessClaims, req.Claims)
 	for key, value := range req.Claims.Args {
 		accessClaims[key] = value
 	}
@@ -105,7 +107,8 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 		return response, nil
 	}
 
-	refreshClaims := baseTokenClaims(req.Claims.Uid, req.Claims.Uname, req.AuthType, "refresh", req.IssuedAt, req.RefreshExpireSeconds)
+	refreshClaims := baseTokenClaims(req.Claims.wireUID(), req.Claims.Uname, req.AuthType, "refresh", req.IssuedAt, req.RefreshExpireSeconds)
+	addTokenIdentityUID(refreshClaims, req.Claims)
 	addIdentityClaims(refreshClaims, req.Identity)
 	if req.ManageTestIdentity {
 		refreshClaims[manageTestIdentityClaim] = true
@@ -122,6 +125,12 @@ func IssueTokenPair(req TokenIssueRequest) (TokenPairResponse, error) {
 func validateTokenIssueRequest(req TokenIssueRequest) error {
 	if req.Claims == nil || req.Claims.Uid == "" {
 		return errors.New("颁发 Token 时 UID 不能为空")
+	}
+	if req.Claims.tokenUIDErr != nil {
+		return req.Claims.tokenUIDErr
+	}
+	if req.Claims.tokenUID != "" && req.AuthType != types.AuthTypeUser {
+		return errors.New("仅普通用户 Token 允许展示 UID")
 	}
 	if req.AuthType != types.AuthTypeUser && req.AuthType != types.AuthTypeManage && req.AuthType != types.AuthTypeServerManage {
 		return errors.New("颁发 Token 时认证类型无效")
@@ -252,6 +261,10 @@ func ValidateAccessToken(tokenString, secret string, expectedAuthType types.Auth
 	}
 
 	uid, _ := claims["uid"].(string)
+	uid, identityErr := tokenAuthenticationUID(claims, expectedAuthType, uid)
+	if identityErr != nil {
+		return nil, identityErr
+	}
 	username, _ := claims["uname"].(string)
 	authType, _ := claims["auth_type"].(string)
 	tokenUse, _ := claims["token_use"].(string)
@@ -318,6 +331,10 @@ func ValidateRefreshToken(tokenString, secret string, expectedAuthType types.Aut
 	}
 
 	uid, _ := claims["uid"].(string)
+	uid, identityErr := tokenAuthenticationUID(claims, expectedAuthType, uid)
+	if identityErr != nil {
+		return nil, identityErr
+	}
 	username, _ := claims["uname"].(string)
 	authType, _ := claims["auth_type"].(string)
 	tokenUse, _ := claims["token_use"].(string)

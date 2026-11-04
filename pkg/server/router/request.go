@@ -53,7 +53,7 @@ func getRequestInfo(r *http.Request, req *Request) {
 	}
 	req.clientIP = utils.ClientPublicIP(r, trustedProxies...)
 	ctext := r.Context()
-	obj := ctext.Value("uid")
+	obj := requestAuthenticationUID(ctext)
 	if obj != nil {
 		suid := obj.(string)
 		req.userID = suid
@@ -95,7 +95,7 @@ func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	ctext := r.Context()
 	uid := ""
 	uname := ""
-	obj := ctext.Value("uid")
+	obj := requestAuthenticationUID(ctext)
 	if obj != nil {
 		uid = obj.(string)
 	}
@@ -106,6 +106,14 @@ func getUserIDAndName(req *Request, r *http.Request) (string, string) {
 	req.userID = uid
 	req.userName = uname
 	return uid, uname
+}
+
+// requestAuthenticationUID 从框架已验签上下文读取原始身份；展示 uid 不参与服务端用户主键。
+func requestAuthenticationUID(ctx context.Context) interface{} {
+	if original := ctx.Value("auth_identity_uid"); original != nil {
+		return original
+	}
+	return ctx.Value("uid")
 }
 
 // NewRequest 路由接收到请求

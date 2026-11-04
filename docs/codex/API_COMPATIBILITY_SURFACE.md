@@ -13,6 +13,11 @@
 
 ## Go API
 
+新增可选 `types.ITokenUIDMutator.SetTokenUID(string) error`，由 `safe.Claims` 实现。
+普通用户显式设置后 JWT `uid` 可用于展示，保留字段 `auth_identity_uid` 维持认证身份。
+未设置时格式不变，旧令牌仍可验证；刷新/撤销/请求用户身份和秘密 Claim 使用原始 UID。
+所有验证端必须先升级，再启用新格式签发；详见 [展示 UID 升级边界](TOKEN_DISPLAY_UID_2026-11-04.md)。
+
 | 包或入口 | 级别 | Owner | 消费场景 | 当前证据 |
 | --- | --- | --- | --- | --- |
 | `pkg/server/types.IRouter`、`IRequest`、`IResponse`、`RouterInfo` | Stable | server/router | public/private/manage 路由、服务间调用 | `pkg/server/types/router.go`、`interface.go`、examples |

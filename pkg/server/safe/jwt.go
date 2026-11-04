@@ -27,6 +27,8 @@ type Claims struct {
 	secretErr   error
 	secretSizes map[string]int
 	manageRoles string
+	tokenUID    string
+	tokenUIDErr error
 }
 
 func NewClaims(userId string, username string) *Claims {
@@ -88,6 +90,12 @@ func (own *Claims) SetManageRoles(roles []types.ManageRoleRef) error {
 func (own *Claims) GetToken(secret string, expire int64) (string, error) {
 	if own == nil {
 		return "", errors.New("Claims 不能为空")
+	}
+	if own.tokenUIDErr != nil {
+		return "", own.tokenUIDErr
+	}
+	if own.tokenUID != "" {
+		return "", errors.New("展示 UID 必须使用 IssueTokenPair 签发")
 	}
 	if own.secretErr != nil {
 		return "", fmt.Errorf("秘密 Claim 无效: %w", own.secretErr)
