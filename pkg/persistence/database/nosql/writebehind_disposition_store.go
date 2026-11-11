@@ -62,6 +62,11 @@ func (p *PrefixedBadgerDB[T]) legacyDispositionCheck() error {
 }
 
 func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string, deferredGroups ...map[string]struct{}) (err error) {
+	return p.ensureDispositionSnapshot(txn, key, nil, deferredGroups...)
+}
+
+// ensureDispositionSnapshot复用仅当前实际事务内构造的独立新快照；nil保持全部旧入口的权威回读。
+func (p *PrefixedBadgerDB[T]) ensureDispositionSnapshot(txn *badger.Txn, key string, prepared *dispositionPreparedSnapshot[T], deferredGroups ...map[string]struct{}) (err error) {
 	rt := p.disposition
 	if rt == nil {
 		return nil
@@ -80,15 +85,27 @@ func (p *PrefixedBadgerDB[T]) ensureDispositionEntry(txn *badger.Txn, key string
 		}
 	}()
 	var snapshot SyncQueueItem[T]
-	if err = dispositionRead(txn, key, &snapshot); err != nil {
-		return err
+	if prepared != nil {
+		snapshot = *prepared.snapshot
+	} else {
+		if rt.snapshotReadObserver != nil {
+			rt.snapshotReadObserver()
+		}
+		if err = dispositionRead(txn, key, &snapshot); err != nil {
+			return err
+		}
 	}
 	if snapshot.IsSynced || snapshot.HandedOff {
 		return nil
 	}
-	b, err := json.Marshal(&snapshot)
-	if err != nil {
-		return err
+	var b []byte
+	if prepared != nil {
+		b = prepared.canonical
+	} else {
+		b, err = json.Marshal(&snapshot)
+		if err != nil {
+			return err
+		}
 	}
 	fp := dispositionHash(string(b))
 	id := dispositionHash(rt.policy.StoreID + "\x00" + p.prefix + "\x00" + key + "\x00" + fp)

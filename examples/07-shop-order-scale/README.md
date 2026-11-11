@@ -302,3 +302,7 @@ models 组合根支持 SHOP_ORDER_REMOTE_DRIVER=postgres，配合 SHOP_ORDER_REM
 ### 可选有界失败终态保留
 
 普通UseWriteBehind保持原行为。使用UseWriteBehindWithFailureHandler后，默认不额外保留每版本完整终态快照；未解决原件、原IsSyncAfterDelete和顺序屏障保持。07组合根可选设置Service.TerminalRetention（MaxAge/MaxRecords/MaxBytes均正），nil默认瘦身与有界回收，不增加业务worker。存量卷会建立格式门禁，不能让旧二进制回开；维护API及实际物理回收边界见[终态保留指南](../../docs/codex/WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
+
+## 同事务快照优化升级
+
+v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用；旧规范指纹/ID逐字保持，不支持类型或双JSON字节不等继续原路径。示例不增加配置或worker，原Save/SaveBatch及FailurePolicy/FailureHandler接线不变；普通UseWriteBehind不变。旧责任读取、失败预算、组前序、可靠刷盘、确认和IsSyncAfterDelete保持，不能据此保证现场下单P99。见[正式验证与接入说明](../../docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。

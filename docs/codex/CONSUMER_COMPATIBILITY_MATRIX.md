@@ -208,3 +208,7 @@ go test -exec=/usr/bin/true ./... -count=1 -timeout=15m
 ## v1.10.0 有界同进程错误链（2026-11-04）
 
 Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Unknown/本地失败与新PID硬杀恢复单独取证。原UseWriteBehind/零配置不变；显式有界模式无需新增参数，cause引用按ScanLimit保留，新增三个低基数观测字段。格式/policy不变，可停稳后用v1.9.1重开同代卷，但原保留缺口仍存在；早于v1.9.0的格式迁移/回退门禁保持。增强不会自动解除旧paused或补造跨进程回滚证明。消费方接入、真实业务SQL、Full-E4恢复/UAT/容量均NOT_RUN；交付正式模块不代表消费方已升级。详见[范围与验收](WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
+
+## v1.11.1 同事务新快照复用
+
+无公开API/配置/持久格式改变，原StoreID/policy及更早单向格式迁移门禁保持。Core合成同代卷旧路径→候选→旧路径及反向独立进程往返均PASS；真实Bitzoom/Full-E4接入、业务UAT与容量NOT_RUN，不能从组件结果推导。显式有界模式自动判断可复用类型，规范字节不等或自定义codec保持旧路径；原pending/attempt/组屏障及IsSyncAfterDelete不变。正式验证见[专项报告](WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。

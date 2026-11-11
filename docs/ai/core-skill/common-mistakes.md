@@ -2,6 +2,8 @@
 
 ## write-behind 失败处置
 
+- 同事务复用新wrapper时不能直接借可变Item/切片或用任意前台JSON算FP；只在独立快照的标准规范编码与实际写入字节一致时复用，其他情况走旧解码。自定义codec和TooBig子事务必须保持原件/身份边界。
+
 - 不把 `RetryKeys / DeadKeys` 当成可靠重试或删除授权；旧零配置仍可能无限重试，需要显式有限 policy 和应用 handler，不能让 Core 猜业务预算。
 - 不以超时、一次 not found 或回调返回 nil 推导原事务未提交；未知结果先确认。回调超时不等于原代码实际退出。
 - 接管不是 APPLIED、`IsSynced` 或顺序放行；回执先在应用独立事务持久保存并绑定原版本，同组屏障须应用明确 Release。

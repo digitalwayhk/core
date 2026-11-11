@@ -31,6 +31,9 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 	jobs         chan writeBehindDispositionJob[T]
 	// groupCheckObserver 仅供包内诊断同步观察实际核验；准备阶段设置，不改变写集或记录业务身份。
 	groupCheckObserver func(*badger.Txn, badger.IteratorOptions)
+	// snapshotReadObserver仅包内计数真实的新快照回读，准备期绑定，不输出业务标识。
+	snapshotReadObserver func()
+	snapshotCopy         dispositionValueCopy
 	// historyCommitObserver仅包内故障验收在事务提交前返回错误，不改变生产默认行为。
 	historyCommitObserver func(*badger.Txn) error
 	// selectionObserver仅在准备期绑定，观察实际NewIterator/Seek；nil时不采集时钟。
@@ -67,6 +70,7 @@ func (p *PrefixedBadgerDB[T]) UseWriteBehindWithFailureHandler(target WriteBehin
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &writeBehindDispositionRuntime[T]{policy: *policy, handler: handler, ctx: ctx, cancel: cancel, jobs: make(chan writeBehindDispositionJob[T], policy.HandlerWorkers), causes: writeBehindCauseRetention{limit: policy.ScanLimit}}
+	rt.snapshotCopy = dispositionCopyPlan(reflect.TypeFor[T](), make(map[reflect.Type]bool))
 	p.disposition = rt
 	err := p.bootstrapDispositions()
 	if err != nil {

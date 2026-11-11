@@ -247,3 +247,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## 同进程延后错误链验收
 
 有界失败模式须以真实 ReliableWriteStore/Badger、32 不同组、2 worker/容量2队列的受控屏障先固定4份原类型/28份说明的RED，再确认手动与自动均32份原链。健康组在屏障期间确认，失败项pending/attempt保持；普通与race分别保留。覆盖同轮旧Unknown与新target错误隔离、每个绑定维度、旧attempt不能证明后次未知、未提交Unknown结果不保留证明、容量溢出失败关闭、处置与Close释放，以及真实硬杀/新PID原目录恢复无原链且不盲重调target。`CauseOverflow`计保留拒绝，不是丢原件；子进程入口SKIP不能替代实际父测试运行证明。旧RED的race无DATA RACE但断言失败必须记FAIL，不能改成PASS。详见[验收记录](../../codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
+
+## 同事务快照优化回归
+
+新wrapper复用必须先用真实ReliableWriteStore/Badger的回读计数取得RED，再逐字对照旧规范JSON/FP/ID；自定义codec、字节不等、omitempty/null/time及同批同key回调快照隔离须覆盖。原件、改组、未知/旧确认、TooBig/回滚与清理/进程恢复不能只靠helper测试。固定最终二进制的多轮/持续对照必须与编译、回归和探索版分开，报告排空/短窗回退和分配未改善，不能只展示降低的P99。普通、race、同代卷双向独立进程验收及具体边界见[专项报告](../../codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。

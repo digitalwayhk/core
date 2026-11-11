@@ -131,3 +131,7 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 终态导入的`initializeTerminalRecordBlock`每8条一个实际事务，只能在该块内去重；同一应用组的历史跨块分布时，组标记早已删除仍可能反复Seek其队列历史。`deleteEmptyDispositionGroups`须在当前事务最终写集内先点查`g:<group>`：仅`ErrKeyNotFound`免除无效扫描，其他错误继续返回；标记存在时仍新建精确Prefix迭代器，只有实际空组才删除。不能跨事务缓存不存在，也不能因无标记确认业务成功、清pending或省略版本/指纹/前序核验。
 
 `PrefetchValues=false`不等于不解析队列项；Badger仍为可见性跳过组内删除/MVCC历史。精确Prefix保留，但不保证同组历史查询为常数成本。点读会看本事务pendingWrites；缺失快照读保留冲突依赖，本事务已有删除命中的分支不额外登记读依赖，原storageMu/BatchCommitter仍不可绕过。v1.9.1沿用v1.9.0的`terminal-history-v1:`和原检查点，可续跑部分迁移卷，不新增配置/API或重置进度。更早卷的单向迁移限制不变。组件性能与现场时限不可互推，见[空组迁移修复记录](../../codex/WRITE_BEHIND_EMPTY_GROUP_MIGRATION_2026-11-03.md)。
+
+## 新版本快照与双JSON兼容
+
+v1.11.1有界前台在本次实际事务内复用独立新快照：标准库规范编码与已经写入的pkg/json字节完全一致时，省去该版本的完整回读/解码，并复用规范编码计算原FP/ID。自定义codec/不支持类型或字节不一致继续原路径，不能直接hash任意前台JSON，也不能把可变模型/切片借给历史快照。旧原件、前序/attempt/实际组/目标屏障、回滚/TooBig子事务和恢复核验不可省略；无新参数、API或格式。FIFO及可靠提交后Save返回保持，不保证所有长尾消失。见[正式说明](../../codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。

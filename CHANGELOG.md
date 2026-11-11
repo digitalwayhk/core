@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- 有界ReliableWriteStore对同事务新wrapper保守复用独立快照，字节核验后免除重复完整回读/解码；原双JSON规范指纹、ID、失败原件与事务恢复保持。无需新配置，详见[验证](docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md).
+
 - 隔离一轮旧Unknown与新target错误，按ID/版本/指纹/target attempt/BatchID核验原错误归属；仅已提交Unknown可保留，旧证明不能用于新attempt或新版本。详见[验收与升级](docs/codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
 
 ### Security
@@ -31,6 +33,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.11.1] - 2026-11-11
+
+### Fixed
+
+- 有界可靠写的新wrapper在同一实际事务内复用独立快照及已核验规范字节，省去重复完整回读/解码。自定义codec/不支持类型或双JSON字节差异保留原路径；原FP/ID、前序/attempt/组、TooBig/回滚及恢复保护保持。
+
+### Changed
+
+- 无公开API、配置、依赖或卷格式变化，无需消费方开关；可靠刷盘及FIFO不变。持续窗口收益有范围，排空和部分短窗有回退，详见[完整验证](docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。Core组件结果不代表消费方UAT或容量。
 
 ## [v1.10.0] - 2026-11-04
 

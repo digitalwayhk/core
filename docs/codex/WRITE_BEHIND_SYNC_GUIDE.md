@@ -133,3 +133,13 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 ## 终态技术历史与物理回收
 
 有界失败模式默认只保留轻量终态，显式`WriteBehindTerminalRetention`提供有限额外完整审计。原版本确认、pending、IsSyncAfterDelete、hook=false与重启不补删的业务副本合同不变。存量技术历史在单向格式门禁下分页建立引用并安全回收；不能用PurgeLocal/Delete或删除prefix替代。逻辑分类与物理LSM/VLog分别核验；Admin.ReclaimStorage只做有限原生GC。完整API、参数、旧程序拒绝及维护步骤见[终态保留指南](WRITE_BEHIND_TERMINAL_RETENTION_GUIDE.md)。
+
+## 同事务新快照复用（v1.11.1）
+
+`ReliableWriteStore.Save/SaveBatch` 的有界前台路径已持有本次实际事务的新 wrapper。框架只对可证明默认 JSON 往返语义的字段构造独立快照，并以标准库编码与本次实际写入的 `pkg/json` 字节逐字核验；相同才省去该新版本的 `txn.Get + JSON Unmarshal`，复用已核验的规范编码计算原指纹/责任 ID。指纹不是改成对任意前台字节直接取 hash；规范编码本身、旧责任读取及责任记录写入编码仍然存在。
+
+自定义 JSON/Text codec、映射、接口、递归、字段冲突、不能证明匿名指针分配或双编码器字节不一致时保持旧回读流程。普通模型字段的指针/切片独立，忽略字段、omitempty、JSON null、UTF-8 和 time 的持久化归一化必须保持；回调不能因后续同 key Save 看到被覆盖的原件。没有跨事务对象缓存、业务特例、新 API、参数或格式。
+
+只优化当前 `ApplyWriteOperations` 构造的新版本；初次业务读取、旧责任/前序/attempt/组/target/指纹核验、启动恢复、导入兼容入口保持。回滚及 `ErrTxnTooBig` 子事务分别重建独立快照，不把失败事务的对象或计数发布出去。FIFO、storageMu、可靠提交后响应及原清理 hook 不变；本优化不消除调度、GC、Badger提交及后台确认竞争，不能承诺任意机器的 Save P99。
+
+升级不需要业务改代码或开关；原 StoreID/policy 和既有卷格式门禁保持。同代卷必须停稳实际在途操作后回退；更早格式的单向迁移限制不变，不得删 mode/pending/history。性能及真实回归见[专项记录](WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。

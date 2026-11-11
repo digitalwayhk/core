@@ -149,13 +149,14 @@ func (p *PrefixedBadgerDB[T]) applyWriteOperationBatch(
 			if !needSync {
 				continue
 			}
+			prepared := p.copyNewDispositionSnapshot(wrapper, data)
 			if _, exists := queued[key]; exists {
-				if err := p.ensureDispositionEntry(txn, key, groups); err != nil {
+				if err := p.ensureDispositionSnapshot(txn, key, prepared, groups); err != nil {
 					return err
 				}
 				continue
 			}
-			created, err := p.ensureSyncQueueEntry(txn, key, groups)
+			created, err := p.ensureSyncQueueSnapshot(txn, key, prepared, groups)
 			if err != nil {
 				return err
 			}

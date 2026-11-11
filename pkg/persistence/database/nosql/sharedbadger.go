@@ -560,7 +560,11 @@ func (p *PrefixedBadgerDB[T]) BatchInsert(items []*T) error {
 }
 
 func (p *PrefixedBadgerDB[T]) ensureSyncQueueEntry(txn *badger.Txn, dataKey string, deferredGroups ...map[string]struct{}) (bool, error) {
-	if err := p.ensureDispositionEntry(txn, dataKey, deferredGroups...); err != nil {
+	return p.ensureSyncQueueSnapshot(txn, dataKey, nil, deferredGroups...)
+}
+
+func (p *PrefixedBadgerDB[T]) ensureSyncQueueSnapshot(txn *badger.Txn, dataKey string, prepared *dispositionPreparedSnapshot[T], deferredGroups ...map[string]struct{}) (bool, error) {
+	if err := p.ensureDispositionSnapshot(txn, dataKey, prepared, deferredGroups...); err != nil {
 		return false, err
 	}
 	queueKey := []byte(p.syncQueueKey(dataKey))
