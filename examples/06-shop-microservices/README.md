@@ -160,3 +160,7 @@ docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml confi
 设置 SHOP_IDENTITY_ROOT、SHOP_GENERATOR_REDIS_ADDR、SHOP_GENERATOR_NAMESPACE、SHOP_GENERATOR_EPOCH 后，bootstrap 从独占持久身份卷恢复稳定实例；必须先离线初始化，默认演示仍是 legacy。步骤、崩溃恢复与迁移见 [指南](../../docs/codex/STABLE_INSTANCE_IDENTITY_GUIDE.md)。真实恢复回归为 `TestStableThreeProcessDiscoveryRecovery`：无通知删键、断网超过 TTL、readiness 503→200、mTLS 调用恢复、正常重启及退出不复活；不触碰共享 Redis。
 
 设置 `SHOP_ETCD_DISCOVERY_ENDPOINT` 可显式将三进程发现改为 etcd；发现命名空间仍用 `SHOP_REDIS_DISCOVERY_PREFIX`。事件和编号的 Redis 连接独立保留。对应真实断网回归为 `TestStableThreeProcessEtcdDiscoveryRecovery`，测试需提供独占 `CORE_TEST_ETCD_ADDR` 与 `CORE_TEST_REDIS_ADDR`。
+
+### Outbox 失败重试（v1.11.2）
+
+继续原 `sc.UseOutbox(...)` / `sc.UseOutboxWithOptions(...)`，无需新配置或业务 worker。健康满批持续时，临时失败的 OrderingKey 也会在既有 Interval 窗口获得重试资格；原前序未成功前不放行同 key 后继。Notify 每窗口最多提前一次，失败原件和批量确认幂等保持。无 SkipBlocked 且失败前缀占满窗口、屏障容量饱和或同批回调未退出时仍有背压边界，不保证固定延迟。[正式行为、验证和升级](../../docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。

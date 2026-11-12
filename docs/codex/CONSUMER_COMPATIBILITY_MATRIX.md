@@ -212,3 +212,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.11.1 同事务新快照复用
 
 无公开API/配置/持久格式改变，原StoreID/policy及更早单向格式迁移门禁保持。Core合成同代卷旧路径→候选→旧路径及反向独立进程往返均PASS；真实Bitzoom/Full-E4接入、业务UAT与容量NOT_RUN，不能从组件结果推导。显式有界模式自动判断可复用类型，规范字节不等或自定义codec保持旧路径；原pending/attempt/组屏障及IsSyncAfterDelete不变。正式验证见[专项报告](WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+## v1.11.2 Outbox 持续健康流下的失败重试
+
+原 UseOutbox/UseOutboxWithOptions 接线不变，无新配置、API 或卷格式。原 EventID/ShardKey、消息、组、PEL、游标及业务 Inbox 保持；不需要清 pending、重建消费组或补写业务事实。Notify 同窗口最多一次提前重试，其余按原 Interval；有限屏障饱和时背压。没有 SkipBlocked 且失败前缀占满窗口，以及未退出的同批回调，仍有进度边界。精确组件/进程/真实 Redis 普通和 race 结果与未运行项见[交付记录](OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。消费方接入、部署、功能/UAT/容量均 NOT_RUN；不把本节更新作为上表历史消费方 smoke 的替代。

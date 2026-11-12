@@ -306,3 +306,7 @@ models 组合根支持 SHOP_ORDER_REMOTE_DRIVER=postgres，配合 SHOP_ORDER_REM
 ## 同事务快照优化升级
 
 v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用；旧规范指纹/ID逐字保持，不支持类型或双JSON字节不等继续原路径。示例不增加配置或worker，原Save/SaveBatch及FailurePolicy/FailureHandler接线不变；普通UseWriteBehind不变。旧责任读取、失败预算、组前序、可靠刷盘、确认和IsSyncAfterDelete保持，不能据此保证现场下单P99。见[正式验证与接入说明](../../docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+### Outbox 失败重试（v1.11.2）
+
+继续原 `sc.UseOutbox(...)` / `sc.UseOutboxWithOptions(...)`，无需新配置或业务 worker。健康满批持续时，临时失败的 OrderingKey 也会在既有 Interval 窗口获得重试资格；原前序未成功前不放行同 key 后继。Notify 每窗口最多提前一次，失败原件和批量确认幂等保持。无 SkipBlocked 且失败前缀占满窗口、屏障容量饱和或同批回调未退出时仍有背压边界，不保证固定延迟。[正式行为、验证和升级](../../docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。

@@ -241,3 +241,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### v1.11.1 事务内新快照复用
 
 仅内部路径优化，无公开Go/HTTP/JSON/配置或卷格式变化。当前事务新版本只有在独立快照的规范JSON与实际写入字节一致时免回读；自定义codec等继续旧路径。原指纹/ID、同代卷及既有单向迁移边界保持。详见[验证](WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+### v1.11.2 Outbox 失败重试窗口
+
+无新增公开 API、配置、依赖或持久格式。失败 key 的重试资格不再依赖健康 drain 退出，沿既有 Interval 共享窗口恢复；Notify 在同一窗口最多提前恢复一次，防止持续通知忙重试。earliest-first、同 key 前序屏障、发布后确认及 at-least-once 保持；批量确认失败仍可重放。取批前两批 key 屏障预算及最多 `3*BatchSize-1` 峰值形成明确背压；未实现 SkipBlocked 的满前缀、任意多失败 key、同批未退出 handler 不保证健康 key 穿透。版本不要求搬迁消息、PEL/游标或业务表；回退会恢复旧重试饥饿行为。[完整边界与验证](OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。

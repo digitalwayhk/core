@@ -83,6 +83,14 @@ func (g *GetProducts) RouterInfo() *types.RouterInfo {
 - `message.ConfirmPublishedWith(ctx, action, model, ids, fields)`：通过显式 `PublishedFields` 指定布尔发布字段及可选时间字段，锁定并核对完整主键集合后，分批执行状态更新；空批次不访问数据库。仅支持每行一个不可变事件且无逐行业务更新 Hook 的模型。可变业务行的版本条件、目标子状态和业务完成度仍由项目适配，不能省略版本比较后直接调用。
 - SQLite/MySQL action 提供可选 `types.ITransactionDB.GetTransactionDB()`，只返回已经开启的事务连接，未开启/未完成懒初始化则拒绝。不要用 `GetRunDB()` 作为事务连接；其原有基础连接语义保持不变。现有 `IDataAction` 实现无需新增必选方法，未支持显式 SQL 事务能力的适配器须保留原逐条路径或明确拒绝，不得悄悄使用基础连接。
 
+### Outbox 失败重试窗口
+
+v1.11.2 修复持续健康满批使失败 key 永远留在单次 drain 屏障的问题。原 `UseOutbox` / `UseOutboxWithOptions` 无需新参数：失败屏障按既有 `OutboxOptions.Interval` 的共享窗口恢复重试资格，默认 100ms；满批有进展的 drain 在下一次取批前也检查到期，不要求健康流全部耗尽。到期只重新读取 earliest-first 未发布原件，不确认成功、不跳过前序。一次批次/handler 尚未返回仍可延迟检查，Interval 不是端到端延迟保证。
+
+`NotifyOutbox` 保留提前唤醒用途，但同一窗口最多提前恢复一次失败重试资格，后续通知不能无限清除屏障；永久失败按窗口保留原件，不忙重试、不自动丢弃。屏障集合在取批前达到两批 key 数时背压；每批不超过 BatchSize 时，峰值至多 `3*BatchSize-1` 个 key。该预算限制条数，不限制应用字符串长度；达到预算可暂停健康扫描至下次资格恢复，不能承诺任意多失败 key 下的全局公平。
+
+可选 `OutboxStoreSkipBlocked` 仍须过滤后 earliest-first；没有此能力且失败前缀填满查询窗口，后方健康 key 仍可能不可见。此修复不增加分页、持久重试表或独立 worker，不改 `runKeyedLanes` 的同批等待，不保证多个 publisher 的全局顺序。内存退避在重启后重新开始；原持久消息/ID/组/游标/ACK/幂等合同保持。发布或确认失败均保留原件，批量确认结果未知仍可能重复投递。见[实际验证和升级边界](../../codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
 ### Outbox 批量确认边界
 
 `OutboxBatchMarker` 的成功必须表示全部请求记录在同一事务内持久确认；重复 ID 去重，已确认记录成功，缺失/零主键返回错误并回滚，不得静默部分成功。它确认的是发布状态，不是消费者 ACK，不改变 MQ 生命周期或授权删除 Broker 消息。确认失败或提交结果未知时可能重放整个已发布前缀；同 key 的首次发布顺序保持不变，但重复消息可能出现在较新消息之后，消费者仍须按 EventID 幂等。批量确认减少事务次数，不等于一条批量 UPDATE，也不保证低流量下减少 fsync。

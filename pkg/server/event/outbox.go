@@ -1,3 +1,4 @@
+// 本文件复用标准Outbox持久原件，按key屏障、有界重试窗口及可选批量确认可靠外发。
 package event
 
 import (
@@ -69,6 +70,11 @@ type OutboxOptions struct {
 }
 
 type outboxPublisher struct {
+	// 下列退避状态只由run/drain所在发布器goroutine访问，不持久化业务决定。
+	blocked        map[string]struct{}
+	retryAt        time.Time
+	retryExpedited bool
+
 	admission       func() error
 	source          string
 	store           OutboxStore
@@ -134,11 +140,24 @@ func (p *outboxPublisher) run(ctx context.Context) {
 	defer p.wg.Done()
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
+	retry := time.NewTimer(time.Hour)
+	retry.Stop()
+	defer retry.Stop()
 	for {
+		var retryWake <-chan time.Time
+		if len(p.blocked) > 0 && !p.retryAt.IsZero() {
+			retry.Reset(time.Until(p.retryAt))
+			retryWake = retry.C
+		} else {
+			retry.Stop()
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-p.notify:
+			p.advanceOutboxRetry(time.Now(), true)
+			p.drain(ctx)
+		case <-retryWake:
 			p.drain(ctx)
 		case <-ticker.C:
 			p.drain(ctx)
@@ -147,14 +166,23 @@ func (p *outboxPublisher) run(ctx context.Context) {
 }
 
 func (p *outboxPublisher) drain(ctx context.Context) {
-	// 本轮同 OrderingKey 失败屏障：最早失败的 key 阻断后续同 key 记录，其他 key 可继续。
-	// 跨重启依赖 LoadPending 仍按 earliest-first 返回 unpublished。
-	// 若 store 实现 OutboxStoreSkipBlocked，可跳过已 blocked 的 key，避免 hot key 饿死其他 key。
-	blocked := make(map[string]struct{})
-	p.blockedKeys.Store(0)
+	// 屏障属于发布器退避窗口，不属于可无限延长的健康drain；到期重新读取原earliest-first。
+	if p.blocked == nil {
+		p.blocked = make(map[string]struct{})
+	}
+	blocked := p.blocked
 	noProgressRounds := 0
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		p.advanceOutboxRetry(time.Now(), false)
 		if p.admission != nil && p.admission() != nil {
+			return
+		}
+		// 一个批次最多新增batch个失败key；跨批前达到两批预算即退回原worker，等到期或一次显式提前重试。
+		// 因此集合峰值最多3*batch-1，不随持续输入无限增长；达限形成明确容量背压。
+		if p.batch > 0 && len(blocked)/p.batch >= 2 {
 			return
 		}
 		items, err := p.loadPending(ctx, blocked)
@@ -171,6 +199,13 @@ func (p *outboxPublisher) drain(ctx context.Context) {
 			return
 		}
 		progressed := p.publishBatch(ctx, items, blocked)
+		if len(blocked) > 0 && p.retryAt.IsZero() {
+			delay := p.interval
+			if delay <= 0 {
+				delay = 100 * time.Millisecond
+			}
+			p.retryAt = time.Now().Add(delay)
+		}
 		p.blockedKeys.Store(int64(len(blocked)))
 		if progressed {
 			noProgressRounds = 0

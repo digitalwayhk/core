@@ -251,3 +251,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## 同事务快照优化回归
 
 新wrapper复用必须先用真实ReliableWriteStore/Badger的回读计数取得RED，再逐字对照旧规范JSON/FP/ID；自定义codec、字节不等、omitempty/null/time及同批同key回调快照隔离须覆盖。原件、改组、未知/旧确认、TooBig/回滚与清理/进程恢复不能只靠helper测试。固定最终二进制的多轮/持续对照必须与编译、回归和探索版分开，报告排空/短窗回退和分配未改善，不能只展示降低的P99。普通、race、同代卷双向独立进程验收及具体边界见[专项报告](../../codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+## Outbox 持续满批与失败重试验收
+
+先保留旧正式源码通过公开 EventBridge/UseOutbox 的真实 RED：健康生产仍开启且有满批进展，失败前序却不重试；不能先停生产使其变绿。覆盖默认/串行/分 key 并行、SkipBlocked/BatchMarker 有无、发布/确认失败、最小批次、有限屏障预算、Notify 风暴与实际回调退出。真实独占 Redis 用合成 WRONGTYPE 发布故障验证健康消费及故障恢复后原 ID 顺序/PEL；不删除 Stream、pending 或重置游标。event/router/mq 普通与 race 串行执行，另显式原生租约进程恢复；真实 Badger Outbox、SQLite Inbox 的发布后未确认硬杀应由新 PID 重开验证。纯内存故障 RED 不代表真实 Broker 结论，查询窗口饱和/慢回调/容量背压须分别登记，详见[专项验证](../../codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。

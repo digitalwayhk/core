@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- 修复 Outbox 在健康满批持续时失败 OrderingKey 的重试饥饿；沿既有 Interval 恢复资格，Notify 同窗口最多提前一次，失败屏障集合有界。保留 earliest-first、发布后确认、同 key 前序及 at-least-once；无新增 API、配置、依赖或卷格式。详见[验证及背压边界](docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
 - 有界ReliableWriteStore对同事务新wrapper保守复用独立快照，字节核验后免除重复完整回读/解码；原双JSON规范指纹、ID、失败原件与事务恢复保持。无需新配置，详见[验证](docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md).
 
 - 隔离一轮旧Unknown与新target错误，按ID/版本/指纹/target attempt/BatchID核验原错误归属；仅已提交Unknown可保留，旧证明不能用于新attempt或新版本。详见[验收与升级](docs/codex/WRITE_BEHIND_DEFERRED_CAUSE_2026-11-04.md)。
@@ -33,6 +35,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.11.2] - 2026-11-12
+
+### Fixed
+
+- 修复 Outbox 在健康满批持续时失败 OrderingKey 的重试饥饿；沿既有 Interval 恢复资格，Notify 同窗口最多提前一次，失败屏障集合有界。保留 earliest-first、发布后确认、同 key 前序及 at-least-once；无新增 API、配置、依赖或卷格式。详见[验证及背压边界](docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
+### Changed
+
+- 消费方原接线无需新参数；Notify 对失败资格的提前恢复限每窗口一次。有限屏障预算、未实现 SkipBlocked 的查询窗口和同批回调等待边界明确保留，不声称解决全部业务延迟或容量问题。
 
 ## [v1.11.1] - 2026-11-11
 
