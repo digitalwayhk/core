@@ -135,3 +135,9 @@ FlightRecorder的`MaxBytes`是运行时提示值，采集方仍须限制下载�
 ## 新版本快照与双JSON兼容
 
 v1.11.1有界前台在本次实际事务内复用独立新快照：标准库规范编码与已经写入的pkg/json字节完全一致时，省去该版本的完整回读/解码，并复用规范编码计算原FP/ID。自定义codec/不支持类型或字节不一致继续原路径，不能直接hash任意前台JSON，也不能把可变模型/切片借给历史快照。旧原件、前序/attempt/实际组/目标屏障、回滚/TooBig子事务和恢复核验不可省略；无新参数、API或格式。FIFO及可靠提交后Save返回保持，不保证所有长尾消失。见[正式说明](../../codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+## 本地恢复有界读取
+
+v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式有界读取门面。limit须1–1000；每页另限4096当前可见键及8MiB物理键+wrapper编码字节，底层精确Prefix、无value预取、扫描内检查ctx/关闭。空页也可能有nextCursor，只在next为空结束；范围绑定的不透明游标可在同路径/模型/前缀新进程续用，不是授权凭证。错误整页失败不跳原件，单项过大明确拒绝；不改变pending、失败、顺序、版本或删除hook。旧ScanLocal/LocalScanOptions不变，Limit<=0仍会全量材料化，反复正Limit只读首段。
+
+每页独立快照，不能当跨页一致扫描；恢复须应用沿原准入、owner fence和重放水位协调。原始字节预算不等于解码后堆上限，业务若留存全部页仍O(N)。边读边折叠必要状态、释放本页，不能清历史/租约或绕过私有db。详细错误、预算和回退见[正式指南](../../codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。消费方恢复/内存/功能及容量须另验，不能把Core组件PASS当消费方关闭。

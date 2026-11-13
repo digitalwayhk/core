@@ -135,3 +135,7 @@ benchmark 子进程会把服务日志级别临时调为 `error`，减少 info �
 ## 同事务快照优化升级
 
 v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用；旧规范指纹/ID逐字保持，不支持类型或双JSON字节不等继续原路径。示例不增加配置或worker，原Save/SaveBatch及FailurePolicy/FailureHandler接线不变；普通UseWriteBehind不变。旧责任读取、失败预算、组前序、可靠刷盘、确认和IsSyncAfterDelete保持，不能据此保证现场下单P99。见[正式验证与接入说明](../../docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+### 恢复时有界枚举本地原件
+
+若扩展示例恢复逻辑需要读取大量保留记录，使用 `store.ScanLocalPage(ctx,prefix,cursor,128)`，处理本页后释放；空页有cursor仍继续，只有空next结束。不要循环正Limit的旧ScanLocal或用Limit=0全量读。每页新快照，恢复仍须应用控制准入/fence/水位；分页不触发同步和删除，也不保证业务把全部页留存时堆有界。[正式用法与错误边界](../../docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。

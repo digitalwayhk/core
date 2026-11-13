@@ -249,3 +249,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ## v1.11.3 owner 容量刷新
 
 兼容修复不新增公开API、配置、Provider公共接口、policy指纹或持久格式。内置owner完整检查可恢复超时后，在同一整轮剩余预算内补一次容量，原完整错误继续返回/计数；不回收、不假刷新完整证据。补读失败/取消/缺证据仍unknown，语义/fence错误不降级，真实hard reached保持Backpressure。未实现内置协调的legacy Provider不额外读取，保留原检查及phase错误处理；同时含语义错误/取消和deadline的内部失败分类按安全优先级记录。加性9项固定Runtime counter及限频诊断不新增动态标签。无需清消息、PEL/游标、换组、迁移卷或改应用开关，消费方应重新链接精确权威skill。真实验证、原始RED和未运行项见[交付记录](LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)；不把组件结果作为消费方部署/UAT/容量通过。
+
+## v1.12.0 有界本地读取（加性）
+
+`nosql.ReliableWriteStore[T].ScanLocalPage(context.Context,string,string,int) ([]*T,string,error)` 为Stable加性入口，三个公开LocalScanPageMax常量及ErrInvalidLocalScanPage/ErrLocalScanItemTooLarge/ErrLocalScanData为其合同。旧LocalScanOptions结构、ScanLocal/底层ScanPage语义不变，无配置或存储格式改变。范围绑定cursor、空页续读、每页快照与错误原件保护见[正式指南](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。nosql包加入受保护清单，公开基线通过官方apidiff入口更新；普通/有界卷仍遵守原格式回退边界。

@@ -143,3 +143,7 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 只优化当前 `ApplyWriteOperations` 构造的新版本；初次业务读取、旧责任/前序/attempt/组/target/指纹核验、启动恢复、导入兼容入口保持。回滚及 `ErrTxnTooBig` 子事务分别重建独立快照，不把失败事务的对象或计数发布出去。FIFO、storageMu、可靠提交后响应及原清理 hook 不变；本优化不消除调度、GC、Badger提交及后台确认竞争，不能承诺任意机器的 Save P99。
 
 升级不需要业务改代码或开关；原 StoreID/policy 和既有卷格式门禁保持。同代卷必须停稳实际在途操作后回退；更早格式的单向迁移限制不变，不得删 mode/pending/history。性能及真实回归见[专项记录](WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md)。
+
+## 本地恢复读取
+
+需要枚举保留业务原件时使用 v1.12.0 加性 `ReliableWriteStore.ScanLocalPage`，参见[正式指南](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。原ScanLocal的Limit<=0仍全量，正Limit不能续页。分页只读原件，不同步、确认或清理pending；每页独立快照，应用沿现有恢复准入/fence/重放水位处理并发变化。边页折叠必要状态，空页且有cursor仍继续，错误或超大项不能跳过。无需配置、卷迁移或新worker。

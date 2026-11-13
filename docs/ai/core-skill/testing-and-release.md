@@ -259,3 +259,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## owner 容量补读回归
 
 保留旧正式controller与真实Redis的CAPACITY_REFRESH_OWNER_GAP RED：旧完整快照过期、完整Inspect受控耗尽350ms而轻量容量可用时，owner拒绝、standby可实际发布。明确超时是注入，不冒充现场服务端自然延迟。候选必须保持完整deadline返回及计数、只刷新独立容量，不刷完整前沿/lag/pending、不额外回收。覆盖语义错误与deadline竞态、取消/实际回调退出、补读缺证据和hard reached、entry/policy替换、legacy、原500ms总预算、真实Redis暂停耗尽余量及8Subject命令增量；13×44既有正常轮次不加扫描。mq/event/router/observability完整普通/race与Collector固定白名单验证分别运行；NATS真实Broker未运行单列NOT_RUN。详情见[验收报告](../../codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
+
+## 有界本地读取验收
+
+新分页门面必须先在旧源码真实可靠保存后保留缺能力RED，再验证范围绑定、正limit/上限、键数/原始字节预算和空页续游标，损坏/过大不静默跳过。取消与Close采用解码屏障，独立PID正常关闭和SIGKILL后重开原目录续页；pending核对持久索引，不能拿旧模式重开后未初始化缓存代替。旧ScanLocal和底层ScanPage保持行为。旧全量API与新分页对照分别报告每调用和整轮成本，分配累计不冒充存活堆；分页没有跨页快照，也不保证应用保留全部页时内存有界。消费方UAT/恢复/容量另列NOT_RUN。

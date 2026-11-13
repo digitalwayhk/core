@@ -6,6 +6,8 @@
 
 ### Added
 
+- 新增可靠本地读取门面 `ScanLocalPage`：正limit/框架上限、范围绑定cursor、键数/原始字节预算、精确Prefix、取消/关闭和错误不跳过。旧API、配置与卷不变；每页独立快照，不承诺跨页一致。见[正式指南](docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。
+
 - 普通用户签名前 Hook 可通过可选 `ITokenUIDMutator.SetTokenUID` 设置展示用 JWT `uid`；原始认证身份由保留字段 `auth_identity_uid` 携带，既有接口不变。
 
 - 有界 write-behind 在固定回调背压时，按既有 ScanLimit 有限保留同进程当前尝试的原错误链；现有 disposition metrics 新增 CauseRetained/CauseCapacity/CauseOverflow。
@@ -37,6 +39,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.12.0] - 2026-11-13
+
+### Added
+
+- 新增可靠本地读取门面 `ScanLocalPage`：正limit/框架上限、范围绑定cursor、键数/原始字节预算、精确Prefix、取消/关闭和错误不跳过。旧API、配置与卷不变；每页独立快照，不承诺跨页一致。见[正式指南](docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。
+
+### Changed
+
+- 无需新配置或迁移；恢复须显式改用新门面，旧ScanLocal非正Limit仍全量。分页限制一次材料化，消费方准入/fence/重放及必要状态折叠另验，不宣称OOM或容量已通过。
 
 ## [v1.11.3] - 2026-11-13
 

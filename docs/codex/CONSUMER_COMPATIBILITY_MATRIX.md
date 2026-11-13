@@ -220,3 +220,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.11.3 owner 容量刷新
 
 兼容修复不新增公开API、配置、Provider公共接口、policy指纹或持久格式。内置owner完整检查可恢复超时后，在同一整轮剩余预算内补一次容量，原完整错误继续返回/计数；不回收、不假刷新完整证据。补读失败/取消/缺证据仍unknown，语义/fence错误不降级，真实hard reached保持Backpressure。未实现内置协调的legacy Provider不额外读取，保留原检查及phase错误处理；同时含语义错误/取消和deadline的内部失败分类按安全优先级记录。加性9项固定Runtime counter及限频诊断不新增动态标签。无需清消息、PEL/游标、换组、迁移卷或改应用开关，消费方应重新链接精确权威skill。真实验证、原始RED和未运行项见[交付记录](LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)；不把组件结果作为消费方部署/UAT/容量通过。
+
+## v1.12.0 有界本地读取
+
+加性API，直接升级无需新配置/迁移；原ScanLocal仍可调用，恢复改用ScanLocalPage才能有界续页。游标不能跨store路径/模型/请求prefix使用，不保证跨页一致快照，不给旧版本增加可调用方法。保留原卷及既有格式保护；消费方边读边折叠和准入/fence/水位接入、实际OOM/业务/容量均NOT_RUN，不改变上表历史锁定。详见[接入](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)及[Core验收](RELIABLE_LOCAL_SCAN_PAGE_2026-11-13.md)。
