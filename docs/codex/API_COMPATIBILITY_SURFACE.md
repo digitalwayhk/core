@@ -245,3 +245,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### v1.11.2 Outbox 失败重试窗口
 
 无新增公开 API、配置、依赖或持久格式。失败 key 的重试资格不再依赖健康 drain 退出，沿既有 Interval 共享窗口恢复；Notify 在同一窗口最多提前恢复一次，防止持续通知忙重试。earliest-first、同 key 前序屏障、发布后确认及 at-least-once 保持；批量确认失败仍可重放。取批前两批 key 屏障预算及最多 `3*BatchSize-1` 峰值形成明确背压；未实现 SkipBlocked 的满前缀、任意多失败 key、同批未退出 handler 不保证健康 key 穿透。版本不要求搬迁消息、PEL/游标或业务表；回退会恢复旧重试饥饿行为。[完整边界与验证](OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
+## v1.11.3 owner 容量刷新
+
+兼容修复不新增公开API、配置、Provider公共接口、policy指纹或持久格式。内置owner完整检查可恢复超时后，在同一整轮剩余预算内补一次容量，原完整错误继续返回/计数；不回收、不假刷新完整证据。补读失败/取消/缺证据仍unknown，语义/fence错误不降级，真实hard reached保持Backpressure。未实现内置协调的legacy Provider不额外读取，保留原检查及phase错误处理；同时含语义错误/取消和deadline的内部失败分类按安全优先级记录。加性9项固定Runtime counter及限频诊断不新增动态标签。无需清消息、PEL/游标、换组、迁移卷或改应用开关，消费方应重新链接精确权威skill。真实验证、原始RED和未运行项见[交付记录](LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)；不把组件结果作为消费方部署/UAT/容量通过。

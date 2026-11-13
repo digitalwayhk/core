@@ -10,11 +10,12 @@ import (
 )
 
 type lifecycleEntry struct {
-	policy   LifecyclePolicy
-	provider LifecycleMQProvider
-	snapshot LifecycleSnapshot
-	capacity *LifecycleSnapshot
-	running  atomic.Bool
+	policy      LifecyclePolicy
+	provider    LifecycleMQProvider
+	snapshot    LifecycleSnapshot
+	capacity    *LifecycleSnapshot
+	running     atomic.Bool
+	diagnostics lifecycleDiagnostics
 }
 
 // lifecycleController 持有已冻结的 Subject 策略、快照和有界回收 worker。
@@ -171,45 +172,66 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) (runE
 	// 整轮预算不变：观测最多使用 70%，剩余时间留给独立的回收阶段。
 	inspectCtx, stopInspect := context.WithTimeout(runCtx, policy.Reclaim.TimeBudget*7/10)
 	defer stopInspect()
-	if worker, ok := provider.(lifecycleWorkerProvider); ok {
-		ownedCtx, owned, err := worker.acquireLifecycleRound(inspectCtx, policy, c.owner)
+	worker, coordinated := provider.(lifecycleWorkerProvider)
+	owned := false
+	c.beginLifecycleRound(subject, entry, "legacy")
+	if coordinated {
+		c.beginLifecycleRound(subject, entry, "unknown")
+		ownedCtx, acquired, err := worker.acquireLifecycleRound(inspectCtx, policy, c.owner)
+		owned = acquired
 		if err != nil {
-			if inspectCtx.Err() != nil {
-				return inspectCtx.Err()
-			}
-			return err
+			return lifecyclePhaseError(err, inspectCtx.Err())
 		}
 		if !owned {
+			c.beginLifecycleRound(subject, entry, "standby")
 			capacity, err := worker.inspectLifecycleCapacity(inspectCtx, policy)
+			err = lifecyclePhaseError(err, inspectCtx.Err())
+			c.recordLifecycleRead(subject, entry, "capacity", err)
 			if err != nil {
-				if inspectCtx.Err() != nil {
-					return inspectCtx.Err()
-				}
 				return err
 			}
 			c.mu.Lock()
+			if c.entries[subject] != entry || entry.policy.Fingerprint() != policy.Fingerprint() {
+				c.mu.Unlock()
+				return ErrLifecyclePolicyConflict
+			}
 			entry.capacity = &capacity
 			c.mu.Unlock()
 			return nil
 		}
+		c.beginLifecycleRound(subject, entry, "owner")
 		// 仅复制租约凭据，不继承观测子 context 的取消信号。
 		runCtx = context.WithValue(runCtx, lifecycleRoundKey{}, ownedCtx.Value(lifecycleRoundKey{}))
 		inspectCtx = ownedCtx
 	}
 	snapshot, err := provider.InspectLifecycle(inspectCtx, policy)
-	if phaseErr := inspectCtx.Err(); phaseErr != nil {
-		err = phaseErr
+	// 原始语义错误优先；不能把同时到期的policy/fence/元数据错误覆盖为可降级deadline。
+	if coordinated {
+		if err == nil {
+			err = validateLifecycleSnapshot(policy, snapshot)
+		}
+		err = lifecyclePhaseError(err, inspectCtx.Err())
+	} else {
+		// 未实现内置轮次能力的legacy Provider保持原检查/phase错误优先级，不补容量。
+		if inspectCtx.Err() != nil {
+			err = inspectCtx.Err()
+		}
+		if err == nil {
+			err = validateLifecycleSnapshot(policy, snapshot)
+		}
 	}
 	stopInspect()
+	c.recordLifecycleRead(subject, entry, "full", err)
 	if err != nil {
-		return err
-	}
-	if err := validateLifecycleSnapshot(policy, snapshot); err != nil {
+		if coordinated && owned && lifecycleFailureReason(err) == 0 && runCtx.Err() == nil && c.ctx.Err() == nil {
+			c.refreshOwnerCapacity(runCtx, subject, entry, policy, worker)
+		}
+		// 即使容量补读成功，完整检查仍失败；不回收，不吞错误或计数。
 		return err
 	}
 	c.mu.Lock()
 	current := c.entries[subject]
-	if current == nil || current.policy.Fingerprint() != policy.Fingerprint() {
+	if current != entry || current.policy.Fingerprint() != policy.Fingerprint() {
 		c.mu.Unlock()
 		return ErrLifecyclePolicyConflict
 	}
@@ -258,34 +280,21 @@ func (c *lifecycleController) allowPublish(subject string) error {
 	}
 	policy := entry.policy
 	snapshot := entry.snapshot
+	source := "full"
 	if entry.capacity != nil {
+		source = "capacity"
 		snapshot = *entry.capacity
 	}
 	c.mu.RUnlock()
 	if policy.Capacity.HardMessages == 0 && policy.Capacity.HardBytes == 0 {
 		return nil
 	}
-	if snapshot.ObservedAt.IsZero() || c.now().Sub(snapshot.ObservedAt) > 2*policy.Reclaim.Interval ||
-		(snapshot.State != LifecycleStateOK && snapshot.State != LifecycleStatePartial) {
-		return ErrLifecycleCapacityUnknown
+	now := c.now()
+	err, reason := lifecycleCapacityDecision(policy, snapshot, now)
+	if err != nil {
+		c.recordCapacityRejection(subject, entry, snapshot, source, reason, now)
 	}
-	if policy.Capacity.HardMessages > 0 {
-		if snapshot.RetainedMessages == nil {
-			return ErrLifecycleCapacityUnknown
-		}
-		if *snapshot.RetainedMessages >= policy.Capacity.HardMessages {
-			return ErrLifecycleBackpressure
-		}
-	}
-	if policy.Capacity.HardBytes > 0 {
-		if snapshot.RetainedBytes == nil {
-			return ErrLifecycleCapacityUnknown
-		}
-		if *snapshot.RetainedBytes >= policy.Capacity.HardBytes {
-			return ErrLifecycleBackpressure
-		}
-	}
-	return nil
+	return err
 }
 
 func (c *lifecycleController) validateRequiredGroup(subject, group string) error {

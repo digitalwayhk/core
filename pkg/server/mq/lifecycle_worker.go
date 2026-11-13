@@ -14,17 +14,34 @@ var errLifecycleOwnerLost = errors.New("mq: lifecycle owner lost")
 
 // 只映射固定原因；原始错误不成为指标标签或公开字段。
 func lifecycleFailureReason(err error) int {
-	var timeout net.Error
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
-		return 0
-	}
 	if errors.Is(err, errLifecycleOwnerLost) || strings.Contains(err.Error(), "LIFECYCLE_OWNER_LOST") {
 		return 1
 	}
 	if errors.Is(err, ErrLifecyclePolicyConflict) || errors.Is(err, ErrLifecycleStateUncertain) || errors.Is(err, ErrLifecycleUnsafeBrokerPolicy) {
 		return 2
 	}
+	if errors.Is(err, context.Canceled) {
+		return 3
+	}
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		return 0
+	}
 	return 3
+}
+
+// lifecyclePhaseError保留取消和已知语义错误，避免超时竞态将其误判为可补容量的deadline。
+func lifecyclePhaseError(err, phaseErr error) error {
+	if err != nil {
+		reason := lifecycleFailureReason(err)
+		if reason == 1 || reason == 2 || errors.Is(err, context.Canceled) {
+			return err
+		}
+	}
+	if phaseErr != nil {
+		return phaseErr
+	}
+	return err
 }
 
 type lifecycleWorkerProvider interface {

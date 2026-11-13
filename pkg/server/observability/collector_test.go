@@ -147,3 +147,35 @@ func TestCollectorExportsReliableQueueAndClocks(t *testing.T) {
 	require.Equal(t, gauges, actualGauges)
 	require.Equal(t, counters, actualCounters)
 }
+
+// TestCollectorExportsCapacityRefreshReasons只导出固定9项容量诊断，不接纳动态Subject/用户/消息指标名。
+func TestCollectorExportsCapacityRefreshReasons(t *testing.T) {
+	expected := map[string]float64{
+		"publish_rejected_reason_not_observed_total": 1, "publish_rejected_reason_stale_total": 2, "publish_rejected_reason_state_total": 3,
+		"publish_rejected_reason_messages_missing_total": 4, "publish_rejected_reason_bytes_missing_total": 5, "publish_rejected_reason_hard_reached_total": 6,
+		"capacity_refresh_attempt_total": 7, "capacity_refresh_success_total": 8, "capacity_refresh_fail_total": 9,
+	}
+	values := map[string]float64{"subject.dynamic-user-123": 99}
+	for k, v := range expected {
+		values[k] = v
+	}
+	registry := prometheus.NewRegistry()
+	require.NoError(t, registry.Register(observability.NewComponentCollector("service", []observability.RuntimeMetricProvider{&fakeProvider{name: "mq", counters: values}})))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	got := map[string]float64{}
+	for _, family := range families {
+		if family.GetName() != "core_component_counter" {
+			continue
+		}
+		for _, m := range family.GetMetric() {
+			for _, l := range m.GetLabel() {
+				require.NotContains(t, l.GetValue(), "dynamic-user")
+				if l.GetName() == "name" {
+					got[l.GetValue()] = m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	require.Equal(t, expected, got)
+}

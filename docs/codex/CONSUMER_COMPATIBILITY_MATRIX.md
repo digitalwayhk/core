@@ -216,3 +216,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.11.2 Outbox 持续健康流下的失败重试
 
 原 UseOutbox/UseOutboxWithOptions 接线不变，无新配置、API 或卷格式。原 EventID/ShardKey、消息、组、PEL、游标及业务 Inbox 保持；不需要清 pending、重建消费组或补写业务事实。Notify 同窗口最多一次提前重试，其余按原 Interval；有限屏障饱和时背压。没有 SkipBlocked 且失败前缀占满窗口，以及未退出的同批回调，仍有进度边界。精确组件/进程/真实 Redis 普通和 race 结果与未运行项见[交付记录](OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。消费方接入、部署、功能/UAT/容量均 NOT_RUN；不把本节更新作为上表历史消费方 smoke 的替代。
+
+## v1.11.3 owner 容量刷新
+
+兼容修复不新增公开API、配置、Provider公共接口、policy指纹或持久格式。内置owner完整检查可恢复超时后，在同一整轮剩余预算内补一次容量，原完整错误继续返回/计数；不回收、不假刷新完整证据。补读失败/取消/缺证据仍unknown，语义/fence错误不降级，真实hard reached保持Backpressure。未实现内置协调的legacy Provider不额外读取，保留原检查及phase错误处理；同时含语义错误/取消和deadline的内部失败分类按安全优先级记录。加性9项固定Runtime counter及限频诊断不新增动态标签。无需清消息、PEL/游标、换组、迁移卷或改应用开关，消费方应重新链接精确权威skill。真实验证、原始RED和未运行项见[交付记录](LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)；不把组件结果作为消费方部署/UAT/容量通过。

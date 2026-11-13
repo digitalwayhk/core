@@ -54,14 +54,29 @@ func (c *lifecycleController) runtimeMetricSnapshot(context.Context) (observabil
 	}
 	c.mu.RLock()
 	entries := make([]LifecycleSnapshot, 0, len(c.entries))
+	var rejected [6]uint64
+	var refreshAttempts, refreshSuccesses, refreshFailures uint64
 	for _, entry := range c.entries {
+		for i, count := range entry.diagnostics.rejected {
+			rejected[i] += count
+		}
+		refreshAttempts += entry.diagnostics.refreshAttempts
+		refreshSuccesses += entry.diagnostics.refreshSuccesses
+		refreshFailures += entry.diagnostics.refreshFailures
 		snapshot := entry.snapshot
 		if snapshot.ObservedAt.IsZero() || c.now().Sub(snapshot.ObservedAt) > 2*entry.policy.Reclaim.Interval {
 			snapshot = LifecycleSnapshot{State: LifecycleStateStale}
 		}
-		if entry.capacity != nil && c.now().Sub(entry.capacity.ObservedAt) <= 2*entry.policy.Reclaim.Interval {
-			snapshot.RetainedMessages = entry.capacity.RetainedMessages
-			snapshot.RetainedBytes = entry.capacity.RetainedBytes
+		if entry.capacity != nil {
+			if !entry.capacity.ObservedAt.IsZero() && c.now().Sub(entry.capacity.ObservedAt) <= 2*entry.policy.Reclaim.Interval && (entry.capacity.State == LifecycleStateOK || entry.capacity.State == LifecycleStatePartial) {
+				snapshot.RetainedMessages = entry.capacity.RetainedMessages
+				snapshot.RetainedBytes = entry.capacity.RetainedBytes
+			} else {
+				// 独立容量失败不能在Runtime里再用旧完整容量伪装已采集；完整组指标仍按自身时间判断。
+				snapshot.RetainedMessages = nil
+				snapshot.RetainedBytes = nil
+				snapshot.State = LifecycleStatePartial
+			}
 		}
 		entries = append(entries, snapshot)
 	}
@@ -77,6 +92,12 @@ func (c *lifecycleController) runtimeMetricSnapshot(context.Context) (observabil
 			"publish_rejected_total": float64(c.publishRejected.Load()),
 		},
 	}
+	for i, reason := range lifecycleCapacityReasons {
+		result.Counters["publish_rejected_reason_"+reason+"_total"] = float64(rejected[i])
+	}
+	result.Counters["capacity_refresh_attempt_total"] = float64(refreshAttempts)
+	result.Counters["capacity_refresh_success_total"] = float64(refreshSuccesses)
+	result.Counters["capacity_refresh_fail_total"] = float64(refreshFailures)
 	for i, reason := range []string{"deadline", "owner_lost", "policy_fence", "provider"} {
 		result.Counters["reclaim_fail_"+reason+"_total"] = float64(c.reclaimReasons[i].Load())
 	}

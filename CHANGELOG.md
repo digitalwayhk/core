@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- 修复内置生命周期owner完整Inspect超时未独立刷新容量的路径缺口：仅可恢复超时且原整轮有余量时补一次轻量读取；完整错误/计数、回收门禁、4s示例新鲜度和hard容量保持。增加原entry固定原因诊断、9项低基数counter和限频状态日志，无新API/配置/持久格式。见[验收与边界](docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
+
 - 修复 Outbox 在健康满批持续时失败 OrderingKey 的重试饥饿；沿既有 Interval 恢复资格，Notify 同窗口最多提前一次，失败屏障集合有界。保留 earliest-first、发布后确认、同 key 前序及 at-least-once；无新增 API、配置、依赖或卷格式。详见[验证及背压边界](docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
 
 - 有界ReliableWriteStore对同事务新wrapper保守复用独立快照，字节核验后免除重复完整回读/解码；原双JSON规范指纹、ID、失败原件与事务恢复保持。无需新配置，详见[验证](docs/codex/WRITE_BEHIND_TRANSACTION_SNAPSHOT_REUSE_2026-11-11.md).
@@ -35,6 +37,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.11.3] - 2026-11-13
+
+### Fixed
+
+- 修复内置生命周期owner完整Inspect超时未独立刷新容量的路径缺口：仅可恢复超时且原整轮有余量时补一次轻量读取；完整错误/计数、回收门禁、4s示例新鲜度和hard容量保持。增加原entry固定原因诊断、9项低基数counter和限频状态日志，无新API/配置/持久格式。见[验收与边界](docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
+
+### Changed
+
+- 语义/fence/取消与deadline同时出现时优先保留安全错误，禁止误触发容量降级；legacy自定义Provider不增加轻量读取。容量补读失败保持unknown，真实硬限仍Backpressure。固定逐Subject诊断与Prom聚合分别取证，不承诺全部现场unknown/异步积压已解决。
 
 ## [v1.11.2] - 2026-11-12
 

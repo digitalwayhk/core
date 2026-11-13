@@ -164,3 +164,7 @@ docker compose -f examples/06-shop-microservices/deploy/docker-compose.yml confi
 ### Outbox 失败重试（v1.11.2）
 
 继续原 `sc.UseOutbox(...)` / `sc.UseOutboxWithOptions(...)`，无需新配置或业务 worker。健康满批持续时，临时失败的 OrderingKey 也会在既有 Interval 窗口获得重试资格；原前序未成功前不放行同 key 后继。Notify 每窗口最多提前一次，失败原件和批量确认幂等保持。无 SkipBlocked 且失败前缀占满窗口、屏障容量饱和或同批回调未退出时仍有背压边界，不保证固定延迟。[正式行为、验证和升级](../../docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
+### 生命周期容量诊断（v1.11.3）
+
+原RequireMessageLifecycle/UseOutbox/SubscribeEvent接线和策略无需新开关。内置owner完整检查超时且整轮预算未尽时补一次独立容量；原deadline仍计数，容量可用不代表完整组前沿已恢复或可回收。unknown与hard reached分别诊断，不通过改observe、提硬限、延长快照新鲜度或清消息来排空。固定原因计数、限频日志和升级边界见[正式验证](../../docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。

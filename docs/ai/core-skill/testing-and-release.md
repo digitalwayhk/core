@@ -255,3 +255,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## Outbox 持续满批与失败重试验收
 
 先保留旧正式源码通过公开 EventBridge/UseOutbox 的真实 RED：健康生产仍开启且有满批进展，失败前序却不重试；不能先停生产使其变绿。覆盖默认/串行/分 key 并行、SkipBlocked/BatchMarker 有无、发布/确认失败、最小批次、有限屏障预算、Notify 风暴与实际回调退出。真实独占 Redis 用合成 WRONGTYPE 发布故障验证健康消费及故障恢复后原 ID 顺序/PEL；不删除 Stream、pending 或重置游标。event/router/mq 普通与 race 串行执行，另显式原生租约进程恢复；真实 Badger Outbox、SQLite Inbox 的发布后未确认硬杀应由新 PID 重开验证。纯内存故障 RED 不代表真实 Broker 结论，查询窗口饱和/慢回调/容量背压须分别登记，详见[专项验证](../../codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
+
+## owner 容量补读回归
+
+保留旧正式controller与真实Redis的CAPACITY_REFRESH_OWNER_GAP RED：旧完整快照过期、完整Inspect受控耗尽350ms而轻量容量可用时，owner拒绝、standby可实际发布。明确超时是注入，不冒充现场服务端自然延迟。候选必须保持完整deadline返回及计数、只刷新独立容量，不刷完整前沿/lag/pending、不额外回收。覆盖语义错误与deadline竞态、取消/实际回调退出、补读缺证据和hard reached、entry/policy替换、legacy、原500ms总预算、真实Redis暂停耗尽余量及8Subject命令增量；13×44既有正常轮次不加扫描。mq/event/router/observability完整普通/race与Collector固定白名单验证分别运行；NATS真实Broker未运行单列NOT_RUN。详情见[验收报告](../../codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
