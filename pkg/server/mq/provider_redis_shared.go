@@ -1,3 +1,4 @@
+// 本文件提供Redis共享组的模式、PEL观察与分key租约原语，不提前夺归属或ACK。
 package mq
 
 import (
@@ -37,11 +38,16 @@ local start="-"
 if ARGV[2]~="0-0" then start="("..ARGV[2] end
 local pending=redis.call("XPENDING",KEYS[1],ARGV[1],start,"+",ARGV[3])
 local messages={}
+local skip={}
+local skipCount=tonumber(ARGV[5]) or 0
+for i=1,skipCount do skip[ARGV[5+i]]=true end
 local next="0-0"
 for _,entry in ipairs(pending) do
-  local rows=redis.call("XRANGE",KEYS[1],entry[1],entry[1],"COUNT",1)
-  if #rows==0 then return redis.error_reply("SHARED_PENDING_BODY_MISSING") end
-  table.insert(messages,rows[1])
+  if not skip[entry[1]] then
+    local rows=redis.call("XRANGE",KEYS[1],entry[1],entry[1],"COUNT",1)
+    if #rows==0 then return redis.error_reply("SHARED_PENDING_BODY_MISSING") end
+    table.insert(messages,rows[1])
+  end
 end
 if #pending==tonumber(ARGV[3]) then next=pending[#pending][1] end
 return {next,messages,{}}

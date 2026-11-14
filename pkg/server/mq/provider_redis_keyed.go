@@ -1,3 +1,4 @@
+// 本文件实现有界key调度、原PEL页游标及有限已知ID提示，保留fence与成功后ACK。
 package mq
 
 import (
@@ -25,11 +26,19 @@ return redis.call("XREADGROUP", "GROUP", ARGV[1], ARGV[2], "COUNT", ARGV[3], "ST
 `
 
 func (r *RedisStreamProvider) claimReliableKeyed(ctx context.Context, key, subject string, options ReliableSubscribeOptions, cursor string, count int64) ([]redis.XMessage, string, error) {
+	return r.claimReliableKeyedSkipping(ctx, key, subject, options, cursor, count, nil)
+}
+
+// claimReliableKeyedSkipping只省去本会话已持有key屏障后的已知正文，仍逐页观察原PEL和推进原游标。
+func (r *RedisStreamProvider) claimReliableKeyedSkipping(ctx context.Context, key, subject string, options ReliableSubscribeOptions, cursor string, count int64, skipped []string) ([]redis.XMessage, string, error) {
 	script := redisKeyedClaimScript
 	args := []interface{}{options.Group, options.Consumer, cursor, count}
 	if options.SharedKeys {
 		script = redisSharedPendingScript
-		args = []interface{}{options.Group, cursor, count, redisSharedMarker(options)}
+		args = []interface{}{options.Group, cursor, count, redisSharedMarker(options), len(skipped)}
+		for _, id := range skipped {
+			args = append(args, id)
+		}
 		if options.scopeMarker != "" {
 			script = redisOwnedSizeBoundScript(script, true)
 			args = append(args, options.scopeMessageLimit)
@@ -63,6 +72,8 @@ type redisKeyedTask struct {
 	running  bool
 	retryAt  time.Time
 	sequence uint64
+	// 仅ID元数据，所有task合计不超过共享window；完成/丢失原PEL后随task释放。
+	observedIDs map[string]struct{}
 }
 
 // runReliableKeyedSubscriber 的 worker 生命周期属于一个 owner 会话，而非读取批次。
@@ -142,12 +153,31 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 	cursor := "0-0"
 	running := 0
 	var sequence uint64
+	knownIDs := 0
+	forget := func(key string) {
+		if task := tasks[key]; task != nil {
+			knownIDs -= len(task.observedIDs)
+			delete(tasks, key)
+		}
+	}
+	remember := func(task *redisKeyedTask, id string) {
+		if !options.SharedKeys || int64(knownIDs) >= window {
+			return
+		}
+		if task.observedIDs == nil {
+			task.observedIDs = make(map[string]struct{})
+		}
+		if _, ok := task.observedIDs[id]; !ok {
+			task.observedIDs[id] = struct{}{}
+			knownIDs++
+		}
+	}
 	complete := func(result reliableKeyedFailure) {
 		task := tasks[result.work.key]
 		running--
 		task.running = false
 		if result.err == nil {
-			delete(tasks, result.work.key)
+			forget(result.work.key)
 			// 此前扫过但因该 key 正在执行而跳过的旧消息必须先于后页消息。
 			cursor = "0-0"
 			return
@@ -195,7 +225,7 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 						continue
 					}
 					if len(pending) == 0 {
-						delete(tasks, task.work.key)
+						forget(task.work.key)
 						cursor = "0-0"
 						continue
 					}
@@ -217,7 +247,16 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 		admitted := false
 		if int64(len(tasks)) < window {
 			startedAt := time.Now()
-			pending, next, err := r.claimReliableKeyed(ctx, key, subject, options, cursor, window)
+			var skipped []string
+			if options.SharedKeys {
+				skipped = make([]string, 0, knownIDs)
+				for _, task := range tasks {
+					for id := range task.observedIDs {
+						skipped = append(skipped, id)
+					}
+				}
+			}
+			pending, next, err := r.claimReliableKeyedSkipping(ctx, key, subject, options, cursor, window, skipped)
 			readAt := time.Now()
 			if err != nil {
 				if !waitRedisKeyed(ctx, results, complete, delay) {
@@ -228,7 +267,8 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 			metrics.reclaimRead.Add(int64(len(pending)))
 			observeRedisKeyedRead(ctx, startedAt, readAt, "reclaim", key, options.Group, pending)
 			for _, work := range r.reliableKeyedWorks(ctx, key, subject, options, pending, handler) {
-				if _, exists := tasks[work.key]; exists {
+				if task, exists := tasks[work.key]; exists {
+					remember(task, work.id)
 					continue
 				}
 				if int64(len(tasks)) == window {
@@ -241,6 +281,7 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 				work = r.observeRedisKeyedWork(ctx, work, key, options.Group, firstRead, readAt, fresh, metrics)
 				sequence++
 				tasks[work.key] = &redisKeyedTask{work: work, sequence: sequence}
+				remember(tasks[work.key], work.id)
 				admitted = true
 			}
 			cursor = next

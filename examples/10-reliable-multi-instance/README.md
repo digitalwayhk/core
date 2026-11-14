@@ -93,3 +93,7 @@ CORE_TEST_REDIS_ADDR=127.0.0.1:16379 go test -p 1 -race ./examples/10-reliable-m
 ```
 
 测试复用标准进程/HTTP/TestToken 工具，启动三个真实服务，断言两个不同 PID 都处理、慢 key 不阻塞另一个 key、同用户顺序、失败重投、匿名拒绝和用户隔离。没有 Redis 时显式跳过，不将 skip 当通过。
+
+## v1.12.1 轮询成本与升级
+
+本例普通Reliable+SharedKeys消费会话仅复用仍被本地task屏障挡住的已知PEL ID，提示合计≤原W，不确认或跳过消息。前序完成或原项已被ACK后释放提示、按原cursor回绕；缺正文仍在重新取原件时拒绝。原N/W、group、SharedKeys标记和消息保持，不需清理或调参。发生容量stale拒绝的发布进程需要分别升级，不能只靠消费者升级刷新其内存快照；Owned专用reader并不由本例证明性能改善。真实微基准和组件/消费方边界见[专项](../../docs/codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

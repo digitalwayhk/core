@@ -1,5 +1,7 @@
 # 生命周期 owner 容量刷新：修复与验收
 
+> 本文保留v1.11.3历史验证；v1.12.1进一步覆盖acquire/standby预算余量，现行升级与边界见[后续专项](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
 2026-11-13。基线正式 v1.11.2（e9791d1cc35631c1f344d6d2b5b7e6897313df2c），兼容补丁候选 v1.11.3。精确main/tag、官方Go代理/SUM和最终干净提交门禁由正式Release交付回执绑定。仅Core；未操作Bitzoom/Full-E4。
 
 ## 已确认根因与证据边界

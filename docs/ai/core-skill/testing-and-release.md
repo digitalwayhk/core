@@ -263,3 +263,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## 有界本地读取验收
 
 新分页门面必须先在旧源码真实可靠保存后保留缺能力RED，再验证范围绑定、正limit/上限、键数/原始字节预算和空页续游标，损坏/过大不静默跳过。取消与Close采用解码屏障，独立PID正常关闭和SIGKILL后重开原目录续页；pending核对持久索引，不能拿旧模式重开后未初始化缓存代替。旧ScanLocal和底层ScanPage保持行为。旧全量API与新分页对照分别报告每调用和整轮成本，分配累计不冒充存活堆；分页没有跨页快照，也不保证应用保留全部页时内存有界。消费方UAT/恢复/容量另列NOT_RUN。
+
+## PEL正文与容量剩余预算回归
+
+先保留真实Redis RED：handler保持在途、10轮读取已知正文重复；以及acquire/standby350ms子预算失败而原500ms余量可取可信容量。GREEN须原PEL页cursor不变、提示元数据≤原W、失败/完成/远端ACK后重扫、未知缺正文错误保持，ScriptFlush后自定义结果和lease/ACK回退可用。容量覆盖语义与deadline同现、取消/迟到成功、耗尽原预算、完整前沿隔离；以实际deadline继承证明不是额外500ms。跑四包真实Redis普通/race、显式原生长租约独立PID硬杀、10例三进程HTTP。固定读轮微基准的CPU/协议/命令与业务端到端时延分开，Lua子命令不叠加CPU，缺主线程CPU用null。真实Owned reader不带task提示，不能用普通SharedKeys测量代替其性能；消费方混合版本/接入/UAT/容量单列。

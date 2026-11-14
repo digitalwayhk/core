@@ -26,6 +26,8 @@
 
 ### Fixed
 
+- 修复普通Redis SharedKeys会话重复读取已知PEL正文的放大；ID元数据合计不超过原window，原PEL分页/顺序/fence/ACK保持。生命周期acquire与standby可恢复超时复用原轮次余量补读容量，不放宽stale或硬限。见[验收和角色升级](docs/codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
 - 修复内置生命周期owner完整Inspect超时未独立刷新容量的路径缺口：仅可恢复超时且原整轮有余量时补一次轻量读取；完整错误/计数、回收门禁、4s示例新鲜度和hard容量保持。增加原entry固定原因诊断、9项低基数counter和限频状态日志，无新API/配置/持久格式。见[验收与边界](docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
 
 - 修复 Outbox 在健康满批持续时失败 OrderingKey 的重试饥饿；沿既有 Interval 恢复资格，Notify 同窗口最多提前一次，失败屏障集合有界。保留 earliest-first、发布后确认、同 key 前序及 at-least-once；无新增 API、配置、依赖或卷格式。详见[验证及背压边界](docs/codex/OUTBOX_RETRY_FAIRNESS_2026-11-12.md)。
@@ -39,6 +41,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.12.1] - 2026-11-14
+
+### Fixed
+
+- 修复普通Redis SharedKeys会话重复读取已知PEL正文的放大；ID元数据合计不超过原window，原PEL分页/顺序/fence/ACK保持。生命周期acquire与standby可恢复超时复用原轮次余量补读容量，不放宽stale或硬限。见[验收和角色升级](docs/codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
+### Changed
+
+- 无新增API、配置或卷格式；producer与普通SharedKeys consumer须按实际角色分别升级，Owned reader本轮不带提示。EVALSHA未纳入生产，不承诺消除全部stale或现场异步长尾；原件/fingerprint/SQL fence保持，不清数据。
 
 ## [v1.12.0] - 2026-11-13
 

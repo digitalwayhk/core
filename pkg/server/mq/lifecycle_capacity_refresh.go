@@ -1,4 +1,4 @@
-// 本文件仅在owner完整检查超时后，用原轮次剩余预算补一次容量证据；不刷新回收前沿。
+// 本文件在acquire、standby或owner观测超时后，用原轮次剩余预算补一次容量证据；不刷新回收前沿。
 package mq
 
 import (
@@ -7,7 +7,14 @@ import (
 	"time"
 )
 
-func (c *lifecycleController) refreshOwnerCapacity(ctx context.Context, subject string, entry *lifecycleEntry, policy LifecyclePolicy, worker lifecycleWorkerProvider) {
+func (c *lifecycleController) refreshCapacityAfterTimeout(ctx context.Context, subject string, entry *lifecycleEntry, policy LifecyclePolicy, worker lifecycleWorkerProvider, cause error) {
+	if lifecycleFailureReason(cause) != 0 || ctx.Err() != nil || c.ctx.Err() != nil {
+		return
+	}
+	c.refreshLifecycleCapacity(ctx, subject, entry, policy, worker)
+}
+
+func (c *lifecycleController) refreshLifecycleCapacity(ctx context.Context, subject string, entry *lifecycleEntry, policy LifecyclePolicy, worker lifecycleWorkerProvider) {
 	if policy.Capacity.HardMessages == 0 && policy.Capacity.HardBytes == 0 {
 		return
 	}

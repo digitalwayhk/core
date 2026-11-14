@@ -1,3 +1,4 @@
+// 本文件管理消息生命周期原轮次预算、可信快照与安全回收，不放宽容量发布门禁。
 package mq
 
 import (
@@ -180,7 +181,9 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) (runE
 		ownedCtx, acquired, err := worker.acquireLifecycleRound(inspectCtx, policy, c.owner)
 		owned = acquired
 		if err != nil {
-			return lifecyclePhaseError(err, inspectCtx.Err())
+			err = lifecyclePhaseError(err, inspectCtx.Err())
+			c.refreshCapacityAfterTimeout(runCtx, subject, entry, policy, worker, err)
+			return err
 		}
 		if !owned {
 			c.beginLifecycleRound(subject, entry, "standby")
@@ -188,12 +191,22 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) (runE
 			err = lifecyclePhaseError(err, inspectCtx.Err())
 			c.recordLifecycleRead(subject, entry, "capacity", err)
 			if err != nil {
+				c.refreshCapacityAfterTimeout(runCtx, subject, entry, policy, worker, err)
 				return err
 			}
 			c.mu.Lock()
 			if c.entries[subject] != entry || entry.policy.Fingerprint() != policy.Fingerprint() {
 				c.mu.Unlock()
 				return ErrLifecyclePolicyConflict
+			}
+			// 迟到的standby成功也不能在取消后刷新证据。
+			if err := lifecyclePhaseError(nil, inspectCtx.Err()); err != nil {
+				c.mu.Unlock()
+				return err
+			}
+			if err := c.ctx.Err(); err != nil {
+				c.mu.Unlock()
+				return err
 			}
 			entry.capacity = &capacity
 			c.mu.Unlock()
@@ -223,8 +236,8 @@ func (c *lifecycleController) runOnce(ctx context.Context, subject string) (runE
 	stopInspect()
 	c.recordLifecycleRead(subject, entry, "full", err)
 	if err != nil {
-		if coordinated && owned && lifecycleFailureReason(err) == 0 && runCtx.Err() == nil && c.ctx.Err() == nil {
-			c.refreshOwnerCapacity(runCtx, subject, entry, policy, worker)
+		if coordinated && owned {
+			c.refreshCapacityAfterTimeout(runCtx, subject, entry, policy, worker, err)
 		}
 		// 即使容量补读成功，完整检查仍失败；不回收，不吞错误或计数。
 		return err

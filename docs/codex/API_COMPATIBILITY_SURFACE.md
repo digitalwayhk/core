@@ -253,3 +253,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ## v1.12.0 有界本地读取（加性）
 
 `nosql.ReliableWriteStore[T].ScanLocalPage(context.Context,string,string,int) ([]*T,string,error)` 为Stable加性入口，三个公开LocalScanPageMax常量及ErrInvalidLocalScanPage/ErrLocalScanItemTooLarge/ErrLocalScanData为其合同。旧LocalScanOptions结构、ScanLocal/底层ScanPage语义不变，无配置或存储格式改变。范围绑定cursor、空页续读、每页快照与错误原件保护见[正式指南](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。nosql包加入受保护清单，公开基线通过官方apidiff入口更新；普通/有界卷仍遵守原格式回退边界。
+
+## v1.12.1 内部Redis轮询与容量补读
+
+无公开签名/接口/配置或持久字段变化。普通SharedKeys会话有限ID提示只减少已知正文传输，仍按原PEL页/游标、共享W和fenced执行/成功后ACK。原有reclaim_read指标继续计实际返回的正文，不把少读正文当业务完成。新进程无提示按原PEL恢复，Owned专用reader不传提示。生命周期新增acquire/standby可恢复超时的原runCtx余量补读，原错误及fail-closed门禁保持。详见[验证及角色升级](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

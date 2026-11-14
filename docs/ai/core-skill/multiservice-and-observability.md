@@ -184,7 +184,7 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 - Redis publish 只声明 `broker-accepted`；要求落盘确认的应用必须选择提供 `broker-persisted` 的 Provider。Redis 回收只允许 fenced Lua 校验后的有界 `XDEL`；NATS 使用全部 durable `AckFloor`、KV 前沿和有界 purge。禁止应用自行 `MAXLEN`、TTL、单组 ACK 后删除、删离线组或重置游标。
 - 策略先以 `observe` 上线核对 pending/lag/oldest/容量，再通过重启切换 `enforce`。Provider capability 不满足、既有组 enrollment 未知、自动淘汰策略不安全、必需组缺失或前沿回退时必须 fail closed。
 - 内置 Redis/NATS 生命周期 worker 在完整 Inspect 前竞争跨周期 subject 租约；standby 只刷新轻量容量，不重复扫描全部组。`TimeBudget` 仍是整轮上限（观测最多 70%，回收使用独立 context），启动和周期有界抖动。不得通过延长业务 policy、清数据、改 observe 或忽略 deadline 掩盖 worker 故障；v1.1.1 的 fingerprint/metadata 原地兼容，混跑旧版期间不保证命令去重收益。诊断同时查看 `reclaim_fail_total` 和固定 `deadline|owner_lost|policy_fence|provider` 原因指标，不能只看某一实例；完整 pending/lag 未采集或过期不得冒充零。详见生命周期指南的多实例 worker 章节。
-- v1.11.3 起，仅 owner 的完整检查可恢复超时且原整轮尚有余量时，内置 worker 补一次现有轻量容量读取；完整错误仍返回/计数，不执行回收，不刷新完整前沿/pending/lag。沿原 runCtx 余量，不另开一份预算，不延长 2×Interval 新鲜度。补读失败/缺证据仍 unknown，真实硬限仍 Backpressure；policy/元数据/owner/fence/取消的语义错误不能被同时到期的 deadline 覆盖后降级。legacy 自定义 Provider 不增加读取。详见[修复和安全边界](../../codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
+- v1.11.3 引入 owner 完整检查超时的容量补读，v1.12.1 进一步覆盖 acquire/standby 可恢复超时；仅在原整轮尚有余量时，内置 worker 补一次现有轻量容量读取；完整错误仍返回/计数，不执行回收，不刷新完整前沿/pending/lag。沿原 runCtx 余量，不另开一份预算，不延长 2×Interval 新鲜度。补读失败/缺证据仍 unknown，真实硬限仍 Backpressure；policy/元数据/owner/fence/取消的语义错误不能被同时到期的 deadline 覆盖后降级。legacy 自定义 Provider 不增加读取。详见[修复和安全边界](../../codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
 - 容量拒绝通过固定 `publish_rejected_reason_{not_observed|stale|state|messages_missing|bytes_missing|hard_reached}_total` 与 `capacity_refresh_{attempt|success|fail}_total` 观测；Prom不加动态Subject/业务ID标签。逐Subject的 `mq_lifecycle_publish_blocked` 只在状态变化且距上次至少一个既有Interval时记录，包含实际full/capacity来源、已知年龄、上轮角色与full/light固定错误类别；未采集年龄不补0。诊断字段固定保存在已登记entry，不能每次拒绝再访问Redis。
 
 - 有序可靠投递为加性契约：`mq.PublishOptions.OrderingKey`、`OrderedReliableMQProvider`、`MQManager.RequireOrderedReliable`、EventBridge透传与 Outbox earliest-first / 可选 `OutboxStoreSkipBlocked`、可选 `OutboxBatchMarker` 等以 `docs/codex/API_COMPATIBILITY_SURFACE.md` 与当前测试为准；未声明 requirement 时零值兼容。分键并发另需 `KeyedReliableMQProvider` 能力和 `VerifyKeyedReliableConcurrency`；Redis仍只有一个 active owner，只在 owner 内并行不同 key。同 key 仍串行 Publish；批量确认只作用于已发布前缀。
@@ -235,3 +235,9 @@ SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期�
 ## write-behind处置状态观测
 
 显式新模式的技术pending、真实同步确认、retrying、unknown、paused和handed_off是不同事实，不能相加成业务成功。`GetWriteBehindDispositionMetrics`及可靠门面提供原持久状态、预算耗尽、最老失败时间和handler实际/排队/上限；未启用返回错误，不把未采集填0。该显式查询扫描未解决索引，不用于高频业务请求；Core只在原worker轮次记录低基数状态，不另建采样线程。完整失败记录含原件和错误，仅供应用有权限的恢复流程，不日志dump key/用户/payload/SQL/回执。接管和Release不等于APPLIED，详见[有界失败处置](../../codex/WRITE_BEHIND_FAILURE_DISPOSITION_GUIDE.md)。
+
+## v1.12.1 Redis PEL重复正文与容量余量
+
+普通 `Reliable + SharedKeys` 的 `runReliableKeyedOwner` 仅对自己有限task中已观察到、仍等待同key前序的消息保存ID提示，总量不超过原有效window。PEL仍按原页XPENDING，游标依据原PEL页末推进，提示只省XRANGE正文；完成/已无PEL时释放提示并回到原页首核对，重启不保留提示。未观察原件仍取正文，缺失继续报错；已知尾项的缺正文检查在前序退出、重新取原件时执行，不承诺在前序挂起期间即时发现；同key失败/未知/租约fence/成功后ACK、共享预取上限和真实回调退出均不变。提示是有限元数据，不是第二个队列。原始EVAL及自定义响应解码保持，不能据此宣称Redis不再有XRANGE/EVAL成本。Owned专用reader不带task提示，本轮不宣称它省正文。
+
+内置生命周期worker在取得轮次、standby轻量读取或owner完整检查发生可恢复超时后，均可用**同一原runCtx剩余时间**补一次现有轻量容量读取；无余量/取消/语义/fence错误不补。完整错误仍返回计数，不回收、不刷新完整组前沿，缺证据/真实硬限仍拒绝，不延长2×Interval新鲜度。升级需要分角色：发生拒绝的producer升级才能修复本地capacity controller，普通SharedKeys consumer升级才有正文复用；两者不互相替代，混跑未升级副本仍有旧成本。无新配置、W/策略fingerprint、组/PEL/游标、scope/SQL fence或卷迁移，不准删/改标记或清数据。详见[本轮验证与升级](../../codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

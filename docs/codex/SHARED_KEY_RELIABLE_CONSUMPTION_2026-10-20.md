@@ -110,3 +110,7 @@ CORE_TEST_REDIS_ADDR=127.0.0.1:<专属端口> GOWORK=off go test -p 1 -race ./ex
 本轮主 Agent 按并发、可靠性、公开合同和迁移边界自审，仓库禁止子 Agent，未宣称独立第三方审计。生产 Redis 主从故障/数据丢失、多主机网络分区、Redis Cluster、长时间容量吞吐、NATS 真 Broker 重测、Bitzoom 消费方迁移和生产部署均为 **NOT_RUN**。不能把两个连接的 conformance 当多进程，通过 Core 回归也不等于消费方已验收。
 
 官方机制参考：[XPENDING 排他分页](https://redis.io/docs/latest/commands/xpending/)、[XCLAIM](https://redis.io/docs/latest/commands/xclaim/)、[Lua 原子执行](https://redis.io/docs/latest/develop/programmability/eval-intro/)。
+
+## v1.12.1 有限ID提示
+
+普通共享key会话可以复用本地已观察且仍被同keytask屏障挡住的消息ID，最多原window个，仅省重复XRANGE正文，不改原PEL分页/共享预算、顺序、租约或ACK。task完成或PEL已无原项时释放提示并按原cursor回绕，新进程从原PEL恢复。没有持久标记变化，不需删组或重置游标；未升级消费者仍原重复成本。专用Owned reader不带提示，不能把此优化当跨主题归属重构或其扫描优化。EVALSHA只作对照，未纳入生产。详见[真实RED/GREEN与角色升级](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

@@ -287,3 +287,7 @@ W 与模式持久冻结。启用前必须停旧订阅、确认实际 handler 已
 | 无MQ/其它Provider | 未声明即拒绝 | 不模拟 | 不降级本地或哈希 |
 
 详见[持续归属指南](SCOPED_EVENT_OWNERSHIP_GUIDE.md)。保留required groups、发布确认、容量、保留与安全回收。新入口不支持有限次整批DLQ，MaxDeliveries>0明确拒绝；不能为接入而擅自删改原策略。ACK响应未知先重查原PEL；新读取后重新扫描最早PEL，保留原OrderingKey失败屏障，不承诺跨subject总序。
+
+## v1.12.1 原观测预算的有限补读
+
+容量证据超时可能发生在acquire或standby，而非完整Inspect。内置worker现在对三条可恢复超时路径共用同一原runCtx余量的一次轻量读取；不会延长整轮TimeBudget、新鲜度或放松元数据/策略验证。原错误仍返回计数，完整前沿不更新、不回收；无证据仍unknown、实际硬限仍背压。发布进程必须升级，不能只升级消费者或仅改某台Interval/TimeBudget（这些值参与冻结fingerprint）。无需配置/格式/原组迁移；保留旧消息、PEL、序号与原fence。详细角色边界与真实证据见[专项](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

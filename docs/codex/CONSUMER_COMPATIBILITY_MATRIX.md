@@ -224,3 +224,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.12.0 有界本地读取
 
 加性API，直接升级无需新配置/迁移；原ScanLocal仍可调用，恢复改用ScanLocalPage才能有界续页。游标不能跨store路径/模型/请求prefix使用，不保证跨页一致快照，不给旧版本增加可调用方法。保留原卷及既有格式保护；消费方边读边折叠和准入/fence/水位接入、实际OOM/业务/容量均NOT_RUN，不改变上表历史锁定。详见[接入](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)及[Core验收](RELIABLE_LOCAL_SCAN_PAGE_2026-11-13.md)。
+
+## v1.12.1 Redis PEL与容量余量
+
+兼容修复，无API/配置/持久格式或fingerprint变化。producer升级修复自身acquire/standby/owner超时后的有限容量补读；普通SharedKeys consumer升级省其本地task已知正文。任一方升级不能替代另一方，Owned专用reader性能未由此改变。v1.11.0/1.11.1/1.12.0混合运行必须按各实际二进制和入口映射，不用根go.mod推断。保留原volume、原Stream/消费组/PEL/cursor、序号及SQL fence；既有格式回退禁令不放松。无调参、无清理步骤，不改应用的私有诊断刷盘设置。Core组件与消费方接入/经济事实/UAT/容量独立；详见[升级与验收](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
