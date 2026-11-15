@@ -3,6 +3,7 @@ package orderservice
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,12 @@ func (r *orderedReceiptResource) Close(ctx context.Context) error {
 
 // TestOrderFailureServiceContextLifecycle 验证正式组合根与资源逆序：先停止Core store，再关闭应用独立接管库。
 func TestOrderFailureServiceContextLifecycle(t *testing.T) {
+	for _, workers := range []int{0, 2} {
+		t.Run(fmt.Sprint(workers), func(t *testing.T) { testOrderFailureServiceContextLifecycle(t, workers) })
+	}
+}
+
+func testOrderFailureServiceContextLifecycle(t *testing.T, workers int) {
 	root := t.TempDir()
 	t.Setenv("SHOP_LOCAL_PENDING_DIR", filepath.Join(root, "core"))
 	cfg := config.NewServiceDefaultConfig("order-failure-lifecycle", 0)
@@ -45,7 +52,7 @@ func TestOrderFailureServiceContextLifecycle(t *testing.T) {
 	t.Cleanup(func() { sc.SetRunState(false) })
 	receipts, err := business.NewOrderFailureReceipts(filepath.Join(root, "app"))
 	require.NoError(t, err)
-	service := &Service{FailurePolicy: &nosql.WriteBehindFailurePolicy{StoreID: "order-failure-lifecycle:instance-a", MaxAttempts: 2, MinRetryInterval: 50 * time.Millisecond, MaxRetryInterval: time.Second, HandlerMaxAttempts: 4, HandlerTimeout: time.Second, HandlerWorkers: 1, ScanLimit: 8}}
+	service := &Service{WriteBehindExecution: nosql.WriteBehindExecutionOptions{IndependentGroups: workers}, FailurePolicy: &nosql.WriteBehindFailurePolicy{StoreID: "order-failure-lifecycle:instance-a", MaxAttempts: 2, MinRetryInterval: 50 * time.Millisecond, MaxRetryInterval: time.Second, HandlerMaxAttempts: 4, HandlerTimeout: time.Second, HandlerWorkers: 1, ScanLimit: 8}}
 	store, err := service.newOrderWriteStore(sc)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -76,6 +83,9 @@ func TestOrderFailureServiceContextLifecycle(t *testing.T) {
 	r, _, err := store.ListWriteBehindFailures("", 10)
 	require.NoError(t, err)
 	require.Len(t, r, 1)
+	metrics, err := store.WriteBehindDispositionMetrics()
+	require.NoError(t, err)
+	require.Equal(t, workers, metrics.TargetLimit)
 	sc.SetRunState(false)
 	require.True(t, checked.Load())
 	_, err = receipts.Read(r[0].ID)

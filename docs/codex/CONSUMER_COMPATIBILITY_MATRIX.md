@@ -228,3 +228,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.12.1 Redis PEL与容量余量
 
 兼容修复，无API/配置/持久格式或fingerprint变化。producer升级修复自身acquire/standby/owner超时后的有限容量补读；普通SharedKeys consumer升级省其本地task已知正文。任一方升级不能替代另一方，Owned专用reader性能未由此改变。v1.11.0/1.11.1/1.12.0混合运行必须按各实际二进制和入口映射，不用根go.mod推断。保留原volume、原Stream/消费组/PEL/cursor、序号及SQL fence；既有格式回退禁令不放松。无调参、无清理步骤，不改应用的私有诊断刷盘设置。Core组件与消费方接入/经济事实/UAT/容量独立；详见[升级与验收](REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
+### 同store独立组排空接入
+
+旧 `UseWriteBehindWithFailureHandler`、零值target执行和同代原卷保持。新入口显式传 `WriteBehindExecutionOptions{IndependentGroups: N}`，N为1–64；应用负责验证稳定组、线程安全与独立事务。没有原policy不能静默启用。保持StoreID/attempt/指纹/终态保留，停稳原回调后升级；回退仅限识别同代格式的二进制并先关闭新选项验证副本，不能删mode或并发开原卷。消费方功能、UAT、Full-E4与容量尚须独立执行，Core组件不代认证。

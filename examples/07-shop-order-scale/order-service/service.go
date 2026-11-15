@@ -33,6 +33,8 @@ import (
 type Service struct {
 	// FailurePolicy/FailureHandler 仅在应用显式声明有界失败处置时设置；零值继续原示例行为。
 	FailurePolicy *nosql.WriteBehindFailurePolicy
+	// WriteBehindExecution仅显式有界模式启用独立组；零值保持整批target。
+	WriteBehindExecution nosql.WriteBehindExecutionOptions
 	// TerminalRetention仅在需要额外完整终态审计时设置，nil默认按框架回收。
 	TerminalRetention *nosql.WriteBehindTerminalRetention
 	FailureHandler    nosql.WriteBehindFailureHandler[transaction.Order]
@@ -112,6 +114,9 @@ func (s *Service) Start() {
 // newOrderWriteStore 为当前订单服务副本创建尚未绑定远程 target 的本地可靠 store。
 func (s *Service) newOrderWriteStore(sc *router.ServiceContext) (*transaction.OrderWriteStore, error) {
 	// BasePath 只是挂载根目录；ReliableWriteStore 还会追加 service/dc/machine，防止水平副本共用 Badger 文件。
+	if s.FailurePolicy == nil && s.WriteBehindExecution.IndependentGroups != 0 {
+		return nil, nosql.ErrWriteBehindDisposition
+	}
 	basePath := orderPendingBasePath()
 	badgerConfig := nosql.DefaultProductionConfig(basePath)
 	// 示例不转发 Badger 内部噪声日志；存储和同步结果由框架结构化指标表达。
@@ -196,7 +201,7 @@ func (s *Service) bindOrderWriteStore(sc *router.ServiceContext, store *transact
 	}
 	var bindErr error
 	if s.FailurePolicy != nil {
-		bindErr = store.UseWriteBehindWithFailureHandler(target, s.FailureHandler)
+		bindErr = store.UseWriteBehindWithFailureHandlerOptions(target, s.FailureHandler, s.WriteBehindExecution)
 	} else {
 		bindErr = store.UseWriteBehind(target)
 	}

@@ -69,6 +69,11 @@ func (store *OrderWriteStore) UseWriteBehindWithFailureHandler(target nosql.Writ
 	return store.reliable.UseWriteBehindWithFailureHandler(target, handler)
 }
 
+// UseWriteBehindWithFailureHandlerOptions显式复用Core独立组排空，不建立应用worker。
+func (store *OrderWriteStore) UseWriteBehindWithFailureHandlerOptions(target nosql.WriteBehindTarget[Order], handler nosql.WriteBehindFailureHandler[Order], options nosql.WriteBehindExecutionOptions) error {
+	return store.reliable.UseWriteBehindWithFailureHandlerOptions(target, handler, options)
+}
+
 // ListWriteBehindFailures 分页向应用恢复流程提供原失败事实，不加入业务路由或管理页面。
 func (store *OrderWriteStore) ListWriteBehindFailures(after string, limit int) ([]nosql.WriteBehindFailureRecord[Order], string, error) {
 	return store.reliable.ListWriteBehindFailures(after, limit)

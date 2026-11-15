@@ -139,3 +139,7 @@ v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用�
 ### 恢复时有界枚举本地原件
 
 若扩展示例恢复逻辑需要读取大量保留记录，使用 `store.ScanLocalPage(ctx,prefix,cursor,128)`，处理本页后释放；空页有cursor仍继续，只有空next结束。不要循环正Limit的旧ScanLocal或用Limit=0全量读。每页新快照，恢复仍须应用控制准入/fence/水位；分页不触发同步和删除，也不保证业务把全部页留存时堆有界。[正式用法与错误边界](../../docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。
+
+### 可选：有界独立组排空
+
+默认write-behind行为不变。需要同store健康组在无关慢组执行时持续确认，可在已绑定有限失败policy的原store上显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, nosql.WriteBehindExecutionOptions{IndependentGroups: 4})`。target必须线程安全、各应用顺序组可独立提交；每次target只有一组首，不适用跨组原子事务。07组合根可设置 `Service.WriteBehindExecution`，零值保留旧模式；不增加业务worker、不改SyncWrites或卷。手动/自动、取消、资源和升级边界见[正式指南](../../docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。

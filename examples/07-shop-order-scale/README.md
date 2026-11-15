@@ -314,3 +314,7 @@ v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用�
 ### 生命周期容量诊断（v1.11.3）
 
 原RequireMessageLifecycle/UseOutbox/SubscribeEvent接线和策略无需新开关。内置owner完整检查超时且整轮预算未尽时补一次独立容量；原deadline仍计数，容量可用不代表完整组前沿已恢复或可回收。unknown与hard reached分别诊断，不通过改observe、提硬限、延长快照新鲜度或清消息来排空。固定原因计数、限频日志和升级边界见[正式验证](../../docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
+
+### 可选：有界独立组排空
+
+默认write-behind行为不变。需要同store健康组在无关慢组执行时持续确认，可在已绑定有限失败policy的原store上显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, nosql.WriteBehindExecutionOptions{IndependentGroups: 4})`。target必须线程安全、各应用顺序组可独立提交；每次target只有一组首，不适用跨组原子事务。07组合根可设置 `Service.WriteBehindExecution`，零值保留旧模式；不增加业务worker、不改SyncWrites或卷。手动/自动、取消、资源和升级边界见[正式指南](../../docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。

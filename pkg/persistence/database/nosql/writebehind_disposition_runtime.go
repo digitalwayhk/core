@@ -20,7 +20,8 @@ type writeBehindDispositionJob[T types.IModel] struct {
 	cause  error
 }
 type writeBehindDispositionRuntime[T types.IModel] struct {
-	activeIDs    sync.Map // 仅固定worker持有，至多HandlerWorkers项
+	groups       *writeBehindGroupExecution[T]
+	activeIDs    sync.Map // 固定target/handler worker持有；false为target，true为handler
 	activeGroups sync.Map
 	causes       writeBehindCauseRetention
 	storageMu    sync.Mutex // 仅串行本prefix本地元数据提交，不跨target/处置回调持锁
@@ -33,6 +34,8 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 	groupCheckObserver func(*badger.Txn, badger.IteratorOptions)
 	// snapshotReadObserver仅包内计数真实的新快照回读，准备期绑定，不输出业务标识。
 	snapshotReadObserver func()
+	// confirmationObserver仅准备期绑定，在真实本地确认提交后观察快照；生产nil不采时钟。
+	confirmationObserver func([]*SyncQueueItem[T])
 	snapshotCopy         dispositionValueCopy
 	// historyCommitObserver仅包内故障验收在事务提交前返回错误，不改变生产默认行为。
 	historyCommitObserver func(*badger.Txn) error
@@ -48,6 +51,14 @@ type writeBehindDispositionRuntime[T types.IModel] struct {
 
 // UseWriteBehindWithFailureHandler 显式启用有限处置；必须在接受写入前绑定，需与持久policy指纹一致。
 func (p *PrefixedBadgerDB[T]) UseWriteBehindWithFailureHandler(target WriteBehindTarget[T], handler WriteBehindFailureHandler[T]) error {
+	return p.UseWriteBehindWithFailureHandlerOptions(target, handler, WriteBehindExecutionOptions{})
+}
+
+// UseWriteBehindWithFailureHandlerOptions显式选择独立组执行；零值保留原整批target合同。
+func (p *PrefixedBadgerDB[T]) UseWriteBehindWithFailureHandlerOptions(target WriteBehindTarget[T], handler WriteBehindFailureHandler[T], options WriteBehindExecutionOptions) error {
+	if err := options.validate(); err != nil {
+		return err
+	}
 	policy := p.manager.config.WriteBehindFailure
 	if policy == nil || policy.Validate() != nil || target == nil || handler == nil {
 		return ErrWriteBehindDisposition
@@ -87,6 +98,13 @@ func (p *PrefixedBadgerDB[T]) UseWriteBehindWithFailureHandler(target WriteBehin
 	for range rt.policy.HandlerWorkers {
 		p.wg.Add(1)
 		go p.dispositionHandlerWorker()
+	}
+	if options.IndependentGroups > 0 {
+		rt.groups = newWriteBehindGroupExecution[T](options.IndependentGroups)
+		for range options.IndependentGroups {
+			p.wg.Add(1)
+			go p.independentGroupWorker()
+		}
 	}
 	p.startWriteBehindWorker()
 	return nil
@@ -398,6 +416,10 @@ func (p *PrefixedBadgerDB[T]) dispositionHandlerWorker() {
 }
 
 func (p *PrefixedBadgerDB[T]) syncWithDisposition() {
+	if p.disposition.groups != nil {
+		p.syncWithIndependentGroups()
+		return
+	}
 	var historyNextAt time.Time
 	rt := p.disposition
 	timer := time.NewTimer(time.Hour)

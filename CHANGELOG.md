@@ -6,6 +6,8 @@
 
 ### Added
 
+- 显式 `WriteBehindExecutionOptions.IndependentGroups` / `UseWriteBehindWithFailureHandlerOptions` 允许同store独立顺序组有界持续排空：固定worker、组首独立target与真实本地确认，健康组不再等待无关慢组整轮返回。旧入口/零值保持；target须线程安全且各组独立提交，不能替代跨组原子事务。API、恢复和代价见[指南](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
 - 新增可靠本地读取门面 `ScanLocalPage`：正limit/框架上限、范围绑定cursor、键数/原始字节预算、精确Prefix、取消/关闭和错误不跳过。旧API、配置与卷不变；每页独立快照，不承诺跨页一致。见[正式指南](docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。
 
 - 普通用户签名前 Hook 可通过可选 `ITokenUIDMutator.SetTokenUID` 设置展示用 JWT `uid`；原始认证身份由保留字段 `auth_identity_uid` 携带，既有接口不变。
@@ -41,6 +43,26 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.0] - 2026-11-16
+
+### Added
+
+- 同store显式独立组执行选项与固定target worker；手动/自动共享有界执行池，各组真实确认后可补充后继。
+- 失败处置观测增加 TargetActive/TargetQueued/TargetLimit，示例07组合根可显式透传，04/07默认行为不变。
+
+### Changed
+
+- 新模式每次target仅一组首并独立BatchID；短执行互斥保留选批和确认，实际未退出回调保留组/槽。原版本、指纹、attempt、失败处置、确认后hook及终态保留不变。
+- 没有新增配置字段、依赖或持久格式；原StoreID/policy和同代卷兼容，停稳后显式启用。小target可能增加调用和确认事务数，不承诺Save P99或消费方容量。见[接入及边界](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
+### Fixed
+
+- 显式独立组执行避免健康组因无关慢组尚未返回而无法本地确认和推进后继；默认整批合同不变。不同key哈希条带碰撞不重新串行target，强制本地删除仍排他；真实选批过大有界缩块，不重复消费attempt。
+
+### Security
+
+- 不清pending/历史、不提前确认、不关闭可靠刷盘；无消费方部署授权扩展，组件验证不等于业务UAT/容量通过。
 
 ## [v1.12.1] - 2026-11-14
 

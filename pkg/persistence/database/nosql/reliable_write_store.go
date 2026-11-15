@@ -126,6 +126,18 @@ func (store *ReliableWriteStore[T]) UseWriteBehindWithFailureHandler(target Writ
 	return nil
 }
 
+// UseWriteBehindWithFailureHandlerOptions显式允许不同应用顺序组独立完成；target须支持并发调用。
+func (store *ReliableWriteStore[T]) UseWriteBehindWithFailureHandlerOptions(target WriteBehindTarget[T], handler WriteBehindFailureHandler[T], options WriteBehindExecutionOptions) error {
+	if store == nil || store.db == nil || store.closing.Load() {
+		return ErrWriteStoreClosed
+	}
+	if err := store.db.UseWriteBehindWithFailureHandlerOptions(target, handler, options); err != nil {
+		return err
+	}
+	store.bound.Store(true)
+	return nil
+}
+
 // ListWriteBehindFailures 分页读取受应用权限保护的原失败记录，不提供管理页面或匿名API。
 func (store *ReliableWriteStore[T]) ListWriteBehindFailures(after string, limit int) ([]WriteBehindFailureRecord[T], string, error) {
 	if store == nil || store.db == nil {

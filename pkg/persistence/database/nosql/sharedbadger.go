@@ -208,8 +208,8 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
 	syncInProgress bool
-	syncExecMu     sync.Mutex // 保证 processSyncQueue 串行执行，防止并发调用
-	syncKeyLocks   [syncKeyLockStripeCount]sync.Mutex
+	syncExecMu     sync.Mutex // 默认串行整轮；显式独立组仅跨选批/预留及确认持有
+	syncKeyLocks   [syncKeyLockStripeCount]sync.RWMutex
 	closeCh        chan struct{}
 	syncTrigger    chan struct{} // 写入时立即触发同步，无需等待 ticker
 	sadTrigger     chan struct{}
@@ -1966,6 +1966,11 @@ func (p *PrefixedBadgerDB[T]) syncBatchWithTargetContext(ctx context.Context, it
 // lockSyncKeys 使同一数据键的远端同步与强制本地删除串行。
 // 分片锁避免为每个业务键长期保留 mutex；按分片序号排序后加锁可避免批量同步死锁。
 func (p *PrefixedBadgerDB[T]) lockSyncKeys(keys []string) func() {
+	return p.lockSyncKeyStripes(keys, false)
+}
+
+// lockSyncKeyStripes独立组target共享条带读锁；同key由持久前序和实际在途ID隔离，强制删除仍取排他锁。
+func (p *PrefixedBadgerDB[T]) lockSyncKeyStripes(keys []string, independent bool) func() {
 	indexes := make([]int, 0, len(keys))
 	seen := make(map[int]struct{}, len(keys))
 	for _, key := range keys {
@@ -1978,11 +1983,19 @@ func (p *PrefixedBadgerDB[T]) lockSyncKeys(keys []string) func() {
 	}
 	sort.Ints(indexes)
 	for _, index := range indexes {
-		p.syncKeyLocks[index].Lock()
+		if independent {
+			p.syncKeyLocks[index].RLock()
+		} else {
+			p.syncKeyLocks[index].Lock()
+		}
 	}
 	return func() {
 		for index := len(indexes) - 1; index >= 0; index-- {
-			p.syncKeyLocks[indexes[index]].Unlock()
+			if independent {
+				p.syncKeyLocks[indexes[index]].RUnlock()
+			} else {
+				p.syncKeyLocks[indexes[index]].Unlock()
+			}
 		}
 	}
 }

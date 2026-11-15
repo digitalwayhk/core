@@ -81,6 +81,10 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 				return e
 			}
 			if r.State == WriteBehindInFlight {
+				// 实际target未退出时不能被下一次选批改成Unknown。
+				if _, active := p.disposition.activeGroups.Load(dispositionGroup(&r)); active {
+					continue
+				}
 				r.State = WriteBehindUnknown
 				r.Reason = "local_confirmation_unknown"
 				if r.FirstFailureAt.IsZero() {
@@ -98,6 +102,7 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 					return e
 				}
 			}
+			// handler超时仍持久暂停，但其实际退出前不能重入原组。
 			if _, active := p.disposition.activeGroups.Load(dispositionGroup(&r)); active {
 				continue
 			}
@@ -138,29 +143,16 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 		if !groups.ValidForPrefix([]byte(prefix)) {
 			last = ""
 		}
-		if len(selected) > 0 {
-			batch := writeBehindFailureBatch{}
-			for _, r := range selected {
-				batch.Selected = append(batch.Selected, p.dispositionIdentity(r))
-			}
-			b, e := json.Marshal(batch.Selected)
-			if e != nil {
+		batchSize := len(selected)
+		if p.disposition.groups != nil {
+			batchSize = 1
+		}
+		for start := 0; start < len(selected); start += batchSize {
+			if e := p.saveDispositionSelected(txn, selected[start:start+batchSize]); e != nil {
 				return e
-			}
-			batch.ID = dispositionHash(string(b) + ":" + strconv.Itoa(selected[0].Attempts))
-			if e = dispositionWrite(txn, base+"b:"+batch.ID, batch); e != nil {
-				return e
-			}
-			for i := range selected {
-				if e := txn.Set([]byte(base+"member:"+selected[i].ID+":"+batch.ID), nil); e != nil {
-					return e
-				}
-				selected[i].BatchID = batch.ID
-				if e = p.saveDisposition(txn, &selected[i]); e != nil {
-					return e
-				}
 			}
 		}
+
 		// 仍建立首次cursor；已有值未变时不重复Set。其它状态写集照常提交，推进/回绕不能省略。
 		if cursorErr == nil && last == cursor {
 			return nil
@@ -168,6 +160,33 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 		return dispositionWrite(txn, base+"cursor", last)
 	})
 	return
+}
+
+// saveDispositionSelected按一次实际target调用保存BatchID；独立组各自成批，不能暗示跨组SQL原子性。
+func (p *PrefixedBadgerDB[T]) saveDispositionSelected(txn *badger.Txn, selected []WriteBehindFailureRecord[T]) error {
+	base := p.dispositionPrefix()
+	batch := writeBehindFailureBatch{}
+	for _, r := range selected {
+		batch.Selected = append(batch.Selected, p.dispositionIdentity(r))
+	}
+	b, err := json.Marshal(batch.Selected)
+	if err != nil {
+		return err
+	}
+	batch.ID = dispositionHash(string(b) + ":" + strconv.Itoa(selected[0].Attempts))
+	if err = dispositionWrite(txn, base+"b:"+batch.ID, batch); err != nil {
+		return err
+	}
+	for i := range selected {
+		if err = txn.Set([]byte(base+"member:"+selected[i].ID+":"+batch.ID), nil); err != nil {
+			return err
+		}
+		selected[i].BatchID = batch.ID
+		if err = p.saveDisposition(txn, &selected[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit int) (confirmed int, err error) {
@@ -182,6 +201,9 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	}
 	if limit > p.manager.config.SyncBatchSize {
 		limit = p.manager.config.SyncBatchSize
+	}
+	if p.disposition.groups != nil {
+		return p.processIndependentGroupBatch(ctx, limit)
 	}
 	p.syncExecMu.Lock()
 	started := time.Now()
@@ -201,16 +223,24 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	if err != nil || len(selected) == 0 {
 		return
 	}
+	n, notices, executionErr := p.executeDispositionBatch(ctx, selected, false)
+	confirmed += n
+	notify = append(notify, notices...)
+	return confirmed, executionErr
+}
+
+// executeDispositionBatch复用原target/结果校验与有界确认，不持本地提交器等待远端。
+func (p *PrefixedBadgerDB[T]) executeDispositionBatch(ctx context.Context, selected []WriteBehindFailureRecord[T], independent bool) (confirmed int, notify []WriteBehindFailureRecord[T], err error) {
 	items := make([]*SyncQueueItem[T], 0, len(selected))
 	allowed := map[string]bool{}
 	for _, r := range selected {
 		b, e := json.Marshal(r.Snapshot)
 		if e != nil {
-			return 0, e
+			return 0, nil, e
 		}
 		var item SyncQueueItem[T]
 		if e = json.Unmarshal(b, &item); e != nil {
-			return 0, e
+			return 0, nil, e
 		}
 		items = append(items, &item)
 		allowed[item.Key] = true
@@ -219,7 +249,7 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 	for _, v := range items {
 		keys = append(keys, v.Key)
 	}
-	unlock := p.lockSyncKeys(keys)
+	unlock := p.lockSyncKeyStripes(keys, independent)
 	defer unlock()
 	var result *WriteBehindResult
 	targetStarted := time.Now()
@@ -229,6 +259,9 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 				err = ErrWriteBehindDisposition
 			}
 		}()
+		if err = ctx.Err(); err != nil {
+			return
+		}
 		result, err = p.syncTarget.SyncBatch(ctx, items)
 	}()
 	p.syncMetricsMu.Lock()
@@ -258,6 +291,19 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 			err = errors.Join(err, ErrWriteBehindDisposition)
 		}
 	}
+	if independent {
+		p.syncExecMu.Lock()
+		defer p.syncExecMu.Unlock()
+		// AfterFunc取消通知可尚未获调度；关闭状态本身也必须禁止迟到成功确认。
+		if ctx.Err() != nil {
+			success = map[string]bool{}
+			err = errors.Join(err, ctx.Err())
+		}
+		if p.IsClosed() || p.disposition.ctx.Err() != nil {
+			success = map[string]bool{}
+			err = errors.Join(err, ErrWriteStoreClosed)
+		}
+	}
 	n, notices, confirmationErr := p.commitDispositionResults(selected, success, err)
 	confirmed += n
 	// notices仅来自已提交的Unknown结果；仍须与原选批含BatchID的完整身份吻合。
@@ -272,7 +318,7 @@ func (p *PrefixedBadgerDB[T]) processDispositionRound(ctx context.Context, limit
 			}
 		}
 	}
-	notify = append(notify, notices...)
+	notify = notices
 	err = errors.Join(err, confirmationErr)
 	return
 }

@@ -159,7 +159,9 @@ type WriteBehindDispositionMetrics struct {
 	Ready, Retrying, Unknown, Paused, HandedOff int
 	BudgetExhausted                             int
 	HandlerActive, HandlerQueued, HandlerLimit  int
-	OldestWaitingAt                             time.Time
+	// TargetActive/Queued/Limit仅在显式独立组模式采集；零值表示未启用该执行池。
+	TargetActive, TargetQueued, TargetLimit int
+	OldestWaitingAt                         time.Time
 	// CauseRetained/Capacity仅计未准入原错误引用；CauseOverflow为本进程拒绝新增保留的累计次数。
 	CauseRetained, CauseCapacity int
 	CauseOverflow                uint64

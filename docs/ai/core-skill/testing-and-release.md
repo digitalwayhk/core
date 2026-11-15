@@ -267,3 +267,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## PEL正文与容量剩余预算回归
 
 先保留真实Redis RED：handler保持在途、10轮读取已知正文重复；以及acquire/standby350ms子预算失败而原500ms余量可取可信容量。GREEN须原PEL页cursor不变、提示元数据≤原W、失败/完成/远端ACK后重扫、未知缺正文错误保持，ScriptFlush后自定义结果和lease/ACK回退可用。容量覆盖语义与deadline同现、取消/迟到成功、耗尽原预算、完整前沿隔离；以实际deadline继承证明不是额外500ms。跑四包真实Redis普通/race、显式原生长租约独立PID硬杀、10例三进程HTTP。固定读轮微基准的CPU/协议/命令与业务端到端时延分开，Lua子命令不叠加CPU，缺主线程CPU用null。真实Owned reader不带task提示，不能用普通SharedKeys测量代替其性能；消费方混合版本/接入/UAT/容量单列。
+
+## 独立组排空验收
+
+先以真实Badger保留B1 target返回但未本地确认的RED；显式模式须证明B1本地确认后B2可在A1释放前推进，不能只检查target进入。覆盖手动/自动共享池、同key跨组更新与条带碰撞、BatchID逐实际调用、部分成功加error、未知/确认失败、迟到/Close及实际回调未退出。新PID打开原卷，在没有新Save时核实未知业务事实、恢复原attempt与屏障、已确认项不重放。旧入口/零值与冻结policy格式保持，终态nil Item不能解引用。持续性能对照固定可靠刷盘、原1ms FIFO、CPU/组/target预算，报告Save与真实本地确认分布/计数/积压，失败和未采集原样保留。组件通过不能升级成消费方或Full-E4验收。

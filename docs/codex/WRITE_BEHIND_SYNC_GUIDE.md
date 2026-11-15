@@ -147,3 +147,7 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 ## 本地恢复读取
 
 需要枚举保留业务原件时使用 v1.12.0 加性 `ReliableWriteStore.ScanLocalPage`，参见[正式指南](RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。原ScanLocal的Limit<=0仍全量，正Limit不能续页。分页只读原件，不同步、确认或清理pending；每页独立快照，应用沿现有恢复准入/fence/重放水位处理并发变化。边页折叠必要状态，空页且有cursor仍继续，错误或超大项不能跳过。无需配置、卷迁移或新worker。
+
+## 显式独立组持续排空
+
+默认有界模式仍等待整批target结果；target内部并发不能提前交回部分确认。需要健康组在无关慢组执行时确认并推进后继，可在原绑定处显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, WriteBehindExecutionOptions{IndependentGroups: 4})`。这要求target线程安全、各组可独立提交；固定槽位、同组在途/未知屏障、真实本地确认、FIFO和原清理保持。一次独立target通常只一项，调用/确认事务数可能增加，不承诺Save P99或所有业务更快。完整API、手动/自动、取消和同代卷回退见[独立组指南](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。

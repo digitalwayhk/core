@@ -141,3 +141,7 @@ v1.11.1有界前台在本次实际事务内复用独立新快照：标准库规�
 v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式有界读取门面。limit须1–1000；每页另限4096当前可见键及8MiB物理键+wrapper编码字节，底层精确Prefix、无value预取、扫描内检查ctx/关闭。空页也可能有nextCursor，只在next为空结束；范围绑定的不透明游标可在同路径/模型/前缀新进程续用，不是授权凭证。错误整页失败不跳原件，单项过大明确拒绝；不改变pending、失败、顺序、版本或删除hook。旧ScanLocal/LocalScanOptions不变，Limit<=0仍会全量材料化，反复正Limit只读首段。
 
 每页独立快照，不能当跨页一致扫描；恢复须应用沿原准入、owner fence和重放水位协调。原始字节预算不等于解码后堆上限，业务若留存全部页仍O(N)。边读边折叠必要状态、释放本页，不能清历史/租约或绕过私有db。详细错误、预算和回退见[正式指南](../../codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。消费方恢复/内存/功能及容量须另验，不能把Core组件PASS当消费方关闭。
+
+## 同 store 独立组执行
+
+默认有界target仍整批返回，健康组会等本轮无关慢组。显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, nosql.WriteBehindExecutionOptions{IndependentGroups: 4})` 才启用固定N个target worker；0保持旧入口，1–64有界，非法拒绝。只在应用已提供稳定组、target线程安全且各组可独立事务时使用，不拆store、不另写worker，不把SyncMaxConcurrency保留字段当开关。每次target仅一组首，真实原版本本地确认后释放组/槽，实际未退出回调不补替代worker；全N槽被占仍背压。手动和自动复用原执行池，ForceSyncBatch只是上限，可能少于limit。原attempt/BatchID/未知确认/失败Scope及恢复、可靠刷盘、FIFO、hook和终态nil Item格式保持；小target可能增加本地确认事务，不能承诺Save P99固定15ms或消费方容量通过。TargetActive/Queued/Limit与Handler指标分开，按实际工作比较新旧Attempts。正式接入、同代卷兼容与回退见[指南](../../codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。

@@ -67,7 +67,7 @@ func (p *PrefixedBadgerDB[T]) commitDispositionResultBlock(selected []WriteBehin
 				}
 				return e
 			}
-			if r.ID != original.ID || r.Snapshot == nil || r.Snapshot.Key != original.Snapshot.Key || r.State != WriteBehindInFlight || r.Attempts != original.Attempts || r.Fingerprint != original.Fingerprint || !r.Snapshot.UpdatedAt.Equal(original.Snapshot.UpdatedAt) {
+			if r.ID != original.ID || r.Snapshot == nil || r.Snapshot.Key != original.Snapshot.Key || r.State != WriteBehindInFlight || r.Attempts != original.Attempts || r.BatchID != original.BatchID || r.Fingerprint != original.Fingerprint || !r.Snapshot.UpdatedAt.Equal(original.Snapshot.UpdatedAt) {
 				invalid = errors.Join(invalid, ErrWriteBehindDisposition)
 				continue // 语义失效不是存储失败，不回滚无关的有效原版本。
 			}
@@ -111,6 +111,9 @@ func (p *PrefixedBadgerDB[T]) commitDispositionResultBlock(selected []WriteBehin
 		return 0, nil, err
 	}
 	p.incrementPendingCount(-len(snapshots))
+	if observer := p.disposition.confirmationObserver; observer != nil {
+		observer(snapshots)
+	}
 	p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates(snapshots, keys))
 	return len(snapshots), notify, invalid
 }

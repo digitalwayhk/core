@@ -81,7 +81,7 @@ target/handler 预算耗尽分别记为 `target_budget_exhausted / handler_budge
 
 ## 资源、关闭与观测
 
-复用原同步 worker，target 仍在原同步互斥下串行批次执行。失败回调使用固定 HandlerWorkers 及等容量队列，不逐条起 goroutine，不补充卡住的 worker。handler 次数在准入时预占，HandlerTimeout 包含有限队列等待；过期或容量不足会保留原件并暂停，预占次数不等同函数实际开始次数。短本地事务按 prefix 串行保护元数据，不跨 target/回调持锁，不自动重放带应用副作用的闭包。
+默认复用原同步 worker，target 仍在原同步互斥下串行批次执行。显式 `UseWriteBehindWithFailureHandlerOptions` 可选择[独立组持续排空](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)：固定target worker、组首独立调用和确认；零值与旧入口不变。失败回调使用固定 HandlerWorkers 及等容量队列，不逐条起 goroutine，不补充卡住的 worker。handler 次数在准入时预占，HandlerTimeout 包含有限队列等待；过期或容量不足会保留原件并暂停，预占次数不等同函数实际开始次数。短本地事务按 prefix 串行保护元数据，不跨 target/回调持锁，不自动重放带应用副作用的闭包。
 
 超时或取消不证明原代码/远端请求停止。不合作回调占住原槽；即使人工请求 Retry，同组仍等实际退出，无关组继续。Core 无法强杀任意 Go/远端代码，应用 I/O 必须有界并幂等。关闭取消上下文并等待原生命周期；新模式未实际退出时返回 `ErrWriteBehindDispositionCloseTimeout`，即使技术 pending 为零。超时返回不能授权回收仍被业务持有的应用存储。
 

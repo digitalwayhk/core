@@ -297,7 +297,17 @@ func (p *PrefixedBadgerDB[T]) GetWriteBehindDispositionMetrics() (WriteBehindDis
 		}
 		return nil
 	})
-	p.disposition.activeIDs.Range(func(_, _ any) bool { m.HandlerActive++; return true })
+	p.disposition.activeIDs.Range(func(_, value any) bool {
+		if value == true {
+			m.HandlerActive++
+		}
+		return true
+	})
+	if g := p.disposition.groups; g != nil {
+		m.TargetActive = int(g.active.Load())
+		m.TargetQueued = len(g.jobs)
+		m.TargetLimit = cap(g.slots)
+	}
 	m.HandlerQueued = len(p.disposition.jobs)
 	m.HandlerLimit = p.disposition.policy.HandlerWorkers
 	m.CauseRetained, m.CauseCapacity, m.CauseOverflow = p.disposition.causes.metrics()
