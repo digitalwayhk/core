@@ -106,7 +106,7 @@
 
 在v1.13.0正式发布、尚未向消费方宣称完成的最终检查中，新增真实受控RED：AutoSync=false、A仍在途、B1已暂停，手动调用选批未找到可执行B；应用在选批结束到等待前确认B1，但仅原自动syncTrigger收到通知，独立组代际等待未被唤醒，B2继续等A。`manual-notify-red` exit1，1秒受控窗口内B2不进入target，原日志保留。这是实际SDK缺口，不归因消费方，不能交v1.13.0当完整手动/自动合同。
 
-v1.13.1仅把原triggerSync接到独立组代际通知，同时删除worker单独重复通知。所有原新写/决策/完成通知均复用同一入口，选批前捕获代际防止丢唤醒，无新goroutine/轮询/API/预算/格式。本地确认和实际退出屏障不变。相同决策断言GREEN，另补新Save在同一间隙唤醒的独立回归；重新运行普通、race、恢复、示例及发布门禁。v1.13.0保持原tag/提交并公开说明此边界，最终接入版本使用v1.13.1或更高。前述1.13.0与补丁失败/通过证据分别保留，不覆盖成PASS。
+v1.13.1仅把原triggerSync接到独立组代际通知，同时删除worker单独重复通知。所有原新写/决策/完成通知均复用同一入口，选批前捕获代际防止丢唤醒，无新goroutine/API/预算/格式。本地确认和实际退出屏障不变。相同决策断言GREEN，另补新Save在同一间隙唤醒的独立回归；重新运行普通、race、恢复、示例及发布门禁。v1.13.0保持原tag/提交并公开说明此边界，最终接入版本使用v1.13.1或更高。前述1.13.0与补丁失败/通过证据分别保留，不覆盖成PASS。
 
 ### v1.13.1最终补丁回归与持续对照
 
@@ -125,3 +125,39 @@ v1.13.1仅把原triggerSync接到独立组代际通知，同时删除worker单�
 | 3 / 4 | 2.115 / 2.201 / 2.807 / 3.310 / 9.138 | 6.66 / 10.69 / 15.68 | 319.83 | 17 / 0.050 |
 
 补丁这一时段连零值旧路径也比先前时段更快，说明主机/持久化时段波动不能忽略；不能把跨时段差异都归因几行通知修复，结论以各自同轮旧/新对照为准。通知补丁的直接证据是受控的决策/Save丢唤醒RED→GREEN，性能不替代正确性断言。此前Save差轮、确认事务增加、CPU/I/O未采集及所有NOT_RUN边界继续保留。
+
+### 到期重试等待的第二项受控RED
+
+交付前再覆盖AutoSync=false、A仍阻塞且B已由应用明确NotCommitted授权Retry的边界：统一通知只发生在决策提交时，尚未到NextAttemptAt，之后无Save/target退出，手动调用不会再次选取到期B。`manual-retry-due-red` exit1，原件保留。最小补丁只在原手动等待内使用一个timer，沿policy.MinRetryInterval有界复查；仍须原状态/NextAttemptAt/预算允许，不能对未知结果盲重试，没有新增后台线程。
+
+`manual-retry-due-green`是测试helper指针编译错误，不算语义RED；修正后`manual-retry-due-green-fixed`三项真实Badger测试全部PASS。两项通知回归将原重试间隔配置为2秒、断言窗口仍1秒，证明由通知推进而非备用timer偶然通过；到期回归使用原50ms间隔，A不退出、无新Save，B真实完成第二次target并本地确认。所有FAIL不覆盖成PASS。
+
+最终到期补丁首次完整race `final131-nosql-race` exit1，无DATA RACE但自动排空测试在pending已减至0、worker尚未记录SyncedItems瞬间读到2而期望3。此FAIL不算race整体通过。与之前pending/释放槽的边界相同，测试改为等待pending=0且SyncedItems=3的两个真实条件，最终仍精确要求3、原1秒时限不变；生产确认路径未为此修改。
+
+### 既有硬杀恢复限制：仍为FAIL，不因本专项改写
+
+最终普通全包`final131-nosql-normal-metrics-boundary`发生既有`TestCrashBeforeAndAfterHandoffConfirmation/before`重开错误：`while opening memtables ... while opening fid: 1 err: Create a new file`。单独使用固定官方v1.12.1源码加已披露计时观察的baseline.test与最终候选各20轮真实硬杀对照，双方均19 PASS/1 FAIL，两个命令都exit1（`legacy-handoff-crash-baseline`、`legacy-handoff-crash-candidate`）。旧测试文件及SharedBadgerManager与v1.12.1逐字相同；这些结果证明该错误无需独立组能力也能出现，不证明所有恢复故障均已排除，也不量化发生率。
+
+本专项没有改Badger依赖、recovery选项或原硬杀断言，未将失败用例SKIP、重试包裹或放宽成功条件。上述FAIL原日志及二进制哈希保留；该旧恢复边界仍未修复，不能以之后单轮PASS宣称硬杀长期可靠性全绿。新独立组专用硬杀测试验证A未知由应用事实确认、B1/B2已确认不重放及无新Save新PID恢复，属于不同的具体边界。
+
+### 最终到期补丁的完整回归与固定二进制持续对照
+
+- `final131-nosql-normal-isolated`：exit0，33.37s，顶层{'PASS': 279, 'FAIL': 0, 'SKIP': 51}；实际命令`go test ./pkg/persistence/database/nosql -v -count=1 -timeout=300s`。writebehind_independent_groups_process_test.go:114: SIGKILL旧PID=29720，新PID=29721；A原Unknown确认，B1/B2不重放，原卷无新Save恢复
+- `final131-nosql-race-metrics-boundary`：exit0，70.35s，顶层{'PASS': 279, 'FAIL': 0, 'SKIP': 51}；实际命令`go test -race ./pkg/persistence/database/nosql -v -count=1 -timeout=300s`。writebehind_independent_groups_process_test.go:114: SIGKILL旧PID=27934，新PID=27936；A原Unknown确认，B1/B2不重放，原卷无新Save恢复
+- `final131-examples-race`：exit0，20.31s，顶层{'PASS': 94, 'FAIL': 0, 'SKIP': 14}；实际命令`go test -race ./examples/04-shop-performance/... ./examples/07-shop-order-scale/... -v -count=1 -timeout=300s`。
+- `final131-release-contract`：exit0，60.92s，顶层{'PASS': 0, 'FAIL': 0, 'SKIP': 0}；实际命令`bash scripts/test.sh release-contract`。
+
+最终候选固定二进制`candidate131-final-metrics.test`，构建与命令原件为`build-final131-performance-metrics` / `final131-binary-performance`（exit0，39.67s）。已结束其它本轮CPU回归再运行；使用前述同一可靠性、16组、50ms输入节拍、每组120笔、约2KiB、GOMAXPROCS=1、1组40ms/其它1ms目标、4并发预算及真实Badger。全部6组各1920真实确认、0错误、最终pending=0。
+
+| 轮次/模式 | Save平均/P50/P95/P99/最大(ms) | 健康组确认P99(ms) | 确认/墙钟秒 | 输入结束pending | 排空(s) |
+|---|---|---:|---:|---:|---:|
+| 1/0 | 3.727/3.671/6.515/7.947/20.114 | 831.987 | 281.21 | 244 | 0.875 |
+| 1/4 | 3.941/4.242/5.718/7.338/8.209 | 26.675 | 319.19 | 17 | 0.056 |
+| 2/0 | 3.955/3.608/7.001/10.872/17.765 | 1059.281 | 272.24 | 296 | 1.096 |
+| 2/4 | 3.303/3.371/5.092/6.508/6.958 | 24.056 | 319.29 | 17 | 0.055 |
+| 3/0 | 4.517/3.725/7.660/21.378/40.580 | 1066.639 | 271.75 | 292 | 1.111 |
+| 3/4 | 4.376/4.535/6.514/8.638/10.352 | 30.153 | 319.15 | 17 | 0.060 |
+
+该轮同机对照健康组真实确认P99从832–1067ms降至24–30ms，确认吞吐约272–281/s至319/s；确认事务仍从481增至1920。Save本次同轮也改善，但前述较差轮和主机波动仍保留，不推断全部现场/业务SQL、单CPU硬配额或稳定15ms承诺。完整分段累计值、CPU用户/系统、GC/内存及未知的物理I/O/限流见私有`performance-final131-summary.json`；不能把嵌套/累计时间相加当请求壁钟。
+
+代码及测试由当前主Agent直接审查，无子Agent；复核了槽预留、真实退出、取消迟到结果、通知代际、到期NextAttemptAt、固定worker及同key跨组前序。最终发布仍以干净精确提交执行的`release-check --release`和远端tag/Proxy/SumDB回执为准，不能从本文推断消费方已接入。

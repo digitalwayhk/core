@@ -148,4 +148,4 @@ v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式
 
 ### 手动等待通知补丁（v1.13.1）
 
-独立组API自v1.13.0增加，但其手动等待者只收到target完成通知，可能遗漏等待期间新Save或应用Confirm/Retry等统一通知。正式启用使用v1.13.1或更高：复用原triggerSync唤醒自动worker及代际等待者，选批前捕获通知代际，关闭/取消仍走原生命周期；不新建轮询，不改预算/格式。原v1.13.0 tag保留，不能把其自动场景通过当作全部手动场景完成。
+独立组API自v1.13.0增加，但其手动等待者只收到target完成通知，可能遗漏等待期间新Save或应用Confirm/Retry等统一通知。正式启用使用v1.13.1或更高：复用原triggerSync唤醒自动worker及代际等待者，选批前捕获通知代际；手动调用等待无关在途组时，沿原policy.MinRetryInterval使用一个可取消timer有界复查到期资格，原NextAttemptAt/attempt和预算仍决定是否可执行，未知结果不会因此自动重试。不增加后台轮询线程或worker，不改预算/格式，关闭/取消仍走原生命周期。原v1.13.0 tag保留，不能把其自动场景通过当作全部手动场景完成。

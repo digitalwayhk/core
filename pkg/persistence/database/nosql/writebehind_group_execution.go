@@ -110,6 +110,10 @@ reservedSlots:
 func (p *PrefixedBadgerDB[T]) processIndependentGroupBatch(ctx context.Context, limit int) (int, error) {
 	rt := p.disposition
 	g := rt.groups
+	// 通知推进新写/决策；同一手动调用另沿原最小重试间隔复查到期资格，
+	// 不依赖无关在途target退出，也不绕过持久NextAttemptAt或有限预算。
+	retryTimer := time.NewTimer(rt.policy.MinRetryInterval)
+	defer retryTimer.Stop()
 	for {
 		changed := g.changeSignal()
 		jobs, busy, err := p.enqueueIndependentGroups(ctx, limit)
@@ -120,8 +124,11 @@ func (p *PrefixedBadgerDB[T]) processIndependentGroupBatch(ctx context.Context, 
 			if !busy {
 				return 0, nil
 			}
+			retryTimer.Reset(rt.policy.MinRetryInterval)
 			select {
 			case <-changed:
+				continue
+			case <-retryTimer.C:
 				continue
 			case <-ctx.Done():
 				return 0, ctx.Err()

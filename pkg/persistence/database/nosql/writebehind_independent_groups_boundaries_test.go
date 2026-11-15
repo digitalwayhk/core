@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func openIndependentStore(t *testing.T, path string, auto bool, workers int, target *cleanupTestTarget) *ReliableWriteStore[cleanupTestRecord] {
+func openIndependentStore(t *testing.T, path string, auto bool, workers int, target *cleanupTestTarget, overrides ...func(*BadgerDBConfig)) *ReliableWriteStore[cleanupTestRecord] {
 	t.Helper()
 	cfg := DefaultProductionConfig(path)
 	cfg.AutoSync = auto
@@ -25,6 +25,9 @@ func openIndependentStore(t *testing.T, path string, auto bool, workers int, tar
 	cfg.SyncFlushThreshold = 4
 	cfg.SyncMaxCollectDelay = time.Millisecond
 	cfg.SyncBacklogDrainDelay = time.Millisecond
+	for _, override := range overrides {
+		override(&cfg)
+	}
 	s, _, e := NewReliableWriteStore[cleanupTestRecord](ServiceIdentity{ServiceName: "group-test", DataCenterID: 1, MachineID: 2}, ReliableWriteStoreConfig{BasePath: path, Badger: cfg, CloseTimeout: time.Second})
 	require.NoError(t, e)
 	t.Cleanup(func() { _ = s.Close(context.Background()); _ = CloseSharedManager(s.config.BasePath) })
@@ -81,7 +84,11 @@ func TestIndependentGroupsAutoDrain(t *testing.T) {
 	require.Equal(t, 2, m.TargetLimit)
 	require.Zero(t, m.HandlerActive)
 	unblock()
-	require.Eventually(t, func() bool { return s.Metrics().Pending == 0 }, time.Second, time.Millisecond)
+	// pending在确认提交后先更新，worker随后记录指标；等待两个真实边界，最终仍精确要求3项。
+	require.Eventually(t, func() bool {
+		m := s.Metrics()
+		return m.Pending == 0 && m.Sync.SyncedItems == 3
+	}, time.Second, time.Millisecond)
 	require.EqualValues(t, 3, s.Metrics().Sync.SyncedItems)
 }
 
@@ -492,7 +499,11 @@ func TestIndependentGroupsManualDecisionWakesWaiter(t *testing.T) {
 		}
 		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
 	}}
-	s := openIndependentStore(t, t.TempDir(), false, 2, target)
+	s := openIndependentStore(t, t.TempDir(), false, 2, target, func(cfg *BadgerDBConfig) {
+		// 备用到期复查晚于1秒断言，必须由原通知唤醒，不能靠timer偶然通过。
+		cfg.WriteBehindFailure.MinRetryInterval = 2 * time.Second
+		cfg.WriteBehindFailure.MaxRetryInterval = 2 * time.Second
+	})
 	defer onceA.Do(func() { close(aRelease) })
 	defer onceC.Do(func() { close(cRelease) })
 	for _, r := range []*cleanupTestRecord{groupRecord(t, "A", "A", 1, false, &cleanupTestProbe{}), groupRecord(t, "B1", "B", 1, false, &cleanupTestProbe{})} {
@@ -546,7 +557,11 @@ func TestIndependentGroupsManualSaveWakesWaiter(t *testing.T) {
 		}
 		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
 	}}
-	s := openIndependentStore(t, t.TempDir(), false, 2, target)
+	s := openIndependentStore(t, t.TempDir(), false, 2, target, func(cfg *BadgerDBConfig) {
+		// 备用到期复查晚于1秒断言，必须由原通知唤醒，不能靠timer偶然通过。
+		cfg.WriteBehindFailure.MinRetryInterval = 2 * time.Second
+		cfg.WriteBehindFailure.MaxRetryInterval = 2 * time.Second
+	})
 	defer once.Do(func() { close(release) })
 	require.NoError(t, s.Save(context.Background(), groupRecord(t, "A", "A", 1, false, &cleanupTestProbe{})))
 	first := make(chan error, 1)
@@ -570,4 +585,62 @@ func TestIndependentGroupsManualSaveWakesWaiter(t *testing.T) {
 	require.NoError(t, <-waiter)
 	once.Do(func() { close(release) })
 	require.NoError(t, <-first)
+}
+
+// TestIndependentGroupsManualRetryDue 验证应用已明确NotCommitted授权的到期重试无需新订单或无关A退出。
+func TestIndependentGroupsManualRetryDue(t *testing.T) {
+	aEntered, aRelease, cEntered, cRelease, retried := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var aOnce, cOnce sync.Once
+	var attempts atomic.Int32
+	target := &cleanupTestTarget{sync: func(_ context.Context, items []*SyncQueueItem[cleanupTestRecord]) (*WriteBehindResult, error) {
+		switch items[0].Item.Key {
+		case "A":
+			close(aEntered)
+			<-aRelease
+		case "B":
+			if attempts.Add(1) == 1 {
+				return nil, errors.New("由应用确认未提交后再重试")
+			}
+			close(retried)
+		case "C":
+			close(cEntered)
+			<-cRelease
+		}
+		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
+	}}
+	s := openIndependentStore(t, t.TempDir(), false, 2, target)
+	defer aOnce.Do(func() { close(aRelease) })
+	defer cOnce.Do(func() { close(cRelease) })
+	for _, r := range []*cleanupTestRecord{groupRecord(t, "A", "A", 1, false, &cleanupTestProbe{}), groupRecord(t, "B", "B", 1, false, &cleanupTestProbe{})} {
+		require.NoError(t, s.Save(context.Background(), r))
+	}
+	first := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(context.Background(), 16); first <- e }()
+	awaitGroupChannel(t, aEntered)
+	record := cleanupTestAwaitState(t, s, WriteBehindPaused)
+	require.NoError(t, s.Save(context.Background(), groupRecord(t, "C", "C", 1, false, &cleanupTestProbe{})))
+	cDone := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(context.Background(), 16); cDone <- e }()
+	awaitGroupChannel(t, cEntered)
+	changed := s.db.disposition.groups.changeSignal()
+	cOnce.Do(func() { close(cRelease) })
+	<-changed
+	require.NoError(t, <-cDone)
+	d := cleanupTestDecision(record, WriteBehindRetry)
+	d.Outcome = WriteBehindNotCommitted
+	d.RetryAfter = s.db.disposition.policy.MinRetryInterval
+	require.NoError(t, s.ApplyWriteBehindDecision(context.Background(), d))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waiter := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(ctx, 16); waiter <- e }()
+	select {
+	case <-retried:
+	case <-ctx.Done():
+		t.Fatal("已授权重试到期后仍等待无关A或新Save")
+	}
+	require.NoError(t, <-waiter)
+	require.Equal(t, int32(2), attempts.Load())
+	aOnce.Do(func() { close(aRelease) })
+	require.Error(t, <-first)
 }
