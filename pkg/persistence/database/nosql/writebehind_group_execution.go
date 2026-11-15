@@ -177,7 +177,6 @@ func (p *PrefixedBadgerDB[T]) independentGroupWorker() {
 			for _, r := range notices {
 				p.dispatchDisposition(r)
 			}
-			g.signal()
 			p.triggerSync()
 		}
 	}

@@ -70,6 +70,11 @@ func TestIndependentGroupsAutoDrain(t *testing.T) {
 	require.NoError(t, s.Save(context.Background(), groupRecord(t, "next", "B", 1, true, &cleanupTestProbe{})))
 	awaitGroupChannel(t, next)
 	require.Eventually(t, func() bool { return s.Metrics().Pending == 1 }, time.Second, time.Millisecond)
+	// pending变更与worker释放是两个边界；必须等B的原worker实际归还槽，不能把刚确认瞬间当退出。
+	require.Eventually(t, func() bool {
+		m, e := s.WriteBehindDispositionMetrics()
+		return e == nil && m.TargetActive == 1 && m.TargetQueued == 0
+	}, time.Second, time.Millisecond)
 	m, e := s.WriteBehindDispositionMetrics()
 	require.NoError(t, e)
 	require.Equal(t, 1, m.TargetActive)
@@ -466,4 +471,103 @@ func TestIndependentGroupsSelectionTooBigSplits(t *testing.T) {
 		require.True(t, r.LocalConfirmed)
 	}
 	require.Greater(t, store.Metrics().Sync.MetadataLocal.TooBig, uint64(0), "必须实际触发Badger ErrTxnTooBig")
+}
+
+// TestIndependentGroupsManualDecisionWakesWaiter 验证人工确认/新写通知能唤醒等空闲健康组的手动调用，不能继续等无关A。
+func TestIndependentGroupsManualDecisionWakesWaiter(t *testing.T) {
+	aEntered, aRelease, cEntered, cRelease, bNext := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var onceA, onceC sync.Once
+	target := &cleanupTestTarget{sync: func(_ context.Context, items []*SyncQueueItem[cleanupTestRecord]) (*WriteBehindResult, error) {
+		switch items[0].Item.Key {
+		case "A":
+			close(aEntered)
+			<-aRelease
+		case "B1":
+			return nil, errors.New("B原结果待应用确认")
+		case "C":
+			close(cEntered)
+			<-cRelease
+		case "B2":
+			close(bNext)
+		}
+		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
+	}}
+	s := openIndependentStore(t, t.TempDir(), false, 2, target)
+	defer onceA.Do(func() { close(aRelease) })
+	defer onceC.Do(func() { close(cRelease) })
+	for _, r := range []*cleanupTestRecord{groupRecord(t, "A", "A", 1, false, &cleanupTestProbe{}), groupRecord(t, "B1", "B", 1, false, &cleanupTestProbe{})} {
+		require.NoError(t, s.Save(context.Background(), r))
+	}
+	first := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(context.Background(), 16); first <- e }()
+	awaitGroupChannel(t, aEntered)
+	record := cleanupTestAwaitState(t, s, WriteBehindPaused)
+	require.NoError(t, s.Save(context.Background(), groupRecord(t, "B2", "B", 1, false, &cleanupTestProbe{})))
+	require.NoError(t, s.Save(context.Background(), groupRecord(t, "C", "C", 1, false, &cleanupTestProbe{})))
+	cDone := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(context.Background(), 16); cDone <- e }()
+	awaitGroupChannel(t, cEntered)
+	// 唯一空闲worker必须已完成B并处理C；精确等待C最后一次池通知，排除旧通知偶然唤醒。
+	changed := s.db.disposition.groups.changeSignal()
+	onceC.Do(func() { close(cRelease) })
+	<-changed
+	require.NoError(t, <-cDone)
+	scanned, continueScan := make(chan struct{}), make(chan struct{})
+	var scanOnce sync.Once
+	s.db.disposition.selectionRoundObserver = func(time.Duration) { scanOnce.Do(func() { close(scanned); <-continueScan }) }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waiter := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(ctx, 16); waiter <- e }()
+	awaitGroupChannel(t, scanned)
+	// 保证决策通知发生在选批结束与实际等待之间；不能丢唤醒。
+	cleanupTestConfirm(t, s, record)
+	close(continueScan)
+	select {
+	case <-bNext:
+	case <-ctx.Done():
+		t.Fatal("应用已确认B1，但手动同步仍等待无关A而未进入B2")
+	}
+	require.NoError(t, <-waiter)
+	onceA.Do(func() { close(aRelease) })
+	require.Error(t, <-first)
+}
+
+// TestIndependentGroupsManualSaveWakesWaiter 验证等待期间新Save产生健康组时，由原通知推进而不依赖A结束。
+func TestIndependentGroupsManualSaveWakesWaiter(t *testing.T) {
+	entered, release, next := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	target := &cleanupTestTarget{sync: func(_ context.Context, items []*SyncQueueItem[cleanupTestRecord]) (*WriteBehindResult, error) {
+		if items[0].Item.Group == "A" {
+			close(entered)
+			<-release
+		} else {
+			close(next)
+		}
+		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
+	}}
+	s := openIndependentStore(t, t.TempDir(), false, 2, target)
+	defer once.Do(func() { close(release) })
+	require.NoError(t, s.Save(context.Background(), groupRecord(t, "A", "A", 1, false, &cleanupTestProbe{})))
+	first := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(context.Background(), 16); first <- e }()
+	awaitGroupChannel(t, entered)
+	scanned, continueScan := make(chan struct{}), make(chan struct{})
+	var scannedOnce sync.Once
+	s.db.disposition.selectionRoundObserver = func(time.Duration) { scannedOnce.Do(func() { close(scanned); <-continueScan }) }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waiter := make(chan error, 1)
+	go func() { _, e := s.ForceSyncBatch(ctx, 16); waiter <- e }()
+	awaitGroupChannel(t, scanned)
+	require.NoError(t, s.Save(context.Background(), groupRecord(t, "B", "B", 1, false, &cleanupTestProbe{})))
+	close(continueScan)
+	select {
+	case <-next:
+	case <-ctx.Done():
+		t.Fatal("新Save的健康组未唤醒手动等待者")
+	}
+	require.NoError(t, <-waiter)
+	once.Do(func() { close(release) })
+	require.NoError(t, <-first)
 }

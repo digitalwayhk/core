@@ -145,3 +145,7 @@ v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式
 ## 同 store 独立组执行
 
 默认有界target仍整批返回，健康组会等本轮无关慢组。显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, nosql.WriteBehindExecutionOptions{IndependentGroups: 4})` 才启用固定N个target worker；0保持旧入口，1–64有界，非法拒绝。只在应用已提供稳定组、target线程安全且各组可独立事务时使用，不拆store、不另写worker，不把SyncMaxConcurrency保留字段当开关。每次target仅一组首，真实原版本本地确认后释放组/槽，实际未退出回调不补替代worker；全N槽被占仍背压。手动和自动复用原执行池，ForceSyncBatch只是上限，可能少于limit。原attempt/BatchID/未知确认/失败Scope及恢复、可靠刷盘、FIFO、hook和终态nil Item格式保持；小target可能增加本地确认事务，不能承诺Save P99固定15ms或消费方容量通过。TargetActive/Queued/Limit与Handler指标分开，按实际工作比较新旧Attempts。正式接入、同代卷兼容与回退见[指南](../../codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
+### 手动等待通知补丁（v1.13.1）
+
+独立组API自v1.13.0增加，但其手动等待者只收到target完成通知，可能遗漏等待期间新Save或应用Confirm/Retry等统一通知。正式启用使用v1.13.1或更高：复用原triggerSync唤醒自动worker及代际等待者，选批前捕获通知代际，关闭/取消仍走原生命周期；不新建轮询，不改预算/格式。原v1.13.0 tag保留，不能把其自动场景通过当作全部手动场景完成。

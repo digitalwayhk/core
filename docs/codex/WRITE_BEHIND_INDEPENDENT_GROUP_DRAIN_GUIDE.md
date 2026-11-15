@@ -51,3 +51,7 @@ err := store.UseWriteBehindWithFailureHandlerOptions(
 07 的组合根 `Service.WriteBehindExecution` 透传到原订单 store；没有 FailurePolicy 却设置独立组时明确拒绝。默认仍是零值。04示例保持默认目标，应用可参照本指南在其可靠 store 层显式绑定，不复制调度循环。
 
 组件测试与性能命令见[专项验收报告](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_2026-11-16.md)。Core 本地真实Badger、race、进程恢复和示例通过，不代表消费方已升级、Full-E4功能/UAT或容量通过。
+
+### 手动等待通知补丁（v1.13.1）
+
+独立组API自v1.13.0增加，但其手动等待者只收到target完成通知，可能遗漏等待期间新Save或应用Confirm/Retry等统一通知。正式启用使用v1.13.1或更高：复用原triggerSync唤醒自动worker及代际等待者，选批前捕获通知代际，关闭/取消仍走原生命周期；不新建轮询，不改预算/格式。原v1.13.0 tag保留，不能把其自动场景通过当作全部手动场景完成。

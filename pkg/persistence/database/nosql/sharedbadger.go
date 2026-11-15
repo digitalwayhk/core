@@ -1296,6 +1296,10 @@ func (p *PrefixedBadgerDB[T]) incrementPendingCount(delta int) {
 
 // triggerSync 通知 syncToOtherDB 立即执行同步（非阻塞，幂等）
 func (p *PrefixedBadgerDB[T]) triggerSync() {
+	// 手动独立组等待者与自动worker共用原通知源；捕获选批前的代际，不能丢新写/应用决策唤醒。
+	if rt := p.disposition; rt != nil && rt.groups != nil {
+		rt.groups.signal()
+	}
 	select {
 	case p.syncTrigger <- struct{}{}:
 	default:

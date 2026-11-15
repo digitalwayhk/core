@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- 修复v1.13.0显式独立组手动等待者遗漏新Save/应用确认通知：复用原triggerSync，同时唤醒自动worker与代际等待者。原选批前捕获代际，防止选批结束到等待之间丢通知；无新API、预算或格式变化。
+
 - 修复普通Redis SharedKeys会话重复读取已知PEL正文的放大；ID元数据合计不超过原window，原PEL分页/顺序/fence/ACK保持。生命周期acquire与standby可恢复超时复用原轮次余量补读容量，不放宽stale或硬限。见[验收和角色升级](docs/codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
 
 - 修复内置生命周期owner完整Inspect超时未独立刷新容量的路径缺口：仅可恢复超时且原整轮有余量时补一次轻量读取；完整错误/计数、回收门禁、4s示例新鲜度和hard容量保持。增加原entry固定原因诊断、9项低基数counter和限频状态日志，无新API/配置/持久格式。见[验收与边界](docs/codex/LIFECYCLE_OWNER_CAPACITY_REFRESH_2026-11-13.md)。
@@ -43,6 +45,12 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.1] - 2026-11-16
+
+### Fixed
+
+- 补齐v1.13.0独立组手动排空的通知：应用确认B1或等待期间新Save可立即唤醒B2，而不继续等无关在途A。沿原统一通知入口，不轮询、不增worker、不提前确认；默认及存量卷不变。新增受控选批/等待间隙RED→GREEN及普通/race回归，启用新能力请使用此补丁或更高版本。1.13.0 tag保持原提交。
 
 ## [v1.13.0] - 2026-11-16
 
