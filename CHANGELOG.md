@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复Badger回收memtable中途硬杀遗留0字节.mem导致首次重开报`Create a new file`：Core Unix可写打开入口在同目录flock下仅回收真正空技术WAL，非空数据/可靠刷盘/原锁/卷格式不变，无依赖升级。只读、绕锁及尚未实现该锁适配的平台不自动处理。详见[恢复专项](docs/codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
+
+
 ### Added
 
 - 显式 `WriteBehindExecutionOptions.IndependentGroups` / `UseWriteBehindWithFailureHandlerOptions` 允许同store独立顺序组有界持续排空：固定worker、组首独立target与真实本地确认，健康组不再等待无关慢组整轮返回。旧入口/零值保持；target须线程安全且各组独立提交，不能替代跨组原子事务。API、恢复和代价见[指南](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
@@ -45,6 +50,12 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.2] - 2026-11-16
+
+### Fixed
+
+- 补齐零字节memtable回收中断后的首次打开恢复，覆盖共享/独立Badger、authstate与Badger L2；规范命名、单链接普通零文件在同目录独占锁下才可处理，业务原件/索引/非空WAL均不清理。默认生效，无新增业务配置。未验证平台沿原行为，不能把本窗口修复当全部损坏恢复能力。
 
 ## [v1.13.1] - 2026-11-16
 

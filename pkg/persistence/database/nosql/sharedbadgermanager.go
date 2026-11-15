@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/digitalwayhk/core/internal/badgeropen"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -158,7 +159,7 @@ func GetSharedManager(basePath string, config ...BadgerDBConfig) (*SharedBadgerM
 	maxRetries := 3
 
 	for i := 0; i < maxRetries; i++ {
-		db, err = badger.Open(opts)
+		db, err = badgeropen.Open(opts)
 		if err == nil {
 			break
 		}

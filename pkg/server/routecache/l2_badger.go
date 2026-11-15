@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/digitalwayhk/core/internal/badgeropen"
 	"github.com/digitalwayhk/core/pkg/server/config"
 )
 
@@ -42,7 +43,7 @@ func NewBadgerL2(cfg config.RouteCacheL2Config) (*BadgerL2, error) {
 		return nil, err
 	}
 	open := func() (*badger.DB, error) {
-		return badger.Open(badger.DefaultOptions(cfg.Path).WithLogger(nil))
+		return badgeropen.Open(badger.DefaultOptions(cfg.Path).WithLogger(nil))
 	}
 	db, err := open()
 	if err != nil && cfg.CorruptionPolicy == "reset" {

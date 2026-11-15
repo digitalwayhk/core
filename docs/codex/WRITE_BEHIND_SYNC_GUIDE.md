@@ -151,3 +151,7 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 ## 显式独立组持续排空
 
 默认有界模式仍等待整批target结果；target内部并发不能提前交回部分确认。需要健康组在无关慢组执行时确认并推进后继，可在原绑定处显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, WriteBehindExecutionOptions{IndependentGroups: 4})`。这要求target线程安全、各组可独立提交；固定槽位、同组在途/未知屏障、真实本地确认、FIFO和原清理保持。一次独立target通常只一项，调用/确认事务数可能增加，不承诺Save P99或所有业务更快。完整API、手动/自动、取消和同代卷回退见[独立组指南](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
+## 空WAL回收中断后的启动恢复
+
+v1.13.2补齐Core Badger Unix可写入口：在与Badger一致的目录排他锁下仅处理回收中断遗留的0字节规范memtable技术文件，然后仍由Badger正常获取其正式锁并恢复数据；不是删除pending、清库、降低刷盘或重试碰运气。无需应用新增开关，原有失败/未知/版本/顺序/清理hook合同不变。只读、绕锁和未验证平台保持原行为；具体根因、真实删除窗口硬杀及原卷副本见[专项报告](BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。

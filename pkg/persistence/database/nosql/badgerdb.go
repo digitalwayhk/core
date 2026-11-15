@@ -13,6 +13,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/json"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/digitalwayhk/core/internal/badgeropen"
 	"github.com/digitalwayhk/core/pkg/persistence/types"
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -179,7 +180,7 @@ func NewBadgerDBWithConfig[T any](config BadgerDBConfig) (*BadgerDB[T], error) {
 	maxRetries := 3
 
 	for i := 0; i < maxRetries; i++ {
-		db, err = badger.Open(opts)
+		db, err = badgeropen.Open(opts)
 		if err == nil {
 			break
 		}

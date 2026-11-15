@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/digitalwayhk/core/internal/badgeropen"
 	"github.com/digitalwayhk/core/pkg/server/types"
 )
 
@@ -60,7 +61,7 @@ func OpenBadgerStore(path string) (*BadgerStore, error) {
 	if err := os.Chmod(path, 0o700); err != nil {
 		return nil, fmt.Errorf("设置Badger撤销存储权限失败: %w", err)
 	}
-	db, err := badger.Open(badger.DefaultOptions(path).WithLogger(nil))
+	db, err := badgeropen.Open(badger.DefaultOptions(path).WithLogger(nil))
 	if err != nil {
 		return nil, fmt.Errorf("打开Badger撤销存储失败: %w", err)
 	}

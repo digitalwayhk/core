@@ -80,3 +80,13 @@ Badger官方SyncWrites默认false，Core可靠pending为true；比较吞吐时�
 服务实例复用一个ReliableWriteStore，前台并发Save由既有BatchCommitter合批；应用已有多项可用SaveBatch，按Committed前缀处理部分结果。不能每请求开库，也不能每笔Save后调用ForceSync等待远端来冒充异步写。MaxBatch是上限，不强等满批；CollectBacklog1/1ms窗口与250µs候选须分别实测，QueueCapacity属于有界背压预算。保留SyncWrites/DetectConflicts与成功提交后响应，禁止用WriteBatch盲写替换原件读改写核验。
 
 CPU/窗口测量须同时核对前台Save、确认批次、队列、排空、实际target调用与状态合并量；最终2000个状态key收敛不等于40000个中间版本逐一远端投递。夹具在计量外逐件核验本地模型/同步标记和持久pending索引，不能把缓存pending=0当事实完成。用法及实际结果见[SSD与并行度验证](../../codex/WRITE_BEHIND_TWO_PROCS_2026-10-31.md)；Core组件通过不代表消费方接入或容量通过。
+
+## 空memtable回收中断的恢复
+
+Badger v4.9.6 / Ristretto v2.2.0回收WAL时先Truncate(0)再关闭/删除，进程在两步间退出可遗留规范命名的零字节`.mem`。底层打开将其识别为z.NewFile，恢复循环却返回`while opening memtables ... Create a new file`。这不等于已确认业务事实丢失，不能清库或盲重试当修复。
+
+Core内部`internal/badgeropen.Open`在原Badger入口前、可写且未BypassLockGuard时，用与固定依赖一致的目录flock取得排他保护，仅移除规范数字命名、普通单链接、确实0字节的技术memtable残留，并同步目录；非空WAL、vlog、SST、MANIFEST、业务原件/索引/历史均不动。随后释放预检锁，由Badger自己重新取得正式锁；若其它owner抢先则仍正常拒绝，不保持绕锁打开。未使用删除LOCK、reset_cache、降低SyncWrites或依赖重试。标准共享/独立库、authstate和Badger L2复用此内部入口，不改变公开API或卷格式。
+
+该预处理使用上游Unix目录锁语义；本轮Darwin/arm64普通/race与独立Linux/arm64实际进程已运行，其它平台真实验证NOT_RUN，具体结果以专项报告为准。Windows/AIX/Plan9/JS/WASI保留原打开行为且不在无锁条件下修改文件，不能声称这些平台同样已修复。只读/显式BypassLockGuard/InMemory不执行此恢复；绕锁不受支持，不能用于可靠pending。直接调用第三方badger.Open的应用不自动取得本层修复。非空损坏仍按原错误/CorruptionPolicy处理，禁止手工截断或删文件碰运气。
+
+验收必须保留首次打开RED、实际截断后SIGKILL及新PID原卷恢复、活owner拒绝、原pending/预算/版本核验和非空文件保护；目录级预检仅启动时运行，不进入Save热路径。详见[空WAL恢复专项](../../codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
