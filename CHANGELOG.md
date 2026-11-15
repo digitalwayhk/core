@@ -4,11 +4,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- 修复Badger回收memtable中途硬杀遗留0字节.mem导致首次重开报`Create a new file`：Core Unix可写打开入口在同目录flock下仅回收真正空技术WAL，非空数据/可靠刷盘/原锁/卷格式不变，无依赖升级。只读、绕锁及尚未实现该锁适配的平台不自动处理。详见[恢复专项](docs/codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
-
-
 ### Added
 
 - 显式 `WriteBehindExecutionOptions.IndependentGroups` / `UseWriteBehindWithFailureHandlerOptions` 允许同store独立顺序组有界持续排空：固定worker、组首独立target与真实本地确认，健康组不再等待无关慢组整轮返回。旧入口/零值保持；target须线程安全且各组独立提交，不能替代跨组原子事务。API、恢复和代价见[指南](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
@@ -32,6 +27,8 @@
 - 无。
 
 ### Fixed
+
+- 修复Badger回收memtable中途硬杀遗留0字节.mem导致首次重开报`Create a new file`：Core Unix可写打开入口在同目录flock下仅回收真正空技术WAL，非空数据/可靠刷盘/原锁/卷格式不变，无依赖升级。只读、绕锁及尚未实现该锁适配的平台不自动处理。详见[恢复专项](docs/codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
 
 - 修复v1.13.0显式独立组手动等待者遗漏新Save/应用确认通知：复用原triggerSync，同时唤醒自动worker与代际等待者。原选批前捕获代际，防止选批结束到等待之间丢通知；无新API、预算或格式变化。
 

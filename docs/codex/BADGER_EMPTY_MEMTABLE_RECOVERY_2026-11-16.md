@@ -58,3 +58,5 @@ Linux真实运行使用本地已有镜像`redis:7.4.12-alpine`（仅作Linux二�
 API/配置/StoreID/冻结policy/终态nil Item及卷格式未变，Core标准入口默认生效，不要求业务改target、handler或新开关。回退不需要卷转换；停稳实际回调与库owner、保留卷副本后方可替换二进制。更早有界/终态格式既有门禁不变。直接第三方badger.Open、只读/绕锁及Windows/AIX/Plan9/JS/WASI等原行为未覆盖；其它BSD虽采用相同Unix实现，本轮真实运行NOT_RUN。
 
 NOT_RUN：Windows等上述平台真实运行、物理断电/非空WAL损坏自动修复、外部MySQL/Redis/NATS/WS业务全链、Bitzoom/Full-E4升级/部署/压力/UAT/容量。Core通过不等于消费方已经接入。原历史20轮1失败/3失败事实不删除，本轮只闭环已稳定复现的零字节回收窗口。
+
+首次正式`release-check`退出1：Unreleased重复Fixed标题，尚未tag/push。已合并进既有Fixed段，保留原失败日志并对新干净提交另名重跑；不是运行测试通过或已发布的证据。
