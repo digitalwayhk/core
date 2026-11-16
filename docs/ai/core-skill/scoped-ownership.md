@@ -79,3 +79,9 @@ MaxKeys默认/上限256；PageSize默认min(32,MaxKeys)，每发现间隔至多�
 归属引用心跳从既有按服务同步转发器注册表取得当前中继，不在后台读取可被SetRunState清空的CrossNodeBroker。Melody在启动组合根取得MQManager引用；引用开启时使用该稳定句柄，不能从后台反复读ServiceContext公开字段。关闭取消在途刷新、等待实际返回与原worker退出，之后关闭Gateway lease；关闭后不能再刷新或重新开户。原单轮3秒、128摘要、mTLS、用户隔离、退订不复活和恢复合同不变。
 
 RegisterOwnedKey、CallServiceOwned及其Resolver使用原生命周期锁取得快照，锁不跨Redis、SQL或网络调用持有。停止后新调用返回NotReady/Unavailable；已经执行的控制调用若结果未知，不自动重试副作用。公开的MQManager/CrossNodeBroker/ServiceResolver字段不是无锁运行时取句柄接口；应用须通过正式API，或在自己启动生命周期取得既有Store并自行保证使用/退出次序。本补丁不修改API、配置、动态manifest、消息或卷格式，无需清PEL或重新迁移。
+
+## 原PEL分类提示
+
+Owned reader每个subject最多保留原PendingWindow条ID→ordering key/scope key分类元数据，不保存正文、业务完成标记或另一份队列。每次仍从原PEL重取完整身份页，移除消失ID；Key回调须按原Selector稳定、纯粹地映射不可变原事件。注册状态每次使用当前目录，缓存不会把注册前未知键永久冻结。ordering key超过4096字节不缓存，scope key沿既有512字节约束；不扩大W/U或消息大小预算。
+
+Step只为实际准入项重取原Stream正文，再沿原Ready credential/fenced claim、应用handler和成功后ACK执行。提示不能替代原件、token、PEL或SQL fence；缺正文不能执行handler或ACK。Observe可复用分类并继续原unread/容量核验，不能把少读正文当业务成功。已知原件缺失检查延后到准入（或提示丢弃后的重新分类），不承诺纯观测轮立即发现人为删除的正文。重启丢弃提示、按原PEL恢复；无API/配置/卷格式变更，不删组或重置游标。组件成本下降不代表消费方容量或端到端时延通过。

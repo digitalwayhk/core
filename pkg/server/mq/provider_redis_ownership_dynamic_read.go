@@ -15,13 +15,13 @@ type redisOwnedClassification struct{ ID, Field, Key string }
 func (r *redisOwnedReader) classify(rows []redis.XMessage, subject string) ([]redisOwnedClassification, error) {
 	result := make([]redisOwnedClassification, 0, len(rows))
 	for _, row := range rows {
-		if len(redisMessageData(row.Values["data"])) > int(r.options.Manifest.MaxMessageBytes) {
+		if !redisPendingHint(row) && len(redisMessageData(row.Values["data"])) > int(r.options.Manifest.MaxMessageBytes) {
 			return nil, ownership.ErrCapacity
 		}
 		if len(redisMessageData(row.Values["ordering_key"])) == 0 {
 			return nil, ownership.ErrUnknown
 		}
-		key, err := r.options.Key(&Message{ID: row.ID, Subject: subject, Data: redisMessageData(row.Values["data"])})
+		key, err := r.pendingScope(subject, row)
 		if err != nil || key == "" || len(key) > 512 {
 			return nil, ownership.ErrUnknown
 		}
@@ -36,14 +36,13 @@ func (r *redisOwnedReader) dynamicSubjectMessages(ctx context.Context, subject s
 	options := r.subscribeOptions()
 	stream := p.streamKey(subject)
 	started := time.Now()
-	rows, _, err := p.claimReliableKeyed(ctx, stream, subject, options, "0-0", m.PendingWindow())
+	rows, _, err := r.pendingRows(ctx, subject, read)
 	if err != nil {
 		return nil, ownershipRedisError(err)
 	}
 	if !read {
 		return rows, nil
 	}
-	r.metrics.reclaimRead.Add(int64(len(rows)))
 	observeRedisKeyedRead(ctx, started, time.Now(), "pending_scan", stream, m.Group, rows)
 	pending, err := p.client.XPending(ctx, stream, m.Group).Result()
 	if err != nil {
@@ -147,7 +146,7 @@ return redis.call("XREADGROUP","GROUP",ARGV[1],ARGV[2],"COUNT",allowed,"STREAMS"
 		}
 		observeRedisKeyedRead(ctx, started, time.Now(), "new", stream, m.Group, entry.Messages)
 	}
-	rows, _, err = p.claimReliableKeyed(ctx, stream, subject, options, "0-0", m.PendingWindow())
+	rows, _, err = r.pendingRows(ctx, subject, read)
 	if err != nil {
 		return nil, ownershipRedisError(err)
 	}

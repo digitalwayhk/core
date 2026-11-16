@@ -241,3 +241,5 @@ SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期�
 普通 `Reliable + SharedKeys` 保存有限ID→ordering key提示，总量不超过原有效window。头完成后仅移除该头提示，保留仍在原PEL等待的尾ID；每页仍由原XPENDING返回完整身份并清除消失提示，游标按原页末推进。只有即将准入的最早项重取原Stream正文；提示不保存payload、不替代fenced XCLAIM/ACK、失败/未知屏障或真实回调退出。ordering key超过4096字节不缓存提示，沿原读取路径处理，不拒绝合法长键。已知尾项的缺正文检查在重新准入时执行，不承诺前序挂起期间即时发现；缺失仍报错并保留PEL，同key后项不能越过。重启无提示，从原消息恢复；Shared预取和生命周期预算不变，不承诺XRANGE成本归零。
 
 内置生命周期worker在取得轮次、standby轻量读取或owner完整检查发生可恢复超时后，均可用**同一原runCtx剩余时间**补一次现有轻量容量读取；无余量/取消/语义/fence错误不补。完整错误仍返回计数，不回收、不刷新完整组前沿，缺证据/真实硬限仍拒绝，不延长2×Interval新鲜度。升级需要分角色：发生拒绝的producer升级才能修复本地capacity controller，普通SharedKeys consumer升级才有正文复用；两者不互相替代，混跑未升级副本仍有旧成本。无新配置、W/策略fingerprint、组/PEL/游标、scope/SQL fence或卷迁移，不准删/改标记或清数据。详见[本轮验证与升级](../../codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
+Owned专用reader使用独立的有限PEL身份分类提示，不复用普通task调度；正文仍在实际准入时从原Stream取回。Observe与Step均保留原PEL/目录/W-U/未读核验，scope恢复、SQL fence及ACK不以提示为准。具体字节预算与原件缺失边界见[持续归属](scoped-ownership.md#原pel分类提示)。`reclaim_read`是实际取回正文行数，纯Observe不全部计入；不是唯一消息数、handler调用数或业务重投数。

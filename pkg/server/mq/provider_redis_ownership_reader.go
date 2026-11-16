@@ -12,6 +12,8 @@ import (
 )
 
 type redisOwnedReader struct {
+	pendingMu     sync.Mutex
+	pending       map[string]map[string]redisOwnedPendingHint
 	provider      *RedisStreamProvider
 	options       OwnedReliableOptions
 	handler       func(context.Context, ownership.Credential, []*Message) error
@@ -30,7 +32,7 @@ func newRedisOwnedReader(p *RedisStreamProvider, o OwnedReliableOptions, h func(
 	for _, key := range o.Manifest.Keys {
 		known[key] = true
 	}
-	return &redisOwnedReader{directory: known, provider: p, options: o, handler: h, metrics: m, cursors: map[string]int{}, inflight: map[string]int64{}}
+	return &redisOwnedReader{pending: map[string]map[string]redisOwnedPendingHint{}, directory: known, provider: p, options: o, handler: h, metrics: m, cursors: map[string]int{}, inflight: map[string]int64{}}
 }
 func (r *redisOwnedReader) subscribeOptions() ReliableSubscribeOptions {
 	return ReliableSubscribeOptions{Group: r.options.Manifest.Group, Consumer: r.options.InstanceID + ":" + r.options.SessionID, SharedKeys: true, KeyConcurrency: 1, Count: r.options.Manifest.PendingWindow(), scopeMarker: ownedRedisMarker(r.options.Manifest), scopeMessageLimit: r.options.Manifest.MaxMessageBytes}
@@ -49,13 +51,12 @@ func (r *redisOwnedReader) subjectMessages(ctx context.Context, subject string, 
 		return r.dynamicSubjectMessages(ctx, subject, read)
 	}
 	scanStarted := time.Now()
-	rows, _, err := p.claimReliableKeyed(ctx, key, subject, options, "0-0", budget)
+	rows, _, err := r.pendingRows(ctx, subject, read)
 	if err != nil {
 		return nil, ownershipRedisError(err)
 	}
 	if read {
 		observeRedisKeyedRead(ctx, scanStarted, time.Now(), "pending_scan", key, m.Group, rows)
-		r.metrics.reclaimRead.Add(int64(len(rows)))
 	}
 	if read {
 		pending, err := p.client.XPending(ctx, key, m.Group).Result()
@@ -79,7 +80,7 @@ func (r *redisOwnedReader) subjectMessages(ctx context.Context, subject string, 
 				}
 				// 其他实例可能在首次PEL扫描与新读取之间推进游标；新读取只预取，
 				// 必须重新扫描最早PEL，不能直接准入本次返回的后序消息。
-				rows, _, err = p.claimReliableKeyed(ctx, key, subject, options, "0-0", budget)
+				rows, _, err = r.pendingRows(ctx, subject, read)
 				if err != nil {
 					return nil, ownershipRedisError(err)
 				}
@@ -111,8 +112,12 @@ func (r *redisOwnedReader) mapMessages(subject, key string, rows []redis.XMessag
 		if ordering == "" {
 			return nil, ownership.ErrUnknown
 		}
-		msg := &Message{ID: row.ID, Subject: subject, Data: redisMessageData(row.Values["data"]), Ack: func() error { return errors.New("ownership: ack only after batch success") }}
-		scopeKey, err := r.options.Key(msg)
+		var data []byte
+		if !redisPendingHint(row) {
+			data = redisMessageData(row.Values["data"])
+		}
+		msg := &Message{ID: row.ID, Subject: subject, Data: data, Ack: func() error { return errors.New("ownership: ack only after batch success") }}
+		scopeKey, err := r.pendingScope(subject, row)
 		if err != nil || scopeKey == "" {
 			return nil, ownership.ErrUnknown
 		}
@@ -178,6 +183,9 @@ func (r *redisOwnedReader) step(ctx context.Context, c ownership.Credential) (bo
 		if due == 0 {
 			return false, nil
 		}
+	}
+	if err := r.hydratePending(ctx, c, messages); err != nil {
+		return false, err
 	}
 	if err := r.claim(ctx, c, messages); err != nil {
 		return false, err
