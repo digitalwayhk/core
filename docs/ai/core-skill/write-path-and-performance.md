@@ -153,3 +153,9 @@ v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式
 ### 在途组的选批成本
 
 独立组的实际target在途且尚未归还原组/槽时，选批仅轮转组标记，不重复对该组queue Seek和解码完整原件。失败handler仍读取原件并按原期限持久暂停；不能将全部active组一概跳过。ScanLimit、cursor、target作用域、版本/attempt/BatchID和可靠本地确认保持不变。该优化降低重复选批成本，不保证消费方端到端时延，也不消除本地可靠提交之间的资源竞争。
+
+## 普通 write-behind 的原件复核与确认
+
+普通 `UseWriteBehind` 已按批执行本地确认，并非有界失败模式共享FIFO或逐条提交。真实选批首次完整解码业务T给target；同批后续复核/确认仅在同Badger实例、完整物理key、非零已提交MVCC版本、原UpdatedAt及实际重读编码SHA256全部匹配时复用已验证快照，免除冗余完整业务编解码。证明仅本批内存使用，不持久化、不缓存跨轮正文。确认仍写回原value并可靠提交，不省略坏原件读取、CAS、pending计数或提交后hook。
+
+封套更新复用现有json-iterator遍历，仅改is_synced/synced_at，保留item原编码及未知字段；无证明、字节/身份变化、重复或非规范大小写字段回到原codec。事务内重复key不能使用Badger pendingWrites的readTs冒充原版本；重复确认不重复扣pending。普通配置/target/API/卷格式不变，无需转有界模式或新增开关。自定义业务codec仍用于首次读取及回退，不能依赖技术确认重复触发业务codec副作用。实测后台分配下降，但Save P99有差轮，不能承诺SQL、Go调度或消费方端到端时延改善，详见[验收及升级](../../codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。

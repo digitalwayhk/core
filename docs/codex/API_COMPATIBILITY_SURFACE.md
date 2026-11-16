@@ -261,3 +261,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### 同store独立组执行（加性）
 
 `nosql.WriteBehindExecutionOptions{IndependentGroups: int}` 与 `ReliableWriteStore[T]` / `PrefixedBadgerDB[T].UseWriteBehindWithFailureHandlerOptions(target, handler, options)` 为显式加性API。0/旧绑定保持整批，1–64固定worker，其余拒绝；要求原有限policy且target可并发独立提交。`WriteBehindDispositionMetrics` 加 TargetActive/Queued/Limit，旧模式0表示未启用。没有更改旧签名、业务协议、config字段、policy指纹或存储格式；同代卷停稳后可切换，既有更老格式门禁不放松。[合同与升级](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
+## 普通write-behind确认内部优化
+
+原UseWriteBehind、WriteBehindTarget.SyncBatch、ForceSync与零配置签名不变；SyncQueueItem仅新增不持久化的私有读证明，原公开JSON/卷格式不变。真实选批仍完整解码T，技术复核/确认在身份、版本及实际字节未变时免除重复业务codec调用；首次和回退继续原codec。自定义codec不能依赖重复确认执行副作用。原pending、CAS、失败、tombstone、hook与新PID恢复保护保持。无需新开关或格式迁移，既有更早卷门禁不放宽。[实际验收与升级](PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。

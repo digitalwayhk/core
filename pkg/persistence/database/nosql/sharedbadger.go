@@ -3,6 +3,7 @@ package nosql
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"reflect"
@@ -174,7 +175,8 @@ type SyncQueueItem[T types.IModel] struct {
 	DeletedAt time.Time `json:"deleted_at,omitempty"`
 	// fromSyncQueue 只由 getUnsyncedBatch 在内存中设置，不持久化。
 	// syncBatch 用它区分真实队列快照与底层单测直接构造的合成项。
-	fromSyncQueue bool `json:"-"`
+	fromSyncQueue bool                `json:"-"`
+	readProof     *syncQueueReadProof `json:"-"` // 仅真实选批已完整解码的当前原件；随本批释放，不持久化。
 }
 
 type syncAfterDeleteCandidate[T types.IModel] struct {
@@ -1740,6 +1742,7 @@ func (p *PrefixedBadgerDB[T]) getUnsyncedBatch(limit int) ([]*SyncQueueItem[T], 
 					}
 				}
 				wrapper.fromSyncQueue = true
+				wrapper.readProof = &syncQueueReadProof{database: p.manager.db, key: dataKey, version: dataItem.Version(), updatedAt: wrapper.UpdatedAt, encodingHash: sha256.Sum256(val)}
 				items = append(items, &wrapper)
 				count++
 				return nil
@@ -1938,9 +1941,13 @@ func (p *PrefixedBadgerDB[T]) syncBatchWithTarget(items []*SyncQueueItem[T], tar
 
 func (p *PrefixedBadgerDB[T]) syncBatchWithTargetContext(ctx context.Context, items []*SyncQueueItem[T], target WriteBehindTarget[T]) ([]string, error) {
 	snapshotTimes := make(map[string]time.Time, len(items))
+	proofs := make(map[string]*syncQueueReadProof, len(items))
 	for _, wrapper := range items {
 		if wrapper != nil && wrapper.Key != "" {
 			snapshotTimes[wrapper.Key] = wrapper.UpdatedAt
+			if wrapper.readProof != nil {
+				proofs[wrapper.Key] = wrapper.readProof
+			}
 		}
 	}
 	result, err := target.SyncBatch(ctx, items)
@@ -1954,7 +1961,7 @@ func (p *PrefixedBadgerDB[T]) syncBatchWithTargetContext(ctx context.Context, it
 		return nil, err
 	}
 	candidates := p.collectSyncAfterDeleteCandidates(items, result.ConfirmedKeys)
-	confirmed, confirmErr := p.confirmSyncSuccess(result.ConfirmedKeys, snapshotTimes, candidates)
+	confirmed, confirmErr := p.confirmSyncSuccess(result.ConfirmedKeys, snapshotTimes, candidates, proofs)
 	if confirmErr != nil {
 		return confirmed, errors.Join(err, confirmErr)
 	}
@@ -2035,12 +2042,23 @@ func (p *PrefixedBadgerDB[T]) currentSyncItems(items []*SyncQueueItem[T]) ([]*Sy
 			if err != nil {
 				return err
 			}
+			// 原件身份和实际编码均核验，不能仅凭MVCC号跳过坏原件读取。
 			var wrapper SyncQueueItem[T]
+			unchanged := false
 			if err := entry.Value(func(value []byte) error {
+				if snapshot.readProof.matches(p.manager.db, snapshot.Key, entry.Version(), snapshot.UpdatedAt, value) && !snapshot.IsSynced && !snapshot.HandedOff {
+					unchanged = true
+					return nil
+				}
 				return json.Unmarshal(value, &wrapper)
 			}); err != nil {
 				return fmt.Errorf("反序列化当前同步数据失败 [key=%s]: %w", snapshot.Key, err)
 			}
+			if unchanged {
+				current = append(current, snapshot)
+				continue
+			}
+
 			if wrapper.IsSynced || wrapper.HandedOff || !wrapper.UpdatedAt.Equal(snapshot.UpdatedAt) {
 				continue
 			}
@@ -2051,11 +2069,11 @@ func (p *PrefixedBadgerDB[T]) currentSyncItems(items []*SyncQueueItem[T]) ([]*Sy
 	return current, err
 }
 
-func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotTimes map[string]time.Time, candidates []syncAfterDeleteCandidate[T]) ([]string, error) {
+func (p *PrefixedBadgerDB[T]) confirmSyncSuccess(successKeys []string, snapshotTimes map[string]time.Time, candidates []syncAfterDeleteCandidate[T], proofs ...map[string]*syncQueueReadProof) ([]string, error) {
 	if len(successKeys) == 0 {
 		return successKeys, nil
 	}
-	confirmedKeys, removedPending, err := p.batchConfirmSyncedStatus(successKeys, snapshotTimes)
+	confirmedKeys, removedPending, err := p.batchConfirmSyncedStatus(successKeys, snapshotTimes, proofs...)
 	if err != nil {
 		logx.Errorf("更新同步状态失败（下次循环将重试这些记录）[prefix=%s]: %v", p.prefix, err)
 		return nil, err
@@ -3205,7 +3223,7 @@ func (p *PrefixedBadgerDB[T]) batchUpdateSyncedStatusKeys(keys []string, snapsho
 }
 
 // batchConfirmSyncedStatus 分开返回幂等确认和实际移除的 pending；旧 ACK 不得重复扣减计数。
-func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTimes map[string]time.Time) ([]string, int, error) {
+func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTimes map[string]time.Time, proofs ...map[string]*syncQueueReadProof) ([]string, int, error) {
 	if len(keys) == 0 {
 		return nil, 0, nil
 	}
@@ -3228,6 +3246,8 @@ func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTi
 		confirmedKeys := make([]string, 0, len(keys))
 		removedPending := 0
 		err := p.updateWriteBehindTransaction(func(txn *badger.Txn) error {
+			// Badger事务内待写项的Version为readTs，不能将已改写的重复key误认原MVCC版本。
+			written := make(map[string]bool, len(keys))
 			for _, key := range keys {
 				item, err := txn.Get([]byte(key))
 				if err != nil {
@@ -3248,37 +3268,50 @@ func (p *PrefixedBadgerDB[T]) batchConfirmSyncedStatus(keys []string, snapshotTi
 				}
 
 				var wrapper SyncQueueItem[T]
+				var data []byte
+				fast := false
 				if err = item.Value(func(val []byte) error {
+					if len(proofs) > 0 && !written[key] {
+						if version, ok := snapshotTimes[key]; ok && proofs[0][key].matches(p.manager.db, key, item.Version(), version, val) {
+							data, fast = markPlainSyncEnvelope(val, now)
+							if fast {
+								return nil
+							}
+						}
+					}
 					return json.Unmarshal(val, &wrapper)
 				}); err != nil {
 					logx.Errorf("反序列化失败 [%s]: %v", key, err)
 					continue
 				}
 
-				// 已同步，清理队列条目后跳过
-				if wrapper.IsSynced || wrapper.HandedOff {
-					_ = txn.Delete([]byte(p.syncQueueKey(key)))
-					continue
+				if !fast {
+					// 已同步，清理队列条目后跳过
+					if wrapper.IsSynced || wrapper.HandedOff {
+						_ = txn.Delete([]byte(p.syncQueueKey(key)))
+						continue
+					}
+
+					// CAS 检查：如果数据在快照后被更新，保留 IsSynced=false 让下次循环重新同步
+					if snapTime, ok := snapshotTimes[key]; ok && !wrapper.UpdatedAt.IsZero() && !wrapper.UpdatedAt.Equal(snapTime) {
+						logx.Infof(" CAS 不匹配，跳过标记 [%s]: 快照=%v, 当前=%v", key, snapTime, wrapper.UpdatedAt)
+						continue
+					}
+
+					wrapper.IsSynced = true
+					wrapper.SyncedAt = now
+
+					data, err = json.Marshal(&wrapper)
+					if err != nil {
+						logx.Errorf("序列化失败 [%s]: %v", key, err)
+						continue
+					}
+
 				}
-
-				// CAS 检查：如果数据在快照后被更新，保留 IsSynced=false 让下次循环重新同步
-				if snapTime, ok := snapshotTimes[key]; ok && !wrapper.UpdatedAt.IsZero() && !wrapper.UpdatedAt.Equal(snapTime) {
-					logx.Infof(" CAS 不匹配，跳过标记 [%s]: 快照=%v, 当前=%v", key, snapTime, wrapper.UpdatedAt)
-					continue
-				}
-
-				wrapper.IsSynced = true
-				wrapper.SyncedAt = now
-
-				data, err := json.Marshal(&wrapper)
-				if err != nil {
-					logx.Errorf("序列化失败 [%s]: %v", key, err)
-					continue
-				}
-
 				if err := txn.Set([]byte(key), data); err != nil {
 					return err // 把错误传播出去触发整体回滚
 				}
+				written[key] = true
 				// 同步成功，删除同步队列索引条目
 				removed, err := removeQueue(txn, key)
 				if err != nil {

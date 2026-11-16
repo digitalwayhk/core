@@ -318,3 +318,7 @@ v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用�
 ### 可选：有界独立组排空
 
 默认write-behind行为不变。需要同store健康组在无关慢组执行时持续确认，可在已绑定有限失败policy的原store上显式使用 `UseWriteBehindWithFailureHandlerOptions(target, handler, nosql.WriteBehindExecutionOptions{IndependentGroups: 4})`。target必须线程安全、各应用顺序组可独立提交；每次target只有一组首，不适用跨组原子事务。07组合根可设置 `Service.WriteBehindExecution`，零值保留旧模式；不增加业务worker、不改SyncWrites或卷。手动/自动、取消、资源和升级边界见[正式指南](../../docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
+
+## 普通同步的技术确认优化
+
+原UseWriteBehind接线无需改动：真实选批仍给target完整T，同批原件身份/实际编码未变时，后续复核和确认免除重复完整业务编解码；本地确认仍可靠提交后才更新pending并调用原清理hook。无需切换有界模式或新增参数，原卷不迁移。该优化降低组件分配，不承诺Save P99、SQL或业务端到端时延；见[原件保护与实际验证](../../docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。

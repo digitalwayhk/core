@@ -155,3 +155,11 @@ Save平均和P99需按实际分布与慢请求分段判断，不能把20ms远端
 ## 空WAL回收中断后的启动恢复
 
 v1.13.2补齐Core Badger Unix可写入口：在与Badger一致的目录排他锁下仅处理回收中断遗留的0字节规范memtable技术文件，然后仍由Badger正常获取其正式锁并恢复数据；不是删除pending、清库、降低刷盘或重试碰运气。无需应用新增开关，原有失败/未知/版本/顺序/清理hook合同不变。只读、绕锁和未验证平台保持原行为；具体根因、真实删除窗口硬杀及原卷副本见[专项报告](BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
+
+## 普通模式的重复业务编解码收敛
+
+普通 `UseWriteBehind` 的 `getUnsyncedBatch` 首次完整解析业务T；`currentSyncItems` 与成功确认原本又各自完整解码，确认还重编码T。当前只对真实已验证且未变原件走技术封套更新：同DB、完整key、非零已提交Badger版本、原UpdatedAt和实际重读编码SHA256共同约束。只在当前批次保留紧凑证明，不跨轮缓存正文、不新增持久状态；target仍收到原业务类型。
+
+复核仍读取当前原件；确认仍在原事务逐项核验后更新is_synced/synced_at、删除同步索引，真实提交后才扣pending并安排IsSyncAfterDelete。重复key在同一事务改写后必须回退原codec，不能把Badger待写项Version=readTs当原版本；版本/字节变化、缺证明、重复/大小写别名或非标准封套也回退，不放宽坏原件和旧结果保护。标准快路径直接保留item编码及未知字段，业务codec首次解析和回退仍执行，技术确认不再重复触发其副作用。
+
+升级继续原UseWriteBehind/AutoSync配置，无新开关、API、StoreID/policy或卷格式，不要求改有界模式。旧原卷无需清理或重同步；本补丁不新增回退门禁，已有有界终态等更早格式限制仍有效。仍有Badger原件复制/写回、可靠刷盘和资源竞争；同机多轮分配下降不等于Save P99稳定改善，也不解释消费方全部SQL/网络/运行时等待。完整RED、原失败尝试、同机性能与新PID恢复见[专项报告](PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。

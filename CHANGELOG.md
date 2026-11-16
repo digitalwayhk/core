@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- 普通UseWriteBehind在已验证且身份/版本/实际编码未变时，免除currentSyncItems和本地确认的重复完整业务编解码；首次target仍取得真实T，原CAS、可靠提交、pending/hook及codec回退保持，无新API/配置/卷格式。后台分配下降与Save P99波动分别报告，见[验收及升级](docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
+
 - 减少独立组write-behind实际target在途组的重复queue Seek、普通SharedKeys头完成后的尾PEL正文重取、固定/动态Owned纯观测的重复分类；有限身份提示不保存payload，执行前仍取原件并保留fence/成功ACK。无新API、配置或卷格式，锁专项WIP未发布，Save P99未证明改善。详见[本轮验收和升级](docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。
 
 - 修复Badger回收memtable中途硬杀遗留0字节.mem导致首次重开报`Create a new file`：Core Unix可写打开入口在同目录flock下仅回收真正空技术WAL，非空数据/可靠刷盘/原锁/卷格式不变，无依赖升级。只读、绕锁及尚未实现该锁适配的平台不自动处理。详见[恢复专项](docs/codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
@@ -49,6 +51,17 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.4] - 2026-11-16
+
+### Fixed
+
+- 普通UseWriteBehind复核与本地确认仅在同库、完整key、非零已提交MVCC、原UpdatedAt及实际重读编码SHA256匹配时免除重复完整业务编解码；首次target仍取得真实T，变更/缺证明/非标准封套回退原codec，重复key不重复扣pending。
+- 标准技术封套更新保留原Item编码及未知字段，真实本地确认提交后才计数和安排原清理hook；坏原件、CAS、部分未知、tombstone与新PID恢复保护不变。
+
+### Changed
+
+- 无新公开API、配置、依赖或卷格式，无需切有界模式或清理原卷。多轮后台分配下降，Save P99仍有差轮；本轮不含锁/Prefix/yield/compaction调整，不代表消费方SQL、端到端或容量已通过。见[实际验收及升级](docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
 
 ## [v1.13.3] - 2026-11-16
 

@@ -43,14 +43,26 @@ func (r *confirmationLoadRecord) NewModel() {
 // GetLocalKey 返回仅本测试使用的合成原件标识。
 func (r *confirmationLoadRecord) GetLocalKey() string { return r.Key }
 
-type confirmationLoadTarget struct{ calls, items, nanos atomic.Int64 }
+type confirmationLoadTarget struct {
+	calls, items, nanos atomic.Int64
+	delay               time.Duration
+}
 
 // 下列计数仅由显式性能诊断的Go覆盖文件写入，正常构建未采集时必须输出null。
 var confirmationPerfBodyNS, confirmationPerfTransactionNS, confirmationPerfTransactionCount atomic.Int64
 
-// SyncBatch 立即确认全部原身份，不进行SQL或网络调用。
-func (a *confirmationLoadTarget) SyncBatch(_ context.Context, items []*SyncQueueItem[confirmationLoadRecord]) (*WriteBehindResult, error) {
+// SyncBatch 在显式受控延迟后或立即确认全部原身份，不进行SQL或网络调用。
+func (a *confirmationLoadTarget) SyncBatch(ctx context.Context, items []*SyncQueueItem[confirmationLoadRecord]) (*WriteBehindResult, error) {
 	start := time.Now()
+	if a.delay > 0 {
+		timer := time.NewTimer(a.delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	r := &WriteBehindResult{}
 	for _, item := range items {
 		r.ConfirmedKeys = append(r.ConfirmedKeys, item.Key)
@@ -101,19 +113,23 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 	payload := confirmationPayload(t)
 	scenario := os.Getenv("CORE_CONFIRM_PERF_GROUP_SCENARIO")
 	require.Contains(t, []string{"", "same_group", "cross_group", "history_tombstones"}, scenario)
+	modes := []string{"plain_no_sync", "bounded_no_sync", "bounded_fast_sync"}
+	if os.Getenv("CORE_CONFIRM_PERF_PLAIN") == "1" {
+		modes = []string{"plain_no_sync", "plain_fast_sync", "plain_delayed_sync"}
+	}
 	for round := 0; round < 4; round++ {
-		for _, mode := range []string{"plain_no_sync", "bounded_no_sync", "bounded_fast_sync"} {
+		for _, mode := range modes {
 			t.Run(fmt.Sprintf("%d/%s", round, mode), func(t *testing.T) {
 				path, err := os.MkdirTemp(root, fmt.Sprintf("%d-%s-", round, mode))
 				require.NoError(t, err)
 				cfg := DefaultProductionConfig(path)
-				cfg.AutoSync = mode == "bounded_fast_sync"
+				cfg.AutoSync = mode == "bounded_fast_sync" || mode == "plain_fast_sync" || mode == "plain_delayed_sync"
 				cfg.EnableLogger = false
 				cfg.SyncBatchSize = 128
 				cfg.SyncFlushThreshold = 32
 				cfg.SyncMaxCollectDelay = 20 * time.Millisecond
 				cfg.SyncBacklogDrainDelay = 0
-				if mode != "plain_no_sync" {
+				if strings.HasPrefix(mode, "bounded_") {
 					cfg.WriteBehindFailure = &WriteBehindFailurePolicy{StoreID: "core-confirm-performance", MaxAttempts: 3, MaxElapsed: 5 * time.Minute, MinRetryInterval: time.Second, MaxRetryInterval: 10 * time.Second, HandlerMaxAttempts: 8, HandlerTimeout: 2 * time.Second, HandlerWorkers: 2, ScanLimit: 128}
 				}
 				// 参数实验只接受固定白名单，不改变生产默认值和可靠性。
@@ -147,7 +163,10 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 					"collect_window_ns": batch.CollectWindow.Nanoseconds(), "max_batch": batch.MaxBatch,
 				}
 				a := &confirmationLoadTarget{}
-				if mode == "plain_no_sync" {
+				if mode == "plain_delayed_sync" {
+					a.delay = 20 * time.Millisecond
+				}
+				if cfg.WriteBehindFailure == nil {
 					err = store.UseWriteBehind(a)
 				} else {
 					err = store.UseWriteBehindWithFailureHandler(a, a)
@@ -265,6 +284,9 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 				}
 				pct := func(p float64) float64 { return all[int(math.Ceil(p*float64(len(all))))-1] }
 				result := map[string]any{"variant": variant, "effective_options": effectiveOptions, "levels_after_drain": store.db.manager.db.Levels(), "mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
+				result["target_controlled_delay_ms"] = a.delay.Milliseconds()
+				result["allocated_bytes"] = memAfter.TotalAlloc - memBefore.TotalAlloc
+				result["allocations"] = memAfter.Mallocs - memBefore.Mallocs
 				result["group_scenario"] = scenario
 				result["empty_group_checks"] = groupChecks.Load()
 				result["unbounded_group_checks"] = unboundedChecks.Load()
