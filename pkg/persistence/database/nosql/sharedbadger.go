@@ -197,7 +197,8 @@ const (
 type PrefixedBadgerDB[T types.IModel] struct {
 	localConfirmationLimit int // facade确认固定小块，避免波次空隙放大；不按业务身份分锁。
 
-	localSubmit func(func() error) error // 显式有界store复用现有BatchCommitter，绑定前设置，之后不变。
+	localSubmit             func(func() error) error                // 显式有界store复用现有BatchCommitter，绑定前设置，之后不变。
+	localConfirmationSubmit func(*writeBehindConfirmation[T]) error // 独立组结果仍进入同FIFO，绑定前设置。
 
 	manager *SharedBadgerManager
 	prefix  string // "user:", "order:", "product:"
@@ -210,7 +211,7 @@ type PrefixedBadgerDB[T types.IModel] struct {
 	syncLock       sync.RWMutex
 	syncMutex      sync.Mutex
 	syncInProgress bool
-	syncExecMu     sync.Mutex // 默认串行整轮；显式独立组仅跨选批/预留及确认持有
+	syncExecMu     sync.Mutex // 默认串行整轮；显式独立组仅跨选批/预留及历史维护，确认由原FIFO/本地事务保护
 	syncKeyLocks   [syncKeyLockStripeCount]sync.RWMutex
 	closeCh        chan struct{}
 	syncTrigger    chan struct{} // 写入时立即触发同步，无需等待 ticker

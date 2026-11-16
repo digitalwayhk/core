@@ -21,10 +21,11 @@ var (
 )
 
 type batchCommitRequest[T types.IModel] struct {
-	localCommit func() error // 仅Core本地事务，不允许target/网络/应用回调。
-	operations  []WriteOperation[T]
-	queuedAt    time.Time
-	result      chan batchCommitResponse
+	localCommit  func() error                // 仅Core本地事务，不允许target/网络/应用回调。
+	confirmation *writeBehindConfirmation[T] // 仅相邻、同store、预算内的已退出target结果可合并。
+	operations   []WriteOperation[T]
+	queuedAt     time.Time
+	result       chan batchCommitResponse
 }
 
 type batchCommitResponse struct {
@@ -216,7 +217,23 @@ func (b *BatchCommitter[T]) Metrics() BatchCommitMetrics {
 
 func (b *BatchCommitter[T]) run() {
 	defer close(b.done)
-	for first := range b.requests {
+	var pending *batchCommitRequest[T]
+	for {
+		var first batchCommitRequest[T]
+		if pending != nil {
+			first = *pending
+			pending = nil
+		} else {
+			var ok bool
+			first, ok = <-b.requests
+			if !ok {
+				return
+			}
+		}
+		if first.confirmation != nil {
+			pending = b.finishConfirmationBatch(first)
+			continue
+		}
 		if first.localCommit != nil {
 			b.finishLocalCommit(first)
 			continue
@@ -239,7 +256,7 @@ func (b *BatchCommitter[T]) run() {
 						channelClosed = true
 						break collect
 					}
-					if request.localCommit != nil {
+					if request.localCommit != nil || request.confirmation != nil {
 						local = &request
 						break collect
 					}
@@ -257,7 +274,7 @@ func (b *BatchCommitter[T]) run() {
 		}
 		b.finishBatch(batch)
 		if local != nil {
-			b.finishLocalCommit(*local)
+			pending = local
 		}
 		if channelClosed {
 			return

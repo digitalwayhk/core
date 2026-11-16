@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- 收短显式IndependentGroups确认控制区，结果等待原FIFO时不持syncExecMu；原执行器短内存保护归还已退出worker的组/槽。原FIFO仅有界合并相邻同store确认，不跨前台或元数据屏障；保留实际事务身份、取消/未知、pending/hook及恢复，无新API/配置/卷格式，普通v1.13.4不变。见[验收](docs/codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。
+
 - 普通UseWriteBehind在已验证且身份/版本/实际编码未变时，免除currentSyncItems和本地确认的重复完整业务编解码；首次target仍取得真实T，原CAS、可靠提交、pending/hook及codec回退保持，无新API/配置/卷格式。后台分配下降与Save P99波动分别报告，见[验收及升级](docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
 
 - 减少独立组write-behind实际target在途组的重复queue Seek、普通SharedKeys头完成后的尾PEL正文重取、固定/动态Owned纯观测的重复分类；有限身份提示不保存payload，执行前仍取原件并保留fence/成功ACK。无新API、配置或卷格式，锁专项WIP未发布，Save P99未证明改善。详见[本轮验收和升级](docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。
@@ -51,6 +53,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.5] - 2026-11-16
+
+### Fixed
+
+- 显式 IndependentGroups 的 target 结果不再持执行控制锁等待本地确认；已退出回调的组和槽由既有短内存锁归还。沿原 FIFO 最多合并相邻同 store 的 8 项确认及原字节预算，不跨前台保存或元数据屏障。真实本地提交之后才更新 pending、计数和清理 hook；版本、指纹、attempt、BatchID、未知结果及关闭恢复保护保持。
+
+### Changed
+
+- 无新公开 API、配置、依赖或持久格式；普通 v1.13.4 路径和旧有界零值行为保持，已启用独立组者升级即可。确认事务数约减少 80%，但同机受控延迟目标的 Save P99 有回退，不代表前台长尾或消费方容量通过。04 首轮额外启停竞态和恢复请求 500 未在本专项修复，原始失败与后续通过分别保留。详见[验收、兼容和风险](docs/codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。
 
 ## [v1.13.4] - 2026-11-16
 

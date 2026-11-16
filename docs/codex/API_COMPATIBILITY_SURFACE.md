@@ -265,3 +265,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ## 普通write-behind确认内部优化
 
 原UseWriteBehind、WriteBehindTarget.SyncBatch、ForceSync与零配置签名不变；SyncQueueItem仅新增不持久化的私有读证明，原公开JSON/卷格式不变。真实选批仍完整解码T，技术复核/确认在身份、版本及实际字节未变时免除重复业务codec调用；首次和回退继续原codec。自定义codec不能依赖重复确认执行副作用。原pending、CAS、失败、tombstone、hook与新PID恢复保护保持。无需新开关或格式迁移，既有更早卷门禁不放宽。[实际验收与升级](PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
+
+## 显式独立组确认控制区内部补丁
+
+不增加公开API、配置、worker/队列、StoreID/policy或持久格式。旧普通UseWriteBehind及IndependentGroups=0保持；已显式启用的ReliableWriteStore自动沿同一FIFO有界合并相邻独立确认，不跨前台保存、元数据、store或原8项/约1MiB量子。实际事务重核原身份/状态/attempt/BatchID及取消/关闭，真实提交后由原worker计数/hook；直接PrefixedBadgerDB不增加提交器。原槽只在原回调实际退出且结果已提交或保留未知后归还。原卷与同代版本的停稳回退边界不变，性能差轮与兼容验证见[正式报告](WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。

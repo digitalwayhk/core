@@ -296,20 +296,18 @@ func (p *PrefixedBadgerDB[T]) executeDispositionBatch(ctx context.Context, selec
 			err = errors.Join(err, ErrWriteBehindDisposition)
 		}
 	}
+	var confirmationErr error
+	var n int
+	var notices []WriteBehindFailureRecord[T]
 	if independent {
-		p.syncExecMu.Lock()
-		defer p.syncExecMu.Unlock()
-		// AfterFunc取消通知可尚未获调度；关闭状态本身也必须禁止迟到成功确认。
-		if ctx.Err() != nil {
-			success = map[string]bool{}
-			err = errors.Join(err, ctx.Err())
-		}
-		if p.IsClosed() || p.disposition.ctx.Err() != nil {
-			success = map[string]bool{}
-			err = errors.Join(err, ErrWriteStoreClosed)
-		}
+		// 结果入原FIFO时不持控制锁；关闭/取消在实际本地事务中再次核验。
+		n, notices, confirmationErr = p.commitDispositionResults(selected, success, err, ctx)
+	} else {
+		n, notices, confirmationErr = p.commitDispositionResults(selected, success, err)
 	}
-	n, notices, confirmationErr := p.commitDispositionResults(selected, success, err)
+	if independent && ctx.Err() != nil {
+		err = errors.Join(err, ctx.Err())
+	}
 	confirmed += n
 	// notices仅来自已提交的Unknown结果；仍须与原选批含BatchID的完整身份吻合。
 	if err != nil {

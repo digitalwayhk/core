@@ -2,10 +2,10 @@
 package nosql
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"runtime"
-	"time"
 
 	"github.com/dgraph-io/badger/v4"
 )
@@ -14,7 +14,7 @@ const dispositionConfirmationMaxItems = 32
 const dispositionConfirmationMaxBytes = 1 << 20
 
 // commitDispositionResults 在条数/编码字节预算内落地；真实事务失败不发布该块任何内存结果。
-func (p *PrefixedBadgerDB[T]) commitDispositionResults(selected []WriteBehindFailureRecord[T], success map[string]bool, cause error) (int, []WriteBehindFailureRecord[T], error) {
+func (p *PrefixedBadgerDB[T]) commitDispositionResults(selected []WriteBehindFailureRecord[T], success map[string]bool, cause error, contexts ...context.Context) (int, []WriteBehindFailureRecord[T], error) {
 	confirmed := 0
 	var notify []WriteBehindFailureRecord[T]
 	var resultErr error
@@ -40,7 +40,7 @@ func (p *PrefixedBadgerDB[T]) commitDispositionResults(selected []WriteBehindFai
 			size += cost
 			end++
 		}
-		n, notices, err := p.commitDispositionResultBlock(selected[start:end], success, cause)
+		n, notices, err := p.commitDispositionResultBlockBudget(selected[start:end], success, cause, size, contexts...)
 		confirmed += n
 		notify = append(notify, notices...)
 		resultErr = errors.Join(resultErr, err)
@@ -51,69 +51,49 @@ func (p *PrefixedBadgerDB[T]) commitDispositionResults(selected []WriteBehindFai
 	return confirmed, notify, resultErr
 }
 
-func (p *PrefixedBadgerDB[T]) commitDispositionResultBlock(selected []WriteBehindFailureRecord[T], success map[string]bool, cause error) (int, []WriteBehindFailureRecord[T], error) {
-	var snapshots []*SyncQueueItem[T]
-	var keys []string
-	var notify []WriteBehindFailureRecord[T]
-	var invalid error
-	groups := make(map[string]struct{}, len(selected))
-	err := p.updateWriteBehindTransactionKind(localCommitConfirmation, len(selected), func(txn *badger.Txn) error {
-		for _, original := range selected {
-			var r WriteBehindFailureRecord[T]
-			if e := dispositionRead(txn, p.dispositionPrefix()+"r:"+original.ID, &r); e != nil {
-				if errors.Is(e, badger.ErrKeyNotFound) {
-					invalid = errors.Join(invalid, e)
-					continue
-				}
-				return e
+func (p *PrefixedBadgerDB[T]) commitDispositionResultBlock(selected []WriteBehindFailureRecord[T], success map[string]bool, cause error, contexts ...context.Context) (int, []WriteBehindFailureRecord[T], error) {
+	return p.commitDispositionResultBlockBudget(selected, success, cause, 0, contexts...)
+}
+
+// commitDispositionResultBlockBudget复用上游已编码的同一快照预算，避免确认准备再次完整编码业务T。
+func (p *PrefixedBadgerDB[T]) commitDispositionResultBlockBudget(selected []WriteBehindFailureRecord[T], success map[string]bool, cause error, budget int, contexts ...context.Context) (int, []WriteBehindFailureRecord[T], error) {
+	work := &writeBehindConfirmation[T]{store: p, selected: selected, success: success, cause: cause, bytesBudget: budget}
+	if len(contexts) > 0 {
+		work.ctx = contexts[0]
+	}
+	var err error
+	if work.ctx != nil && p.localConfirmationSubmit != nil {
+		// 完整编码预算在入队前计算，不能占用唯一提交worker；仍以同一原快照估算并保留实际Badger硬限。
+		if work.bytesBudget <= 0 {
+			work.bytesBudget, err = work.cost()
+			if err != nil {
+				return 0, nil, err
 			}
-			if r.ID != original.ID || r.Snapshot == nil || r.Snapshot.Key != original.Snapshot.Key || r.State != WriteBehindInFlight || r.Attempts != original.Attempts || r.BatchID != original.BatchID || r.Fingerprint != original.Fingerprint || !r.Snapshot.UpdatedAt.Equal(original.Snapshot.UpdatedAt) {
-				invalid = errors.Join(invalid, ErrWriteBehindDisposition)
-				continue // 语义失效不是存储失败，不回滚无关的有效原版本。
-			}
-			if success[r.Snapshot.Key] {
-				removed, e := p.completeDisposition(txn, &r, WriteBehindCompleted, groups)
-				if e != nil {
-					return e
-				}
-				if removed {
-					snapshots = append(snapshots, r.Snapshot)
-					keys = append(keys, r.Snapshot.Key)
-				}
-				continue
-			}
-			r.State = WriteBehindUnknown
-			r.Reason = "target_outcome_unknown"
-			if r.FirstFailureAt.IsZero() {
-				r.FirstFailureAt = time.Now().UTC()
-			}
-			if cause != nil {
-				r.ErrorMessage = cause.Error()
-			} else {
-				r.ErrorMessage = ErrWriteBehindNoProgress.Error()
-			}
-			if e := p.saveDisposition(txn, &r); e != nil {
-				return e
-			}
-			notify = append(notify, r)
 		}
-		return p.deleteEmptyDispositionGroups(txn, groups)
-	})
+		err = p.localConfirmationSubmit(work)
+	} else {
+		err = p.updateWriteBehindTransactionKind(localCommitConfirmation, len(selected), func(txn *badger.Txn) error {
+			groups := make(map[string]struct{}, len(selected))
+			if e := work.apply(txn, groups); e != nil {
+				return e
+			}
+			return p.deleteEmptyDispositionGroups(txn, groups)
+		})
+	}
 	if errors.Is(err, badger.ErrTxnTooBig) && len(selected) > 1 {
-		// 仅重建纯本地写集；未提交块的快照、计数及通知全部丢弃。不会重调target。
 		middle := len(selected) / 2
-		n, left, e1 := p.commitDispositionResultBlock(selected[:middle], success, cause)
+		n, left, e1 := p.commitDispositionResultBlock(selected[:middle], success, cause, contexts...)
 		runtime.Gosched()
-		m, right, e2 := p.commitDispositionResultBlock(selected[middle:], success, cause)
+		m, right, e2 := p.commitDispositionResultBlock(selected[middle:], success, cause, contexts...)
 		return n + m, append(left, right...), errors.Join(e1, e2)
 	}
 	if err != nil {
 		return 0, nil, err
 	}
-	p.incrementPendingCount(-len(snapshots))
+	p.incrementPendingCount(-len(work.snapshots))
 	if observer := p.disposition.confirmationObserver; observer != nil {
-		observer(snapshots)
+		observer(work.snapshots)
 	}
-	p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates(snapshots, keys))
-	return len(snapshots), notify, invalid
+	p.scheduleSyncAfterDelete(p.collectSyncAfterDeleteCandidates(work.snapshots, work.keys))
+	return len(work.snapshots), work.notify, errors.Join(work.invalid, work.canceled)
 }

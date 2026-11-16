@@ -163,3 +163,7 @@ v1.13.2补齐Core Badger Unix可写入口：在与Badger一致的目录排他锁
 复核仍读取当前原件；确认仍在原事务逐项核验后更新is_synced/synced_at、删除同步索引，真实提交后才扣pending并安排IsSyncAfterDelete。重复key在同一事务改写后必须回退原codec，不能把Badger待写项Version=readTs当原版本；版本/字节变化、缺证明、重复/大小写别名或非标准封套也回退，不放宽坏原件和旧结果保护。标准快路径直接保留item编码及未知字段，业务codec首次解析和回退仍执行，技术确认不再重复触发其副作用。
 
 升级继续原UseWriteBehind/AutoSync配置，无新开关、API、StoreID/policy或卷格式，不要求改有界模式。旧原卷无需清理或重同步；本补丁不新增回退门禁，已有有界终态等更早格式限制仍有效。仍有Badger原件复制/写回、可靠刷盘和资源竞争；同机多轮分配下降不等于Save P99稳定改善，也不解释消费方全部SQL/网络/运行时等待。完整RED、原失败尝试、同机性能与新PID恢复见[专项报告](PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
+
+## 显式独立组的确认合批
+
+IndependentGroups启用后，原FIFO可合并相邻同store的已返回target结果，仍按8项/约1MiB量子及真实事务硬限拆分；不跨前台/元数据边界、不加入等待窗口。确认不持选批syncExecMu等FIFO，组和槽只有实际回调退出、原结果提交或保留未知之后才在短内存区归还；原storageMu/版本指纹/attempt/BatchID和组前序保持。计数/hook/通知在FIFO之外，只来自实际提交。原普通和旧有界零值不转此模式，直接PrefixedBadgerDB不增提交器。见[正式合同](WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)及[验收与升级](WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。

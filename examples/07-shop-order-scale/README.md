@@ -322,3 +322,7 @@ v1.11.1 对显式有界 store 的前台新 wrapper 做保守独立快照复用�
 ## 普通同步的技术确认优化
 
 原UseWriteBehind接线无需改动：真实选批仍给target完整T，同批原件身份/实际编码未变时，后续复核和确认免除重复完整业务编解码；本地确认仍可靠提交后才更新pending并调用原清理hook。无需切换有界模式或新增参数，原卷不迁移。该优化降低组件分配，不承诺Save P99、SQL或业务端到端时延；见[原件保护与实际验证](../../docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
+
+## 独立组确认内部补丁
+
+已显式使用IndependentGroups的store升级后，原FIFO自动在8项/字节预算内合并相邻独立结果；不跨前台保存或屏障，不让target/SQL进入提交器，原版本/失败/关闭及组前序保护保持。无需再加参数；示例默认普通/零值接线不因此转模式。组件对照与消费方容量分别验收，详见[确认控制锁专项](../../docs/codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。

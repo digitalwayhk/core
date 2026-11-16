@@ -163,13 +163,24 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 					"collect_window_ns": batch.CollectWindow.Nanoseconds(), "max_batch": batch.MaxBatch,
 				}
 				a := &confirmationLoadTarget{}
+				independent := os.Getenv("CORE_CONFIRM_PERF_INDEPENDENT")
+				require.Contains(t, []string{"", "32"}, independent)
+				if os.Getenv("CORE_CONFIRM_PERF_TARGET_DELAY_MS") == "5" {
+					a.delay = 5 * time.Millisecond
+				} else {
+					require.Empty(t, os.Getenv("CORE_CONFIRM_PERF_TARGET_DELAY_MS"))
+				}
 				if mode == "plain_delayed_sync" {
 					a.delay = 20 * time.Millisecond
 				}
 				if cfg.WriteBehindFailure == nil {
 					err = store.UseWriteBehind(a)
 				} else {
-					err = store.UseWriteBehindWithFailureHandler(a, a)
+					if independent == "32" {
+						err = store.UseWriteBehindWithFailureHandlerOptions(a, a, WriteBehindExecutionOptions{IndependentGroups: 32})
+					} else {
+						err = store.UseWriteBehindWithFailureHandler(a, a)
+					}
 				}
 				require.NoError(t, err)
 				var groupChecks, unboundedChecks atomic.Int64
@@ -285,6 +296,7 @@ func TestConfirmationPerformanceComparison(t *testing.T) {
 				pct := func(p float64) float64 { return all[int(math.Ceil(p*float64(len(all))))-1] }
 				result := map[string]any{"variant": variant, "effective_options": effectiveOptions, "levels_after_drain": store.db.manager.db.Levels(), "mode": mode, "round": round, "sustained": round == 3, "fixed_working_set": round == 3, "sustained_offered_per_second": 2000, "payload_bytes": len(payload), "gomaxprocs": runtime.GOMAXPROCS(0), "sync_writes": cfg.SyncWrites, "completed": len(all), "errors": failures.Load(), "write_seconds": writeTime.Seconds(), "drain_seconds": drainTime.Seconds(), "save_ms": map[string]float64{"avg": sum / float64(len(all)), "p50": pct(.5), "p95": pct(.95), "p99": pct(.99), "max": all[len(all)-1]}, "at_write_end": atWrite, "after_drain": endMetrics, "pending_trend": pendingTrend, "target_calls": a.calls.Load(), "target_items": a.items.Load(), "target_duration_ns": a.nanos.Load(), "badger_committed_transactions": transactions, "cpu_user_seconds": float64(after.Utime.Nano()-before.Utime.Nano()) / 1e9, "cpu_system_seconds": float64(after.Stime.Nano()-before.Stime.Nano()) / 1e9, "max_rss_native_units": after.Maxrss, "gc_count": memAfter.NumGC - memBefore.NumGC, "gc_pause_ns": memAfter.PauseTotalNs - memBefore.PauseTotalNs, "heap_bytes_end": memAfter.HeapAlloc, "fsync_msync_calls": nil, "cpu_throttling": nil, "io_syscalls": nil, "pure_fsync_duration": nil, "hard_cpu_memory_limits": false}
 				result["target_controlled_delay_ms"] = a.delay.Milliseconds()
+				result["independent_workers"] = independent
 				result["allocated_bytes"] = memAfter.TotalAlloc - memBefore.TotalAlloc
 				result["allocations"] = memAfter.Mallocs - memBefore.Mallocs
 				result["group_scenario"] = scenario

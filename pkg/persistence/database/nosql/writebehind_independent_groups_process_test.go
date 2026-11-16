@@ -23,6 +23,10 @@ func TestIndependentGroupsRecoveryProcess(t *testing.T) {
 	app, e := badger.Open(badger.DefaultOptions(filepath.Join(root, "app")).WithSyncWrites(true).WithLogger(nil))
 	require.NoError(t, e)
 	defer app.Close()
+	if stage := os.Getenv("CORE_GROUP_CONFIRM_STAGE"); stage != "" {
+		runIndependentConfirmationProcess(t, mode, root, stage, app)
+		return
+	}
 	entered := make(chan struct{})
 	target := &cleanupTestTarget{}
 	target.sync = func(_ context.Context, items []*SyncQueueItem[cleanupTestRecord]) (*WriteBehindResult, error) {
@@ -79,37 +83,42 @@ func TestIndependentGroupsRecoveryProcess(t *testing.T) {
 
 // TestIndependentGroupsHardCrashRecovery 验证A未知、健康B已确认的混合状态在新PID原目录恢复，保持attempt和幂等事实。
 func TestIndependentGroupsHardCrashRecovery(t *testing.T) {
-	root := t.TempDir()
-	exe, e := os.Executable()
-	require.NoError(t, e)
-	start := func(mode string) (*exec.Cmd, *os.File) {
-		output, e := os.Create(filepath.Join(root, mode+".log"))
-		require.NoError(t, e)
-		cmd := exec.Command(exe, "-test.run=^TestIndependentGroupsRecoveryProcess$", "-test.timeout=20s")
-		cmd.Env = append(os.Environ(), "CORE_GROUP_PROCESS_MODE="+mode, "CORE_GROUP_PROCESS_ROOT="+root)
-		cmd.Stdout = output
-		cmd.Stderr = output
-		require.NoError(t, cmd.Start())
-		t.Cleanup(func() {
-			_ = cmd.Process.Kill()
-			_ = output.Close()
-			if t.Failed() {
-				b, _ := os.ReadFile(output.Name())
-				t.Logf("mode=%s PID=%d %s", mode, cmd.Process.Pid, b)
+	for _, stage := range []string{"", "before_confirmation", "after_confirmation"} {
+		t.Run("stage="+stage, func(t *testing.T) {
+			root := t.TempDir()
+			exe, e := os.Executable()
+			require.NoError(t, e)
+			start := func(mode string) (*exec.Cmd, *os.File) {
+				output, e := os.Create(filepath.Join(root, mode+".log"))
+				require.NoError(t, e)
+				cmd := exec.Command(exe, "-test.run=^TestIndependentGroupsRecoveryProcess$", "-test.timeout=20s")
+				cmd.Env = append(os.Environ(), "CORE_GROUP_PROCESS_MODE="+mode, "CORE_GROUP_PROCESS_ROOT="+root, "CORE_GROUP_CONFIRM_STAGE="+stage)
+				cmd.Stdout = output
+				cmd.Stderr = output
+				require.NoError(t, cmd.Start())
+				t.Cleanup(func() {
+					_ = cmd.Process.Kill()
+					_ = output.Close()
+					if t.Failed() {
+						b, _ := os.ReadFile(output.Name())
+						t.Logf("mode=%s PID=%d %s", mode, cmd.Process.Pid, b)
+					}
+				})
+				return cmd, output
 			}
+			crash, output := start("crash")
+			require.Eventually(t, func() bool { _, e := os.Stat(filepath.Join(root, "crash.ready")); return e == nil }, 10*time.Second, time.Millisecond)
+			require.NoError(t, crash.Process.Kill())
+			require.Error(t, crash.Wait())
+			require.NoError(t, output.Close())
+			recover, output := start("recover")
+			require.NotEqual(t, crash.Process.Pid, recover.Process.Pid)
+			require.NoError(t, recover.Wait())
+			require.NoError(t, output.Close())
+			_, e = os.Stat(filepath.Join(root, "recover.ready"))
+			require.NoError(t, e)
+			t.Logf("stage=%s，SIGKILL旧PID=%d，新PID=%d；子进程核对原事实/attempt/已确认不重放，原卷无新Save恢复", stage, crash.Process.Pid, recover.Process.Pid)
+
 		})
-		return cmd, output
 	}
-	crash, output := start("crash")
-	require.Eventually(t, func() bool { _, e := os.Stat(filepath.Join(root, "crash.ready")); return e == nil }, 10*time.Second, time.Millisecond)
-	require.NoError(t, crash.Process.Kill())
-	require.Error(t, crash.Wait())
-	require.NoError(t, output.Close())
-	recover, output := start("recover")
-	require.NotEqual(t, crash.Process.Pid, recover.Process.Pid)
-	require.NoError(t, recover.Wait())
-	require.NoError(t, output.Close())
-	_, e = os.Stat(filepath.Join(root, "recover.ready"))
-	require.NoError(t, e)
-	t.Logf("SIGKILL旧PID=%d，新PID=%d；A原Unknown确认，B1/B2不重放，原卷无新Save恢复", crash.Process.Pid, recover.Process.Pid)
 }

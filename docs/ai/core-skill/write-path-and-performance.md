@@ -159,3 +159,7 @@ v1.12.0 的 `ReliableWriteStore.ScanLocalPage(ctx,prefix,after,limit)` 是正式
 普通 `UseWriteBehind` 已按批执行本地确认，并非有界失败模式共享FIFO或逐条提交。真实选批首次完整解码业务T给target；同批后续复核/确认仅在同Badger实例、完整物理key、非零已提交MVCC版本、原UpdatedAt及实际重读编码SHA256全部匹配时复用已验证快照，免除冗余完整业务编解码。证明仅本批内存使用，不持久化、不缓存跨轮正文。确认仍写回原value并可靠提交，不省略坏原件读取、CAS、pending计数或提交后hook。
 
 封套更新复用现有json-iterator遍历，仅改is_synced/synced_at，保留item原编码及未知字段；无证明、字节/身份变化、重复或非规范大小写字段回到原codec。事务内重复key不能使用Badger pendingWrites的readTs冒充原版本；重复确认不重复扣pending。普通配置/target/API/卷格式不变，无需转有界模式或新增开关。自定义业务codec仍用于首次读取及回退，不能依赖技术确认重复触发业务codec副作用。实测后台分配下降，但Save P99有差轮，不能承诺SQL、Go调度或消费方端到端时延改善，详见[验收及升级](../../codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
+
+### 独立组确认控制区与FIFO量子
+
+显式IndependentGroups的结果不持syncExecMu等待原FIFO或本地确认，已确认worker以既有执行器短内存互斥归还组/ID，不再次排入选批控制锁。原storageMu、事务CAS/指纹/attempt/BatchID及持久前序仍保护实际写集；不是删锁换并发。ReliableWriteStore只合并原FIFO中相邻、同store、已返回target的确认命令，仍最多8项/约1MiB、TooBig拆块，不跨前台保存/元数据屏障，不新增队列或收集窗口。原target/SQL/失败handler及提交后计数/hook不进入唯一提交worker；实际提交才算进展，入队后取消在实际事务内复核。直接PrefixedBadgerDB无facade时不新增提交器，普通/旧有界入口及卷格式不变。无需新配置，不能把组件合批收益当消费方13秒等待或固定P99已解决，见[真实验收](../../codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。

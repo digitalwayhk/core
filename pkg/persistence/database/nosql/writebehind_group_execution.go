@@ -26,7 +26,7 @@ type writeBehindGroupExecution[T types.IModel] struct {
 	slots   chan struct{}
 	jobs    chan writeBehindGroupJob[T]
 	active  atomic.Int32
-	mu      sync.Mutex
+	mu      sync.Mutex // 仅代际通知及组/ID登记归还，不跨本地提交或回调
 	changed chan struct{}
 }
 
@@ -93,8 +93,10 @@ reservedSlots:
 	// 组和ID在选择事务提交之后、释放syncExecMu之前登记，下一次选批不会误判仍在执行的InFlight。
 	results := make(chan writeBehindGroupResult, reserved)
 	for _, r := range selected {
+		g.mu.Lock()
 		rt.activeIDs.Store(r.ID, false)                    // false是target，true仍只表示失败handler。
 		rt.activeGroups.Store(dispositionGroup(&r), false) // 与activeIDs一致：false为实际target，true为失败handler。
+		g.mu.Unlock()
 		j := writeBehindGroupJob[T]{ctx: ctx, record: r, result: results}
 		jobs = append(jobs, j)
 		g.jobs <- j // 已先预留有界槽，jobs队列不会满。
@@ -174,10 +176,11 @@ func (p *PrefixedBadgerDB[T]) independentGroupWorker() {
 			stop()
 			cancel()
 			p.recordSyncMetrics(n, err, time.Since(started))
-			p.syncExecMu.Lock()
+			// 结果已可靠落地（或保留未知）且原回调实际退出；只归还内存登记，不再等持久控制锁。
+			g.mu.Lock()
 			rt.activeIDs.Delete(job.record.ID)
 			rt.activeGroups.Delete(dispositionGroup(&job.record))
-			p.syncExecMu.Unlock()
+			g.mu.Unlock()
 			g.active.Add(-1)
 			g.slots <- struct{}{}
 			job.result <- writeBehindGroupResult{n, err}

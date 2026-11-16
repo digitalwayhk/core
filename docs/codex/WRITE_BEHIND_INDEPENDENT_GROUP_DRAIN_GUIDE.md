@@ -22,11 +22,11 @@ err := store.UseWriteBehindWithFailureHandlerOptions(
 
 新模式复用原 worker 生命周期、持久选批、游标、前序校验及有界确认。固定 N 个 target worker、N 个总执行槽、容量 N 的内部执行交接，**在途加排队总数不超过 N**；每次 target 调用只含一个组首，按实际调用分别持久 BatchID。`SyncBatchSize` 与 `ScanLimit` 仍限制一次选批和扫描。没有每条启动 goroutine、第二套业务队列或新提交器；SQL、网络和失败回调不进入本地 FIFO/元数据事务。
 
-短 `syncExecMu` 仍覆盖选择、实际组/ID预留和确认，原 `storageMu` 与 BatchCommitter FIFO 继续串行本地可靠提交。target 在这两个本地提交保护之外。它真正返回并完成原版本本地确认后才释放组和槽；B1 真实确认后，B2 可占空闲槽执行，不必等仍占另一个槽的 A1。自动 worker 不等待整轮所有 target 返回。
+`syncExecMu` 保留选择、预留与历史维护的串行边界，但独立组确认不持它等待本地FIFO或可靠提交，已确认worker也不再第二次取它归还槽。原 `storageMu` 与 BatchCommitter FIFO 继续串行本地原子写集；组/ID的登记和真实回调退出后的归还使用既有执行器的短内存互斥，不跨Badger、FIFO或应用回调。target在本地提交保护之外。它真正返回并完成原版本本地确认后才释放组和槽；B1 真实确认后，B2 可占空闲槽执行，不必等仍占另一个槽的 A1。自动 worker 不等待整轮所有 target 返回。
 
 原条带锁继续防止强制本地删除与远端同步重叠。独立组 target 对条带使用共享保护，不同 key 的哈希碰撞不再相互串行；同 key（含改到不同组的新版本）仍由原持久前序和实际在途 ID 阻断。普通模式与强制删除保持排他保护。不是删锁来换性能。
 
-这项能力将跨组原子批拆成独立调用；依赖跨组同一事务的 target 不适用。即时小 target 可能增加调用数和本地确认事务数，不能把该模式等同于无条件吞吐优化。确认仍使用原最多8项/约1MiB量子、TxnTooBig拆分和真实提交后计数，单次独立调用通常只有一项。前后台仍共享本地提交器、CPU和磁盘，不保证 Save P99 固定上限。
+这项能力将跨组原子批拆成独立调用；依赖跨组同一事务的 target 不适用。即时小 target 可能增加调用数和本地确认事务数，不能把该模式等同于无条件吞吐优化。确认仍使用原最多8项/约1MiB量子、TxnTooBig拆分和真实提交后计数。ReliableWriteStore的原FIFO现在可以将已经相邻入队、同store的独立组结果合并为有界本地事务；遇到前台保存、元数据屏障、其他store或预算边界就停止，不跨越或重排，不添加收集等待。单次target仍一组首，各命令分别保留原BatchID、cause与结果；这不是等待所有组完成的屏障。直接PrefixedBadgerDB没有facade FIFO时继续原本地互斥提交，不新建提交器。前后台仍共享本地提交器、CPU和磁盘，不保证 Save P99 固定上限。
 
 当全部 N 个槽都被慢或不合作回调占用时继续背压，不扩 worker；一个组本身的速度不足也不会因本能力变快。按原组游标有界扫描，不宣称所有积压已公平隔离。选项不改变 target 自己的 I/O 超时责任。
 
@@ -65,3 +65,9 @@ err := store.UseWriteBehindWithFailureHandlerOptions(
 ### 在途组的选批成本
 
 独立组的实际target在途且尚未归还原组/槽时，选批仅轮转组标记，不重复对该组queue Seek和解码完整原件。失败handler仍读取原件并按原期限持久暂停；不能将全部active组一概跳过。ScanLimit、cursor、target作用域、版本/attempt/BatchID和可靠本地确认保持不变。该优化降低重复选批成本，不保证消费方端到端时延，也不消除本地可靠提交之间的资源竞争。
+
+### 确认控制锁与FIFO合批补丁
+
+独立组结果在真实本地事务开始时再次核对调用者取消和store关闭，取消/未知不借合批提前确认；事务失败整块不发布计数/hook，TooBig只拆本地写集并分别保留已提交与失败块，不重调target。确认、pending计数、hook和失败通知是不同边界，后两者仍由原等待worker在FIFO之外执行。相邻确认不经过前台1ms收集窗口，不扩大原8项/字节量子，不能承诺任何负载下都合批或Save P99固定下降。
+
+仅显式IndependentGroups已绑定的ReliableWriteStore自动采用此内部修复，无新参数/API/卷格式；普通UseWriteBehind与旧有界零值目标接线保留。停稳原回调、保留原卷与policy/StoreID后升级，不清pending/历史；同代格式回退仍须原卷副本和进程验证。真实32组RED、确认前后硬杀恢复、持续性能差轮及升级skill见[验收报告](WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。

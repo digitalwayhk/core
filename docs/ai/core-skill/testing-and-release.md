@@ -277,3 +277,7 @@ go get github.com/digitalwayhk/core@<commit>
 ### 普通确认编解码复用回归
 
 以真实ReliableWriteStore/Badger与业务codec计数先保留重复解析/未知字段丢失的RED；首次target必须取得实际T。覆盖同DB同MVCC不同key、跨DB、实际字节核验、同字节重写新版本、事务内重复key、旧确认/坏原件、别名/重复封套回退、部分未知、pending/hook及真实新PID硬杀恢复。固定最终源码、原可靠刷盘、1ms合批、并行度和载荷，比较无后台/立即target/受控延迟三模式的多轮持续输入；报告分配与Save各分位、差轮、未采集null，不用旧候选收益替代最终版。普通/race、04/07、真实独占MySQL及发布门禁分别取证，组件通过不代表消费方端到端或容量通过。
+
+### 有界独立组确认convoy回归
+
+必须以真实Badger、32组手动/自动、target已返回而原FIFO受控阻塞，先取得全部结果无法入队及逐条确认RED；修复后原预算内合批，已确认槽/组释放不二次等待控制锁。保留32份实际入队断言、前台FIFO屏障、入队后取消、坏原件导致整块回滚、旧指纹/跨库隔离、实际TooBig拆块和原cause/attempt/未知屏障；不能只用编译或helper。确认前/后硬杀用新PID打开原Core与应用存储，核实原事实及attempt且无新Save恢复。固定可靠刷盘、原1ms窗口、32worker和载荷的旧/新多轮持续数据及Go阻塞/互斥诊断分开，累计时间不换成单笔；完整普通/race、04/07及发布门禁取证，消费方容量NOT_RUN。

@@ -52,6 +52,7 @@ func NewReliableWriteStore[T types.IModel](
 	if normalized.Badger.WriteBehindFailure != nil {
 		db.localSubmit = store.batcher.submitLocalCommit
 		db.localConfirmationLimit = 8
+		db.localConfirmationSubmit = store.batcher.submitLocalConfirmation
 	}
 	return store, &ReliableWriteStoreAdmin[T]{db: db}, nil
 }

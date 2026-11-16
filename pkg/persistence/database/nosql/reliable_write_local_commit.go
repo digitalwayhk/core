@@ -7,7 +7,10 @@ import (
 )
 
 func (b *BatchCommitter[T]) queueLocalCommit(ctx context.Context, commit func() error) (chan batchCommitResponse, error) {
-	request := batchCommitRequest[T]{localCommit: commit, result: make(chan batchCommitResponse, 1)}
+	return b.queueLocalRequest(ctx, batchCommitRequest[T]{localCommit: commit, result: make(chan batchCommitResponse, 1)})
+}
+
+func (b *BatchCommitter[T]) queueLocalRequest(ctx context.Context, request batchCommitRequest[T]) (chan batchCommitResponse, error) {
 	b.stateMu.RLock()
 	if b.localClosed {
 		b.stateMu.RUnlock()

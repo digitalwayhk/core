@@ -179,8 +179,9 @@ func TestIndependentGroupsConfirmationFailure(t *testing.T) {
 		return &WriteBehindResult{ConfirmedKeys: []string{items[0].Key}}, nil
 	}}
 	s := openIndependentStore(t, t.TempDir(), false, 2, target)
-	original := s.db.localSubmit
-	s.db.localSubmit = func(f func() error) error {
+	// 确认现为同FIFO的私有命令，仍在实际提交入口注入故障，不改失败断言。
+	original := s.db.localConfirmationSubmit
+	s.db.localConfirmationSubmit = func(f *writeBehindConfirmation[cleanupTestRecord]) error {
 		if fail.Swap(false) {
 			return badger.ErrConflict
 		}
