@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- 减少独立组write-behind实际target在途组的重复queue Seek、普通SharedKeys头完成后的尾PEL正文重取、固定/动态Owned纯观测的重复分类；有限身份提示不保存payload，执行前仍取原件并保留fence/成功ACK。无新API、配置或卷格式，锁专项WIP未发布，Save P99未证明改善。详见[本轮验收和升级](docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。
+
 - 修复Badger回收memtable中途硬杀遗留0字节.mem导致首次重开报`Create a new file`：Core Unix可写打开入口在同目录flock下仅回收真正空技术WAL，非空数据/可靠刷盘/原锁/卷格式不变，无依赖升级。只读、绕锁及尚未实现该锁适配的平台不自动处理。详见[恢复专项](docs/codex/BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
 
 - 修复v1.13.0显式独立组手动等待者遗漏新Save/应用确认通知：复用原triggerSync，同时唤醒自动worker与代际等待者。原选批前捕获代际，防止选批结束到等待之间丢通知；无新API、预算或格式变化。
@@ -47,6 +49,18 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.3] - 2026-11-16
+
+### Fixed
+
+- 独立组write-behind在原预算/cursor内跳过真实target在途组的重复queue Seek；失败handler到期与同组屏障保持。
+- 普通SharedKeys按原有限window保留尾PEL身份提示，Owned固定/动态reader按原PendingWindow复用分类；不缓存正文，实际准入仍重取原件并走原fence/成功ACK。
+- Owned分类来源限Go进程内私有类型，Broker附加字符串字段不能冒充。无新API、配置、依赖或持久格式，升级不清PEL或重建scope。
+
+### Changed
+
+- 不包含锁专项WIP。真实扫描成本改善与Save P99分开验收，后者未证明改善；消费方功能/UAT/容量为NOT_RUN。详见[验证、资源及升级边界](docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。
 
 ## [v1.13.2] - 2026-11-16
 

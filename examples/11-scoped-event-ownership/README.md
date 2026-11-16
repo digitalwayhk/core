@@ -70,3 +70,9 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 ### 退出验收（v1.8.1）
 
 引用心跳复用既有服务级中继索引和启动期MQ句柄，停止时取消并等待在途刷新，不要求应用自行停框架worker。集成测试在关闭真实子进程后同时核对实际退出状态和DATA RACE日志，业务断言通过不等于退出通过。无新配置；原固定/动态迁移、SQL fence、PEL及WS免重订断言保持。
+
+## PEL分类复用（v1.13.3）
+
+无需新参数：固定和动态Owned reader均在原有限PendingWindow内保留ID分类，不缓存正文；纯Observe继续核对原PEL、未读范围和目录，实际准入前从原Stream重取正文。原Ready、SQL fence、mTLS/WS恢复、成功后ACK与W/U预算不变。分类只由应用稳定Key回调和Go进程内私有提示形成，不能信任Broker附加字段。已知项缺正文检查延后到实际准入，失败仍不执行handler、不ACK。
+
+升级保留原group/PEL/sequence/SQL fence，无需清数据或重新登记scope；混跑旧副本仍有旧扫描成本。真实多进程、固定→动态迁移与双Gateway验证及剩余性能边界见[扫描修复报告](../../docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。扫描量下降不等于业务容量或所有时延通过。
