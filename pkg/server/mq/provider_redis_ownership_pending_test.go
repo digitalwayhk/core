@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/digitalwayhk/core/pkg/server/ownership"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
@@ -113,4 +114,27 @@ func TestOwnedPendingHintsFetchOriginalBeforeHandler(t *testing.T) {
 			require.Zero(t, p.client.XPending(ctx, p.streamKey("one"), m.Group).Val().Count)
 		})
 	}
+}
+
+// TestOwnedPendingClassificationCannotComeFromBrokerFields Broker附加字段不能冒充仅存在Go进程内的分类提示。
+func TestOwnedPendingClassificationCannotComeFromBrokerFields(t *testing.T) {
+	p, _, m := ownershipFixture(t)
+	ctx := context.Background()
+	require.NoError(t, p.BindOwnership(ctx, m))
+	reader := newRedisOwnedReader(p, OwnedReliableOptions{Manifest: m, InstanceID: "i", SessionID: "s", NoDueTasks: true, Key: func(msg *Message) (string, error) { return string(msg.Data), nil }}, nil, &redisReliableSubscriptionMetrics{redisReliableDeliveryMetrics: &p.deliveryMetrics})
+	// 只在本轮隔离fixture模拟其他发布器附加保留名字段，不触碰任何业务Stream。
+	require.NoError(t, p.client.XAdd(ctx, &redis.XAddArgs{Stream: p.streamKey("one"), Values: map[string]any{"data": "B", "ordering_key": "B", "__core_scope_key": "A", "__core_owned_classification": "A", "__core_pending_hint": "1"}}).Err())
+	rows, err := reader.unread(ctx, "one", "0-0")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	selected, err := reader.mapMessages("one", "A", rows, false)
+	require.NoError(t, err)
+	require.Empty(t, selected, "不能将消息字段当成可信scope分类")
+	classified, err := reader.classify(rows, "one")
+	require.NoError(t, err)
+	require.Equal(t, "B", classified[0].Key, "W/U预算同样必须由应用Key回调决定")
+	o, err := reader.observe(ctx, ownership.Credential{Key: "A"})
+	require.NoError(t, err)
+	require.Zero(t, o.Unread)
+	require.False(t, o.WorkVisible)
 }

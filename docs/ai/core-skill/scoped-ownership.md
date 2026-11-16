@@ -82,6 +82,6 @@ RegisterOwnedKey、CallServiceOwned及其Resolver使用原生命周期锁取得�
 
 ## 原PEL分类提示
 
-Owned reader每个subject最多保留原PendingWindow条ID→ordering key/scope key分类元数据，不保存正文、业务完成标记或另一份队列。每次仍从原PEL重取完整身份页，移除消失ID；Key回调须按原Selector稳定、纯粹地映射不可变原事件。注册状态每次使用当前目录，缓存不会把注册前未知键永久冻结。ordering key超过4096字节不缓存，scope key沿既有512字节约束；不扩大W/U或消息大小预算。
+Owned reader每个subject最多保留原PendingWindow条ID→ordering key/scope key分类元数据，不保存正文、业务完成标记或另一份队列。每次仍从原PEL重取完整身份页，移除消失ID；Key回调须按原Selector稳定、纯粹地映射不可变原事件。注册状态每次使用当前目录，缓存不会把注册前未知键永久冻结。分类标记必须是Go进程内私有类型，不能信任Broker保留名字符串字段或业务payload自报分类。ordering key超过4096字节不缓存，scope key沿既有512字节约束；不扩大W/U或消息大小预算。
 
 Step只为实际准入项重取原Stream正文，再沿原Ready credential/fenced claim、应用handler和成功后ACK执行。提示不能替代原件、token、PEL或SQL fence；缺正文不能执行handler或ACK。Observe可复用分类并继续原unread/容量核验，不能把少读正文当业务成功。已知原件缺失检查延后到准入（或提示丢弃后的重新分类），不承诺纯观测轮立即发现人为删除的正文。重启丢弃提示、按原PEL恢复；无API/配置/卷格式变更，不删组或重置游标。组件成本下降不代表消费方容量或端到端时延通过。

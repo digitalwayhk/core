@@ -47,7 +47,7 @@ func (r *redisOwnedReader) pendingRows(ctx context.Context, subject string, read
 			hints[row.ID] = hint
 		}
 		rows[i].Values["ordering_key"] = hint.ordering
-		rows[i].Values["__core_scope_key"] = hint.scope
+		rows[i].Values["__core_owned_classification"] = hint
 	}
 	r.pending[subject] = hints
 	if read {
@@ -57,8 +57,8 @@ func (r *redisOwnedReader) pendingRows(ctx context.Context, subject string, read
 }
 
 func (r *redisOwnedReader) pendingScope(subject string, row redis.XMessage) (string, error) {
-	if value, ok := row.Values["__core_scope_key"].(string); ok {
-		return value, nil
+	if value, ok := row.Values["__core_owned_classification"].(redisOwnedPendingHint); ok {
+		return value.scope, nil
 	}
 	return r.options.Key(&Message{ID: row.ID, Subject: subject, Data: redisMessageData(row.Values["data"])})
 }
