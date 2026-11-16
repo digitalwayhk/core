@@ -33,33 +33,42 @@ func (h *pendingBodyReadHook) DialHook(next redis.DialHook) redis.DialHook {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) { return next(ctx, network, addr) }
 }
 
-// ProcessPipelineHook 透传真实管线，不改消息。
+// ProcessPipelineHook观察每个实际响应；pipeline不经过ProcessHook，不能遗漏缺正文错误。
 func (h *pendingBodyReadHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
-	return next
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		err := next(ctx, cmds)
+		for _, cmd := range cmds {
+			h.observeCommand(cmd, cmd.Err())
+		}
+		return err
+	}
 }
 
-// ProcessHook 只计实际返回的PEL正文和轮询数，不记录正文或业务key。
+// ProcessHook只计实际返回的PEL正文和轮询数，不记录正文或业务key。
 func (h *pendingBodyReadHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		err := next(ctx, cmd)
-		if err != nil && strings.Contains(err.Error(), "SHARED_PENDING_BODY_MISSING") {
-			h.missing.Add(1)
-		}
-		if c, ok := cmd.(*redis.XAutoClaimCmd); ok && err == nil {
-			messages, _, e := c.Result()
-			if e == nil {
-				h.reads.Add(1)
-				h.mu.Lock()
-				for _, m := range messages {
-					if redisPendingHint(m) {
-						continue
-					}
+		h.observeCommand(cmd, err)
+		return err
+	}
+}
+
+func (h *pendingBodyReadHook) observeCommand(cmd redis.Cmder, err error) {
+	if err != nil && strings.Contains(err.Error(), "SHARED_PENDING_BODY_MISSING") {
+		h.missing.Add(1)
+	}
+	if c, ok := cmd.(*redis.XAutoClaimCmd); ok && err == nil {
+		messages, _, e := c.Result()
+		if e == nil {
+			h.reads.Add(1)
+			h.mu.Lock()
+			for _, m := range messages {
+				if !redisPendingHint(m) {
 					h.byID[m.ID]++
 				}
-				h.mu.Unlock()
 			}
+			h.mu.Unlock()
 		}
-		return err
 	}
 }
 

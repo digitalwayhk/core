@@ -280,6 +280,8 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 				}
 				candidate := make(map[string]bool)
 				readyRows := make([]redis.XMessage, 0, len(pending))
+				var hintIDs []string
+				var hintPositions []int
 				for _, row := range pending {
 					ordering := known[row.ID]
 					if !redisPendingHint(row) {
@@ -296,18 +298,25 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 						continue
 					}
 					if redisPendingHint(row) {
-						row, err = r.pendingBody(ctx, key, row.ID)
-						if err != nil {
-							break
-						}
-						bodies++
-						if string(redisMessageData(row.Values["ordering_key"])) != ordering {
-							err = errors.New("redis-stream: pending identity changed")
-							break
-						}
+						hintIDs = append(hintIDs, row.ID)
+						hintPositions = append(hintPositions, len(readyRows))
 					}
 					candidate[ordering] = true
 					readyRows = append(readyRows, row)
+				}
+				if err == nil && len(hintIDs) > 0 {
+					var restored []redis.XMessage
+					restored, err = r.pendingBodies(ctx, key, hintIDs)
+					bodies += int64(len(restored))
+					if err == nil {
+						for i, row := range restored {
+							if string(redisMessageData(row.Values["ordering_key"])) != known[row.ID] {
+								err = errors.New("redis-stream: pending identity changed")
+								break
+							}
+							readyRows[hintPositions[i]] = row
+						}
+					}
 				}
 				pending = readyRows
 			}

@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- 普通Redis SharedKeys将原PEL页中已知候选正文读取合并为有界pipeline，减少调度器逐条网络往返；原W/N、失败退避、顺序、fence/成功ACK与Owned单项reader保持。无新API/配置/格式，真实三进程对照与剩余间隙见[验收](docs/codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
+
 - 收短显式IndependentGroups确认控制区，结果等待原FIFO时不持syncExecMu；原执行器短内存保护归还已退出worker的组/槽。原FIFO仅有界合并相邻同store确认，不跨前台或元数据屏障；保留实际事务身份、取消/未知、pending/hook及恢复，无新API/配置/卷格式，普通v1.13.4不变。见[验收](docs/codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。
 
 - 普通UseWriteBehind在已验证且身份/版本/实际编码未变时，免除currentSyncItems和本地确认的重复完整业务编解码；首次target仍取得真实T，原CAS、可靠提交、pending/hook及codec回退保持，无新API/配置/卷格式。后台分配下降与Save P99波动分别报告，见[验收及升级](docs/codex/PLAIN_WRITE_BEHIND_CONFIRMATION_2026-11-16.md)。
@@ -53,6 +55,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.13.6] - 2026-11-17
+
+### Fixed
+
+- 普通Redis SharedKeys在原PEL页内用go-redis有界pipeline取回最早可准入候选正文，消除逐条网络往返；原W/N、50ms重试、同key屏障、fence、成功后ACK及Owned单项读取保持。无新API、配置、依赖或持久格式。
+
+### Changed
+
+- 真实8候选8→1往返RED/GREEN、三进程多轮、原生2分钟租约SIGKILL恢复与普通/race验证通过。受控网络下后继间隙下降，但仍有竞争/调度成本；1ms回包代理不等于现场idle PING或主窗RTT，不宣称全部现场延迟或容量已解决。详见[精确结果、失败和升级](docs/codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
 
 ## [v1.13.5] - 2026-11-16
 

@@ -281,3 +281,7 @@ go get github.com/digitalwayhk/core@<commit>
 ### 有界独立组确认convoy回归
 
 必须以真实Badger、32组手动/自动、target已返回而原FIFO受控阻塞，先取得全部结果无法入队及逐条确认RED；修复后原预算内合批，已确认槽/组释放不二次等待控制锁。保留32份实际入队断言、前台FIFO屏障、入队后取消、坏原件导致整块回滚、旧指纹/跨库隔离、实际TooBig拆块和原cause/attempt/未知屏障；不能只用编译或helper。确认前/后硬杀用新PID打开原Core与应用存储，核实原事实及attempt且无新Save恢复。固定可靠刷盘、原1ms窗口、32worker和载荷的旧/新多轮持续数据及Go阻塞/互斥诊断分开，累计时间不换成单笔；完整普通/race、04/07及发布门禁取证，消费方容量NOT_RUN。
+
+## SharedKeys后继正文往返验收
+
+真实Redis受控固定8头完成/ACK，再恢复原PEL页，旧版8次正文串行往返必须RED，候选一次pipeline但实际正文/ACK非零；缺正文、取消与原PEL保留不能跳过。固定正式旧源码/候选二进制、3独立PID、2P/N32/W128/50key每键10/s及90ms合成handler，多轮直连/明确1ms回包代理分开报告；代理不是现场RTT，不能推导Full-E4全部间隙。SIGKILL后等待原生至少2分钟lease自然到期，新PID处理原ID与同key后继，独立key仍能在接管等待中推进；不允许为测试减TTL。MQ/event/router/观测普通race与示例10正式入口分别取证，剩余等待/容量/现场未验分开。详见[专项报告](../../codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。

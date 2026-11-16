@@ -97,3 +97,7 @@ CORE_TEST_REDIS_ADDR=127.0.0.1:16379 go test -p 1 -race ./examples/10-reliable-m
 ## v1.12.1 轮询成本与升级
 
 本例普通Reliable+SharedKeys消费会话仅复用仍被本地task屏障挡住的已知PEL ID，提示合计≤原W，不确认或跳过消息。前序完成或原项已被ACK后释放提示、按原cursor回绕；缺正文仍在重新取原件时拒绝。原N/W、group、SharedKeys标记和消息保持，不需清理或调参。发生容量stale拒绝的发布进程需要分别升级，不能只靠消费者升级刷新其内存快照；Owned专用reader并不由本例证明性能改善。真实微基准和组件/消费方边界见[专项](../../docs/codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。
+
+## 同key后继间隙排查
+
+普通SharedKeys已知候选正文在原PEL窗口内使用有界pipeline，减少串行往返，无需更改本示例接线或W/N。handler返回到后继开始仍包括owner校验/成功ACK/release、PEL/调度和网络，不能把50ms重试常量直接认定为业务间隙原因。真实三进程、受控网络对照与原生租约恢复见[专项验收](../../docs/codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)，不代表业务UAT或容量通过。

@@ -35,12 +35,13 @@ func redisPendingHint(row redis.XMessage) bool {
 	return !body && row.Values["__core_pending_hint"] == "1"
 }
 
-// pendingBody保留Redis端原件缺失错误与成熟XAutoClaim响应解码，不改变PEL。
-func (r *RedisStreamProvider) pendingBody(ctx context.Context, stream, id string) (redis.XMessage, error) {
-	const script = `local rows=redis.call("XRANGE",KEYS[1],ARGV[1],ARGV[1],"COUNT",1)
+const redisPendingBodyScript = `local rows=redis.call("XRANGE",KEYS[1],ARGV[1],ARGV[1],"COUNT",1)
  if #rows~=1 then return redis.error_reply("SHARED_PENDING_BODY_MISSING") end
  return {"0-0",rows,{}}`
-	cmd := redis.NewXAutoClaimCmd(ctx, "eval", script, 1, stream, id)
+
+// pendingBody保留归属reader原单项读取和错误，不改变PEL。
+func (r *RedisStreamProvider) pendingBody(ctx context.Context, stream, id string) (redis.XMessage, error) {
+	cmd := redis.NewXAutoClaimCmd(ctx, "eval", redisPendingBodyScript, 1, stream, id)
 	_ = r.client.Process(ctx, cmd)
 	rows, _, err := cmd.Result()
 	if err != nil {
@@ -50,4 +51,34 @@ func (r *RedisStreamProvider) pendingBody(ctx context.Context, stream, id string
 		return redis.XMessage{}, errors.New("SHARED_PENDING_BODY_MISSING")
 	}
 	return rows[0], nil
+}
+
+// pendingBodies仅合并当前原PEL页已选候选的正文读取；数量不超过原window，无第二队列或缓存。
+func (r *RedisStreamProvider) pendingBodies(ctx context.Context, stream string, ids []string) ([]redis.XMessage, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	commands := make([]*redis.XAutoClaimCmd, 0, len(ids))
+	_, pipelineErr := r.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, id := range ids {
+			cmd := redis.NewXAutoClaimCmd(ctx, "eval", redisPendingBodyScript, 1, stream, id)
+			commands = append(commands, cmd)
+			if err := pipe.Process(ctx, cmd); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	rows := make([]redis.XMessage, 0, len(ids))
+	for i, cmd := range commands {
+		result, _, err := cmd.Result()
+		if err != nil {
+			return rows, err
+		}
+		if len(result) != 1 || result[0].ID != ids[i] {
+			return rows, errors.New("SHARED_PENDING_BODY_MISSING")
+		}
+		rows = append(rows, result[0])
+	}
+	return rows, pipelineErr
 }

@@ -269,3 +269,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ## 显式独立组确认控制区内部补丁
 
 不增加公开API、配置、worker/队列、StoreID/policy或持久格式。旧普通UseWriteBehind及IndependentGroups=0保持；已显式启用的ReliableWriteStore自动沿同一FIFO有界合并相邻独立确认，不跨前台保存、元数据、store或原8项/约1MiB量子。实际事务重核原身份/状态/attempt/BatchID及取消/关闭，真实提交后由原worker计数/hook；直接PrefixedBadgerDB不增加提交器。原槽只在原回调实际退出且结果已提交或保留未知后归还。原卷与同代版本的停稳回退边界不变，性能差轮与兼容验证见[正式报告](WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。
+
+### SharedKeys已知候选正文读取
+
+普通Redis SharedKeys只将原PEL页内的已知候选正文命令合入一个有限pipeline，不增加公开选项/API/持久格式。原Group/W冻结标记、原Stream/PEL/消息ID、最早key候选、fence与成功ACK保持；Owned reader原单项方法保持。升级消费者可减少其串行往返，混合旧副本仍有旧成本；无需变更发布者或清除/重建组。回退须正常停止订阅并等待实际handler退出，保持原数据和预算。受控实验与现场性能分开，见[验收](REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
