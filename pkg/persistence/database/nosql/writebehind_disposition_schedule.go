@@ -62,6 +62,11 @@ func (p *PrefixedBadgerDB[T]) selectDispositionRound(limit int) (selected, notif
 			scanned++
 			group := string(groups.Item().Key())[len(prefix):]
 			last = group
+			// 实际target占用原组直到确认及回调退出，不可能在本轮再次准入。
+			// handler仍须读取原件处理到期暂停；不能将全部active组一概跳过。
+			if handler, active := p.disposition.activeGroups.Load(group); active && handler == false {
+				continue
+			}
 			qprefix := base + "q:" + group + ":"
 			queueOpts := opts
 			queueOpts.Prefix = []byte(qprefix)

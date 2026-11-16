@@ -61,3 +61,7 @@ err := store.UseWriteBehindWithFailureHandlerOptions(
 本专项真实新PID恢复覆盖已确认健康组不重放、未知组查应用事实后推进。完整回归另捕获旧有Badger硬杀重开`Create a new file`错误，固定v1.12.1基线与候选各20轮均19通过/1失败，尚未修复；后续单轮普通/race通过不等于所有硬杀恢复已获认证。原FAIL和具体命令见专项报告，不能据此改回调确认或删除卷数据。
 
 上述v1.13.1验收时的零字节memtable重开失败已由v1.13.2专项处理，旧失败原件仍保留。仅针对已验证的空WAL回收中断，不覆盖非空损坏、物理断电或所有平台。详见[恢复修复与平台边界](BADGER_EMPTY_MEMTABLE_RECOVERY_2026-11-16.md)。
+
+### 在途组的选批成本
+
+独立组的实际target在途且尚未归还原组/槽时，选批仅轮转组标记，不重复对该组queue Seek和解码完整原件。失败handler仍读取原件并按原期限持久暂停；不能将全部active组一概跳过。ScanLimit、cursor、target作用域、版本/attempt/BatchID和可靠本地确认保持不变。该优化降低重复选批成本，不保证消费方端到端时延，也不消除本地可靠提交之间的资源竞争。

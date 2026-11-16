@@ -93,8 +93,8 @@ reservedSlots:
 	// 组和ID在选择事务提交之后、释放syncExecMu之前登记，下一次选批不会误判仍在执行的InFlight。
 	results := make(chan writeBehindGroupResult, reserved)
 	for _, r := range selected {
-		rt.activeIDs.Store(r.ID, false) // false是target，true仍只表示失败handler。
-		rt.activeGroups.Store(dispositionGroup(&r), true)
+		rt.activeIDs.Store(r.ID, false)                    // false是target，true仍只表示失败handler。
+		rt.activeGroups.Store(dispositionGroup(&r), false) // 与activeIDs一致：false为实际target，true为失败handler。
 		j := writeBehindGroupJob[T]{ctx: ctx, record: r, result: results}
 		jobs = append(jobs, j)
 		g.jobs <- j // 已先预留有界槽，jobs队列不会满。

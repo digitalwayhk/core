@@ -22,7 +22,7 @@ type writeBehindDispositionJob[T types.IModel] struct {
 type writeBehindDispositionRuntime[T types.IModel] struct {
 	groups       *writeBehindGroupExecution[T]
 	activeIDs    sync.Map // 固定target/handler worker持有；false为target，true为handler
-	activeGroups sync.Map
+	activeGroups sync.Map // value=false为target、true为失败handler；存在即保持原组屏障
 	causes       writeBehindCauseRetention
 	storageMu    sync.Mutex // 仅串行本prefix本地元数据提交，不跨target/处置回调持锁
 	policy       WriteBehindFailurePolicy
