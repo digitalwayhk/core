@@ -120,3 +120,7 @@ NOT_RUN：Bitzoom/Full-E4接入部署、实际132次拒绝的逐调用根因与�
 | `red-real-redis.log` | 1 | 6.893 | 3035 | `c740a706affba04fb0fd92b80af5375776b5f807de6985ab844969ed78fb94ba` |
 | `release-contract.log` | 0 | 78.977 | 1357 | `8f2d1b2c8ee142b5d8650ae26138a533f0cb938337fe338032bfa6c731979785` |
 | `web-dist-sync.log` | 0 | 6.799 | 176 | `cb998eea575d2a081076ce4898622a10c25c2b925a6cde1b414c63a956e9fb5b` |
+
+## 后续滚动完成边界
+
+以上旧版验证原件保留。后续修复将普通Shared的提示保留到原PEL身份消失，头确认不再丢弃全部尾提示；每次XPENDING页仍返回原ID，准入最早头时重取正文。提示仅含ID/ordering key，最多原window条，超过4096字节的ordering key回落原读取、不改变接入合同。已知尾缺正文仍在准入时报错，不越过或ACK。正式滚动回归原版单ID最高重复读取16次，候选不超过发现与准入两次；不是全业务吞吐或现场时延验收。

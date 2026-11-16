@@ -238,6 +238,6 @@ SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期�
 
 ## v1.12.1 Redis PEL重复正文与容量余量
 
-普通 `Reliable + SharedKeys` 的 `runReliableKeyedOwner` 仅对自己有限task中已观察到、仍等待同key前序的消息保存ID提示，总量不超过原有效window。PEL仍按原页XPENDING，游标依据原PEL页末推进，提示只省XRANGE正文；完成/已无PEL时释放提示并回到原页首核对，重启不保留提示。未观察原件仍取正文，缺失继续报错；已知尾项的缺正文检查在前序退出、重新取原件时执行，不承诺在前序挂起期间即时发现；同key失败/未知/租约fence/成功后ACK、共享预取上限和真实回调退出均不变。提示是有限元数据，不是第二个队列。原始EVAL及自定义响应解码保持，不能据此宣称Redis不再有XRANGE/EVAL成本。Owned专用reader不带task提示，本轮不宣称它省正文。
+普通 `Reliable + SharedKeys` 保存有限ID→ordering key提示，总量不超过原有效window。头完成后仅移除该头提示，保留仍在原PEL等待的尾ID；每页仍由原XPENDING返回完整身份并清除消失提示，游标按原页末推进。只有即将准入的最早项重取原Stream正文；提示不保存payload、不替代fenced XCLAIM/ACK、失败/未知屏障或真实回调退出。ordering key超过4096字节不缓存提示，沿原读取路径处理，不拒绝合法长键。已知尾项的缺正文检查在重新准入时执行，不承诺前序挂起期间即时发现；缺失仍报错并保留PEL，同key后项不能越过。重启无提示，从原消息恢复；Shared预取和生命周期预算不变，不承诺XRANGE成本归零。
 
 内置生命周期worker在取得轮次、standby轻量读取或owner完整检查发生可恢复超时后，均可用**同一原runCtx剩余时间**补一次现有轻量容量读取；无余量/取消/语义/fence错误不补。完整错误仍返回计数，不回收、不刷新完整组前沿，缺证据/真实硬限仍拒绝，不延长2×Interval新鲜度。升级需要分角色：发生拒绝的producer升级才能修复本地capacity controller，普通SharedKeys consumer升级才有正文复用；两者不互相替代，混跑未升级副本仍有旧成本。无新配置、W/策略fingerprint、组/PEL/游标、scope/SQL fence或卷迁移，不准删/改标记或清数据。详见[本轮验证与升级](../../codex/REDIS_PENDING_CAPACITY_BUDGET_2026-11-14.md)。

@@ -51,6 +51,9 @@ func (h *pendingBodyReadHook) ProcessHook(next redis.ProcessHook) redis.ProcessH
 				h.reads.Add(1)
 				h.mu.Lock()
 				for _, m := range messages {
+					if redisPendingHint(m) {
+						continue
+					}
 					h.byID[m.ID]++
 				}
 				h.mu.Unlock()

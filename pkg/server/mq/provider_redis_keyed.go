@@ -3,6 +3,7 @@ package mq
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -31,10 +32,18 @@ func (r *RedisStreamProvider) claimReliableKeyed(ctx context.Context, key, subje
 
 // claimReliableKeyedSkipping只省去本会话已持有key屏障后的已知正文，仍逐页观察原PEL和推进原游标。
 func (r *RedisStreamProvider) claimReliableKeyedSkipping(ctx context.Context, key, subject string, options ReliableSubscribeOptions, cursor string, count int64, skipped []string) ([]redis.XMessage, string, error) {
+	return r.claimReliableKeyedPage(ctx, key, subject, options, cursor, count, skipped, false)
+}
+
+// claimReliableKeyedPage可返回已知PEL的纯ID占位；原XPENDING页仍完整返回，提示不能冒充ACK。
+func (r *RedisStreamProvider) claimReliableKeyedPage(ctx context.Context, key, subject string, options ReliableSubscribeOptions, cursor string, count int64, skipped []string, includeKnown bool) ([]redis.XMessage, string, error) {
 	script := redisKeyedClaimScript
 	args := []interface{}{options.Group, options.Consumer, cursor, count}
 	if options.SharedKeys {
 		script = redisSharedPendingScript
+		if includeKnown {
+			script = redisSharedPendingHintScript
+		}
 		args = []interface{}{options.Group, cursor, count, redisSharedMarker(options), len(skipped)}
 		for _, id := range skipped {
 			args = append(args, id)
@@ -72,8 +81,6 @@ type redisKeyedTask struct {
 	running  bool
 	retryAt  time.Time
 	sequence uint64
-	// 仅ID元数据，所有task合计不超过共享window；完成/丢失原PEL后随task释放。
-	observedIDs map[string]struct{}
 }
 
 // runReliableKeyedSubscriber 的 worker 生命周期属于一个 owner 会话，而非读取批次。
@@ -153,23 +160,17 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 	cursor := "0-0"
 	running := 0
 	var sequence uint64
-	knownIDs := 0
+	// 只缓存ID→ordering key；不缓存正文，原PEL每页仍是权威。
+	known := make(map[string]string)
 	forget := func(key string) {
 		if task := tasks[key]; task != nil {
-			knownIDs -= len(task.observedIDs)
+			delete(known, task.work.id)
 			delete(tasks, key)
 		}
 	}
 	remember := func(task *redisKeyedTask, id string) {
-		if !options.SharedKeys || int64(knownIDs) >= window {
-			return
-		}
-		if task.observedIDs == nil {
-			task.observedIDs = make(map[string]struct{})
-		}
-		if _, ok := task.observedIDs[id]; !ok {
-			task.observedIDs[id] = struct{}{}
-			knownIDs++
+		if options.SharedKeys && int64(len(known)) < window && len(task.work.key) <= redisPendingHintMaxKeyBytes {
+			known[id] = task.work.key
 		}
 	}
 	complete := func(result reliableKeyedFailure) {
@@ -249,14 +250,11 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 			startedAt := time.Now()
 			var skipped []string
 			if options.SharedKeys {
-				skipped = make([]string, 0, knownIDs)
-				for _, task := range tasks {
-					for id := range task.observedIDs {
-						skipped = append(skipped, id)
-					}
+				for id := range known {
+					skipped = append(skipped, id)
 				}
 			}
-			pending, next, err := r.claimReliableKeyedSkipping(ctx, key, subject, options, cursor, window, skipped)
+			pending, next, err := r.claimReliableKeyedPage(ctx, key, subject, options, cursor, window, skipped, options.SharedKeys)
 			readAt := time.Now()
 			if err != nil {
 				if !waitRedisKeyed(ctx, results, complete, delay) {
@@ -264,7 +262,62 @@ func (r *RedisStreamProvider) runReliableKeyedOwner(
 				}
 				continue
 			}
-			metrics.reclaimRead.Add(int64(len(pending)))
+			bodies := int64(0)
+			for _, row := range pending {
+				if !redisPendingHint(row) {
+					bodies++
+				}
+			}
+			if options.SharedKeys {
+				seen := make(map[string]bool, len(pending))
+				for _, row := range pending {
+					seen[row.ID] = true
+				}
+				for id := range known {
+					if streamIDCompare(id, cursor) > 0 && (next == "0-0" || streamIDCompare(id, next) <= 0) && !seen[id] {
+						delete(known, id)
+					}
+				}
+				candidate := make(map[string]bool)
+				readyRows := make([]redis.XMessage, 0, len(pending))
+				for _, row := range pending {
+					ordering := known[row.ID]
+					if !redisPendingHint(row) {
+						ordering = string(redisMessageData(row.Values["ordering_key"]))
+					}
+					if ordering == "" {
+						err = errors.New("redis-stream: pending hint identity missing")
+						break
+					}
+					if int64(len(known)) < window && len(ordering) <= redisPendingHintMaxKeyBytes {
+						known[row.ID] = ordering
+					}
+					if tasks[ordering] != nil || candidate[ordering] {
+						continue
+					}
+					if redisPendingHint(row) {
+						row, err = r.pendingBody(ctx, key, row.ID)
+						if err != nil {
+							break
+						}
+						bodies++
+						if string(redisMessageData(row.Values["ordering_key"])) != ordering {
+							err = errors.New("redis-stream: pending identity changed")
+							break
+						}
+					}
+					candidate[ordering] = true
+					readyRows = append(readyRows, row)
+				}
+				pending = readyRows
+			}
+			metrics.reclaimRead.Add(bodies)
+			if err != nil {
+				if !waitRedisKeyed(ctx, results, complete, delay) {
+					return
+				}
+				continue
+			}
 			observeRedisKeyedRead(ctx, startedAt, readAt, "reclaim", key, options.Group, pending)
 			for _, work := range r.reliableKeyedWorks(ctx, key, subject, options, pending, handler) {
 				if task, exists := tasks[work.key]; exists {
