@@ -179,3 +179,27 @@ func TestCollectorExportsCapacityRefreshReasons(t *testing.T) {
 	}
 	require.Equal(t, expected, got)
 }
+
+// TestCollectorRejectsDynamicOwnershipNames只接收固定名称，不因补白名单允许按用户/消息扩展名称。
+func TestCollectorRejectsDynamicOwnershipNames(t *testing.T) {
+	provider := &fakeProvider{name: "ownership", gauges: map[string]float64{"ownership_active": 2, "ownership_directory_keys:user-A": 64, "ownership_user_123": 9}, counters: map[string]float64{"ownership_revoked_total": 3, "ownership_revoked_user_123_total": 9, "ownership_message_123_total": 9}}
+	registry := prometheus.NewRegistry()
+	require.NoError(t, registry.Register(observability.NewComponentCollector("fixture", []observability.RuntimeMetricProvider{provider})))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	seen := map[string]float64{}
+	for _, family := range families {
+		for _, m := range family.GetMetric() {
+			for _, label := range m.GetLabel() {
+				if label.GetName() == "name" {
+					if m.Gauge != nil {
+						seen[label.GetValue()] = m.GetGauge().GetValue()
+					} else {
+						seen[label.GetValue()] = m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+	}
+	require.Equal(t, map[string]float64{"ownership_active": 2, "ownership_revoked_total": 3}, seen)
+}

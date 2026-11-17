@@ -236,3 +236,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.14.0：SQL持久任务的显式业务阻挡
 
 `ownership.Observation.BlockedDue`为非负、已核实Due子集；默认0保持旧规则与JSON字节形状。旧StartRuntime/Owned订阅、Manifest/Fingerprint、SQL fence与持久格式保持。显式采用者按[SQL任务指南](OWNERSHIP_SQL_TASKS_GUIDE.md)升级相关owner及真实分类，不能把旧实例混跑认证为新能力。直接SQL Runtime不必Bind原MQ；回退同时回退应用新增字段接线，保留任务、attempt、scope和PEL，旧规则可能重新按45s停滞撤销。Core合成Redis/MySQL/多进程验证不等于消费方金融功能、UAT或容量；这些仍NOT_RUN。
+
+## v1.14.1：归属固定指标导出
+
+仅修复九个既有快照名称被过滤及固定Keys目录量未初始化的问题，无API/配置/SQL/卷/消息变化，不要求重建scope、消费组或清理数据。消费方按各自维护安排升级相关采集进程；混跑时旧副本仍缺样本，应保持null/state，不阻断本轮独立业务验证。go get不安装skill，按既有流程重新同步观测与归属分片。Core本地Collector/HTTP验证不代表消费方部署、UAT或容量。

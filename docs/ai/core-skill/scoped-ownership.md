@@ -93,3 +93,7 @@ Step只为实际准入项重取原Stream正文，再沿原Ready credential/fence
 Observation.BlockedDue为Due中应用已由一致持久事实核实的阻挡子集。0保持旧语义/旧默认JSON；只有全来源已知、其他工作/有限未知标志为零且Due全部明确被阻挡，最近Step无错误时，不把业务暂停当可执行stall。原Due/HasWork与原件保持，不能用CapacityBlocked、假Due=0或心跳进度绕过。普通前序、未来重试、执行中、未知或数据库失败均不能猜为阻挡。非法/过期证明、观察未知、持续Step错误、执行/续租保护仍有效。
 
 Step无可执行项返回false,nil，错误保留；LastConfirmed仅由真实进展更新。阻挡解除或新健康任务用独立资格起点评估原Stall，不改变真实确认或应用attempt。应用仍负责同组前序与健康组选批；Core不执行金融补账/跳过/ACK。无新格式/默认阈值，旧OwnedSubscription.Due回调不自动获得此分类。公开示例、生命周期和回退见[SQL任务归属指南](../../codex/OWNERSHIP_SQL_TASKS_GUIDE.md)。
+
+## 固定归属指标白名单
+
+v1.14.1仅补齐Runtime已有9项固定指标导出，完整名称和口径见[观测分片](multiservice-and-observability.md)。directory_keys可在多个副本重复，不能求和当全局唯一目录；恢复累计秒不等于单次SLO。原归属/预算/SQLfence/BlockedDue不改，缺失样本不能填0，未知动态名仍拒绝。

@@ -80,3 +80,7 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 ## SQL任务与业务暂停
 
 本示例的Broker归属默认不变。原MQ只收单、后续由应用SQL任务执行时，可用同一公开OwnershipStore+ownership.StartRuntime且不Bind原MQ；需要完整Observe和应用同事务SQLfence。显式Observation.BlockedDue仅表达一致SQL事实核实的Due阻挡子集，不是把Due清零、伪造进展或令Core跳过前序。Step无可执行应false,nil，持续错误/未知/实际执行超时仍撤销并等待退出。旧本示例NoDueTasks/Due合同不自动改为新分类，详见[通用接入](../../docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)及[真实验收](../../docs/codex/OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。
+
+## 归属指标导出补丁
+
+v1.14.1补齐既有Ownership快照的9项固定名称及固定Keys真实目录长度初始化，查询例如`core_component_gauge{component="ownership",name="ownership_directory_keys"}`；counter使用原`core_component_counter`族。单Runtime目录量可能在多个副本重复，不要相加为全局唯一key数。无新增配置或scope/SQL/PEL迁移；缺失不能补0，详见[原件和升级边界](../../docs/codex/OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。

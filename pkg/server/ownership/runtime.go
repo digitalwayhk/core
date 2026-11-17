@@ -87,6 +87,7 @@ func (r *Runtime) run() {
 	cooldown := map[string]time.Time{}
 	cursor := 0
 	keys := append([]string(nil), r.options.Manifest.Keys...)
+	r.directoryKeys.Store(int64(len(keys)))
 	directoryNext := 0
 	var refreshAt time.Time
 	ticker := time.NewTicker(r.options.Manifest.Timing.Poll)

@@ -30,6 +30,8 @@
 
 ### Fixed
 
+- 修复Ownership Runtime既有1个目录gauge和8个错误/撤销/恢复counter被Collector白名单过滤。同时初始化固定Keys的真实目录长度；仅允许9个固定低基数名称，保留动态未知名拒绝、真实零值与不可用缺失的区分；不改变归属、SQL fence、BlockedDue或消息格式。见[验收](docs/codex/OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。
+
 - 普通Redis SharedKeys将原PEL页中已知候选正文读取合并为有界pipeline，减少调度器逐条网络往返；原W/N、失败退避、顺序、fence/成功ACK与Owned单项reader保持。无新API/配置/格式，真实三进程对照与剩余间隙见[验收](docs/codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
 
 - 收短显式IndependentGroups确认控制区，结果等待原FIFO时不持syncExecMu；原执行器短内存保护归还已退出worker的组/槽。原FIFO仅有界合并相邻同store确认，不跨前台或元数据屏障；保留实际事务身份、取消/未知、pending/hook及恢复，无新API/配置/卷格式，普通v1.13.4不变。见[验收](docs/codex/WRITE_BEHIND_CONFIRMATION_CONVOY_2026-11-16.md)。
@@ -57,6 +59,12 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.14.1] - 2026-11-17
+
+### Fixed
+
+- 将Ownership快照已提供的directory_keys及8个目录错误/撤销/恢复counter加入原Collector固定白名单，恢复原有低基数观测链，并补正固定Keys目录长度初始化；类型、单位、已知零与未知缺失边界保留，动态名不放行。无新API、配置、依赖或持久格式，不变更归属或业务调度。升级与验证见[专项报告](docs/codex/OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。
 
 ## [v1.14.0] - 2026-11-17
 

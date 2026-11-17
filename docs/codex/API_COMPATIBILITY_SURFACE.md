@@ -277,3 +277,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### ownership.Observation.BlockedDue（v1.14.0）
 
 加性非负Due子集，零值+omitempty保留旧Check语义/默认JSON；正值仅显式全阻挡且观察完整、无技术错误时免于可执行stall。真实HasWork/LastConfirmed与旧执行/未知/续约保护不改。公开方法签名、Manifest/Fingerprint、Store/SQL/消息格式均不变。回退应用新增字段接线后旧版继续旧停滞行为，不能认证混跑的新能力。详见[SQL任务归属](OWNERSHIP_SQL_TASKS_GUIDE.md)与[验收](OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。
+
+### 归属固定指标导出白名单（v1.14.1）
+
+补齐Runtime已提供的1个目录gauge及8个counter，并初始化固定Keys的真实目录长度，沿原core_component_gauge/core_component_counter的固定name标签输出；不改变Go API、DTO、配置、持久格式或归属算法。新增固定样本有界，不放行动态名称；旧版缺失不能解释为0。单Runtime目录量不可跨副本直接求和，恢复耗时为累计秒。见[验收与升级](OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。

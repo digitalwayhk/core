@@ -163,6 +163,12 @@ worker 生命周期由通知系统持有；队列满、filter timeout、panic �
 
 实现位置：`pkg/server/runtime`、`pkg/server/api/public/runtimetopology.go`、`pkg/server/observability`；验收可参考示例 07 的 scrape 配置与 multi-process 集成测试。
 
+### 归属固定指标（v1.14.1）
+
+Ownership Runtime的既有4个gauge和11个counter通过原`core_component_gauge`/`core_component_counter`导出，固定名称是`name`标签值。v1.14.1补齐白名单遗漏的`ownership_directory_keys`及directory_errors、renew_failures、execution_revoked、observation_revoked、stalled_revoked、activation_failures、restore_failures、restore_seconds这8个`ownership_*_total` counter；固定Keys在运行时启动时按实际Keys长度初始化directory_keys，动态模式仍沿原分页更新；没有增加业务key/UserID标签或放行动态名称。
+
+`directory_keys`源于单Runtime所见目录量，ServiceContext沿原链汇总本实例多个scope；多个副本可能看见同一目录，不能相加当全局唯一key数。active/ready/inflight是原本地持有/执行口径；counter随进程生命周期累计，restore_seconds是恢复回调累计秒（包含失败调用），不是P99或单次恢复SLO。已注册Provider的真实0可以导出；未注册/不可用无样本仍是缺失，不能补0。无需新配置、消息/SQL/卷迁移；升级相关采集进程即可获得新增样本，旧版缺样本保持null/正确state。详见[实际RED/GREEN及边界](../../codex/OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。
+
 ## Cluster、Transport、MQ 与事件
 
 - MQ 未配置时默认 `Mode=off`，不创建 Provider，也不探测 Redis；需要跨节点 EventBridge 的服务在自己的 `etc/<service>.json` 显式设置 `MQ.Mode=on/auto` 和 Broker 地址。`etc/server.json` 是系统管理服务配置，不负责替业务服务启用 MQ。已有配置中的显式 `auto/on` 不会被新默认值覆盖，详见配置能力矩阵的迁移说明。

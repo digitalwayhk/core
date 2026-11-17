@@ -19,6 +19,7 @@ type RuntimeMetricProvider interface {
 // allowedGaugeNames 组件 gauge 名白名单（低基数）。
 var allowedGaugeNames = map[string]struct{}{
 	"ownership_active": {}, "ownership_ready": {}, "ownership_inflight": {},
+	"ownership_directory_keys":       {},
 	"local_queue_wait_seconds_total": {}, "admission_seconds_total": {}, "admission_attempts_total": {},
 	"admission_rejected_concurrency_total": {},
 	"admission_rejected_pending_total":     {},
@@ -77,7 +78,15 @@ var allowedGaugeNames = map[string]struct{}{
 
 var allowedCounterNames = map[string]struct{}{
 	"ownership_acquired_total": {}, "ownership_revoked_total": {}, "ownership_unknown_total": {},
-	"redis_command_pool_wait_total": {}, "redis_command_pool_wait_seconds_total": {}, "redis_command_pool_timeouts_total": {},
+	"ownership_directory_errors_total":    {},
+	"ownership_renew_failures_total":      {},
+	"ownership_execution_revoked_total":   {},
+	"ownership_observation_revoked_total": {},
+	"ownership_stalled_revoked_total":     {},
+	"ownership_activation_failures_total": {},
+	"ownership_restore_failures_total":    {},
+	"ownership_restore_seconds_total":     {},
+	"redis_command_pool_wait_total":       {}, "redis_command_pool_wait_seconds_total": {}, "redis_command_pool_timeouts_total": {},
 	"redis_blocking_pool_wait_total": {}, "redis_blocking_pool_wait_seconds_total": {}, "redis_blocking_pool_timeouts_total": {},
 	"shared_key_acquired_total": {}, "shared_key_contended_total": {}, "shared_key_owner_lost_total": {},
 	"reliable_ack_total": {}, "reliable_ack_fail_total": {}, "reliable_ack_seconds_total": {},

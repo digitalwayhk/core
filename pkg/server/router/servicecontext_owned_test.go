@@ -128,4 +128,35 @@ func TestServiceContextOwnedMetricsAggregateScopes(t *testing.T) {
 		}
 		return false
 	}, 2*time.Second, 20*time.Millisecond, "两个范围的Ready应汇总为2")
+	// 核对真实Runtime经过ServiceContext原多scope汇总与默认Collector，包含新增固定指标和真实零值。
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	values := map[string]float64{}
+	for _, family := range families {
+		if family.GetName() != "core_component_gauge" && family.GetName() != "core_component_counter" {
+			continue
+		}
+		for _, metric := range family.Metric {
+			labels := map[string]string{}
+			for _, label := range metric.Label {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["service"] != name || labels["component"] != "ownership" {
+				continue
+			}
+			if family.GetName() == "core_component_gauge" {
+				values[labels["name"]] = metric.GetGauge().GetValue()
+			} else {
+				require.NotNil(t, metric.Counter)
+				values[labels["name"]] = metric.GetCounter().GetValue()
+			}
+		}
+	}
+	require.Equal(t, 2.0, values["ownership_directory_keys"], "两个scope的目录量由原实例聚合相加，不是跨副本唯一目录")
+	for _, metric := range []string{"ownership_directory_errors_total", "ownership_renew_failures_total", "ownership_execution_revoked_total", "ownership_observation_revoked_total", "ownership_stalled_revoked_total", "ownership_activation_failures_total", "ownership_restore_failures_total", "ownership_restore_seconds_total"} {
+		value, ok := values[metric]
+		require.True(t, ok, "缺少固定指标 %s", metric)
+		require.GreaterOrEqual(t, value, 0.0)
+	}
+
 }
