@@ -159,6 +159,7 @@ func (r *Runtime) runKey(c Credential) (result error) {
 	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 	var stageSince, lastProgress atomic.Int64
+	var lastStepFailed atomic.Bool
 	lastProgress.Store(time.Now().UnixNano())
 	keyProgress := &runtimeKeyProgress{context: ctx, credential: c, stageSince: &stageSince}
 	r.statusMu.Lock()
@@ -176,7 +177,7 @@ func (r *Runtime) runKey(c Credential) (result error) {
 	go func() {
 		defer close(watchDone)
 		defer readyState.lose(r)
-		r.watchKey(ctx, c, cancel, &stageSince, &lastProgress, readyState)
+		r.watchKey(ctx, c, cancel, &stageSince, &lastProgress, &lastStepFailed, readyState)
 	}()
 	defer func() { cancel(); <-watchDone }()
 	stage := func(callback func(context.Context) error) (err error) {
@@ -255,6 +256,7 @@ func (r *Runtime) runKey(c Credential) (result error) {
 		}
 		progress := false
 		err := stage(func(ctx context.Context) error { var err error; progress, err = r.options.Step(ctx, c); return err })
+		lastStepFailed.Store(err != nil)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -275,11 +277,14 @@ func (r *Runtime) runKey(c Credential) (result error) {
 	return ctx.Err()
 }
 
-func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.CancelFunc, stageSince, lastProgress *atomic.Int64, readyState *runtimeReadyState) {
+func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.CancelFunc, stageSince, lastProgress *atomic.Int64, lastStepFailed *atomic.Bool, readyState *runtimeReadyState) {
 	timing := r.options.Manifest.Timing
 	ticker := time.NewTicker(min(timing.Renew, timing.Execution/2))
 	defer ticker.Stop()
 	lastKnown := time.Now()
+	// 资格时钟不代表业务确认；长暂停解除后仍给真实可执行工作完整的原stall窗口。
+	var eligibleSince time.Time
+	wasBlockedOnly := false
 	defer func() {
 		release, stop := context.WithTimeout(context.Background(), timing.Renew)
 		defer stop()
@@ -306,7 +311,18 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		if err != nil || observation.At.IsZero() || observation.At.After(now.Add(timing.Renew)) || time.Since(observation.At) > timing.Observation {
 			observation = Observation{At: now, Delivered: -1, Unread: -1, Queued: -1, Due: -1}
 		}
-		if since > 0 && observation.Delivered == 0 {
+		allowBlocked := !lastStepFailed.Load()
+		blockedOnly := allowBlocked && observation.onlyBlockedDue()
+		if blockedOnly {
+			wasBlockedOnly = true
+		} else if wasBlockedOnly && observation.Known() {
+			if observation.HasWork() {
+				eligibleSince = time.Now()
+			}
+			wasBlockedOnly = false
+		}
+		// 显式全阻挡不把短Step查询冒充可执行消息；不合作回调仍由上方原Execution保护撤销。
+		if since > 0 && observation.Delivered == 0 && !blockedOnly {
 			observation.Delivered = 1
 		}
 		if observation.Known() || observation.CapacityBlocked {
@@ -317,7 +333,11 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		} else {
 			r.unknown.Add(1)
 		}
-		if err := observation.Check(time.Now(), time.Unix(0, lastProgress.Load()), lastKnown, timing); err != nil {
+		progressAt := time.Unix(0, lastProgress.Load())
+		if eligibleSince.After(progressAt) {
+			progressAt = eligibleSince
+		}
+		if err := observation.check(time.Now(), progressAt, lastKnown, timing, allowBlocked); err != nil {
 			if errors.Is(err, ErrStalled) {
 				r.stalledRevocations.Add(1)
 			} else {

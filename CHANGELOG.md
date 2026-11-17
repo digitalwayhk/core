@@ -6,6 +6,8 @@
 
 ### Added
 
+- 新增显式 `ownership.Observation.BlockedDue` 子集，真实业务全阻挡可保留健康归属，不隐藏Due或伪造LastConfirmed；部分可执行、错误/未知/执行/续租保护保持，旧零值与默认JSON不变。SQL持久任务继续复用公开Store+StartRuntime，见[接入](docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)。
+
 - 显式 `WriteBehindExecutionOptions.IndependentGroups` / `UseWriteBehindWithFailureHandlerOptions` 允许同store独立顺序组有界持续排空：固定worker、组首独立target与真实本地确认，健康组不再等待无关慢组整轮返回。旧入口/零值保持；target须线程安全且各组独立提交，不能替代跨组原子事务。API、恢复和代价见[指南](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
 
 - 新增可靠本地读取门面 `ScanLocalPage`：正limit/框架上限、范围绑定cursor、键数/原始字节预算、精确Prefix、取消/关闭和错误不跳过。旧API、配置与卷不变；每页独立快照，不承诺跨页一致。见[正式指南](docs/codex/RELIABLE_LOCAL_SCAN_PAGE_GUIDE.md)。
@@ -55,6 +57,16 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.14.0] - 2026-11-17
+
+### Added
+
+- 新增显式 `ownership.Observation.BlockedDue`，表示应用从持久事实核实的 Due 阻挡子集。全来源已知、全部到期项确实阻挡且没有其他工作时，可保持原归属；Due、原件和 LastConfirmed 不伪装为空或进展。SQL持久任务复用现有 OwnershipStore / StartRuntime，不新增队列或绑定原MQ。
+
+### Changed
+
+- 解除阻挡后给可执行工作原有 Stall 资格窗口；Step 错误、未知观测、Execution、续租和 SQL fence 保护保持。旧零值与默认JSON、API入口、Manifest指纹、预算及持久格式不变，无需迁移卷、重建消费组或清消息。相关owner须升级并接应用真实分类；旧实例仍按旧停滞语义。见[接入](docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)和[真实验收及边界](docs/codex/OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。
 
 ## [v1.13.6] - 2026-11-17
 

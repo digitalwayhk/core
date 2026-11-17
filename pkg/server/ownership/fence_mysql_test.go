@@ -40,7 +40,7 @@ func (tx mysqlFenceTransaction) SaveFence(state ownership.FenceState) error {
 	return tx.db.Model(&mysqlFenceFixture{}).Where("scope = ? AND key_name = ?", state.Scope, state.Key).Updates(map[string]any{"epoch": state.Epoch, "token": state.Token}).Error
 }
 
-func mysqlFenceDatabase(t *testing.T) *gorm.DB {
+func mysqlFenceDatabase(t *testing.T, fixtures ...any) *gorm.DB {
 	t.Helper()
 	file := os.Getenv("CORE_TEST_MYSQL_OWNERSHIP_CONFIG_FILE")
 	if file == "" {
@@ -56,6 +56,10 @@ func mysqlFenceDatabase(t *testing.T) *gorm.DB {
 	var rows []*mysqlFenceFixture
 	// 启动组合根：框架负责自动建库/表/索引；事务和handler不承担DDL。
 	require.NoError(t, action.Load(&persistencetypes.SearchItem{Page: 1, Size: 1, Model: &mysqlFenceFixture{}}, &rows))
+	for _, fixture := range fixtures {
+		var values []map[string]any
+		require.NoError(t, action.Load(&persistencetypes.SearchItem{Page: 1, Size: 1, Model: fixture}, &values))
+	}
 	db, err := action.GetDB()
 	require.NoError(t, err)
 	return db

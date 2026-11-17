@@ -85,3 +85,11 @@ RegisterOwnedKey、CallServiceOwned及其Resolver使用原生命周期锁取得�
 Owned reader每个subject最多保留原PendingWindow条ID→ordering key/scope key分类元数据，不保存正文、业务完成标记或另一份队列。每次仍从原PEL重取完整身份页，移除消失ID；Key回调须按原Selector稳定、纯粹地映射不可变原事件。注册状态每次使用当前目录，缓存不会把注册前未知键永久冻结。分类标记必须是Go进程内私有类型，不能信任Broker保留名字符串字段或业务payload自报分类。ordering key超过4096字节不缓存，scope key沿既有512字节约束；不扩大W/U或消息大小预算。
 
 Step只为实际准入项重取原Stream正文，再沿原Ready credential/fenced claim、应用handler和成功后ACK执行。提示不能替代原件、token、PEL或SQL fence；缺正文不能执行handler或ACK。Observe可复用分类并继续原unread/容量核验，不能把少读正文当业务成功。已知原件缺失检查延后到准入（或提示丢弃后的重新分类），不承诺纯观测轮立即发现人为删除的正文。重启丢弃提示、按原PEL恢复；无API/配置/卷格式变更，不删组或重置游标。组件成本下降不代表消费方容量或端到端时延通过。
+
+## 显式SQL任务归属与BlockedDue
+
+应用已有SQL持久待办、原MQ只收单时，可在启动组合根用公开OwnershipStore+ownership.StartRuntime复用有界归属，不需Bind原订阅；并通过UseResource管理返回Runtime及实际退出。没有另一个默认业务任务框架。Scope声明/SQLfence/恢复和资源约束保持，MaxOwned与应用SQL许可分开；64桶需要足够持有槽，不是12个金融许可就只能配12个owner。
+
+Observation.BlockedDue为Due中应用已由一致持久事实核实的阻挡子集。0保持旧语义/旧默认JSON；只有全来源已知、其他工作/有限未知标志为零且Due全部明确被阻挡，最近Step无错误时，不把业务暂停当可执行stall。原Due/HasWork与原件保持，不能用CapacityBlocked、假Due=0或心跳进度绕过。普通前序、未来重试、执行中、未知或数据库失败均不能猜为阻挡。非法/过期证明、观察未知、持续Step错误、执行/续租保护仍有效。
+
+Step无可执行项返回false,nil，错误保留；LastConfirmed仅由真实进展更新。阻挡解除或新健康任务用独立资格起点评估原Stall，不改变真实确认或应用attempt。应用仍负责同组前序与健康组选批；Core不执行金融补账/跳过/ACK。无新格式/默认阈值，旧OwnedSubscription.Due回调不自动获得此分类。公开示例、生命周期和回退见[SQL任务归属指南](../../codex/OWNERSHIP_SQL_TASKS_GUIDE.md)。

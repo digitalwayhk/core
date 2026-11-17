@@ -285,3 +285,7 @@ go get github.com/digitalwayhk/core@<commit>
 ## SharedKeys后继正文往返验收
 
 真实Redis受控固定8头完成/ACK，再恢复原PEL页，旧版8次正文串行往返必须RED，候选一次pipeline但实际正文/ACK非零；缺正文、取消与原PEL保留不能跳过。固定正式旧源码/候选二进制、3独立PID、2P/N32/W128/50key每键10/s及90ms合成handler，多轮直连/明确1ms回包代理分开报告；代理不是现场RTT，不能推导Full-E4全部间隙。SIGKILL后等待原生至少2分钟lease自然到期，新PID处理原ID与同key后继，独立key仍能在接管等待中推进；不允许为测试减TTL。MQ/event/router/观测普通race与示例10正式入口分别取证，剩余等待/容量/现场未验分开。详见[专项报告](../../codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
+
+## SQL归属业务阻挡验收
+
+以真实Redis/MySQL和默认15s/45s固定PAUSED前序+PENDING后继，保留旧51s失去Ready的RED；新合同须保持真实Due/BlockedDue、同epoch和nil LastConfirmed，再证明同桶健康任务实际SQL提交及原暂停后继/attempt/原MQ PEL/cursor不动。不能只检查另一空闲桶Ready。默认JSON/零值/Manifest字节、部分可执行/在途/未知/非法/陈旧证明、解除阻挡资格窗口和持续Step错误分别回归。原生15s租约下正常退出、实际SIGKILL及新PID原schema接管，Activate必须等旧SQL实际提交，旧epoch/错token/Renew/Release不能破坏新owner。不合作回调取消后仍等实际退出；组件/普通/race/例11与消费方金融/UAT/容量分开登记。详见[验收](../../codex/OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。

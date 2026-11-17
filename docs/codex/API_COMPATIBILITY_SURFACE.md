@@ -273,3 +273,7 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### SharedKeys已知候选正文读取
 
 普通Redis SharedKeys只将原PEL页内的已知候选正文命令合入一个有限pipeline，不增加公开选项/API/持久格式。原Group/W冻结标记、原Stream/PEL/消息ID、最早key候选、fence与成功ACK保持；Owned reader原单项方法保持。升级消费者可减少其串行往返，混合旧副本仍有旧成本；无需变更发布者或清除/重建组。回退须正常停止订阅并等待实际handler退出，保持原数据和预算。受控实验与现场性能分开，见[验收](REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
+
+### ownership.Observation.BlockedDue（v1.14.0）
+
+加性非负Due子集，零值+omitempty保留旧Check语义/默认JSON；正值仅显式全阻挡且观察完整、无技术错误时免于可执行stall。真实HasWork/LastConfirmed与旧执行/未知/续约保护不改。公开方法签名、Manifest/Fingerprint、Store/SQL/消息格式均不变。回退应用新增字段接线后旧版继续旧停滞行为，不能认证混跑的新能力。详见[SQL任务归属](OWNERSHIP_SQL_TASKS_GUIDE.md)与[验收](OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。

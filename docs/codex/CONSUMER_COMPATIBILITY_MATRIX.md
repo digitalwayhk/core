@@ -232,3 +232,7 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ### 同store独立组排空接入
 
 旧 `UseWriteBehindWithFailureHandler`、零值target执行和同代原卷保持。新入口显式传 `WriteBehindExecutionOptions{IndependentGroups: N}`，N为1–64；应用负责验证稳定组、线程安全与独立事务。没有原policy不能静默启用。保持StoreID/attempt/指纹/终态保留，停稳原回调后升级；回退仅限识别同代格式的二进制并先关闭新选项验证副本，不能删mode或并发开原卷。消费方功能、UAT、Full-E4与容量尚须独立执行，Core组件不代认证。
+
+## v1.14.0：SQL持久任务的显式业务阻挡
+
+`ownership.Observation.BlockedDue`为非负、已核实Due子集；默认0保持旧规则与JSON字节形状。旧StartRuntime/Owned订阅、Manifest/Fingerprint、SQL fence与持久格式保持。显式采用者按[SQL任务指南](OWNERSHIP_SQL_TASKS_GUIDE.md)升级相关owner及真实分类，不能把旧实例混跑认证为新能力。直接SQL Runtime不必Bind原MQ；回退同时回退应用新增字段接线，保留任务、attempt、scope和PEL，旧规则可能重新按45s停滞撤销。Core合成Redis/MySQL/多进程验证不等于消费方金融功能、UAT或容量；这些仍NOT_RUN。

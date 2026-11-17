@@ -13,6 +13,8 @@ type Options struct {
 	Activate func(context.Context, Credential) error
 	// Restore在Ready前及后续revision变更时收敛活跃引用。
 	Restore func(context.Context, Credential, ReferenceSnapshot) error
-	Step    func(context.Context, Credential) (bool, error)
+	// Step仅在真实进展后返回true；无可执行项返回false,nil，错误不能借BlockedDue免除停滞。
+	Step func(context.Context, Credential) (bool, error)
+	// Observe完整覆盖本Runtime输入；主计数未知为-1，BlockedDue只接受已核实的非负子集。
 	Observe func(context.Context, Credential) (Observation, error)
 }

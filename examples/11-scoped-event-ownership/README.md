@@ -50,7 +50,7 @@ go run ./examples/11-scoped-event-ownership/main -p 22030 -grpc 23030 -view 0
 ```bash
 CORE_TEST_REDIS_ADDR=<本轮独占Redis> \
 CORE_TEST_MYSQL_OWNERSHIP_CONFIG_FILE=<0600 MySQL配置绝对路径> \
-go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout=3m -v
+go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout=600s -v
 ```
 
 覆盖SQL提交计数、非owner查询、两处理PID、真实用户WS/匿名拒绝/他人隔离、健康旧进程仍运行时换主、恢复快照与退订交错、Gateway恢复租约丢失后等待原生15秒重建引用；不发送客户端重订。硬崩溃、TCP断连/迟到ACK、多主题真实多输入批次、有限积压/取消等更底层证据在Core包测试；SQL锁跨原生租约到期在ownership包真实MySQL测试。
@@ -76,3 +76,7 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 无需新参数：固定和动态Owned reader均在原有限PendingWindow内保留ID分类，不缓存正文；纯Observe继续核对原PEL、未读范围和目录，实际准入前从原Stream重取正文。原Ready、SQL fence、mTLS/WS恢复、成功后ACK与W/U预算不变。分类只由应用稳定Key回调和Go进程内私有提示形成，不能信任Broker附加字段。已知项缺正文检查延后到实际准入，失败仍不执行handler、不ACK。
 
 升级保留原group/PEL/sequence/SQL fence，无需清数据或重新登记scope；混跑旧副本仍有旧扫描成本。真实多进程、固定→动态迁移与双Gateway验证及剩余性能边界见[扫描修复报告](../../docs/codex/RELIABLE_PENDING_SCAN_FIX_2026-11-16.md)。扫描量下降不等于业务容量或所有时延通过。
+
+## SQL任务与业务暂停
+
+本示例的Broker归属默认不变。原MQ只收单、后续由应用SQL任务执行时，可用同一公开OwnershipStore+ownership.StartRuntime且不Bind原MQ；需要完整Observe和应用同事务SQLfence。显式Observation.BlockedDue仅表达一致SQL事实核实的Due阻挡子集，不是把Due清零、伪造进展或令Core跳过前序。Step无可执行应false,nil，持续错误/未知/实际执行超时仍撤销并等待退出。旧本示例NoDueTasks/Due合同不自动改为新分类，详见[通用接入](../../docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)及[真实验收](../../docs/codex/OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。

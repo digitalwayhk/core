@@ -116,3 +116,37 @@ func TestRedisOwnershipLocallyRevokedKeyCannotServeDuringUnknownRelease(t *testi
 	_, err = runtime.Status(ctx, "A")
 	require.ErrorIs(t, err, ownership.ErrNotReady, "本地key已取消，不能继续返回旧视图")
 }
+
+// TestRedisOwnershipBlockedDueStillWaitsForActualCallback显式业务阻挡不能掩盖实际回调超时或伪装已退出。
+func TestRedisOwnershipBlockedDueStillWaitsForActualCallback(t *testing.T) {
+	p := newPoolBudgetProvider(t, 4, 8)
+	ctx := context.Background()
+	m := ownership.Manifest{Scope: "blocked-callback", Service: "fixture", Group: "fixture", Selector: "opaque-v1", Keys: []string{"A"}, Subjects: []string{"input"}, Timing: ownership.Timing{Lease: time.Second, Renew: 100 * time.Millisecond, Poll: 10 * time.Millisecond, Execution: 250 * time.Millisecond, Stall: 500 * time.Millisecond, Observation: 200 * time.Millisecond}}.Normalize()
+	require.NoError(t, p.ProvisionOwnership(ctx, m, 0))
+	store, err := p.OwnershipStore(ctx)
+	require.NoError(t, err)
+	entered, hold := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(hold) }) }
+	defer release()
+	runtime, err := ownership.StartRuntime(ctx, store, ownership.Options{Manifest: m, InstanceID: "owner", SessionID: "boot", MaxOwned: 1, Activate: func(context.Context, ownership.Credential) error { return nil }, Step: func(context.Context, ownership.Credential) (bool, error) { close(entered); <-hold; return true, nil }, Observe: func(context.Context, ownership.Credential) (ownership.Observation, error) {
+		return ownership.Observation{At: time.Now(), Due: 1, BlockedDue: 1}, nil
+	}})
+	require.NoError(t, err)
+	t.Cleanup(func() { release(); _ = runtime.Close(ctx) })
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("实际回调未开始")
+	}
+	require.Eventually(t, func() bool { _, err := store.Resolve(ctx, m.Scope, "A"); return errors.Is(err, ownership.ErrNotReady) }, 2*time.Second, time.Millisecond)
+	snap := runtime.RuntimeMetricSnapshot(ctx)
+	require.Positive(t, snap.Gauges["ownership_inflight"])
+	require.Positive(t, snap.Counters["ownership_execution_revoked_total"])
+	wait, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, runtime.Close(wait), context.DeadlineExceeded, "不能把取消当实际回调退出")
+	release()
+	require.NoError(t, runtime.Close(ctx))
+	require.Zero(t, runtime.RuntimeMetricSnapshot(ctx).Gauges["ownership_inflight"])
+}

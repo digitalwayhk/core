@@ -10,5 +10,9 @@ func (r *Runtime) observe(ctx context.Context, c Credential) (observation Observ
 			err = ErrUnknown
 		}
 	}()
-	return r.options.Observe(ctx, c)
+	observation, err = r.options.Observe(ctx, c)
+	if err == nil && !observation.validBlockedDue() {
+		return Observation{}, ErrUnknown
+	}
+	return observation, err
 }
