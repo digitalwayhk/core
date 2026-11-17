@@ -6,6 +6,8 @@
 
 ### Added
 
+- 显式ownership.Options.GroupWork与实例共用GroupWorkBudget支持同租约独立SQL顺序组持续排空；真实单元完成释放本组，不等待无关慢组。新增显式共享CheckFenceShared，原Step与排他Check/Activate默认保持。有限身份/固定worker、真实退出、版本/业务SQL前序和未知结果边界见[指南](docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)。无新配置、manifest/卷/消息格式，不自动改变Broker订阅或消费方业务。
+
 - 新增显式 `ownership.Observation.BlockedDue` 子集，真实业务全阻挡可保留健康归属，不隐藏Due或伪造LastConfirmed；部分可执行、错误/未知/执行/续租保护保持，旧零值与默认JSON不变。SQL持久任务继续复用公开Store+StartRuntime，见[接入](docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md)。
 
 - 显式 `WriteBehindExecutionOptions.IndependentGroups` / `UseWriteBehindWithFailureHandlerOptions` 允许同store独立顺序组有界持续排空：固定worker、组首独立target与真实本地确认，健康组不再等待无关慢组整轮返回。旧入口/零值保持；target须线程安全且各组独立提交，不能替代跨组原子事务。API、恢复和代价见[指南](docs/codex/WRITE_BEHIND_INDEPENDENT_GROUP_DRAIN_GUIDE.md)。
@@ -59,6 +61,12 @@
 - 展示编号不改变服务端认证 UID、Casdoor 在线校验、撤销、WS 或秘密 Claim 加密身份；Manage/ServerManage 禁止设置。启用前先升级全部验证端，不能与旧验证端混用，详见 `docs/codex/TOKEN_DISPLAY_UID_2026-11-04.md`。
 
 - 不序列化任意error，不从错误文字反造结果，不输出payload/身份/凭据或改变SQL事实；不提前确认或扩大重试预算。
+
+## [v1.15.0] - 2026-11-18
+
+- 新增显式Options.GroupWork、实例共用GroupWorkBudget及ServiceContext.NewOwnedWorkBudget；同租约内独立SQL组真实完成后推进后继，不等无关慢组，保留同组前序、有限身份/固定worker和真实退出。
+- 新增显式SharedFenceTransaction/CheckFenceShared共享锁定当前读；原Step、排他Check/Activate及Ready/恢复/续租/SQL幂等保持。无新配置、Manifest/卷/消息格式；启用需要应用原模型回调及SQL适配。
+- 真实Redis/MySQL、普通/race、独立PID原schema/SIGKILL、例11固定/动态/保全迁移/mTLS/双Gateway WS通过。原生三轮8s对照新P99仍514–611ms，首次探索FAIL保留，不宣称消费方功能或容量通过。[接入与验收](docs/codex/OWNERSHIP_SQL_INDEPENDENT_GROUPS_2026-11-18.md)。
 
 ## [v1.14.1] - 2026-11-17
 

@@ -289,3 +289,8 @@ go get github.com/digitalwayhk/core@<commit>
 ## SQL归属业务阻挡验收
 
 以真实Redis/MySQL和默认15s/45s固定PAUSED前序+PENDING后继，保留旧51s失去Ready的RED；新合同须保持真实Due/BlockedDue、同epoch和nil LastConfirmed，再证明同桶健康任务实际SQL提交及原暂停后继/attempt/原MQ PEL/cursor不动。不能只检查另一空闲桶Ready。默认JSON/零值/Manifest字节、部分可执行/在途/未知/非法/陈旧证明、解除阻挡资格窗口和持续Step错误分别回归。原生15s租约下正常退出、实际SIGKILL及新PID原schema接管，Activate必须等旧SQL实际提交，旧epoch/错token/Renew/Release不能破坏新owner。不合作回调取消后仍等实际退出；组件/普通/race/例11与消费方金融/UAT/容量分开登记。详见[验收](../../codex/OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。
+
+
+## 同租约独立SQL组验收
+
+保留旧Step整轮等待及旧排他Check真实双RED，再验显式GroupWork的B2在A1未退出前真实SQL提交、A2未进入组首查询。实例多Runtime共享worker/prefetch，不得每scope乘预算；默认30s单元超时未退出仍占槽，健康组持续超过30s不误撤销。共享Check须真MySQL多个S并存、X Activate等全部旧事务、RR旧快照不能通过当前读、旧X合同保持。未知commit/PAUSED/attempt及同组前序保留，独立PID原schema/SIGKILL/原生15s接管与旧S事务未退出不能Ready分别验证。Close、迟到完成、revision维护恢复、真实Collector指标和例11固定/动态迁移/mTLS/双Gateway WS普通race需运行。固定SQL连接/CPU/数据多轮持续对照记录实际延迟和排空，不能拿原消费方13s或Full-E4当本组件SLO，未运行项单列。

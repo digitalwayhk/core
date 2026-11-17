@@ -18,6 +18,7 @@ type RuntimeMetricProvider interface {
 
 // allowedGaugeNames 组件 gauge 名白名单（低基数）。
 var allowedGaugeNames = map[string]struct{}{
+	"ownership_work_workers": {}, "ownership_work_prefetch_limit": {}, "ownership_work_active": {}, "ownership_work_reserved": {}, "ownership_work_queued": {},
 	"ownership_active": {}, "ownership_ready": {}, "ownership_inflight": {},
 	"ownership_directory_keys":       {},
 	"local_queue_wait_seconds_total": {}, "admission_seconds_total": {}, "admission_attempts_total": {},
@@ -77,6 +78,7 @@ var allowedGaugeNames = map[string]struct{}{
 }
 
 var allowedCounterNames = map[string]struct{}{
+	"ownership_work_started_total": {}, "ownership_work_completed_total": {}, "ownership_work_errors_total": {}, "ownership_work_no_progress_total": {}, "ownership_work_selections_total": {}, "ownership_work_selection_errors_total": {}, "ownership_work_timeouts_total": {}, "ownership_work_capacity_wait_total": {}, "ownership_work_queue_wait_seconds_total": {}, "ownership_work_handler_seconds_total": {}, "ownership_work_selection_seconds_total": {},
 	"ownership_acquired_total": {}, "ownership_revoked_total": {}, "ownership_unknown_total": {},
 	"ownership_directory_errors_total":    {},
 	"ownership_renew_failures_total":      {},

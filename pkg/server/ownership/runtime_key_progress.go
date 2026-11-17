@@ -11,4 +11,5 @@ type runtimeKeyProgress struct {
 	credential Credential
 	confirmed  atomic.Int64
 	stageSince *atomic.Int64
+	groupWork  *groupWorkLease
 }

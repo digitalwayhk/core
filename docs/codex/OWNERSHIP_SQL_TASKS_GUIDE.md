@@ -56,3 +56,90 @@ MaxOwned是持有归属key的容量，不是金融或SQL并发许可。固定64�
 ## 验证边界
 
 Core以真实Redis/MySQL默认时限保留旧51秒RED并验证同桶健康SQL实际提交、原暂停/后继/attempt与MQ PEL保全；独立PID正常/硬杀接管验证旧SQL锁跨租约及迟到凭据拒绝。完整命令与失败证据见[专项验收](OWNERSHIP_BLOCKED_DUE_2026-11-17.md)。这些不代表消费方金融功能、Full-E4、500ms–1s目标、UAT或容量通过；应用仍须正式包独立复测。
+
+
+## 显式同租约独立组（新增MINOR能力）
+
+旧`Options.Step`保持同步、真实返回后才确认的原合同。它没有组内独立完成通知；若应用Step内部等一批回调全部返回，健康组的后继仍会等最慢组。`MaxOwned`只分归属key，MQ的KeyConcurrency与Badger IndependentGroups都不能充当这里的SQL组配置。
+
+新`Options.GroupWork`与Step严格二选一；零值不启用。它复用原Runtime、Store、Activate/Restore/Observe、租约和查询/WS入口，不读/ACK原MQ，不保存业务任务副本。Core只认识应用传入的不透明group；顺序范围是`scope + key + group`，不同scope/key不保证同用户顺序。
+
+在启动组合根先创建实例共用预算：
+
+```go
+budget, err := sc.NewOwnedWorkBudget(ownership.GroupWorkBudgetOptions{
+    Workers: 12,
+    Prefetch: 24,
+})
+if err != nil { return err }
+// 所有scope共用这一个budget；不能每桶创建一份。
+options := ownership.Options{
+    Manifest: manifest, InstanceID: sc.ServiceInstanceID, SessionID: session,
+    MaxOwned: ownerSlots, Activate: activate, Restore: restore, Observe: observe,
+    GroupWork: &ownership.GroupWorkOptions{
+        Budget: budget,
+        NextGroups: func(ctx context.Context, c ownership.Credential, q ownership.GroupWorkRequest) ([]string, error) {
+            return taskModel.FindExecutableGroups(ctx, c.Key, q.Limit, q.ExcludedGroups)
+        },
+        StepGroup: func(ctx context.Context, c ownership.Credential, group string) (bool, error) {
+            return taskModel.CommitEarliestUnresolved(ctx, c, group)
+        },
+    },
+}
+runtime, err := ownership.StartRuntime(ctx, ownershipStore, options)
+if err != nil { return err }
+if err := sc.UseResource("sql-task-owner", runtime); err != nil {
+    _ = runtime.Close(context.Background())
+    return err
+}
+if err := sc.RegisterRuntimeMetricProviders(runtime); err != nil {
+    _ = runtime.Close(context.Background())
+    return err
+}
+```
+
+`taskModel`/session/回调是应用自己的原模型和生命周期变量，不是Core现成业务API。模型的DDL仍只能由启动EnsureStorage处理。一个ServiceContext仅允许创建一次正式预算；重复声明失败。直接`NewGroupWorkBudget(instanceID,options)`的低层使用者须在同实例所有Runtime共用该句柄、自行登记资源及指标；句柄拒绝不同实例和不同逻辑服务，关闭后拒绝新Runtime。
+
+### 发现与真实执行
+
+- `NextGroups`只在原SQL发现当前可执行组身份，最多`q.Limit`项，必须排除`q.ExcludedGroups`；不claim、不执行业务、不读取无限payload。选择须符合应用真实前序/PAUSED/未知/重试期限；有限扫描看不全不能报空或假零。返回重复、已占、空、超过512字节或超过额度的组失败关闭，不能悄悄截断。
+- 实际固定worker接纳`StepGroup`后，才在同一应用事务查/claim最早未解决原件，并核对原attempt/版本/指纹/BatchID/前序。Core不替应用制造这些SQL字段，也不改它们；选择到身份不是认领原件或业务提交。
+- `true,nil`只表示该单元已经可靠完成原提交；经当前Ready凭据复核才记LastConfirmed。入队、查询、认领、心跳和取消后的迟到返回均不算进展。发生commit未知必须保留原事实，由应用查询/幂等收敛，不能盲重做。
+- 同组从预取、排队到回调真实退出持续占用。B1真实完成后释放自身，B2无需等A1；A2不得越过未退出的A1进入真实组首查询。错误/false仅按原Poll技术间隔，应用决定有限业务重试、暂停、接管和解除屏障；Core不跳过失败，不新增业务重试计数。
+- 回调必须线程安全，不能依赖原Step全局串行；跨组原子业务事务仍由应用保留，不能拆开后声称原子性不变。暂停/未知状态不能作为成功，已提交结果也不能因同组其他项失败而抹去。
+
+### 实例资源、时钟与退出
+
+Workers必须1..64，Prefetch必须Workers..1024。Prefetch涵盖选择预留、排队和执行身份总额，不是每scope额外额度；单次发现至多Workers。预算仅排有限身份/原凭据引用，无payload队列或公开Submit。最多4096个登记租约，仍受每Runtime最多64owner/每ServiceContext最多64scope边界。全worker真实不退出或额度耗尽时明确背压；不补位、不无限创建goroutine，也不保证在没有空余槽时健康组无延迟。
+
+每个实际组单元使用原Execution时限的独立context；持续排空循环总年龄超过30s不会被当作一个超时任务。单元超时仅取消该单元，真实回调未退出仍占原worker/group，其他组在剩余预算内继续。Activate/Restore/NextGroups的控制阶段Execution保护、续租/观测未知/聚合Stall仍沿原规则；全部挂住仍停滞撤销。不得把观察BlockedDue当作掩盖仍执行工作；Core以下限补齐实际组在途量，不与应用已经统计的同一工作重复相加。
+
+原引用revision确实改变且有Restore时，本key停止新准入并等自身实际组退出再恢复；这是引用恢复维护屏障，普通排空没有每批Wait。未变更revision不会等待其他组。其他key仍可用剩余预算推进。
+
+Runtime.Close与Budget.Close均取消准入及排队/在途context，但必须等实际回调退出才Done；超时只表示调用方等待到期。Budget.Close取消已登记租约并等固定worker与租约退出，不能替代应用SQL远端操作实际终止。资源按预算先登记、Runtime后登记，逆序先关Runtime再关预算；SQL连接依赖最后关闭。所有权丢失后旧业务事务是否还在执行，必须由真实SQL fence保护，不能仅信本地cancel。
+
+### 显式共享Check，排他Activate保持
+
+旧`FenceTransaction.LockFence`、`CheckFence`、`ActivateFence`仍要求排他锁，绝不静默降锁。需要独立组SQL事务并行时，显式实现新`SharedFenceTransaction.LockFenceShared`，并在原业务事务内调用`CheckFenceShared`：
+
+```go
+func (t sharedFenceTransaction) LockFenceShared(scope, key string) (ownership.FenceState, error) {
+    var row OwnerFence
+    err := t.tx.Clauses(clause.Locking{Strength: "SHARE"}).
+        Where("scope = ? AND key_name = ?", scope, key).Take(&row).Error
+    return ownership.FenceState{Scope: row.Scope, Key: row.KeyName,
+        Epoch: row.Epoch, Token: row.Token}, err
+}
+// 业务事务内先CheckFenceShared，再锁定/执行原组首；共享锁保持至真实commit/rollback。
+// Activate仍传原排他fenceTransaction，不能把Activate也换SHARE。
+```
+
+这是MySQL 8的共享**锁定当前读**，不是普通快照SELECT、缓存或先查后插；必须有预初始化唯一(scope,key)行，完整epoch/token相等且Scope/Key一致。RR事务先有旧快照时，锁定当前读仍须拒绝旧凭据。多个独立组S可共存；新Activate X必须等待所有旧S事务真实commit/rollback，再恢复/Ready，旧epoch/token后续拒绝。账户/任务行排他锁、业务前序、SQL幂等和未知commit仍由应用维护；共享guard不能替代它们。其他SQL引擎的锁适配未实测不得宣称等价。
+
+### 升级与回退
+
+本能力为显式加性API，无新配置字段/StoreID/manifest指纹/持久格式/消息变化。无需清原SQL、重建scope/Stream/group/PEL/cursor。先升级正式Core和消费方skill，再在停止准入、等旧回调真实退出后启用GroupWork及共享Check；同一应用生命周期不要为同一scope重复登记旧Step和新组Runtime。GroupWork不是Broker持久模式标记，启动只校验本地Step/GroupWork互斥；不能据此推断其他进程均已启用。旧Step副本赢得归属时仍有旧串行/整批成本，混跑不作为新模式并发验收；本轮不提供回调策略在线热切换。迁移不重置epoch、SQL fence、原attempt或截止时间。
+
+回退同样先停稳真实回调，改回Step与旧排他Check；原SQL事实和guard仍可用，不删状态。但旧版本恢复原桶串行/整批等待成本，混跑不能验收新独立完成合同。此能力不自动改变SubscribeOwnedEvents的Broker消费模型；例11现有MQ/WS路径保持零值兼容。
+
+实际RED/GREEN、SQL/进程/性能与NOT_RUN见[本轮验收](OWNERSHIP_SQL_INDEPENDENT_GROUPS_2026-11-18.md)。Core组件通过不代表Bitzoom已经接入、金融/UAT/Full-E4或500/s容量通过。

@@ -84,3 +84,10 @@ go test -race ./examples/integration/11-scoped-event-ownership -count=1 -timeout
 ## 归属指标导出补丁
 
 v1.14.1补齐既有Ownership快照的9项固定名称及固定Keys真实目录长度初始化，查询例如`core_component_gauge{component="ownership",name="ownership_directory_keys"}`；counter使用原`core_component_counter`族。单Runtime目录量可能在多个副本重复，不要相加为全局唯一key数。无新增配置或scope/SQL/PEL迁移；缺失不能补0，详见[原件和升级边界](../../docs/codex/OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。
+
+
+## 同租约独立SQL组（显式加性能力）
+
+本例默认仍走原Broker owned批次，不自动改变消息/ACK/WS合同。若应用已有SQL事实待办，且同一归属key内需要多个独立顺序组推进，使用[SQL任务指南](../../docs/codex/OWNERSHIP_SQL_TASKS_GUIDE.md#显式同租约独立组新增minor能力)的Options.GroupWork；先sc.NewOwnedWorkBudget创建全实例唯一预算，所有scope共用。NextGroups只返回有限原SQL组身份，StepGroup接纳后才核验原组首/业务事务，true只在真实提交后返回；不要把例中Handler另行套通用并发池。
+
+SQL需要并行共享guard时显式SharedFenceTransaction/CheckFenceShared，原排他ActivateFence不变。默认Step、原例fenceTransaction和Broker入口保持兼容，没有在此演示中偷偷换SHARE或新建任务业务表。真实SQL组执行、共享锁及独立PID恢复测试位于pkg/server/ownership/group_work_*test.go和fence_shared_mysql_test.go；本例的固定/动态/迁移双Gateway验证仍须完整回归。组件测试不能替代消费方金融或容量验收。

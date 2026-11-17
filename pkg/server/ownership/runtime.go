@@ -42,8 +42,22 @@ func StartRuntime(ctx context.Context, store Store, options Options) (*Runtime, 
 	if err := options.Manifest.Validate(); err != nil {
 		return nil, err
 	}
-	if store == nil || options.InstanceID == "" || options.SessionID == "" || options.MaxOwned <= 0 || options.MaxOwned > 64 || options.Activate == nil || options.Step == nil || options.Observe == nil {
+	if store == nil || options.InstanceID == "" || options.SessionID == "" || options.MaxOwned <= 0 || options.MaxOwned > 64 || options.Activate == nil || options.Observe == nil {
 		return nil, ErrUnknown
+	}
+	if options.GroupWork == nil {
+		if options.Step == nil {
+			return nil, ErrUnknown
+		}
+	} else {
+		work := *options.GroupWork
+		if options.Step != nil || work.NextGroups == nil || work.StepGroup == nil {
+			return nil, ErrUnknown
+		}
+		if err := work.Budget.valid(options.InstanceID, options.Manifest.Service); err != nil {
+			return nil, err
+		}
+		options.GroupWork = &work
 	}
 	if options.Manifest.DynamicKeys != nil {
 		if _, ok := store.(KeyRegistry); !ok {
@@ -163,6 +177,12 @@ func (r *Runtime) runKey(c Credential) (result error) {
 	var lastStepFailed atomic.Bool
 	lastProgress.Store(time.Now().UnixNano())
 	keyProgress := &runtimeKeyProgress{context: ctx, credential: c, stageSince: &stageSince}
+	var groupWork *groupWorkLease
+	if r.options.GroupWork != nil {
+		groupWork = &groupWorkLease{r: r, c: c, ctx: ctx, cancel: cancel, progress: &lastProgress, failed: &lastStepFailed, confirmed: &keyProgress.confirmed, budget: r.options.GroupWork.Budget, notify: make(chan struct{}, 1), running: map[*groupWorkJob]struct{}{}}
+		keyProgress.groupWork = groupWork
+	}
+
 	r.statusMu.Lock()
 	r.status[c.Key] = keyProgress
 	r.statusMu.Unlock()
@@ -181,6 +201,13 @@ func (r *Runtime) runKey(c Credential) (result error) {
 		r.watchKey(ctx, c, cancel, &stageSince, &lastProgress, &lastStepFailed, readyState)
 	}()
 	defer func() { cancel(); <-watchDone }()
+	if groupWork != nil {
+		if err := groupWork.budget.attach(groupWork); err != nil {
+			return err
+		}
+		defer groupWork.finish()
+	}
+
 	stage := func(callback func(context.Context) error) (err error) {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -223,6 +250,12 @@ func (r *Runtime) runKey(c Credential) (result error) {
 			return nil
 		}
 		if r.options.Restore != nil {
+			if groupWork != nil {
+				groupWork.jobs.Wait()
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+			}
 			started := time.Now()
 			if err := stage(func(ctx context.Context) error { return r.options.Restore(ctx, c, snapshot) }); err != nil {
 				r.restoreFailures.Add(1)
@@ -251,6 +284,9 @@ func (r *Runtime) runKey(c Credential) (result error) {
 	readyState.ready = true
 	r.ready.Add(1)
 	readyState.mu.Unlock()
+	if groupWork != nil {
+		return r.runGroupWork(groupWork, stage, restore)
+	}
 	for ctx.Err() == nil {
 		if err := restore(); err != nil {
 			return err
@@ -311,6 +347,16 @@ func (r *Runtime) watchKey(ctx context.Context, c Credential, cancel context.Can
 		stop()
 		if err != nil || observation.At.IsZero() || observation.At.After(now.Add(timing.Renew)) || time.Since(observation.At) > timing.Observation {
 			observation = Observation{At: now, Delivered: -1, Unread: -1, Queued: -1, Due: -1}
+		}
+		// 新组模式必须显示真实在途，不能用业务BlockedDue掩盖仍执行的子工作。
+		r.statusMu.RLock()
+		state := r.status[c.Key]
+		r.statusMu.RUnlock()
+		if state != nil && state.groupWork != nil && state.credential.Same(c) {
+			active, _ := state.groupWork.execution()
+			if observation.Delivered >= 0 && active > observation.Delivered {
+				observation.Delivered = active
+			}
 		}
 		allowBlocked := !lastStepFailed.Load()
 		blockedOnly := allowBlocked && observation.onlyBlockedDue()

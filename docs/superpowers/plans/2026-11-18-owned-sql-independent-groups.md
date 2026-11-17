@@ -74,13 +74,13 @@ NextGroups只在原SQL中发现可执行组身份，不得claim或执行、不�
 
 ## 任务与实际验收顺序
 
-- [ ] T1 固定真实RED：在现有真实Redis Runtime中A组阻塞、B1完成后B2尚不进入，保留旧Step证据；共享锁用两个旧Check事务同guard互相阻挡保留RED。缺新符号的编译失败不算产品RED。
-- [ ] T2 实现预算/组模式最小GREEN：A保持占用、B连续推进；同group后继不先StepGroup；不同Runtime共享预算，总执行≤Workers，全部身份≤Prefetch，非法选择拒绝。
-- [ ] T3 生命周期和时钟：默认Execution30秒持续健康流量超过30秒不误杀；单元超时未退出不释放槽；取消/失去Ready/Close/预算关闭、迟到完成不假确认，全部挂住明确背压；失败/暂停组不跨过前序，健康组继续。
-- [ ] T4 真实MySQL S/X：多组共享事务共存、Activate等所有旧S事务、激活后旧凭据拒绝；旧X路径仍串行；先前快照不能替代当前读。未知commit由原SQL事实幂等，不自动判失败。
-- [ ] T5 独立PID原schema恢复：真实SIGKILL、原pending/attempt/fence保留，新owner等旧真实SQL事务退出；无新请求也排空，旧会话不能确认新状态，Close超时不算成功。
-- [ ] T6 实际小型同机SQL对照：相同SQL事实/连接预算/可靠性，对照旧单key Step与新显式模式，记录吞吐/分位/错误/排空及真实上限；不把该组件对照当Full500/s或容量验收。
-- [ ] T7 对应包普通/race、真实Redis动态/固定迁移与旧Step/Ready/观察保护回归；例11真实多进程/mTLS/WS/SQL按原门禁运行。保留所有FAIL/SKIP/NOT_RUN。
+- [x] T1 固定真实RED：在现有真实Redis Runtime中A组阻塞、B1完成后B2尚不进入，保留旧Step证据；共享锁用两个旧Check事务同guard互相阻挡保留RED。缺新符号的编译失败不算产品RED。
+- [x] T2 实现预算/组模式最小GREEN：A保持占用、B连续推进；同group后继不先StepGroup；不同Runtime共享预算，总执行≤Workers，全部身份≤Prefetch，非法选择拒绝。
+- [x] T3 生命周期和时钟：默认Execution30秒持续健康流量超过30秒不误杀；单元超时未退出不释放槽；取消/失去Ready/Close/预算关闭、迟到完成不假确认，全部挂住明确背压；失败/暂停组不跨过前序，健康组继续。
+- [x] T4 真实MySQL S/X：多组共享事务共存、Activate等所有旧S事务、激活后旧凭据拒绝；旧X路径仍串行；先前快照不能替代当前读。未知commit由原SQL事实幂等，不自动判失败。
+- [x] T5 独立PID原schema恢复：真实SIGKILL、原pending/attempt/fence保留，新owner等旧真实SQL事务退出；无新请求也排空，旧会话不能确认新状态，Close超时不算成功。
+- [x] T6 实际小型同机SQL对照：相同SQL事实/连接预算/可靠性，对照旧单key Step与新显式模式，记录吞吐/分位/错误/排空及真实上限；不把该组件对照当Full500/s或容量验收。
+- [x] T7 对应包普通/race、真实Redis动态/固定迁移与旧Step/Ready/观察保护回归；例11真实多进程/mTLS/WS/SQL按原门禁运行。保留所有FAIL/SKIP/NOT_RUN。
 - [ ] T8 文档/公开兼容/配置/安全/内嵌前端/正式发布门禁；独立提交，核远端合法MINOR版本、不覆盖tag/不force；main及annotated tag原子发布，官方Proxy/SumDB全新缓存验包。失败原件保留，不以本地缓存冒充官方包。
 
 每项用rtk代理，原始argv/退出码/bytes/SHA封存在/private/tmp/core-owned-sql-independent-groups-20261118/；不读其他消费方资料、不部署/压测Full-E4。正式新公开能力应MINOR，实际版本以发布前远端核验为准。
@@ -99,3 +99,5 @@ NextGroups只在原SQL中发现可执行组身份，不得claim或执行、不�
 - [x] 证据层级：原R555统计非Core重跑，不承诺13秒全部由本修复解释；Full业务/500/s/容量仍由消费方验收。
 
 自审结论：按以上最小显式模式实施。单元超时的隔离是新模式的明确合同，不弱化原Step默认；共享锁是单独新承诺，未验收前不发布。实现若发现契约冲突，先回传精确事实，不删边界凑GREEN。
+
+实施结果见[正式验收](../../codex/OWNERSHIP_SQL_INDEPENDENT_GROUPS_2026-11-18.md)。T8的远端发布和官方验包由提交后回执记录，不能把本计划的候选状态当已发布证明。

@@ -281,3 +281,8 @@ v1.9.1空组迁移补丁不新增/删除公开API、配置或持久字段；沿�
 ### 归属固定指标导出白名单（v1.14.1）
 
 补齐Runtime已提供的1个目录gauge及8个counter，并初始化固定Keys的真实目录长度，沿原core_component_gauge/core_component_counter的固定name标签输出；不改变Go API、DTO、配置、持久格式或归属算法。新增固定样本有界，不放行动态名称；旧版缺失不能解释为0。单Runtime目录量不可跨副本直接求和，恢复耗时为累计秒。见[验收与升级](OWNERSHIP_METRICS_EXPORT_GAP_2026-11-17.md)。
+
+
+## 显式SQL独立组与共享fence（加性MINOR）
+
+Stable新增ownership.GroupWorkBudgetOptions、NewGroupWorkBudget、GroupWorkBudget.Close/Done、GroupWorkRequest、GroupWorkOptions、Options.GroupWork和ServiceContext.NewOwnedWorkBudget。Step与GroupWork互斥，nil保持原Step；预算实例共享且有界，Close等待真实退出。新增SharedFenceTransaction.LockFenceShared/CheckFenceShared，原FenceTransaction/CheckFence/ActivateFence排他合同不变。无必选Provider方法、配置、manifest指纹或SQL/卷/消息格式变化；共享锁需应用显式适配和原SQL事务/业务幂等，见[接入](OWNERSHIP_SQL_TASKS_GUIDE.md)。GroupWork不写Broker模式标记，无法凭本地启动证明所有副本都启用；旧Step副本仍有旧性能合同，混跑不认证新并发能力。未停稳真实回调不做模式热切换。

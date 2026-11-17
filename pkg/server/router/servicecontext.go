@@ -18,6 +18,7 @@ import (
 	"github.com/digitalwayhk/core/pkg/server/identity"
 	"github.com/digitalwayhk/core/pkg/server/mq"
 	"github.com/digitalwayhk/core/pkg/server/observability"
+	"github.com/digitalwayhk/core/pkg/server/ownership"
 	"github.com/digitalwayhk/core/pkg/server/ratelimit"
 	"github.com/digitalwayhk/core/pkg/server/routecache"
 	"github.com/digitalwayhk/core/pkg/server/runtime"
@@ -118,6 +119,7 @@ type ServiceContext struct {
 	resources           *resourceManager
 	ownedMetricsMu      sync.Mutex
 	ownedMetrics        *ownedRuntimeMetrics
+	ownedWorkBudget     *ownership.GroupWorkBudget
 }
 
 const grpcLifecycleTimeout = 5 * time.Second

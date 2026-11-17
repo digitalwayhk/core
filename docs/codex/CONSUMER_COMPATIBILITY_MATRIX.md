@@ -240,3 +240,8 @@ Core原32组真实RED转GREEN、2worker/2queue背压、overflow/旧attempt/旧Un
 ## v1.14.1：归属固定指标导出
 
 仅修复九个既有快照名称被过滤及固定Keys目录量未初始化的问题，无API/配置/SQL/卷/消息变化，不要求重建scope、消费组或清理数据。消费方按各自维护安排升级相关采集进程；混跑时旧副本仍缺样本，应保持null/state，不阻断本轮独立业务验证。go get不安装skill，按既有流程重新同步观测与归属分片。Core本地Collector/HTTP验证不代表消费方部署、UAT或容量。
+
+
+## 同租约独立SQL组
+
+旧Step/零值、固定及动态manifest、原SQL guard行字节和MQ消息保持兼容；新GroupWork/CheckFenceShared为显式加性能力，旧二进制不认识新增源码API。切换/回退先停止准入并等所有真实回调退出，不删除SQL/pending/attempt或重置fence。Core真实Redis/MySQL/PID及例11证据分别登记于[专项验收](OWNERSHIP_SQL_INDEPENDENT_GROUPS_2026-11-18.md)；Bitzoom正式接入、金融/UAT/Full-E4与容量NOT_RUN，由消费方完成。go get不安装skill，须同步权威skill。

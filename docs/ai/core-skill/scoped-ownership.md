@@ -97,3 +97,12 @@ Step无可执行项返回false,nil，错误保留；LastConfirmed仅由真实进
 ## 固定归属指标白名单
 
 v1.14.1仅补齐Runtime已有9项固定指标导出，完整名称和口径见[观测分片](multiservice-and-observability.md)。directory_keys可在多个副本重复，不能求和当全局唯一目录；恢复累计秒不等于单次SLO。原归属/预算/SQLfence/BlockedDue不改，缺失样本不能填0，未知动态名仍拒绝。
+
+
+## 显式同租约独立SQL组
+
+原Options.Step默认仍同步，不能把应用整批Wait当成独立完成。显式Options.GroupWork与Step互斥：NextGroups只发现原SQL可执行group身份，不claim；固定worker接纳StepGroup后才查/claim原最早未解决项。所有scope共享一个sc.NewOwnedWorkBudget；Workers1..64、Prefetch Workers..1024（选择+排队+执行总额），不可每桶一份。B真实提交后推进自身后继，不等无关A；同scope/key/group从预取至实际回调退出独占。Core不理解业务group，不改attempt/前序/未知/暂停/版本或业务幂等，不保存第二份任务队列。
+
+每单元独立原Execution context，持续排空总时长不按30s误杀；超时取消单元但真实未退出仍占槽，无替代worker。旧Step以及控制Activate/Restore/NextGroups、续租、观测、Stall保护保持；实际在途不能被BlockedDue盖住，LastConfirmed只记真实成功且凭据有效。Close超时非退出，引用revision变化才有本key真实退出后的Restore维护屏障。
+
+并行SQL guard须显式实现SharedFenceTransaction并CheckFenceShared，使用事务内共享锁定当前读保持至commit/rollback；原CheckFence/ActivateFence继续排他，新Activate等全部旧共享事务实际退出再Ready。不能把普通快照SELECT或租约过期当成fence；账户/任务X锁、原SQL幂等及未知结果仍由应用保留。无新配置/格式/指纹，切换先停稳旧回调，不清scope/SQL/消息；低层预算须跨Runtime共享并管理退出。详见[正式接入与共享锁合同](../../codex/OWNERSHIP_SQL_TASKS_GUIDE.md#显式同租约独立组新增minor能力)。

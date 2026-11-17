@@ -58,5 +58,15 @@ func (r *Runtime) Status(ctx context.Context, key string) (KeyStatus, error) {
 		at := time.Unix(0, n).UTC()
 		result.ExecutionSince = &at
 	}
+	if state.groupWork != nil {
+		active, earliest := state.groupWork.execution()
+		if result.Observation.Delivered >= 0 && active > result.Observation.Delivered {
+			result.Observation.Delivered = active
+		}
+		if !earliest.IsZero() && (result.ExecutionSince == nil || earliest.Before(*result.ExecutionSince)) {
+			at := earliest.UTC()
+			result.ExecutionSince = &at
+		}
+	}
 	return result, nil
 }

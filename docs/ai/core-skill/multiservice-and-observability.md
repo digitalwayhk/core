@@ -251,3 +251,6 @@ SharedKeys执行租约不代表跨主题持续归属。需要同scope/key长期�
 普通SharedKeys在原PEL页内先筛选各key最早可准入候选，再用成熟go-redis pipeline一次取回该页的已知候选正文；条数仍受原W限制，逐项核对原ID和ordering key。命令/正文行数不因此归零，减少的是串行网络往返；任一错误/取消/身份冲突不准入该页，不以提示ACK。原50ms竞争/失败重试、结果唤醒、fence/成功ACK与Owned单项reader不变。多实例同key间隙还包括ACK/释放、PEL/重试和真实网络，不能见常量就删退避，也不能把受控代理改善当现场全部延迟根因。见[真实RED、三进程及边界](../../codex/REDIS_SHARED_KEY_SUCCESSOR_GAP_2026-11-17.md)。
 
 Owned专用reader使用独立的有限PEL身份分类提示，不复用普通task调度；正文仍在实际准入时从原Stream取回。Observe与Step均保留原PEL/目录/W-U/未读核验，scope恢复、SQL fence及ACK不以提示为准。具体字节预算与原件缺失边界见[持续归属](scoped-ownership.md#原pel分类提示)。`reclaim_read`是实际取回正文行数，纯Observe不全部计入；不是唯一消息数、handler调用数或业务重投数。
+
+
+实例级SQL组预算使用独立固定组件ownership_work，仅在NewOwnedWorkBudget登记一次，不按Runtime/scope相加。gauges为ownership_work_workers/prefetch_limit/active/reserved/queued，counter为ownership_work_started/completed/errors/no_progress/selections/selection_errors/timeouts/capacity_wait/queue_wait_seconds/selection_seconds/handler_seconds加_total；均沿core_component_gauge/counter族固定白名单，无group/UserID/业务身份标签。reserved含选择预留/排队/实际执行，active含准入后凭据复核和回调及技术Poll等待，不等于SQL连接数；queue_wait、selector和handler是各工作累计时钟，不能相加冒充请求墙钟。completed仅真实成功且仍有效/未取消，timeouts不代表回调实际退出；缺失不补0。实例所有scope共用预算，原ownership组件仍按既有方法聚合租约。
